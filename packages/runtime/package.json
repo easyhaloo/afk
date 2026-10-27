@@ -194,7 +194,6 @@
     "@afk/application": "workspace:*",
     "@afk/core": "workspace:*",
     "@afk/workflow-graph": "workspace:*",
-    "@anthropic-ai/claude-code": "^2.1.299",
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",
     "@octokit/rest": "^22.0.1",

@@ -5,12 +5,15 @@ Get up and running with AFK CLI in 5 minutes.
 ## Installation
 
 Install Node.js 22.16 or later and ensure `node` and `tar` are on `PATH`.
+Online installation also requires `curl`.
 Precompiled releases support macOS and glibc Linux on x64 and arm64.
 The installer downloads a release with production dependencies, verifies its
 SHA-256 and startup, then activates it. It never installs dependencies, builds
 source, or runs a test suite; pnpm, git, and a compiler are unnecessary for
 installation. Git and other tools used by individual commands are still needed
 when executing those commands.
+The Claude Code provider expects the separately installed `claude` command on
+`PATH`.
 
 After the first `cli-v*` release has been published:
 
@@ -28,6 +31,21 @@ bash /tmp/afk-install.sh --prefix "$HOME/bin"
 bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-darwin-arm64.tar.gz.sha256
 ```
 
+Downloads use curl with redirects, connection timeouts, and up to two retries
+for transient failures. Configure `HTTPS_PROXY` / `https_proxy` or `ALL_PROXY` /
+`all_proxy` if your network needs a proxy; `NO_PROXY` / `no_proxy` sets bypasses.
+HTTP mirrors use `http_proxy`. The installer does not detect proxy applications
+or choose a proxy port. Set `AFK_RELEASE_BASE_URL` to a trusted release mirror
+with the same URL layout if GitHub is unreachable, or use a local archive and
+checksum. Download errors include the URL and curl diagnostic.
+
+Downloaded archives are cached in `~/.afk/cli/downloads/` and resumed when a
+network failure leaves a partial file. The cache is keyed by the release
+checksum, so an updated `latest` release does not reuse stale bytes.
+Interactive downloads display progress, transfer speed, and ETA. Active archive
+transfers have no fixed total timeout; connections time out after 15 seconds,
+and transfers below 1 KiB/s for 60 seconds are retried. Servers without range
+support restart the download. Corrupt downloads are discarded after verification.
 The executable at `~/.local/bin/afk` points into
 `~/.afk/cli/versions/<version>-<platform>-<arch>-<sha256>/`. Reinstalling upgrades
 that link atomically; download, checksum, or startup failures preserve the old

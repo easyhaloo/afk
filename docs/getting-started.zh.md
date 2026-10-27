@@ -5,10 +5,12 @@
 ## 安装
 
 安装 Node.js 22.16 或以上版本，确保 `node` 和 `tar` 位于 `PATH`。
+在线安装还需要 `curl`。
 预编译包支持 macOS、使用 glibc 的 Linux，均覆盖 x64 与 arm64。
 安装器下载包含生产依赖的发布包，校验 SHA-256 和启动状态，再切换执行入口。
 安装过程不安装依赖、不构建源码、不运行测试套件，无需 pnpm、git 或编译器。
 运行具体命令时，仍需准备该命令依赖的 Git 等工具。
+Claude Code 提供商还要求单独安装 `claude` 命令，并确保它位于 `PATH` 中。
 
 首次发布 `cli-v*` Release 后，可直接下载独立安装器：
 
@@ -26,8 +28,19 @@ bash /tmp/afk-install.sh --prefix "$HOME/bin"
 bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-darwin-arm64.tar.gz.sha256
 ```
 
+下载使用 curl，支持重定向、连接超时，并对临时故障最多重试两次。
+需要代理时设置 `HTTPS_PROXY` / `https_proxy` 或 `ALL_PROXY` / `all_proxy`，
+通过 `NO_PROXY` / `no_proxy` 指定直连地址；HTTP 镜像使用 `http_proxy`。
+安装器不会探测代理软件或猜测代理端口。若无法访问 GitHub，可将
+`AFK_RELEASE_BASE_URL` 设置为 URL 结构一致的可信发布镜像，或通过本地压缩包
+和校验文件离线安装。下载失败时会显示 URL 和 curl 的具体错误。
+
 `~/.local/bin/afk` 指向
 `~/.afk/cli/versions/<版本>-<平台>-<架构>-<sha256>/` 内的执行入口。
+下载的发布包缓存于 `~/.afk/cli/downloads/`；网络中断留下的部分文件会在下次安装时断点续传。
+缓存按发布包 SHA-256 命名，因此 `latest` 更新后不会误用旧文件。
+终端下载显示进度、速度和预计剩余时间；发布包正常传输时没有固定总超时，连接超时为 15 秒，
+连续 60 秒低于 1 KiB/s 时重试。不支持断点续传的服务器会从头下载，校验失败的缓存会被删除。
 再次安装时原子替换软链接；下载、校验或启动失败时保留原版本，历史版本继续保留在磁盘上。
 替换非托管文件时，需要显式使用 `--force`，不会替换目录。
 默认安装路径无需提权。`--system` 使用 `/usr/local/bin`，要求当前用户已具备写入权限。

@@ -4,14 +4,12 @@ set -euo pipefail
 command -v node >/dev/null 2>&1 || { printf '%s\n' 'Node.js 22.16+ is required.' >&2; exit 1; }
 exec node --input-type=module - "$@" <<'NODE'
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 
 const help = `AFK CLI installer — installs a precompiled release; no build tools required.
 
@@ -26,8 +24,11 @@ Usage: bash install.sh [options]
   -h, --help         Show this help
 
 Release storage: ~/.afk/cli/versions/
+Download cache: ~/.afk/cli/downloads/
 Mirror override: AFK_RELEASE_BASE_URL (default: GitHub easyhaloo/afk releases)
-Requires Node.js 22.16+ and tar. No elevated permissions are needed.
+Requires Node.js 22.16+ and tar; downloads also require curl.
+Downloads respect HTTPS_PROXY/https_proxy, ALL_PROXY/all_proxy and NO_PROXY/no_proxy.
+No elevated permissions are needed.
 `;
 
 const options = { version: 'latest', prefix: join(homedir(), '.local/bin'), archive: '', checksum: '', force: false, completion: true };
@@ -40,10 +41,46 @@ function run(command, args, extra = {}) {
   return result.stdout.trim();
 }
 
-async function download(url, file) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(300_000) });
-  if (!response.ok || !response.body) throw new Error(`download failed (${response.status}): ${url}`);
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(file, { flags: 'wx', mode: 0o600 }));
+async function sha256(file) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+async function download(url, file, { resume = false, expected = '', restart = false } = {}) {
+  if (resume) {
+    const existing = await sha256(file).catch(() => '');
+    if (existing === expected) { console.log('Using verified download cache.'); return; }
+    console.log(`Downloading archive; interrupted downloads resume from ${file}`);
+  }
+  try {
+    await new Promise((resolve, reject) => {
+      const child = execFile('curl', [
+        '--disable', '--fail', '--location', '--show-error',
+        ...(!resume || !process.stderr.isTTY ? ['--silent'] : []),
+        '--proto', '=https,http', '--proto-redir', '=https,http',
+        '--connect-timeout', '15', '--max-time', resume ? '0' : '600',
+        '--speed-limit', '1024', '--speed-time', '60',
+        '--retry', '2', '--retry-delay', '1', '--retry-max-time', '600',
+        ...(resume && !restart ? ['--continue-at', '-'] : []),
+        '--write-out', '%{http_code}',
+        '--output', file, url,
+      ], (error, stdout, stderr) => {
+        if (!error && stdout.trim() === '416') error = Object.assign(new Error('HTTP 416: byte range rejected'), { code: 33 });
+        if (!error) return resolve();
+        const detail = error.code === 'ENOENT' ? 'curl is required for downloads'
+          : stderr.split(/[\r\n]+/).filter(line => line.startsWith('curl:')).join('\n') || error.message;
+        reject(new Error(`download failed: ${url}\n${detail}\nCheck your network or configure HTTPS_PROXY/ALL_PROXY or AFK_RELEASE_BASE_URL; offline installation supports --archive and --checksum.`, { cause: error }));
+      });
+      if (resume && process.stderr.isTTY) child.stderr.on('data', chunk => process.stderr.write(chunk));
+    });
+  } catch (error) {
+    if (resume && !restart && (error.cause?.code === 33 || (error.cause?.code === 22 && error.message.includes('416')))) {
+      console.log('Server cannot resume this archive; restarting download.');
+      await rm(file, { force: true });
+      await download(url, file, { resume: true, expected, restart: true });
+    } else throw error;
+  }
 }
 
 async function validateLinks(directory, root) {
@@ -82,6 +119,7 @@ try {
   const prefix = resolve(options.prefix.replace(/^~(?=\/|$)/, homedir()));
   const storage = join(homedir(), '.afk/cli');
   const versions = join(storage, 'versions');
+  const downloads = join(storage, 'downloads');
   const executable = join(prefix, 'afk');
   await mkdir(prefix, { recursive: true });
   await access(prefix, constants.W_OK);
@@ -91,23 +129,30 @@ try {
     throw new Error(`${executable} is not managed by this installer; choose --prefix or use --force for a file`);
   }
   await mkdir(versions, { recursive: true });
+  await mkdir(downloads, { recursive: true });
   temporary = await mkdtemp(join(storage, '.install-'));
   const asset = `afk-${process.platform}-${process.arch}.tar.gz`;
-  const archive = resolve(options.archive || join(temporary, asset));
-  const checksum = resolve(options.checksum || `${archive}.sha256`);
+  let archive = resolve(options.archive || join(temporary, asset));
+  let checksum = resolve(options.checksum || `${archive}.sha256`);
   if (!options.archive) {
     const base = (process.env.AFK_RELEASE_BASE_URL ?? 'https://github.com/easyhaloo/afk/releases').replace(/\/$/, '');
     const release = options.version === 'latest' ? 'latest/download' : `download/cli-v${options.version}`;
     console.log(`Downloading AFK ${options.version} (${process.platform}/${process.arch})...`);
-    await download(`${base}/${release}/${asset}`, archive);
-    await download(`${base}/${release}/${asset}.sha256`, checksum);
+    const archiveUrl = `${base}/${release}/${asset}`;
+    checksum = join(temporary, `${asset}.sha256`);
+    await download(`${archiveUrl}.sha256`, checksum);
+    const expected = (await readFile(checksum, 'utf8')).trim().split(/\s+/)[0].toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(expected)) throw new Error(`release checksum is invalid: ${archiveUrl}.sha256`);
+    archive = join(downloads, `${options.version}-${process.platform}-${process.arch}-${expected}-${asset}`);
+    await download(archiveUrl, archive, { resume: true, expected });
   }
   console.log('Verifying release checksum...');
   const expected = (await readFile(checksum, 'utf8')).trim().split(/\s+/)[0];
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(archive)) hash.update(chunk);
-  const actual = hash.digest('hex');
-  if (!/^[a-f0-9]{64}$/i.test(expected) || actual !== expected.toLowerCase()) throw new Error('release checksum does not match');
+  const actual = await sha256(archive);
+  if (!/^[a-f0-9]{64}$/i.test(expected) || actual !== expected.toLowerCase()) {
+    if (!options.archive) await rm(archive, { force: true });
+    throw new Error('release checksum does not match');
+  }
 
   const entries = run('tar', ['-tzf', archive]).split('\n');
   if (entries.some(entry => !/^afk(?:\/|$)/.test(entry) || entry.split('/').includes('..') || entry.includes('\\'))) throw new Error('archive contains an unsafe path');

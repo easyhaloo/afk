@@ -2,7 +2,6 @@ packages:
   - packages/*
   - apps/*
 allowBuilds:
-  '@anthropic-ai/claude-code': false
   electron: true
   electron-winstaller: false
   esbuild: true

@@ -65,7 +65,7 @@ describe('precompiled CLI installer', () => {
     const first = await readlink(command);
     await install(...args);
     expect(await readlink(command)).toBe(first);
-    expect(await readdir(join(home, '.afk/cli'))).toEqual(['versions']);
+    expect(await readdir(join(home, '.afk/cli'))).toEqual(['downloads', 'versions']);
   });
 
   it.each(['0.1.1', 'latest'])('downloads release %s and its checksum, then upgrades the executable', async version => {
@@ -86,9 +86,154 @@ describe('precompiled CLI installer', () => {
       cwd: root, env: { ...env, AFK_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` },
     });
     const path = version === 'latest' ? '/latest/download' : '/download/cli-v0.1.1';
-    expect(requests).toEqual([`${path}/${asset}`, `${path}/${asset}.sha256`]);
+    expect(requests).toEqual([`${path}/${asset}.sha256`, `${path}/${asset}`]);
     expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.1');
     expect(await readdir(join(home, '.afk/cli/versions'))).toHaveLength(2);
+  });
+
+  it('downloads through an environment proxy', async () => {
+    const { root, env, command } = await fixture();
+    const release = await archive(root);
+    const requests: string[] = [];
+    const server = createServer(async (request, response) => {
+      requests.push(request.url!);
+      response.end(await readFile(request.url!.endsWith('.sha256') ? release.checksum : release.file));
+    });
+    servers.push(server);
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address() as { port: number };
+    const proxy = `http://127.0.0.1:${address.port}`;
+    const base = 'http://afk.invalid/releases';
+    await exec('bash', [join(root, 'install.sh'), '--skip-completion'], {
+      cwd: root,
+      env: { ...env, AFK_RELEASE_BASE_URL: base, http_proxy: proxy, HTTP_PROXY: proxy, ALL_PROXY: '', all_proxy: '', NO_PROXY: '', no_proxy: '', NODE_USE_ENV_PROXY: '0' },
+    });
+    const asset = `${base}/latest/download/afk-${process.platform}-${process.arch}.tar.gz`;
+    expect(requests).toEqual([`${asset}.sha256`, asset]);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+  });
+
+  it('retries a transient download failure and follows redirects', async () => {
+    const { root, env, command } = await fixture();
+    const release = await archive(root);
+    const asset = `/latest/download/afk-${process.platform}-${process.arch}.tar.gz`;
+    let attempts = 0;
+    const server = createServer(async (request, response) => {
+      if (request.url === asset) {
+        attempts += 1;
+        response.writeHead(attempts === 1 ? 503 : 302, { Location: '/archive' });
+        response.end();
+      } else response.end(await readFile(request.url!.endsWith('.sha256') ? release.checksum : release.file));
+    });
+    servers.push(server);
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address() as { port: number };
+    await exec('bash', [join(root, 'install.sh'), '--skip-completion'], {
+      cwd: root, env: { ...env, AFK_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` },
+    });
+    expect(attempts).toBe(2);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+  });
+
+  it('reuses a verified release archive on repeated installation', async () => {
+    const { root, env, command } = await fixture();
+    const release = await archive(root);
+    const requests: string[] = [];
+    const server = createServer(async (request, response) => {
+      requests.push(request.url!);
+      response.end(await readFile(request.url!.endsWith('.sha256') ? release.checksum : release.file));
+    });
+    servers.push(server);
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address() as { port: number };
+    const install = { ...env, AFK_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` };
+    await exec('bash', [join(root, 'install.sh'), '--skip-completion'], { cwd: root, env: install });
+    await exec('bash', [join(root, 'install.sh'), '--skip-completion'], { cwd: root, env: install });
+    expect(requests.filter(request => !request.endsWith('.sha256'))).toHaveLength(1);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+  });
+
+  it.each(['supported', 'ignored', 'rejected'])('retains an interrupted download (ranges %s)', async rangeSupport => {
+    const { root, home, env, command } = await fixture();
+    const release = await archive(root);
+    const contents = await readFile(release.file);
+    const offset = Math.floor(contents.length / 2);
+    const ranges: Array<string | undefined> = [];
+    const server = createServer(async (request, response) => {
+      if (request.url!.endsWith('.sha256')) {
+        response.end(await readFile(release.checksum));
+        return;
+      }
+      ranges.push(request.headers.range);
+      if (ranges.length === 1) {
+        response.writeHead(200, { 'Content-Length': contents.length, Connection: 'close' });
+        response.end(contents.subarray(0, offset));
+      } else if (rangeSupport === 'supported') {
+        response.writeHead(206, { 'Content-Range': `bytes ${offset}-${contents.length - 1}/${contents.length}` });
+        response.end(contents.subarray(offset));
+      } else if (rangeSupport === 'rejected' && request.headers.range) {
+        response.writeHead(416);
+        response.end();
+      } else response.end(contents);
+    });
+    servers.push(server);
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address() as { port: number };
+    const install = () => exec('bash', [join(root, 'install.sh'), '--skip-completion'], {
+      cwd: root, env: { ...env, AFK_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` },
+    });
+    await expect(install()).rejects.toThrow();
+    const cache = join(home, '.afk/cli/downloads');
+    const files = await readdir(cache);
+    expect(files).toHaveLength(1);
+    expect(await readFile(join(cache, files[0]))).toEqual(contents.subarray(0, offset));
+    await install();
+    expect(ranges).toEqual(rangeSupport === 'supported' ? [undefined, `bytes=${offset}-`] : [undefined, `bytes=${offset}-`, undefined]);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+  });
+
+  it('uses a separate cache when the latest release checksum changes', async () => {
+    const { root, env, command } = await fixture();
+    const first = await archive(root);
+    const second = await archive(root, '0.1.1');
+    let release = first;
+    const ranges: Array<string | undefined> = [];
+    const server = createServer(async (request, response) => {
+      if (!request.url!.endsWith('.sha256')) ranges.push(request.headers.range);
+      response.end(await readFile(request.url!.endsWith('.sha256') ? release.checksum : release.file));
+    });
+    servers.push(server);
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address() as { port: number };
+    const install = () => exec('bash', [join(root, 'install.sh'), '--skip-completion'], {
+      cwd: root, env: { ...env, AFK_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` },
+    });
+    await install();
+    release = second;
+    await install();
+    expect(ranges).toEqual([undefined, undefined]);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.1');
+  });
+
+  it('discards a corrupt download so a later installation can recover', async () => {
+    const { root, home, env, command } = await fixture();
+    const release = await archive(root);
+    const contents = await readFile(release.file);
+    let corrupted = true;
+    const server = createServer(async (request, response) => {
+      response.end(request.url!.endsWith('.sha256') ? await readFile(release.checksum) : corrupted ? Buffer.from('corrupt') : contents);
+    });
+    servers.push(server);
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address() as { port: number };
+    const install = () => exec('bash', [join(root, 'install.sh'), '--skip-completion'], {
+      cwd: root, env: { ...env, AFK_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` },
+    });
+    await expect(install()).rejects.toThrow('checksum does not match');
+    expect(await readdir(join(home, '.afk/cli/downloads'))).toEqual([]);
+    corrupted = false;
+    await install();
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
   });
 
   it.each(['checksum', 'startup', 'platform', 'version', 'download', 'external link'])('preserves the installed version after a %s failure', async failure => {
@@ -100,9 +245,14 @@ describe('precompiled CLI installer', () => {
     if (failure === 'checksum') await writeFile(next.checksum, `${'0'.repeat(64)}  archive.tar.gz\n`);
     const args = failure === 'download' ? ['--version', '0.1.1'] : ['--archive', next.file, '--checksum', next.checksum];
     if (failure === 'version') args.push('--version', '0.2.0');
-    await expect(exec('bash', [join(root, 'install.sh'), '--skip-completion', ...args], {
+    const result = exec('bash', [join(root, 'install.sh'), '--skip-completion', ...args], {
       cwd: root, env: { ...env, AFK_RELEASE_BASE_URL: 'http://127.0.0.1:1' },
-    })).rejects.toThrow();
+    });
+    await expect(result).rejects.toThrow();
+    if (failure === 'download') {
+      await expect(result).rejects.toMatchObject({ stderr: expect.stringContaining('download failed: http://127.0.0.1:1/') });
+      await expect(result).rejects.toMatchObject({ stderr: expect.stringContaining('curl') });
+    }
     expect(await readlink(command)).toBe(target);
     expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
   });

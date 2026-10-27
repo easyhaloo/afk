@@ -10,7 +10,7 @@ import { join } from 'node:path';
 vi.mock('@afk/runtime/infrastructure/provider/tracker-provider-factory', () => ({
   createManagementProviders: vi.fn(),
 }));
-vi.mock('../cli-utils.js', () => ({
+vi.mock('../output.js', () => ({
   handleCommandError: (error: unknown) => { throw error; },
   success: vi.fn(), info: vi.fn(), warning: vi.fn(), fail: vi.fn(), detail: vi.fn(),
 }));

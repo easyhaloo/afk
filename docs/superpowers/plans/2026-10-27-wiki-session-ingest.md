@@ -35,7 +35,7 @@ Other native local formats need a dedicated adapter or an export.
 
 ## Tests added
 
-Ten deterministic tests cover Claude records, Codex records, ChatGPT mapping
+Eleven deterministic tests cover Claude records, Codex records, ChatGPT mapping
 exports, generic JSONL, text exports, secret redaction, malformed JSONL,
 oversize rejection, symlink rejection, ambiguous discovery, and CLI JSON output.
 A targeted GitHub Actions workflow compiles the scripts and runs all
@@ -43,8 +43,8 @@ A targeted GitHub Actions workflow compiles the scripts and runs all
 
 ## Validation status
 
-The main repository CI's documentation-link and Skill metadata checks passed
-for PR #244. The targeted Python test workflow is configured to run on this PR;
-its result must be checked separately before claiming the Python test suite
-passed. Direct local execution was unavailable in the current environment
-because direct GitHub network access failed.
+The first targeted run compiled both scripts successfully and ran 39 tests;
+the existing wiki CLI suite had seven failures because the runner did not have
+ripgrep installed. The workflow now installs ripgrep before running the suite.
+The rerun must pass before claiming the full Python suite passed. Direct local
+execution was unavailable because direct GitHub network access failed.

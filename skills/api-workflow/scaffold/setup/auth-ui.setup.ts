@@ -11,6 +11,7 @@ const authFile = path.resolve(
 );
 
 setup('authenticate via UI', async ({ page }) => {
+  void page; // Used by the generated login implementation.
   await mkdir(path.dirname(authFile), { recursive: true });
 
   // Replace with the real UI login flow discovered in the target repository.

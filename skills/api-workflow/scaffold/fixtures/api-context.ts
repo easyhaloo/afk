@@ -4,7 +4,7 @@
 // Playwright internals or domain-specific endpoint assumptions are used.
 
 import { test, request, type APIRequestContext } from '@playwright/test';
-import { requireEnv, requireEnvOrDefault } from '../utils/require-env';
+import { requireEnvOrDefault } from '../utils/require-env';
 
 let apiContext: APIRequestContext | undefined;
 
@@ -63,8 +63,3 @@ test.afterAll(async () => {
     apiContext = undefined;
   }
 });
-
-// Require an environment variable without ever including its value in errors.
-export function requireApiEnv(name: string): string {
-  return requireEnv(name);
-}

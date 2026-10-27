@@ -16,8 +16,124 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect Changed Areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      skill_docs: ${{ steps.filter.outputs.skill_docs }}
+      plugin: ${{ steps.filter.outputs.plugin }}
+      shared: ${{ steps.filter.outputs.shared }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+      desktop_e2e: ${{ steps.filter.outputs.desktop_e2e }}
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: filter
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # On an initial push, or if Git cannot resolve the comparison, run
+          # the complete verification set rather than silently skipping checks.
+          if [[ -z "${BASE_SHA:-}" || "$BASE_SHA" =~ ^0+$ ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null ||
+             ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "Could not resolve the comparison range; enabling all checks."
+            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+              echo "${key}=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+
+          if ! changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"; then
+            echo "Could not compute changed paths; enabling all checks."
+            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+              echo "${key}=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+
+          if [[ -z "$changed_files" ]]; then
+            echo "No changed paths detected; enabling all checks as a safe fallback."
+            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+              echo "${key}=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+
+          docs=false
+          skill_docs=false
+          plugin=false
+          shared=false
+          desktop=false
+          desktop_e2e=false
+          global_config=false
+
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            case "$path" in
+              *.md|docs/*|README*|CONTRIBUTING*|CHANGELOG*|scripts/check-doc-links.mjs)
+                docs=true
+                ;;
+            esac
+            case "$path" in
+              skills/*/SKILL.md|skills/*/*/SKILL.md|skills/*/*/*/SKILL.md|skills/*/*/*/*/SKILL.md)
+                skill_docs=true
+                docs=true
+                ;;
+              plugin.json|.claude-plugin/*)
+                plugin=true
+                ;;
+            esac
+            case "$path" in
+              package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json|vitest*.ts|.npmrc|.node-version|.nvmrc|.github/workflows/*|scripts/architecture-guard.mjs|scripts/check-workspace-imports.mjs|scripts/build-package.mjs)
+                global_config=true
+                ;;
+              packages/*|src/*|tests/*|apps/cli/*|scripts/*)
+                if [[ "$path" != "scripts/check-doc-links.mjs" ]]; then
+                  shared=true
+                fi
+                ;;
+            esac
+            case "$path" in
+              apps/desktop/*)
+                desktop=true
+                desktop_e2e=true
+                ;;
+              packages/*)
+                # Shared package changes can affect the desktop application.
+                desktop=true
+                desktop_e2e=true
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          if [[ "$global_config" == true ]]; then
+            shared=true
+            desktop=true
+            desktop_e2e=true
+          fi
+
+          for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            printf '%s=%s\n' "$key" "${!key}" >> "$GITHUB_OUTPUT"
+          done
+
+          echo "Detected areas:"
+          printf '%s\n' "$changed_files"
+          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e"
+
   docs-link-check:
     name: Docs Link Check
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -28,8 +144,67 @@ jobs:
       - name: Check doc links
         run: node scripts/check-doc-links.mjs
 
+  metadata-check:
+    name: Skill And Plugin Metadata
+    needs: changes
+    if: needs.changes.outputs.skill_docs == 'true' || needs.changes.outputs.plugin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate changed skill frontmatter
+        if: needs.changes.outputs.skill_docs == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git diff --name-only "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.event.pull_request.head.sha || github.sha }}" -- 'skills/**/SKILL.md' || true)
+          for file in "${files[@]}"; do
+            [[ -f "$file" ]] || continue
+            if ! head -n 1 "$file" | grep -qx -- '---'; then
+              echo "Missing YAML frontmatter opener: $file"
+              exit 1
+            fi
+            frontmatter="$(awk 'NR == 1 { next } /^---[[:space:]]*$/ { exit } { print }' "$file")"
+            if ! grep -Eq '^name:[[:space:]]*[^[:space:]]' <<< "$frontmatter"; then
+              echo "Missing name field in frontmatter: $file"
+              exit 1
+            fi
+            if ! grep -Eq '^description:[[:space:]]*[^[:space:]>]' <<< "$frontmatter" &&
+               ! grep -Eq '^description:[[:space:]]*>?-?[[:space:]]*$' <<< "$frontmatter"; then
+              echo "Missing description field in frontmatter: $file"
+              exit 1
+            fi
+          done
+      - name: Validate plugin manifest JSON and versions
+        if: needs.changes.outputs.plugin == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, existsSync } from 'node:fs';
+
+          const paths = ['plugin.json', '.claude-plugin/plugin.json'];
+          const manifests = paths
+            .filter(existsSync)
+            .map((path) => ({ path, value: JSON.parse(readFileSync(path, 'utf8')) }));
+
+          if (manifests.length !== paths.length) {
+            throw new Error('Expected both plugin.json and .claude-plugin/plugin.json');
+          }
+          const versions = new Set(manifests.map(({ value }) => value.version));
+          if (versions.size !== 1 || manifests.some(({ value }) => typeof value.version !== 'string')) {
+            throw new Error('Plugin manifest versions must both exist and match');
+          }
+          console.log(`Plugin manifests valid; version ${manifests[0].value.version}`);
+          NODE
+
   cli:
     name: Shared Packages And CLI
+    needs: changes
+    if: needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -51,8 +226,6 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # All applications share the root workspace lockfile. Desktop checks
-      # run separately in `verify`.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
 
@@ -64,9 +237,6 @@ jobs:
           restore-keys: |
             node-gyp-${{ runner.os }}-node22-
 
-      # --ignore-scripts skipped every postinstall above; esbuild needs its
-      # native binary for the build step. node-pty and puppeteer are only
-      # used by the opt-in PTY E2E suite, so they are rebuilt in that step.
       - name: Build native dependencies
         run: pnpm rebuild esbuild --pending --reporter=append-only
 
@@ -82,10 +252,6 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # node-pty 1.1.0 aborts the vitest worker when its ThreadSafeFunction
-      # callback lands during Environment::CleanupHandles (unfixed upstream).
-      # vitest.config.ts keeps the default suite off these files; this step is
-      # advisory so an environment-specific crash cannot block a merge.
       - name: Build PTY E2E native dependencies
         run: pnpm rebuild node-pty puppeteer --pending --reporter=append-only
 
@@ -95,6 +261,8 @@ jobs:
 
   verify:
     name: Verify
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -149,9 +317,10 @@ jobs:
 
   desktop-e2e:
     name: Desktop E2E (Electron + Playwright)
+    needs: [changes, verify]
+    if: needs.changes.outputs.desktop_e2e == 'true' && needs.verify.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: verify
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -170,8 +339,6 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # Playwright's Electron driver needs a display server. Linux runners
-      # have no Xvfb by default — install it before launching Electron.
       - name: Install Xvfb and Electron Linux deps
         run: |
           sudo apt-get update -y
@@ -193,7 +360,6 @@ jobs:
           pnpm typecheck
           pnpm build:main
 
-      # xvfb-run provides the display server Electron needs on Linux.
       - name: Run Playwright + Electron E2E
         working-directory: apps/desktop
         env:

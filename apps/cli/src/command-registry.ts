@@ -49,7 +49,7 @@ export async function dispatchCommand(command: string, args: string[]): Promise<
     program.name('afk').version('0.1.0').exitOverride();
     const registrations = await Promise.all(COMMANDS.map(entry => entry.loader()));
     for (const register of registrations) register(program);
-    program.parse(['node', 'afk', command, ...args]);
+    await program.parseAsync(['node', 'afk', command, ...args]);
     return;
   }
 
@@ -65,11 +65,11 @@ export async function dispatchCommand(command: string, args: string[]): Promise<
 
   const matched = program.commands.find(candidate => candidate.name() === command);
   if (!matched) {
-    program.parse(['afk', command, ...args]);
+    await program.parseAsync(['afk', command, ...args]);
     return;
   }
 
   const subcommand = matched.commands.find(candidate => candidate.name() === args[0]);
   const target = subcommand ?? matched;
-  target.parse(buildCommandArgv(command, args, subcommand?.name()));
+  await target.parseAsync(buildCommandArgv(command, args, subcommand?.name()));
 }

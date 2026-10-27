@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { COMMANDS } from './command-registry.js';
+import { buildCommandArgv, COMMANDS, dispatchCommand } from './command-registry.js';
 
-describe('CLI hard cutover registry', () => {
+describe('CLI command registry and dispatcher', () => {
   it('exposes the canonical public command registry without duplicate routes', () => {
     const names = COMMANDS.flatMap(entry => entry.names);
     expect(names).toEqual(expect.arrayContaining([
@@ -76,5 +76,69 @@ describe('CLI hard cutover registry', () => {
     const run = program.commands.find(command => command.name() === 'run');
     expect(run?.options.find(option => option.long === '--backlog-id')).toMatchObject({ required: true });
     expect(run?.options.some(option => option.long === '--iid')).toBe(false);
+  });
+
+  it('builds argv for top-level and nested command parsing', () => {
+    expect(buildCommandArgv('run', ['--backlog-id', '42'])).toEqual([
+      'afk', 'run', '--backlog-id', '42',
+    ]);
+    expect(buildCommandArgv('backlog', ['tag', 'add', '--id', '42'], 'tag')).toEqual([
+      'afk', 'tag', 'add', '--id', '42',
+    ]);
+  });
+
+  it('awaits asynchronous command actions before returning', async () => {
+    const name = '__async_dispatch_test__';
+    const entry = {
+      names: [name],
+      loader: async () => (program: Command) => {
+        program.command(name).action(async () => {
+          await Promise.resolve();
+          process.stdout.write('action-complete');
+        });
+      },
+    };
+    COMMANDS.push(entry);
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await dispatchCommand(name, []);
+    } finally {
+      COMMANDS.splice(COMMANDS.indexOf(entry), 1);
+      process.stdout.write = originalWrite;
+    }
+    expect(captured.join('')).toContain('action-complete');
+  });
+
+  it('fails unknown commands without loading the full command set', async () => {
+    await expect(dispatchCommand('not-a-command', [])).rejects.toThrow(
+      "Unknown command 'not-a-command'. Run 'afk --help' to see available commands.",
+    );
+  });
+
+  it.each([
+    ['--help', [], 'Usage: afk'],
+    ['backlog', ['tag', 'add', '--help'], 'Add a business tag'],
+    ['backlog', ['tag', 'remove', '--help'], 'Remove a business tag'],
+    ['observe', ['timeline', '--help'], 'Show ordered audit events for a run'],
+    ['log', ['--help'], 'Show one observed run and its verified timeline'],
+  ] as const)('runs the nested parser for %s %j', async (command, args, expectedHelp) => {
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      await expect(dispatchCommand(command, [...args])).rejects.toMatchObject({ code: 'commander.helpDisplayed' });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    expect(captured.join('')).toContain(expectedHelp);
   });
 });

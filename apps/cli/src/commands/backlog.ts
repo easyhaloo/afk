@@ -41,13 +41,13 @@ import {
 import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
-import { handleCommandError, success, warning, detail } from '../cli-utils.js';
+import { handleCommandError, success, warning, detail } from '../output.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import {
   classifyError,
   emitFailure,
   emitSuccess,
-} from '../json-output.js';
+} from '../output.js';
 
 const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];

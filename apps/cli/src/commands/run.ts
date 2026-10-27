@@ -1,5 +1,5 @@
 import { Command, InvalidArgumentError } from 'commander';
-import { handleCommandError, success, warning, detail } from '../cli-utils.js';
+import { handleCommandError, success, warning, detail } from '../output.js';
 import { runWorkflowCli } from '@afk/runtime/application/workflows/run-cmd';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { resolveAgentProviderName } from '@afk/runtime/domain/agents/index';

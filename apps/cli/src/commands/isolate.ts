@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { basename } from 'path';
 import { IsolateManager } from '@afk/runtime/application/isolate';
-import { handleCommandError, success, info, fail } from '../cli-utils.js';
+import { handleCommandError, success, info, fail } from '../output.js';
 
 function createIsolate(cwd?: string): IsolateManager {
   return new IsolateManager(cwd ?? process.cwd());

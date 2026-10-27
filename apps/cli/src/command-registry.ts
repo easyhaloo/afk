@@ -1,4 +1,4 @@
-import type { Command } from 'commander';
+import { Command } from 'commander';
 
 export interface CommandRegistrationContext {
   argv?: readonly string[];
@@ -7,19 +7,16 @@ export interface CommandRegistrationContext {
 export type RegisterFn = (p: Command, context?: CommandRegistrationContext) => void;
 
 export interface CommandEntry {
-  /** Command name(s) that route to this loader. Hidden aliases (e.g. __complete) go here too. */
+  /** Public command names and aliases handled by this loader. */
   names: string[];
-  /** Dynamic import returning the register function. */
+  /** Dynamically imports the module that registers this command. */
   loader: () => Promise<RegisterFn>;
 }
 
 /**
- * Single source of truth for CLI commands. Both the lazy loader (per-command
- * dynamic import - the fast path) and full-cli (load-all fallback) consume
- * this list, so the two can't drift: a command added here is present in both
- * paths. Previously the lazy loader's array and full-cli's register calls were
- * maintained separately, and `github` / `tracker` / `kanban` had silently
- * fallen out of the lazy list (always hitting the full load).
+ * Single source of truth for command names, aliases, and lazy registration.
+ * The dispatcher lives here so the registry and the only supported dispatch
+ * path cannot drift apart.
  */
 export const COMMANDS: CommandEntry[] = [
   { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
@@ -37,3 +34,42 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['graph'], loader: () => import('./commands/graph.js').then(m => m.registerGraphCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];
+
+/** Build the argv expected by Commander when parsing a matched nested command. */
+export function buildCommandArgv(command: string, args: string[], subcommand?: string): string[] {
+  return subcommand
+    ? ['afk', subcommand, ...args.slice(1)]
+    : ['afk', command, ...args];
+}
+
+/** Load and parse exactly one registered command; unknown commands fail directly. */
+export async function dispatchCommand(command: string, args: string[]): Promise<void> {
+  if (command === '--help' || command === '-h') {
+    const program = new Command();
+    program.name('afk').version('0.1.0').exitOverride();
+    const registrations = await Promise.all(COMMANDS.map(entry => entry.loader()));
+    for (const register of registrations) register(program);
+    await program.parseAsync(['node', 'afk', command, ...args]);
+    return;
+  }
+
+  const entry = COMMANDS.find(candidate => candidate.names.includes(command));
+  if (!entry) {
+    throw new Error(`Unknown command '${command}'. Run 'afk --help' to see available commands.`);
+  }
+
+  const register = await entry.loader();
+  const program = new Command();
+  program.name('afk').version('0.1.0').exitOverride();
+  register(program, { argv: ['node', 'afk', command, ...args] });
+
+  const matched = program.commands.find(candidate => candidate.name() === command || candidate.aliases().includes(command));
+  if (!matched) {
+    await program.parseAsync(['afk', command, ...args]);
+    return;
+  }
+
+  const subcommand = matched.commands.find(candidate => candidate.name() === args[0]);
+  const target = subcommand ?? matched;
+  await target.parseAsync(buildCommandArgv(command, args, subcommand?.name()));
+}

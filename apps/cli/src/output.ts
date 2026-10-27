@@ -1,20 +1,63 @@
 import chalk from 'chalk';
 import { logger } from '@afk/runtime/infrastructure/io/index';
-export { openInBrowser } from '@afk/runtime/shared/browser';
+import type { ErrorCode as RuntimeErrorCode } from '@afk/runtime/errors';
 
-/** Parse comma-separated string into trimmed array. */
-export function parseCommaSeparated(input: string): string[] {
-  return input.split(',').map(item => item.trim()).filter(Boolean);
+export { classifyError, type ErrorCode } from '@afk/runtime/errors';
+
+export type JsonSuccess<T> = {
+  ok: true;
+  kind: string;
+  data: T;
+};
+
+export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+export interface JsonFailureDetails {
+  readonly hint?: string;
+  readonly [key: string]: JsonValue | undefined;
 }
 
-/** Format JSON output consistently. */
+export type JsonFailure = {
+  ok: false;
+  kind: string;
+  error: {
+    code: RuntimeErrorCode;
+    message: string;
+    details?: JsonFailureDetails;
+  };
+};
+
+export type JsonEnvelope<T> = JsonSuccess<T> | JsonFailure;
+
+/** Emit the canonical machine-readable success envelope to stdout. */
+export function emitSuccess<T>(kind: string, data: T): void {
+  const envelope: JsonSuccess<T> = { ok: true, kind, data };
+  process.stdout.write(JSON.stringify(envelope));
+}
+
+/** Emit the canonical machine-readable failure envelope and set a failing exit code. */
+export function emitFailure(
+  kind: string,
+  code: RuntimeErrorCode,
+  message: string,
+  details?: JsonFailureDetails,
+): void {
+  const envelope: JsonFailure = {
+    ok: false,
+    kind,
+    error: details ? { code, message, details } : { code, message },
+  };
+  process.stdout.write(JSON.stringify(envelope));
+  process.exitCode = 1;
+}
+
+/** Print pretty JSON for interactive command output. */
 export function formatJson(data: unknown): void {
   console.log(JSON.stringify(data, null, 2));
 }
 
-/** Get recovery hint for common errors. */
 function getRecoveryHint(error: unknown): string | null {
-  const message = (error as Error).message;
+  const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes('GITLAB_TOKEN')) return 'Set GITLAB_TOKEN or authenticate: glab auth login';
   if (message.includes('GITHUB_TOKEN')) return 'Set GITHUB_TOKEN or authenticate: gh auth login';
@@ -26,9 +69,9 @@ function getRecoveryHint(error: unknown): string | null {
   return null;
 }
 
-/** Handle command error with user-friendly formatting and exit. */
+/** Log and display a command failure with a recovery hint when one is known. */
 export function handleCommandError(error: unknown, context?: string): never {
-  const message = (error as Error).message;
+  const message = error instanceof Error ? error.message : String(error);
   const hint = getRecoveryHint(error);
 
   logger.error({ err: error, context }, 'command failed');
@@ -36,12 +79,6 @@ export function handleCommandError(error: unknown, context?: string): never {
   if (hint) console.error(chalk.yellow('Hint:'), hint);
   if (context) console.error(chalk.dim('Context:'), context);
   process.exit(1);
-}
-
-/** Log error and return fallback value (for non-critical operations). */
-export function logAndReturn<T>(error: unknown, context: string, fallback: T): T {
-  logger.warn({ context, err: error }, 'non-critical operation failed');
-  return fallback;
 }
 
 export function success(message: string): void {

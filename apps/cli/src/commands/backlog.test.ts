@@ -21,7 +21,7 @@ import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
 import type { BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
-import { emitSuccess, emitFailure } from '../json-output.js';
+import { emitSuccess, emitFailure } from '../output.js';
 import * as providerFactory from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 
 function commandTree(register: (program: Command) => void): Command {

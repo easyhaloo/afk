@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emitFailure, type JsonFailure } from './json-output.js';
+import { emitFailure, type JsonFailure } from './output.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
   process.exitCode = undefined;
 });
 
-describe('emitFailure', () => {
+describe('JSON output', () => {
   it('serializes nested JSON details without changing the failure envelope', () => {
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const details: NonNullable<JsonFailure['error']['details']> = {

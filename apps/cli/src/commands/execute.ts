@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Command } from 'commander';
 import { executeWorkItem, reconcileWorkItemMerge } from '@afk/runtime/execution';
-import { detail, handleCommandError, success, warning } from '../cli-utils.js';
+import { detail, handleCommandError, success, warning } from '../output.js';
 
 export function registerExecuteCommands(program: Command): void {
   program.command('reconcile')

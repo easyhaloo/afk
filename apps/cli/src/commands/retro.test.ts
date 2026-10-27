@@ -91,6 +91,20 @@ describe('retro command', () => {
     expect(JSON.parse(output.join(''))).toEqual({ version: 1, retroId: 'retro-1' });
   });
 
+  it('renders a saved report as human-readable text unless --json is set', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-show-text-'));
+    roots.push(root);
+    const reportPath = join(root, 'report.json');
+    await fs.writeFile(reportPath, JSON.stringify({ version: 1, retroId: 'retro-1', summary: 'Summary text' }));
+    const output: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { output.push(String(chunk)); return true; });
+    const program = new Command().name('afk');
+    registerRetroCommands(program);
+    await program.parseAsync(['node', 'afk', 'retro', 'show', reportPath]);
+    expect(output.join('')).toContain('Summary text');
+    expect(output.join('')).not.toContain('"retroId"');
+  });
+
   it('uses the indexed transcript path when the AFK session id differs from the provider id', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-indexed-'));
     roots.push(root);

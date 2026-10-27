@@ -10,7 +10,7 @@ import { getSchedulerConfig, getWorkflowConfig } from '@afk/runtime/infrastructu
 import { parseWorkItemId } from '@afk/runtime/domain/backlog/index';
 import { loadLoopConfig } from '@afk/runtime/application/runners/loop-config';
 import { logger, redirectStdioToLog, resolveLogPath } from '@afk/runtime/infrastructure/io/index';
-import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils.js';
+import { handleCommandError, success, info, warning, fail, detail } from '../output.js';
 import { spawnDetached, waitForProcessPid } from '@afk/runtime/infrastructure/process/daemon';
 import {
   LOOP_PID_FILE,

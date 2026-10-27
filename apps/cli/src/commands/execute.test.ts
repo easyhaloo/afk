@@ -3,7 +3,7 @@ import { Command } from 'commander';
 
 const mocks = vi.hoisted(() => ({ executeWorkItem: vi.fn(), reconcileWorkItemMerge: vi.fn() }));
 vi.mock('@afk/runtime/execution', () => ({ executeWorkItem: mocks.executeWorkItem, reconcileWorkItemMerge: mocks.reconcileWorkItemMerge }));
-vi.mock('../cli-utils.js', () => ({
+vi.mock('../output.js', () => ({
   handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: vi.fn(), detail: vi.fn(),
 }));
 

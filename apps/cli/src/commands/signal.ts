@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
 import { getCurrentTimestamp, type Signal } from '@afk/runtime/domain/schemas';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '@afk/runtime/infrastructure/io/index';
-import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
+import { handleCommandError, success, info, warning, detail, formatJson } from '../output.js';
 
 function parseNonNegativeInt(value: string, _previous?: number): number {
   const parsed = Number(value);

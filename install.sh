@@ -1,287 +1,156 @@
 #!/usr/bin/env bash
-#
-# AFK CLI - One-click Installation Script
-# Installs afk CLI tool to /usr/local/bin (or /usr/bin with --system flag)
-#
-
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+command -v node >/dev/null 2>&1 || { printf '%s\n' 'Node.js 22.16+ is required.' >&2; exit 1; }
+exec node --input-type=module - "$@" <<'NODE'
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
-# Configuration
-DEFAULT_INSTALL_DIR="/usr/local/bin"
-INSTALL_DIR="$DEFAULT_INSTALL_DIR"
-FORCE=false
-SKIP_DEPS=false
-SKIP_COMPLETION=false
+const help = `AFK CLI installer — installs a precompiled release; no build tools required.
 
-# Print functions
-print_info() {
-    echo -e "${BLUE}ℹ ${NC}$1"
+Usage: bash install.sh [options]
+  --version VERSION  Install a specific CLI version (default: latest)
+  --prefix DIR       Executable directory (default: ~/.local/bin)
+  --archive FILE     Install a local release archive
+  --checksum FILE    SHA-256 file; required with --archive
+  --force            Replace an executable not managed by this installer
+  --skip-completion  Skip shell completion setup
+  --system           Use /usr/local/bin; requires existing write access
+  -h, --help         Show this help
+
+Release storage: ~/.afk/cli/versions/
+Mirror override: AFK_RELEASE_BASE_URL (default: GitHub easyhaloo/afk releases)
+Requires Node.js 22.16+ and tar. No elevated permissions are needed.
+`;
+
+const options = { version: 'latest', prefix: join(homedir(), '.local/bin'), archive: '', checksum: '', force: false, completion: true };
+let temporary;
+let pendingLink;
+
+function run(command, args, extra = {}) {
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 32 * 1024 * 1024, ...extra });
+  if (result.error || result.status !== 0) throw new Error(`${command} failed: ${result.error?.message ?? result.stderr?.trim() ?? result.signal ?? result.status}`);
+  return result.stdout.trim();
 }
 
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
+async function download(url, file) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(300_000) });
+  if (!response.ok || !response.body) throw new Error(`download failed (${response.status}): ${url}`);
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(file, { flags: 'wx', mode: 0o600 }));
 }
 
-print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+async function validateLinks(directory, root) {
+  root ??= await realpath(directory);
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const file = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      const destination = relative(root, await realpath(file));
+      if (destination === '..' || destination.startsWith('../') || isAbsolute(destination)) throw new Error(`release link escapes its directory: ${file}`);
+    } else if (entry.isDirectory()) await validateLinks(file, root);
+  }
 }
 
-print_error() {
-    echo -e "${RED}✗${NC} $1" >&2
+try {
+  const args = process.argv.slice(2);
+  while (args.length) {
+    const flag = args.shift();
+    if (flag === '-h' || flag === '--help') { console.log(help); process.exit(0); }
+    if (['--version', '--prefix', '--archive', '--checksum'].includes(flag)) {
+      const value = args.shift();
+      if (!value || value.startsWith('--')) throw new Error(`${flag} requires a value`);
+      options[flag.slice(2)] = value;
+    } else if (flag === '--force') options.force = true;
+    else if (flag === '--skip-completion') options.completion = false;
+    else if (flag === '--system') options.prefix = '/usr/local/bin';
+    else throw new Error(`unknown option: ${flag}`);
+  }
+  if (options.version.startsWith('v')) options.version = options.version.slice(1);
+  if (options.version !== 'latest' && !/^\d+\.\d+\.\d+$/.test(options.version)) throw new Error('version must be latest or a stable version such as 0.1.0');
+  if (Boolean(options.archive) !== Boolean(options.checksum)) throw new Error('--archive and --checksum must be supplied together');
+  const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+  if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 16)) throw new Error('Node.js 22.16+ is required');
+  if (!['darwin', 'linux'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)) throw new Error('supported platforms: macOS/Linux on x64/arm64');
+  if (process.platform === 'linux' && !process.report.getReport().header.glibcVersionRuntime) throw new Error('Linux releases require glibc; musl/Alpine is not supported');
+
+  const prefix = resolve(options.prefix.replace(/^~(?=\/|$)/, homedir()));
+  const storage = join(homedir(), '.afk/cli');
+  const versions = join(storage, 'versions');
+  const executable = join(prefix, 'afk');
+  await mkdir(prefix, { recursive: true });
+  await access(prefix, constants.W_OK);
+  const existing = await lstat(executable).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  const target = existing?.isSymbolicLink() ? resolve(prefix, await readlink(executable)) : '';
+  if (existing && (existing.isDirectory() || (!target.startsWith(`${versions}/`) && !options.force))) {
+    throw new Error(`${executable} is not managed by this installer; choose --prefix or use --force for a file`);
+  }
+  await mkdir(versions, { recursive: true });
+  temporary = await mkdtemp(join(storage, '.install-'));
+  const asset = `afk-${process.platform}-${process.arch}.tar.gz`;
+  const archive = resolve(options.archive || join(temporary, asset));
+  const checksum = resolve(options.checksum || `${archive}.sha256`);
+  if (!options.archive) {
+    const base = (process.env.AFK_RELEASE_BASE_URL ?? 'https://github.com/easyhaloo/afk/releases').replace(/\/$/, '');
+    const release = options.version === 'latest' ? 'latest/download' : `download/cli-v${options.version}`;
+    console.log(`Downloading AFK ${options.version} (${process.platform}/${process.arch})...`);
+    await download(`${base}/${release}/${asset}`, archive);
+    await download(`${base}/${release}/${asset}.sha256`, checksum);
+  }
+  console.log('Verifying release checksum...');
+  const expected = (await readFile(checksum, 'utf8')).trim().split(/\s+/)[0];
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(archive)) hash.update(chunk);
+  const actual = hash.digest('hex');
+  if (!/^[a-f0-9]{64}$/i.test(expected) || actual !== expected.toLowerCase()) throw new Error('release checksum does not match');
+
+  const entries = run('tar', ['-tzf', archive]).split('\n');
+  if (entries.some(entry => !/^afk(?:\/|$)/.test(entry) || entry.split('/').includes('..') || entry.includes('\\'))) throw new Error('archive contains an unsafe path');
+  run('tar', ['-xzf', archive, '--no-same-owner', '-C', temporary]);
+  const candidate = join(temporary, 'afk');
+  await validateLinks(candidate);
+  const manifest = JSON.parse(await readFile(join(candidate, 'release.json'), 'utf8'));
+  if (!/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.platform !== process.platform || manifest.arch !== process.arch || manifest.nodeMinimum !== '22.16.0') throw new Error('release metadata does not match this platform or supported runtime');
+  if (options.version !== 'latest' && manifest.version !== options.version) throw new Error('release version does not match requested version');
+  const entry = join(candidate, 'dist/index.js');
+  await chmod(entry, 0o755);
+  console.log('Checking CLI startup...');
+  if (run(process.execPath, [entry, '--version'], { cwd: temporary }) !== manifest.version) throw new Error('CLI version does not match release metadata');
+
+  const destination = join(versions, `${manifest.version}-${manifest.platform}-${manifest.arch}-${actual}`);
+  const installed = await lstat(destination).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  if (installed) {
+    if (!installed.isDirectory() || installed.isSymbolicLink()) throw new Error('existing release directory is invalid');
+    await validateLinks(destination);
+    if (run(process.execPath, [join(destination, 'dist/index.js'), '--version']) !== manifest.version) throw new Error('existing release is damaged');
+  } else await rename(candidate, destination);
+  pendingLink = join(prefix, `.afk-${process.pid}-${Date.now()}`);
+  await symlink(join(destination, 'dist/index.js'), pendingLink);
+  await rename(pendingLink, executable);
+  pendingLink = undefined;
+  console.log(`AFK ${manifest.version} installed at ${executable}`);
+
+  const shell = (process.env.SHELL ?? '').split('/').pop();
+  if (options.completion && ['bash', 'zsh', 'fish'].includes(shell)) {
+    const result = spawnSync(executable, ['completion', shell, '--install'], { encoding: 'utf8', timeout: 30_000 });
+    if (result.error || result.status !== 0) console.warn('Completion setup skipped; run afk completion --install later.');
+    else console.log('Shell completion installed; restart your shell to load it.');
+  }
+  if (!(process.env.PATH ?? '').split(':').includes(prefix)) console.log(`Add to your shell profile: export PATH=${JSON.stringify(prefix)}:$PATH`);
+  else {
+    const selected = spawnSync('sh', ['-c', 'command -v afk'], { encoding: 'utf8' }).stdout?.trim();
+    if (selected && selected !== executable) console.warn(`Another afk appears first in PATH: ${selected}. Put ${prefix} first.`);
+  }
+} catch (error) {
+  console.error(`Installation failed: ${error.message}`);
+  process.exitCode = 1;
+} finally {
+  if (pendingLink) await rm(pendingLink, { force: true });
+  if (temporary) await rm(temporary, { recursive: true, force: true });
 }
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --system)
-            INSTALL_DIR="/usr/bin"
-            shift
-            ;;
-        --prefix)
-            INSTALL_DIR="$2"
-            shift 2
-            ;;
-        --force)
-            FORCE=true
-            shift
-            ;;
-        --skip-deps)
-            SKIP_DEPS=true
-            shift
-            ;;
-        --skip-completion)
-            SKIP_COMPLETION=true
-            shift
-            ;;
-        -h|--help)
-            cat <<EOF
-AFK CLI Installation Script
-
-Usage: $0 [OPTIONS]
-
-Options:
-  --system        Install to /usr/bin instead of /usr/local/bin
-  --prefix DIR    Install to custom directory
-  --force         Overwrite existing installation
-  --skip-deps     Skip dependency checks
-  --skip-completion  Skip shell tab-completion setup
-  -h, --help      Show this help message
-
-Examples:
-  $0                          # Install to /usr/local/bin (default)
-  $0 --system                 # Install to /usr/bin (requires sudo)
-  $0 --prefix ~/.local/bin    # Install to user directory
-  $0 --force                  # Force reinstall
-
-Requirements:
-  - Node.js v18+
-  - pnpm
-  - Git
-EOF
-            exit 0
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            echo "Run '$0 --help' for usage information"
-            exit 1
-            ;;
-    esac
-done
-
-# Check if running as root when installing to system directories
-if [[ "$INSTALL_DIR" == "/usr/bin" ]] && [[ $EUID -ne 0 ]]; then
-    print_error "Installing to /usr/bin requires sudo privileges"
-    echo "Please run: sudo $0 --system"
-    exit 1
-fi
-
-# Welcome message
-echo ""
-echo "╔═══════════════════════════════════════╗"
-echo "║   AFK CLI Installation Script         ║"
-echo "╚═══════════════════════════════════════╝"
-echo ""
-
-# Check dependencies
-if [[ "$SKIP_DEPS" == false ]]; then
-    print_info "Checking dependencies..."
-
-    # Check Node.js
-    if ! command -v node &> /dev/null; then
-        print_error "Node.js is not installed"
-        echo "Please install Node.js v18+ from https://nodejs.org/"
-        exit 1
-    fi
-
-    NODE_VERSION=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [[ $NODE_VERSION -lt 18 ]]; then
-        print_error "Node.js v18+ required (found v$NODE_VERSION)"
-        exit 1
-    fi
-    print_success "Node.js v$(node --version)"
-
-    # Check pnpm
-    if ! command -v pnpm &> /dev/null; then
-        print_error "pnpm is not installed"
-        exit 1
-    fi
-    print_success "pnpm v$(pnpm --version)"
-
-    # Check git
-    if ! command -v git &> /dev/null; then
-        print_warning "Git is not installed (optional but recommended)"
-    else
-        print_success "git v$(git --version | awk '{print $3}')"
-    fi
-fi
-
-# Get script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-print_info "Source directory: $SCRIPT_DIR"
-
-# Check if source files exist
-if [[ ! -f "$SCRIPT_DIR/package.json" ]]; then
-    print_error "package.json not found in $SCRIPT_DIR"
-    echo "Please run this script from the afk-cli repository root"
-    exit 1
-fi
-
-if [[ ! -d "$SCRIPT_DIR/apps/cli/src" ]]; then
-    print_error "apps/cli/src/ directory not found in $SCRIPT_DIR"
-    exit 1
-fi
-
-# Check if install directory exists
-if [[ ! -d "$INSTALL_DIR" ]]; then
-    print_error "Install directory does not exist: $INSTALL_DIR"
-    echo "Please create it first: sudo mkdir -p $INSTALL_DIR"
-    exit 1
-fi
-
-# Check if afk is already installed
-if command -v afk &> /dev/null && [[ "$FORCE" == false ]]; then
-    EXISTING_PATH=$(command -v afk)
-    print_warning "afk is already installed at: $EXISTING_PATH"
-    read -p "Overwrite? (Y/n) " -n 1 -r
-    echo
-    if [[ "$REPLY" =~ ^[Nn]$ ]]; then
-        print_info "Installation cancelled"
-        exit 0
-    fi
-fi
-
-# Install workspace dependencies, including build tools.
-print_info "Installing workspace dependencies..."
-cd "$SCRIPT_DIR"
-pnpm install --frozen-lockfile
-print_success "Dependencies installed"
-
-# Build TypeScript
-print_info "Building TypeScript..."
-pnpm run build > /dev/null
-if [[ ! -f "$SCRIPT_DIR/apps/cli/dist/index.js" ]]; then
-    print_error "Build failed: apps/cli/dist/index.js not found"
-    exit 1
-fi
-print_success "Build completed"
-
-# Create executable wrapper script
-print_info "Creating executable wrapper..."
-WRAPPER_PATH="$INSTALL_DIR/afk"
-
-cat > "$WRAPPER_PATH" <<EOF
-#!/usr/bin/env node
-//
-// AFK CLI - Unified workflow automation tool
-// Installed from: $SCRIPT_DIR
-// Installation date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-//
-
-const { spawn } = require('child_process');
-const path = require('path');
-
-// Run the actual CLI
-const cliPath = path.join('$SCRIPT_DIR', 'apps', 'cli', 'dist', 'index.js');
-const child = spawn(process.execPath, [cliPath, ...process.argv.slice(2)], {
-  stdio: 'inherit',
-  env: process.env
-});
-
-child.on('exit', (code) => {
-  process.exit(code || 0);
-});
-EOF
-
-chmod +x "$WRAPPER_PATH"
-print_success "Executable created at $WRAPPER_PATH"
-
-# Verify installation
-print_info "Verifying installation..."
-if ! command -v afk &> /dev/null; then
-    print_error "Installation failed: afk command not found in PATH"
-    echo "Try adding $INSTALL_DIR to your PATH:"
-    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
-    exit 1
-fi
-
-AFK_VERSION=$(afk --version 2>&1 || echo "unknown")
-print_success "afk v$AFK_VERSION installed successfully"
-
-# Test basic functionality
-print_info "Testing basic functionality..."
-if afk --help &> /dev/null; then
-    print_success "Help command works"
-else
-    print_warning "Help command failed (non-critical)"
-fi
-
-# Set up shell tab completion (per-user; skipped under sudo/root)
-if [[ "$SKIP_COMPLETION" == true ]]; then
-    print_info "Skipping shell completion setup (--skip-completion)"
-elif [[ $EUID -eq 0 ]]; then
-    print_info "Skipping shell completion setup (running as root)"
-    print_info "Run 'afk completion --install' as your user to enable tab completion"
-else
-    SHELL_NAME="$(basename "${SHELL:-}")"
-    case "$SHELL_NAME" in
-        zsh|bash|fish)
-            print_info "Setting up shell completion for $SHELL_NAME..."
-            if afk completion "$SHELL_NAME" --install; then
-                print_success "Tab completion enabled - restart your shell or source your rc file"
-            else
-                print_warning "Completion setup failed - run 'afk completion --install' manually"
-            fi
-            ;;
-        *)
-            print_warning "Auto-completion not supported for '$SHELL_NAME'"
-            print_info "Run 'afk completion --help' for manual setup"
-            ;;
-    esac
-fi
-
-# Show post-install information
-echo ""
-echo "╔═══════════════════════════════════════╗"
-echo "║       Installation Complete! 🚀       ║"
-echo "╚═══════════════════════════════════════╝"
-echo ""
-print_success "AFK CLI v$AFK_VERSION installed to $WRAPPER_PATH"
-echo ""
-echo "Next steps:"
-echo "  1. Verify:  afk --version  |  afk --help"
-echo "  2. Configure tokens:"
-echo "       export GITLAB_TOKEN=glpat-xxxxxxxxxxxxx   # https://gitlab.com/-/profile/personal_access_tokens"
-echo "       export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx      # https://github.com/settings/tokens"
-echo "  3. Run:     afk workflow launch --iid <issue-number>"
-echo "              afk --help  # for all commands"
-echo "  4. Completion: restart your shell, then 'afk <TAB>'"
-echo "              (or run: afk completion --install)"
-echo ""
-exit 0
+NODE

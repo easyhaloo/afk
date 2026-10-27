@@ -9,7 +9,7 @@ here is a copy that will silently drift. If you need depth, follow the link.
 
 ## Tech stack
 
-TypeScript on Node.js ≥18, pnpm workspaces. CLI via `commander`; TUI via
+TypeScript on Node.js ≥22.16, pnpm workspaces. CLI via `commander`; TUI via
 React + `ink`; validation with `zod`; Git via `simple-git` and `node-tmux`;
 GitLab via `@gitbeaker/node`, GitHub via `@octokit/rest`; structured logging
 with `pino`. Tests run under `vitest`. The Electron desktop client is a

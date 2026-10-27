@@ -1,0 +1,73 @@
+name: Release CLI
+
+on:
+  push:
+    tags: ['cli-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+          - runner: macos-15-intel
+            platform: darwin
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: pnpm
+      - name: Verify target
+        env:
+          EXPECTED_TARGET: ${{ matrix.platform }}-${{ matrix.arch }}
+        run: node -e 'if (`${process.platform}-${process.arch}` !== process.env.EXPECTED_TARGET) process.exit(1)'
+      - name: Install build dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Prepare build tool
+        run: pnpm rebuild esbuild
+      - name: Test installer
+        run: pnpm exec vitest run tests/cli-install.test.ts
+      - name: Build, package and verify offline installation
+        run: pnpm release:cli --version "${GITHUB_REF_NAME#cli-v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/cli/*
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: release/cli
+      - name: Publish CLI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/cli/* --verify-tag --title "AFK CLI ${GITHUB_REF_NAME#cli-v}" --generate-notes --latest

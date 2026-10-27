@@ -4,26 +4,68 @@
 
 ## 安装
 
+安装 Node.js 22.16 或以上版本，确保 `node` 和 `tar` 位于 `PATH`。
+预编译包支持 macOS、使用 glibc 的 Linux，均覆盖 x64 与 arm64。
+安装器下载包含生产依赖的发布包，校验 SHA-256 和启动状态，再切换执行入口。
+安装过程不安装依赖、不构建源码、不运行测试套件，无需 pnpm、git 或编译器。
+运行具体命令时，仍需准备该命令依赖的 Git 等工具。
+
+首次发布 `cli-v*` Release 后，可直接下载独立安装器：
+
 ```bash
-# 克隆项目
-git clone https://github.com/easyhaloo/afk.git
-cd afk
-
-# 安装依赖
-pnpm install
-
-# 构建
-pnpm build
-
-# 全局安装
-pnpm --dir apps/cli link --global
+curl -fsSL https://github.com/easyhaloo/afk/releases/latest/download/install.sh -o /tmp/afk-install.sh
+bash /tmp/afk-install.sh
 ```
+
+已有源码仓库也可以直接运行 `./install.sh`，同样下载发布包，不构建当前源码。
+常用参数：
+
+```bash
+bash /tmp/afk-install.sh --version 0.1.0 --skip-completion
+bash /tmp/afk-install.sh --prefix "$HOME/bin"
+bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-darwin-arm64.tar.gz.sha256
+```
+
+`~/.local/bin/afk` 指向
+`~/.afk/cli/versions/<版本>-<平台>-<架构>-<sha256>/` 内的执行入口。
+再次安装时原子替换软链接；下载、校验或启动失败时保留原版本，历史版本继续保留在磁盘上。
+替换旧安装器生成的 wrapper 或其他非托管文件时，需要显式使用 `--force`；不会替换目录。
+默认安装路径无需提权。`--system` 使用 `/usr/local/bin`，要求当前用户已具备写入权限。
+补全配置可通过 `--skip-completion` 关闭；若安装器提示，将执行目录加入 shell 的 `PATH`。
+
+AFK 配置与系统数据继续存放在 `~/.afk/`，工作项执行目录继续使用 `~/.loop-workspace/`。
 
 验证安装：
 ```bash
 afk --version
 afk --help
 ```
+
+### 构建并发布 CLI
+
+维护者使用 pnpm（CI 固定 12.5.1）在目标平台构建，用户安装构建后的产物：
+
+```bash
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm rebuild esbuild
+pnpm release:cli
+```
+
+本机使用 pnpm 12.5.1 也可以直接执行。打包脚本在 deploy 前后保留源码 workspace
+的依赖元数据，避免污染本地依赖状态。
+
+`release/cli/` 会生成 `install.sh`、`afk-<平台>-<架构>.tar.gz` 及对应的 `.sha256` 文件。
+打包脚本构建 CLI 与 workspace 依赖，通过
+`pnpm deploy --legacy --prod --ignore-scripts --config.hoist=false --config.force=false`
+收集生产依赖，随后在源码目录之外、
+禁用构建工具的环境中执行离线安装验证，并通过 `--help` 检查命令注册表中的全部入口。
+
+将 `apps/cli/package.json` 与 CLI 输出的版本同步后，推送对应标签，例如 `cli-v0.1.0`。
+[CLI 发布工作流](../.github/workflows/release-cli.yml) 会在四个目标平台分别构建、验证，
+全部通过后才上传 GitHub Release。标签必须与 CLI 包版本一致。
+CLI 标签使用 `cli-v` 前缀，插件版本单独管理。
+工作流将 CLI Release 标记为 `latest`，发布插件时应保留该指向；指定版本安装使用 `--version`。
+当前不提供 Windows 和 musl/Alpine 发布包。
 
 ## 配置
 
@@ -159,12 +201,9 @@ Loop 只接受一个 Backlog ID 与匹配的执行 manifest，并复用 `afk exe
 ### 命令找不到
 
 ```bash
-# 重新链接
-cd /path/to/afk
-npm link
-
-# 或直接运行
-node /path/to/afk/apps/cli/dist/index.js --help
+# 将安装目录加入 PATH（自定义 prefix 时改成对应目录）
+export PATH="$HOME/.local/bin:$PATH"
+afk --version
 ```
 
 ### 平台检测错误

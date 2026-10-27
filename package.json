@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "release:cli": "node scripts/package-cli.mjs",
     "build": "pnpm -r --filter \"!afk-control-electron\" build",
     "typecheck": "pnpm --filter @afk/runtime... build && pnpm -r --filter \"!afk-control-electron\" typecheck && tsc -p tsconfig.tests.json",
     "architecture:check": "node scripts/architecture-guard.mjs --check-packages && node scripts/check-workspace-imports.mjs",

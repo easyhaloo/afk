@@ -4,26 +4,77 @@ Get up and running with AFK CLI in 5 minutes.
 
 ## Installation
 
+Install Node.js 22.16 or later and ensure `node` and `tar` are on `PATH`.
+Precompiled releases support macOS and glibc Linux on x64 and arm64.
+The installer downloads a release with production dependencies, verifies its
+SHA-256 and startup, then activates it. It never installs dependencies, builds
+source, or runs a test suite; pnpm, git, and a compiler are unnecessary for
+installation. Git and other tools used by individual commands are still needed
+when executing those commands.
+
+After the first `cli-v*` release has been published:
+
 ```bash
-# Clone the project
-git clone https://github.com/easyhaloo/afk.git
-cd afk
-
-# Install dependencies
-pnpm install
-
-# Build
-pnpm build
-
-# Install globally
-pnpm --dir apps/cli link --global
+curl -fsSL https://github.com/easyhaloo/afk/releases/latest/download/install.sh -o /tmp/afk-install.sh
+bash /tmp/afk-install.sh
 ```
+
+An existing checkout can also run `./install.sh`; it downloads the same release
+without building the checkout. Options:
+
+```bash
+bash /tmp/afk-install.sh --version 0.1.0 --skip-completion
+bash /tmp/afk-install.sh --prefix "$HOME/bin"
+bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-darwin-arm64.tar.gz.sha256
+```
+
+The executable at `~/.local/bin/afk` points into
+`~/.afk/cli/versions/<version>-<platform>-<arch>-<sha256>/`. Reinstalling upgrades
+that link atomically; download, checksum, or startup failures preserve the old
+version. Previous versions remain on disk. Replacing an older wrapper or another
+unmanaged executable requires `--force`; directories are never replaced.
+The default path needs no elevated permissions. `--system` selects
+`/usr/local/bin` and requires write access already granted to your user.
+Shell completion is optional and can be disabled with `--skip-completion`.
+Add the executable directory to your shell's `PATH` if the installer requests it.
+
+AFK configuration and system data remain in `~/.afk/`; execution workspaces
+remain in `~/.loop-workspace/`.
 
 Verify the installation:
 ```bash
 afk --version
 afk --help
 ```
+
+### Build and publish a CLI release
+
+Maintainers build on each target platform with pnpm (CI pins 12.5.1);
+users install the resulting archive:
+
+```bash
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm rebuild esbuild
+pnpm release:cli
+```
+
+Local pnpm 12.5.1 is also supported. The release builder preserves the source
+workspace's dependency metadata around deploy.
+
+`release/cli/` contains `install.sh`, `afk-<platform>-<arch>.tar.gz`, and its
+`.sha256` file. The packaging script builds the CLI and its workspace dependencies,
+uses `pnpm deploy --legacy --prod --ignore-scripts --config.hoist=false --config.force=false`
+to include production dependencies, and tests an offline installation outside the source tree with
+build tools blocked. It checks every command registry entry with `--help`.
+
+Set `apps/cli/package.json` and the CLI's reported version to the same version,
+then push its tag, for example `cli-v0.1.0`. The
+[CLI release workflow](../.github/workflows/release-cli.yml) builds and verifies
+all four targets before publishing the assets to GitHub Releases. The tag must
+match the CLI package version. CLI tags use `cli-v`; plugin versions are separate.
+The workflow marks CLI releases as `latest`; keep plugin releases from changing
+that pointer. Use `--version` for a pinned install. Windows and musl/Alpine packages
+are not provided.
 
 ## Configuration
 
@@ -167,12 +218,9 @@ the former implementation/QA queue or schedule unrelated items without manifests
 ### Command Not Found
 
 ```bash
-# Re-link
-cd /path/to/afk
-npm link
-
-# Or run directly
-node /path/to/afk/apps/cli/dist/index.js --help
+# Add the installed executable to PATH (use your custom prefix if applicable)
+export PATH="$HOME/.local/bin:$PATH"
+afk --version
 ```
 
 ### Platform Detection Error

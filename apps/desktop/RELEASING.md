@@ -22,6 +22,6 @@ The tag must exactly match `apps/desktop/package.json`'s version. CLI releases u
 
 ## Auto-update status and prerequisites
 
-The desktop package declares a stable generic update feed at `https://easyhaloo.github.io/afk/desktop-updates/` so the feed is independent of CLI GitHub Releases. This workflow currently publishes installers to GitHub Releases; it does **not** yet publish the generic feed metadata/assets or wire an updater UI into the running app. Do not advertise in-app automatic updates until those pieces are implemented and tested.
+The packaged app uses `electron-updater` with a generic feed hosted on the `desktop-updates` branch (`raw.githubusercontent.com`). The release workflow publishes installers to GitHub Releases, then publishes `latest.yml`, `latest-mac.yml`, and `latest-linux.yml` metadata to that branch. Metadata points directly to assets on the matching `desktop-v*` release, independently of CLI releases.
 
-Production macOS distribution also needs Developer ID code signing and notarization for a trustworthy first install and update experience. Store signing credentials in GitHub Actions secrets; never commit certificates or passwords. Windows code signing is recommended.
+Production macOS distribution needs Developer ID code signing and notarization. Until signing secrets are configured, macOS updates are not production-ready. Linux in-app updates support AppImage; `.deb` users must install new packages manually. Store signing credentials in GitHub Actions secrets; never commit certificates or passwords. Windows code signing is recommended.

@@ -23,8 +23,15 @@ export class TestDataManager {
       throw new Error(`Failed to create ${type}: ${res.status()}`);
     }
     const { id } = await res.json();
-    this.created.push({ type, id });
+    this.track(type, id);
     return id;
+  }
+
+  track(type: string, id: string): void {
+    if (!id) {
+      throw new Error('Cannot track a test resource without an ID.');
+    }
+    this.created.push({ type, id });
   }
 
   async cleanup(): Promise<void> {

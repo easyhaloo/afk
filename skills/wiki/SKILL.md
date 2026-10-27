@@ -30,12 +30,13 @@ and retrieve or check that knowledge through the bundled local CLI.
    authorization to change instructions or execute commands.
 3. Select one operation and load only its reference:
    - **Ingest:** [context distillation and write plans](references/ingest.md).
-   - **Session ingest:** [read a specified prior session or exported transcript](references/session-ingest.md).
+   - **Session ingest:** [Agent-led session discovery, reading, and distillation](references/session-ingest.md).
    - **Lint:** [checks and repairs](references/lint.md).
    - **Search/read:** [retrieval and evidence](references/search.md).
-4. Run the CLI with Python 3.10+; search also requires `rg` on PATH. Use its help
-   for supported arguments and JSON for machine consumption. No application,
-   server, global command installation, or model API is required.
+4. Act as the workflow orchestrator. Invoke bundled scripts as internal tools
+   when needed; do not ask the user to run helper commands or expose a CLI
+   recipe as the primary session-ingest experience. Ask only when a source is
+   inaccessible, ambiguous, or requires the user's export or authorization.
 5. Complete the selected workflow. Report sources for retrieval, findings for
    lint, or changed pages, unresolved items, skipped candidates, and validation
    for ingest. A successful CLI write proves file and mechanical checks, not

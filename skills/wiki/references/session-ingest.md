@@ -19,20 +19,26 @@ no access by itself.
   ChatGPT historical conversations cannot be fetched by this local reader
   merely from a conversation ID.
 
-## Read a session
+## Agent workflow
 
-```sh
-python3 scripts/session_source.py --session-id SESSION_ID
-python3 scripts/session_source.py --session-id SESSION_ID --source claude
-python3 scripts/session_source.py --file /path/to/session.jsonl
-python3 scripts/session_source.py --file /path/to/export.json
-```
+This is an Agent capability, not a user-facing standalone command workflow.
+When the user's intent is to capture durable knowledge from a prior session:
 
-The JSON report contains normalized messages, source, counts, completeness,
-and warnings. Default limit is 250,000 characters; `--max-chars` can raise it
-to 5,000,000. Oversized sessions fail rather than silently truncating. Malformed
-JSONL records are counted and mark the transcript incomplete. Do not present a
-partial transcript as the complete history.
+1. Identify the requested session and likely source from available context.
+2. Invoke `scripts/session_source.py` internally with the matching session ID
+   or explicit export path. Use `--source` only when needed to disambiguate.
+   Do not ask the user to run the script themselves.
+3. If discovery fails because the data is not locally accessible, explain the
+   actual limitation and ask for an export or an accessible file. Never imply
+   that a session ID grants remote access.
+4. Inspect the JSON report before distillation. It contains normalized messages,
+   source, counts, completeness, and warnings. The default limit is 250,000
+   characters; `--max-chars` can raise it to 5,000,000. Oversized sessions fail
+   rather than silently truncating. Malformed JSONL records mark the transcript
+   incomplete; do not present a partial transcript as complete.
+5. Continue with the existing knowledge distillation and Ingest Pipeline below.
+   Do not expose raw transcript JSON as the final result unless the user asks
+   for it.
 
 The reader redacts common secret-bearing lines and private-key blocks. This is
 defense in depth, not a guarantee that every secret format is recognized.

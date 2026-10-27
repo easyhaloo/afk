@@ -1,7 +1,7 @@
 // ============================================================
 // Order Flow Scenario
 // ============================================================
-// Example: Complete order flow from login to order completion
+// Illustrative example only; replace every endpoint and business assumption before use.
 //
 // This file demonstrates the modular structure:
 //   - steps/  : Individual step functions
@@ -54,7 +54,7 @@ export async function step_pollOrderPaid(orderId: string) {
     apiContext,
     `/orders/${orderId}`,
     (data) => data.status,
-    ['PAID', 'COMPLETED'],
+    ['PAID'],
     { intervalMs: 2000, timeoutMs: 30000 }
   );
 }
@@ -63,7 +63,7 @@ export async function step_pollOrderPaid(orderId: string) {
 // Complete Flow Test
 // ─────────────────────────────────────────────────────────────
 
-test('order flow: login → create order → poll until paid → verify', async () => {
+test.skip('EXAMPLE ONLY — adapt endpoints, payment trigger, and cleanup before enabling', async () => {
   const manager = new TestDataManager(getApiContext());
 
   try {
@@ -76,7 +76,7 @@ test('order flow: login → create order → poll until paid → verify', async 
     expect(order.orderId).toBeDefined();
     expect(order.status).toBe('PENDING');
 
-    // Step 3: Poll until paid (simulate payment)
+    // Step 3: Trigger the real payment/action endpoint before polling.
     // In real tests, you might trigger payment here
     // await apiContext.post(`/orders/${order.orderId}/pay`);
 

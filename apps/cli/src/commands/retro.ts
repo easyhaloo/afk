@@ -358,9 +358,39 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   return report;
 }
 
-function emit(value: unknown, json?: boolean): void {
-  void json;
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+function emit(value: unknown, json = false): void {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(value)}\n`);
+    return;
+  }
+
+  if (!value || typeof value !== 'object') {
+    process.stdout.write(`${String(value)}\n`);
+    return;
+  }
+
+  const report = value as {
+    summary?: unknown;
+    retroId?: unknown;
+    htmlPath?: unknown;
+    metrics?: Record<string, unknown>;
+    findings?: Array<{ severity?: unknown; title?: unknown; recommendation?: unknown }>;
+  };
+  const lines = [typeof report.summary === 'string' ? report.summary : 'Retro report'];
+  if (typeof report.retroId === 'string') lines.push(`Report: ${report.retroId}`);
+  if (report.metrics) {
+    lines.push('', 'Metrics');
+    for (const [name, metric] of Object.entries(report.metrics)) lines.push(`  ${name}: ${String(metric)}`);
+  }
+  if (report.findings?.length) {
+    lines.push('', `Findings (${report.findings.length})`);
+    for (const finding of report.findings) {
+      lines.push(`  - [${String(finding.severity ?? 'unknown')}] ${String(finding.title ?? 'Untitled finding')}`);
+      if (typeof finding.recommendation === 'string') lines.push(`    ${finding.recommendation}`);
+    }
+  }
+  if (typeof report.htmlPath === 'string') lines.push('', `HTML report: ${report.htmlPath}`);
+  process.stdout.write(`${lines.join('\n')}\n`);
 }
 
 export function registerRetroCommands(program: Command, _context: CommandRegistrationContext = {}): void {

@@ -11,9 +11,6 @@ import type { BrowserContext, Page } from '@playwright/test';
 
 export { expect };
 
-const AUTH_STATE_FILE =
-  process.env.AUTH_STATE_FILE || 'playwright/.auth/user.json';
-
 export const test = base.extend<{
   sessionContext: BrowserContext;
   sessionPage: Page;

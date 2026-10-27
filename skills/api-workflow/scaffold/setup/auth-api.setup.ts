@@ -11,6 +11,8 @@ const authFile = path.resolve(
 );
 
 setup('authenticate via API', async ({ request }) => {
+  await mkdir(path.dirname(authFile), { recursive: true });
+
   // Replace this block with the real login request discovered in the target
   // codebase. Verify the response and ensure the resulting auth state is
   // compatible with the application's browser authentication mechanism.

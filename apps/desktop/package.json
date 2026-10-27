@@ -95,9 +95,10 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://easyhaloo.github.io/afk/desktop-updates/"
+        "url": "https://raw.githubusercontent.com/easyhaloo/afk/desktop-updates/"
       }
-    ]
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
@@ -109,7 +110,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "@afk/application": "workspace:*",

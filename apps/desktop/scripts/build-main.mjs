@@ -38,7 +38,7 @@ const common = {
   target: 'node22',
   sourcemap: true,
   logLevel: 'warning',
-  external: ['electron', 'node-pty'],
+  external: ['electron', 'node-pty', 'electron-updater'],
   ...(e2e ? { alias: {
     '@afk/runtime/backlog': join(desktop, 'tests/e2e/fixtures/runtime.ts'),
     '@afk/runtime/execution': join(desktop, 'tests/e2e/fixtures/runtime.ts'),

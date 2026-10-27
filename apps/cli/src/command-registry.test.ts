@@ -87,6 +87,33 @@ describe('CLI command registry and dispatcher', () => {
     ]);
   });
 
+  it('awaits asynchronous command actions before returning', async () => {
+    const name = '__async_dispatch_test__';
+    const entry = {
+      names: [name],
+      loader: async () => (program: Command) => {
+        program.command(name).action(async () => {
+          await Promise.resolve();
+          process.stdout.write('action-complete');
+        });
+      },
+    };
+    COMMANDS.push(entry);
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await dispatchCommand(name, []);
+    } finally {
+      COMMANDS.splice(COMMANDS.indexOf(entry), 1);
+      process.stdout.write = originalWrite;
+    }
+    expect(captured.join('')).toContain('action-complete');
+  });
+
   it('fails unknown commands without loading the full command set', async () => {
     await expect(dispatchCommand('not-a-command', [])).rejects.toThrow(
       "Unknown command 'not-a-command'. Run 'afk --help' to see available commands.",

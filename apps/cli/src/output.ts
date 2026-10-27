@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { logger } from '@afk/runtime/infrastructure/io/index';
 import type { ErrorCode as RuntimeErrorCode } from '@afk/runtime/errors';
 
 export { classifyError, type ErrorCode } from '@afk/runtime/errors';

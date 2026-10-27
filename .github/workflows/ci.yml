@@ -85,7 +85,7 @@ jobs:
                 ;;
             esac
             case "$path" in
-              skills/*.md|skills/*/*.md|skills/*/*/*.md|skills/*/*/*/*.md|skills/*/*/*/*/*.md)
+              skills/*/SKILL.md|skills/*/*/SKILL.md|skills/*/*/*/SKILL.md|skills/*/*/*/*/SKILL.md)
                 skill_docs=true
                 docs=true
                 ;;
@@ -160,7 +160,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t files < <(git diff --name-only "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.event.pull_request.head.sha || github.sha }}" -- 'skills/**/*.md' 'skills/*.md' || true)
+          mapfile -t files < <(git diff --name-only "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.event.pull_request.head.sha || github.sha }}" -- 'skills/**/SKILL.md' || true)
           for file in "${files[@]}"; do
             [[ -f "$file" ]] || continue
             if ! head -n 1 "$file" | grep -qx -- '---'; then

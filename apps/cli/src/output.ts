@@ -1,8 +1,6 @@
 import chalk from 'chalk';
-import { logger } from '@afk/runtime/infrastructure/io/index';
-import type { ErrorCode } from '@afk/runtime/errors';
+import type { ErrorCode as RuntimeErrorCode } from '@afk/runtime/errors';
 
-export { openInBrowser } from '@afk/runtime/shared/browser';
 export { classifyError, type ErrorCode } from '@afk/runtime/errors';
 
 export type JsonSuccess<T> = {
@@ -22,7 +20,7 @@ export type JsonFailure = {
   ok: false;
   kind: string;
   error: {
-    code: ErrorCode;
+    code: RuntimeErrorCode;
     message: string;
     details?: JsonFailureDetails;
   };
@@ -39,7 +37,7 @@ export function emitSuccess<T>(kind: string, data: T): void {
 /** Emit the canonical machine-readable failure envelope and set a failing exit code. */
 export function emitFailure(
   kind: string,
-  code: ErrorCode,
+  code: RuntimeErrorCode,
   message: string,
   details?: JsonFailureDetails,
 ): void {
@@ -50,11 +48,6 @@ export function emitFailure(
   };
   process.stdout.write(JSON.stringify(envelope));
   process.exitCode = 1;
-}
-
-/** Parse comma-separated input into a trimmed list, omitting empty values. */
-export function parseCommaSeparated(input: string): string[] {
-  return input.split(',').map(item => item.trim()).filter(Boolean);
 }
 
 /** Print pretty JSON for interactive command output. */
@@ -85,12 +78,6 @@ export function handleCommandError(error: unknown, context?: string): never {
   if (hint) console.error(chalk.yellow('Hint:'), hint);
   if (context) console.error(chalk.dim('Context:'), context);
   process.exit(1);
-}
-
-/** Log a non-critical failure and return the supplied fallback value. */
-export function logAndReturn<T>(error: unknown, context: string, fallback: T): T {
-  logger.warn({ context, err: error }, 'non-critical operation failed');
-  return fallback;
 }
 
 export function success(message: string): void {

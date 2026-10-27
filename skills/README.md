@@ -11,6 +11,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | [afk-grill-me](./afk-grill-me/) | `/afk-grill-me` | Requirements interview — ambiguous → falsifiable shared understanding |
 | [afk-grill-me-context](./afk-grill-me-context/) | `/afk-grill-me-context` | Gap-fill interview — verify/correct existing context |
 | [afk-hand-off](./afk-hand-off/) | `/afk-hand-off` | Session handoff — zero context loss between sessions |
+| [session-time-analysis](./session-time-analysis/) | `/session-time-analysis` | Session time distribution, bottleneck analysis, and optimization recommendations |
 | [reasoning-guard](./reasoning-guard/) | `/reasoning-guard` | Self-watch — detect degraded reasoning paths mid-session |
 | [jev-agent-guard](./jev-agent-guard/) | `/jev-agent-guard` | Agent checkpoints across Claude Code, Codex, OpenCode |
 

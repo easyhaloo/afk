@@ -1,0 +1,120 @@
+name: Release Desktop
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing desktop-v* tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_EVENT_INPUTS_TAG:-${GITHUB_REF_NAME}}"
+          version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8')).version)")"
+          [[ "$tag" == desktop-v* ]] || { echo "Expected desktop-v* tag, got $tag" >&2; exit 1; }
+          [[ "${tag#desktop-v}" == "$version" ]] || { echo "Tag $tag does not match desktop version $version" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_EVENT_INPUTS_TAG: ${{ github.event.inputs.tag }}
+
+  package:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows
+            target: --win nsis
+          - runner: macos-15
+            platform: macos-arm64
+            target: --mac dmg zip --arm64
+          - runner: macos-15-intel
+            platform: macos-x64
+            target: --mac dmg zip --x64
+          - runner: ubuntu-22.04
+            platform: linux
+            target: --linux AppImage deb
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fakeroot dpkg rpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+      - name: Rebuild native dependencies
+        run: pnpm --dir apps/desktop rebuild electron node-pty esbuild --pending --reporter=append-only
+      - name: Typecheck and test
+        working-directory: apps/desktop
+        run: |
+          pnpm typecheck
+          pnpm test
+      - name: Build installer
+        working-directory: apps/desktop
+        shell: bash
+        run: pnpm build && pnpm exec electron-builder ${{ matrix.target }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: apps/desktop/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [prepare, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release/desktop
+      - name: Generate checksums
+        working-directory: release/desktop
+        run: sha256sum * > SHA256SUMS.txt
+      - name: Publish desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes

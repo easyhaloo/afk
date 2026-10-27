@@ -1,91 +1,64 @@
 # Browser Auth Runbook
 
-Two modes. Pick by environment:
+Select one mode based on the environment. Copy only the selected mode's fixture
+and setup file into the generated project.
 
 | Runs where | Mode | Setup |
 |------------|------|-------|
-| **Local dev** | `localhost-cdp` | One-time: launch a dedicated Chrome with `--remote-debugging-port=9222`, log in |
-| **CI** | `storage-state` | One-time: run setup project to generate `playwright/.auth/user.json` |
+| Local development with an already-authenticated dedicated Chromium | `localhost-cdp` | Start Chrome with loopback CDP and log in manually |
+| CI/non-interactive environment | `storage-state` | Implement the generated setup flow, then run the setup project |
 
----
+## localhost-cdp (local development)
 
-## localhost-cdp (local dev)
-
-The default for human-driven development. You start a Chrome once, log in
-to the sites you need, and leave it running on port 9222. Tests attach
-over CDP and reuse the live session — no per-run login.
-
-### One-time setup
+Use a dedicated browser profile, never the default personal profile.
 
 ```bash
-# 1. Create a dedicated profile (NEVER point at the default personal profile)
 mkdir -p ~/.afk-browser-profile
-
-# 2. Launch Chrome with remote debugging
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --user-data-dir=$HOME/.afk-browser-profile \
+  --user-data-dir="$HOME/.afk-browser-profile" \
   --remote-debugging-port=9222 \
   --no-first-run about:blank &
-
-# 3. In the launched Chrome, log in to every site the tests need.
-#    Cookies / localStorage / sessionStorage / IndexedDB are persisted.
-
-# 4. Set the endpoint for the test runner
 export CDP_ENDPOINT=http://127.0.0.1:9222
 ```
 
-### Re-authentication
+Log in through that Chrome window before running tests. The profile persists
+session state across restarts. If the session expires, log in again.
 
-Just re-login in the running Chrome. The next test run picks up the new
-session state automatically — no setup project to re-run.
-
-### If Chrome is killed / restarted
-
-Re-run step 2 above. The profile (`~/.afk-browser-profile`) persists
-sessions across restarts, so you usually stay logged in.
-
-### Security
-
-- The CDP endpoint is a credential. Bind to loopback only (the default).
-- Never commit `CDP_ENDPOINT` or the profile directory.
-
----
+Security:
+- Treat the CDP endpoint and browser profile as credentials.
+- Bind CDP to loopback only; never expose it on a network interface.
+- Never commit the profile directory or endpoint value.
+- The fixture rejects CI and non-loopback CDP endpoints.
 
 ## storage-state (CI)
 
-For scripted environments with no interactive browser. Tests load a
-pre-generated auth state file.
+The setup file is a template, not a universal login implementation. Before
+running it, replace the placeholder with the login flow discovered in the
+target repository. Verify the response and confirm that the resulting state
+matches the application's auth mechanism. API request storage state captures
+cookies, but does not automatically translate a bearer token into browser
+localStorage or sessionStorage.
 
-### One-time setup
+After implementing the setup file:
 
 ```bash
-# Run the setup project to generate the auth state file
+AUTH_MODE=storage-state \
 AUTH_STATE_FILE=playwright/.auth/user.json \
-TEST_EMAIL=your-test-email@example.com \
+TEST_EMAIL=your-test-identity@example.com \
 TEST_PASSWORD=your-test-password \
   npx playwright test --project=setup
 ```
 
-The setup project calls the discovered login endpoint (or fills the UI
-login form), then writes the resulting cookies/localStorage to
-`playwright/.auth/user.json` (gitignored).
+Run the workflow tests with the same `AUTH_MODE` and `AUTH_STATE_FILE`
+values. The `api` project depends on `setup`, so the setup project runs first.
 
-### Re-authentication
-
-Delete the state file and re-run setup:
+To re-authenticate, delete the state file and rerun the setup command:
 
 ```bash
-rm playwright/.auth/user.json
-npx playwright test --project=setup
+rm -f playwright/.auth/user.json
+AUTH_MODE=storage-state npx playwright test --project=setup
 ```
 
-Typical triggers for re-auth:
-- Auth tokens in the state file expired (e.g., short-lived JWT).
-- Login API contract changed.
-- Test identity was revoked.
-
-### Security
-
-- `playwright/.auth/user.json` is a credential. Keep it gitignored.
-- Use a dedicated test identity, never a personal account.
-- Never upload the state file as a CI artifact (or encrypt it first).
+Common causes include expired tokens, changed login contracts, or revoked test
+identities. Never use personal credentials, commit the state file, or upload it
+as a CI artifact. Keep `playwright/.auth/` gitignored.

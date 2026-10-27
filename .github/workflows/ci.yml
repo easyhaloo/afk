@@ -342,8 +342,8 @@ jobs:
       - name: Install Xvfb and Electron Linux deps
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \\
-            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \\
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 
       - name: Install apps/desktop dependencies

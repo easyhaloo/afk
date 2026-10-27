@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { createManagementProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import { QARunner } from '@afk/runtime/application/runners/qa-runner';
-import { handleCommandError, success, warning, detail } from '../cli-utils.js';
+import { handleCommandError, success, warning, detail } from '../output.js';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { createAgentProvider, prepareAgentRuntime, resolveAgentProviderName } from '@afk/runtime/domain/agents/index';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';

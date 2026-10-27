@@ -216,17 +216,19 @@ if (envEx) {
 console.log('\n=== Template Neutrality ===');
 
 const scaffoldFiles = listFiles('scaffold');
-const DOMAIN_SPECIFIC_PATTERNS = [
-  /WIKI_API_KEY/,
-  /\\bKB_ID\\b/,
-  /wikiEndpoint/,
-  /\\/knowledgebase\\//,
+const DOMAIN_SPECIFIC_MARKERS = [
+  'WIKI_API_KEY',
+  'KB_ID',
+  'wikiEndpoint',
+  '/knowledgebase/',
 ];
 for (const f of scaffoldFiles) {
   const content = readText(f);
   if (!content) continue;
-  for (const pat of DOMAIN_SPECIFIC_PATTERNS) {
-    if (pat.test(content)) fail(`Domain-specific Wiki assumption in ${f}: ${pat.source}`);
+  for (const marker of DOMAIN_SPECIFIC_MARKERS) {
+    if (content.includes(marker)) {
+      fail(`Domain-specific Wiki assumption in ${f}: ${marker}`);
+    }
   }
 }
 ok('No Wiki-specific identifiers in scaffold');

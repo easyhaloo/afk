@@ -60,10 +60,11 @@ pnpm release:cli
 收集生产依赖，随后在源码目录之外、
 禁用构建工具的环境中执行离线安装验证，并通过 `--help` 检查命令注册表中的全部入口。
 
-将 `apps/cli/package.json` 与 CLI 输出的版本同步后，推送对应标签，例如 `cli-v0.1.0`。
-[CLI 发布工作流](../.github/workflows/release-cli.yml) 会在四个目标平台分别构建、验证，
-全部通过后才上传 GitHub Release。标签必须与 CLI 包版本一致。
-CLI 标签使用 `cli-v` 前缀，插件版本单独管理。
+将 `apps/cli/package.json` 与 CLI 输出的版本同步后，合并到 `main`。
+[CLI 发布工作流](../.github/workflows/release-cli.yml) 会检测新的 CLI 版本，自动创建匹配的
+标签（例如 `cli-v0.1.0`），在四个目标平台分别构建、验证，全部通过后上传 GitHub Release。
+已经存在对应版本和 Release 时会跳过，因此普通提交不会重复发布同一包。
+也可以手动推送匹配的 `cli-v` 标签。CLI 标签使用 `cli-v` 前缀，插件版本单独管理。
 工作流将 CLI Release 标记为 `latest`，发布插件时应保留该指向；指定版本安装使用 `--version`。
 当前不提供 Windows 和 musl/Alpine 发布包。
 

@@ -2,13 +2,66 @@ name: Release CLI
 
 on:
   push:
+    branches: [main]
     tags: ['cli-v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('apps/cli/package.json', 'utf8')).version)")"
+          tag="cli-v${version}"
+
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            [[ "${GITHUB_REF_NAME}" == cli-v* ]] || { echo "Unsupported release tag: ${GITHUB_REF_NAME}" >&2; exit 1; }
+            requested="${GITHUB_REF_NAME#cli-v}"
+            [[ "${requested}" == "${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} does not match CLI version ${version}" >&2; exit 1; }
+            tag="${GITHUB_REF_NAME}"
+          elif ! git ls-remote --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git tag -a "${tag}" -m "AFK CLI ${version}"
+            git push origin "${tag}"
+          fi
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            publish=false
+          else
+            publish=true
+          fi
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   package:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +82,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: pnpm/action-setup@v4
         with:
           version: 12.5.1
@@ -48,7 +103,7 @@ jobs:
       - name: Test installer
         run: pnpm exec vitest run tests/cli-install.test.ts
       - name: Build, package and verify offline installation
-        run: pnpm release:cli --version "${GITHUB_REF_NAME#cli-v}"
+        run: pnpm release:cli --version "${{ needs.prepare.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.platform }}-${{ matrix.arch }}
@@ -56,12 +111,12 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: package
+    needs: [prepare, package]
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: cli-*
@@ -70,4 +125,4 @@ jobs:
       - name: Publish CLI release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/cli/* --verify-tag --title "AFK CLI ${GITHUB_REF_NAME#cli-v}" --generate-notes --latest
+        run: gh release create "${{ needs.prepare.outputs.tag }}" release/cli/* --verify-tag --title "AFK CLI ${{ needs.prepare.outputs.version }}" --generate-notes --latest

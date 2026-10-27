@@ -68,10 +68,13 @@ to include production dependencies, and tests an offline installation outside th
 build tools blocked. It checks every command registry entry with `--help`.
 
 Set `apps/cli/package.json` and the CLI's reported version to the same version,
-then push its tag, for example `cli-v0.1.0`. The
-[CLI release workflow](../.github/workflows/release-cli.yml) builds and verifies
-all four targets before publishing the assets to GitHub Releases. The tag must
-match the CLI package version. CLI tags use `cli-v`; plugin versions are separate.
+then merge that version bump into `main`. The
+[CLI release workflow](../.github/workflows/release-cli.yml) detects a new CLI
+version, creates the matching tag such as `cli-v0.1.0`, builds and verifies all
+four targets, and publishes the assets to GitHub Releases. An existing version
+and Release are skipped, so normal commits do not republish the same package.
+Pushing a matching `cli-v` tag manually remains supported. CLI tags use `cli-v`;
+plugin versions are separate.
 The workflow marks CLI releases as `latest`; keep plugin releases from changing
 that pointer. Use `--version` for a pinned install. Windows and musl/Alpine packages
 are not provided.

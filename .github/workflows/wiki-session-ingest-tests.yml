@@ -1,0 +1,33 @@
+name: Wiki Session Ingest Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/wiki/**"
+      - ".github/workflows/wiki-session-ingest-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "skills/wiki/**"
+      - ".github/workflows/wiki-session-ingest-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  wiki-python-tests:
+    name: Wiki Python Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile wiki scripts
+        run: python -m py_compile skills/wiki/scripts/wiki.py skills/wiki/scripts/session_source.py
+      - name: Run wiki test suites
+        run: python -B -m unittest discover -s skills/wiki/scripts -p 'test_*.py' -v

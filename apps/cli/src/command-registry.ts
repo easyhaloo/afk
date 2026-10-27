@@ -63,7 +63,7 @@ export async function dispatchCommand(command: string, args: string[]): Promise<
   program.name('afk').version('0.1.0').exitOverride();
   register(program, { argv: ['node', 'afk', command, ...args] });
 
-  const matched = program.commands.find(candidate => candidate.name() === command);
+  const matched = program.commands.find(candidate => candidate.name() === command || candidate.aliases().includes(command));
   if (!matched) {
     await program.parseAsync(['afk', command, ...args]);
     return;

@@ -43,8 +43,8 @@ A targeted GitHub Actions workflow compiles the scripts and runs all
 
 ## Validation status
 
-The first targeted run compiled both scripts successfully and ran 39 tests;
-the existing wiki CLI suite had seven failures because the runner did not have
-ripgrep installed. The workflow now installs ripgrep before running the suite.
-The rerun must pass before claiming the full Python suite passed. Direct local
-execution was unavailable because direct GitHub network access failed.
+The targeted GitHub Actions run compiled both scripts and passed all 40 tests
+(12 new session-source tests plus the existing wiki CLI tests). The first run
+exposed a missing ripgrep dependency in the runner; the workflow was updated to
+install it, and the subsequent run passed. Direct local execution was
+unavailable because direct GitHub network access failed.

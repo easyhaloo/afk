@@ -94,6 +94,7 @@ describe('CLI command registry and dispatcher', () => {
   });
 
   it.each([
+    ['--help', [], 'Usage: afk'],
     ['backlog', ['tag', 'add', '--help'], 'Add a business tag'],
     ['backlog', ['tag', 'remove', '--help'], 'Remove a business tag'],
     ['observe', ['timeline', '--help'], 'Show ordered audit events for a run'],

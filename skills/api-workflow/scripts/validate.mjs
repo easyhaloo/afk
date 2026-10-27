@@ -213,7 +213,7 @@ if (envEx) {
 
 // ── Domain neutrality and auth setup safety ───────────────────
 
-console.log('\\n=== Template Neutrality ===');
+console.log('\n=== Template Neutrality ===');
 
 const scaffoldFiles = listFiles('scaffold');
 const DOMAIN_SPECIFIC_PATTERNS = [

@@ -72,7 +72,7 @@ test.skip('EXAMPLE ONLY — adapt endpoints, payment trigger, and cleanup before
 
     // Step 2: Create order
     const order = await step_createOrder(token, userId, 'SKU123', 2);
-    await manager.create('orders', { id: order.orderId }); // track for cleanup
+    manager.track('orders', order.orderId); // Track the created order for cleanup.
     expect(order.orderId).toBeDefined();
     expect(order.status).toBe('PENDING');
 

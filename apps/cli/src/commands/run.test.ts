@@ -21,7 +21,7 @@ vi.mock('./agent-runtime-options.js', () => ({
   addAgentRuntimeOptions: (command: Command) => command,
   resolveAgentRuntimeOptions: () => ({ kind: 'default' }),
 }));
-vi.mock('../cli-utils.js', () => ({
+vi.mock('../output.js', () => ({
   handleCommandError: (error: unknown) => { throw error; },
   success: vi.fn(),
   warning: vi.fn(),

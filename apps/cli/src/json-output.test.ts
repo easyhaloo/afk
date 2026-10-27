@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emitFailure, type JsonFailure } from './json-output.js';
+import { emitFailure, type JsonFailure } from './output.js';
 
 afterEach(() => {
   vi.restoreAllMocks();

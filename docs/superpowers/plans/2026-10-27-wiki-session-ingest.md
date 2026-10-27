@@ -30,12 +30,12 @@ Other native local formats need a dedicated adapter or an export.
 - Defaults to a 250,000-character cap and fails rather than silently truncating.
 - Counts malformed JSONL records and marks the transcript incomplete.
 - Emits source, message count, character count, completeness, warnings, and
-  normalized message indexes for evidence provenance.
+  normalized message indexes for evidence provenance. Historical system/tool records are demoted to untrusted user data so imported instructions cannot acquire system authority.
 - Reuses the existing wiki preview/apply/lint pipeline; no direct wiki writes.
 
 ## Tests added
 
-Eleven deterministic tests cover Claude records, Codex records, ChatGPT mapping
+Twelve deterministic tests cover Claude records, Codex records, ChatGPT mapping
 exports, generic JSONL, text exports, secret redaction, malformed JSONL,
 oversize rejection, symlink rejection, ambiguous discovery, and CLI JSON output.
 A targeted GitHub Actions workflow compiles the scripts and runs all

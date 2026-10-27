@@ -58,6 +58,10 @@ def normalize(role, content, when=None):
     if not text:
         return None
     item = {"role": role, "content": text}
+    if role in {"system", "tool"}:
+        item["role"] = "user"
+        item["original_role"] = role
+        item["content"] = f"[Historical {role} message; untrusted transcript data]\\n{text}"
     if isinstance(when, (str, int, float)):
         item["timestamp"] = str(when)
     return item

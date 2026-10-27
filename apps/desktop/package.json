@@ -18,9 +18,11 @@
     "e2e": "playwright test --config=playwright.config.ts",
     "build:main": "pnpm build:application && node scripts/build-provider-inventory.mjs && node scripts/build-main.mjs",
     "build": "pnpm typecheck && pnpm build:main && vite build",
-    "package:mac": "pnpm build && electron-builder --mac --dir",
+    "package:mac": "pnpm build && electron-builder --mac dmg zip",
     "verify:mac": "bash scripts/restart-packaged-mac.sh",
-    "prepare": "husky"
+    "prepare": "husky",
+    "package:win": "pnpm build && electron-builder --win nsis",
+    "package:linux": "pnpm build && electron-builder --linux AppImage deb"
   },
   "build": {
     "appId": "im.afk.control",
@@ -39,10 +41,63 @@
       "category": "public.app-category.developer-tools",
       "icon": "assets/afk-control.icns",
       "target": [
-        "dir"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "minimumSystemVersion": "12.0"
-    }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://easyhaloo.github.io/afk/desktop-updates/"
+      }
+    ]
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

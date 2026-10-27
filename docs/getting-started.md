@@ -31,8 +31,9 @@ bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-da
 The executable at `~/.local/bin/afk` points into
 `~/.afk/cli/versions/<version>-<platform>-<arch>-<sha256>/`. Reinstalling upgrades
 that link atomically; download, checksum, or startup failures preserve the old
-version. Previous versions remain on disk. Replacing an older wrapper or another
-unmanaged executable requires `--force`; directories are never replaced.
+version. Previous versions remain on disk. The wrapper created by older AFK
+installers is migrated automatically; replacing another unmanaged executable
+requires `--force`. Directories are never replaced.
 The default path needs no elevated permissions. `--system` selects
 `/usr/local/bin` and requires write access already granted to your user.
 Shell completion is optional and can be disabled with `--skip-completion`.

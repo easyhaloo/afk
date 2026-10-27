@@ -57,6 +57,14 @@ async function validateLinks(directory, root) {
   }
 }
 
+async function isLegacyWrapper(file) {
+  if (!file.isFile()) return false;
+  const source = await readFile(file.path, 'utf8').catch(() => '');
+  return source.includes('// AFK CLI - Unified workflow automation tool')
+    && source.includes("const { spawn } = require('node:child_process');")
+    && source.includes("apps', 'cli', 'dist', 'index.js");
+}
+
 try {
   const args = process.argv.slice(2);
   while (args.length) {
@@ -87,7 +95,11 @@ try {
   await access(prefix, constants.W_OK);
   const existing = await lstat(executable).catch(error => { if (error.code !== 'ENOENT') throw error; });
   const target = existing?.isSymbolicLink() ? resolve(prefix, await readlink(executable)) : '';
-  if (existing && (existing.isDirectory() || (!target.startsWith(`${versions}/`) && !options.force))) {
+  const legacy = existing && await isLegacyWrapper({
+    isFile: () => existing.isFile(),
+    path: executable,
+  });
+  if (existing && (existing.isDirectory() || (!legacy && !target.startsWith(`${versions}/`) && !options.force))) {
     throw new Error(`${executable} is not managed by this installer; choose --prefix or use --force for a file`);
   }
   await mkdir(versions, { recursive: true });

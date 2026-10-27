@@ -117,4 +117,24 @@ describe('precompiled CLI installer', () => {
     await install('--force', '--archive', file, '--checksum', checksum);
     expect(await readlink(command)).toContain('.afk/cli/versions');
   });
+
+  it('migrates the wrapper created by the previous installer without force', async () => {
+    const { root, command, install } = await fixture();
+    const { file, checksum } = await archive(root);
+    await mkdir(join(command, '..'), { recursive: true });
+    await writeFile(command, `#!/usr/bin/env node
+//
+// AFK CLI - Unified workflow automation tool
+// Installed from: ${root}
+//
+const { spawn } = require('node:child_process');
+const path = require('path');
+const sourceDir = ${JSON.stringify(root)};
+const cliPath = path.join(sourceDir, 'apps', 'cli', 'dist', 'index.js');
+const child = spawn(process.execPath, [cliPath, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env });
+child.on('exit', (code) => process.exit(code ?? 1));
+`);
+    await install('--archive', file, '--checksum', checksum);
+    expect(await readlink(command)).toContain('.afk/cli/versions');
+  });
 });

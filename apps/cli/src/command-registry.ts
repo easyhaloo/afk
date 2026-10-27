@@ -44,6 +44,15 @@ export function buildCommandArgv(command: string, args: string[], subcommand?: s
 
 /** Load and parse exactly one registered command; unknown commands fail directly. */
 export async function dispatchCommand(command: string, args: string[]): Promise<void> {
+  if (command === '--help' || command === '-h') {
+    const program = new Command();
+    program.name('afk').version('0.1.0').exitOverride();
+    const registrations = await Promise.all(COMMANDS.map(entry => entry.loader()));
+    for (const register of registrations) register(program);
+    program.parse(['node', 'afk', command, ...args]);
+    return;
+  }
+
   const entry = COMMANDS.find(candidate => candidate.names.includes(command));
   if (!entry) {
     throw new Error(`Unknown command '${command}'. Run 'afk --help' to see available commands.`);

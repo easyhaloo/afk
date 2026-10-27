@@ -80,12 +80,12 @@ jobs:
           while IFS= read -r path; do
             [[ -z "$path" ]] && continue
             case "$path" in
-              *.md|docs/*|README*|CONTRIBUTING*|CHANGELOG*)
+              *.md|docs/*|README*|CONTRIBUTING*|CHANGELOG*|scripts/check-doc-links.mjs)
                 docs=true
                 ;;
             esac
             case "$path" in
-              skills/*/*.md|skills/*/*/*.md|skills/*/*/*/*.md|skills/*/*/*/*/*.md)
+              skills/*.md|skills/*/*.md|skills/*/*/*.md|skills/*/*/*/*.md|skills/*/*/*/*/*.md)
                 skill_docs=true
                 docs=true
                 ;;

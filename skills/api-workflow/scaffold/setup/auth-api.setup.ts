@@ -11,6 +11,7 @@ const authFile = path.resolve(
 );
 
 setup('authenticate via API', async ({ request }) => {
+  void request; // Used by the generated login implementation.
   await mkdir(path.dirname(authFile), { recursive: true });
 
   // Replace this block with the real login request discovered in the target

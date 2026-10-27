@@ -10,6 +10,10 @@ dist/
 release/
 *.tsbuildinfo
 
+# Locally built standalone installer (hundreds of MB); the tracked script is
+# install.sh.
+install
+
 # Electron release artifacts
 apps/desktop/release/
 apps/desktop/dist-electron/

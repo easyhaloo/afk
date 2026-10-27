@@ -1,5 +1,4 @@
 name: Release Desktop
-
 on:
   push:
     tags: ['desktop-v*']
@@ -9,19 +8,14 @@ on:
         description: Existing desktop-v* tag to package
         required: true
         type: string
-
 permissions:
   contents: read
-
 concurrency:
   group: release-desktop-${{ github.ref }}
   cancel-in-progress: false
-
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
@@ -32,17 +26,16 @@ jobs:
           fetch-depth: 0
       - id: meta
         shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_EVENT_INPUTS_TAG:-${GITHUB_REF_NAME}}"
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8')).version)")"
           [[ "$tag" == desktop-v* ]] || { echo "Expected desktop-v* tag, got $tag" >&2; exit 1; }
           [[ "${tag#desktop-v}" == "$version" ]] || { echo "Tag $tag does not match desktop version $version" >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-        env:
-          GITHUB_EVENT_INPUTS_TAG: ${{ github.event.inputs.tag }}
-
   package:
     needs: prepare
     strategy:
@@ -62,7 +55,7 @@ jobs:
             platform: linux
             target: --linux AppImage deb
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,7 +80,7 @@ jobs:
         run: |
           pnpm typecheck
           pnpm test
-      - name: Build installer
+      - name: Build installer and update metadata
         working-directory: apps/desktop
         shell: bash
         run: pnpm build && pnpm exec electron-builder ${{ matrix.target }} --publish never
@@ -97,18 +90,26 @@ jobs:
           path: apps/desktop/release/*
           if-no-files-found: error
           retention-days: 14
-
   publish:
     needs: [prepare, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
           merge-multiple: true
           path: release/desktop
+      - name: Rewrite update metadata asset URLs
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: node apps/desktop/scripts/rewrite-update-feed.mjs release/desktop
       - name: Generate checksums
         working-directory: release/desktop
         run: sha256sum * > SHA256SUMS.txt
@@ -118,3 +119,24 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes
+      - name: Publish update feed
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/desktop-update-feed
+          cp release/desktop/latest*.yml /tmp/desktop-update-feed/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin desktop-updates; then
+            git checkout -B desktop-updates origin/desktop-updates
+            git rm -rf . || true
+          else
+            git checkout --orphan desktop-updates
+            git rm -rf . || true
+          fi
+          cp /tmp/desktop-update-feed/latest*.yml .
+          git add latest*.yml
+          git commit -m "chore(desktop): publish update feed for $TAG"
+          git push origin desktop-updates

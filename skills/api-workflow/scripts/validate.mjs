@@ -205,10 +205,45 @@ if (gi) {
 
 const envEx = readText('scaffold/auth.env.example');
 if (envEx) {
-  for (const v of ['AUTH_STATE_FILE', 'AUTH_PROFILE_DIR', 'CDP_ENDPOINT']) {
-    if (envEx.includes(v)) ok(`.env.example references ${v}`);
-    else fail(`.env.example missing ${v}`);
+  for (const v of ['BASE_URL', 'AUTH_STATE_FILE', 'API_KEY_HEADER', 'CDP_ENDPOINT']) {
+    if (envEx.includes(v)) ok('.env.example references ' + v);
+    else fail('.env.example missing ' + v);
   }
+}
+
+// ── Domain neutrality and auth setup safety ───────────────────
+
+console.log('\n=== Template Neutrality ===');
+
+const scaffoldFiles = listFiles('scaffold');
+const DOMAIN_SPECIFIC_MARKERS = [
+  'WIKI_API_KEY',
+  'KB_ID',
+  'wikiEndpoint',
+  '/knowledgebase/',
+];
+for (const f of scaffoldFiles) {
+  const content = readText(f);
+  if (!content) continue;
+  for (const marker of DOMAIN_SPECIFIC_MARKERS) {
+    if (content.includes(marker)) {
+      fail(`Domain-specific Wiki assumption in ${f}: ${marker}`);
+    }
+  }
+}
+ok('No Wiki-specific identifiers in scaffold');
+
+const config = readText('scaffold/playwright.config.ts') || '';
+if (config.includes("name: 'setup'") && config.includes("dependencies: ['setup']")) {
+  ok('storage-state setup project is wired to API tests');
+} else {
+  fail('Playwright config must wire the storage-state setup project to API tests');
+}
+
+for (const f of ['scaffold/setup/auth-api.setup.ts', 'scaffold/setup/auth-ui.setup.ts']) {
+  const content = readText(f) || '';
+  if (content.includes('template placeholder')) ok(`${f}: incomplete auth fails fast`);
+  else fail(`${f}: missing fail-fast guard for placeholder auth flow`);
 }
 
 // ── No root/CLI dependency assumptions ───────────────────────

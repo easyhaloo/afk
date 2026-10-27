@@ -2,131 +2,123 @@
 name: api-workflow
 description: >-
   Multi-step API testing with Playwright. Generates executable test files from
-  business scenarios with auth reuse. Pick the auth mode by where the test
-  runs: local dev uses a long-running Chrome on 9222 + CDP attach (default);
-  CI uses storage-state from API login. Triggers: "test order flow",
-  "verify webhook", "trigger async job, poll for completion",
-  "API then browser verify", "reuse browser login", "skip UI login",
-  "browser auth session".
+  codebase-grounded business scenarios, with optional browser verification and
+  reusable authentication. Selects local CDP or storage-state based on the
+  execution environment. Triggers: "test API workflow", "verify webhook",
+  "trigger async job and poll for completion", "API then browser verify",
+  "reuse browser login", "browser auth session".
 ---
 
 # API Workflow Testing
 
-**Tool:** Playwright | **Output:** `tests/api-workflow/` or standalone
+**Tool:** Playwright | **Output:** `tests/api-workflow/` or an existing test directory
 
 ## References
 
 | Type | Path |
 |------|------|
-| Patterns | `references/api-patterns/` |
-| Hybrid | `references/hybrid-patterns/` |
+| API patterns | `references/api-patterns/` |
+| API + browser patterns | `references/hybrid-patterns/` |
 | Auth modes | `references/hybrid-patterns/browser-auth-modes.md` |
 | Templates | `scaffold/` |
 
 ## Process
 
-### 1. Discover
+### 1. Discover the target project
 
-Analyze via codebase, NOT assumptions:
+Inspect the repository before designing tests. Gather evidence for:
 
-| Check | Action |
-|-------|--------|
-| Auth | Read middleware — X-API-Key / Bearer / Cookie? |
-| Auth storage | cookies, localStorage, IndexedDB, or sessionStorage? |
-| Login mechanism | API endpoint discoverable? SSO/OAuth? MFA? Passkey? |
-| Endpoints | Read route definitions |
-| Async | Identify trigger + poll pattern |
-| Freshness | Locate authoritative data source |
-| Layout | Detect project structure (frontend repo? Playwright setup?) |
-| CI/local | Is this running in CI or locally? |
+- Authentication middleware, credential types, and session storage.
+- Login and logout flows, including SSO, MFA, OAuth, and passkeys.
+- Route definitions, request schemas, response schemas, and error behavior.
+- Async task triggers, status endpoints, terminal states, and authoritative results.
+- Test-data creation, ownership, cleanup, and idempotency.
+- Existing Playwright configuration, package manager, test directory, and CI environment.
 
-Layout is auto-detected during codebase analysis.
+Do not infer endpoints, payloads, status values, or selectors from examples. Record unknowns instead of guessing.
 
-### 2. Pick Auth Mode (Environment-Driven)
+### 2. Select the authentication mode
 
-Pick the mode based on **where the test will run**, not on the auth scheme:
+Choose based on execution environment:
 
 | Environment | Mode |
 |-------------|------|
-| **Local dev** — user already runs Chrome on 9222 with a dedicated profile, manually logged in | `localhost-cdp` |
-| **CI** — no interactive login, fully scripted | `storage-state` |
+| Local development with a dedicated, already-authenticated Chromium session on loopback CDP | `localhost-cdp` |
+| CI or another non-interactive environment where authentication can be scripted | `storage-state` |
 
-Don't ask the user which mode to pick when the environment is obvious. The
-auth scheme (SSO, MFA, passkey, etc.) only matters when generating the
-storage state file in CI, not when picking the mode itself.
+Reject `localhost-cdp` in CI, for non-Chromium browsers, and for non-loopback endpoints. If the environment or auth flow cannot safely support either mode, stop and ask for a suitable test identity or an explicit alternative.
 
-**Hard rejects:**
-- Reject `localhost-cdp` in CI (no manual browser available).
-- Reject `localhost-cdp` for non-Chromium browsers or non-loopback endpoints.
-- When neither mode fits, stop and ask for a dedicated test identity.
+The auth scheme affects how setup is implemented, but does not by itself determine the mode.
 
-### 3. Clarify
+### 3. Present the plan and confirm
 
-Confirm with user:
-- Detected layout and output location
-- Selected browser auth mode
-- Workflow steps (auth setup, API calls, browser verification)
+Before writing files, summarize:
 
-### 4. Generate
+- Detected project layout and output location.
+- Chosen auth mode and its prerequisites.
+- Concrete workflow steps, including expected outcomes and failure paths.
+- Test data and cleanup strategy.
+- Which parts are supported by code evidence and which require user input.
 
-Only after confirmation. Copy only the selected mode's fixture, setup,
-and config artifacts. Never generate unused modes.
+Do not generate the final test project until the user confirms the plan.
+
+### 4. Generate only the selected path
+
+Copy only the selected mode's fixture and required configuration. Replace all illustrative endpoints, payloads, selectors, and auth logic with findings from the target project. Do not copy example business logic as if it were real.
+
+Generated projects must not contain unused auth modes, secrets, or business-specific remnants from these templates. Never commit credentials or auth-state files.
+
+### 5. Validate in layers
+
+Run checks in this order where supported:
+
+1. Structural validation of generated files and configuration.
+2. Type checking or test discovery.
+3. A minimal authentication/setup run.
+4. The requested workflow tests.
+5. Cleanup verification and a concise result report.
+
+Report each check as passed, failed, or not run. A structural validator passing is not evidence that authentication or business behavior works. Do not claim end-to-end success when the target service or credentials are unavailable.
 
 ## Output Options
 
-**A: Inside frontend repo** (if Playwright setup detected)
-```
-frontend/e2e/api-workflow/
-|-- scenarios/*.spec.ts
-|-- fixtures/
-|-- utils/
-# Reuse root playwright.config.ts
-```
+**A: Existing frontend/test project** — integrate under its established test directory and reuse its package manager and Playwright configuration where possible.
 
-**B: Standalone project** (if no frontend or external tester)
-```
-tests/api-workflow/
-|-- package.json
-|-- playwright.config.ts
-|-- scenarios/*.spec.ts
-|-- fixtures/
-|-- utils/
-```
+**B: Standalone project** — use `tests/api-workflow/` when no suitable test harness exists or the user requests isolation.
+
+Avoid introducing a second Playwright installation or conflicting configuration when the target repository already has one.
 
 ## Auth Mode Artifacts
 
-When a browser auth mode is selected, the generated project also receives:
+For browser-based workflows, include only the selected mode's artifacts:
 
-| Artifact | Source template |
-|----------|----------------|
-| `fixtures/browser-session.ts` | Selected mode fixture (`localhost-cdp` or `storage-state`) |
-| `setup/auth-api.setup.ts` (storage-state only) | API setup to generate state file |
-| `playwright/.auth/` (gitignored) | Auth state file location |
-| `.gitignore` entries | `scaffold/auth-artifacts.gitignore` |
-| `.env.example` | `scaffold/auth.env.example` |
-| `browser-auth-runbook.md` | Setup and re-auth instructions |
+| Artifact | Requirement |
+|----------|-------------|
+| `fixtures/browser-session.ts` | Selected mode fixture, renamed to the stable import path |
+| `setup/auth-api.setup.ts` or `setup/auth-ui.setup.ts` | Only for storage-state mode, using the discovered login mechanism |
+| `playwright/.auth/` | Runtime auth state; must be gitignored |
+| `.env.example` | Variable names only; no real secrets |
+| `browser-auth-runbook.md` | Setup, re-authentication, and security instructions |
 
-## Config
+The setup template contains placeholders and is not executable until the discovered login flow is implemented. Never save an empty or unauthenticated state file and report it as successful setup.
 
-```typescript
-baseURL: process.env.BASE_URL || 'http://localhost:8080'
-testDir: '.'
-'X-API-Key': requireEnv('WIKI_API_KEY')
+## Async Workflow Pattern
+
+Discover the real trigger and polling endpoints from the application code. A common shape is:
+
+```text
+POST /action -> task identifier
+GET /tasks/:id -> status
+GET /tasks/:id/result -> authoritative result (if separate)
 ```
 
-## Async Pattern
-
-```
-POST /action -> { run_id }
-GET  /runs/:id (poll) -> { status, summary }
-```
-
-Poll endpoint `summary` often more authoritative than cached GET.
+Poll only known non-terminal states; stop on success, known failure, or timeout. Include useful failure context without exposing credentials. Prefer the authoritative result over stale cached status when the application exposes one.
 
 ## Anti-patterns
 
-- No hardcoded credentials / base URL
-- No `.spec.ts` suffix missing
-- No skipping codebase analysis / user confirmation
-- No silent fallback between auth modes
-- No generating unused auth mode artifacts
+- Guessing API paths, payloads, auth headers, status values, or selectors.
+- Hardcoding credentials, API keys, or a real auth-state file.
+- Using a personal browser profile or exposing CDP beyond loopback.
+- Silently switching auth modes after a failure.
+- Generating unused auth artifacts or carrying over domain-specific template code.
+- Treating example scenarios or structural validation as proof of a working test.

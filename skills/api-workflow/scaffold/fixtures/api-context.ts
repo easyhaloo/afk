@@ -1,115 +1,65 @@
-// ============================================================
-// API Context Fixture
-// ============================================================
-// Reusable API context for API tests.
-// Handles auth headers, base URL, and context lifecycle.
-//
-// IMPORTANT FIXTURE RULES:
-// 1. File-level shared context causes flaky tests on retry
-// 2. Use test.beforeAll for init, test.afterAll for cleanup
-// 3. Add null check in getter to fail fast if context invalid
-// ============================================================
+// Generic API context helpers for generated Playwright workflows.
+// Replace auth configuration only when the target application's contract
+// requires it. Context creation and disposal are explicit; no globalThis
+// Playwright internals or domain-specific endpoint assumptions are used.
 
-import { test, APIRequestContext } from '@playwright/test';
-import { requireEnv, requireEnvOrDefault } from '../utils/require-env';
+import { test, request, type APIRequestContext } from '@playwright/test';
+import { requireEnvOrDefault } from '../utils/require-env';
 
-let apiContext: APIRequestContext | null = null;
-let currentKbId: string;
-let currentApiKey: string;
+let apiContext: APIRequestContext | undefined;
 
-/**
- * Get the shared API context.
- * Throws if context is not initialized.
- */
 export function getApiContext(): APIRequestContext {
   if (!apiContext) {
     throw new Error(
-      'API context not initialized. ' +
-      'Ensure test.beforeAll has run before using getApiContext().'
+      'API context is not initialized. Call this from a test file after its beforeAll hook.',
     );
   }
   return apiContext;
 }
 
-export function getCurrentKbId(): string {
-  return currentKbId;
-}
+export async function createApiContext(
+  options: {
+    baseURL?: string;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<APIRequestContext> {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const apiKey = process.env.API_KEY;
+  if (apiKey) {
+    const headerName = requireEnvOrDefault('API_KEY_HEADER', 'X-API-Key');
+    headers[headerName] = apiKey;
+  }
 
-export function getCurrentApiKey(): string {
-  return currentApiKey;
-}
-
-/**
- * Initialize API context.
- * Called once before all tests in the file.
- */
-test.beforeAll(async () => {
-  currentKbId = requireEnvOrDefault('KB_ID', 'demo-kb');
-  currentApiKey = requireEnv('WIKI_API_KEY');
-
-  apiContext = await getNewApiContext(currentApiKey);
-});
-
-/**
- * Create a new API context with proper configuration.
- * Use this when you need an isolated context for a specific test.
- */
-export async function getNewApiContext(apiKey?: string): Promise<APIRequestContext> {
-  const key = apiKey || currentApiKey || requireEnv('WIKI_API_KEY');
-
-  return await globalThis.test?.request?.newContext?.({
-    baseURL: requireEnvOrDefault('BASE_URL', 'http://localhost:8080'),
-    extraHTTPHeaders: {
-      'Content-Type': 'application/json',
-      'X-API-Key': key,
-    },
-  }) || await globalThis.request?.newContext?.({
-    baseURL: requireEnvOrDefault('BASE_URL', 'http://localhost:8080'),
-    extraHTTPHeaders: {
-      'Content-Type': 'application/json',
-      'X-API-Key': key,
-    },
+  return request.newContext({
+    baseURL: options.baseURL ?? requireEnvOrDefault('BASE_URL', 'http://localhost:8080'),
+    extraHTTPHeaders: headers,
   });
 }
 
-/**
- * Clean up API context.
- * Called once after all tests in the file complete.
- */
-test.afterAll(async () => {
-  if (apiContext) {
-    try {
-      await apiContext.dispose();
-      apiContext = null;
-    } catch (e) {
-      // Ignore: context may already be closed due to test retry
-      console.log('[api-context] Context disposed or already closed');
-    }
-  }
-});
-
-/**
- * Build wiki-specific API endpoint path.
- * Use this instead of hardcoding paths.
- *
- * @example
- *   wikiEndpoint('/lint') → '/api/v1/knowledgebase/demo-kb/wiki/lint'
- *   wikiEndpoint('/review', 'other-kb') → '/api/v1/knowledgebase/other-kb/wiki/review'
- */
-export function wikiEndpoint(path: string, kbId?: string): string {
-  const kb = kbId || currentKbId;
-  return `/api/v1/knowledgebase/${kb}/wiki${path}`;
-}
-
-/**
- * Create auth headers for API requests.
- * Ensures X-API-Key is always set correctly.
- */
-export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const key = currentApiKey || requireEnv('WIKI_API_KEY');
-  return {
+export function authHeaders(
+  extra: Record<string, string> = {},
+): Record<string, string> {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-API-Key': key,
     ...extra,
   };
+  const apiKey = process.env.API_KEY;
+  if (apiKey) {
+    headers[requireEnvOrDefault('API_KEY_HEADER', 'X-API-Key')] = apiKey;
+  }
+  return headers;
 }
+
+test.beforeAll(async () => {
+  // API_KEY is optional: the target application may use cookies, bearer
+  // tokens, or no authentication. Generate the appropriate auth flow from
+  // codebase evidence rather than assuming one scheme.
+  apiContext = await createApiContext();
+});
+
+test.afterAll(async () => {
+  if (apiContext) {
+    await apiContext.dispose();
+    apiContext = undefined;
+  }
+});

@@ -32,6 +32,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile wiki scripts
-        run: python -m py_compile skills/wiki/scripts/wiki.py skills/wiki/scripts/session_source.py
+        run: python -m py_compile skills/wiki/scripts/wiki.py skills/wiki/scripts/session_source.py skills/wiki/scripts/test_session_source.py
       - name: Run wiki test suites
         run: python -B -m unittest discover -s skills/wiki/scripts -p 'test_*.py' -v

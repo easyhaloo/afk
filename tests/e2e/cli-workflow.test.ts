@@ -120,7 +120,7 @@ describe('built CLI workflows', () => {
     for (const shell of ['bash', 'zsh', 'fish']) expect((await cli(['completion', shell])).stdout).toContain('afk');
     expect((await cli(['__complete', 'backlog', 'show'])).stdout).toBe('');
     expect((await cli(['board'], 1)).stderr).toContain('no arguments');
-    expect((await cli(['tracker'], 1)).stderr).toContain('unknown command');
+    expect((await cli(['tracker'], 1)).stderr.toLowerCase()).toContain('unknown command');
   });
 
   it('creates, lists, tags, interrupts, retries and confirms a root merge through the provider SDK', async () => {

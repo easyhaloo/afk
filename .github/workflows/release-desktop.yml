@@ -1,5 +1,4 @@
 name: Release Desktop
-
 on:
   push:
     tags: ['desktop-v*']
@@ -9,19 +8,14 @@ on:
         description: Existing desktop-v* tag to package
         required: true
         type: string
-
 permissions:
   contents: read
-
 concurrency:
-  group: release-desktop-${{ github.ref }}
+  group: release-desktop-feed
   cancel-in-progress: false
-
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
@@ -32,17 +26,36 @@ jobs:
           fetch-depth: 0
       - id: meta
         shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_EVENT_INPUTS_TAG:-${GITHUB_REF_NAME}}"
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8')).version)")"
           [[ "$tag" == desktop-v* ]] || { echo "Expected desktop-v* tag, got $tag" >&2; exit 1; }
           [[ "${tag#desktop-v}" == "$version" ]] || { echo "Tag $tag does not match desktop version $version" >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Validate macOS signing and notarization secrets
+        shell: bash
         env:
-          GITHUB_EVENT_INPUTS_TAG: ${{ github.event.inputs.tag }}
-
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required GitHub Actions secrets for a production desktop release: %s\\n' "${missing[*]}" >&2
+            exit 1
+          fi
   package:
     needs: prepare
     strategy:
@@ -62,7 +75,7 @@ jobs:
             platform: linux
             target: --linux AppImage deb
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,28 +100,56 @@ jobs:
         run: |
           pnpm typecheck
           pnpm test
-      - name: Build installer
+      - name: Build application
+        working-directory: apps/desktop
+        run: pnpm build
+      - name: Package installer and generate update metadata
         working-directory: apps/desktop
         shell: bash
-        run: pnpm build && pnpm exec electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_LINK: ${{ startsWith(matrix.platform, 'macos') && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(matrix.platform, 'macos') && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_TEAM_ID || '' }}
+        run: pnpm exec electron-builder ${{ matrix.target }} --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}
           path: apps/desktop/release/*
           if-no-files-found: error
           retention-days: 14
-
   publish:
     needs: [prepare, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install release assembly dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
-          merge-multiple: true
-          path: release/desktop
+          path: release/artifacts
+      - name: Assemble platform assets and merge macOS update metadata
+        run: node apps/desktop/scripts/assemble-update-feed.mjs release/artifacts release/desktop
+      - name: Rewrite update metadata asset URLs
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: node apps/desktop/scripts/rewrite-update-feed.mjs release/desktop
       - name: Generate checksums
         working-directory: release/desktop
         run: sha256sum * > SHA256SUMS.txt
@@ -117,4 +158,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
-        run: gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --clobber
+            release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f "name=AFK Control $VERSION" -f make_latest=false >/dev/null
+          else
+            gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes --latest=false
+          fi
+      - name: Publish update feed
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/desktop-update-feed
+          cp release/desktop/latest*.yml /tmp/desktop-update-feed/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin desktop-updates; then
+            git checkout -B desktop-updates origin/desktop-updates
+            git rm -rf . || true
+          else
+            git checkout --orphan desktop-updates
+            git rm -rf . || true
+          fi
+          cp /tmp/desktop-update-feed/latest*.yml .
+          git add latest*.yml
+          if git diff --cached --quiet; then
+            echo "Update feed is already current for $TAG."
+          else
+            git commit -m "chore(desktop): publish update feed for $TAG"
+            git push origin desktop-updates
+          fi

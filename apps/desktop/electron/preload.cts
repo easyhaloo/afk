@@ -4,6 +4,11 @@ import type { DesktopApi } from "../shared/ipc-contract.js";
 // Sandboxed preloads can only require Electron built-ins. Keep the wire names
 // local while the shared contract remains the source of renderer/main types.
 const IPC_CHANNELS = {
+  updateStatus: "afk:update-status",
+  updateGetStatus: "afk:update-get-status",
+  updateCheck: "afk:update-check",
+  updateDownload: "afk:update-download",
+  updateInstall: "afk:update-install",
   copyText: "afk:copy-text",
   openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",
@@ -65,6 +70,10 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: DesktopApi = {
+  update: {
+    getStatus: () => ipcRenderer.invoke(IPC_CHANNELS.updateGetStatus), check: () => ipcRenderer.invoke(IPC_CHANNELS.updateCheck), download: () => ipcRenderer.invoke(IPC_CHANNELS.updateDownload), install: () => ipcRenderer.invoke(IPC_CHANNELS.updateInstall),
+    onStatus: listener => { const handler = (_event: Electron.IpcRendererEvent, status: import('../shared/ipc-contract.js').DesktopUpdateStatus) => listener(status); ipcRenderer.on(IPC_CHANNELS.updateStatus, handler); return () => ipcRenderer.removeListener(IPC_CHANNELS.updateStatus, handler); },
+  },
   copyText: (text) => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),
   openExternal: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternal, url),
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),

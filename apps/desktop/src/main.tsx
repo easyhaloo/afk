@@ -43,6 +43,7 @@ import { useExecutionHistory } from "./features/run-center/use-execution-history
 import { RunTimelineSection } from "./features/run-center/RunTimelineView.js";
 import { WorkflowInstancesPage, type ExecutionSelection } from "./features/workflows/WorkflowInstancesPage.js";
 import type { ProviderProjectRef } from "../shared/backlog-contract.js";
+import type { DesktopUpdateStatus } from "../shared/ipc-contract.js";
 import type { ExecutionRunDetail, ExecutionSummary } from "../shared/execution-contract.js";
 import type { SshSession } from "../shared/ssh-contract.js";
 
@@ -149,6 +150,7 @@ function App() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [appearance, setAppearance] = useState<AppearancePreferences>(defaultAppearance);
+  const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus>({ state: "idle" });
   const freshTimer = useRef<number | null>(null);
   const refreshInFlight = useRef(false);
   const activeSshSessionId = useRef<string | null>(null);
@@ -206,6 +208,7 @@ function App() {
     return () => { window.clearInterval(timer); };
   }, [view, workspace]);
   useEffect(() => { void window.afkDesktop.appearance().then(setAppearance).catch(() => setAppearance(defaultAppearance)); }, []);
+  useEffect(() => { const off = window.afkDesktop.update.onStatus(setUpdateStatus); void window.afkDesktop.update.getStatus().then(setUpdateStatus).catch(error => setUpdateStatus({ state: "error", message: error instanceof Error ? error.message : String(error) })); return off; }, []);
   useEffect(() => {
     const buffer = earlySshSessionBuffer.current;
     const offData = window.afkDesktop.ssh.onData((sessionId, data) => {
@@ -445,7 +448,7 @@ function App() {
           {view === "workflows" ? <Workflows key={`${workspace}:${focusTemplateId ?? ""}`} snapshot={snapshot} focusTemplateId={focusTemplateId} onSave={saveWorkflowConfig} /> : null}
           {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} hasMore={!!executionCursor} onLoadMore={() => void loadMoreExecutions()} onSelect={selection => openWorkflowInstance(selection.runId, selection.workItemId)} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
-          {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
+          {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} updateStatus={updateStatus} onCheckUpdate={() => { void window.afkDesktop.update.check().then(setUpdateStatus).catch(error => setUpdateStatus({ state: "error", message: error instanceof Error ? error.message : String(error) })); }} onDownloadUpdate={() => { void window.afkDesktop.update.download().then(setUpdateStatus).catch(error => setUpdateStatus({ state: "error", message: error instanceof Error ? error.message : String(error) })); }} onInstallUpdate={() => { void window.afkDesktop.update.install(); }} /> : null}
         </div>
         {selected && (view === "queue" || view === "board") ? <Inspector event={events.find(event => event.id === selected.id) ?? selected} execution={auditedExecutions.find(run => run.runId === selected.id && run.workItemId === selected.source)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkflow={openWorkflowInstance} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
         </div>

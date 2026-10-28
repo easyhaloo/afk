@@ -12,7 +12,7 @@
 
 3. The `Release Desktop` workflow builds installers on Windows, macOS Apple Silicon, macOS Intel, and Linux, runs typecheck/tests, calculates SHA-256 checksums, and attaches artifacts to the matching GitHub Release.
 
-The tag must exactly match `apps/desktop/package.json`'s version. CLI releases use `cli-v*`; desktop releases use `desktop-v*` and do not use GitHub's repository-wide `--latest` marker.
+The tag must exactly match `apps/desktop/package.json`'s version. CLI releases use `cli-v*`; desktop releases use `desktop-v*`. The workflow explicitly uses `--latest=false`, so a desktop release does not replace the repository-wide Latest release used by other release streams.
 
 ## Installer formats
 
@@ -22,6 +22,6 @@ The tag must exactly match `apps/desktop/package.json`'s version. CLI releases u
 
 ## Auto-update status and prerequisites
 
-The desktop package declares a stable generic update feed at `https://easyhaloo.github.io/afk/desktop-updates/` so the feed is independent of CLI GitHub Releases. This workflow currently publishes installers to GitHub Releases; it does **not** yet publish the generic feed metadata/assets or wire an updater UI into the running app. Do not advertise in-app automatic updates until those pieces are implemented and tested.
+The packaged app uses `electron-updater` with a generic feed hosted on the `desktop-updates` branch (`raw.githubusercontent.com`). The release workflow publishes installers to GitHub Releases, then publishes `latest.yml`, `latest-mac.yml`, and `latest-linux.yml` metadata to that branch. The publish job keeps each platform's build metadata separate and merges the Intel and Apple Silicon entries into one `latest-mac.yml`; this is required because the two macOS builds produce the same metadata filename. Metadata URLs point directly to assets on the matching `desktop-v*` release, with spaces URL-encoded.
 
-Production macOS distribution also needs Developer ID code signing and notarization for a trustworthy first install and update experience. Store signing credentials in GitHub Actions secrets; never commit certificates or passwords. Windows code signing is recommended.
+Production desktop releases require macOS Developer ID code signing and notarization. Before running the release workflow, configure these GitHub Actions secrets: `MACOS_CERTIFICATE_P12_BASE64` (base64-encoded Developer ID `.p12` certificate), `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`. The preparation job validates all five and fails before packaging if any are missing; signing secrets are passed to electron-builder only in the packaging step. Never commit certificates or passwords. Windows code signing is recommended. Linux in-app updates support AppImage; `.deb` users must install new packages manually.

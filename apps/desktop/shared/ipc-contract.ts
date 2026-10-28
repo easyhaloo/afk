@@ -2,6 +2,8 @@ import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSu
 import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 
+export type DesktopUpdateStatus = { state: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; message?: string; };
+
 export type RuntimeEvent = {
   id: string;
   timestamp: string;
@@ -185,6 +187,7 @@ export type ExecutionAttachInput = {
 };
 
 export type DesktopApi = {
+  update: { getStatus: () => Promise<DesktopUpdateStatus>; check: () => Promise<DesktopUpdateStatus>; download: () => Promise<DesktopUpdateStatus>; install: () => Promise<boolean>; onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void; };
   copyText: (text: string) => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
   chooseWorkspace: () => Promise<string | null>;
@@ -254,6 +257,11 @@ export type DesktopApi = {
 };
 
 export const IPC_CHANNELS = {
+  updateStatus: "afk:update-status",
+  updateGetStatus: "afk:update-get-status",
+  updateCheck: "afk:update-check",
+  updateDownload: "afk:update-download",
+  updateInstall: "afk:update-install",
   copyText: "afk:copy-text",
   openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",

@@ -2,6 +2,7 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { registerIpcHandlers } from "./ipc/register-handlers.js";
+import { registerUpdateService } from "./services/update-service.js";
 import { readWorkspacePreference } from "./services/workspace-preference-service.js";
 import { createMainWindow } from "./window/main-window.js";
 import { workspaceStateDirectory } from "@afk/runtime/infrastructure/workspace";
@@ -27,6 +28,7 @@ if (!hasSingleInstanceLock) {
     const workspace = await readWorkspacePreference(app.getPath("userData"));
     if (workspace) process.env.AFK_WORKSPACE = workspace;
     registerIpcHandlers();
+    registerUpdateService();
     await createMainWindow();
     if (readyFile) writeFileSync(readyFile, String(process.pid));
     app.on("activate", () => {

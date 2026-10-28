@@ -1,5 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { autoUpdater } from "electron-updater";
+import { createRequire } from "node:module";
+const electronUpdater = createRequire(import.meta.url)("electron-updater") as typeof import("electron-updater");
+const { autoUpdater } = electronUpdater;
 import { IPC_CHANNELS, type DesktopUpdateStatus } from "../../shared/ipc-contract.js";
 import { assertTrustedSender } from "../security/sender-guard.js";
 let status: DesktopUpdateStatus = { state: "idle" };

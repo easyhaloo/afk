@@ -8860,7 +8860,7 @@ snapshots:
 
   builder-util-runtime@9.3.1:
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@8.1.1)
       sax: 1.4.2
     transitivePeerDependencies:
       - supports-color

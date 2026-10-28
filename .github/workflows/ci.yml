@@ -28,6 +28,7 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
       desktop_e2e: ${{ steps.filter.outputs.desktop_e2e }}
       wiki_python: ${{ steps.filter.outputs.wiki_python }}
+      prd_tests: ${{ steps.filter.outputs.prd_tests }}
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
@@ -56,7 +57,7 @@ jobs:
 
           if ! changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"; then
             echo "Could not compute changed paths; enabling all checks."
-            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -64,7 +65,7 @@ jobs:
 
           if [[ -z "$changed_files" ]]; then
             echo "No changed paths detected; enabling all checks as a safe fallback."
-            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -77,6 +78,7 @@ jobs:
           desktop=false
           desktop_e2e=false
           wiki_python=false
+          prd_tests=false
           global_config=false
 
           while IFS= read -r path; do
@@ -89,6 +91,9 @@ jobs:
             case "$path" in
               skills/wiki/*)
                 wiki_python=true
+                ;;
+              skills/afk-ai-prd/*|skills/afk-to-prd/*)
+                prd_tests=true
                 ;;
             esac
             case "$path" in

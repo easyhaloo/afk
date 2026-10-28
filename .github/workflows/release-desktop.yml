@@ -135,7 +135,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
-        run: gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes --latest=false
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "AFK Control $VERSION" --latest=false
+          else
+            gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes --latest=false
+          fi
       - name: Publish update feed
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
@@ -155,5 +163,9 @@ jobs:
           fi
           cp /tmp/desktop-update-feed/latest*.yml .
           git add latest*.yml
-          git commit -m "chore(desktop): publish update feed for $TAG"
-          git push origin desktop-updates
+          if git diff --cached --quiet; then
+            echo "Update feed is already current for $TAG."
+          else
+            git commit -m "chore(desktop): publish update feed for $TAG"
+            git push origin desktop-updates
+          fi

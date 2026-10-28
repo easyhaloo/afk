@@ -28,6 +28,7 @@ vi.mock("electron", () => ({
 }));
 vi.mock("node:fs", () => ({ mkdirSync: bootstrap.mkdir, writeFileSync: bootstrap.write }));
 vi.mock("../../electron/ipc/register-handlers.js", () => ({ registerIpcHandlers: vi.fn() }));
+vi.mock("../../electron/services/update-service.js", () => ({ registerUpdateService: vi.fn() }));
 vi.mock("../../electron/services/workspace-preference-service.js", () => ({ readWorkspacePreference: vi.fn() }));
 vi.mock("../../electron/window/main-window.js", () => ({ createMainWindow: bootstrap.createWindow }));
 

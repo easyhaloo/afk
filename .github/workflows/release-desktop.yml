@@ -80,7 +80,10 @@ jobs:
         run: |
           pnpm typecheck
           pnpm test
-      - name: Build installer and update metadata
+      - name: Build application
+        working-directory: apps/desktop
+        run: pnpm build
+      - name: Package installer and generate update metadata
         working-directory: apps/desktop
         shell: bash
         env:
@@ -89,7 +92,7 @@ jobs:
           APPLE_ID: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_TEAM_ID || '' }}
-        run: pnpm build && pnpm exec electron-builder ${{ matrix.target }} --publish never
+        run: pnpm exec electron-builder ${{ matrix.target }} --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}

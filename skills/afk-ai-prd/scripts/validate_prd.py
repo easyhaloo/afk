@@ -183,7 +183,7 @@ def validate(path: Path) -> int:
         if count > 1:
             errors.append(f"duplicate ID definition: {item}")
 
-    defined_ids.extend(re.findall(r"^### ((?:FLOW|SEQ|STATE|RULE)-\\d{3}):", text, re.MULTILINE))
+    defined_ids.extend(re.findall(r"^### ((?:FLOW|SEQ|STATE|RULE)-\d{3}):", text, re.MULTILINE))
     defined = set(defined_ids)
     # Check only standard IDs that are referenced in prose or tables; the definition itself is allowed.
     all_ids = set(ID_RE.findall(text))

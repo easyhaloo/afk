@@ -37,6 +37,34 @@ references relevant to the request. If the project provides
 support helpers, use them as project-specific configuration; do not assume the
 template is already configured or invent missing values.
 
+### Business rules
+
+Business rules are allowed to be ordinary natural-language documents. Do not
+require users to write YAML, JSON, or a rule DSL. Discover authoritative
+project rules first (requirements, PRDs, user-provided descriptions, domain
+docs, API/event contracts, and existing rule documents). Preserve their source
+and separate confirmed rules from assumptions or unresolved questions.
+
+Use `references/business-rules/README.md` as a reusable library of common
+company-level business-rule candidates. Load only packs relevant to capabilities
+that actually exist in the target project. This library is a prompt for
+discovering and reviewing scenarios, not an automatic product specification:
+- Treat clearly applicable security-baseline candidates as risks to verify,
+  while checking the actual resource boundary and expected observable behavior.
+- Treat organization-specific choices (for example, account uniqueness scope,
+  verification policy, file-size limits, retention periods, and deletion
+  semantics) as unconfirmed until project evidence establishes them.
+- When a rule is ambiguous or conflicts with project sources, record the
+  question or conflict instead of silently choosing a behavior.
+- Keep source documents authoritative. Generate a structured internal rule
+  map, test cases, or datasets as needed, but do not force people to maintain
+  structured rule syntax.
+
+The library may suggest scenario dimensions and data combinations. Reuse the
+project's existing fixtures, factories, seed scripts, and test-support
+helpers before generating new data. Create deterministic synthetic test data
+when needed; do not use unapproved production data or invent business outcomes.
+
 Browse `references/patterns/README.md` and `references/patterns/catalog.yaml` to select built-in patterns, then load only the relevant references. Consult `references/research-sources.md` when a pattern contract needs external verification.
 
 The profile and templates under `templates/` are optional starting points. Use `templates/TESTING-PROFILE.yaml` as the project profile starter, `templates/TEST-PLAN.md` for non-trivial test planning, and `templates/TEST-REPORT.md` for the evidence report unless the project already has an equivalent convention.

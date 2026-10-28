@@ -1,0 +1,65 @@
+# Optional project-owned testing profile.
+# Copy to docs/testing/TESTING-PROFILE.yaml and replace values with verified
+# project facts. Empty values are intentionally unknown, not defaults.
+version: 1
+
+business_rules:
+  # Paths to authoritative requirements, status maps, API/event schemas, or
+  # user-maintained business-rule documents. Use repository-relative paths.
+  sources: []
+
+commands:
+  # Existing project-supported commands or script names; do not invent them.
+  unit: ""
+  integration: ""
+  e2e: ""
+  static_checks: ""
+
+test_support:
+  # Existing helper paths/symbols in the project's native test-support code.
+  account_factory: ""
+  data_factories: []
+  event_harness: ""
+  callback_receiver: ""
+  upload_fixture_factory: ""
+  llm_client_stub: ""
+
+status_rules:
+  # Keep transport status, business error code, and persisted state distinct.
+  source: ""
+  mappings: []
+
+async_work:
+  completion_signal: ""
+  timeout_seconds: null
+  poll_interval_ms: null
+
+patterns:
+  # Runtime interaction and workflow patterns. Combine when appropriate.
+  enabled: []
+  project_specific_references: []
+
+test_approaches:
+  # How to observe and structure the test: black-box, gray-box, white-box,
+  # BDD, contract-first, TDD, characterization, exploratory, risk-based.
+  enabled: []
+
+test_design_techniques:
+  # Optional techniques supported by the project toolchain.
+  enabled: []
+
+quality_attributes:
+  # Select based on risk: security, reliability, performance, accessibility,
+  # observability, compatibility, privacy.
+  enabled: []
+
+llm:
+  # Prefer deterministic stubs in ordinary tests. Live calls are opt-in.
+  ordinary_tests: "stubbed"
+  live_evaluation_opt_in: false
+  evaluation_dataset: ""
+  evaluator_rubric: ""
+
+reporting:
+  plan_required_for: ["multi-layer", "multi-business-flow", "high-risk"]
+  report_required_for: ["non-trivial-test-work"]

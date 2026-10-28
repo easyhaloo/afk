@@ -114,6 +114,29 @@ Attach, read the last `Next:` line, decide:
 - **Escalate** — already done; a human may move the item back to `ready` and
   set `executionMode: afk` only after correcting the cause.
 
+## Testing skill collaboration
+
+The implementation workflow owns production-code changes and the ordinary
+TDD Red-Green-Refactor loop. Do not invoke a second skill for every unit test
+or every AC iteration.
+
+Invoke `/afk-testing` when testing work needs a focused specialist pass:
+- broad scenario design or test-to-AC mapping before implementation;
+- test-only changes spanning multiple layers or boundaries;
+- difficult test failures, flaky behavior, or baseline-vs-regression analysis;
+- test-effectiveness review, including mutation testing when supported;
+- deterministic scenario tests for an AI Agent or Skill.
+
+The testing skill may edit tests and test-supporting artifacts, but must not
+change production behavior. Return to implementation after test-only work;
+the implementation agent owns any required product fix.
+
+Route a task whose sole objective is incremental coverage of an existing
+business flow, with no production changes and durable plan/report artifacts,
+to `/afk-change-driven-testing`. Keep `/afk-qa` as the independent
+Acceptance Criteria gate; implementation evidence never replaces its fresh
+verification.
+
 ## Common failure modes
 
 - **Target branch moved:** QA integrates the latest baseline before publishing the change request.

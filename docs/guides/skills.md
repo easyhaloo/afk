@@ -33,10 +33,12 @@ User Request
     ├──→ /afk-prototype ─→ Validate Technical Approach
     │
     ├──→ /afk-implement ─→ TDD Implementation
-    │         ↓
-    │    Triggers After Completion
-    │         ↓
-    └──→ /afk-qa ────────→ Verify & Merge
+    │         └──→ /afk-testing ─→ Specialist test work when needed
+    │
+    └──→ /afk-qa ────────→ Independent AC verification & release gate
+
+/afk-testing ─────────────→ Test design, execution, diagnosis, effectiveness audit
+/afk-change-driven-testing → Legacy coverage expansion without production changes
 
 /afk-scheduler ──────→ Multi-issue Dependency-aware Scheduling
 /afk-branch-migrate ─→ Cross-branch Code Migration
@@ -299,6 +301,33 @@ Load different documents based on task type:
 - **Called** ← **afk-do** — Acts as execution engine
 - **Output** → Signal → **afk-qa** — Triggers verification flow
 - **Input** ← **afk-research** — Reference research results for implementation
+
+---
+
+### Testing Skill Collaboration
+
+**`afk-testing`** is the independent testing specialist. It designs or updates
+tests, runs suites, diagnoses failures, and assesses test effectiveness without
+changing production code. Invoke it directly for test-first tasks, complex
+cross-layer test work, suite failures, flaky behavior, or Agent/Skill scenario
+tests. `afk-implement` keeps the ordinary TDD loop local and uses this
+specialist only when the testing work is broader than the immediate AC cycle.
+
+Its [pattern catalog](../../skills/afk-testing/references/patterns/README.md)
+separates runtime interactions, business workflows, reliability and concurrency,
+API/data/security boundaries, deployment and quality attributes, test-design
+techniques, and code-level behavioral design patterns. The structured
+[catalog.yaml](../../skills/afk-testing/references/patterns/catalog.yaml) supports
+selection by observed architecture. Project-specific rules and test helpers are
+mapped through the optional
+[TESTING-PROFILE.yaml template](../../skills/afk-testing/templates/TESTING-PROFILE.yaml);
+the profile is configured per repository, not assumed to exist by default.
+
+**`afk-change-driven-testing`** remains the dedicated workflow for adding
+regression protection to existing business flows without production changes;
+it requires a scoped test plan and reports test-case counts by layer.
+**`afk-qa`** remains the independent acceptance gate for managed backlog work.
+A testing report does not replace QA's fresh execution of Acceptance Criteria.
 
 ---
 

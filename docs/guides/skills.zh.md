@@ -33,10 +33,12 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
     ├──→ /afk-prototype ─→ 技术方案验证
     │
     ├──→ /afk-implement ─→ TDD 实现
-    │         ↓
-    │    完成后触发
-    │         ↓
-    └──→ /afk-qa ────────→ 验证 & 合并
+    │         └──→ /afk-testing ─→ 按需处理专项测试工作
+    │
+    └──→ /afk-qa ────────→ 独立 AC 验证与发布门禁
+
+/afk-testing ─────────────→ 测试设计、执行、诊断、有效性审查
+/afk-change-driven-testing → 存量代码补测，不修改生产行为
 
 /afk-scheduler ──────→ 多 issues 依赖感知调度
 /afk-branch-migrate ─→ 跨分支代码迁移
@@ -285,6 +287,16 @@ feat(auth): add user model      — 最终提交
 - **被调用** ← **afk-do** — 作为执行引擎
 - **输出** → Signal → **afk-qa** — 触发验证流程
 - **输入** ← **afk-research** — 参考调研结果实现
+
+---
+
+### Testing Skill 协作边界
+
+**`afk-testing`** 是独立的测试专家，负责测试设计、测试代码与测试夹具的增改、测试套件执行、失败诊断和测试有效性审查，但不修改生产代码。可以由用户直接调用，也可以由 `afk-implement` 在测试工作超出普通 TDD 迭代时调用。普通 Red-Green 循环不需要每次启动另一个 Skill。
+
+其[测试模式目录](../../skills/afk-testing/references/patterns/README.md)区分运行时交互、业务工作流、可靠性与并发、API/数据/安全、部署与质量属性、测试设计技术以及代码级行为设计模式。结构化的 [catalog.yaml](../../skills/afk-testing/references/patterns/catalog.yaml) 用于根据实际架构选择模式。项目专属业务规则和测试辅助工具通过可选的 [TESTING-PROFILE.yaml 模板](../../skills/afk-testing/templates/TESTING-PROFILE.yaml) 映射；每个仓库需要自行填充，不能假定模板已经配置。
+
+**`afk-change-driven-testing`** 专门处理存量业务流程缺少测试保护、且任务要求不修改生产代码的补测工作，使用明确的 `TEST-PLAN.md` 和 `TEST-REPORT.md`，并按测试层统计用例。`afk-qa` 仍是托管 Backlog 工作项的独立验收门禁，必须重新执行 AC 检查，不得以实现阶段或 testing Skill 的自报结果代替。
 
 ---
 

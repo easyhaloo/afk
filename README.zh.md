@@ -13,7 +13,7 @@
 ## 功能特性
 
 - **跨平台** — 统一的 GitLab 和 GitHub CLI（issues、MRs/PRs）
-- **Skills 套件** — 24 个 Claude Code skills，覆盖完整开发周期
+- **Skills 套件** — 25 个 Claude Code skills，覆盖完整开发周期
 - **TUI 仪表盘** — 交互式 Issue 追踪仪表盘
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论
@@ -131,6 +131,7 @@ afk signal goal-complete --summary "<summary>"
 | `/afk-research` | 技术调研 | 编码前需要理解现有实现 |
 | `/afk-prototype` | 方案验证 | 承诺投入前验证技术方案 |
 | `/afk-implement` | TDD 实现 | 清晰实现目标 |
+| `/afk-testing` | 独立测试工程 | 测试设计、执行、失败诊断与有效性评估 |
 | `/afk-change-driven-testing` | 变更驱动测试 | 为本次修改涉及的业务流程渐进式补充回归测试 |
 | `/afk-qa` | 独立验证 | MR/PR 准备合并 |
 | `/afk-diagnose` | 诊断 | 具体、可复现的故障 |

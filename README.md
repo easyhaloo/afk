@@ -13,7 +13,7 @@ Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI ag
 ## Features
 
 - **Cross-platform** — Unified GitLab and GitHub CLI (issues, MRs/PRs)
-- **Skills Suite** — 24 Claude Code skills covering the full development lifecycle
+- **Skills Suite** — 25 Claude Code skills covering the full development lifecycle
 - **TUI Dashboard** — Interactive issue tracking dashboard
 - **Background Automation** — tmux-based workflow scheduler
 - **TDD Integration** — Built-in test-driven development methodology
@@ -131,6 +131,7 @@ Full command reference: `afk --help`
 | `/afk-research` | Technical research | Need to understand existing implementation before coding |
 | `/afk-prototype` | Validate approach | Need to validate tech approach before committing |
 | `/afk-implement` | TDD implementation | Clear implementation target |
+| `/afk-testing` | Testing specialist | Design, execute, diagnose, and assess the effectiveness of tests |
 | `/afk-change-driven-testing` | Change-driven testing | Add focused regression tests for the business flow being changed |
 | `/afk-qa` | Independent verification | MR/PR ready to merge |
 | `/afk-diagnose` | Quick fix | Specific, reproducible failure |

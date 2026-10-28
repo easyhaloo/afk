@@ -48,7 +48,7 @@ jobs:
              ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null ||
              ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             echo "Could not resolve the comparison range; enabling all checks."
-            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -129,7 +129,7 @@ jobs:
             desktop_e2e=true
           fi
 
-          for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python; do
+          for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
             printf '%s=%s\n' "$key" "${!key}" >> "$GITHUB_OUTPUT"
           done
 

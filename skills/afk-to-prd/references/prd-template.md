@@ -1,140 +1,84 @@
 # PRD Template
 
-## When to Use
-
-When synthesizing any alignment record into a PRD for publication. The
-input format is the caller's choice — accept whatever was produced
-upstream.
-
-## Structure
+Use this template for every approved product requirements document. Keep the standard sections, but do not add empty or irrelevant sections. Replace all placeholders before approval. A formal PRD contains confirmed product facts and decisions only; unresolved questions stay in the clarification workflow, not in the document.
 
 ```markdown
-# PRD: <Short title>
+# PRD: <short product or feature name>
 
-## Problem Statement
+| Field | Value |
+|---|---|
+| Version | <version> |
+| Status | Approved |
+| Owner | <confirmed owner or owning team> |
+| Last updated | <YYYY-MM-DD> |
 
-<one paragraph: user-visible problem, who is affected, why now>
+## 1. Background & Problem
 
-## Users & Jobs
+<Briefly describe the business context, why this matters now, who is affected, and the concrete problem or pain point. Avoid describing the solution here.>
 
-- **User: <role>** — <job-to-be-done>
-- **User: <role>** — <job-to-be-done>
+## 2. Goals & Success Measures
 
-## Bounded Contexts
-
-- **<context name>** — <one-line responsibility>
-- **<context name>** — <one-line responsibility>
-
-## User Stories
-
-Each story maps to one bounded context and produces one issue downstream.
-
-### Story: <verb> <object>
-
-- **As a** <role>
-- **I want** <capability>
-- **So that** <outcome>
-
-**Observable Behavior:**
-- <user-visible behavior that can be observed from outside the system>
-- <boundary condition, edge case, error path>
-
-**Out of Scope** (this story):
-- <item>
-- <item>
-
-### Story: <verb> <object>
-
-...
-
-## Key Decisions
-
-<!-- 2+ decisions → table for easy comparison -->
-| Decision | Rationale | Reversible | ADR |
-|---|---|---|---|
-| ... | ... | ... | ... |
-
-<!-- 1 decision with rich content → expanded block -->
-**Decision:** <what was decided>
-
-**Rationale:** <why>
-
-**Reversible:** yes | no
-
-**ADR:** ADR-NNNN (or "none — needs ADR" if irreversible and unrecorded)
-
-## Open Risks
-
-<!-- 2+ risks → table -->
-| Risk | Impact | Mitigation |
+| Goal | Expected outcome | Success measure |
 |---|---|---|
-| ... | ... | ... |
+| <confirmed goal> | <observable or business outcome> | <confirmed metric/target, or qualitative outcome if no numeric target was agreed> |
 
-<!-- 1 risk with rich content → expanded block -->
-**Risk:** <what could go wrong>
+## 3. Users & User Stories
 
-**Impact:** <high | medium | low>
+| User | User story | Value |
+|---|---|---|
+| <target user/role> | As a <role>, I want <capability> | So that <confirmed value> |
 
-**Mitigation:** <plan or "TBD">
+## 4. Scope
 
-## Non-Goals
+| In scope | Out of scope |
+|---|---|
+| <included behavior> | <explicitly excluded behavior> |
 
-- <what this PRD will NOT do>
-- <what this PRD will NOT do>
+## 5. Functional Requirements & Acceptance Criteria
+
+| ID | Requirement | Priority | Acceptance criteria |
+|---|---|---|---|
+| FR-001 | <one observable product behavior> | Must/Should/May | AC-001: Given <condition>, when <action>, then <observable result> |
+
+## 6. Business Rules
+
+| ID | Rule | Applies when | Observable consequence |
+|---|---|---|---|
+| BR-001 | <confirmed rule in plain language> | <confirmed condition> | <result when rule applies> |
+
+## 7. Product Constraints & Quality Requirements
+
+| ID | Constraint or quality | Requirement | Rationale |
+|---|---|---|---|
+| NFR-001 | <confirmed quality attribute or product constraint> | <measurable or observable guarantee> | <confirmed reason> |
+
+## 8. Related Flows / State Model (optional)
+
+<Add a concise table or Mermaid diagram only when it materially clarifies a confirmed flow, lifecycle, or complex rule. Link it to FR/AC IDs.>
+
+## 9. Confirmed Decisions (optional)
+
+| Decision | Confirmed choice | Rationale |
+|---|---|---|
+| <product decision> | <confirmed answer> | <why, if known> |
+
+## 10. Traceability (optional when needed)
+
+| Goal / User story | Requirement | Acceptance criterion |
+|---|---|---|
+| <goal or story> | FR-001 | AC-001 |
 ```
 
-## Field Reference
+## Authoring Rules
 
-| Field | Required | Format | Purpose |
-|-------|----------|--------|---------|
-| `# PRD: <title>` | yes | one line | Document name |
-| `## Problem Statement` | yes | one paragraph | Why this work |
-| `## Users & Jobs` | yes | bulleted list | Audience |
-| `## Bounded Contexts` | yes | bulleted list | Slicing boundaries |
-| `## User Stories` | yes | ≥1 story block | What gets built |
-| `## Key Decisions` | yes | table or block | Decided things |
-| `## Open Risks` | yes | table or block | Undecided things |
-| `## Non-Goals` | yes | bulleted list | Explicit exclusions |
-
-## User Story Format
-
-Each story block:
-
-```
-### Story: <verb> <object>
-
-- **As a** <role>
-- **I want** <capability>
-- **So that** <outcome>
-
-**Observable Behavior:**
-- <user-visible behavior observable from outside the system>
-- <boundary condition>
-
-**Out of Scope** (this story):
-- <item>
-```
-
-### Observable Behavior — what to write
-
-Each behavior must be:
-- **User-observable** — visible from outside the system (HTTP response, UI state, log line, file content, CLI output). Not "code is clean" or "module structure is right".
-- **Bounded** — single concrete outcome, not "and also...".
-- **Falsifiable** — someone can point at shipped behavior and say yes/no.
-
-Do not write test commands or evidence types here — those belong to the
-issue template, generated downstream by reading the codebase.
-
-## Story Granularity
-
-- **Too coarse:** story has > 4 Observable Behaviors or touches > 1 bounded context → split
-- **Too fine:** story has 0 Observable Behaviors or no user-observable behavior → fold
-- **Default:** one context per story, 2-4 Observable Behaviors per story
-
-## Anti-Patterns
-
-- Observable Behaviors that are implementation details ("uses Redis", "calls `validateToken()`")
-- Stories that mix multiple bounded contexts (slicing target unclear)
-- Key Decisions that are actually open risks (undecided masquerading as decided)
-- Open Risks that are actually decided (decided masquerading as open)
-- "We can fix it later" as a Key Decision rationale
+- Keep the required product context: background/problem, goals, users/user stories, scope, functional requirements, and acceptance criteria.
+- Include business rules and quality requirements when they affect behavior; omit sections that have no applicable confirmed content rather than filling them with boilerplate.
+- A user story expresses user value, not a technical task.
+- Each FR describes one coherent, observable product behavior. Each AC states a testable outcome; cover important success, permission, boundary, and failure cases where relevant.
+- Use stable IDs: `FR-###`, `AC-###`, `BR-###`, `GOAL-###`, and `NFR-###`. Reuse IDs when revising the same concepts; do not recycle retired IDs.
+- Prefer tables for requirements, rules, scope, decisions, and traceability. Use short prose for background and explanations. Do not force every concept into a table when prose is clearer.
+- Write only confirmed product facts and decisions. No `TBD`, `TODO`, `Unknown`, `Proposed`, unresolved questions, or unapproved assumptions in an approved PRD.
+- Do not include code snippets, function/class names, source paths, database schemas, internal module designs, framework choices, algorithms, deployment details, test commands, issue IDs, or task decomposition.
+- Public interfaces may describe externally observable inputs, outputs, errors, and compatibility when they are part of the confirmed product contract.
+- State numeric targets only when confirmed. Do not invent metrics or business policies.
+- Diagrams are optional and should be included only when they reduce ambiguity.

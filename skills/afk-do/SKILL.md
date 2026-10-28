@@ -34,6 +34,15 @@ Before writing any code, determine the task type:
 | Hotfix | `hotfix.md` | Live production bug under pressure |
 | Spike | `spike.md` | Feasibility exploration |
 | Research | `research.md` | Information gathering or decision-making |
+| Testing | `/afk-testing` | Test design, test-only changes, suite execution/diagnosis, or test-effectiveness audit |
+
+## Testing task routing
+
+When testing is the primary task, route to `/afk-testing` instead of
+defaulting to feature TDD. For a dedicated legacy-coverage task that must not
+change production behavior and requires a scoped plan/report, route to
+`/afk-change-driven-testing`. A managed backlog item already in
+`verification` belongs to `/afk-qa`.
 
 ## Steps
 

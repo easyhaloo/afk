@@ -28,7 +28,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| [afk-qa](./afk-qa/) | `/afk-qa` | Skill evaluation and testing |
+| [afk-qa](./afk-qa/) | `/afk-qa` | Independent Acceptance Criteria verification for managed work items |
 | [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | Publish results to PRD document |
 | [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | Produce a provider-neutral backlog manifest from findings |
 | [md-to-pdf](./md-to-pdf/) | `/md-to-pdf` | Convert Markdown to PDF |
@@ -40,7 +40,8 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| [afk-change-driven-testing](./afk-change-driven-testing/) | `/afk-change-driven-testing` | Incremental regression tests scoped to the current business change |
+| [afk-testing](./afk-testing/) | `/afk-testing` | Test design, execution, failure diagnosis, and test-effectiveness audit for AI Coding |
+| [afk-change-driven-testing](./afk-change-driven-testing/) | `/afk-change-driven-testing` | Legacy regression-test expansion without production changes |
 | [api-workflow](./api-workflow/) | `/api-workflow` | API testing with request chaining and browser hybrid |
 
 ## Debug Skills

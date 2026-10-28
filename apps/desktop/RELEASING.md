@@ -12,7 +12,7 @@
 
 3. The `Release Desktop` workflow builds installers on Windows, macOS Apple Silicon, macOS Intel, and Linux, runs typecheck/tests, calculates SHA-256 checksums, and attaches artifacts to the matching GitHub Release.
 
-The tag must exactly match `apps/desktop/package.json`'s version. CLI releases use `cli-v*`; desktop releases use `desktop-v*` and do not use GitHub's repository-wide `--latest` marker.
+The tag must exactly match `apps/desktop/package.json`'s version. CLI releases use `cli-v*`; desktop releases use `desktop-v*`. The workflow explicitly uses `--latest=false`, so a desktop release does not replace the repository-wide Latest release used by other release streams.
 
 ## Installer formats
 
@@ -22,6 +22,6 @@ The tag must exactly match `apps/desktop/package.json`'s version. CLI releases u
 
 ## Auto-update status and prerequisites
 
-The packaged app uses `electron-updater` with a generic feed hosted on the `desktop-updates` branch (`raw.githubusercontent.com`). The release workflow publishes installers to GitHub Releases, then publishes `latest.yml`, `latest-mac.yml`, and `latest-linux.yml` metadata to that branch. Metadata points directly to assets on the matching `desktop-v*` release, independently of CLI releases.
+The packaged app uses `electron-updater` with a generic feed hosted on the `desktop-updates` branch (`raw.githubusercontent.com`). The release workflow publishes installers to GitHub Releases, then publishes `latest.yml`, `latest-mac.yml`, and `latest-linux.yml` metadata to that branch. The publish job keeps each platform's build metadata separate and merges the Intel and Apple Silicon entries into one `latest-mac.yml`; this is required because the two macOS builds produce the same metadata filename. Metadata URLs point directly to assets on the matching `desktop-v*` release, with spaces URL-encoded.
 
-Production macOS distribution needs Developer ID code signing and notarization. Until signing secrets are configured, macOS updates are not production-ready. Linux in-app updates support AppImage; `.deb` users must install new packages manually. Store signing credentials in GitHub Actions secrets; never commit certificates or passwords. Windows code signing is recommended.
+Production macOS distribution needs Developer ID code signing and notarization. Configure these GitHub Actions secrets before distributing macOS builds to users: `MACOS_CERTIFICATE_P12_BASE64` (base64-encoded Developer ID `.p12` certificate), `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`. The release workflow passes these values to electron-builder only for macOS jobs. Without them, the workflow can produce unsigned macOS artifacts, but they are not production-ready and may be blocked by Gatekeeper. Never commit certificates or passwords. Windows code signing is recommended. Linux in-app updates support AppImage; `.deb` users must install new packages manually.

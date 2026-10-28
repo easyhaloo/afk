@@ -135,7 +135,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
-        run: gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes
+        run: gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes --latest=false
       - name: Publish update feed
         env:
           TAG: ${{ needs.prepare.outputs.tag }}

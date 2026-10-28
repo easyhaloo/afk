@@ -23,7 +23,7 @@ OPTIONAL_SECTIONS = (
     "## 10. Traceability (optional when needed)",
 )
 ID_RE = re.compile(r"\b(?:GOAL|USER|FR|AC|BR|NFR|FLOW|SEQ|STATE|RULE)-\d{3}\b")
-DEFINED_ID_RE = re.compile(r"^\s*\|\s*(GOAL|USER|FR|BR|NFR)-\d{3}\s*\|", re.MULTILINE)
+DEFINED_ID_RE = re.compile(r"^\s*\|\s*(GOAL|USER)-\d{3}\s*\|", re.MULTILINE)
 AC_DEFINITION_RE = re.compile(r"\b(AC-\d{3})\s*:")
 PLACEHOLDER_RE = re.compile(r"<[^>\n]+>|\b(?:TBD|TODO|Unknown|Proposed)\b|待确认|未确认|待补充|待定|尚未确定", re.IGNORECASE)
 CODE_DETAIL_PATTERNS = (
@@ -183,6 +183,7 @@ def validate(path: Path) -> int:
         if count > 1:
             errors.append(f"duplicate ID definition: {item}")
 
+    defined_ids.extend(re.findall(r"^### ((?:FLOW|SEQ|STATE|RULE)-\\d{3}):", text, re.MULTILINE))
     defined = set(defined_ids)
     # Check only standard IDs that are referenced in prose or tables; the definition itself is allowed.
     all_ids = set(ID_RE.findall(text))

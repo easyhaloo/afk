@@ -140,7 +140,7 @@ jobs:
 
           echo "Detected areas:"
           printf '%s\n' "$changed_files"
-          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e wiki_python=$wiki_python"
+          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e wiki_python=$wiki_python prd_tests=$prd_tests"
 
   wiki-python-tests:
     name: Wiki Python Tests
@@ -241,6 +241,26 @@ jobs:
           }
           console.log(`Plugin manifests valid; version ${manifests[0].value.version}`);
           NODE
+
+  prd-validator-tests:
+    name: PRD Validator Tests
+    needs: changes
+    if: needs.changes.outputs.prd_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile PRD validator
+        run: python -m py_compile skills/afk-ai-prd/scripts/validate_prd.py
+      - name: Run PRD validator tests
+        run: python -B -m unittest discover -s skills/afk-ai-prd/tests -p 'test_*.py' -v
 
   cli:
     name: Shared Packages And CLI

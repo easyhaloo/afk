@@ -16,11 +16,11 @@ REQUIRED_SECTIONS = (
     "## 5. Functional Requirements & Acceptance Criteria",
 )
 OPTIONAL_SECTIONS = (
-    "## 6. Business Rules (when applicable)",
-    "## 7. Product Constraints & Quality Requirements (when applicable)",
-    "## 8. Related Flow or State Model (optional)",
-    "## 9. Confirmed Product Decisions (optional)",
-    "## 10. Traceability (optional when needed)",
+    "## 6. Business Rules",
+    "## 7. Product Constraints & Quality Requirements",
+    "## 8. Related Flow or State Model",
+    "## 9. Confirmed Product Decisions",
+    "## 10. Traceability",
 )
 ID_RE = re.compile(r"\b(?:GOAL|USER|FR|AC|BR|NFR|FLOW|SEQ|STATE|RULE)-\d{3}\b")
 DEFINED_ID_RE = re.compile(r"^\s*\|\s*(GOAL|USER)-\d{3}\s*\|", re.MULTILINE)

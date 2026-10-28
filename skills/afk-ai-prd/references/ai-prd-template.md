@@ -40,29 +40,29 @@ This is the canonical template for approved product requirements documents. Keep
 |---|---|---|---|
 | FR-001 | <one coherent, observable product behavior> | Must / Should / May | AC-001: Given <condition>, when <action>, then <observable result> |
 
-## 6. Business Rules (when applicable)
+## 6. Business Rules
 
 | Rule ID | Rule | Applies when | Observable consequence |
 |---|---|---|---|
 | BR-001 | <confirmed rule in plain language> | <confirmed condition> | <result when the rule applies> |
 
-## 7. Product Constraints & Quality Requirements (when applicable)
+## 7. Product Constraints & Quality Requirements
 
 | ID | Constraint / quality | Required outcome | Rationale |
 |---|---|---|---|
 | NFR-001 | <confirmed quality attribute or product constraint> | <measurable or observable guarantee> | <confirmed reason> |
 
-## 8. Related Flow or State Model (optional)
+## 8. Related Flow or State Model
 
 <Add a compact table or Mermaid diagram only when it materially clarifies a confirmed flow, lifecycle, or complex rule. Reference related FR/AC IDs.>
 
-## 9. Confirmed Product Decisions (optional)
+## 9. Confirmed Product Decisions
 
 | Decision | Confirmed choice | Rationale |
 |---|---|---|
 | <decision> | <confirmed choice> | <reason, if known> |
 
-## 10. Traceability (optional when needed)
+## 10. Traceability
 
 | Goal / User Story | Requirement | Acceptance Criterion |
 |---|---|---|

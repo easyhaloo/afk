@@ -36,7 +36,7 @@ function writeManifest(directory: string, filename: string, version: string, ass
   writeFileSync(path.join(directory, filename), body);
 }
 
-function writeArtifact(artifacts: string, name: string, metadata: string, metadataName: string, asset: string) {
+function writeArtifact(artifacts: string, name: string, metadataName: string, asset: string) {
   const directory = path.join(artifacts, name);
   mkdirSync(directory, { recursive: true });
   writeFileSync(path.join(directory, asset), "installer artifact");
@@ -53,10 +53,10 @@ describe("desktop release metadata assembly", () => {
   it("merges macOS architectures and rewrites all feed URLs to encoded release asset URLs", () => {
     const workspace = createWorkspace();
     mkdirSync(workspace.artifacts, { recursive: true });
-    writeArtifact(workspace.artifacts, "desktop-windows", "latest.yml", "latest.yml", "AFK Control-0.1.0-win-x64.exe");
-    writeArtifact(workspace.artifacts, "desktop-linux", "latest-linux.yml", "latest-linux.yml", "AFK Control-0.1.0-linux-x64.AppImage");
-    writeArtifact(workspace.artifacts, "desktop-macos-arm64", "latest-mac.yml", "latest-mac.yml", "AFK Control-0.1.0-mac-arm64.zip");
-    writeArtifact(workspace.artifacts, "desktop-macos-x64", "latest-mac.yml", "latest-mac.yml", "AFK Control-0.1.0-mac-x64.zip");
+    writeArtifact(workspace.artifacts, "desktop-windows", "latest.yml", "AFK Control-0.1.0-win-x64.exe");
+    writeArtifact(workspace.artifacts, "desktop-linux", "latest-linux.yml", "AFK Control-0.1.0-linux-x64.AppImage");
+    writeArtifact(workspace.artifacts, "desktop-macos-arm64", "latest-mac.yml", "AFK Control-0.1.0-mac-arm64.zip");
+    writeArtifact(workspace.artifacts, "desktop-macos-x64", "latest-mac.yml", "AFK Control-0.1.0-mac-x64.zip");
 
     execFileSync(process.execPath, [assembleScript, workspace.artifacts, workspace.output], { cwd: desktopDirectory });
 
@@ -100,10 +100,10 @@ describe("desktop release metadata assembly", () => {
   it("fails closed when platform metadata describes different versions", () => {
     const workspace = createWorkspace();
     mkdirSync(workspace.artifacts, { recursive: true });
-    writeArtifact(workspace.artifacts, "desktop-windows", "latest.yml", "latest.yml", "AFK Control-0.1.0-win-x64.exe");
-    writeArtifact(workspace.artifacts, "desktop-linux", "latest-linux.yml", "latest-linux.yml", "AFK Control-0.1.0-linux-x64.AppImage");
-    writeArtifact(workspace.artifacts, "desktop-macos-arm64", "latest-mac.yml", "latest-mac.yml", "AFK Control-0.1.0-mac-arm64.zip");
-    writeArtifact(workspace.artifacts, "desktop-macos-x64", "latest-mac.yml", "latest-mac.yml", "AFK Control-0.1.0-mac-x64.zip");
+    writeArtifact(workspace.artifacts, "desktop-windows", "latest.yml", "AFK Control-0.1.0-win-x64.exe");
+    writeArtifact(workspace.artifacts, "desktop-linux", "latest-linux.yml", "AFK Control-0.1.0-linux-x64.AppImage");
+    writeArtifact(workspace.artifacts, "desktop-macos-arm64", "latest-mac.yml", "AFK Control-0.1.0-mac-arm64.zip");
+    writeArtifact(workspace.artifacts, "desktop-macos-x64", "latest-mac.yml", "AFK Control-0.1.0-mac-x64.zip");
 
     const windowsManifest = path.join(workspace.artifacts, "desktop-windows", "latest.yml");
     writeManifest(path.dirname(windowsManifest), "latest.yml", "0.2.0", "AFK Control-0.2.0-win-x64.exe");

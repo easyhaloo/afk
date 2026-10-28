@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-desktop-${{ github.ref }}
+  group: release-desktop-feed
   cancel-in-progress: false
 jobs:
   prepare:

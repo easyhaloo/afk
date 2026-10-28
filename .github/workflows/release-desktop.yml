@@ -163,7 +163,8 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "AFK Control $VERSION" --latest=false
+            release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f "name=AFK Control $VERSION" -f make_latest=false >/dev/null
           else
             gh release create "$TAG" release/desktop/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "AFK Control $VERSION" --generate-notes --latest=false
           fi

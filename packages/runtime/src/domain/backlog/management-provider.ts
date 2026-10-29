@@ -1,4 +1,4 @@
-import type { BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
+import type { BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
 
 /**
@@ -25,5 +25,6 @@ export class ManagementBacklogProvider implements QABacklogProvider {
   addTag(id: string, tag: string): Promise<void> { return this.provider.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.provider.removeTag(id, tag); }
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.provider.applyRelationUpdate(id, update); }
+  applyRole(id: string, kind: BacklogKind): Promise<void> { return this.provider.applyRole(id, kind); }
   initialize(): Promise<void> { return this.provider.initialize(); }
 }

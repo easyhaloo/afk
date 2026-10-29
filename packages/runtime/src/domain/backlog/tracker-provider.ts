@@ -1,4 +1,4 @@
-import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState } from './index.js';
+import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState } from './index.js';
 import { FilesystemClaimLock, type ExpiredClaim } from './claim.js';
 import {
   NativeOrLockedClaimStrategy,
@@ -18,6 +18,7 @@ import {
   canonicalizeBacklogReference,
   decodeBacklogRelations,
   planRelationLabelDelta,
+  planRoleLabelDelta,
   type BacklogMetadataScope,
   type BacklogRelationUpdate,
 } from './metadata-codec.js';
@@ -361,6 +362,30 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (delta.add.length === 0 && delta.remove.length === 0) return;
     // A platform only attaches a label that already exists, so a new edge
     // needs its label definition before the edge can be written.
+    if (delta.add.length && target.tracker.ensureBacklogMetadata) {
+      await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
+        name,
+        color: 'C5DEF5',
+        description: 'AFK backlog metadata',
+      })));
+    }
+    await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+  }
+
+  /**
+   * Give an item the organizational role of a PRD anchor.
+   *
+   * The role is written as a label, and the role label is reserved metadata:
+   * an anchor carries no stage label at all, and the human-in-the-loop mode
+   * says it never runs by itself. Every other label of the issue stays where
+   * it is, so an item can become an anchor without losing its children, its
+   * dependencies or its business tags.
+   */
+  async applyRole(id: string, kind: BacklogKind): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const delta = planRoleLabelDelta(issue.labels, kind);
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
     if (delta.add.length && target.tracker.ensureBacklogMetadata) {
       await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
         name,

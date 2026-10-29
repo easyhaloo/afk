@@ -68,6 +68,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | 修改已存在 backlog 工作项的关系边 |
+| `afk backlog role --id <id> --kind prd` | 把一个 backlog 工作项设为 PRD 锚点角色 |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
@@ -282,6 +283,16 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 
 `afk backlog tag add` 与 `afk backlog tag remove` 刻意拒绝保留元数据前缀，
 关系前缀也在其中：业务标签和关系边是两件事，走不同的命令编辑。
+
+### Backlog 角色
+
+角色标签同样是保留元数据，所以不能当业务标签传进来。
+`afk backlog role --id <id> --kind prd` 给一个已存在的工作项赋上 PRD 锚点角色：
+加上角色标签，去掉 stage 标签，模式换成 human-in-the-loop，表示它本身永不执行。
+锚点完全没有生命周期位置——它是个容器。
+
+该 issue 的其余标签一律不动，因此一个工作项变成锚点时，不会丢掉它的子项、
+依赖或业务标签。这个编辑是幂等的：已经带该角色的工作项不会被改动。
 
 ### Backlog manifest
 

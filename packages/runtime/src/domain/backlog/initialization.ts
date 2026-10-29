@@ -18,6 +18,18 @@ export const BACKLOG_METADATA = {
 } as const;
 
 /**
+ * The label prefixes AFK metadata owns.
+ *
+ * A prefix says who owns the labels behind it: the lifecycle position, the
+ * execution mode, or the role of the item.
+ */
+export const BACKLOG_LABEL_PREFIX = {
+  state: 'stage::',
+  mode: 'mode::',
+  kind: 'kind::',
+} as const;
+
+/**
  * The roles a provider issue can carry.
  *
  * A role says what an item is, not where it is in a lifecycle. The PRD role

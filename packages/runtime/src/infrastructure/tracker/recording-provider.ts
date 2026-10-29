@@ -4,6 +4,7 @@ import type {
   BacklogCreatePlan,
   BacklogExecutionMode,
   BacklogItem,
+  BacklogKind,
   BacklogListOptions,
   BacklogProvider,
   BacklogProviderCapabilities,
@@ -109,6 +110,10 @@ export class RecordingBacklogProvider implements BacklogProvider {
 
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
     return this.provider.applyRelationUpdate(id, update);
+  }
+
+  applyRole(id: string, kind: BacklogKind): Promise<void> {
+    return this.provider.applyRole(id, kind);
   }
 
   initialize(): Promise<void> {

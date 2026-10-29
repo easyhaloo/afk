@@ -1,6 +1,6 @@
 import { createManagementProviders, type TrackerPlatform } from './infrastructure/provider/tracker-provider-factory.js';
-import { addBacklogTag, applyBacklogRelationUpdate, confirmBacklogMerge, createBacklog, interruptBacklog, listBacklogs, removeBacklogTag, showBacklog } from './domain/backlog/commands.js';
-import type { BacklogCreateInput, BacklogListOptions } from './domain/backlog/index.js';
+import { addBacklogTag, applyBacklogRelationUpdate, applyBacklogRole, confirmBacklogMerge, createBacklog, interruptBacklog, listBacklogs, removeBacklogTag, showBacklog } from './domain/backlog/commands.js';
+import type { BacklogCreateInput, BacklogKind, BacklogListOptions } from './domain/backlog/index.js';
 import type { BacklogRelationUpdate } from './domain/backlog/metadata-codec.js';
 import type { ManagementProviderBundle } from './infrastructure/provider/providers.js';
 import { loadWorkflowConfig } from './infrastructure/config/manager.js';
@@ -32,6 +32,11 @@ export function createBacklogRuntime(factory: ProviderFactory = createManagement
     async applyRelationUpdate(workspace: string, id: string, update: BacklogRelationUpdate) {
       const backlog = await provider(workspace);
       await applyBacklogRelationUpdate(backlog, id, update);
+      return showBacklog(backlog, id);
+    },
+    async applyRole(workspace: string, id: string, kind: BacklogKind) {
+      const backlog = await provider(workspace);
+      await applyBacklogRole(backlog, id, kind);
       return showBacklog(backlog, id);
     },
     async interrupt(workspace: string, id: string, reason: string) {

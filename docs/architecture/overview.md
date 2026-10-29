@@ -89,6 +89,7 @@ single source of truth for the supported surface:
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
+| `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
@@ -367,6 +368,18 @@ close a cycle, so it is refused too.
 reserved metadata prefixes, including the relationship prefixes: a business
 tag and a relationship edge are different things and are edited through
 different commands.
+
+### Backlog roles
+
+The role label is reserved metadata too, so it cannot arrive as a business
+tag. `afk backlog role --id <id> --kind prd` gives an item that already
+exists the organizational role of a PRD anchor: the role label goes on, the
+stage label goes away, and the human-in-the-loop mode says it never runs by
+itself. An anchor has no lifecycle position at all — it is a container.
+
+Every other label of the issue stays where it is, so an item can become an
+anchor without losing its children, its dependencies or its business tags.
+The edit is idempotent: an item that already carries the role is left alone.
 
 ### Backlog manifest
 

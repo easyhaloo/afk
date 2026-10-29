@@ -136,6 +136,10 @@ export class InventoryBacklogProvider implements BacklogManagementProvider {
     throw new Error('全局 Backlog 模式不能修改关系边；请在 Git 仓库目录内或使用 --project 指定项目');
   }
 
+  async applyRole(): Promise<void> {
+    throw new Error('全局 Backlog 模式不能修改角色；请在 Git 仓库目录内或使用 --project 指定项目');
+  }
+
   async initialize(): Promise<void> {
     // Credential-scoped discovery provisions no repository metadata.
   }

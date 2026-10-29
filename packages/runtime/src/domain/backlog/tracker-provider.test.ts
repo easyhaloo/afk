@@ -539,6 +539,32 @@ describe('TrackerBacklogProvider', () => {
     expect(t.updateLabels).not.toHaveBeenCalled();
   });
 
+  it('gives an item the anchor role without disturbing its other labels', async () => {
+    const issue = { id: 24, title: 'PRD', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'billing'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.applyRole('24', 'prd');
+
+    expect(t.updateLabels).toHaveBeenCalledWith(24, {
+      add: ['kind::prd', 'mode::hitl'],
+      remove: ['stage::ready-for-issues', 'mode::afk'],
+    });
+    expect([...issue.labels].sort()).toEqual(['billing', 'kind::prd', 'mode::hitl']);
+    await expect(provider.get('24')).resolves.toMatchObject({ kind: 'prd', state: undefined, executionMode: 'hitl' });
+  });
+
+  it('keeps the role an item already carries', async () => {
+    const issue = { id: 24, title: 'PRD', description: '', labels: ['kind::prd', 'mode::hitl'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.applyRole('24', 'prd');
+
+    expect(t.updateLabels).not.toHaveBeenCalled();
+    await expect(provider.get('24')).resolves.toMatchObject({ kind: 'prd', state: undefined, executionMode: 'hitl' });
+  });
+
   it('initializes provider metadata idempotently and reports capabilities', async () => {
     const ensureMetadata = vi.fn(async () => {});
     const t = tracker({ id: 1, title: 'Item', description: '', labels: [], state: 'opened', url: '', projectId: '' });

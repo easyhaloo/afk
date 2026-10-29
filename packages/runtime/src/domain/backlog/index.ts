@@ -36,6 +36,7 @@ export {
   encodeBacklogRelations,
   isBacklogRelationLabel,
   planRelationLabelDelta,
+  planRoleLabelDelta,
 } from './metadata-codec.js';
 export type {
   BacklogLabelDelta,
@@ -46,6 +47,7 @@ export type {
   BacklogRelations,
 } from './metadata-codec.js';
 export { BACKLOG_KIND_LABELS } from './initialization.js';
+export { BACKLOG_LABEL_PREFIX } from './initialization.js';
 export type { BacklogCreatePlan } from './creation.js';
 import type { BacklogCreatePlan } from './creation.js';
 export { buildBacklogGraph, findDependencyCycle } from './graph.js';
@@ -163,6 +165,13 @@ export interface BacklogManagementProvider {
    * inventory, for one — has nowhere to write an edge to.
    */
   applyRelationUpdate?(id: string, update: BacklogRelationUpdate): Promise<void>;
+  /**
+   * Give an item the organizational role of a PRD anchor.
+   *
+   * An anchor carries no lifecycle state and never runs by itself, so the
+   * role replaces the stage and mode labels the item had.
+   */
+  applyRole?(id: string, kind: BacklogKind): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -193,6 +202,8 @@ export interface BacklogProvider {
   removeTag(id: string, tag: string): Promise<void>;
   /** Edit the relationship edges of an item that already exists. */
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void>;
+  /** Give an item the organizational role of a PRD anchor. */
+  applyRole(id: string, kind: BacklogKind): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
 }
@@ -376,6 +387,21 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     if (relations.baseBacklogId) item.baseBacklogId = relations.baseBacklogId;
     else delete item.baseBacklogId;
     item.dependsOn = [...relations.dependsOn];
+    this.items.set(id, item);
+  }
+
+  /**
+   * Give an item the organizational role of a PRD anchor.
+   *
+   * The role says what the item is: an anchor carries no lifecycle state and
+   * never runs by itself, so the stage label goes away and the mode becomes
+   * human-in-the-loop.
+   */
+  async applyRole(id: string, kind: BacklogKind): Promise<void> {
+    const item = await this.get(id);
+    item.kind = kind;
+    delete item.state;
+    item.executionMode = 'hitl';
     this.items.set(id, item);
   }
 

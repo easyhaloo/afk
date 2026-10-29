@@ -11,7 +11,7 @@
  * graph then silently loses an edge.
  */
 
-import { BACKLOG_KIND_LABELS, BACKLOG_METADATA } from './initialization.js';
+import { BACKLOG_KIND_LABELS, BACKLOG_LABEL_PREFIX, BACKLOG_METADATA } from './initialization.js';
 import { extractBacklogTags } from './tags.js';
 import type { BacklogKind } from './index.js';
 import type { BacklogExecutionMode, BacklogState } from './index.js';
@@ -366,4 +366,35 @@ function relationReference(
     throw new Error(`invalid backlog relationship: ${kind} reference ${value} points at the item itself`);
   }
   return reference;
+}
+
+/**
+ * Plan the label changes that give an item a role.
+ *
+ * An organizational anchor is not a work item in a lifecycle: it carries the
+ * role label, no stage label at all, and the human-in-the-loop mode, because
+ * an anchor never runs by itself. Every other label of the issue — the
+ * business tags, the relationships, the idempotency marker — is left where it
+ * is, so giving a role never disturbs the graph the item belongs to.
+ */
+export function planRoleLabelDelta(
+  labels: readonly string[],
+  kind: BacklogKind,
+): BacklogLabelDelta {
+  const roleLabel = BACKLOG_KIND_LABELS[kind];
+  const modeLabel = BACKLOG_METADATA.executionModeLabels.hitl;
+  const desired = new Set([roleLabel, modeLabel]);
+  const remove = new Set<string>();
+  for (const label of labels) {
+    // A label the edit asks for is never removed: a provider applies the
+    // removals first, and a label in both lists would simply disappear.
+    if (desired.has(label)) continue;
+    if (label.startsWith(BACKLOG_LABEL_PREFIX.kind)) remove.add(label);
+    if (label.startsWith(BACKLOG_LABEL_PREFIX.state)) remove.add(label);
+    if (label.startsWith(BACKLOG_LABEL_PREFIX.mode)) remove.add(label);
+  }
+  return {
+    add: [...desired].filter(label => !labels.includes(label)),
+    remove: [...remove].filter(label => labels.includes(label)),
+  };
 }

@@ -1,5 +1,6 @@
 import type {
   BacklogCreateInput,
+  BacklogKind,
   BacklogListOptions,
   BacklogManagementProvider,
   BacklogItem,
@@ -55,6 +56,22 @@ export async function applyBacklogRelationUpdate(
 ): Promise<void> {
   if (!provider.applyRelationUpdate) throw new Error('backlog provider does not support relationship edits');
   await provider.applyRelationUpdate(id, update);
+}
+
+/**
+ * Give a backlog item the organizational role of a PRD anchor.
+ *
+ * The role label is reserved metadata, so it cannot arrive as a business
+ * tag. An anchor carries no lifecycle state and never runs by itself, so the
+ * edit replaces the stage and mode labels the item had.
+ */
+export async function applyBacklogRole(
+  provider: BacklogManagementProvider,
+  id: string,
+  kind: BacklogKind,
+): Promise<void> {
+  if (!provider.applyRole) throw new Error('backlog provider does not support role edits');
+  await provider.applyRole(id, kind);
 }
 
 export interface BacklogChangeProvider {

@@ -6,6 +6,7 @@ import {
   encodeBacklogRelations,
   isBacklogRelationLabel,
   planRelationLabelDelta,
+  planRoleLabelDelta,
 } from './metadata-codec.js';
 
 const scope = { platform: 'github' as const, projectKey: 'org/repo' };
@@ -167,6 +168,36 @@ describe('backlog relation label delta', () => {
     expect(planRelationLabelDelta(['parent::not-a-reference'], { clearParent: true }, scope)).toEqual({
       add: [],
       remove: ['parent::not-a-reference'],
+    });
+  });
+});
+
+describe('backlog role label delta', () => {
+  it('turns a work item into an anchor and drops its lifecycle state', () => {
+    expect(planRoleLabelDelta(['stage::ready-for-issues', 'mode::afk'], 'prd')).toEqual({
+      add: ['kind::prd', 'mode::hitl'],
+      remove: ['stage::ready-for-issues', 'mode::afk'],
+    });
+  });
+
+  it('keeps the role an item already carries', () => {
+    // A label in both lists would simply be removed by the provider: the
+    // removals are applied first, and the addition is dropped for a label
+    // that is being removed.
+    expect(planRoleLabelDelta(['kind::prd', 'mode::hitl'], 'prd')).toEqual({ add: [], remove: [] });
+  });
+
+  it('removes the legacy stage labels an anchor must not carry', () => {
+    expect(planRoleLabelDelta(['kind::prd', 'stage::approved', 'stage::research'], 'prd')).toEqual({
+      add: ['mode::hitl'],
+      remove: ['stage::approved', 'stage::research'],
+    });
+  });
+
+  it('leaves the business tags and the relationships alone', () => {
+    expect(planRoleLabelDelta(['billing', 'parent::github:org/repo#1', 'depends-on::github:org/repo#9'], 'prd')).toEqual({
+      add: ['kind::prd', 'mode::hitl'],
+      remove: [],
     });
   });
 });

@@ -16,6 +16,7 @@ import {
   runBacklogRelationAdd,
   runBacklogRelationRemove,
   runBacklogRetry,
+  runBacklogRole,
   runBacklogShow,
   runBacklogTagAdd,
   runBacklogTagRemove,
@@ -23,7 +24,7 @@ import {
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
-import type { BacklogCreateInput, BacklogItem, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
 import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
@@ -491,6 +492,13 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
         item.dependsOn = item.dependsOn.filter(existing => existing !== dependency);
       }
     },
+    async applyRole(id: string, kind: BacklogKind) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.kind = kind;
+      delete item.state;
+      item.executionMode = 'hitl';
+    },
     async initialize() { /* noop */ },
     async transition(id, state) {
       const item = items.find(candidate => candidate.id === id);
@@ -798,6 +806,44 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.kind).toBe('backlog.relation.add');
     expect(envelope.error.message).toMatch(/nothing to add/);
+  });
+
+  it('runBacklogRole turns an item into an anchor', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRole(stubProvider([{ ...stubItem }]), '42', 'prd', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.role');
+    expect(envelope.data.kind).toBe('prd');
+    expect(envelope.data.state).toBeUndefined();
+    expect(envelope.data.executionMode).toBe('hitl');
+  });
+
+  it('runBacklogRole refuses a role the model does not have', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRole(stubProvider([{ ...stubItem }]), '42', 'nope' as BacklogKind, { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.role');
+    expect(envelope.error.message).toContain('invalid backlog role');
   });
 
   it('runBacklogInterrupt emits the blocked hitl backlog', async () => {    const captured: string[] = [];

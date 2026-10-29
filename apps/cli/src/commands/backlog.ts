@@ -40,6 +40,7 @@ import {
   addBacklogTag,
   adoptBacklog,
   applyBacklogRelationUpdate,
+  applyBacklogRole,
   confirmBacklogMerge,
   createBacklog,
   initializeBacklog,
@@ -884,6 +885,34 @@ function detailRelations(item: BacklogItem): void {
   if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
 }
 
+export async function runBacklogRole(
+  provider: BacklogManagementProvider,
+  id: string,
+  kind: BacklogKind,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.role';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!kinds.includes(kind as BacklogKind)) {
+      throw new Error(`invalid backlog role: ${kind}. Supported roles: ${kinds.join(', ')}`);
+    }
+    await applyBacklogRole(provider, id, kind);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(command, item);
+      return;
+    }
+    success(`Backlog ${id} is now a ${kind} anchor`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function runBacklogInterrupt(
   provider: QABacklogProvider,
   id: string,
@@ -1333,6 +1362,32 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'remove')!, 'backlog.tag.remove', argv);
   configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'add')!, 'backlog.relation.add', argv);
   configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'remove')!, 'backlog.relation.remove', argv);
+
+  backlog.command('role')
+    .description('Give a backlog item the organizational role of a PRD anchor')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--kind <kind>', `Organizational role (${kinds.join('|')})`)
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogRole(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.kind as BacklogKind,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.role', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'role')!, 'backlog.role', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

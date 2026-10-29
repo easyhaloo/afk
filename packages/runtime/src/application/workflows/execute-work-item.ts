@@ -376,6 +376,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           new QARunner(bundle, workflowConfig, {
             agentRuntime: runRequest.agentRuntime, executionMode: 'interactive', projectRoot: runRequest.workspaceRoot,
             repositories: runRequest.repositories,
+            executionBaseBranch: runRequest.executionBaseBranch,
             beforeChange: async (action, _backlog, change) => {
               if (action === 'publish') await auditQAPass();
               if (action === 'merge' && change) await providers.changes.verifyIssueAssociation(change, workItemId);

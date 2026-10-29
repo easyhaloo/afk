@@ -1,8 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { createWorkflowProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import { LoopRunner } from '@afk/runtime/application/runners/loop-runner';
 import { installLoopSignalHandlers } from './loop-signals.js';
@@ -13,7 +11,8 @@ import { logger, redirectStdioToLog, resolveLogPath } from '@afk/runtime/infrast
 import { handleCommandError, success, info, warning, fail, detail } from '../output.js';
 import { spawnDetached, waitForProcessPid } from '@afk/runtime/infrastructure/process/daemon';
 import {
-  LOOP_PID_FILE,
+  loopPidFilePath,
+  loopStatusFilePath,
   readPid,
   removePidFile,
   ensurePidDirectory,
@@ -21,8 +20,7 @@ import {
 } from '@afk/runtime/infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
 
-const AFK_HOME = path.join(os.homedir(), '.afk');
-const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
+const STATUS_FILE = loopStatusFilePath();
 
 export function resolveManagedLoopExecution(
   options: LoopStartOptions,
@@ -137,7 +135,7 @@ async function startDaemon(args: string[]): Promise<void> {
     success('afk loop daemonized');
     detail(`pid:        ${pid}`);
     detail(`log:        ${resolveLogPath()}`);
-    detail(`pid-file:   ${LOOP_PID_FILE}`);
+    detail(`pid-file:   ${loopPidFilePath()}`);
   } else {
     warning(`afk loop: child spawned (pid=${child.pid}) but no pid file appeared`);
     detail(`check log: ${resolveLogPath()}`);
@@ -147,7 +145,7 @@ async function startDaemon(args: string[]): Promise<void> {
 
 function showStatus(): void {
   const pid = readPid();
-  if (pid === null) { warning('afk loop: not running (no pid file)'); detail(`expected: ${LOOP_PID_FILE}`); return; }
+  if (pid === null) { warning('afk loop: not running (no pid file)'); detail(`expected: ${loopPidFilePath()}`); return; }
   if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(); return; }
   success('afk loop: running');
   detail(`pid:        ${pid}`);

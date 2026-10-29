@@ -123,13 +123,15 @@ flowchart LR
 --backlog-id <exactly-one-id>
 ```
 
-同时不允许 module triggers。`LoopRunner` 在每次 poll 中重新读取 manifest，并只把这个 manifest 绑定的 backlog 项交给 `executeWorkItem`。每个成功或失败的尝试都有独立 `executionId`，同一进程用 `inFlight` 防止重复启动。
+同时不允许 module triggers。`LoopRunner` 在每次 poll 中重新读取 manifest，并只把这个 manifest 绑定的 backlog 项交给 `executeWorkItem`。作用域里的 backlog ID 是 provider backlog id，而 provider 列出的条目使用规范全局 ID，因此 loop 按 manifest 绑定的规范 ID 匹配，保证一个 loop 只执行一个工作项。每个成功或失败的尝试都有独立 `executionId`，同一进程用 `inFlight` 防止重复启动。
 
 loop 的外部控制面是：
 
 - `afk loop start` 或兼容的 `afk loop`：前台运行；`-d` 通过 detached child 后台运行。
 - `afk loop status`：读取 `~/.afk/loop.pid`、`~/.afk/loop-status.json` 和进程存活状态。
 - `afk loop stop`：先发 `SIGTERM`，超时后发 `SIGKILL`。
+
+`AFK_LOOP_PID_FILE` 与 `AFK_LOOP_STATUS_FILE` 可改写上面两个文件的路径。默认值保持单机单 loop；指定不同路径即可让多个 manifest 绑定的 loop 并行，各执行各的工作项。
 
 loop 输出状态行和 JSON 状态文件，包含 active execution、完成数、失败数、启动时间和最近错误。Provider 状态仍是事实源；`inFlight` 只用于当前进程内去重，重启后不会恢复之前的内存集合。
 
@@ -261,8 +263,8 @@ QA 工作树的依赖目录不是指向主检出的单个符号链接。pnpm 12 
 | 统一日志 | `~/.afk/logs/afk-YYYY-MM-DD.log` | 按天轮转的 pino JSONL 日志；watchdog、QA 超时快照同在此根目录下，可用 `AFK_LOG_DIR` 整体覆盖 |
 | 实现超时日志 | `~/.afk/logs/timeout/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
 | QA 超时日志 | `~/.afk/logs/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
-| loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态 |
-| loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查 |
+| loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态；可用 `AFK_LOOP_STATUS_FILE` 改写路径 |
+| loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查；可用 `AFK_LOOP_PID_FILE` 改写路径 |
 
 `RunEvent` 的每条事件还携带 `ObservationContext`、`correlationId`、可选 `evidence` 和完整性字段。证据引用应填写 `uri`、`sha256`、`mediaType`、分类和脱敏状态；日志中出现凭据、token、私有输出时不得直接作为 public evidence 发布。
 

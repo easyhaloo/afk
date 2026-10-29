@@ -196,6 +196,20 @@ describe('QARunner execution boundary', () => {
     expect(tmux.waitForSignal).not.toHaveBeenCalled();
   });
 
+  it('publishes the change request onto the baseline the execution declared', async () => {
+    const f = fixture();
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      executionBaseBranch: '2025-11-8-show',
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: true });
+    expect(f.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: '2025-11-8-show' }));
+  });
+
   it('classifies a QA execution timeout separately from a generic QA failure', async () => {
     const f = fixture();
     f.execution.waitForResult.mockResolvedValue({

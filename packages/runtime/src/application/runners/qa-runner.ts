@@ -40,6 +40,12 @@ export interface QARunnerDependencies {
   projectRoot?: string;
   /** Managed workspace to run QA against; QA prepares it if it is gone. */
   repositories?: readonly WorkflowRunRepository[];
+  /**
+   * The baseline the execution declared. A change request has to land on the
+   * branch the work was cut from, so a manifest-bound run publishes onto it
+   * instead of the globally configured target branch.
+   */
+  executionBaseBranch?: string;
   prepareRepositories?: MultiRepositoryPreparationService;
   mergeBranch?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   runtimeManager?: TaskRuntimeManager;
@@ -67,6 +73,7 @@ export class QARunner {
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
   private readonly repositories?: readonly WorkflowRunRepository[];
+  private readonly executionBaseBranch?: string;
   private readonly prepareRepositories: MultiRepositoryPreparationService;
   private readonly mergeBranchOverride?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   private readonly runtimeManager: TaskRuntimeManager;
@@ -82,6 +89,7 @@ export class QARunner {
     this.executionMode = deps.executionMode ?? 'batch';
     this.projectRoot = deps.projectRoot ?? process.cwd();
     this.repositories = deps.repositories;
+    this.executionBaseBranch = deps.executionBaseBranch;
     this.prepareRepositories = deps.prepareRepositories ?? new MultiRepositoryPreparer();
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
@@ -258,7 +266,8 @@ export class QARunner {
 
   /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
   private async resolveExecutionBranch(backlog: BacklogItem): Promise<string> {
-    return resolveBacklogExecutionBase(this.providers.backlog, backlog, this.config.targetBranch ?? 'main');
+    const configured = this.executionBaseBranch ?? this.config.targetBranch ?? 'main';
+    return resolveBacklogExecutionBase(this.providers.backlog, backlog, configured);
   }
 
   private async mergeBranch(worktreePath: string, baselineBranch: string, featureBranch: string): Promise<void> {

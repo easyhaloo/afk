@@ -426,6 +426,17 @@ sequenceDiagram
 `afk loop` 在进程内复用同一流程并集成 QA；独立 `qa` 命令使用管理 bundle，
 不会认领实现任务。
 
+作用域里的 backlog ID 是 manifest 的 provider backlog id，而 provider 列出的
+backlog 条目使用规范全局 ID。loop 因此按 manifest 绑定的规范 ID 匹配，
+一个 manifest 绑定的 loop 只执行一个工作项。
+
+manifest 声明主仓基线，变更请求就落在该基线上。全局配置的 `targetBranch`
+只作为无 manifest 执行时的回落值。
+
+`AFK_LOOP_PID_FILE` 与 `AFK_LOOP_STATUS_FILE` 可改写 loop 的 pid 文件与状态
+文件路径。默认值保持单机单 loop；指定不同路径即可让多个 manifest 绑定的
+loop 并行，各执行各的工作项。
+
 ## 扩展机制
 
 插件运行时可以注册 provider。每个 provider 必须完整实现 `BacklogProvider`，

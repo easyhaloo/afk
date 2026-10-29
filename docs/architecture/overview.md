@@ -535,6 +535,19 @@ manifest, and delegates to `executeWorkItem`. The former separate
 implementation/QA queue is removed. The standalone QA command remains a
 lower-level verification operation.
 
+The scoped backlog ID is the provider backlog id of the manifest, while a
+provider lists backlog items under their canonical global id. The loop
+therefore matches the manifest-bound work item by its canonical id, so one
+manifest-bound loop executes exactly one work item.
+
+A manifest declares the baseline of its primary repository, and that baseline
+is where the change request lands. The globally configured `targetBranch` is
+only the fallback for an execution without a manifest.
+
+`AFK_LOOP_PID_FILE` and `AFK_LOOP_STATUS_FILE` relocate the loop's pid file
+and status file. The default keeps one loop per machine; distinct paths let
+several manifest-bound loops run side by side, each on its own work item.
+
 ## Extension points
 
 Plugins can register provider implementations through the plugin runtime.

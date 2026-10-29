@@ -1,9 +1,9 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { logger } from '../../infrastructure/io/index.js';
+import { loopPidFilePath, loopStatusFilePath } from '../../infrastructure/process/pid-file.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
-import { parseWorkItemId } from '../../domain/backlog/index.js';
+import { parseWorkItemId, type BacklogItem } from '../../domain/backlog/index.js';
 import { reconcileMergedBacklog } from '../../domain/backlog/commands.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
@@ -65,8 +65,7 @@ const DEFAULTS = {
   pollIntervalMs: 60_000,
   statusIntervalMs: 30_000,
   shutdownTimeoutMs: 300_000,
-  pidFilePath: path.join(os.homedir(), '.afk', 'loop.pid'),
-  statusFilePath: path.join(os.homedir(), '.afk', 'loop-status.json'),
+  maxIterations: undefined as number | undefined,
   targetBranch: 'main',
 };
 
@@ -123,8 +122,8 @@ export class LoopRunner {
       managedExecution,
       readManifest: options.readManifest ?? readExecutionManifest,
       executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
-      pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
-      statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
+      pidFilePath: options.pidFilePath ?? loopPidFilePath(),
+      statusFilePath: options.statusFilePath ?? loopStatusFilePath(),
       targetBranch: options.targetBranch ?? DEFAULTS.targetBranch,
     };
   }
@@ -280,6 +279,17 @@ export class LoopRunner {
   }
 
   /**
+   * The poll scope is the manifest-bound work item.
+   *
+   * A provider lists every backlog item under its canonical global id, while
+   * the scope carries the provider backlog id, so the canonical id of the
+   * managed work item is the match that holds for every provider.
+   */
+  private isInScope(issue: BacklogItem): boolean {
+    return this.opts.backlogIds.has(String(issue.id)) || issue.id === this.opts.managedExecution.workItemId;
+  }
+
+  /**
    * Pull the runnable work item from the provider and start its execution.
    * Tracker errors are logged and swallowed — the loop never dies from a
    * single bad poll.
@@ -303,7 +313,7 @@ export class LoopRunner {
       ]);
       const issues = [...readyIssues, ...reworkIssues]
         .filter((issue, index, all) => all.findIndex(candidate => candidate.id === issue.id) === index)
-        .filter(issue => this.opts.backlogIds.has(String(issue.id)));
+        .filter(issue => this.isInScope(issue));
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;

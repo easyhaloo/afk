@@ -73,6 +73,26 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(internals.inFlight.has('42')).toBe(false);
   });
 
+  it('executes the manifest-bound work item when the provider lists canonical ids', async () => {
+    // A real tracker provider lists every backlog item under its canonical
+    // global id, while the loop scope carries the provider backlog id.
+    const canonical = {
+      ...item, id: 'github:org/repo#42', workItemId: 'github:org/repo#42', providerRef: 'github:org/repo#42',
+    };
+    const { providers } = providersFor([canonical]);
+    const executeManagedWorkItem = vi.fn(async () => ({ status: 'merge_ready' } as any));
+    const subject = new LoopRunner(providers, { ...selection, readManifest, executeManagedWorkItem });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.poll();
+
+    await vi.waitFor(() => expect(subject.getStatus().totals.completed).toBe(1));
+    expect(executeManagedWorkItem).toHaveBeenCalledOnce();
+  });
+
   it('completes a merged backlog during the poll without merging the change itself', async () => {
     const merged = { ...item, state: 'merge_ready' as const, executionMode: 'hitl' as const };
     const transition = vi.fn(async () => {});
@@ -162,6 +182,24 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(subject.getStatus().totals.failed).toBe(1);
     expect(subject.getStatus().lastError['42']).toContain('audit unavailable');
     expect(internals.inFlight.has('42')).toBe(false);
+  });
+
+  it('takes the default pid and status paths from the environment', () => {
+    const previousPid = process.env.AFK_LOOP_PID_FILE;
+    const previousStatus = process.env.AFK_LOOP_STATUS_FILE;
+    process.env.AFK_LOOP_PID_FILE = '/tmp/afk-loop-side-by-side/loop.pid';
+    process.env.AFK_LOOP_STATUS_FILE = '/tmp/afk-loop-side-by-side/status.json';
+    try {
+      const { providers } = providersFor();
+      const subject = new LoopRunner(providers, { ...selection, readManifest });
+      expect((subject as any).opts.pidFilePath).toBe('/tmp/afk-loop-side-by-side/loop.pid');
+      expect((subject as any).opts.statusFilePath).toBe('/tmp/afk-loop-side-by-side/status.json');
+    } finally {
+      if (previousPid === undefined) delete process.env.AFK_LOOP_PID_FILE;
+      else process.env.AFK_LOOP_PID_FILE = previousPid;
+      if (previousStatus === undefined) delete process.env.AFK_LOOP_STATUS_FILE;
+      else process.env.AFK_LOOP_STATUS_FILE = previousStatus;
+    }
   });
 
   it('makes duplicate stop calls idempotent', async () => {

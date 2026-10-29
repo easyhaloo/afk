@@ -40,6 +40,12 @@ export interface WorkflowRunRequest {
   session: string;
   targetBranch: string;
   baseBranch: string;
+  /**
+   * The baseline a manifest-bound execution declared. It is the branch the
+   * change request has to land on, so it is kept apart from `baseBranch`,
+   * which is the branch a worktree is cut from.
+   */
+  executionBaseBranch?: string;
   baseBranchExplicit?: boolean;
   maxRetries: number;
   hardTimeoutMs: number;
@@ -71,6 +77,8 @@ export interface WorkflowRunCliInput {
   workspaceRoot?: string;
   targetBranch?: string;
   baseBranch?: string;
+  /** The baseline a manifest-bound execution declared for its change request. */
+  executionBaseBranch?: string;
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
@@ -167,6 +175,7 @@ export function resolveWorkflowRequest(
     session: input.session ?? `afk-${input.workItemId ?? backlogId}`,
     targetBranch: input.targetBranch ?? config.targetBranch ?? defaults.targetBranch,
     baseBranch: input.baseBranch ?? config.trackerTargetBranch ?? config.targetBranch ?? defaults.baseBranch,
+    ...(input.executionBaseBranch ? { executionBaseBranch: input.executionBaseBranch } : {}),
     baseBranchExplicit: input.baseBranch !== undefined
       || ((input.branchStrategy?.type === 'named' || input.branchStrategy?.type === 'merge-to-head') && input.branchStrategy.baseBranch !== undefined),
     maxRetries: input.maxRetries ?? config.maxRetries ?? defaults.maxRetries,
@@ -268,6 +277,7 @@ function applyExecutionManifest(
     repoRoot: primary.repoRoot,
     workspaceRoot: manifest.workspaceRoot,
     baseBranch: primary.baseBranch,
+    executionBaseBranch: primary.baseBranch,
     targetBranch: manifest.workingBranch,
     branchStrategy,
     repositories: manifest.repositories,

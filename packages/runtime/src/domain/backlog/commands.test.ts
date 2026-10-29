@@ -131,15 +131,34 @@ describe('backlog commands', () => {
     // The attempt answered the rework request and failed.
     await provider.transition('42', 'blocked', { reason: 'QA timed out' });
     await provider.setExecutionMode('42', 'hitl');
-
-    await expect(retryBacklog(provider, '42', 'second attempt')).rejects.toThrow('already has an open rework record');
-
-    await blockBacklog(provider, '42', 'QA timed out');
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', status: 'open' });
 
     await expect(retryBacklog(provider, '42', 'second attempt')).resolves.toMatchObject({
       state: 'rework',
       executionMode: 'afk',
     });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', status: 'open' });
+  });
+
+  it('lets an operator retry an item whose failed attempt left its request open', async () => {
+    const provider = new InMemoryBacklogProvider([
+      backlogItem({ id: '42', state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    await provider.createRework('42', {
+      source: 'operator',
+      summary: 'first attempt',
+      failedCriteria: [],
+      requiredChecks: [],
+    });
+    await provider.transition('42', 'blocked', { reason: 'QA timed out' });
+    await provider.setExecutionMode('42', 'hitl');
+
+    // The retry answers the previous request, so it closes that one first.
+    await expect(retryBacklog(provider, '42', 'second attempt')).resolves.toMatchObject({
+      state: 'rework',
+      executionMode: 'afk',
+    });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', status: 'open' });
   });
 
   it('merges the associated root change, confirms merged, then marks the backlog done', async () => {

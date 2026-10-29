@@ -124,6 +124,11 @@ export async function retryBacklog(
   if (item.state !== 'blocked' || item.executionMode !== 'hitl') {
     throw new Error(`invalid lifecycle transition: retry requires blocked + hitl for backlog ${id}`);
   }
+  // A retry answers the previous operator request, so it closes first: the
+  // provider keeps at most one open operator rework record, and an attempt
+  // that failed before the record could be closed would otherwise block every
+  // further retry.
+  await closeOperatorRework(provider, id, `Superseded by a new operator retry: ${summary}`);
   await provider.createRework(id, {
     source: 'operator',
     summary,

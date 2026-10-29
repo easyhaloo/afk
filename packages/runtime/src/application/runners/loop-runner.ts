@@ -21,7 +21,7 @@ export interface LoopRunnerOptions {
   backlogIds: readonly string[];
   /** Workflow template passed to each execution. */
   template?: string;
-  managedExecution: { workItemId: string; manifestPath: string };
+  managedExecution: { workItemId: string; manifestPath?: string };
   readManifest?: typeof readExecutionManifest;
   executeManagedWorkItem?: typeof executeWorkItem;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
@@ -53,7 +53,7 @@ interface InternalOptions {
   maxIterations: number | undefined;
   backlogIds: ReadonlySet<string>;
   template: string | undefined;
-  managedExecution: { backlogId: string; workItemId: string; manifestPath: string; providerRef?: string };
+  managedExecution: { backlogId: string; workItemId: string; manifestPath?: string; providerRef?: string };
   readManifest: typeof readExecutionManifest;
   executeManagedWorkItem: typeof executeWorkItem;
   pidFilePath: string;
@@ -104,8 +104,8 @@ export class LoopRunner {
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
-    if (options.backlogIds?.length !== 1 || !options.managedExecution?.manifestPath) {
-      throw new Error('loop execution requires exactly one backlog ID, work item ID, and execution manifest');
+    if (options.backlogIds?.length !== 1 || !options.managedExecution?.workItemId) {
+      throw new Error('loop execution requires exactly one backlog ID and one work item ID');
     }
     const managedExecution = {
       backlogId: String(options.backlogIds![0]),
@@ -173,14 +173,29 @@ export class LoopRunner {
 
   private async validateManagedExecution(): Promise<void> {
     const managed = this.opts.managedExecution;
-    const manifest = await this.opts.readManifest(managed.manifestPath, managed.workItemId);
     const identity = parseWorkItemId(managed.workItemId);
+    if (!managed.manifestPath) {
+      // Without a manifest the execution derives one from the work item: the
+      // repository it lives in, the ref its body declares, and the branch AFK
+      // works on.
+      managed.providerRef = `${identity.platform}:${identity.projectKey}#${identity.issueNumber}`;
+      return;
+    }
+    const manifest = await this.readManagedManifest(managed);
     if (manifest.workItemId !== managed.workItemId || manifest.providerBacklogId !== managed.backlogId
       || Number(managed.backlogId) !== identity.issueNumber
       || manifest.tracker.platform !== identity.platform || manifest.tracker.projectKey !== identity.projectKey) {
       throw new Error(`execution manifest identity does not match work item ${managed.workItemId} and backlog ${managed.backlogId}`);
     }
     managed.providerRef = `${identity.platform}:${manifest.tracker.providerProjectId ?? identity.projectKey}#${identity.issueNumber}`;
+  }
+
+  /** The manifest of the managed execution. */
+  private async readManagedManifest(
+    managed: { manifestPath?: string; workItemId: string },
+  ): Promise<Awaited<ReturnType<typeof readExecutionManifest>>> {
+    if (!managed.manifestPath) throw new Error('execution manifest path is required');
+    return this.opts.readManifest(managed.manifestPath, managed.workItemId);
   }
 
   /**
@@ -395,7 +410,7 @@ export class LoopRunner {
       }
       const result = await this.opts.executeManagedWorkItem({
         workItemId: managed.workItemId,
-        manifestPath: managed.manifestPath,
+        ...(managed.manifestPath ? { manifestPath: managed.manifestPath } : {}),
         template: this.opts.template,
       });
       const elapsed = formatDuration(Date.now() - startedAt);

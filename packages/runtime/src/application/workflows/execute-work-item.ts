@@ -14,6 +14,7 @@ import { createProviderBundle, type ProviderBundle, type ManagementProviderBundl
 import { createCrossProjectBacklogGraphSource } from '../../infrastructure/provider/backlog-graph.js';
 import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
+import { parseExecutionBaseBranch } from '../../domain/backlog/execution-base.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { prepareAgentRuntime } from '../../domain/agents/index.js';
@@ -224,6 +225,11 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
       if (item.id !== workItemId || !item.managed || !item.executionEligible) throw new Error(`work item ${workItemId} is not executable`);
       const project = item.project;
       const name = project.projectKey.split('/').at(-1)!;
+      // The work item body declares the ref the work starts from. The
+      // repository's default branch is a setting of the repository and says
+      // nothing about this piece of work — a repository can be developed on
+      // `master` while the work starts from a release ref.
+      const baseBranch = parseExecutionBaseBranch(item.description) ?? project.defaultBranch ?? 'main';
       const manifest = parseExecutionManifest({
         schemaVersion: 1, workItemId, providerBacklogId: String(item.issueNumber),
         tracker: { platform: project.platform, projectKey: project.projectKey,
@@ -233,7 +239,7 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
         repositories: [{ platform: project.platform, projectKey: project.projectKey,
           ...(project.providerHost ? { providerHost: project.providerHost } : {}),
           ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}),
-          name, checkoutPath: `repositories/${name}`, baseBranch: project.defaultBranch ?? 'main', workingBranch: item.branchName, primary: true }],
+          name, checkoutPath: `repositories/${name}`, baseBranch, workingBranch: item.branchName, primary: true }],
       }, { manifestPath, backlogId: workItemId });
       await mkdir(workspaceDataDirectory(executionWorkspacePath(workItemId)), { recursive: true });
       const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`;

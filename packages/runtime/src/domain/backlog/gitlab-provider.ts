@@ -30,6 +30,7 @@ export class GitLabBacklogProvider implements BacklogProvider {
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.implementation.applyRelationUpdate(id, update); }
   applyRole(id: string, kind: BacklogKind): Promise<void> { return this.implementation.applyRole(id, kind); }
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.implementation.applyMode(id, mode); }
+  applyExecutionBase(id: string, baseBranch: string): Promise<void> { return this.implementation.applyExecutionBase(id, baseBranch); }
   initialize(): Promise<void> { return this.implementation.initialize(); }
   isRunnable(item: BacklogItem): Promise<boolean> { return this.implementation.isRunnable(item); }
 }

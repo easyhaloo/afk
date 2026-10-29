@@ -85,12 +85,13 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
+| `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
 | `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
 | `afk backlog mode --id <id> --mode afk\|hitl` | Switch who runs a backlog item |
+| `afk backlog base --id <id> --branch <ref>` | Record the ref a backlog item starts from, in its body |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
@@ -390,6 +391,32 @@ the mode label and nothing else: the state, the role, the business tags and
 the relationships of the item stay exactly where they are. The edit is
 idempotent, and it is the way an operator hands an item to AFK or takes it
 back for a human.
+
+### The ref a work item starts from
+
+A repository can be developed on `master` while the work starts from a release
+ref, and the provider's default branch says nothing about the second case. The
+ref is therefore a fact about the work, and it lives in the body of the item:
+
+```text
+## Base Version
+
+- Base Ref: 2025-11-8-show
+```
+
+A branch name means nothing outside the repository that has it, so a label
+would carry a repository-local fact across every repository the credentials
+reach. `afk backlog create --base-branch <ref>` writes the block when the
+item is created, and `afk backlog base --id <id> --branch <ref>` records it
+on an item that already exists. Both leave everything else about the item
+alone, and both are idempotent.
+
+The execution reads the block back: an execution manifest that does not exist
+yet is derived from the work item, and its base branch is the ref the body
+declares, then the repository's default branch, then `main`. The manifest
+still wins when it exists — it is the execution's own record of what it runs
+against — so an operator can override the body for one run without editing
+the issue.
 
 ### Backlog manifest
 

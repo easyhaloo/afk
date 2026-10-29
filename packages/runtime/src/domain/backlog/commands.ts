@@ -91,6 +91,22 @@ export async function applyBacklogMode(
   await provider.applyMode(id, mode);
 }
 
+/**
+ * Record the ref the work starts from.
+ *
+ * The ref is a fact about the work and the repository it lands in, so it is
+ * written into the body of the item. Nothing else about the item changes.
+ */
+export async function applyBacklogExecutionBase(
+  provider: BacklogManagementProvider,
+  id: string,
+  baseBranch: string,
+): Promise<void> {
+  if (!baseBranch?.trim()) throw new Error('execution base branch is required');
+  if (!provider.applyExecutionBase) throw new Error('backlog provider does not support execution base edits');
+  await provider.applyExecutionBase(id, baseBranch.trim());
+}
+
 export interface BacklogChangeProvider {
   findForBacklog(backlog: BacklogItem): Promise<{ id: string; state: 'open' | 'merged' | 'closed'; sourceBranch: string; targetBranch: string; mergeable?: boolean } | null>;
   merge(id: string): Promise<void>;

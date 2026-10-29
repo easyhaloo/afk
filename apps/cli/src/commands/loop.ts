@@ -25,14 +25,18 @@ const STATUS_FILE = loopStatusFilePath();
 export function resolveManagedLoopExecution(
   options: LoopStartOptions,
   moduleTriggers: Record<string, string[]> = {},
-): { workItemId: string; manifestPath: string } {
-  if (!options.workItemId || !options.executionManifest || options.backlogId?.length !== 1) {
-    throw new Error('managed loop execution requires --work-item-id, --execution-manifest, and exactly one --backlog-id');
+): { workItemId: string; manifestPath?: string } {
+  if (!options.workItemId || options.backlogId?.length !== 1) {
+    throw new Error('managed loop execution requires --work-item-id, exactly one --backlog-id, and optionally an --execution-manifest');
   }
   if (Object.keys(moduleTriggers).length) {
     throw new Error('loop execution does not support module triggers');
   }
-  return { workItemId: parseWorkItemId(options.workItemId).id, manifestPath: options.executionManifest };
+  const workItemId = parseWorkItemId(options.workItemId).id;
+  // Without a manifest the execution derives one from the work item: the
+  // repository it lives in, the ref its body declares, and the branch AFK
+  // works on.
+  return { workItemId, manifestPath: options.executionManifest };
 }
 
 export function registerLoopCommands(program: Command): void {

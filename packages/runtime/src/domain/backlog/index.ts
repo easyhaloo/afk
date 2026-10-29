@@ -55,6 +55,8 @@ export type { BacklogGraph, BacklogGraphSource } from './graph.js';
 export { projectBacklogItem } from './projection.js';
 export type { BacklogIssueView } from './projection.js';
 export { deriveBacklogBranchName } from './branch-name.js';
+import { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection } from './execution-base.js';
+export { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection };
 import type { BacklogClaim } from './claim.js';
 import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
 import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
@@ -87,6 +89,14 @@ export interface BacklogItem {
   kind?: BacklogKind;
   title: string;
   description?: string;
+  /**
+   * The ref the work starts from, as the body declares it.
+   *
+   * A branch name means nothing outside the repository that has it, so it
+   * travels in the body rather than in a label. The execution reads it back
+   * from here, and the repository's default branch is only the fallback.
+   */
+  executionBase?: string;
   /** Organizational grouping only; it never selects a git base branch. */
   parentId?: string;
   /**
@@ -179,6 +189,13 @@ export interface BacklogManagementProvider {
    * inventory, for one — has nowhere to write the mode to.
    */
   applyMode?(id: string, mode: BacklogExecutionMode): Promise<void>;
+  /**
+   * Record the ref the work starts from.
+   *
+   * It is optional for the same reason the mode edit is: a provider that only
+   * reads has nowhere to write the base to.
+   */
+  applyExecutionBase?(id: string, baseBranch: string): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -213,6 +230,8 @@ export interface BacklogProvider {
   applyRole(id: string, kind: BacklogKind): Promise<void>;
   /** Switch who runs an item. */
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void>;
+  /** Record the ref the work starts from. */
+  applyExecutionBase(id: string, baseBranch: string): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
 }
@@ -421,6 +440,15 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
     const item = await this.get(id);
     item.executionMode = mode;
+    this.items.set(id, item);
+  }
+
+  /**
+   * Record the ref the work starts from. Only the body changes.
+   */
+  async applyExecutionBase(id: string, baseBranch: string): Promise<void> {
+    const item = await this.get(id);
+    item.description = applyExecutionBaseBranch(item.description ?? '', baseBranch);
     this.items.set(id, item);
   }
 

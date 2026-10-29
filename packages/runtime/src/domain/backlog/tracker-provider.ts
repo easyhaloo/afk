@@ -13,6 +13,7 @@ import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewRework
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
+import { applyExecutionBaseBranch, parseExecutionBaseBranch } from './execution-base.js';
 import {
   BACKLOG_RELATION_PREFIX,
   canonicalizeBacklogReference,
@@ -395,6 +396,24 @@ export class TrackerBacklogProvider implements BacklogProvider {
       })));
     }
     await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+  }
+
+  /**
+   * Record the ref the work starts from.
+   *
+   * The ref belongs in the body of the item. A branch name means nothing
+   * outside the repository that has it, so a label would carry a
+   * repository-local fact across every repository the credentials reach. The
+   * body is where a person writes it down and where AFK reads it back.
+   */
+  async applyExecutionBase(id: string, baseBranch: string): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const description = issue.description ?? '';
+    if (parseExecutionBaseBranch(description) === baseBranch) return;
+    await target.tracker.updateIssue(target.issueId, {
+      description: applyExecutionBaseBranch(description, baseBranch),
+    });
   }
 
   async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {

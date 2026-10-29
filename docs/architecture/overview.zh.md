@@ -64,12 +64,13 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
-| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
+| `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | 修改已存在 backlog 工作项的关系边 |
 | `afk backlog role --id <id> --kind prd` | 把一个 backlog 工作项设为 PRD 锚点角色 |
 | `afk backlog mode --id <id> --mode afk\|hitl` | 切换一个 backlog 工作项的执行方 |
+| `afk backlog base --id <id> --branch <ref>` | 在工作项正文中记录它起始的基线 ref |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
@@ -300,6 +301,27 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 `afk backlog mode --id <id> --mode afk|hitl` 切换一个已存在工作项的执行方。
 执行模式同样是保留元数据，所以这个编辑只替换模式标签：状态、角色、业务标签
 与关系一律不动。这个编辑是幂等的，操作者用它把工作项交给 AFK，或收回给人工。
+
+### 工作项从哪个 ref 起始
+
+一个仓库可以在 `master` 上开发，而这项工作从某个发布 ref 起始——provider 的
+默认分支说不出后一种情况。这个 ref 是关于工作本身的事实，因此写在工作项正文：
+
+```text
+## Base Version
+
+- Base Ref: 2025-11-8-show
+```
+
+分支名在拥有它的仓库之外没有任何意义，用标签会把仓库内的事实带到凭据可达的
+每一个仓库。`afk backlog create --base-branch <ref>` 在创建时写入该区块，
+`afk backlog base --id <id> --branch <ref>` 为已存在的工作项补记它。两者都不动
+工作项的其他内容，且都是幂等的。
+
+执行时会读回该区块：manifest 不存在时由工作项推导，其基线依次取正文声明的
+ref、仓库默认分支、`main`。manifest 存在时仍以 manifest 为准——它是执行自己对
+「基于什么运行」的记录——因此操作者可以在不修改 issue 的前提下为单次执行做
+覆盖。
 
 ### Backlog manifest
 

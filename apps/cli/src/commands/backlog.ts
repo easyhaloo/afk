@@ -41,6 +41,7 @@ import {
   adoptBacklog,
   applyBacklogRelationUpdate,
   applyBacklogRole,
+  applyBacklogExecutionBase,
   applyBacklogMode,
   confirmBacklogMerge,
   createBacklog,
@@ -57,6 +58,7 @@ import {
 } from '@afk/runtime/domain/backlog/commands';
 import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
+import { applyExecutionBaseBranch } from '@afk/runtime/domain/backlog/index';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../output.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
@@ -699,7 +701,7 @@ async function collectWorkItems(): Promise<{ items: readonly GlobalWorkItem[] } 
 
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
-  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; kind?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
+  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; baseBranch?: string; dependsOn?: string[]; mode?: string; kind?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
 ): Promise<void> {
   const kind = 'backlog.create';
   try {
@@ -710,8 +712,9 @@ export async function runBacklogCreate(
     if (options.kind !== undefined && !kinds.includes(options.kind as BacklogKind)) {
       throw new Error(`invalid backlog role: ${options.kind}`);
     }
-    const description = options.description ?? await readDescription(options.descriptionFile);
+    let description = options.description ?? await readDescription(options.descriptionFile);
     if (!description.trim()) throw new Error('empty backlog description. Provide --description-file or pipe Markdown through stdin.');
+    if (options.baseBranch) description = applyExecutionBaseBranch(description, options.baseBranch);
     const input: BacklogCreateInput = {
       title: options.title,
       description,
@@ -933,6 +936,32 @@ export async function runBacklogMode(
       return;
     }
     success(`Backlog ${id} now runs in ${mode} mode`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function runBacklogExecutionBase(
+  provider: BacklogManagementProvider,
+  id: string,
+  baseBranch: string,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.base';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!baseBranch?.trim()) throw new Error('execution base branch is required');
+    await applyBacklogExecutionBase(provider, id, baseBranch);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(command, item);
+      return;
+    }
+    success(`Backlog ${id} now starts from ${baseBranch.trim()}`);
   } catch (error) {
     if (options.json) {
       emitFailure(command, classifyError(error), (error as Error).message);
@@ -1197,6 +1226,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--description-file <path>', 'Markdown description file (defaults to stdin)')
     .option('--parent <id>', 'Organizational parent backlog ID or platform:project#id (does not select a git base branch)')
     .option('--base-backlog <id>', 'Backlog ID or platform:project#id whose unmerged branch is the explicit execution base')
+    .option('--base-branch <branch>', 'Ref the work starts from, recorded in the body (Base Version)')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--mode <mode>', `Execution mode (${modes.join('|')}); defaults to afk, or hitl for a PRD anchor`)
     .option('--kind <kind>', `Organizational role (${kinds.join('|')}); a PRD anchor is never executed`)
@@ -1443,6 +1473,32 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'mode')!, 'backlog.mode', argv);
+
+  backlog.command('base')
+    .description('Record the ref a backlog item starts from')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--branch <branch>', 'Ref the work starts from')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogExecutionBase(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.branch,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.base', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'base')!, 'backlog.base', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

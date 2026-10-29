@@ -17,6 +17,7 @@ import {
   runBacklogRelationRemove,
   runBacklogRetry,
   runBacklogRole,
+  runBacklogExecutionBase,
   runBacklogMode,
   runBacklogShow,
   runBacklogTagAdd,
@@ -850,6 +851,63 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.kind).toBe('backlog.role');
     expect(envelope.error.message).toContain('invalid backlog role');
+  });
+
+  it('runBacklogExecutionBase records the ref the work starts from', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const applied: string[] = [];
+    const provider = stubProvider([stubItem], {
+      async applyExecutionBase(id: string, baseBranch: string) {
+        applied.push(`${id}=${baseBranch}`);
+      },
+    });
+    try {
+      await runBacklogExecutionBase(provider, '42', '2025-11-8-show', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(applied).toEqual(['42=2025-11-8-show']);
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.base');
+  });
+
+  it('runBacklogExecutionBase refuses an empty ref', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogExecutionBase(stubProvider([stubItem]), '42', '  ', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.message).toMatch(/branch is required/i);
+  });
+
+  it('runBacklogCreate declares the base ref in the body', async () => {
+    const created: BacklogCreateInput[] = [];
+    const provider = {
+      ...stubProvider([stubItem]),
+      async create(input: BacklogCreateInput): Promise<BacklogItem> {
+        created.push(input);
+        return { ...stubItem, id: 'new-1', title: input.title, description: input.description };
+      },
+    };
+    await runBacklogCreate(provider, { title: 'demo', description: '## Context\n\nbody', baseBranch: 'release-1' });
+
+    expect(created).toHaveLength(1);
+    expect(created[0].description).toContain('## Base Version');
+    expect(created[0].description).toContain('- Base Ref: release-1');
   });
 
   it('runBacklogMode switches who runs an item', async () => {

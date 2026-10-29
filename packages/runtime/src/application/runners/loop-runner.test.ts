@@ -29,12 +29,36 @@ function providersFor(items: BacklogItem[] = [item]) {
 }
 
 describe('LoopRunner manifest-bound execution', () => {
-  it('rejects a manifest-less or ambiguous scope before any provider operation', () => {
+  it('rejects an ambiguous scope before any provider operation', () => {
     const { providers, backlog } = providersFor();
-    expect(() => new LoopRunner(providers)).toThrow(/execution manifest/);
-    expect(() => new LoopRunner(providers, { backlogIds: ['42'] })).toThrow(/execution manifest/);
+    expect(() => new LoopRunner(providers)).toThrow(/exactly one backlog ID and one work item ID/);
+    expect(() => new LoopRunner(providers, { backlogIds: ['42'] })).toThrow(/exactly one backlog ID and one work item ID/);
     expect(() => new LoopRunner(providers, { ...selection, backlogIds: ['42', '43'] })).toThrow(/exactly one/);
     expect(backlog.list).not.toHaveBeenCalled();
+  });
+
+  it('derives the manifest from the work item when none is named', async () => {
+    const { providers, backlog } = providersFor([{ ...item, state: 'rework' as const }]);
+    const executeManagedWorkItem = vi.fn(async () => ({ status: 'merge_ready' } as any));
+    const subject = new LoopRunner(providers, {
+      ...selection,
+      managedExecution: { workItemId: 'github:org/repo#42' },
+      readManifest,
+      executeManagedWorkItem,
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    await internals.poll();
+    await vi.waitFor(() => expect(subject.getStatus().totals.completed).toBe(1));
+
+    // No manifest was named, so the execution derives one from the work item
+    // instead of being handed a path that does not exist.
+    expect(executeManagedWorkItem).toHaveBeenCalledWith({
+      workItemId: 'github:org/repo#42', template: undefined,
+    });
+    expect(backlog.list).toHaveBeenCalled();
   });
 
   it('rejects mismatched manifest before polling or claiming', async () => {

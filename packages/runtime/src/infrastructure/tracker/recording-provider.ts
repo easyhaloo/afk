@@ -116,6 +116,9 @@ export class RecordingBacklogProvider implements BacklogProvider {
     return this.provider.applyRole(id, kind);
   }
 
+  applyExecutionBase(id: string, baseBranch: string): Promise<void> {
+    return this.provider.applyExecutionBase(id, baseBranch);
+  }
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
     return this.provider.applyMode(id, mode);
   }

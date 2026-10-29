@@ -44,6 +44,34 @@ describe('TrackerBacklogProvider', () => {
     expect(await plan(new ManagementBacklogProvider(new GitHubBacklogProvider(t)))).toEqual(expected);
   });
 
+  it('records the execution base in the body of the item', async () => {
+    const t = tracker({
+      id: 7, platform: 'github', projectId: 'org/repo', labels: ['stage::ready-for-issues', 'mode::afk'],
+      state: 'opened', description: '## Context\n\nThe change is cut from a release ref.',
+    });
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.applyExecutionBase('7', '2025-11-8-show');
+
+    expect(t.updateIssue).toHaveBeenCalledWith(7, expect.objectContaining({
+      description: expect.stringContaining('- Base Ref: 2025-11-8-show'),
+    }));
+    const item = await provider.get('7');
+    expect(item.executionBase).toBe('2025-11-8-show');
+  });
+
+  it('does not rewrite a body that already declares the base', async () => {
+    const t = tracker({
+      id: 8, platform: 'github', projectId: 'org/repo', labels: ['stage::ready-for-issues', 'mode::afk'],
+      state: 'opened', description: '## Base Version\n\n- Base Ref: main\n',
+    });
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.applyExecutionBase('8', 'main');
+
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
   it('recognizes PRD anchors without allowing claims or adoption', async () => {
     const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['kind::prd', 'mode::hitl'], state: 'opened' });
     const provider = new TrackerBacklogProvider(t);

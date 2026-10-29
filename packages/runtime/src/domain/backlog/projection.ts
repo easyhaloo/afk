@@ -12,6 +12,7 @@ import type { BacklogExecutionMode, BacklogItem, BacklogState } from './index.js
 import { BACKLOG_METADATA } from './initialization.js';
 import { deriveBacklogBranchName } from './branch-name.js';
 import { decodeBacklogMetadata, type BacklogMetadataScope } from './metadata-codec.js';
+import { parseExecutionBaseBranch } from './execution-base.js';
 import { formatWorkItemId } from '../work-item/identity.js';
 
 const MODE_LABELS: Record<BacklogExecutionMode, string> = BACKLOG_METADATA.executionModeLabels;
@@ -61,8 +62,10 @@ export function projectBacklogItem(issue: BacklogIssueView, scope: BacklogMetada
   // still never runs.
   const executionEligible = kind !== 'prd' && managed && (state === 'ready' || state === 'rework')
     && labeledState !== undefined;
+  const executionBase = parseExecutionBaseBranch(issue.description);
   return {
     id, workItemId: id, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, managed, executionEligible,
+    ...(executionBase ? { executionBase } : {}),
     ...(kind ? { kind } : {}),
     parentId: metadata.relations.parentId,
     baseBacklogId: metadata.relations.baseBacklogId ?? metadata.relations.legacyBaseRef,

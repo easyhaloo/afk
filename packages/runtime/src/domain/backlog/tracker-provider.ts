@@ -18,6 +18,7 @@ import {
   canonicalizeBacklogReference,
   decodeBacklogRelations,
   planRelationLabelDelta,
+  planModeLabelDelta,
   planRoleLabelDelta,
   type BacklogMetadataScope,
   type BacklogRelationUpdate,
@@ -390,6 +391,21 @@ export class TrackerBacklogProvider implements BacklogProvider {
       await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
         name,
         color: 'C5DEF5',
+        description: 'AFK backlog metadata',
+      })));
+    }
+    await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+  }
+
+  async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const delta = planModeLabelDelta(issue.labels, mode);
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
+    if (delta.add.length && target.tracker.ensureBacklogMetadata) {
+      await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
+        name,
+        color: '0052CC',
         description: 'AFK backlog metadata',
       })));
     }

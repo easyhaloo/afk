@@ -172,6 +172,13 @@ export interface BacklogManagementProvider {
    * role replaces the stage and mode labels the item had.
    */
   applyRole?(id: string, kind: BacklogKind): Promise<void>;
+  /**
+   * Switch who runs an item.
+   *
+   * It is optional because a provider that only reads — a credential-scoped
+   * inventory, for one — has nowhere to write the mode to.
+   */
+  applyMode?(id: string, mode: BacklogExecutionMode): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -204,6 +211,8 @@ export interface BacklogProvider {
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void>;
   /** Give an item the organizational role of a PRD anchor. */
   applyRole(id: string, kind: BacklogKind): Promise<void>;
+  /** Switch who runs an item. */
+  applyMode(id: string, mode: BacklogExecutionMode): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
 }
@@ -402,6 +411,16 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     item.kind = kind;
     delete item.state;
     item.executionMode = 'hitl';
+    this.items.set(id, item);
+  }
+
+  /**
+   * Switch who runs an item. Only the mode changes: the state, the role and
+   * the relationships of the item stay where they are.
+   */
+  async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    const item = await this.get(id);
+    item.executionMode = mode;
     this.items.set(id, item);
   }
 

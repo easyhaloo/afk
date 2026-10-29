@@ -29,6 +29,7 @@ export class GitHubBacklogProvider implements BacklogProvider {
   removeTag(id: string, tag: string): Promise<void> { return this.implementation.removeTag(id, tag); }
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.implementation.applyRelationUpdate(id, update); }
   applyRole(id: string, kind: BacklogKind): Promise<void> { return this.implementation.applyRole(id, kind); }
+  applyMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.implementation.applyMode(id, mode); }
   initialize(): Promise<void> { return this.implementation.initialize(); }
   isRunnable(item: BacklogItem): Promise<boolean> { return this.implementation.isRunnable(item); }
 }

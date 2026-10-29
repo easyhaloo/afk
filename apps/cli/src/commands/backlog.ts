@@ -41,6 +41,7 @@ import {
   adoptBacklog,
   applyBacklogRelationUpdate,
   applyBacklogRole,
+  applyBacklogMode,
   confirmBacklogMerge,
   createBacklog,
   initializeBacklog,
@@ -913,6 +914,34 @@ export async function runBacklogRole(
   }
 }
 
+export async function runBacklogMode(
+  provider: BacklogManagementProvider,
+  id: string,
+  mode: BacklogExecutionMode,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.mode';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!modes.includes(mode)) {
+      throw new Error(`invalid execution mode: ${mode}. Supported modes: ${modes.join(', ')}`);
+    }
+    await applyBacklogMode(provider, id, mode);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(command, item);
+      return;
+    }
+    success(`Backlog ${id} now runs in ${mode} mode`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function runBacklogInterrupt(
   provider: QABacklogProvider,
   id: string,
@@ -1388,6 +1417,32 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'role')!, 'backlog.role', argv);
+
+  backlog.command('mode')
+    .description('Switch who runs a backlog item')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--mode <mode>', `Execution mode (${modes.join('|')})`)
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogMode(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.mode as BacklogExecutionMode,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.mode', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'mode')!, 'backlog.mode', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

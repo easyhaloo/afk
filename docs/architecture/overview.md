@@ -90,6 +90,7 @@ single source of truth for the supported surface:
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
 | `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
+| `afk backlog mode --id <id> --mode afk\|hitl` | Switch who runs a backlog item |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
@@ -380,6 +381,15 @@ itself. An anchor has no lifecycle position at all — it is a container.
 Every other label of the issue stays where it is, so an item can become an
 anchor without losing its children, its dependencies or its business tags.
 The edit is idempotent: an item that already carries the role is left alone.
+
+### Backlog execution mode
+
+`afk backlog mode --id <id> --mode afk|hitl` switches who runs an item that
+already exists. The execution mode is reserved metadata, so the edit replaces
+the mode label and nothing else: the state, the role, the business tags and
+the relationships of the item stay exactly where they are. The edit is
+idempotent, and it is the way an operator hands an item to AFK or takes it
+back for a human.
 
 ### Backlog manifest
 

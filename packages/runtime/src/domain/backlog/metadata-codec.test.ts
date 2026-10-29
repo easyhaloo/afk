@@ -6,6 +6,7 @@ import {
   encodeBacklogRelations,
   isBacklogRelationLabel,
   planRelationLabelDelta,
+  planModeLabelDelta,
   planRoleLabelDelta,
 } from './metadata-codec.js';
 
@@ -197,6 +198,32 @@ describe('backlog role label delta', () => {
   it('leaves the business tags and the relationships alone', () => {
     expect(planRoleLabelDelta(['billing', 'parent::github:org/repo#1', 'depends-on::github:org/repo#9'], 'prd')).toEqual({
       add: ['kind::prd', 'mode::hitl'],
+      remove: [],
+    });
+  });
+});
+
+describe('backlog execution mode label delta', () => {
+  it('hands an item to AFK and takes it away from the human', () => {
+    expect(planModeLabelDelta(['stage::ready-for-issues', 'mode::hitl'], 'afk')).toEqual({
+      add: ['mode::afk'],
+      remove: ['mode::hitl'],
+    });
+  });
+
+  it('keeps the mode an item already carries', () => {
+    expect(planModeLabelDelta(['stage::ready-for-issues', 'mode::afk'], 'afk')).toEqual({
+      add: [],
+      remove: [],
+    });
+  });
+
+  it('leaves the stage, the role, the business tags and the relationships alone', () => {
+    expect(planModeLabelDelta(
+      ['stage::ready-for-issues', 'kind::prd', 'billing', 'parent::github:org/repo#1'],
+      'hitl',
+    )).toEqual({
+      add: ['mode::hitl'],
       remove: [],
     });
   });

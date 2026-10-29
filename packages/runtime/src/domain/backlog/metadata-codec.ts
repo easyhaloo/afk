@@ -398,3 +398,23 @@ export function planRoleLabelDelta(
     remove: [...remove].filter(label => labels.includes(label)),
   };
 }
+
+/**
+ * Plan the label changes that switch who runs an item.
+ *
+ * The execution mode is the only thing the edit touches: the stage, the role,
+ * the business tags and the relationships of the item stay exactly where they
+ * are, so an operator can hand an item to a human or back to AFK without
+ * disturbing the graph it belongs to.
+ */
+export function planModeLabelDelta(
+  labels: readonly string[],
+  mode: BacklogExecutionMode,
+): BacklogLabelDelta {
+  const modeLabel = BACKLOG_METADATA.executionModeLabels[mode];
+  return {
+    add: labels.includes(modeLabel) ? [] : [modeLabel],
+    remove: labels.filter(label =>
+      label !== modeLabel && label.startsWith(BACKLOG_LABEL_PREFIX.mode)),
+  };
+}

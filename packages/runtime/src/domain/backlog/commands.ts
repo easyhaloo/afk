@@ -1,5 +1,6 @@
 import type {
   BacklogCreateInput,
+  BacklogExecutionMode,
   BacklogKind,
   BacklogListOptions,
   BacklogManagementProvider,
@@ -72,6 +73,22 @@ export async function applyBacklogRole(
 ): Promise<void> {
   if (!provider.applyRole) throw new Error('backlog provider does not support role edits');
   await provider.applyRole(id, kind);
+}
+
+/**
+ * Switch who runs a backlog item.
+ *
+ * The execution mode is the operator's decision about who drives the item, so
+ * it is edited on the item itself: the state, the business tags and the
+ * relationships of the item stay exactly where they are.
+ */
+export async function applyBacklogMode(
+  provider: BacklogManagementProvider,
+  id: string,
+  mode: BacklogExecutionMode,
+): Promise<void> {
+  if (!provider.applyMode) throw new Error('backlog provider does not support execution mode edits');
+  await provider.applyMode(id, mode);
 }
 
 export interface BacklogChangeProvider {

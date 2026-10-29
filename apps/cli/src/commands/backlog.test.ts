@@ -17,6 +17,7 @@ import {
   runBacklogRelationRemove,
   runBacklogRetry,
   runBacklogRole,
+  runBacklogMode,
   runBacklogShow,
   runBacklogTagAdd,
   runBacklogTagRemove,
@@ -24,7 +25,7 @@ import {
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
-import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
 import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
@@ -499,6 +500,11 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       delete item.state;
       item.executionMode = 'hitl';
     },
+    async applyMode(id: string, mode: BacklogExecutionMode) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.executionMode = mode;
+    },
     async initialize() { /* noop */ },
     async transition(id, state) {
       const item = items.find(candidate => candidate.id === id);
@@ -844,6 +850,43 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.kind).toBe('backlog.role');
     expect(envelope.error.message).toContain('invalid backlog role');
+  });
+
+  it('runBacklogMode switches who runs an item', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogMode(stubProvider([{ ...stubItem }]), '42', 'afk', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.mode');
+    expect(envelope.data.executionMode).toBe('afk');
+    expect(envelope.data.state).toBe('ready');
+  });
+
+  it('runBacklogMode refuses a mode the model does not have', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogMode(stubProvider([{ ...stubItem }]), '42', 'nope' as BacklogExecutionMode, { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.mode');
+    expect(envelope.error.message).toContain('invalid execution mode');
   });
 
   it('runBacklogInterrupt emits the blocked hitl backlog', async () => {    const captured: string[] = [];

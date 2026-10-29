@@ -21,6 +21,13 @@ import type {
   ProviderCatalog,
 } from '@afk/runtime/domain/work-item/provider-types';
 import { verifiedInventoryNamespace, SqliteInventoryStore } from '@afk/runtime/storage';
+import {
+  createMirrorWorkItemChildrenInventory,
+  listWorkItemChildren,
+  type WorkItemChildrenResult,
+} from '@afk/runtime/application/work-item/children';
+import { toGlobalWorkItems } from '@afk/runtime/application/work-item/inventory-items';
+import { parseWorkItemId } from '@afk/runtime/domain/work-item/identity';
 import type { InventoryItem, InventoryProject, InventorySnapshot } from '@afk/application';
 import {
   addBacklogTag,
@@ -365,6 +372,118 @@ export async function runBacklogShow(
   }
 }
 
+export interface BacklogChildrenDependencies {
+  /** The locally stored parent and its children. */
+  read?: (parentId: string) => Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined>;
+  /** Collect the items from the providers again. */
+  collect?: () => Promise<{ items: readonly GlobalWorkItem[] } | undefined>;
+}
+
+/**
+ * List the issues that belong to one work item.
+ *
+ * The local mirror answers first. A missing or stale mirror is collected
+ * again before the question is answered, so a PRD that was split after the
+ * last collection still reports its children.
+ */
+export async function runBacklogChildren(
+  parentId: string,
+  options: JsonMode,
+  dependencies: BacklogChildrenDependencies = {},
+): Promise<void> {
+  const kind = 'backlog.children';
+  try {
+    const identity = canonicalParentId(parentId);
+    const inventory = createMirrorWorkItemChildrenInventory({
+      read: dependencies.read ?? readChildrenFromMirror,
+      collect: dependencies.collect ?? collectWorkItems,
+    });
+    const result = await listWorkItemChildren(inventory, { parentId: identity });
+    if (options.json) {
+      emitSuccess(kind, { parent: result.parent, children: result.children, source: result.source });
+      return;
+    }
+    printChildren(result);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * The identity of the queried item.
+ *
+ * A bare issue number names a different issue in every repository, so only
+ * the canonical identity can address one.
+ */
+function canonicalParentId(value: string): string {
+  try {
+    return parseWorkItemId(value).id;
+  } catch {
+    throw new Error(`work item id must use platform:projectKey#issueNumber: ${value}`);
+  }
+}
+
+function printChildren(result: WorkItemChildrenResult): void {
+  console.log(`${chalk.bold(result.parent.id)}  ${result.parent.title}`);
+  detail(`state: ${result.parent.state}  mode: ${result.parent.executionMode}`);
+  if (result.children.length === 0) {
+    warning('No child issues found');
+    return;
+  }
+  for (const child of result.children) {
+    console.log(`${chalk.bold(child.id)}  ${child.title}`);
+    detail(`state: ${child.state}  mode: ${child.executionMode}  managed: ${child.managed ? 'yes' : 'no'}`);
+    if (child.webUrl) detail(`url: ${child.webUrl}`);
+  }
+}
+
+/**
+ * Open the local mirror of the work item inventory.
+ *
+ * The mirror is stored per account set, so it can only be opened when every
+ * account is verified. Without one the query falls back to the providers.
+ */
+async function openInventoryMirror(): Promise<SqliteInventoryStore | undefined> {
+  const catalogs = createGlobalWorkItemCatalogs('all');
+  const resolution = await resolveProviderAccountIdentities(catalogs);
+  const namespaceKey = verifiedInventoryNamespace(resolution.identities);
+  if (!namespaceKey) return undefined;
+  return new SqliteInventoryStore({ namespaceKey });
+}
+
+/** The parent and its children as the local mirror holds them. */
+async function readChildrenFromMirror(
+  parentId: string,
+): Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined> {
+  const store = await openInventoryMirror();
+  if (!store) return undefined;
+  try {
+    const page = await store.query({ parentId });
+    const parent = await store.get(parentId);
+    const items = [...(parent ? [parent] : []), ...page.items];
+    return { items: toGlobalWorkItems(items), lastSuccessAt: page.lastSuccessAt };
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * Collect the work items again and publish them to the mirror.
+ *
+ * Publishing is best effort. The answer does not depend on the mirror being
+ * writable, so a failed publish costs the cache but not the query.
+ */
+async function collectWorkItems(): Promise<{ items: readonly GlobalWorkItem[] } | undefined> {
+  const catalogs = createGlobalWorkItemCatalogs('all');
+  const collected = await collectGlobalWorkItemInventory(catalogs);
+  await persistInventory(catalogs, collected);
+  return { items: collected.items };
+}
+
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
   options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; stage?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
@@ -666,6 +785,23 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.show', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  backlog
+    .command('children')
+    .description('List the issues that belong to one work item')
+    .argument('<prd-id>', 'Canonical work item ID (platform:projectKey#issueNumber)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async (prdId: string, options) => {
+      try {
+        await runBacklogChildren(prdId, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.children', classifyError(error), (error as Error).message);
           return;
         }
         handleCommandError(error);

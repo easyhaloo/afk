@@ -8,6 +8,7 @@ import {
   runBacklogAdopt,
   runBacklogConfirmMerge,
   runBacklogCreate,
+  runBacklogChildren,
   runBacklogInterrupt,
   runBacklogInventory,
   runBacklogList,
@@ -22,6 +23,7 @@ import { registerLoopCommands } from './loop.js';
 import type { BacklogCreateInput, BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
+import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
 import { emitSuccess, emitFailure } from '../output.js';
 import * as providerFactory from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 
@@ -38,7 +40,7 @@ describe('hard-cutover command surface', () => {
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const commandNames = backlog?.commands.map(command => command.name()) ?? [];
     expect(commandNames).toEqual(expect.arrayContaining([
-      'init', 'adopt', 'inventory', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
+      'init', 'adopt', 'inventory', 'list', 'show', 'children', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
     ]));
     expect(new Set(commandNames).size).toBe(commandNames.length);
     const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
@@ -792,5 +794,93 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       process.stdout.write = original;
       process.exitCode = previousExitCode;
     }
+  });
+});
+
+describe('backlog children', () => {
+  function workItem(id: string, overrides: Partial<GlobalWorkItem> = {}): GlobalWorkItem {
+    const [identity, issueNumber] = id.split('#');
+    const projectKey = identity?.split(':')[1] ?? 'group/repo';
+    return {
+      id,
+      issueNumber: Number(issueNumber),
+      project: { platform: 'gitlab', projectKey, name: projectKey.split('/').at(-1) ?? projectKey },
+      title: id,
+      managed: true,
+      executionEligible: false,
+      state: 'ready',
+      executionMode: 'hitl',
+      dependsOn: [],
+      tags: [],
+      branchName: `feature/${issueNumber}`,
+      providerRef: id,
+      ...overrides,
+    };
+  }
+
+  const parent = workItem('gitlab:group/repo#7', { title: 'the PRD', state: 'prd' });
+  const child = workItem('gitlab:group/repo#8', { parentId: parent.id, title: 'child issue' });
+  const unmanaged = workItem('gitlab:group/repo#9', { parentId: parent.id, title: 'manual issue', managed: false });
+
+  async function capture(run: () => Promise<void>): Promise<Record<string, unknown>> {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await run();
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+    return JSON.parse(captured.join('')) as Record<string, unknown>;
+  }
+
+  it('lists the issues that belong to one work item', async () => {
+    const envelope = await capture(() => runBacklogChildren(parent.id, { json: true }, {
+      read: async () => ({ items: [parent, child, unmanaged], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.children',
+      data: {
+        parent: { id: parent.id, title: 'the PRD' },
+        children: [
+          { id: child.id, title: 'child issue', managed: true },
+          { id: unmanaged.id, title: 'manual issue', managed: false },
+        ],
+      },
+    });
+  });
+
+  it('reports an identity that is not a work item id', async () => {
+    const envelope = await capture(() => runBacklogChildren('42', { json: true }, {
+      read: async () => undefined,
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: false,
+      kind: 'backlog.children',
+      error: { code: 'validation' },
+    });
+  });
+
+  it('reports a work item that does not exist', async () => {
+    const envelope = await capture(() => runBacklogChildren('gitlab:group/repo#404', { json: true }, {
+      read: async () => ({ items: [parent, child], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: false,
+      kind: 'backlog.children',
+      error: { code: 'not_found' },
+    });
   });
 });

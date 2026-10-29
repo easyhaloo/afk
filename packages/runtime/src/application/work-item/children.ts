@@ -45,6 +45,52 @@ export interface WorkItemChildrenInventory {
 }
 
 /**
+ * A stored inventory, and the collection that heals it.
+ *
+ * The two surfaces that answer this question — the command line and the
+ * desktop client — keep their copy in different places, but they agree on
+ * what a copy is: the items of the last collection and the time it
+ * succeeded.
+ */
+export interface WorkItemChildrenStore {
+  /** The parent and its children as they are stored locally. */
+  read(parentId: string): Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined>;
+  /** Collect the items again from the providers. */
+  collect(): Promise<{ items: readonly GlobalWorkItem[] } | undefined>;
+}
+
+/** How long a stored copy is trusted before it is collected again. */
+export const DEFAULT_CHILDREN_STALE_AFTER_MS = 5 * 60_000;
+
+/**
+ * The children query over a stored inventory.
+ *
+ * The stored copy answers until it goes stale. A copy that has never
+ * succeeded has no time to compare against, so it is stale too: the first
+ * query after a fresh install pays for the collection.
+ */
+export function createMirrorWorkItemChildrenInventory(
+  store: WorkItemChildrenStore,
+  options: { staleAfterMs?: number } = {},
+): WorkItemChildrenInventory {
+  const staleAfterMs = options.staleAfterMs ?? DEFAULT_CHILDREN_STALE_AFTER_MS;
+  return {
+    async read(parentId) {
+      const stored = await store.read(parentId);
+      if (!stored) return undefined;
+      const lastSuccessAt = stored.lastSuccessAt;
+      const stale = lastSuccessAt === undefined || Date.now() - lastSuccessAt >= staleAfterMs;
+      return { items: stored.items, stale };
+    },
+    async refresh(parentId) {
+      const collected = await store.collect();
+      if (!collected) return undefined;
+      return { items: collected.items };
+    },
+  };
+}
+
+/**
  * List the direct children of one work item.
  *
  * The local inventory answers first. A missing or stale copy is refreshed,

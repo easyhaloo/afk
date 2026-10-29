@@ -463,6 +463,9 @@ Claude Code 的配置文件（`~/.claude.json`，或 `$CLAUDE_CONFIG_DIR/.claude
 
 - 任何失败转换、冲突、超时或 lease 过期都进入 `blocked + hitl`，不会静默
   作为自动任务重试。
+- 阻断条目时会一并关闭本次失败执行所回应的 operator rework 请求，使
+  `afk backlog retry` 能再次发起。qa 来源的 rework 记录保持 open——它就是
+  验证反馈本身，下一次 operator 重试会自行取代它。
 - 优先使用原生认领；文件系统 fallback 仅适用于单机上的本地可信文件系统。
 - lease 清理由生命周期统一管理且必须幂等。
 - backlog ID 通过 provider-neutral 函数确定性映射到分支名。

@@ -133,6 +133,48 @@ export async function retryBacklog(
   return provider.get(id);
 }
 
+/**
+ * Block an item and close the operator rework request the failed execution
+ * answered.
+ *
+ * An operator rework record is an outstanding request for rework. The attempt
+ * that answered it has now failed, so the request is answered — negatively —
+ * and the operator has to be able to ask for it again. Leaving the record
+ * open makes `retry` refuse with "already has an open rework record", and the
+ * item can never be executed again.
+ *
+ * A QA-sourced record is left alone: it is the verification feedback itself,
+ * and the next operator retry supersedes it on its own.
+ */
+export async function blockBacklog(
+  provider: QABacklogProvider,
+  id: string,
+  reason: string,
+): Promise<void> {
+  const summary = requiredReason(reason);
+  await closeOperatorRework(provider, id, summary);
+  await provider.transition(id, 'blocked', { reason: summary });
+  await provider.setExecutionMode(id, 'hitl');
+}
+
+/**
+ * Close the operator rework request the failed execution answered.
+ *
+ * Best-effort on purpose: the blocked transition is the outcome that matters,
+ * so a provider that cannot report or close rework records must not keep the
+ * item out of the blocked state. A record that stays open only costs the
+ * operator one more retry attempt.
+ */
+async function closeOperatorRework(provider: QABacklogProvider, id: string, summary: string): Promise<void> {
+  try {
+    const active = await provider.getActiveRework(id);
+    if (active?.source !== 'operator') return;
+    await provider.resolveRework(id, active.id, { summary: `Rework ${active.id} did not pass: ${summary}` });
+  } catch {
+    /* the item is blocked either way */
+  }
+}
+
 export async function confirmBacklogMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,

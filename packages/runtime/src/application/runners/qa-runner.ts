@@ -6,6 +6,7 @@ import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/ind
 import { configureStatusline, logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
+import { blockBacklog } from '../../domain/backlog/commands.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
 import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
@@ -408,8 +409,7 @@ export class QARunner {
   }
 
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
-    await this.providers.backlog.transition(backlogId, 'blocked', { reason });
-    await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+    await blockBacklog(this.providers.backlog, backlogId, reason);
   }
 
   private async recordBudgetUsage(store: BudgetStore, budget: BudgetManager, execution: AgentExecution, result: ExecutionResult): Promise<void> {

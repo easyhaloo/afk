@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   adoptBacklog,
+  blockBacklog,
   confirmBacklogMerge,
   createBacklog,
   interruptBacklog,
@@ -92,6 +93,53 @@ describe('backlog commands', () => {
 
     await expect(retryBacklog(provider, '42', 'retry')).rejects.toThrow('requires blocked + hitl');
     expect(provider.createRework).not.toHaveBeenCalled();
+  });
+
+  it('closes the open rework record when a blocked execution ends', async () => {
+    const provider = lifecycleProvider(backlogItem({ state: 'blocked', executionMode: 'hitl' }));
+    provider.getActiveRework = vi.fn(async () => ({
+      version: 1 as const,
+      id: 'r1',
+      attempt: 1,
+      status: 'open' as const,
+      source: 'operator' as const,
+      summary: 'first attempt',
+      failedCriteria: [],
+      requiredChecks: [],
+      createdAt: '2026-09-17T00:00:00.000Z',
+    }));
+
+    await blockBacklog(provider, '42', 'QA timed out');
+
+    expect(provider.resolveRework).toHaveBeenCalledWith('42', 'r1', {
+      summary: 'Rework r1 did not pass: QA timed out',
+    });
+    expect(provider.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'QA timed out' });
+    expect(provider.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
+  });
+
+  it('lets an operator retry an item whose rework attempt failed', async () => {
+    const provider = new InMemoryBacklogProvider([
+      backlogItem({ id: '42', state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    await provider.createRework('42', {
+      source: 'operator',
+      summary: 'first attempt',
+      failedCriteria: [],
+      requiredChecks: [],
+    });
+    // The attempt answered the rework request and failed.
+    await provider.transition('42', 'blocked', { reason: 'QA timed out' });
+    await provider.setExecutionMode('42', 'hitl');
+
+    await expect(retryBacklog(provider, '42', 'second attempt')).rejects.toThrow('already has an open rework record');
+
+    await blockBacklog(provider, '42', 'QA timed out');
+
+    await expect(retryBacklog(provider, '42', 'second attempt')).resolves.toMatchObject({
+      state: 'rework',
+      executionMode: 'afk',
+    });
   });
 
   it('merges the associated root change, confirms merged, then marks the backlog done', async () => {
@@ -299,6 +347,8 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
   transition: ReturnType<typeof vi.fn>;
   setExecutionMode: ReturnType<typeof vi.fn>;
   createRework: ReturnType<typeof vi.fn>;
+  getActiveRework: ReturnType<typeof vi.fn>;
+  resolveRework: ReturnType<typeof vi.fn>;
 } {
   const current = { ...item };
   return {

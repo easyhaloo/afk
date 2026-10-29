@@ -580,6 +580,10 @@ filesystem lease directory.
 
 - A failed transition, conflict, timeout, or expired lease is `blocked` plus
   `hitl`; it is never silently retried as automatic work.
+- Blocking an item also closes the operator rework request the failed
+  execution answered, so `afk backlog retry` can ask for it again. A QA-sourced
+  rework record stays open: it is the verification feedback, and the next
+  operator retry supersedes it on its own.
 - Native claim is preferred; the filesystem fallback is deliberately scoped to
   a trusted local filesystem on one host.
 - Lease cleanup is lifecycle-owned and idempotent.

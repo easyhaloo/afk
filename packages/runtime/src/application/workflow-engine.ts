@@ -45,6 +45,7 @@ import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/type
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
 import { resolveBacklogExecutionBase } from '../domain/backlog/creation.js';
+import { blockBacklog } from '../domain/backlog/commands.js';
 import { parseWorkItemId } from '../domain/work-item/identity.js';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
@@ -557,8 +558,11 @@ export class WorkflowRunner {
         }
       }
       if (this.providers && this.activeBacklog) {
-        await this.providers.backlog.transition(this.activeBacklog.id, result.success ? 'verification' : 'blocked', result.success ? undefined : { reason: this.runtimeErrorSummary ?? 'workflow execution failed' });
-        if (!result.success) await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
+        if (result.success) {
+          await this.providers.backlog.transition(this.activeBacklog.id, 'verification', undefined);
+        } else {
+          await blockBacklog(this.providers.backlog, this.activeBacklog.id, this.runtimeErrorSummary ?? 'workflow execution failed');
+        }
       }
       terminalOutcome = result.success ? 'success' : 'failed';
       if (result.success) await this.recordObservation({ kind: 'implementation.completed' });
@@ -1364,8 +1368,7 @@ export class WorkflowRunner {
   private async markBacklogBlocked(reason: string): Promise<void> {
     if (!this.providers || !this.activeBacklog) return;
     try {
-      await this.providers.backlog.transition(this.activeBacklog.id, 'blocked', { reason });
-      await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
+      await blockBacklog(this.providers.backlog, this.activeBacklog.id, reason);
     } catch (error) {
       logger.warn({ backlogId: this.activeBacklog.id, error }, 'failed to mark backlog blocked');
     }

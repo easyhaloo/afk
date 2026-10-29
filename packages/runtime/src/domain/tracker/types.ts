@@ -159,6 +159,7 @@ import type { BacklogMetadataLabel } from '../backlog/initialization.js';
  * TrackerProvider interface — unified for GitLab and GitHub
  */
 export interface TrackerProvider {
+  forProject?(projectKey: string): TrackerProvider;
   readonly platform: Platform;
   readonly projectId: string | number;
   readonly providerHost?: string;
@@ -202,7 +203,6 @@ export interface TrackerProvider {
   // Utility
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
   getRetryCount(issue: TrackedIssue): number;
-  detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
   uploadArtifacts(worktreePath: string, options?: UploadArtifactsOptions): Promise<UploadedArtifact[]>;
 }
 

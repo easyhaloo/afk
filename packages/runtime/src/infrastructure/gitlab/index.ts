@@ -63,13 +63,20 @@ export class GitLabClient implements TrackerProvider {
   readonly providerHost: string;
   private client: InstanceType<typeof Gitlab>;
 
-  constructor(config: GitLabConfig) {
+  constructor(private readonly config: GitLabConfig) {
     this.providerHost = normalizeGitLabHost(config.url);
     this.client = new Gitlab({
       host: config.url,
       token: config.token,
     });
     this.projectId = config.projectId;
+  }
+
+  forProject(projectKey: string): GitLabClient {
+    const firstSegment = projectKey.split('/')[0];
+    if (firstSegment.includes('.') && firstSegment !== this.providerHost) throw new Error('cross-host backlog relationships are not supported');
+    const { projectPath } = resolveGitLabProjectKey(projectKey, this.providerHost);
+    return new GitLabClient({ ...this.config, projectId: projectPath });
   }
 
   async getIssue(id: number): Promise<TrackedIssue> {
@@ -263,14 +270,6 @@ export class GitLabClient implements TrackerProvider {
     const label = issue.labels.find(l => /^retry-count::\d+$/.test(l));
     if (!label) return 0;
     return parseInt(label.split('::')[1], 10);
-  }
-
-  async detectTargetBranch(issueId: number, explicit?: string): Promise<string> {
-    if (explicit) return explicit;
-    const issue = await this.getIssue(issueId);
-    const prdLabel = issue.labels.find(l => /^base::prd-\d+$/.test(l));
-    if (prdLabel) return `prd/${prdLabel.replace('base::prd-', '')}`;
-    return process.env.AFK_TARGET_BRANCH || 'main';
   }
 
   async uploadArtifacts(worktreePath: string): Promise<UploadedArtifact[]> {

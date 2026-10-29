@@ -28,6 +28,42 @@ function tracker(issue: any): TrackerProvider {
 }
 
 describe('TrackerBacklogProvider', () => {
+  it('recognizes PRD anchors without allowing claims or adoption', async () => {
+    const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['stage::prd'], state: 'opened' });
+    const provider = new TrackerBacklogProvider(t);
+    const anchor = await provider.get('10');
+    expect(anchor).toMatchObject({ state: 'prd', executionEligible: false, executionMode: 'hitl' });
+    await expect(provider.isRunnable(anchor)).resolves.toBe(false);
+    await expect(provider.adopt('10')).rejects.toThrow('invalid adoption metadata');
+  });
+
+  it('resolves qualified relationships in their own repository even when IIDs collide', async () => {
+    const remote = { ...tracker({ id: 7, platform: 'github', projectId: 'org/other', title: 'Remote', labels: ['stage::done'], state: 'closed' }), projectId: 'org/other' };
+    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
+    const t = { ...tracker(issue), forProject: vi.fn(() => remote),
+      createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };
+    const provider = new TrackerBacklogProvider(t);
+    const created = await provider.create({ title: 'Child', description: 'Body', parentId: 'github:org/other#7', dependsOn: ['github:org/other#7'] });
+    expect(created).toMatchObject({ parentId: 'github:org/other#7', dependsOn: ['github:org/other#7'] });
+    expect(t.forProject).toHaveBeenCalledWith('org/other');
+    expect(remote.getIssue).toHaveBeenCalledWith(7);
+    expect(t.linkIssues).toHaveBeenCalledWith(42, 7, 'blocked_by', 'org/other');
+    await expect(provider.isRunnable(created)).resolves.toBe(true);
+  });
+
+  it('returns an existing issue for a repeated idempotency key', async () => {
+    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Anchor', labels: [] as string[], state: 'opened' };
+    const t = { ...tracker(issue), ensureBacklogMetadata: vi.fn(async () => {}),
+      listIssues: vi.fn(async () => issue.labels.length ? [{ ...issue }] : []),
+      createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }) };
+    const provider = new TrackerBacklogProvider(t);
+    const input = { title: 'Anchor', description: 'Body', stage: 'prd' as const, idempotencyKey: 'migration/anchor' };
+    expect((await provider.create(input)).id).toBe('42');
+    expect((await provider.create(input)).id).toBe('42');
+    expect(t.createIssue).toHaveBeenCalledTimes(1);
+    expect((await provider.get('42')).tags).toEqual([]);
+  });
+
   it.each([
     ['stage::ready-for-issues'], ['mode::afk'], ['stage::ready-for-issues', 'mode::afk'],
   ])('fills only missing adoption labels and remains idempotent: %j', async (...labels) => {
@@ -325,14 +361,14 @@ describe('TrackerBacklogProvider', () => {
     expect(atomicClaim).toHaveBeenCalledWith('42', 'worker', 'ready', expect.objectContaining({ parentId: '10' }));
   });
 
-  it('allows a parent backlog to run after every tracker child is done', async () => {
+  it('keeps a parent backlog non-runnable after every tracker child is done', async () => {
     const parent = { id: 10, title: 'Parent', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
     const child = { id: 42, title: 'Child', description: '', labels: ['stage::done', 'parent::10'], state: 'opened', url: '', projectId: 'org/repo' };
     const t = tracker(parent);
     t.listIssues = vi.fn(async () => [{ ...parent }, { ...child }]);
     const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
 
-    await expect(provider.isRunnable(await provider.get('10'))).resolves.toBe(true);
+    await expect(provider.isRunnable(await provider.get('10'))).resolves.toBe(false);
   });
 
   it('maps a closed issue without workflow labels to done for dependency checks', async () => {

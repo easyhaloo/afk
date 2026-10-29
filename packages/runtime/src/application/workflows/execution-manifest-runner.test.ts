@@ -51,7 +51,7 @@ describe('execution manifest request to runner boundary', () => {
     const providers = {
       backlog: {
         claim: claimBacklog, transition: vi.fn(async () => undefined), setExecutionMode: vi.fn(async () => undefined),
-        get: vi.fn(), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(),
+        get: vi.fn(async () => claimedItem), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(),
       },
       branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn() },
       changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
@@ -288,7 +288,7 @@ function providersForRun(): ProviderBundle {
   return {
     backlog: {
       claim: vi.fn(async () => claim), transition: vi.fn(async () => undefined), setExecutionMode: vi.fn(async () => undefined),
-      get: vi.fn(), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(async () => undefined),
+      get: vi.fn(async () => item), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(async () => undefined),
     },
     branches: {
       createBranch: vi.fn(), createVerificationWorktree: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn(),

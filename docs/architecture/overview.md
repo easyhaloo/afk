@@ -85,7 +85,7 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title>` | Create one provider-backed backlog item |
+| `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
@@ -245,6 +245,36 @@ carried unchanged through `afk run --backlog-id <id>`, `Run.workItemId`,
 Relationships have separate meanings: `parentId` is organizational grouping,
 `dependsOn` controls scheduling, and `baseBacklogId` selects an explicit Git
 execution base. Neither parent nor dependency edges implicitly select a branch.
+
+Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
+accept a positive issue number in the explicitly selected project, or a qualified
+`platform:projectKey#issueNumber` reference. Qualified references are preserved
+in provider labels and resolved against that project, so identical issue numbers
+in different repositories remain distinct. Cross-project parents and dependencies
+are supported within the authenticated provider host; cross-platform and cross-host
+references are rejected. A Git base must belong to the execution repository.
+Multi-repository Git bases belong in an execution manifest.
+
+For `afk run`, an unfinished base backlog selects its branch before workspace
+preparation, and a completed/merged base falls back to the configured base.
+An explicit `--base-branch`, branch strategy base, or manifest base takes precedence.
+Legacy `base::prd-N` metadata still selects `prd/N`. Implementation and QA use
+the same backlog base resolver; the normal target branch is unchanged.
+
+`--stage prd` creates an organizational anchor with `stage::prd`, which is
+never execution eligible. Existing PRD anchors are recognized even without mode
+labels. Issues without mode labels default to `hitl` until explicitly adopted.
+`--dry-run` validates the same creation plan, including referenced issues, and
+prints the title, description, labels and relationships without provider writes.
+`--idempotency-key` persists a hashed, project-scoped metadata label: sequential
+retries return the existing issue, including closed issues. It is a retry key,
+not a distributed lock; concurrent creators must be serialized by the caller.
+Reserved metadata labels cannot be supplied as business tags, and duplicate
+parent/base labels or invalid references fail validation.
+
+CLI JSON success envelopes are `{ok:true,kind,data}`. Failures are
+`{ok:false,kind,data:null,error:{code,message,details?}}` with a nonzero exit code.
+Automation must check both the exit status and `ok` before reading `data`.
 
 ## Backlog lifecycle
 

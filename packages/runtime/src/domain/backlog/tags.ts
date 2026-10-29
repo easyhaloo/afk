@@ -9,6 +9,7 @@ export const INTERNAL_LABEL_PREFIXES = [
   'base::',
   'depends-on::',
   'depends_on::',
+  'idempotency::',
 ] as const;
 
 export function isInternalBacklogLabel(label: string): boolean {

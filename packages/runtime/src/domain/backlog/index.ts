@@ -1,4 +1,4 @@
-export type BacklogState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+export type BacklogState = 'prd' | 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 export type BacklogExecutionMode = 'afk' | 'hitl';
 
 export type BacklogChangeRequest = {
@@ -60,6 +60,8 @@ export interface BacklogItem {
 export interface BacklogCreateInput {
   title: string;
   description: string;
+  stage?: 'ready' | 'prd';
+  idempotencyKey?: string;
   parentId?: string;
   baseBacklogId?: string;
   dependsOn?: string[];
@@ -158,7 +160,7 @@ export class InMemoryBacklogProvider implements BacklogProvider {
       parentId: input.parentId,
       baseBacklogId: input.baseBacklogId,
       dependsOn: [...new Set(input.dependsOn ?? [])],
-      state: 'ready',
+      state: input.stage ?? 'ready',
       executionMode: input.executionMode ?? 'afk',
       tags: [...new Set((input.tags ?? []).map(validateBusinessTag))],
       branchName: deriveBacklogBranchName(id),
@@ -263,7 +265,7 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   async isRunnable(item: BacklogItem): Promise<boolean> {
     if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
     const hasIncompleteChild = [...this.items.values()]
-      .some(candidate => candidate.parentId === item.id && candidate.state !== 'done');
+      .some(candidate => candidate.parentId === item.id);
     if (hasIncompleteChild) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = this.items.get(dependencyId);

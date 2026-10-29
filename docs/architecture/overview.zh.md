@@ -64,7 +64,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
-| `afk backlog create <title>` | 创建一个 provider 背书的 backlog 工作项 |
+| `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
@@ -201,6 +201,29 @@ TUI 投影和 Desktop 摘要之间原样传递。`runId` 标识一次执行尝�
 
 各关系字段含义互不相同：`parentId` 表示组织分组，`dependsOn` 控制调度顺序，
 `baseBacklogId` 选择显式的 Git 执行基线。父级边和依赖边都不会隐式选择分支。
+
+创建关系参数（`--parent`、`--base-backlog`、`--depends-on`）接受显式选定项目内的
+正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。完整引用原样
+保存在 provider 标签中，并在对应项目解析，因此不同仓库的相同编号不会混淆。
+支持同一认证 provider 主机内的跨项目父项与依赖；跨平台或跨主机引用会明确拒绝。
+Git 执行基线必须属于执行仓库；多仓 Git 基线通过 execution manifest 配置。
+
+`afk run` 在准备工作区前，以尚未完成的基线 backlog 分支作为执行基线；基线已完成
+或合并时回落到配置分支。显式的 `--base-branch`、分支策略基线或 manifest 基线
+优先。存量 `base::prd-N` 继续选择 `prd/N`。实现执行与 QA 共用 backlog 基线
+解析逻辑，正常目标分支保持原有语义。
+
+`--stage prd` 创建带 `stage::prd` 的组织性锚点，始终不可执行；无 mode 标签的
+存量 PRD 锚点也能识别。缺少 mode 标签的 issue 默认 `hitl`，需显式 adopt 后
+才能自动执行。`--dry-run` 使用相同创建计划校验引用，并输出标题、描述、标签与
+关系，不写入 provider。`--idempotency-key` 持久化经过哈希的项目内元数据标签，
+顺序重试返回已有 issue（含已关闭项）。该键用于重试去重，不是分布式锁；并发创建
+需要由调用方串行化。业务标签不能注入保留元数据，重复 parent/base 标签或非法引用
+会被校验拒绝。
+
+CLI JSON 成功信封为 `{ok:true,kind,data}`；失败信封为
+`{ok:false,kind,data:null,error:{code,message,details?}}`，并返回非零退出码。
+自动化脚本须同时检查退出状态与 `ok`，再读取 `data`。
 
 ## Backlog 生命周期
 

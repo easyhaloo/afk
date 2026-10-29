@@ -46,6 +46,44 @@ function runner(bundle: ProviderBundle): WorkflowRunner {
 }
 
 describe('WorkflowRunner backlog provider mode', () => {
+  it('rejects a PRD parent before claiming or preparing a workspace', async () => {
+    const bundle = providers(vi.fn());
+    vi.mocked(bundle.backlog.get).mockResolvedValue({ ...item, state: 'prd' });
+    await expect(runner(bundle).run({ backlogId: '42', session: 'worker', targetBranch: 'main' })).rejects.toThrow('PRD parent');
+    expect(bundle.backlog.claim).not.toHaveBeenCalled();
+    expect(bundle.branches.createBranch).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('propagates the execution base into implementation and repository preparation (explicit override: %s)', async baseBranchExplicit => {
+    const child = { ...item, baseBacklogId: '1' };
+    const { claim } = claimed(child);
+    const bundle = providers(vi.fn(async () => claim));
+    vi.mocked(bundle.backlog.get).mockImplementation(async id => id === '1'
+      ? { ...item, id: '1', branchName: 'afk/backlog-1', providerRef: 'github:org/repo#1' } : child);
+    const subject = runner(bundle) as any;
+    subject.runBody = vi.fn(async () => ({ success: true }));
+    await subject.run({ backlogId: '42', session: 'worker', targetBranch: 'master', baseBranch: 'master', baseBranchExplicit,
+      branchStrategy: { type: 'named', branch: 'afk/backlog-42' } });
+    const expected = baseBranchExplicit ? 'master' : 'afk/backlog-1';
+    expect(subject.runBody).toHaveBeenCalledWith(expect.objectContaining({ baseBranch: expected }));
+    expect(subject.activeBacklog.branchName).toBe('afk/backlog-42');
+  });
+
+  it('passes the resolved base to primary repository preparation', async () => {
+    const child = { ...item, baseBacklogId: '1' };
+    const { claim } = claimed(child);
+    const bundle = providers(vi.fn(async () => claim));
+    vi.mocked(bundle.backlog.get).mockImplementation(async id => id === '1'
+      ? { ...item, id: '1', branchName: 'afk/backlog-1', providerRef: 'github:org/repo#1' } : child);
+    const subject = runner(bundle) as any;
+    const prepare = vi.fn().mockRejectedValue(new Error('stop at repository preparation'));
+    subject.multiRepositoryPreparer = { prepare };
+    await expect(subject.run({ backlogId: '42', session: 'worker', targetBranch: 'master', baseBranch: 'master',
+      repositories: [{ primary: true, baseBranch: 'master' }, { primary: false, baseBranch: 'develop' }] }))
+      .rejects.toThrow('stop at repository preparation');
+    expect(prepare).toHaveBeenCalledWith([{ primary: true, baseBranch: 'afk/backlog-1' }, { primary: false, baseBranch: 'develop' }], expect.any(String));
+  });
+
   it('runs a phase through a provider that exposes only createExecution', async () => {
     const bundle = providers(vi.fn(async () => null));
     const runtime = {

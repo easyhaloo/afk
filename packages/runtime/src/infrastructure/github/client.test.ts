@@ -5,6 +5,15 @@ import { join } from 'node:path';
 import { GitHubClient } from './client.js';
 
 describe('GitHubClient', () => {
+  it('scopes relationship reads to the specified repository', async () => {
+    const client = new GitHubClient({ repo: 'org/code', auth: 'test-token' });
+    const scoped = client.forProject('org/other');
+    expect(scoped.projectId).toBe('org/other');
+    const get = vi.fn().mockResolvedValue({ data: { number: 7, title: 'Remote', labels: [], state: 'open', html_url: 'https://example/7' } });
+    (scoped as any).client = { issues: { get } };
+    await scoped.getIssue(7);
+    expect(get).toHaveBeenCalledWith({ owner: 'org', repo: 'other', issue_number: 7 });
+  });
   it('reads the PR-side closing issue references for open PRs', async () => {
     const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
     const graphql = vi.fn().mockResolvedValue({ repository: { pullRequest: { closingIssuesReferences: {

@@ -6,6 +6,8 @@ import type {
   QABacklogProvider,
 } from './index.js';
 
+export { planBacklogCreate, resolveBacklogExecutionBase } from './creation.js';
+
 export type { BacklogManagementProvider } from './index.js';
 
 export async function listBacklogs(provider: BacklogManagementProvider, options: BacklogListOptions): Promise<BacklogItem[]> {

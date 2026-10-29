@@ -87,7 +87,7 @@ describe('hard-cutover command surface', () => {
 
     expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
     expect(create?.options.map(option => option.long)).toEqual(expect.arrayContaining([
-      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--tag', '--project', '--platform', '--json',
+      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--stage', '--dry-run', '--idempotency-key', '--tag', '--project', '--platform', '--json',
     ]));
     expect(create?.options.find(option => option.long === '--base-backlog')?.description).toContain('explicit execution base');
     expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
@@ -395,6 +395,7 @@ describe('json-output helpers', () => {
     expect(JSON.parse(captured.join(''))).toEqual({
       ok: false,
       kind: 'backlog.list',
+      data: null,
       error: { code: 'auth', message: 'missing token', details: { hint: 'set GITHUB_TOKEN' } },
     });
   });
@@ -575,6 +576,23 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.kind).toBe('backlog.create');
     expect(envelope.data.id).toBe('new-1');
     expect(envelope.data.title).toBe('fresh');
+  });
+
+  it('previews a PRD anchor and relationship labels without creating or initializing', async () => {
+    const create = vi.fn();
+    const initialize = vi.fn();
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      await runBacklogCreate(stubProvider([stubItem], { create, initialize }), {
+        title: 'PRD', description: 'Body', stage: 'prd', dryRun: true, parent: '42', json: true,
+      });
+      expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ ok: true, kind: 'backlog.create',
+        data: { dryRun: true, title: 'PRD', labels: ['stage::prd', 'mode::afk', 'parent::42'] } });
+      expect(create).not.toHaveBeenCalled();
+      expect(initialize).not.toHaveBeenCalled();
+    } finally {
+      output.mockRestore();
+    }
   });
 
   it('runBacklogTagAdd emits the success envelope with the updated item', async () => {

@@ -38,6 +38,7 @@ export interface WorkflowRunRequest {
   session: string;
   targetBranch: string;
   baseBranch: string;
+  baseBranchExplicit?: boolean;
   maxRetries: number;
   hardTimeoutMs: number;
   completionTimeoutMs: number;
@@ -161,6 +162,8 @@ export function resolveWorkflowRequest(
     session: input.session ?? `afk-${input.workItemId ?? backlogId}`,
     targetBranch: input.targetBranch ?? config.targetBranch ?? defaults.targetBranch,
     baseBranch: input.baseBranch ?? config.trackerTargetBranch ?? config.targetBranch ?? defaults.baseBranch,
+    baseBranchExplicit: input.baseBranch !== undefined
+      || ((input.branchStrategy?.type === 'named' || input.branchStrategy?.type === 'merge-to-head') && input.branchStrategy.baseBranch !== undefined),
     maxRetries: input.maxRetries ?? config.maxRetries ?? defaults.maxRetries,
     hardTimeoutMs: input.hardTimeoutMs ?? config.workflowHardTimeout ?? defaults.hardTimeoutMs,
     completionTimeoutMs: input.completionTimeoutMs ?? config.completionTimeout ?? defaults.completionTimeoutMs,

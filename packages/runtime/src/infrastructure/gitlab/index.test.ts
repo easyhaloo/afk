@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { GitLabClient } from './index.js';
 
 describe('GitLabClient listMRs', () => {
+  it('scopes relationship reads to a project on the authenticated host', async () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'team/code' });
+    const scoped = client.forProject('gitlab.example.test/team/other');
+    expect(scoped.projectId).toBe('team/other');
+    expect(scoped.providerHost).toBe('gitlab.example.test');
+    const show = vi.fn().mockResolvedValue({ iid: 7, title: 'Remote', labels: [], state: 'opened', web_url: 'https://example/7' });
+    (scoped as any).client = { Issues: { show } };
+    await scoped.getIssue(7);
+    expect(show).toHaveBeenCalledWith('team/other', 7);
+    expect(() => client.forProject('other.example.test/team/other')).toThrow('cross-host');
+  });
   it('checks native closing issues by project ID and IID, failing closed on unreadable data', async () => {
     const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'team/code' });
     const closesIssues = vi.fn().mockResolvedValue([{ project_id: 11, iid: 158 }, { project_id: 22, iid: 158 }]);

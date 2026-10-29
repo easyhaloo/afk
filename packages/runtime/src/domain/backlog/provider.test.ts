@@ -24,7 +24,7 @@ describe('backlog provider', () => {
     expect(() => deriveBacklogBranchName('')).toThrow('backlog id');
   });
 
-  it('allows a parent backlog to run after every child backlog is done', async () => {
+  it('keeps a parent backlog non-runnable after every child backlog is done', async () => {
     const provider = new InMemoryBacklogProvider([
       item({ id: 'parent', branchName: 'afk/backlog-parent' }),
       item({ id: 'child', parentId: 'parent' }),
@@ -32,7 +32,7 @@ describe('backlog provider', () => {
 
     expect(await provider.isRunnable(await provider.get('parent'))).toBe(false);
     await provider.transition('child', 'done');
-    expect(await provider.isRunnable(await provider.get('parent'))).toBe(true);
+    expect(await provider.isRunnable(await provider.get('parent'))).toBe(false);
   });
 
   it('waits for every dependency to be done', async () => {

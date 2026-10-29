@@ -20,7 +20,7 @@ afterEach(async () => {
 function runner() {
   const record = vi.fn(async (_context: ObservationContext, _data: RunEventData) => undefined);
   const claim = vi.fn(async () => null);
-  const workflow = new WorkflowRunner({ backlog: { claim } } as unknown as ProviderBundle, {
+  const workflow = new WorkflowRunner({ backlog: { claim, get: vi.fn(async () => ({ id: '42', state: 'ready' })) } } as unknown as ProviderBundle, {
     observer: { record } as unknown as RunObserver,
     agentProvider: { name: 'claude-code', capabilities: new Set() } as never,
   });
@@ -61,7 +61,7 @@ describe('WorkflowRunner audit identity', () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-required-audit-'));
     roots.push(root);
     const claim = vi.fn(async () => null);
-    const workflow = new WorkflowRunner({ backlog: { claim } } as unknown as ProviderBundle, {
+    const workflow = new WorkflowRunner({ backlog: { claim, get: vi.fn(async () => ({ id: '42', state: 'ready' })) } } as unknown as ProviderBundle, {
       observer: new DurableRunObserver({ events: new JsonlEventStore({ root }) }),
       agentProvider: { name: 'claude-code', capabilities: new Set() } as never,
     });
@@ -85,7 +85,7 @@ describe('WorkflowRunner audit identity', () => {
     const record = vi.fn(async (_context: ObservationContext, data: RunEventData) => {
       if (data.kind === 'run.started') throw new Error('disk unavailable');
     });
-    const workflow = new WorkflowRunner({ backlog: { claim, getActiveRework: vi.fn(async () => null) } } as unknown as ProviderBundle, {
+    const workflow = new WorkflowRunner({ backlog: { claim, get: vi.fn(async () => ({ id: '42', state: 'ready' })), getActiveRework: vi.fn(async () => null) } } as unknown as ProviderBundle, {
       observer: { record } as unknown as RunObserver,
       agentProvider: { name: 'claude-code', capabilities: new Set() } as never,
     });

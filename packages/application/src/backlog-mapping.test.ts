@@ -10,6 +10,7 @@ import {
 
 describe('backlog -> core vocabulary', () => {
   it('maps every backlog state to its core work state', () => {
+    expect(toCoreWorkState('prd')).toBe('blocked');
     expect(toCoreWorkState('ready')).toBe('ready');
     expect(toCoreWorkState('rework')).toBe('rework');
     expect(toCoreWorkState('in_progress')).toBe('implementing');

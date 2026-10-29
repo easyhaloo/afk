@@ -20,6 +20,7 @@ export interface JsonFailureDetails {
 export type JsonFailure = {
   ok: false;
   kind: string;
+  data: null;
   error: {
     code: RuntimeErrorCode;
     message: string;
@@ -45,6 +46,7 @@ export function emitFailure(
   const envelope: JsonFailure = {
     ok: false,
     kind,
+    data: null,
     error: details ? { code, message, details } : { code, message },
   };
   process.stdout.write(JSON.stringify(envelope));

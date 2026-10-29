@@ -27,6 +27,7 @@ import {
   adoptBacklog,
   confirmBacklogMerge,
   createBacklog,
+  planBacklogCreate,
   initializeBacklog,
   interruptBacklog,
   listBacklogs,
@@ -49,7 +50,7 @@ import {
   emitSuccess,
 } from '../output.js';
 
-const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
+const states: BacklogState[] = ['prd', 'ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
 const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'all'];
 
@@ -367,7 +368,7 @@ export async function runBacklogShow(
 
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
-  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
+  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; stage?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
 ): Promise<void> {
   const kind = 'backlog.create';
   try {
@@ -375,17 +376,28 @@ export async function runBacklogCreate(
     if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
+    if (options.stage !== undefined && options.stage !== 'ready' && options.stage !== 'prd') {
+      throw new Error(`invalid creation stage: ${options.stage}`);
+    }
     const description = options.description ?? await readDescription(options.descriptionFile);
     if (!description.trim()) throw new Error('empty backlog description. Provide --description-file or pipe Markdown through stdin.');
     const input: BacklogCreateInput = {
       title: options.title,
       description,
+      stage: options.stage as BacklogCreateInput['stage'],
+      idempotencyKey: options.idempotencyKey,
       parentId: options.parent,
       baseBacklogId: options.baseBacklog,
       dependsOn: options.dependsOn,
       executionMode: options.mode as BacklogExecutionMode | undefined,
       tags: options.tag,
     };
+    if (options.dryRun) {
+      const { links, idempotencyLabel, ...plan } = await planBacklogCreate(provider, input);
+      if (options.json) emitSuccess(kind, { dryRun: true, ...plan });
+      else process.stdout.write(`${JSON.stringify({ dryRun: true, ...plan }, null, 2)}\n`);
+      return;
+    }
     const item = await createBacklog(provider, input);
     if (options.json) {
       emitSuccess<BacklogItem>(kind, item);
@@ -666,10 +678,13 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Create one provider-backed backlog item')
     .argument('<title>', 'Backlog title')
     .option('--description-file <path>', 'Markdown description file (defaults to stdin)')
-    .option('--parent <id>', 'Organizational parent backlog ID (does not select a git base branch)')
-    .option('--base-backlog <id>', 'Backlog ID whose unmerged branch is the explicit execution base')
-    .option('-d, --depends-on <id>', 'Backlog ID that must complete first', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--parent <id>', 'Organizational parent backlog ID or platform:project#id (does not select a git base branch)')
+    .option('--base-backlog <id>', 'Backlog ID or platform:project#id whose unmerged branch is the explicit execution base')
+    .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
+    .option('--stage <stage>', 'Initial stage (ready|prd); PRD parents cannot execute', 'ready')
+    .option('--dry-run', 'Validate and print the planned issue and labels without writing')
+    .option('--idempotency-key <key>', 'Return the existing issue when this project already contains the key')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')

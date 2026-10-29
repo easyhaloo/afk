@@ -21,6 +21,7 @@ describe('JSON output', () => {
     expect(JSON.parse(String(output.mock.calls[0][0]))).toEqual({
       ok: false,
       kind: 'backlog.list',
+      data: null,
       error: { code: 'validation', message: 'invalid request', details },
     });
     expect(process.exitCode).toBe(1);

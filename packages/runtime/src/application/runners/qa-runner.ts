@@ -14,6 +14,7 @@ import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '
 import type { ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index.js';
+import { resolveBacklogExecutionBase } from '../../domain/backlog/creation.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 import { formatExecutionFailure } from '../workflow-engine.js';
 import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
@@ -257,10 +258,7 @@ export class QARunner {
 
   /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
   private async resolveExecutionBranch(backlog: BacklogItem): Promise<string> {
-    const targetBranch = this.config.targetBranch ?? 'main';
-    if (!backlog.baseBacklogId) return targetBranch;
-    const executionBase = await this.providers.backlog.get(backlog.baseBacklogId);
-    return executionBase.state === 'done' ? targetBranch : executionBase.branchName;
+    return resolveBacklogExecutionBase(this.providers.backlog, backlog, this.config.targetBranch ?? 'main');
   }
 
   private async mergeBranch(worktreePath: string, baselineBranch: string, featureBranch: string): Promise<void> {

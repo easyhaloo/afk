@@ -12,6 +12,8 @@ import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabi
 import { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
+import { parseWorkItemId } from '../work-item/identity.js';
+import { planBacklogCreate, renderBacklogDescription, validateBacklogRelations } from './creation.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
 const MODE_LABELS = BACKLOG_METADATA.executionModeLabels;
@@ -58,6 +60,11 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async get(id: string): Promise<BacklogItem> {
+    if (id.includes(':')) {
+      const target = this.relationTarget(id);
+      const item = await new TrackerBacklogProvider(target.tracker, this.options).get(String(target.issueId));
+      return { ...item, id: parseWorkItemId(id).id };
+    }
     const issue = await this.tracker.getIssue(this.issueId(id));
     const changes = await this.tracker.listMRs({ state: 'all' });
     return this.withChangeRequest(toBacklogItem(issue), issue.labels, changes);
@@ -71,15 +78,14 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const metadata = issue.labels.filter(isInternalBacklogLabel)
       .map(label => label.replace(/^depends_on::/, 'depends-on::'));
     if (new Set(metadata).size !== metadata.length
-      || ['parent::', 'base::'].some(prefix => metadata.filter(label => label.startsWith(prefix)).length > 1)
       || issue.labels.some(label => isWorkflowMetadataLabel(label) && !desired.includes(label))) {
       throw new Error(`invalid adoption metadata for backlog ${id}: expected ready/afk without duplicate or conflicting AFK labels`);
     }
-    for (const label of metadata.filter(label => !isWorkflowMetadataLabel(label))) {
-      const relationId = label.slice(label.indexOf('::') + 2);
-      if (this.canonicalId(relationId) !== relationId || relationId === String(issueId)) {
-        throw new Error(`invalid adoption metadata for backlog ${id}: ${label} must reference another canonical backlog ID`);
-      }
+    try {
+      validateBacklogRelations(metadata, [String(issueId), `${this.tracker.platform}:${this.tracker.projectId}#${issueId}`,
+        `${this.tracker.platform}:${this.tracker.providerHost}/${this.tracker.projectId}#${issueId}`]);
+    } catch (error) {
+      throw new Error(`invalid adoption metadata for backlog ${id}: ${(error as Error).message}`);
     }
     const delta = labelDelta(issue.labels, desired, isWorkflowMetadataLabel);
     if (delta.add.length) {
@@ -97,46 +103,40 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue), issue.labels, changes)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
-      (options.parentId === undefined || item.parentId === options.parentId) &&
+      (options.parentId === undefined || this.sameReference(item.parentId, options.parentId)) &&
       (options.tag === undefined || item.tags.includes(options.tag)),
     );
     return items;
   }
 
   async create(input: BacklogCreateInput): Promise<BacklogItem> {
+    const plan = await planBacklogCreate(this, input);
+    if (plan.idempotencyLabel) {
+      // ponytail: label lookup covers sequential retries; concurrent creators need a distributed lock.
+      const existing = (await this.tracker.listIssues({ state: 'all', labels: [plan.idempotencyLabel] }))
+        .filter(issue => issue.labels.includes(plan.idempotencyLabel!));
+      if (existing.length > 1) throw new Error('idempotency key matches multiple backlog items');
+      if (existing.length) return this.get(String(existing[0].id));
+    }
+    const dependencyTargets = plan.dependsOn.map(id => this.relationTarget(id));
     await this.initialize();
-    const title = input.title.trim();
-    if (!title) throw new Error('backlog title must not be empty');
-    const parentId = input.parentId && this.canonicalId(input.parentId);
-    const baseBacklogId = input.baseBacklogId && this.canonicalId(input.baseBacklogId);
-    const dependsOn = [...new Set((input.dependsOn ?? []).map(id => this.canonicalId(id)))];
-    const mode = input.executionMode ?? 'afk';
-    const tags = [...new Set((input.tags ?? []).map(validateBusinessTag))];
-    const [parent, executionBase, dependencies] = await Promise.all([
-      parentId ? this.get(parentId) : Promise.resolve(undefined),
-      baseBacklogId ? this.get(baseBacklogId) : Promise.resolve(undefined),
-      Promise.all(dependsOn.map(id => this.get(id))),
-    ]);
-    const labels = [
-      BACKLOG_METADATA.stateLabels.ready,
-      MODE_LABELS[mode],
-      ...tags,
-      ...(parentId ? [`parent::${parentId}`] : []),
-      ...(baseBacklogId ? [`base::${baseBacklogId}`] : []),
-      ...dependsOn.map(id => `depends-on::${id}`),
-    ];
+    const relationshipLabels = plan.labels.filter(label => isInternalBacklogLabel(label) && !isWorkflowMetadataLabel(label));
+    if (relationshipLabels.length && this.tracker.ensureBacklogMetadata) {
+      await this.tracker.ensureBacklogMetadata(relationshipLabels.map(name => ({ name, color: 'C5DEF5', description: 'AFK backlog metadata' })));
+    }
     const id = await this.tracker.createIssue({
-      title,
-      description: renderBacklogDescription(input.description, { parent, executionBase, dependencies }),
-      labels,
+      title: plan.title,
+      description: plan.description,
+      labels: plan.labels,
     });
-    for (const dependencyId of dependsOn) {
-      await this.tracker.linkIssues(id, this.issueId(dependencyId), 'blocked_by');
+    for (const target of dependencyTargets) {
+      if (target.tracker === this.tracker) await this.tracker.linkIssues(id, target.issueId, 'blocked_by');
+      else await this.tracker.linkIssues(id, target.issueId, 'blocked_by', String(target.tracker.projectId));
     }
     const created = await this.get(String(id));
     if (!created.webUrl) return created;
     await this.tracker.updateIssue(id, {
-      description: renderBacklogDescription(input.description, { parent, executionBase, dependencies, self: created }),
+      description: renderBacklogDescription(input.description, { ...plan.links, self: created }),
     });
     return this.get(String(id));
   }
@@ -289,9 +289,9 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
+    if (item.executionEligible === false || (item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
     const children = await this.list({ parentId: item.id });
-    if (children.some(child => child.state !== 'done')) return false;
+    if (children.length) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = await this.get(dependencyId).catch(() => null);
       if (!dependency || dependency.state !== 'done') return false;
@@ -302,7 +302,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
   private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {
     if (item.state !== 'in_progress' || item.executionMode !== 'afk') return false;
     const children = await this.list({ parentId: item.id });
-    if (children.some(child => child.state !== 'done')) return false;
+    if (children.length) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = await this.get(dependencyId).catch(() => null);
       if (!dependency || dependency.state !== 'done') return false;
@@ -343,26 +343,29 @@ export class TrackerBacklogProvider implements BacklogProvider {
     return value;
   }
 
-  private canonicalId(id: string): string {
-    const issueId = this.issueId(id.trim());
-    return String(issueId);
+  private relationTarget(id: string): { tracker: TrackerProvider; issueId: number } {
+    if (!id.includes(':')) return { tracker: this.tracker, issueId: this.issueId(id) };
+    const reference = parseWorkItemId(id);
+    if (reference.platform !== this.tracker.platform) throw new Error('cross-platform backlog relationships are not supported');
+    const localProjects = [String(this.tracker.projectId), `${this.tracker.providerHost}/${this.tracker.projectId}`];
+    if (localProjects.includes(reference.projectKey)) return { tracker: this.tracker, issueId: reference.issueNumber };
+    if (!this.tracker.forProject) throw new Error('tracker does not support cross-project backlog relationships');
+    return { tracker: this.tracker.forProject(reference.projectKey), issueId: reference.issueNumber };
+  }
+
+  private sameReference(left: string | undefined, right: string): boolean {
+    if (left === right) return true;
+    if (!left) return false;
+    try {
+      const leftTarget = this.relationTarget(left);
+      const rightTarget = this.relationTarget(right);
+      return leftTarget.issueId === rightTarget.issueId && leftTarget.tracker.projectId === rightTarget.tracker.projectId;
+    } catch {
+      return false;
+    }
   }
 
   private readonly options: TrackerBacklogAdapterOptions;
-}
-
-function renderBacklogDescription(
-  description: string,
-  links: { parent?: BacklogItem; executionBase?: BacklogItem; dependencies: BacklogItem[]; self?: BacklogItem },
-): string {
-  const entries = [
-    ...(links.self?.webUrl ? [`- This backlog: [#${links.self.id}](${links.self.webUrl})`] : []),
-    ...(links.parent?.webUrl ? [`- Parent backlog: [#${links.parent.id}](${links.parent.webUrl})`] : []),
-    ...(links.executionBase?.webUrl ? [`- Execution base: [#${links.executionBase.id}](${links.executionBase.webUrl})`] : []),
-    ...links.dependencies.flatMap(item => item.webUrl ? [`- Depends on: [#${item.id}](${item.webUrl})`] : []),
-  ];
-  if (entries.length === 0) return description;
-  return `${description.trimEnd()}\n\n## Backlog Links\n\n${entries.join('\n')}\n`;
 }
 
 function isModeLabel(label: string): boolean {
@@ -379,16 +382,19 @@ function labelDelta(current: readonly string[], desired: readonly string[], isWo
 }
 
 function toBacklogItem(issue: TrackedIssue): BacklogItem {
-  const parentId = issue.labels.find(label => /^parent::[^:]+$/.test(label))?.slice('parent::'.length);
-  const baseBacklogId = issue.labels.find(label => /^base::[^:]+$/.test(label))?.slice('base::'.length);
+  validateBacklogRelations(issue.labels, [String(issue.id), `${issue.platform}:${issue.projectId}#${issue.id}`], true);
+  const parentId = issue.labels.find(label => label.startsWith('parent::'))?.slice('parent::'.length);
+  const baseBacklogId = issue.labels.find(label => label.startsWith('base::'))?.slice('base::'.length);
   const dependsOn = issue.labels
-    .filter(label => /^depends-on::[^:]+$/.test(label) || /^depends_on::[^:]+$/.test(label))
-    .map(label => label.split('::')[1]);
+    .filter(label => label.startsWith('depends-on::') || label.startsWith('depends_on::'))
+    .map(label => label.slice(label.indexOf('::') + 2));
   const labeledState = Object.entries(STATE_LABELS).find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
   const state = issue.state === 'closed' || issue.state === 'merged' ? 'done' : labeledState ?? 'ready';
-  const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.hitl) ? 'hitl' : 'afk';
+  const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.afk) && !issue.labels.includes(MODE_LABELS.hitl) ? 'afk' : 'hitl';
+  const executionEligible = (state === 'ready' || state === 'rework') && labeledState !== undefined
+    && issue.labels.some(label => Object.values(MODE_LABELS).includes(label as typeof MODE_LABELS[keyof typeof MODE_LABELS]));
   return {
-    id: String(issue.id), title: issue.title, description: issue.description,
+    id: String(issue.id), title: issue.title, description: issue.description, executionEligible,
     parentId, baseBacklogId, dependsOn, state: state ?? 'ready', executionMode, tags: extractBacklogTags(issue.labels),
     ...(labeledState ? { labeledState } : {}),
     branchName: deriveBacklogBranchName(String(issue.id)), providerRef: `${issue.platform}:${issue.projectId}#${issue.id}`,

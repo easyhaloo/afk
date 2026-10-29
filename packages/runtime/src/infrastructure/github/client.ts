@@ -50,7 +50,7 @@ export class GitHubClient implements TrackerProvider {
   readonly projectId: string;
   private client: Octokit;
 
-  constructor(options: GitHubAuthOptions) {
+  constructor(private readonly options: GitHubAuthOptions) {
     if (!options.auth) {
       throw new Error('GitHubClient requires auth token. Set GITHUB_TOKEN env, or pass { auth } to constructor.');
     }
@@ -62,6 +62,11 @@ export class GitHubClient implements TrackerProvider {
         format: '2022-11-28',
       },
     });
+  }
+
+  forProject(projectKey: string): GitHubClient {
+    if (projectKey.split('/').length !== 2) throw new Error('GitHub relationship project must use owner/repo');
+    return new GitHubClient({ ...this.options, repo: projectKey });
   }
 
   private getOwnerRepo(): { owner: string; repo: string } {
@@ -493,14 +498,6 @@ export class GitHubClient implements TrackerProvider {
     const label = issue.labels.find(l => /^retry-count::\d+$/.test(l));
     if (!label) return 0;
     return parseInt(label.split('::')[1], 10);
-  }
-
-  async detectTargetBranch(issueId: number, explicit?: string): Promise<string> {
-    if (explicit) return explicit;
-    const issue = await this.getIssue(issueId);
-    const prdLabel = issue.labels.find(l => /^base::prd-\d+$/.test(l));
-    if (prdLabel) return `prd/${prdLabel.replace('base::prd-', '')}`;
-    return process.env.AFK_TARGET_BRANCH || 'main';
   }
 
   async uploadArtifacts(worktreePath: string, options: UploadArtifactsOptions = {}): Promise<UploadedArtifact[]> {

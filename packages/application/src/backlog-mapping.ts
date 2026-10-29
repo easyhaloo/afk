@@ -13,6 +13,7 @@ import type { WorkItem, WorkState } from '@afk/core';
  */
 
 export const BACKLOG_STATES = [
+  'prd',
   'ready',
   'rework',
   'in_progress',
@@ -29,6 +30,7 @@ export const BACKLOG_EXECUTION_MODES = ['afk', 'hitl'] as const;
 export type BacklogExecutionMode = (typeof BACKLOG_EXECUTION_MODES)[number];
 
 export const coreWorkStateByBacklogState = {
+  prd: 'blocked',
   ready: 'ready',
   rework: 'rework',
   in_progress: 'implementing',

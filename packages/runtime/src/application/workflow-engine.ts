@@ -44,6 +44,7 @@ import type { Step, StepResult } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/types.js';
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
+import { resolveBacklogExecutionBase } from '../domain/backlog/creation.js';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
 import {
@@ -114,6 +115,7 @@ export interface RunnerOptions {
   session: string;
   targetBranch: string;
   baseBranch?: string;
+  baseBranchExplicit?: boolean;
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
@@ -358,13 +360,13 @@ export class WorkflowRunner {
       iid: requestedIid,
       session,
       targetBranch,
-      baseBranch = 'main',
       hardTimeoutMs = this.config.workflowHardTimeout,
       completionTimeoutMs = this.config.completionTimeout,
       maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20),
       contextHighTokens = this.config.contextThreshold,
       maxTotalTokens = this.config.goalBudget,
     } = options;
+    let baseBranch = options.baseBranch ?? 'main';
 
     const backlogId = options.backlogId;
     const iid = requestedIid ?? (Number.isSafeInteger(Number(backlogId)) ? Number(backlogId) : 0);
@@ -391,6 +393,14 @@ export class WorkflowRunner {
       },
     });
     if (this.providers) {
+      const backlog = await this.providers.backlog.get(backlogId);
+      if (backlog.state === 'prd') throw new Error(`backlog ${backlogId} is a PRD parent and is not runnable`);
+      if (!options.baseBranchExplicit) {
+        baseBranch = await resolveBacklogExecutionBase(this.providers.backlog, backlog, baseBranch);
+        options = { ...options, baseBranch,
+          branchStrategy: options.branchStrategy?.type === 'named' ? { ...options.branchStrategy, baseBranch } : options.branchStrategy,
+          repositories: options.repositories?.map(repository => repository.primary ? { ...repository, baseBranch } : repository) };
+      }
       const claimed = await this.providers.backlog.claim(backlogId, session);
       if (!claimed) {
         logger.info({ backlogId }, 'backlog is not runnable or was claimed by another worker');

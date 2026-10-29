@@ -6,6 +6,12 @@
 **Related ADR:** [ADR-0019](docs/adr/0019-desktop-run-log-viewer-projection.md)
 **Related upstream:** [ADR-0016 — Run Event Audit Spine](docs/adr/0016-run-event-audit-spine.md)
 
+> **Historical note.** `stage::prd` was the stage label this PRD was filed
+> under. A PRD is now a **role** (`kind::prd`), not a lifecycle stage: an
+> anchor carries no lifecycle state at all and is never execution eligible.
+> See [Architecture overview — Backlog and work item model](../architecture/overview.md).
+> The line above is kept as the record of how this PRD was filed.
+
 ---
 
 ## Problem Statement
@@ -137,7 +143,7 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
   spec references `afk gitlab issue-create` and `afk gitlab add-label`,
   but neither exists in the installed `afk` binary. The actual
   publication primitives are `afk backlog create` (no `--label` flag)
-  and `afk backlog tag add` (no `stage::prd` mapping). Owner action:
+  and `afk backlog tag add` (no role mapping). Owner action:
   publish manually via GitLab UI, or extend the CLI to expose label
   management.
 - **R3 — Correlation depends on every RunEvent carrying `workItemId`.**
@@ -160,7 +166,8 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
 
 - Step 3 (publish): **blocked by R2.** Cannot issue the GitLab issue
   via CLI. Owner must publish manually or extend the CLI.
-- Step 4 (label): same blocker; `stage::prd` is not yet addressable
-  from the CLI.
+- Step 4 (label): same blocker; the PRD role is not yet addressable
+  from the CLI (`afk backlog create --kind prd` is the closest
+  primitive).
 - Step 5 (HITL gate): pending — this PRD is currently a draft, awaiting
   the owner's approval to proceed to issue decomposition.

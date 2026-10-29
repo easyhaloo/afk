@@ -85,7 +85,7 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
+| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog children <prd-id>` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
@@ -311,18 +311,26 @@ An explicit `--base-branch`, branch strategy base, or manifest base takes preced
 Legacy `base::prd-N` metadata still selects `prd/N`. Implementation and QA use
 the same backlog base resolver; the normal target branch is unchanged.
 
-`--stage prd` creates an organizational anchor with `stage::prd`, which is
-never execution eligible. A PRD parent is its own core work item state, not a
-blocked item: an organizational parent and an item that waits for a human are
-different facts. Existing PRD anchors are recognized even without mode
-labels. Issues without mode labels default to `hitl` until explicitly adopted.
-`--dry-run` validates the same creation plan, including referenced issues, and
-prints the title, description, labels and relationships without provider writes.
-`--idempotency-key` persists a hashed, project-scoped metadata label: sequential
-retries return the existing issue, including closed issues. It is a retry key,
-not a distributed lock; concurrent creators must be serialized by the caller.
-Reserved metadata labels cannot be supplied as business tags, and duplicate
-parent/base labels or invalid references fail validation.
+`--kind prd` creates an organizational anchor with the `kind::prd` label, which
+is never execution eligible. A role is not a stage: an anchor is a container,
+so it has **no lifecycle state at all** — it does not belong to the `ready`
+bucket, and its non-executability comes from the role rather than from a
+state. The seven `stage::*` labels are the only lifecycle positions, and every
+non-anchor work item carries exactly one of them. Issues without mode labels
+default to `hitl` until explicitly adopted. `--dry-run` validates the same
+creation plan, including referenced issues, and prints the title, description,
+labels and relationships without provider writes. An anchor defaults to the
+`hitl` mode; asking for an autonomous anchor is refused rather than
+downgraded. `--idempotency-key` persists a hashed, project-scoped metadata
+label: sequential retries return the existing issue, including closed issues.
+It is a retry key, not a distributed lock; concurrent creators must be
+serialized by the caller. Reserved metadata labels cannot be supplied as
+business tags, and duplicate parent/base labels or invalid references fail
+validation.
+
+`afk backlog list` and `afk backlog inventory` filter by state and by role
+separately: `--state ready` never returns an anchor, because an anchor has no
+state, and `--kind prd` is what selects them.
 
 CLI JSON success envelopes are `{ok:true,kind,data}`. Failures are
 `{ok:false,kind,data:null,error:{code,message,details?}}` with a nonzero exit code.
@@ -344,8 +352,10 @@ the backlog graph, so children in another repository count as children. Any auto
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
 
-A `prd` item is an organizational parent. It is never execution eligible, and
-it is not `blocked`: it groups children instead of waiting for a human.
+An item with the `prd` role is an organizational parent. It has no lifecycle
+state at all — it groups children instead of waiting for a human, and "waiting
+for its children" is not a position in the lifecycle. The role, not a state,
+is what makes it ineligible to run.
 
 QA FAIL persists a new rework record in the provider's issue comment/note,
 supersedes any active record, and increments `ReworkRecord.attempt` from the

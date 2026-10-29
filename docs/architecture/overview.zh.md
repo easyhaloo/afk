@@ -64,7 +64,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
-| `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
+| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk backlog children <prd-id>` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
@@ -245,14 +245,18 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 优先。存量 `base::prd-N` 继续选择 `prd/N`。实现执行与 QA 共用 backlog 基线
 解析逻辑，正常目标分支保持原有语义。
 
-`--stage prd` 创建带 `stage::prd` 的组织性锚点，始终不可执行。PRD 父项在 core
-工作项模型中拥有独立状态，而不是被当作 blocked：组织性父项与等待人工处理的项是
-两种不同的事实。无 mode 标签的存量 PRD 锚点也能识别。缺少 mode 标签的 issue 默认
-`hitl`，需显式 adopt 后才能自动执行。`--dry-run` 使用相同创建计划校验引用，并输出
-标题、描述、标签与关系，不写入 provider。`--idempotency-key` 持久化经过哈希的项目内
-元数据标签，顺序重试返回已有 issue（含已关闭项）。该键用于重试去重，不是分布式锁；
-并发创建需要由调用方串行化。业务标签不能注入保留元数据，重复 parent/base 标签或
-非法引用会被校验拒绝。
+`--kind prd` 创建带 `kind::prd` 标签的组织性锚点，始终不可执行。角色不是阶段：
+锚点是容器，因此**没有任何生命周期状态**——它不落在 `ready` 桶里，其不可执行性来自
+角色本身而不是来自状态。七个 `stage::*` 标签是唯一的生命周期位置，每个非锚点工作项
+恰好携带其中一个。缺少 mode 标签的 issue 默认 `hitl`，需显式 adopt 后才能自动执行。
+`--dry-run` 使用相同创建计划校验引用，并输出标题、描述、标签与关系，不写入 provider。
+锚点默认使用 `hitl` 模式；请求自治锚点会被直接拒绝，而不是被静默降级。
+`--idempotency-key` 持久化经过哈希的项目内元数据标签，顺序重试返回已有 issue（含已关闭项）。
+该键用于重试去重，不是分布式锁；并发创建需要由调用方串行化。业务标签不能注入保留元数据，
+重复 parent/base 标签或非法引用会被校验拒绝。
+
+`afk backlog list` 与 `afk backlog inventory` 按状态和按角色分别过滤：锚点没有状态，
+所以 `--state ready` 永远不会返回锚点，选出锚点要用 `--kind prd`。
 
 CLI JSON 成功信封为 `{ok:true,kind,data}`；失败信封为
 `{ok:false,kind,data:null,error:{code,message,details?}}`，并返回非零退出码。
@@ -273,8 +277,9 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 计入。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
 
-`prd` 条目是组织性父项，始终不可执行，且它不是 `blocked`：它聚合子项，
-而不是等待人工介入。
+带 `prd` 角色的条目是组织性父项。它**没有任何生命周期状态**——它聚合子项，而不是
+等待人工介入，而“等待子项完成”并不是生命周期中的一个位置。让它不可执行的是角色，
+而不是某个状态。
 
 QA FAIL 在 Provider issue comment/note 中持久化新的返工记录，将旧 active
 记录标为 `superseded`，并从已持久化的最高值递增 `ReworkRecord.attempt`。

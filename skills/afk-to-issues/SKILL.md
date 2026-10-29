@@ -5,8 +5,8 @@ description: >-
   Analyze approved requirements and one or more target repositories, then
   decompose the required changes into a provider-neutral backlog manifest
   with traceable acceptance criteria, cross-repository dependencies, execution
-  modes, and business tags. This skill drafts and validates the handoff; the
-  configured backlog provider creates the records.
+  modes, and business tags. After explicit approval, it creates and verifies
+  records through the AFK CLI.
 disallowed-tools: >-
   Bash(git push -f) Bash(git reset --hard*)
   Bash(git branch -D*)
@@ -251,13 +251,21 @@ a manifest or ask the user to manually import/apply it.
    supported options before invoking commands. Use the explicit project and
    platform for each task's `targetRepository`; never rely on the current
    working directory to choose a repository in a multi-repository plan.
-2. Run the CLI's documented dry-run for each task, using the same target
-   project, description, execution mode, tags, and relationships intended for
-   real creation. Resolve the entire global DAG before creating any records.
-3. Create in topological order. For each item, use a stable idempotency key
-   derived from the approved plan identity and draft key. After each creation,
-   capture the provider's canonical ID and URL, then map the draft key to that
-   canonical identity before creating dependent tasks.
+2. Validate the complete draft DAG locally before creating anything: every
+   dependency key must resolve, the graph must be acyclic, and every target
+   repository must be canonicalized. Run CLI dry-runs for each task's fields
+   and for relationships to already-existing items. Do not pass draft-local
+   keys to the CLI: it expects provider IDs, and a dependent item cannot be
+   fully dry-run until its new prerequisites have canonical IDs.
+3. Create in topological order. For each item, first resolve its draft
+   dependency keys to canonical IDs from the creation ledger, then run that
+   item's dry-run with those resolved relationships immediately before
+   creation. If the dry-run fails, do not create that item or its downstream
+   dependents; retain already-created upstream items in the ledger and report
+   the partial result. Use a stable idempotency key derived from the approved
+   plan identity and draft key. After each creation, capture the provider's
+   canonical ID and URL, then map the draft key to that canonical identity
+   before creating dependent tasks.
 4. Use canonical cross-project item identities for dependencies. Do not assume
    bare issue numbers are globally unique. Do not use a cross-repository
    item as `baseBacklogId` unless the runtime explicitly supports it; the

@@ -52,7 +52,7 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('resolves qualified relationships in their own repository even when IIDs collide', async () => {
-    const remote = { ...tracker({ id: 7, platform: 'github', projectId: 'org/other', title: 'Remote', labels: ['stage::done'], state: 'closed' }), projectId: 'org/other' };
+    const remote = { ...tracker({ id: 7, platform: 'github', projectId: 'org/other', title: 'Remote', description: 'Remote base', labels: ['stage::done'], state: 'closed', url: 'https://example/7' }), projectId: 'org/other' };
     const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
     const t = { ...tracker(issue), forProject: vi.fn(() => remote),
       createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };

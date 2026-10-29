@@ -303,7 +303,8 @@ was collected. A child that AFK does not manage is reported as well, with its
 The command resolves that identity for the caller: an issue number is looked
 up in the local index to find the project it belongs to, and `--project` and
 `--platform` say it outright. The canonical identity only has to be typed when
-a script produces it.
+a script produces it. Every item is printed on one line with the URL the
+provider reported, so the entry can be opened from the terminal.
 
 Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
 accept a positive issue number in the explicitly selected project, or a

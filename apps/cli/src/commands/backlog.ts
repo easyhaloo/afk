@@ -627,7 +627,7 @@ function canonicalParentId(value: string): string {
 }
 
 function printChildren(result: WorkItemChildrenResult<GlobalWorkItem>): void {
-  console.log(`${chalk.bold(result.parent.id)}  ${result.parent.title}`);
+  console.log(itemLine(result.parent));
   detail(`state: ${result.parent.state ?? 'none'}  mode: ${result.parent.executionMode}`);
   if (result.parent.kind) detail(`role: ${result.parent.kind} (organizational anchor; never executed)`);
   if (result.children.length === 0) {
@@ -635,10 +635,20 @@ function printChildren(result: WorkItemChildrenResult<GlobalWorkItem>): void {
     return;
   }
   for (const child of result.children) {
-    console.log(`${chalk.bold(child.id)}  ${child.title}`);
+    console.log(itemLine(child));
     detail(`state: ${child.state}  mode: ${child.executionMode}  managed: ${child.managed ? 'yes' : 'no'}`);
-    if (child.webUrl) detail(`url: ${child.webUrl}`);
   }
+}
+
+/**
+ * One item, with the URL the provider reported.
+ *
+ * The URL sits on the line that names the item: the title is what a person
+ * reads, and the link is what they click.
+ */
+function itemLine(item: GlobalWorkItem): string {
+  const heading = `${chalk.bold(item.id)}  ${item.title}`;
+  return item.webUrl ? `${heading}  ${item.webUrl}` : heading;
 }
 
 /**

@@ -239,6 +239,7 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 
 命令会替调用方解析这个身份：裸 issue 编号会在本地索引里查出它属于哪个项目，
 `--project` 与 `--platform` 则直接说明。只有脚本产出规范身份时，整串才需要被敲出来。
+每个条目独占一行，provider 报的 URL 就在标题旁边，因此在终端里点一下就能打开。
 
 创建关系参数（`--parent`、`--base-backlog`、`--depends-on`）接受显式选定项目内的
 正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。Git 执行基线

@@ -848,6 +848,7 @@ describe('backlog children', () => {
       tags: [],
       branchName: `feature/${issueNumber}`,
       providerRef: id,
+      webUrl: `https://example.test/${id}`,
       ...overrides,
     };
   }
@@ -874,6 +875,19 @@ describe('backlog children', () => {
     return JSON.parse(captured.join('')) as Record<string, unknown>;
   }
 
+  async function captureText(run: () => Promise<void>): Promise<string> {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map((value) => String(value)).join(' '));
+    });
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return lines.join('\n');
+  }
+
   it('lists the issues that belong to one work item', async () => {
     const envelope = await capture(() => runBacklogChildren(parent.id, { json: true }, {
       read: async () => ({ items: [parent, child, unmanaged], lastSuccessAt: Date.now() }),
@@ -891,6 +905,21 @@ describe('backlog children', () => {
         ],
       },
     });
+  });
+
+  it('prints the provider URL of every item next to its title', async () => {
+    const output = await captureText(() => runBacklogChildren(parent.id, {}, {
+      read: async () => ({ items: [parent, child], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    const lines = output.split('\n');
+    const parentLine = lines.find(line => line.includes(parent.id)) ?? '';
+    const childLine = lines.find(line => line.includes(child.id)) ?? '';
+    // The URL belongs to the line that names the item, so a terminal can
+    // link it and a person does not have to look for it.
+    expect(parentLine).toContain(parent.webUrl);
+    expect(childLine).toContain(child.webUrl);
   });
 
   it('reports an identity that is not a work item id', async () => {

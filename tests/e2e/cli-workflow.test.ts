@@ -113,7 +113,8 @@ async function fixture() {
 describe('built CLI workflows', () => {
   it('loads every registered command, prints completion scripts and rejects removed entry points', async () => {
     const { cli } = await fixture();
-    expect((await cli(['--version'])).stdout.trim()).toBe('0.1.0');
+    const packageMetadata = JSON.parse(await readFile('apps/cli/package.json', 'utf8')) as { version: string };
+    expect((await cli(['--version'])).stdout.trim()).toBe(packageMetadata.version);
     for (const name of COMMANDS.flatMap(entry => entry.names).filter(name => name !== '__complete')) {
       expect((await cli([name, '--help'])).stdout).toContain('Usage:');
     }

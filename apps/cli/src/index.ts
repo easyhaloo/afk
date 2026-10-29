@@ -3,12 +3,15 @@
  * Thin process entry point. Command registration and dispatch live in
  * command-registry.ts so there is only one command-routing path.
  */
+import { readFileSync } from 'node:fs';
+
+const packageMetadata = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
 const cmd = process.argv[2];
 const extraArgs = process.argv.slice(3);
 
 async function main(): Promise<void> {
   if (cmd === '--version' || cmd === '-V') {
-    console.log('0.1.0');
+    console.log(packageMetadata.version);
     return;
   }
 

@@ -286,6 +286,13 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 `--idempotency-key <prefix>` 用前缀加条目的 `ref`（没有则用标题）派生出逐条重试键，
 因此同一份 manifest 应用两次会返回它已经建好的记录，而不是再建一遍。
 
+依赖边会被写两遍：一遍是 provider 中立的 `depends-on::<id>` 标签，也就是 AFK 读回来的
+那条边；一遍是给人看的 provider 原生链接。在 GitLab 上这条链接是从「被等待的那条记录」
+出发的 `blocks` 链接——GitLab 正是这样显示 "is blocked by"；链接的目标项目用数字身份
+指认，因为链接的请求体里放的是 id。在 GitHub 上它是一条点名那条记录的评论。重复应用
+会补写缺失的关系，也不会重复已有的关系，因此同一份 manifest 应用两次会收敛到这份
+manifest。
+
 CLI JSON 成功信封为 `{ok:true,kind,data}`；失败信封为
 `{ok:false,kind,data:null,error:{code,message,details?}}`，并返回非零退出码。
 自动化脚本须同时检查退出状态与 `ok`，再读取 `data`。

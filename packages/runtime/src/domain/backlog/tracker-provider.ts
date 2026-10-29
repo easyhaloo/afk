@@ -149,14 +149,23 @@ export class TrackerBacklogProvider implements BacklogProvider {
 
   async create(input: BacklogCreateInput): Promise<BacklogItem> {
     const plan = await this.planCreate(input);
+    // The dependency targets are resolved before anything is written, so a
+    // reference that names nothing cannot leave a record behind.
+    const dependencyTargets = plan.dependsOn.map(id => this.resolveTarget(id));
     if (plan.idempotencyLabel) {
       // ponytail: label lookup covers sequential retries; concurrent creators need a distributed lock.
       const existing = (await this.tracker.listIssues({ state: 'all', labels: [plan.idempotencyLabel] }))
         .filter(issue => issue.labels.includes(plan.idempotencyLabel!));
       if (existing.length > 1) throw new Error('idempotency key matches multiple backlog items');
-      if (existing.length) return this.get(String(existing[0].id));
+      if (existing.length) {
+        const found = await this.get(String(existing[0].id));
+        // The record is there; the relation it was created with may not be,
+        // so the relation is written now. A run that stops halfway leaves a
+        // record without its relation, and a repeated run has to repair it.
+        await this.writeDependencyLinks(existing[0].id, dependencyTargets);
+        return found;
+      }
     }
-    const dependencyTargets = plan.dependsOn.map(id => this.resolveTarget(id));
     await this.initialize();
     const relationshipLabels = plan.labels.filter(label => isInternalBacklogLabel(label) && !isWorkflowMetadataLabel(label));
     if (relationshipLabels.length && this.tracker.ensureBacklogMetadata) {
@@ -167,16 +176,21 @@ export class TrackerBacklogProvider implements BacklogProvider {
       description: plan.description,
       labels: plan.labels,
     });
-    for (const target of dependencyTargets) {
-      if (target.tracker === this.tracker) await this.tracker.linkIssues(id, target.issueId, 'blocked_by');
-      else await this.tracker.linkIssues(id, target.issueId, 'blocked_by', String(target.tracker.projectId));
-    }
+    await this.writeDependencyLinks(id, dependencyTargets);
     const created = await this.get(String(id));
     if (!created.webUrl) return created;
     await this.tracker.updateIssue(id, {
       description: renderBacklogDescription(input.description, { ...plan.links, self: created }),
     });
     return this.get(String(id));
+  }
+
+  /** Write the relation that says a record waits for another one. */
+  private async writeDependencyLinks(sourceId: number, targets: readonly { tracker: TrackerProvider; issueId: number }[]): Promise<void> {
+    for (const target of targets) {
+      if (target.tracker === this.tracker) await this.tracker.linkIssues(sourceId, target.issueId, 'blocked_by');
+      else await this.tracker.linkIssues(sourceId, target.issueId, 'blocked_by', String(target.tracker.projectId));
+    }
   }
 
   async claim(id: string, owner: string): Promise<BacklogClaim | null> {

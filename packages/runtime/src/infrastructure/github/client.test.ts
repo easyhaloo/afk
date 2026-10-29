@@ -14,6 +14,16 @@ describe('GitHubClient', () => {
     await scoped.getIssue(7);
     expect(get).toHaveBeenCalledWith({ owner: 'org', repo: 'other', issue_number: 7 });
   });
+  it('does not repeat a relationship comment that is already written', async () => {
+    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const createComment = vi.fn().mockResolvedValue({});
+    const listComments = vi.fn().mockResolvedValue({ data: [{ id: 3, body: 'Blocked by org/other#8' }] });
+    (client as unknown as { client: { issues: { createComment: typeof createComment; listComments: typeof listComments } } }).client = {
+      issues: { createComment, listComments },
+    };
+    await client.linkIssues(5, 8, 'blocked_by', 'org/other');
+    expect(createComment).not.toHaveBeenCalled();
+  });
   it('reads the PR-side closing issue references for open PRs', async () => {
     const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
     const graphql = vi.fn().mockResolvedValue({ repository: { pullRequest: { closingIssuesReferences: {

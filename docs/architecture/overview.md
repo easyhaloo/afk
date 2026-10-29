@@ -367,6 +367,15 @@ one repository.
 and the item's `ref` (or its title), so applying the same manifest twice
 returns the records it already created instead of creating them again.
 
+A dependency edge is written twice: as the portable `depends-on::<id>` label,
+which is the edge AFK reads back, and as a provider-native link for the people
+who read the tracker. On GitLab that link is a `blocks` link that starts at
+the record being waited for, because that is how GitLab shows "is blocked by",
+and the target project is named by its numeric identity, because the body of a
+link carries an id. On GitHub it is a comment that names the record. A repeated
+run writes a relation that is missing and leaves a relation that is already
+there alone, so applying a manifest twice converges on the manifest.
+
 CLI JSON success envelopes are `{ok:true,kind,data}`. Failures are
 `{ok:false,kind,data:null,error:{code,message,details?}}` with a nonzero exit code.
 Automation must check both the exit status and `ok` before reading `data`.

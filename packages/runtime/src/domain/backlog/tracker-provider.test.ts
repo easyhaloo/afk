@@ -78,6 +78,24 @@ describe('TrackerBacklogProvider', () => {
     expect((await provider.get('42')).tags).toEqual([]);
   });
 
+  it('writes the dependency links of a record an earlier run created', async () => {
+    const dependency = { id: 6, platform: 'github', projectId: 'org/repo', title: 'Dependency', labels: [] as string[], state: 'opened' };
+    const existing = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
+    const t = tracker(existing);
+    // The record exists but the run that created it stopped before it wrote
+    // the relation, so the repeated run has to write the relation itself.
+    t.listIssues = vi.fn(async (options: any) => options?.labels?.length ? [{ ...existing, labels: options.labels }] : []);
+    t.getIssue = vi.fn(async (id: number) => (id === 6 ? { ...dependency } : { ...existing }));
+    t.createIssue = vi.fn(async () => 42);
+    t.linkIssues = vi.fn(async () => {});
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.create({ title: 'Child', description: 'Body', dependsOn: ['6'], idempotencyKey: 'manifest/child' });
+
+    expect(t.createIssue).not.toHaveBeenCalled();
+    expect(t.linkIssues).toHaveBeenCalledWith(42, 6, 'blocked_by');
+  });
+
   it.each([
     ['stage::ready-for-issues'], ['mode::afk'], ['stage::ready-for-issues', 'mode::afk'],
   ])('fills only missing adoption labels and remains idempotent: %j', async (...labels) => {

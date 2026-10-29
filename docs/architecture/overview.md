@@ -567,6 +567,15 @@ Claude Code config file — `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.jso
 — under `projects[<absolute path>].hasTrustDialogAccepted`. The write is
 best-effort and never fails a run; `AFK_CLAUDE_TRUST_PRESEED=0` disables it.
 
+An agent TUI can own the keyboard with a modal of its own. Codex greets the
+user with an "Update available" prompt as soon as a newer version is
+installed, and while that prompt is open the Enter presses that submit the
+goal are swallowed: the goal then sits in the composer and the run waits for
+a completion signal that never arrives. AFK therefore starts Codex with
+`check_for_update_on_startup=false`, waits for the Codex composer to be ready
+before it types the goal, and presses Enter again when the composer still
+holds the goal.
+
 ## Extension points
 
 Plugins can register provider implementations through the plugin runtime.
@@ -591,6 +600,9 @@ filesystem lease directory.
   are never staged into a commit. They are process state, not work.
 - Native claim is preferred; the filesystem fallback is deliberately scoped to
   a trusted local filesystem on one host.
+- An interactive agent must receive the goal, not merely have it typed. AFK
+  checks the composer state after submitting and repeats the submit while the
+  goal is still pending, so a TUI modal cannot silently strand a run.
 - Lease cleanup is lifecycle-owned and idempotent.
 - Backlog IDs map deterministically to branches through the provider-neutral
   branch naming function.

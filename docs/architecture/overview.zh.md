@@ -452,6 +452,12 @@ Claude Code 的配置文件（`~/.claude.json`，或 `$CLAUDE_CONFIG_DIR/.claude
 的 `projects[<绝对路径>].hasTrustDialogAccepted`。该写入是尽力而为，永不导致
 运行失败；`AFK_CLAUDE_TRUST_PRESEED=0` 可关闭它。
 
+agent 的 TUI 还可能用自己的弹窗独占键盘。Codex 在检测到已安装更新版本时会弹出
+「Update available」提示，弹窗打开期间用于提交目标的 Enter 会被吞掉：目标留在
+输入框里，运行则一直等待一个永远不会到来的完成信号。因此 AFK 以
+`check_for_update_on_startup=false` 启动 Codex，先等 Codex 的输入框就绪再键入
+目标，并在输入框仍持有目标时再次按下 Enter。
+
 ## 扩展机制
 
 插件运行时可以注册 provider。每个 provider 必须完整实现 `BacklogProvider`，
@@ -471,5 +477,7 @@ Claude Code 的配置文件（`~/.claude.json`，或 `$CLAUDE_CONFIG_DIR/.claude
 - AFK 的运行时产物——完成信号与 `.afk/` 目录——不会被加入提交：它们是过程
   状态，不是工作成果。
 - 优先使用原生认领；文件系统 fallback 仅适用于单机上的本地可信文件系统。
+- 交互式 agent 必须真正收到目标，而不只是被键入。AFK 在提交后检查输入框状态，
+  只要目标仍处于待提交状态就重复提交，使 TUI 弹窗无法悄悄搁浅一次运行。
 - lease 清理由生命周期统一管理且必须幂等。
 - backlog ID 通过 provider-neutral 函数确定性映射到分支名。

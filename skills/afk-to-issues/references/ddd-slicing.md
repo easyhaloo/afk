@@ -1,103 +1,152 @@
 # DDD-Aware Backlog Slicing
 
-**Purpose**: Slice PRD user stories into backlog items along bounded context boundaries, not horizontal layers.
-**When**: Every afk-to-issues session — after reading PRD and identifying contexts.
-**Output**: provider-neutral backlog items with bounded context annotations and relevant ADR references.
+**Purpose:** Slice approved requirements into independently executable work
+items using business outcomes, bounded contexts, repository boundaries, and
+real delivery dependencies.
+**When:** After the mandatory repository analysis in `SKILL.md`.
+**Output:** A provider-neutral manifest whose items collectively cover the
+approved PRD and whose dependencies form one global DAG, including across
+repositories.
 
 ---
 
 ## Core Principle
 
-**Slice vertically along bounded contexts, not horizontally across layers.**
+**Prefer vertical business slices; use repository and bounded-context
+boundaries to plan implementation, not as automatic reasons to split.**
 
-| | ❌ Wrong (horizontal slice) | ✅ Correct (vertical slice) |
-|--|---|---|
-| Issue 1 | Add L2 entity model | Ingest → L2 entity extraction + storage |
-| Issue 2 | Add L2 repository | Query → Archive API + storage |
-| Issue 3 | Add L2 service | Graph → Ego API + traversal |
+A bounded context is a domain boundary. A repository is a code ownership and
+deployment boundary. They are not necessarily one-to-one:
+- One bounded context may be implemented across several repositories.
+- One repository may contain multiple bounded contexts.
+- A single user-visible outcome may require coordinated changes across
+  repositories.
 
-Horizontal slices mean Issue 1 can't be tested independently — it only creates the model, nothing else works.
-
-Vertical slices can be implemented, tested, and shipped independently within one context.
-
----
+Do not split every PRD story into frontend/backend/database tasks merely
+because those layers live in different repositories. Split only when the
+resulting items have clear deliverables, verifiable acceptance, and a real
+dependency or ownership reason.
 
 ## Slicing Rules
 
-### Rule 1 — One Context Per Backlog
+### Rule 1 — Prefer an independently verifiable outcome
 
-Each backlog item should operate within **one bounded context**.
-If work crosses a context boundary, split into multiple items with `dependsOn` links.
+A task should deliver a coherent business behavior or a concrete prerequisite
+with its own acceptance criteria. Include the necessary model, API/logic, and
+tests within the target repository when that makes the outcome independently
+verifiable.
 
-### Rule 2 — Full Stack Within Context
+### Rule 2 — One target repository per task by default
 
-A vertical slice includes everything needed for that context to work:
-- Data model
-- API endpoint
-- Business logic
-- Tests
+Each task normally targets one repository, enabling a clear base version,
+branch, diff boundary, and execution environment. The manifest records
+`targetRepository`; the Issue body does not repeat the repository name.
 
-### Rule 3 — Aggregate Boundaries
+A task may span repositories only when splitting it would create artificial
+work items that cannot be independently implemented or verified. Such an
+exception must list every repository, its intended changes, base-ref policy,
+coordination constraints, and cross-repository verification. Prefer separate
+tasks linked by dependencies whenever the boundaries are real.
 
-If an aggregate (e.g., WikiPage) spans multiple concerns, split along the aggregate's invariant groups.
+### Rule 3 — Split on real boundaries
 
-### Rule 4 — Cross-Context Events
+Separate tasks when there is a meaningful difference in:
+- Bounded context or ownership.
+- Independent acceptance or release boundary.
+- API, schema, event, or generated-client contract.
+- Migration, rollout, or compatibility requirement.
+- Risk, environment, credential, or isolation needs.
+- A prerequisite that can be completed and verified independently.
 
-If item A publishes an event and item B consumes it, B MUST list A in `dependsOn`.
+Do not create a separate task for a model, API, or method merely because it
+exists as a separate technical layer.
+
+### Rule 4 — Model cross-repository contracts explicitly
+
+When a producer repository changes an API, schema, event, or generated
+contract consumed by another repository:
+- Identify producer and consumer tasks.
+- Record the contract version and compatibility requirements.
+- Make consumers depend on producer contract readiness when necessary.
+- Prefer backward-compatible rollout sequences where supported.
+- Include integration/contract tests that validate both sides.
+- Avoid circular dependencies; if the work is truly coordinated, introduce
+  a separately verifiable compatibility/prerequisite task or ask for a
+  sequencing decision.
+
+A repository dependency must not be inferred from repository names alone.
+
+### Rule 5 — Keep one global dependency DAG
+
+Dependencies may cross repository boundaries. Use stable draft-local keys
+until the backlog provider assigns canonical IDs. Check for cycles across the
+entire PRD task graph, not separately per repository. Identify independent
+tasks that can run in parallel, while flagging shared contracts or files that
+could cause conflicts.
+
+### Rule 6 — Parent and dependency are different
+
+Parent/child relationships organize work. `dependsOn` expresses a real
+execution prerequisite. Do not use parent links as a substitute for
+dependencies, and do not make every child depend on its parent unless the
+runtime contract explicitly requires that behavior.
+
+### Rule 7 — Acceptance must prove the intended behavior
+
+Each task must have:
+- Observable, bounded acceptance criteria.
+- A concrete verification method based on repository evidence.
+- Source requirement IDs from the approved PRD.
+- Explicit non-goals to prevent scope creep.
+- Cross-repository integration verification when independent tests are
+  insufficient.
+
+A successful shell command is not itself proof that the product behavior is
+correct. Human checks remain pending until a human signs them off.
 
 ---
 
-## Backlog Manifest Item with Architecture Context
+## Example: One PRD, Three Repositories
 
-```markdown
-## Context
-<PRD link>
+PRD: “A user can upload a file and see a reliable result.”
 
-## Bounded Contexts
-- <context name from PRD>
+| Draft key | Target repository | Deliverable | Depends on |
+|---|---|---|---|
+| `storage-upload` | `file-storage` | Persist file content and metadata with defined failure behavior | none |
+| `api-upload` | `file-api` | Validate request, authorize user, call storage, expose stable response contract | `storage-upload` only if its contract is required first |
+| `web-upload` | `web-app` | Upload interaction and success/error feedback against the agreed API contract | `api-upload` when the contract is not already stable |
+| `upload-e2e` | configured integration-test repository, or one suitable existing repository | Verify upload success, rejection, and error propagation across the integrated flow | relevant producer/consumer tasks |
 
-## Relevant ADRs
-- ADR-NNNN: <title>
-
-## Acceptance Criteria (machine-checkable)
-- [ ] <text> -- <evidence_type> -- <check_command>
-```
-
----
+This is illustrative, not a mandatory four-task plan. If storage and API already exist,
+reuse them; if contract tests live with the API, do not invent a separate test
+repository. The actual task count and dependencies must come from repository
+evidence.
 
 ## Slicing Checklist
 
-Before emitting a backlog manifest item, confirm:
+Before approval, confirm:
 
-- [ ] Does this backlog item operate within ONE bounded context?
-- [ ] Can this be implemented and tested without depending on another incomplete item?
-- [ ] Does it include everything within the context (model + API + logic + test)?
-- [ ] If it triggers downstream contexts via events, does the consumer list this item in `dependsOn`?
-
----
-
-## Context-to-Issue Mapping Example
-
-Given PRD with contexts: Order, Inventory, Notification
-
-```
-PRD User Story: "Customer can reorder an out-of-stock item"
-
-→ backlog-inventory:  [Inventory] Reorder trigger: detect low stock, create reorder proposal
-    dependsOn: []
-
-→ backlog-order:  [Order] Reorder: create new Order from reorder proposal
-    dependsOn: [backlog-inventory]
-
-→ backlog-notification:  [Notification] Reorder: notify customer when item is available
-    dependsOn: [backlog-order] (same Order trigger, different behavior)
-```
-
----
+- [ ] The full repository set relevant to the PRD has been identified, or access
+      limitations are explicit.
+- [ ] Each requirement is mapped to evidence and one or more candidate
+      repositories.
+- [ ] Each task has a clear target repository, base-ref policy, change scope,
+      non-goals, and verification.
+- [ ] Repository boundaries have not replaced business-outcome reasoning.
+- [ ] Cross-repository contracts, rollout constraints, and consumers are
+      represented in the global DAG.
+- [ ] The global DAG is acyclic and parallel work is identified.
+- [ ] End-to-end behavior is verified where repository-local tests are
+      insufficient.
+- [ ] No new product behavior was inferred from code structure alone.
 
 ## Anti-Patterns
 
-- MUST NOT create a backlog item that spans two bounded contexts without splitting
-- MUST NOT create an item for only "the model" or "the API" — it must be a full vertical slice
-- MUST NOT omit `dependsOn` for event-driven cross-context dependencies
-- MUST NOT slice so fine that each item is just one method — aggregate related changes
+- Splitting every PRD story into frontend/backend/database tickets by default.
+- Assuming one bounded context equals one repository.
+- Assuming a repository is relevant based only on its name.
+- Omitting consumer dependencies for a breaking contract change.
+- Treating independent repository tests as proof of end-to-end integration.
+- Creating an issue in a repository that was never confirmed as a target.
+- Making repository identity a duplicated Issue-body field instead of manifest
+  metadata.

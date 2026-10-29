@@ -418,7 +418,7 @@ export class WorkflowRunner {
     });
     if (this.providers) {
       const backlog = await this.providers.backlog.get(backlogId);
-      if (backlog.state === 'prd') throw new Error(`backlog ${backlogId} is a PRD parent and is not runnable`);
+      if (backlog.kind === 'prd') throw new Error(`backlog ${backlogId} is a PRD anchor and is not runnable`);
       if (!options.baseBranchExplicit) {
         baseBranch = await resolveBacklogExecutionBase(this.providers.backlog, backlog, baseBranch);
         options = { ...options, baseBranch,

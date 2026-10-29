@@ -86,6 +86,7 @@ export function filterGlobalWorkItemInventory(
     items: result.items.filter(item =>
       matchesProject(item.project.projectKey)
       && (filters.state === undefined || item.state === filters.state)
+      && (filters.kind === undefined || item.kind === filters.kind)
       && (filters.mode === undefined || item.executionMode === filters.mode)
       && (filters.tag === undefined || item.tags.includes(filters.tag))),
   };

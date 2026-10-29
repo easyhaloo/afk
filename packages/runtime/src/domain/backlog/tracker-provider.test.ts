@@ -45,10 +45,10 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('recognizes PRD anchors without allowing claims or adoption', async () => {
-    const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['stage::prd'], state: 'opened' });
+    const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['kind::prd', 'mode::hitl'], state: 'opened' });
     const provider = new TrackerBacklogProvider(t);
     const anchor = await provider.get('10');
-    expect(anchor).toMatchObject({ state: 'prd', executionEligible: false, executionMode: 'hitl' });
+    expect(anchor).toMatchObject({ kind: 'prd', state: undefined, executionEligible: false, executionMode: 'hitl' });
     await expect(provider.isRunnable(anchor)).resolves.toBe(false);
     await expect(provider.adopt('10')).rejects.toThrow('invalid adoption metadata');
   });
@@ -86,11 +86,29 @@ describe('TrackerBacklogProvider', () => {
       listIssues: vi.fn(async () => issue.labels.length ? [{ ...issue }] : []),
       createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }) };
     const provider = new TrackerBacklogProvider(t);
-    const input = { title: 'Anchor', description: 'Body', stage: 'prd' as const, idempotencyKey: 'migration/anchor' };
+    const input = { title: 'Anchor', description: 'Body', kind: 'prd' as const, idempotencyKey: 'migration/anchor' };
     expect((await provider.create(input)).id).toBe('github:org/repo#42');
     expect((await provider.create(input)).id).toBe('github:org/repo#42');
     expect(t.createIssue).toHaveBeenCalledTimes(1);
     expect((await provider.get('42')).tags).toEqual([]);
+  });
+
+  it('writes the dependency links of a record an earlier run created', async () => {
+    const dependency = { id: 6, platform: 'github', projectId: 'org/repo', title: 'Dependency', labels: [] as string[], state: 'opened' };
+    const existing = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
+    const t = tracker(existing);
+    // The record exists but the run that created it stopped before it wrote
+    // the relation, so the repeated run has to write the relation itself.
+    t.listIssues = vi.fn(async (options: any) => options?.labels?.length ? [{ ...existing, labels: options.labels }] : []);
+    t.getIssue = vi.fn(async (id: number) => (id === 6 ? { ...dependency } : { ...existing }));
+    t.createIssue = vi.fn(async () => 42);
+    t.linkIssues = vi.fn(async () => {});
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.create({ title: 'Child', description: 'Body', dependsOn: ['6'], idempotencyKey: 'manifest/child' });
+
+    expect(t.createIssue).not.toHaveBeenCalled();
+    expect(t.linkIssues).toHaveBeenCalledWith(42, 6, 'blocked_by');
   });
 
   it.each([

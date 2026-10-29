@@ -16,7 +16,7 @@ import { FilterPanel } from "../../components/FilterPanel.js";
 import { SegmentedControl } from "../../components/SegmentedControl.js";
 import { BacklogDetailDrawer } from "./BacklogDetailDrawer.js";
 import { fetchBacklogList, invalidateBacklogCache, readBacklogCache, resetBacklogCache } from "./backlog-cache.js";
-import { BACKLOG_STATE_LABELS, backlogStateLabel, filterBacklogItems, type SourceFilter } from "./backlog-filter.js";
+import { BACKLOG_STATE_LABELS, backlogLifecycleClass, backlogLifecycleLabel, backlogStateLabel, filterBacklogItems, type SourceFilter } from "./backlog-filter.js";
 import "./backlog.css";
 
 export { backlogStateLabel, filterBacklogItems, BACKLOG_STATE_LABELS } from "./backlog-filter.js";
@@ -251,7 +251,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
               <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} title={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}>{item.executionMode === "afk" ? <Bot size={16} aria-hidden="true" /> : <Hand size={16} aria-hidden="true" />}</span>
               <div className="backlog-row-body">
                 <header><div className="backlog-row-heading"><b>{item.title}</b><small>#{item.id}</small></div><button type="button" className="backlog-run-button" onClick={(event) => { event.stopPropagation(); if (canExecuteInWorkItem) { if (item.workItemId) onOpenWorkItem?.(item.workItemId); } else if (action === "stop" || action === "recover" || action === "confirm-merge") { void runLifecycleAction(item, action); } else { void openDetails(item); } }} disabled={runBusyFor === item.id || (canExecuteInWorkItem && (!item.workItemId || !onOpenWorkItem))} aria-label={actionLabel} title={actionTitle}>{canExecuteInWorkItem ? <ArrowUpRight size={12} aria-hidden="true" /> : action === "stop" ? <Square size={11} fill="currentColor" aria-hidden="true" /> : action === "recover" ? <RotateCcw size={12} aria-hidden="true" /> : action === "confirm-merge" ? <GitMerge size={12} aria-hidden="true" /> : <Eye size={12} aria-hidden="true" />}<span className="backlog-run-button-label">{actionLabel}</span></button></header>
-                <div className="backlog-item-metadata"><span className={`backlog-state-label backlog-state-${item.state}`}><i aria-hidden="true" />{backlogStateLabel(item.state)}</span></div>
+                <div className="backlog-item-metadata"><span className={`backlog-state-label backlog-state-${backlogLifecycleClass(item)}`}><i aria-hidden="true" />{backlogLifecycleLabel(item)}</span></div>
                 {missingWorkItemId ? <p className="backlog-run-status">缺少规范化 workItemId，请先关联工作项</p> : null}
                 {summary.activeRun ? <p className="backlog-run-status">运行状态：{summary.activeRun.status === "running" ? "运行中" : summary.activeRun.status === "completed" ? "进程已退出，QA 未确认" : summary.activeRun.status === "starting" ? "启动中" : "失败"} · PID {summary.activeRun.pid ?? "—"}</p> : null}
                 {item.tags.length ? <ul className="backlog-tags">{item.tags.map((tag) => <li key={tag}><span>{tag}</span></li>)}</ul> : null}

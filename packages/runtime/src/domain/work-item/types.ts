@@ -21,7 +21,10 @@ export interface GlobalWorkItem {
   description?: string;
   managed: boolean;
   executionEligible: boolean;
-  state: BacklogState;
+  /** The lifecycle position. A PRD anchor is a container and has none. */
+  state?: BacklogState;
+  /** The role of the item; `prd` marks a parent that is never executable. */
+  kind?: 'prd';
   executionMode: BacklogExecutionMode;
   parentId?: WorkItemId;
   dependsOn: WorkItemId[];

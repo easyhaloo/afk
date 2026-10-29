@@ -5,6 +5,7 @@
 export const INTERNAL_LABEL_PREFIXES = [
   'stage::',
   'mode::',
+  'kind::',
   'parent::',
   'base::',
   'depends-on::',
@@ -16,7 +17,12 @@ export function isInternalBacklogLabel(label: string): boolean {
   return INTERNAL_LABEL_PREFIXES.some(prefix => label.startsWith(prefix));
 }
 
-/** State and mode labels are replaced on every canonical transition. */
+/**
+ * State and mode labels are replaced on every canonical transition.
+ *
+ * The role label is not workflow metadata: a role survives the lifecycle
+ * transitions of the item it marks.
+ */
 export function isWorkflowMetadataLabel(label: string): boolean {
   return label.startsWith('stage::') || label.startsWith('mode::');
 }

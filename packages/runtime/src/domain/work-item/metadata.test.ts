@@ -12,8 +12,9 @@ const project = {
 
 describe('global work item metadata', () => {
   it('keeps existing PRD anchors visible and ineligible', () => {
-    const item = toGlobalWorkItem(project, { issueNumber: 10, title: 'PRD', state: 'opened', labels: ['stage::prd'] });
-    expect(item).toMatchObject({ state: 'prd', executionEligible: false, executionMode: 'hitl' });
+    const item = toGlobalWorkItem(project, { issueNumber: 10, title: 'PRD', state: 'opened', labels: ['kind::prd', 'mode::hitl'] });
+    // An anchor is a container: it carries the role, not a lifecycle position.
+    expect(item).toMatchObject({ kind: 'prd', state: undefined, managed: true, executionEligible: false, executionMode: 'hitl' });
   });
   it.each(['2026-10-15T08:00:00Z', undefined])('preserves the optional Provider updatedAt %s', updatedAt => {
     const item = toGlobalWorkItem(project, {

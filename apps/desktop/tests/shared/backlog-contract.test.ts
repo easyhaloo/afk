@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKLOG_STATES,
+  BACKLOG_KINDS,
   BACKLOG_EXECUTION_MODES,
   type BacklogItem,
   type BacklogState,
@@ -20,8 +21,10 @@ import {
 describe("Backlog shared contract", () => {
   it("exports the canonical state and mode unions", () => {
     expect(BACKLOG_STATES).toEqual([
-      "prd", "ready", "rework", "in_progress", "verification", "merge_ready", "done", "blocked",
+      "ready", "rework", "in_progress", "verification", "merge_ready", "done", "blocked",
     ]);
+    // A PRD is a role, not a lifecycle position: it has its own vocabulary.
+    expect(BACKLOG_KINDS).toEqual(["prd"]);
     expect(BACKLOG_EXECUTION_MODES).toEqual(["afk", "hitl"]);
   });
 

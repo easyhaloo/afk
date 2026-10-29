@@ -8,6 +8,8 @@ import {
   runBacklogAdopt,
   runBacklogConfirmMerge,
   runBacklogCreate,
+  runBacklogChildren,
+  resolveBacklogChildrenIdentity,
   runBacklogInterrupt,
   runBacklogInventory,
   runBacklogList,
@@ -22,6 +24,7 @@ import { registerLoopCommands } from './loop.js';
 import type { BacklogCreateInput, BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
+import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
 import { emitSuccess, emitFailure } from '../output.js';
 import * as providerFactory from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 
@@ -38,7 +41,7 @@ describe('hard-cutover command surface', () => {
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const commandNames = backlog?.commands.map(command => command.name()) ?? [];
     expect(commandNames).toEqual(expect.arrayContaining([
-      'init', 'adopt', 'inventory', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
+      'init', 'adopt', 'inventory', 'list', 'show', 'children', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
     ]));
     expect(new Set(commandNames).size).toBe(commandNames.length);
     const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
@@ -88,8 +91,10 @@ describe('hard-cutover command surface', () => {
 
     expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
     expect(create?.options.map(option => option.long)).toEqual(expect.arrayContaining([
-      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--stage', '--dry-run', '--idempotency-key', '--tag', '--project', '--platform', '--json',
+      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--kind', '--dry-run', '--idempotency-key', '--tag', '--project', '--platform', '--json',
     ]));
+    // The stage option is gone: a PRD is a role, not a lifecycle position.
+    expect(create?.options.map(option => option.long)).not.toContain('--stage');
     expect(create?.options.find(option => option.long === '--base-backlog')?.description).toContain('explicit execution base');
     expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
   });
@@ -527,6 +532,33 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     });
   });
 
+  it('runBacklogList filters by role and rejects an unknown role', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    let received: unknown;
+    try {
+      await runBacklogList(stubProvider([stubItem], {
+        async list(options) { received = options; return []; },
+      }), { kind: 'prd', json: true });
+      // The role filter reaches the provider, so a PRD anchor is selectable
+      // even though it has no lifecycle state to filter on.
+      expect(received).toMatchObject({ kind: 'prd' });
+
+      captured.length = 0;
+      await runBacklogList(stubProvider([stubItem]), { kind: 'nope', json: true });
+      const failure = JSON.parse(captured.join(''));
+      expect(failure.error.message).toContain('invalid backlog role');
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+  });
+
   it('runBacklogList returns the structured failure envelope when the provider throws', async () => {
     const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);
@@ -642,10 +674,14 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     try {
       await runBacklogCreate(stubProvider([stubItem], { create, initialize }), {
-        title: 'PRD', description: 'Body', stage: 'prd', dryRun: true, parent: '42', json: true,
+        title: 'PRD', description: 'Body', kind: 'prd', dryRun: true, parent: '42', json: true,
       });
-      expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ ok: true, kind: 'backlog.create',
-        data: { dryRun: true, title: 'PRD', labels: ['stage::prd', 'mode::afk', 'parent::github:org/repo#42'] } });
+      const envelope = JSON.parse(String(output.mock.calls[0][0]));
+      expect(envelope).toMatchObject({ ok: true, kind: 'backlog.create',
+        data: { dryRun: true, title: 'PRD', kind: 'prd',
+          labels: ['kind::prd', 'mode::hitl', 'parent::github:org/repo#42'] } });
+      // A PRD anchor has no lifecycle position, so the plan carries no state.
+      expect(envelope.data.state).toBeUndefined();
       expect(create).not.toHaveBeenCalled();
       expect(initialize).not.toHaveBeenCalled();
     } finally {
@@ -838,5 +874,207 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       process.stdout.write = original;
       process.exitCode = previousExitCode;
     }
+  });
+});
+
+describe('backlog children', () => {
+  function workItem(id: string, overrides: Partial<GlobalWorkItem> = {}): GlobalWorkItem {
+    const [identity, issueNumber] = id.split('#');
+    const projectKey = identity?.split(':')[1] ?? 'group/repo';
+    return {
+      id,
+      issueNumber: Number(issueNumber),
+      project: { platform: 'gitlab', projectKey, name: projectKey.split('/').at(-1) ?? projectKey },
+      title: id,
+      managed: true,
+      executionEligible: false,
+      state: 'ready',
+      executionMode: 'hitl',
+      dependsOn: [],
+      tags: [],
+      branchName: `feature/${issueNumber}`,
+      providerRef: id,
+      webUrl: `https://example.test/${id}`,
+      ...overrides,
+    };
+  }
+
+  // A PRD anchor is a container: it carries the role and has no state.
+  const parent = workItem('gitlab:group/repo#7', { title: 'the PRD', kind: 'prd', state: undefined });
+  const child = workItem('gitlab:group/repo#8', { parentId: parent.id, title: 'child issue' });
+  const unmanaged = workItem('gitlab:group/repo#9', { parentId: parent.id, title: 'manual issue', managed: false });
+
+  async function capture(run: () => Promise<void>): Promise<Record<string, unknown>> {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await run();
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+    return JSON.parse(captured.join('')) as Record<string, unknown>;
+  }
+
+  async function captureText(run: () => Promise<void>): Promise<string> {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map((value) => String(value)).join(' '));
+    });
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return lines.join('\n');
+  }
+
+  it('lists the issues that belong to one work item', async () => {
+    const envelope = await capture(() => runBacklogChildren(parent.id, { json: true }, {
+      read: async () => ({ items: [parent, child, unmanaged], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.children',
+      data: {
+        parent: { id: parent.id, title: 'the PRD' },
+        children: [
+          { id: child.id, title: 'child issue', managed: true },
+          { id: unmanaged.id, title: 'manual issue', managed: false },
+        ],
+      },
+    });
+  });
+
+  it('prints the provider URL of every item next to its title', async () => {
+    const output = await captureText(() => runBacklogChildren(parent.id, {}, {
+      read: async () => ({ items: [parent, child], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    const lines = output.split('\n');
+    const parentLine = lines.find(line => line.includes(parent.id)) ?? '';
+    const childLine = lines.find(line => line.includes(child.id)) ?? '';
+    // The URL belongs to the line that names the item, so a terminal can
+    // link it and a person does not have to look for it.
+    expect(parentLine).toContain(parent.webUrl);
+    expect(childLine).toContain(child.webUrl);
+  });
+
+  it('reports an identity that is not a work item id', async () => {
+    const envelope = await capture(() => runBacklogChildren('not-an-id', { json: true }, {
+      read: async () => undefined,
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: false,
+      kind: 'backlog.children',
+      error: { code: 'validation' },
+    });
+  });
+
+  it('lists the children of an item addressed by its issue number', async () => {
+    const envelope = await capture(() => runBacklogChildren('7', { json: true }, {
+      resolve: async (value: string) => {
+        expect(value).toBe('7');
+        return parent.id;
+      },
+      read: async () => ({ items: [parent, child, unmanaged], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.children',
+      data: {
+        parent: { id: parent.id, title: 'the PRD' },
+        children: [{ id: child.id }, { id: unmanaged.id }],
+      },
+    });
+  });
+
+  it('reports an issue number whose project cannot be resolved', async () => {
+    const envelope = await capture(() => runBacklogChildren('7', { json: true }, {
+      resolve: async () => {
+        throw new Error('A tracker project must be resolved before the provider can be created.');
+      },
+      read: async () => undefined,
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: false,
+      kind: 'backlog.children',
+      error: { code: 'validation' },
+    });
+  });
+
+  it('reports a work item that does not exist', async () => {
+    const envelope = await capture(() => runBacklogChildren('gitlab:group/repo#404', { json: true }, {
+      read: async () => ({ items: [parent, child], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: false,
+      kind: 'backlog.children',
+      error: { code: 'not_found' },
+    });
+  });
+});
+
+describe('backlog children identity', () => {
+  const target = {
+    platform: 'gitlab' as const,
+    projectId: 'group/repo',
+    host: 'gitlab.example.test',
+    platformSource: 'index' as const,
+    projectSource: 'index' as const,
+  };
+
+  it('keeps a canonical identity as it is', async () => {
+    await expect(resolveBacklogChildrenIdentity('gitlab:group/repo#7', {}, { target: async () => target }))
+      .resolves.toBe('gitlab:group/repo#7');
+  });
+
+  it('reads an issue number through the project that owns it', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', {}, { target: async (options) => {
+      expect(options).toMatchObject({ issueId: '7' });
+      return target;
+    } })).resolves.toBe('gitlab:gitlab.example.test/group/repo#7');
+  });
+
+  it('passes an explicit project and platform on', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', { project: 'group/other', platform: 'gitlab' }, { target: async (options) => {
+      expect(options).toMatchObject({ project: 'group/other', platform: 'gitlab', issueId: '7' });
+      return { ...target, projectId: 'group/other' };
+    } })).resolves.toBe('gitlab:gitlab.example.test/group/other#7');
+  });
+
+  it('reads the instance from the index when the target does not name one', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', {}, {
+      target: async () => ({ ...target, host: undefined }),
+      host: () => 'gitlab.example.test',
+    })).resolves.toBe('gitlab:gitlab.example.test/group/repo#7');
+  });
+
+  it('keeps the host a project already carries', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', { project: 'gitlab.example.test/group/other' }, {
+      target: async () => ({ ...target, projectId: 'gitlab.example.test/group/other', host: undefined }),
+      host: () => undefined,
+    })).resolves.toBe('gitlab:gitlab.example.test/group/other#7');
+  });
+
+  it('refuses an id that is neither an issue number nor a canonical identity', async () => {
+    await expect(resolveBacklogChildrenIdentity('not-an-id', {}, { target: async () => target }))
+      .rejects.toThrow(/must be an issue number or platform:projectKey#issueNumber/);
   });
 });

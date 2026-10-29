@@ -64,8 +64,10 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
-| `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
+| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
+| `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
@@ -231,6 +233,17 @@ backlog 图跨越项目。PRD 锚点可能位于需求仓库，其实现子项�
 provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一个仓库有子项的父项永远
 不可运行。当跨仓图不可读时，adapter 回落到本地项目扫描并报告该失败。
 
+某个工作项的子项由同一个查询回答
+（`packages/runtime/src/application/work-item/children.ts`）。它接受父项的规范身份，
+因为裸 issue 编号在每个仓库都指向不同的 issue；它优先从本地库存回答。本地库存是
+缓存，缺失或过期时会重新采集后再回答，而本地库存从未见过的身份会再采集一次才判定
+为未知。子项按项目与 issue 编号排序，因此列表不依赖库存的采集时机。未被 AFK 纳管的
+子项同样会被返回，并标明 `managed`，因为手工挂到 PRD 上的 issue 也是子项。
+
+命令会替调用方解析这个身份：裸 issue 编号会在本地索引里查出它属于哪个项目，
+`--project` 与 `--platform` 则直接说明。只有脚本产出规范身份时，整串才需要被敲出来。
+每个条目独占一行，provider 报的 URL 就在标题旁边，因此在终端里点一下就能打开。
+
 创建关系参数（`--parent`、`--base-backlog`、`--depends-on`）接受显式选定项目内的
 正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。`--base-backlog`
 支持跨仓引用；但跨仓任务的分支不能直接作为当前仓库的 Git 基线，运行时会保留该引用
@@ -241,14 +254,52 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 优先。存量 `base::prd-N` 继续选择 `prd/N`。实现执行与 QA 共用 backlog 基线
 解析逻辑，正常目标分支保持原有语义。
 
-`--stage prd` 创建带 `stage::prd` 的组织性锚点，始终不可执行。PRD 父项在 core
-工作项模型中拥有独立状态，而不是被当作 blocked：组织性父项与等待人工处理的项是
-两种不同的事实。无 mode 标签的存量 PRD 锚点也能识别。缺少 mode 标签的 issue 默认
-`hitl`，需显式 adopt 后才能自动执行。`--dry-run` 使用相同创建计划校验引用，并输出
-标题、描述、标签与关系，不写入 provider。`--idempotency-key` 持久化经过哈希的项目内
-元数据标签，顺序重试返回已有 issue（含已关闭项）。该键用于重试去重，不是分布式锁；
-并发创建需要由调用方串行化。业务标签不能注入保留元数据，重复 parent/base 标签或
-非法引用会被校验拒绝。
+`--kind prd` 创建带 `kind::prd` 标签的组织性锚点，始终不可执行。角色不是阶段：
+锚点是容器，因此**没有任何生命周期状态**——它不落在 `ready` 桶里，其不可执行性来自
+角色本身而不是来自状态。七个 `stage::*` 标签是唯一的生命周期位置，每个非锚点工作项
+恰好携带其中一个。缺少 mode 标签的 issue 默认 `hitl`，需显式 adopt 后才能自动执行。
+`--dry-run` 使用相同创建计划校验引用，并输出标题、描述、标签与关系，不写入 provider。
+锚点默认使用 `hitl` 模式；请求自治锚点会被直接拒绝，而不是被静默降级。
+`--idempotency-key` 持久化经过哈希的项目内元数据标签，顺序重试返回已有 issue（含已关闭项）。
+该键用于重试去重，不是分布式锁；并发创建需要由调用方串行化。业务标签不能注入保留元数据，
+重复 parent/base 标签或非法引用会被校验拒绝。
+
+`afk backlog list` 与 `afk backlog inventory` 按状态和按角色分别过滤：锚点没有状态，
+所以 `--state ready` 永远不会返回锚点，选出锚点要用 `--kind prd`。
+
+### Backlog manifest
+
+`afk backlog apply-manifest <file>` 应用一份 provider 中立的 manifest：一份 YAML 条目
+列表，每条带标题、描述、所属项目与它之间的关系。manifest 是需求分解产出的交接物，
+由 AFK 消费。
+
+| 字段 | 含义 |
+| --- | --- |
+| `project` | 记录所属项目的规范项目键：`platform:projectKey` |
+| `ref` | 清单内可被其它条目引用的本地名 |
+| `parentId` | 组织性父项：规范 ID 或清单内 `ref` |
+| `baseBacklogId` | Git 执行基线：规范 ID 或清单内 `ref` |
+| `dependsOn` | 必须先完成的记录 |
+| `executionMode` | `afk` 或 `hitl` |
+| `tags` | provider 中立的业务标签 |
+
+跨仓需求把条目放进拥有该工作的仓：每条声明自己的项目，记录就建在那里。引用要么是
+已存在记录的规范 ID，要么是同一份 manifest 里另一条目的 `ref`——后者在它所指的记录
+建好之后才解析，因此父项、执行基线和依赖总是先于指向它们的条目建立。依赖成环会被
+直接拒绝，而不是按某种顺序硬建。
+
+跨项目关系要求两个项目在同一个 provider host 上；跨 provider 的关系会被拒绝。执行
+基线必须与条目运行所在的仓相同，因为分支只属于一个仓。
+
+`--idempotency-key <prefix>` 用前缀加条目的 `ref`（没有则用标题）派生出逐条重试键，
+因此同一份 manifest 应用两次会返回它已经建好的记录，而不是再建一遍。
+
+依赖边会被写两遍：一遍是 provider 中立的 `depends-on::<id>` 标签，也就是 AFK 读回来的
+那条边；一遍是给人看的 provider 原生链接。在 GitLab 上这条链接是从「被等待的那条记录」
+出发的 `blocks` 链接——GitLab 正是这样显示 "is blocked by"；链接的目标项目用数字身份
+指认，因为链接的请求体里放的是 id。在 GitHub 上它是一条点名那条记录的评论。重复应用
+会补写缺失的关系，也不会重复已有的关系，因此同一份 manifest 应用两次会收敛到这份
+manifest。
 
 CLI JSON 成功信封为 `{ok:true,kind,data}`；失败信封为
 `{ok:false,kind,data:null,error:{code,message,details?}}`，并返回非零退出码。
@@ -269,8 +320,9 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 计入。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
 
-`prd` 条目是组织性父项，始终不可执行，且它不是 `blocked`：它聚合子项，
-而不是等待人工介入。
+带 `prd` 角色的条目是组织性父项。它**没有任何生命周期状态**——它聚合子项，而不是
+等待人工介入，而“等待子项完成”并不是生命周期中的一个位置。让它不可执行的是角色，
+而不是某个状态。
 
 QA FAIL 在 Provider issue comment/note 中持久化新的返工记录，将旧 active
 记录标为 `superseded`，并从已持久化的最高值递增 `ReworkRecord.attempt`。

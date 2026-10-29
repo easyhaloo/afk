@@ -246,6 +246,10 @@ export class GitHubClient implements TrackerProvider {
       type === 'blocks' ? `Blocks ${targetRef}` :
       type === 'is_blocked_by' || type === 'blocked_by' ? `Blocked by ${targetRef}` :
       `Related to ${targetRef}`;
+    // A relation that is already written is not written again: a repeated
+    // run has to leave the record the way it found it.
+    const written = await this.listIssueComments(sourceId);
+    if (written.some(comment => comment.body === linkMessage)) return;
 
     await this.addComment(sourceId, linkMessage);
   }

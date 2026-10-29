@@ -58,6 +58,8 @@ export interface GlobalWorkItemInventoryResult {
 export interface GlobalWorkItemInventoryFilters {
   state?: BacklogState;
   mode?: BacklogExecutionMode;
+  /** Filter by role; `prd` selects the organizational anchors. */
+  kind?: 'prd';
   tag?: string;
   project?: string;
 }

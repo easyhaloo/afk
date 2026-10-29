@@ -1,5 +1,5 @@
 export type InventoryPlatform = 'github' | 'gitlab';
-export type InventoryState = 'prd' | 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+export type InventoryState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 
 export interface InventoryProject {
   platform: InventoryPlatform;
@@ -69,7 +69,10 @@ export interface InventoryItem {
   description?: string;
   managed: boolean;
   executionEligible: boolean;
-  state: InventoryState;
+  /** The lifecycle position. An organizational parent has none. */
+  state?: InventoryState;
+  /** The role of the item; `prd` marks a parent that is never executable. */
+  kind?: 'prd';
   executionMode: 'afk' | 'hitl';
   parentId?: string;
   dependsOn: string[];
@@ -108,6 +111,10 @@ export interface InventoryQuery {
   project?: string;
   tag?: string;
   text?: string;
+  /** Canonical identity of the organizational parent; answers "the children of". */
+  parentId?: string;
+  /** Filter by role; `prd` selects the organizational parents. */
+  kind?: 'prd';
   limit?: number;
   cursor?: string;
 }

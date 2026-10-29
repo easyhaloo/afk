@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type {
   BacklogPlatform,
   GlobalWorkItem,
+  WorkItemChildrenResult,
   WorkItemInventoryDiagnostic,
   WorkItemInventoryResult,
   WorkItemRepositoryRef,
@@ -36,8 +37,7 @@ import "./work-items.css";
 const emptyInventory: WorkItemInventoryResult = { items: [], projects: [], diagnostics: [], complete: true };
 const pageSize = 50;
 
-const stateLabels: Record<GlobalWorkItem["state"], string> = {
-  prd: "需求父项",
+const stateLabels: Record<Exclude<GlobalWorkItem["state"], undefined>, string> = {
   ready: "待处理",
   rework: "返工",
   in_progress: "执行中",
@@ -47,14 +47,33 @@ const stateLabels: Record<GlobalWorkItem["state"], string> = {
   blocked: "已阻塞",
 };
 
+/**
+ * The label of a role.
+ *
+ * A PRD anchor is a container: it has no lifecycle position, so the role is
+ * what the reader sees, and it gets its own group instead of being mixed in
+ * with the executable items.
+ */
+const kindLabels: Record<NonNullable<GlobalWorkItem["kind"]>, string> = {
+  prd: "PRD 锚点",
+};
+
 const executionModeLabels: Record<GlobalWorkItem["executionMode"], string> = {
   afk: "AFK 自动",
   hitl: "HITL 人工",
 };
 
-const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label: string; triggerLabel?: string }> = [
+type WorkItemStateFilter = Exclude<GlobalWorkItem["state"], undefined> | "all";
+type WorkItemKindFilter = NonNullable<GlobalWorkItem["kind"]> | "all";
+
+const stateFilterOptions: Array<{ value: WorkItemStateFilter; label: string; triggerLabel?: string }> = [
   { value: "all", label: "全部状态", triggerLabel: "全部" },
-  ...Object.entries(stateLabels).map(([value, label]) => ({ value: value as GlobalWorkItem["state"], label })),
+  ...Object.entries(stateLabels).map(([value, label]) => ({ value: value as Exclude<GlobalWorkItem["state"], undefined>, label })),
+];
+
+const kindFilterOptions: Array<{ value: WorkItemKindFilter; label: string; triggerLabel?: string }> = [
+  { value: "all", label: "全部角色", triggerLabel: "全部" },
+  { value: "prd", label: kindLabels.prd, triggerLabel: kindLabels.prd },
 ];
 
 const runStatusLabels: Record<WorkItemRunRecord["status"], string> = {
@@ -80,7 +99,7 @@ const terminalOptions: Array<{ value: WorkItemTerminalId; label: string }> = [
   { value: "terminal", label: "Terminal.app" },
 ];
 
-type DetailTab = "overview" | "plan" | "runs";
+type DetailTab = "overview" | "plan" | "runs" | "children";
 type RepositoryRunDraft = { selected: boolean; baseBranch: string };
 type WorkItemRunView = { key: string; runId: string; startedAt?: string; status: string; statusLabel: string; summary?: string; actions?: ReactNode; metadata: ReactNode; log?: ReactNode };
 
@@ -230,10 +249,14 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<"all" | BacklogPlatform>("all");
   const [project, setProject] = useState("all");
-  const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("ready");
+  const [stateFilter, setStateFilter] = useState<WorkItemStateFilter>("ready");
+  const [kindFilter, setKindFilter] = useState<WorkItemKindFilter>("all");
   const [sortSelection, setSortSelection] = useState<BacklogSortSelection>(() => parseBacklogSort("updatedAt:desc"));
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
+  const [childrenResult, setChildrenResult] = useState<WorkItemChildrenResult | null>(null);
+  const [childrenError, setChildrenError] = useState("");
+  const [childrenLoading, setChildrenLoading] = useState(false);
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
   const [runDetailOpen, setRunDetailOpen] = useState(false);
   const runSelectionButton = useRef<HTMLButtonElement | null>(null);
@@ -247,6 +270,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const requestVersion = useRef(0);
   const runRequestVersion = useRef(0);
+  const childrenRequestVersion = useRef(0);
   const selectedWorkItemId = useRef<string | null>(null);
   const lastFocusWorkItemId = useRef<string | null>(null);
   const selected = inventory.items.find(item => item.id === selectedItem?.id) ?? selectedItem;
@@ -278,6 +302,18 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     return () => clearInterval(timer);
   }, [detailTab, selected?.id, selected?.runs]);
 
+  useEffect(() => {
+    if (detailTab !== "children" || !selected?.id) return;
+    if (typeof window.afkDesktop.workItems.children !== "function") return;
+    const version = ++childrenRequestVersion.current;
+    setChildrenLoading(true);
+    setChildrenError("");
+    void window.afkDesktop.workItems.children(selected.id)
+      .then(result => { if (version === childrenRequestVersion.current) setChildrenResult(result); })
+      .catch(cause => { if (version === childrenRequestVersion.current) setChildrenError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (version === childrenRequestVersion.current) setChildrenLoading(false); });
+  }, [detailTab, selected?.id]);
+
   const projectOptions = useMemo(() => [
     { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },
     ...inventory.projects
@@ -293,6 +329,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       if (platform !== "all" && !sources.some(source => source.platform === platform)) return false;
       if (project !== "all" && !sources.some(source => source.platform && `${source.platform}:${source.projectKey}` === project)) return false;
       if (stateFilter !== "all" && item.state !== stateFilter) return false;
+      if (kindFilter !== "all" && item.kind !== kindFilter) return false;
       const searchable = [
         item.id,
         item.title,
@@ -304,13 +341,15 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       return !normalized || searchable.includes(normalized);
     });
     return sortBacklogItems(filtered, sortSelection);
-  }, [inventory.items, platform, project, stateFilter, query, sortSelection]);
+  }, [inventory.items, platform, project, stateFilter, kindFilter, query, sortSelection]);
 
   const openDetails = (item: GlobalWorkItem) => {
     runRequestVersion.current += 1;
     selectedWorkItemId.current = item.id;
     setSelected(item);
     setDetailTab("overview");
+    setChildrenResult(null);
+    setChildrenError("");
     setSelectedRunKey(null);
     setRunDetailOpen(false);
     setRunSetupOpen(false);
@@ -367,6 +406,34 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     requestAnimationFrame(() => runSelectionButton.current?.focus());
   };
   const remainingItems = Math.max(0, visibleItems.length - visibleLimit);
+  // A PRD anchor is a container, not a work item in a lifecycle. It gets its
+  // own group so it is never mixed in with the items that can actually run.
+  const shownItems = visibleItems.slice(0, visibleLimit);
+  const anchorItems = shownItems.filter(item => item.kind === "prd");
+  const workItems = shownItems.filter(item => item.kind !== "prd");
+  const renderWorkItemRow = (item: GlobalWorkItem) => {
+    const sources = itemSources(item);
+    const repositories = itemRepositories(item);
+    return (
+      <article key={item.id} className="backlog-row work-item-row" onClick={() => openDetails(item)}>
+        <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={executionModeLabels[item.executionMode]} title={executionModeLabels[item.executionMode]}>{item.executionMode === "afk" ? <Bot size={15} aria-hidden="true" /> : <Hand size={15} aria-hidden="true" />}</span>
+        <div className="backlog-row-body">
+          <header><b>{item.title}</b></header>
+          <div className="work-item-row-context"><span>{sourceSummary(item)}</span><span><FolderGit2 size={12} />{repositorySummary(repositories)}</span></div>
+          <div className="backlog-item-metadata">
+            <span className={`backlog-state-label backlog-state-${item.kind === "prd" ? "prd" : item.state}`}>{item.kind === "prd" ? kindLabels.prd : item.state ? stateLabels[item.state] : "—"}</span>
+            <span className={`backlog-mode-tag is-${item.executionMode}`}>{executionModeLabels[item.executionMode]}</span>
+            <span className={item.managed ? "work-item-managed" : "work-item-unmanaged"}>{item.managed ? item.executionEligible ? "可执行" : "已管理" : "待导入"}</span>
+            <span className="work-item-count">{sources.length} 个来源</span>
+            <span className="work-item-count">{repositories.length} 个关联仓库</span>
+          </div>
+          {item.tags.length > 0 && <ul className="backlog-tags work-item-tags" aria-label="工作项标签">
+            {item.tags.map(tag => <li key={tag} title={tag}><Tag size={11} aria-hidden="true" /><span>{tag}</span></li>)}
+          </ul>}
+        </div>
+      </article>
+    );
+  };
   const selectedExecutionRepositories = availableExecutionRepositories.filter(repository => repositoryRunDrafts[repositoryDraftKey(repository)]?.selected);
   const selectedCheckoutPaths = planRepositoryCheckoutPaths(selectedExecutionRepositories);
   const availableCheckoutPaths = planRepositoryCheckoutPaths(availableExecutionRepositories);
@@ -444,45 +511,34 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       {error ? <div className="backlog-alert error"><ShieldAlert size={15} />{error}</div> : null}
       {inventory.diagnostics.length ? <div className="work-item-diagnostics">{inventory.diagnostics.map((diagnostic, index) => <div key={`${diagnostic.platform}-${diagnostic.projectKey ?? "provider"}-${index}`}><b>{diagnosticTitle(diagnostic)}</b><span>{diagnostic.message}</span></div>)}</div> : null}
 
-      <SegmentedControl label="工作项快捷状态" value={stateFilter} options={[{ value: "all", label: "全部", count: inventory.items.length }, { value: "ready", label: "待处理", count: inventory.items.filter(item => item.state === "ready").length }, { value: "in_progress", label: "执行中", count: inventory.items.filter(item => item.state === "in_progress").length }, { value: "done", label: "已完成", count: inventory.items.filter(item => item.state === "done").length }]} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
+      <SegmentedControl label="工作项快捷状态" value={stateFilter} options={[{ value: "all", label: "全部", count: inventory.items.length }, { value: "ready", label: "待处理", count: inventory.items.filter(item => item.state === "ready").length }, { value: "in_progress", label: "执行中", count: inventory.items.filter(item => item.state === "in_progress").length }, { value: "done", label: "已完成", count: inventory.items.filter(item => item.state === "done").length }]} onChange={value => { setStateFilter(value as WorkItemStateFilter); setVisibleLimit(pageSize); }} />
       <div className="backlog-toolbar work-items-toolbar">
         <label className="backlog-search"><Search size={14} /><input aria-label="搜索工作项" value={query} onChange={event => { setQuery(event.target.value); setVisibleLimit(pageSize); }} placeholder="搜索标题、来源、关联仓库或标签" /></label>
         <FilterPanel label="筛选工作项" filters={[
           ...(platform !== "all" ? [{ key: "platform", label: `来源：${platform === "github" ? "GitHub" : "GitLab"}`, onClear: () => { setPlatform("all"); setProject("all"); setVisibleLimit(pageSize); } }] : []),
           ...(project !== "all" ? [{ key: "project", label: `Issue：${projectOptions.find(option => option.value === project)?.label ?? project}`, onClear: () => { setProject("all"); setVisibleLimit(pageSize); } }] : []),
           ...(stateFilter !== "all" ? [{ key: "state", label: `状态：${stateLabels[stateFilter]}`, onClear: () => { setStateFilter("all"); setVisibleLimit(pageSize); } }] : []),
+          ...(kindFilter !== "all" ? [{ key: "kind", label: `角色：${kindLabels[kindFilter]}`, onClear: () => { setKindFilter("all"); setVisibleLimit(pageSize); } }] : []),
         ]}>
         <SelectMenu label="选择 Provider" value={platform} variant="filter" triggerPrefix="来源" options={[{ value: "all", label: "全部来源平台", triggerLabel: "全部" }, { value: "github", label: "GitHub", icon: "github", triggerLabel: "GitHub" }, { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "GitLab" }]} onChange={value => { setPlatform(value as "all" | BacklogPlatform); setProject("all"); setVisibleLimit(pageSize); }} />
         <SelectMenu label="选择仓库" value={project} variant="filter" triggerPrefix="Issue" search={{ label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" }} options={projectOptions} onChange={value => { setProject(value); setVisibleLimit(pageSize); }} />
-        <SelectMenu label="筛选状态" value={stateFilter} variant="filter" triggerPrefix="状态" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
+        <SelectMenu label="筛选状态" value={stateFilter} variant="filter" triggerPrefix="状态" options={stateFilterOptions} onChange={value => { setStateFilter(value as WorkItemStateFilter); setVisibleLimit(pageSize); }} />
+        <SelectMenu label="筛选角色" value={kindFilter} variant="filter" triggerPrefix="角色" options={kindFilterOptions} onChange={value => { setKindFilter(value as WorkItemKindFilter); setVisibleLimit(pageSize); }} />
         </FilterPanel>
         <SelectMenu label="排序" value={`${sortSelection.field}:${sortSelection.direction}`} variant="filter" triggerPrefix="排序" options={WORK_ITEM_SORT_OPTIONS} onChange={value => { setSortSelection(parseBacklogSort(value)); setVisibleLimit(pageSize); }} />
       </div>
 
       <div className="backlog-list">
-        {visibleItems.length ? visibleItems.slice(0, visibleLimit).map(item => {
-          const sources = itemSources(item);
-          const repositories = itemRepositories(item);
-          return (
-            <article key={item.id} className="backlog-row work-item-row" onClick={() => openDetails(item)}>
-              <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={executionModeLabels[item.executionMode]} title={executionModeLabels[item.executionMode]}>{item.executionMode === "afk" ? <Bot size={15} aria-hidden="true" /> : <Hand size={15} aria-hidden="true" />}</span>
-              <div className="backlog-row-body">
-                <header><b>{item.title}</b></header>
-                <div className="work-item-row-context"><span>{sourceSummary(item)}</span><span><FolderGit2 size={12} />{repositorySummary(repositories)}</span></div>
-                <div className="backlog-item-metadata">
-                  <span className={`backlog-state-label backlog-state-${item.state}`}>{stateLabels[item.state]}</span>
-                  <span className={`backlog-mode-tag is-${item.executionMode}`}>{executionModeLabels[item.executionMode]}</span>
-                  <span className={item.managed ? "work-item-managed" : "work-item-unmanaged"}>{item.managed ? item.executionEligible ? "可执行" : "已管理" : "待导入"}</span>
-                  <span className="work-item-count">{sources.length} 个来源</span>
-                  <span className="work-item-count">{repositories.length} 个关联仓库</span>
-                </div>
-                {item.tags.length > 0 && <ul className="backlog-tags work-item-tags" aria-label="工作项标签">
-                  {item.tags.map(tag => <li key={tag} title={tag}><Tag size={11} aria-hidden="true" /><span>{tag}</span></li>)}
-                </ul>}
-              </div>
-            </article>
-          );
-        }) : <div className="backlog-empty"><b>{loading ? "正在读取全局工作项…" : "没有匹配的工作项"}</b><span>{loading ? "工作项发现不依赖当前打开目录。" : "请检查来源平台鉴权或调整筛选条件。"}</span></div>}
+        {visibleItems.length ? (<>
+          {anchorItems.length ? <>
+            <div className="backlog-group-heading"><b>{kindLabels.prd}</b><span>{anchorItems.length} 个 · 只分组，不执行</span></div>
+            {anchorItems.map(item => renderWorkItemRow(item))}
+          </> : null}
+          {workItems.length ? <>
+            {anchorItems.length ? <div className="backlog-group-heading"><b>工作项</b><span>{workItems.length} 个</span></div> : null}
+            {workItems.map(item => renderWorkItemRow(item))}
+          </> : null}
+        </>) : <div className="backlog-empty"><b>{loading ? "正在读取全局工作项…" : "没有匹配的工作项"}</b><span>{loading ? "工作项发现不依赖当前打开目录。" : "请检查来源平台鉴权或调整筛选条件。"}</span></div>}
       </div>
       {remainingItems > 0 ? <div className="work-items-load-more"><span>还有 {remainingItems} 个</span><button type="button" aria-label="显示更多工作项" onClick={() => setVisibleLimit(limit => limit + pageSize)}>继续加载 <ChevronDown size={13} /></button></div> : null}
 
@@ -497,6 +553,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
               <button type="button" className={detailTab === "overview" ? "active" : ""} aria-pressed={detailTab === "overview"} onClick={() => setDetailTab("overview")}>概览</button>
               <button type="button" className={detailTab === "plan" ? "active" : ""} aria-pressed={detailTab === "plan"} onClick={() => setDetailTab("plan")}>执行计划 <span>{selectedPlan.length}</span></button>
               <button type="button" className={detailTab === "runs" ? "active" : ""} aria-pressed={detailTab === "runs"} onClick={() => setDetailTab("runs")}>运行记录 <span>{selectedRuns.length + auditedRuns.length}</span></button>
+              <button type="button" className={detailTab === "children" ? "active" : ""} aria-pressed={detailTab === "children"} onClick={() => setDetailTab("children")}>子项 <span>{childrenResult?.children.length ?? 0}</span></button>
             </nav>
             <div className="work-item-detail-body">
               {detailTab === "overview" ? <>
@@ -522,6 +579,23 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
               {detailTab === "plan" ? <section className="work-item-detail-section">
                 <div className="work-item-section-heading"><h3>执行计划</h3><small>计划属于工作项，不属于任一仓库</small></div>
                 {selectedPlan.length ? selectedPlan.map((step, index) => <div className="work-item-plan-card" key={step.id}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{step.title}</b><small>{step.detail ?? "待补充执行说明"}</small></div><em className={step.status ?? "pending"}>{step.status === "completed" ? "已完成" : step.status === "running" ? "执行中" : step.status === "blocked" ? "阻塞" : "待执行"}</em></div>) : <WorkItemEmptySection>尚未生成执行计划；可在开始执行时选择工作流。</WorkItemEmptySection>}
+              </section> : null}
+
+              {detailTab === "children" ? <section className="work-item-detail-section">
+                <div className="work-item-section-heading"><h3>子项</h3><small>{childrenResult?.children.length ?? 0} 个关联 issue，可能位于其他仓库</small></div>
+                {childrenError ? <div className="work-item-run-error">读取子项失败：{childrenError}</div> : null}
+                {childrenLoading ? <WorkItemEmptySection>正在读取子项…</WorkItemEmptySection> : null}
+                {!childrenLoading && !childrenError && childrenResult && childrenResult.children.length ? childrenResult.children.map(child => (
+                  <button key={child.id} type="button" className="work-item-reference-card" onClick={() => {
+                    const target = inventory.items.find(item => item.id === child.id);
+                    if (target) openDetails(target);
+                  }}>
+                    <span className={`work-item-reference-icon ${child.project.platform}`}><ProviderIcon provider={child.project.platform} size={13} /></span>
+                    <span className="work-item-reference-copy"><b>{child.title}</b><small>{child.project.projectKey} #{child.issueNumber} · {child.kind === "prd" ? kindLabels.prd : child.state ? stateLabels[child.state] : "—"}</small></span>
+                    <span className="work-item-role">{child.managed ? "已纳管" : "未纳管"}</span>
+                  </button>
+                )) : null}
+                {!childrenLoading && !childrenError && childrenResult && !childrenResult.children.length ? <WorkItemEmptySection>该工作项没有子项。</WorkItemEmptySection> : null}
               </section> : null}
 
               {detailTab === "runs" ? <section className="work-item-detail-section work-item-run-history" data-detail-open={runDetailOpen}>

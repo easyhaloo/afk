@@ -45,15 +45,28 @@ export function projectBacklogItem(issue: BacklogIssueView, scope: BacklogMetada
     selfId: id,
   });
   const labeledState = metadata.state;
-  const state = issue.state === 'closed' || issue.state === 'merged' ? 'done' : labeledState ?? 'ready';
+  const kind = metadata.kind;
+  const closed = issue.state === 'closed' || issue.state === 'merged';
+  // A PRD anchor is a container, not a work item in a lifecycle: it has no
+  // position of its own. A closed one still reads as done, because the
+  // provider closed it.
+  const state = kind === 'prd' ? (closed ? 'done' : undefined) : closed ? 'done' : labeledState ?? 'ready';
   const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.afk) && !issue.labels.includes(MODE_LABELS.hitl) ? 'afk' : 'hitl';
-  const executionEligible = (state === 'ready' || state === 'rework') && labeledState !== undefined
-    && issue.labels.some(label => Object.values(MODE_LABELS).includes(label as typeof MODE_LABELS[keyof typeof MODE_LABELS]));
+  const hasModeLabel = metadata.executionMode !== undefined;
+  // An issue AFK manages carries a mode label and either a lifecycle label or
+  // a role label. A manual issue may carry neither, and the difference
+  // decides whether its state is a recorded fact or a derived default.
+  const managed = hasModeLabel && (labeledState !== undefined || kind !== undefined);
+  // The role decides executability, never the state: an anchor is ready and
+  // still never runs.
+  const executionEligible = kind !== 'prd' && managed && (state === 'ready' || state === 'rework')
+    && labeledState !== undefined;
   return {
-    id, workItemId: id, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, executionEligible,
+    id, workItemId: id, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, managed, executionEligible,
+    ...(kind ? { kind } : {}),
     parentId: metadata.relations.parentId,
     baseBacklogId: metadata.relations.baseBacklogId ?? metadata.relations.legacyBaseRef,
-    dependsOn: metadata.relations.dependsOn, state: state ?? 'ready', executionMode, tags: metadata.tags,
+    dependsOn: metadata.relations.dependsOn, state, executionMode, tags: metadata.tags,
     ...(labeledState ? { labeledState } : {}),
     branchName: deriveBacklogBranchName(String(issue.issueNumber)), providerRef: id,
     ...(issue.webUrl === undefined ? {} : { webUrl: issue.webUrl }),

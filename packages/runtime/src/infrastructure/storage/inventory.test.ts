@@ -4,6 +4,18 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { InventoryItem, InventoryScope, InventorySnapshot } from '@afk/application';
 import { SqliteInventoryStore } from './inventory.js';
+import { INVENTORY_SCHEMA } from './inventory-schema.js';
+import { openSqlite } from './sqlite.js';
+
+/**
+ * The mirror as it looked before the role existed.
+ *
+ * The migration has to bring an existing mirror forward in place, so the test
+ * needs a real version 1 database to migrate rather than a fresh one.
+ */
+const LEGACY_SCHEMA = INVENTORY_SCHEMA
+  .replace(', kind TEXT,', ',')
+  .replace('CREATE INDEX idx_items_kind ON work_items(kind);', '');
 
 const roots: string[] = [];
 const stores: SqliteInventoryStore[] = [];
@@ -94,6 +106,57 @@ describe('normalized inventory', () => {
     await store.fail(await store.begin(scope), { platform: 'github', code: 'offline', message: 'offline', retryable: true });
     expect((await store.query()).items).toHaveLength(1);
     expect((await store.query()).diagnostics[0].code).toBe('offline');
+  });
+
+  it('answers which items belong to one parent', async () => {
+    const store = open();
+    await publish(store, [
+      item(1, { parentId: 'github:acme/prd#7' }),
+      item(2, { parentId: 'github:acme/prd#7' }),
+      item(3, { parentId: 'github:acme/prd#8' }),
+      item(4),
+    ]);
+
+    const children = await store.query({ parentId: 'github:acme/prd#7' });
+
+    expect(children.items.map(entry => entry.id)).toEqual(['github:acme/api#1', 'github:acme/api#2']);
+  });
+
+  it('stores a PRD anchor with an empty state and reads it back without one', async () => {
+    const store = open();
+    const anchor = item(7, { kind: 'prd', state: undefined, executionEligible: false, executionMode: 'hitl' });
+    await publish(store, [anchor, item(8)]);
+
+    const stored = await store.get('github:acme/api#7');
+    // The mirror keeps the state column NOT NULL, so an anchor is stored with
+    // an empty state and the role in its own column.
+    expect(stored).toMatchObject({ kind: 'prd', executionEligible: false });
+    expect(stored?.state).toBeUndefined();
+    expect((await store.query({ kind: 'prd' })).items.map(entry => entry.id)).toEqual(['github:acme/api#7']);
+    expect((await store.query({ state: 'ready' })).items.map(entry => entry.id)).toEqual(['github:acme/api#8']);
+  });
+
+  it('migrates an existing mirror in place instead of rebuilding it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'afk-inventory-'));
+    roots.push(root);
+    const file = join(root, 'inventory.sqlite');
+    const legacy = openSqlite({ file, schema: LEGACY_SCHEMA, version: 1 });
+    legacy.prepare('INSERT INTO inventory_meta(singleton,namespace_key,namespace_kind,created_at_ms) VALUES (1,?,\'authenticated\',?)').run('a'.repeat(64), Date.now());
+    legacy.prepare('INSERT INTO sync_scopes(platform,host_key,scope_kind,project_key) VALUES (\'github\',\'github.com\',\'catalog\',\'\')').run();
+    legacy.prepare('INSERT INTO repositories(platform,project_key,host_key,name,default_branch,catalog_scope_id,observed_at_ms) VALUES (\'github\',\'acme/api\',\'github.com\',\'API\',\'main\',1,1)').run();
+    legacy.prepare('INSERT INTO work_items(id,owner_repository_id,issue_number,origin_scope_id,title,managed,execution_eligible,state,execution_mode,branch_name,provider_ref,last_seen_seq,observed_at_ms) VALUES (\'github:acme/api#1\',1,1,1,\'kept\',1,1,\'ready\',\'afk\',\'feature/1\',\'github:acme/api#1\',1,1)').run();
+    legacy.close();
+
+    const store = new SqliteInventoryStore({ root, namespaceKey: 'a'.repeat(64), databasePath: file });
+    stores.push(store);
+
+    // The mirror is a cache: it is migrated forward, not thrown away.
+    expect(store.databasePath).toBe(file);
+    expect((await store.get('github:acme/api#1'))?.title).toBe('kept');
+    const inspect = openSqlite({ file, schema: LEGACY_SCHEMA, version: 2 });
+    const columns = inspect.prepare('SELECT name FROM pragma_table_info(\'work_items\')').all();
+    inspect.close();
+    expect(columns.map(column => column.name)).toContain('kind');
   });
 
   it('rolls back all changes when a later item is invalid', async () => {

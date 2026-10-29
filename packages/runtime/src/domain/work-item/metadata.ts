@@ -33,8 +33,17 @@ export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIss
     .find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
   const labeledMode = Object.entries(modeLabels)
     .find(([, label]) => issue.labels.includes(label))?.[0] as BacklogExecutionMode | undefined;
-  const managed = labeledState !== undefined && labeledMode !== undefined;
-  const state = issue.state === 'closed' ? 'done' : labeledState ?? 'blocked';
+  const kind = metadata.kind;
+  // An issue AFK manages carries a mode label and either a lifecycle label or
+  // a role label. A manual issue may carry neither, and the difference
+  // decides whether its state is a recorded fact or a derived default.
+  const managed = labeledMode !== undefined && (labeledState !== undefined || kind !== undefined);
+  const closed = issue.state === 'closed';
+  // A PRD anchor is a container, not a work item in a lifecycle: it has no
+  // position of its own. A closed one still reads as done.
+  const state = kind === 'prd'
+    ? (closed ? 'done' : undefined)
+    : closed ? 'done' : labeledState ?? 'blocked';
   const executionMode = labeledMode ?? 'hitl';
 
   return {
@@ -44,9 +53,10 @@ export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIss
     title: issue.title,
     description: issue.description,
     managed,
-    executionEligible: managed
+    executionEligible: kind !== 'prd' && managed
       && (state === 'ready' || state === 'rework'),
     state,
+    ...(kind === undefined ? {} : { kind }),
     executionMode,
     parentId: metadata.relations.parentId,
     dependsOn: metadata.relations.dependsOn,

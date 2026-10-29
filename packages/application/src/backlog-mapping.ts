@@ -11,13 +11,12 @@ import type { WorkItem, WorkState } from '@afk/core';
  * place a vocabulary change has to land — see
  * docs/architecture/blueprints/core-layer-architecture_zh.md.
  *
- * `prd` keeps its own core state. An organizational PRD parent and an item
- * that is blocked on a human are different facts, and collapsing them makes
- * the work item model unable to say which one it is.
+ * A PRD parent has no core state: it is a container, and "waiting for its
+ * children to be implemented" is not a position in the lifecycle. Its role
+ * travels separately — see `coreWorkKindByBacklogKind`.
  */
 
 export const BACKLOG_STATES = [
-  'prd',
   'ready',
   'rework',
   'in_progress',
@@ -34,7 +33,6 @@ export const BACKLOG_EXECUTION_MODES = ['afk', 'hitl'] as const;
 export type BacklogExecutionMode = (typeof BACKLOG_EXECUTION_MODES)[number];
 
 export const coreWorkStateByBacklogState = {
-  prd: 'prd',
   ready: 'ready',
   rework: 'rework',
   in_progress: 'implementing',
@@ -49,8 +47,29 @@ export const coreWorkModeByExecutionMode = {
   hitl: 'human',
 } as const satisfies Record<BacklogExecutionMode, WorkItem['mode']>;
 
-export function toCoreWorkState(state: BacklogState): WorkState {
-  return coreWorkStateByBacklogState[state];
+/**
+ * The roles a backlog item can carry.
+ *
+ * A role says what kind of item this is, not where it is in a lifecycle. A
+ * PRD parent carries the `prd` role: it groups children and is never
+ * executable.
+ */
+export const BACKLOG_KINDS = ['prd'] as const;
+
+export type BacklogKind = (typeof BACKLOG_KINDS)[number];
+
+export const coreWorkKindByBacklogKind = {
+  prd: 'prd',
+} as const satisfies Record<BacklogKind, NonNullable<WorkItem['kind']>>;
+
+/**
+ * Map a backlog state onto its core work state.
+ *
+ * A PRD anchor has no state, so it has no core work state either. The
+ * mapping stays total over the seven real lifecycle positions.
+ */
+export function toCoreWorkState(state: BacklogState | undefined): WorkState | undefined {
+  return state === undefined ? undefined : coreWorkStateByBacklogState[state];
 }
 
 export function toCoreWorkMode(executionMode: BacklogExecutionMode): WorkItem['mode'] {

@@ -1,6 +1,9 @@
 import type { WorkItemApplicationAdapter } from "./application-adapter.js";
+import { listWorkItemChildren } from "@afk/runtime/application/work-item/children";
 import {
   parseWorkItemInventoryOptions,
+  type GlobalWorkItem,
+  type WorkItemChildrenResult,
   type WorkItemInventoryOptions,
   type WorkItemInventoryResult,
 } from "../../shared/backlog-contract.js";
@@ -50,6 +53,25 @@ export function createWorkItemInventoryService(deps: WorkItemInventoryServiceDep
     },
     async sync(rawOptions?: WorkItemInventoryOptions): Promise<WorkItemInventoryResult> {
       return refresh(parseWorkItemInventoryOptions(rawOptions));
+    },
+    /**
+     * The issues that belong to one work item.
+     *
+     * The children may live in other repositories than the parent, so the
+     * answer comes from the whole inventory rather than from one project.
+     * A copy that has gone stale is collected again before the question is
+     * answered, so a PRD that was split after the last collection still
+     * reports its children.
+     */
+    async children(workItemId: string): Promise<WorkItemChildrenResult> {
+      const options: WorkItemInventoryOptions = {};
+      const key = workItemInventoryKey(options);
+      const inventory = await this.list(options);
+      const stale = isStale(syncedAt.get(key), staleAfterMs);
+      return listWorkItemChildren<GlobalWorkItem>({
+        read: async () => ({ items: inventory.items, stale }),
+        refresh: async () => ({ items: (await this.sync(options)).items }),
+      }, { parentId: workItemId });
     },
     invalidate(): void {
       cache.clear();

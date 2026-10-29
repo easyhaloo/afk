@@ -85,8 +85,10 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
+| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
+| `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
@@ -293,6 +295,23 @@ claims it; a parent with children in another repository is never runnable. When
 the graph cannot be read, the adapter falls back to the local project scan and
 reports the failure.
 
+The children of one work item are answered by one query
+(`packages/runtime/src/application/work-item/children.ts`). It takes the
+canonical identity of the parent, because a bare issue number names a
+different issue in every repository, and it answers from the local inventory
+first. The inventory is a cache, so a missing or stale copy is collected again
+before the question is answered, and an identity the copy has never heard of is
+collected once more before it is reported as unknown. The children are ordered
+by project and issue number, so the list does not depend on when the inventory
+was collected. A child that AFK does not manage is reported as well, with its
+`managed` flag, because a hand-written issue attached to a PRD is a child too.
+
+The command resolves that identity for the caller: an issue number is looked
+up in the local index to find the project it belongs to, and `--project` and
+`--platform` say it outright. The canonical identity only has to be typed when
+a script produces it. Every item is printed on one line with the URL the
+provider reported, so the entry can be opened from the terminal.
+
 Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
 accept a positive issue number in the explicitly selected project, or a
 qualified `platform:projectKey#issueNumber` reference. A Git base must belong
@@ -305,18 +324,69 @@ An explicit `--base-branch`, branch strategy base, or manifest base takes preced
 Legacy `base::prd-N` metadata still selects `prd/N`. Implementation and QA use
 the same backlog base resolver; the normal target branch is unchanged.
 
-`--stage prd` creates an organizational anchor with `stage::prd`, which is
-never execution eligible. A PRD parent is its own core work item state, not a
-blocked item: an organizational parent and an item that waits for a human are
-different facts. Existing PRD anchors are recognized even without mode
-labels. Issues without mode labels default to `hitl` until explicitly adopted.
-`--dry-run` validates the same creation plan, including referenced issues, and
-prints the title, description, labels and relationships without provider writes.
-`--idempotency-key` persists a hashed, project-scoped metadata label: sequential
-retries return the existing issue, including closed issues. It is a retry key,
-not a distributed lock; concurrent creators must be serialized by the caller.
-Reserved metadata labels cannot be supplied as business tags, and duplicate
-parent/base labels or invalid references fail validation.
+`--kind prd` creates an organizational anchor with the `kind::prd` label, which
+is never execution eligible. A role is not a stage: an anchor is a container,
+so it has **no lifecycle state at all** — it does not belong to the `ready`
+bucket, and its non-executability comes from the role rather than from a
+state. The seven `stage::*` labels are the only lifecycle positions, and every
+non-anchor work item carries exactly one of them. Issues without mode labels
+default to `hitl` until explicitly adopted. `--dry-run` validates the same
+creation plan, including referenced issues, and prints the title, description,
+labels and relationships without provider writes. An anchor defaults to the
+`hitl` mode; asking for an autonomous anchor is refused rather than
+downgraded. `--idempotency-key` persists a hashed, project-scoped metadata
+label: sequential retries return the existing issue, including closed issues.
+It is a retry key, not a distributed lock; concurrent creators must be
+serialized by the caller. Reserved metadata labels cannot be supplied as
+business tags, and duplicate parent/base labels or invalid references fail
+validation.
+
+`afk backlog list` and `afk backlog inventory` filter by state and by role
+separately: `--state ready` never returns an anchor, because an anchor has no
+state, and `--kind prd` is what selects them.
+
+### Backlog manifest
+
+`afk backlog apply-manifest <file>` applies a provider-neutral manifest: a
+YAML list of items, each with a title, a description, the project it belongs
+to, and the relationships it has. The manifest is the handoff a decomposition
+produces and AFK consumes.
+
+| Field | Meaning |
+| --- | --- |
+| `project` | The canonical project key the record belongs to: `platform:projectKey` |
+| `ref` | A manifest-local name other items can point at |
+| `parentId` | The organizational parent: a canonical ID or a manifest-local `ref` |
+| `baseBacklogId` | The Git execution base: a canonical ID or a manifest-local `ref` |
+| `dependsOn` | The records that must complete first |
+| `executionMode` | `afk` or `hitl` |
+| `tags` | Provider-neutral business tags |
+
+A requirement that spans repositories puts its items in the repositories that
+own them: each item names its own project, and the record is created there.
+A reference is either the canonical ID of a record that already exists, or the
+`ref` of another item of the same manifest — the second kind is resolved when
+the record it names has been created, so a parent, an execution base and a
+dependency are always created before the item that points at them. A
+dependency cycle is refused instead of being applied in some order.
+
+Cross-project relationships need the two projects to live on the same
+provider host; a relationship across providers is refused. An execution base
+has to live in the repository the item runs in, because a branch belongs to
+one repository.
+
+`--idempotency-key <prefix>` derives one retry key per item from the prefix
+and the item's `ref` (or its title), so applying the same manifest twice
+returns the records it already created instead of creating them again.
+
+A dependency edge is written twice: as the portable `depends-on::<id>` label,
+which is the edge AFK reads back, and as a provider-native link for the people
+who read the tracker. On GitLab that link is a `blocks` link that starts at
+the record being waited for, because that is how GitLab shows "is blocked by",
+and the target project is named by its numeric identity, because the body of a
+link carries an id. On GitHub it is a comment that names the record. A repeated
+run writes a relation that is missing and leaves a relation that is already
+there alone, so applying a manifest twice converges on the manifest.
 
 CLI JSON success envelopes are `{ok:true,kind,data}`. Failures are
 `{ok:false,kind,data:null,error:{code,message,details?}}` with a nonzero exit code.
@@ -338,8 +408,10 @@ the backlog graph, so children in another repository count as children. Any auto
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
 
-A `prd` item is an organizational parent. It is never execution eligible, and
-it is not `blocked`: it groups children instead of waiting for a human.
+An item with the `prd` role is an organizational parent. It has no lifecycle
+state at all — it groups children instead of waiting for a human, and "waiting
+for its children" is not a position in the lifecycle. The role, not a state,
+is what makes it ineligible to run.
 
 QA FAIL persists a new rework record in the provider's issue comment/note,
 supersedes any active record, and increments `ReworkRecord.attempt` from the

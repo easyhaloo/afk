@@ -1,7 +1,7 @@
 # Backlog Issue Body Template
 
 > The body describes the work. Repository association comes from the Issue's
-> containing repository and is carried as `targetRepository` metadata in the
+> containing repository and is carried as `project` metadata in the
 > provider-neutral manifest; do not repeat it in this body.
 > Audience: coding agents and reviewers.
 
@@ -104,3 +104,21 @@ behavior must match the criterion.
 - Treating successful unit tests in each repository as proof of an integrated
   cross-repository workflow.
 - Using provider IDs in the draft before the provider has created the records.
+- MUST NOT include `- [x]` items (everything starts unchecked).
+- MUST NOT put `--` inside the acceptance criterion text (breaks the
+  three-field parse).
+- MUST NOT use evidence types outside the controlled vocabulary.
+- MUST NOT write a `check_command` that mutates state without `--dry-run`.
+- MUST NOT add acceptance criteria that have no observable check.
+
+## Handoff
+
+After approval, the skill applies this manifest with the AFK CLI: run
+`afk backlog apply-manifest <file> --dry-run` first, read the plan it
+prints, then run the same command without `--dry-run`. The provider applies
+the provider-neutral fields (`project`, `ref`, `parentId`, `dependsOn`,
+`executionMode`, and business `tags`) and writes the relationships between
+the records. The `project` and `ref` fields are part of the manifest
+contract in `SKILL.md`: a record has to land in one repository, and a
+reference has to say whether it names an existing record or another item of
+the same manifest.

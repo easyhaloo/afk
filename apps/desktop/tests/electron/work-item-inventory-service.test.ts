@@ -127,3 +127,42 @@ describe("work item inventory service", () => {
     expect(store.read).toHaveBeenCalledWith({});
   });
 });
+
+describe("work item children", () => {
+  const parent = {
+    ...inventory.items[0],
+    id: "gitlab:corp/req#7",
+    issueNumber: 7,
+    project: { platform: "gitlab" as const, projectKey: "corp/req", name: "req" },
+    title: "the PRD",
+    kind: "prd" as const,
+  };
+  const child = {
+    ...inventory.items[0],
+    id: "gitlab:corp/svc#8",
+    issueNumber: 8,
+    project: { platform: "gitlab" as const, projectKey: "corp/svc", name: "svc" },
+    title: "child issue",
+    parentId: parent.id,
+  };
+
+  it("lists the issues that belong to one work item", async () => {
+    const service = createWorkItemInventoryService({
+      application: application({ ...inventory, items: [parent, child] }),
+    });
+
+    const result = await service.children(parent.id);
+
+    expect(result.parent.id).toBe(parent.id);
+    expect(result.children.map(entry => entry.id)).toEqual([child.id]);
+    expect(result.source).toBe("inventory");
+  });
+
+  it("reports a work item that does not exist", async () => {
+    const service = createWorkItemInventoryService({
+      application: application({ ...inventory, items: [parent, child] }),
+    });
+
+    await expect(service.children("gitlab:corp/req#404")).rejects.toThrow(/not found/i);
+  });
+});

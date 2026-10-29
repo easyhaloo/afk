@@ -49,6 +49,7 @@ const IPC_CHANNELS = {
   backlogTagRemove: "afk:backlog-tag-remove",
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
+  workItemsChildren: "afk:work-items-children",
   workItemsStart: "afk:work-items-start",
   workItemsExecutions: "afk:work-items-executions",
   workItemsExecutionRunDetail: "afk:work-items-execution-run-detail",
@@ -134,6 +135,7 @@ const api: DesktopApi = {
         ? ipcRenderer.invoke(IPC_CHANNELS.workItemsList)
         : ipcRenderer.invoke(IPC_CHANNELS.workItemsList, options),
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.workItemsStart, input),
+    children: (workItemId) => ipcRenderer.invoke(IPC_CHANNELS.workItemsChildren, workItemId),
     executions: (options) => ipcRenderer.invoke(IPC_CHANNELS.workItemsExecutions, options),
     executionRunDetail: (runId, workItemId) => ipcRenderer.invoke(IPC_CHANNELS.workItemsExecutionRunDetail, runId, workItemId),
     resolveAttachTarget: (request) => ipcRenderer.invoke(IPC_CHANNELS.workItemsResolveAttachTarget, request),

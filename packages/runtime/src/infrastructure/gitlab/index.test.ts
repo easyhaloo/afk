@@ -69,3 +69,53 @@ describe('GitLabClient listMRs', () => {
     await expect(client.getMR(9)).resolves.toMatchObject({ mergeable: false });
   });
 });
+
+describe('GitLabClient linkIssues', () => {
+  function linked() {
+    const link = vi.fn().mockResolvedValue({});
+    const links = vi.fn().mockResolvedValue([]);
+    const show = vi.fn().mockResolvedValue({ id: 7752 });
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'team/atlas' });
+    (client as unknown as { client: { Issues: { link: typeof link; links: typeof links }; Projects: { show: typeof show } } }).client = {
+      Issues: { link, links }, Projects: { show },
+    };
+    return { client, link, links, show };
+  }
+
+  it('writes a blocked-by relation as a blocks link that starts at the record it waits for', async () => {
+    const { client, link, show } = linked();
+    await client.linkIssues(5, 8, 'blocked_by', 'team/k-base');
+    // GitLab stores the blocking direction, not the waiting one: the record
+    // that waits is the target of a `blocks` link that starts at the record
+    // it waits for.
+    expect(link).toHaveBeenCalledWith('team/k-base', 8, 7752, 5, { link_type: 'blocks' });
+    expect(show).toHaveBeenCalledWith('team/atlas');
+  });
+
+  it('keeps the direction of a link that names a blocking relation', async () => {
+    const { client, link } = linked();
+    await client.linkIssues(5, 8, 'blocks', 'team/k-base');
+    expect(link).toHaveBeenCalledWith('team/atlas', 5, 7752, 8, { link_type: 'blocks' });
+  });
+
+  it('names the relation the way GitLab names it', async () => {
+    const { client, link } = linked();
+    await client.linkIssues(5, 8, 'related_to', 'team/k-base');
+    expect(link).toHaveBeenCalledWith('team/atlas', 5, 7752, 8, { link_type: 'relates_to' });
+  });
+
+  it('does not create a link that is already there', async () => {
+    const { client, link, links } = linked();
+    links.mockResolvedValue([{ iid: 5, project_id: 7752 }]);
+    await client.linkIssues(5, 8, 'blocked_by', 'team/k-base');
+    expect(links).toHaveBeenCalledWith('team/k-base', 8);
+    expect(link).not.toHaveBeenCalled();
+  });
+
+  it('refuses to write a link whose project has no readable identity', async () => {
+    const { client, link, show } = linked();
+    show.mockResolvedValue({});
+    await expect(client.linkIssues(5, 8, 'blocked_by', 'team/k-base')).rejects.toThrow(/unavailable/i);
+    expect(link).not.toHaveBeenCalled();
+  });
+});

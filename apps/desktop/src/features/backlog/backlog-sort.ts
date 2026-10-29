@@ -1,9 +1,12 @@
-import type { BacklogState } from "../../../shared/backlog-contract.js";
+import type { BacklogKind, BacklogState } from "../../../shared/backlog-contract.js";
 
 export type SortableBacklogRow = {
   id: string;
   title: string;
-  state: BacklogState;
+  /** The lifecycle position. A PRD anchor is a container and has none. */
+  state?: BacklogState;
+  /** The role of the item; `prd` marks an organizational parent. */
+  kind?: BacklogKind;
   updatedAt?: string;
 };
 
@@ -33,15 +36,25 @@ export const WORK_ITEM_SORT_OPTIONS: typeof BACKLOG_SORT_OPTIONS = [
 const DEFAULT_SORT: BacklogSortSelection = { field: "id", direction: "asc" };
 
 const STATE_ORDER: Record<BacklogState, number> = {
-  prd: 0,
-  ready: 1,
-  rework: 2,
-  in_progress: 3,
-  verification: 4,
-  merge_ready: 5,
-  blocked: 6,
-  done: 7,
+  ready: 0,
+  rework: 1,
+  in_progress: 2,
+  verification: 3,
+  merge_ready: 4,
+  blocked: 5,
+  done: 6,
 };
+
+/**
+ * Where a row sits in the lifecycle order.
+ *
+ * A PRD anchor has no lifecycle position, so it sorts ahead of every state:
+ * it is the parent the other items hang from.
+ */
+function lifecycleOrder(row: SortableBacklogRow): number {
+  if (row.kind === "prd") return -1;
+  return row.state === undefined ? 99 : (STATE_ORDER[row.state] ?? 99);
+}
 
 export function parseBacklogSort(value: string | undefined): BacklogSortSelection {
   if (!value) return DEFAULT_SORT;
@@ -53,7 +66,7 @@ export function sortBacklogItems<T extends SortableBacklogRow>(items: T[], selec
   const factor = selection.direction === "desc" ? -1 : 1;
   return [...items].sort((left, right) => {
     if (selection.field === "state") {
-      const diff = (STATE_ORDER[left.state] ?? 99) - (STATE_ORDER[right.state] ?? 99);
+      const diff = lifecycleOrder(left) - lifecycleOrder(right);
       if (diff !== 0) return diff * factor;
       return left.id.localeCompare(right.id);
     }

@@ -62,6 +62,8 @@ export class GitLabClient implements TrackerProvider {
   readonly projectId: string | number;
   readonly providerHost: string;
   private client: InstanceType<typeof Gitlab>;
+  /** The numeric identity of every project this client was asked to link across. */
+  private readonly projectIds = new Map<string, number>();
 
   constructor(private readonly config: GitLabConfig) {
     this.providerHost = normalizeGitLabHost(config.url);
@@ -155,14 +157,53 @@ export class GitLabClient implements TrackerProvider {
     await this.client.IssueNotes.edit(this.projectId, id, Number(commentId), body);
   }
 
+  /**
+   * Write a relation between two issues.
+   *
+   * GitLab keeps one link per pair of issues and accepts two link types:
+   * `relates_to` and `blocks`. "Blocked by" is the same relation seen from
+   * the other side, so a record that waits for another one is written as a
+   * `blocks` link that starts at the record it waits for — that is how
+   * GitLab shows "is blocked by".
+   *
+   * The target project is named by its numeric identity. A project path
+   * reaches the API only in the URL, and the body of a link carries an id;
+   * GitLab reads an id and nothing else there.
+   */
   async linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void> {
-    await this.client.Issues.link(
-      this.projectId,
-      sourceId,
-      targetProjectId ?? this.projectId,
-      targetId,
-      { link_type: type }
-    );
+    const waits = type === 'blocked_by' || type === 'is_blocked_by';
+    const linkType = waits ? 'blocks' : type === 'related_to' ? 'relates_to' : type;
+    const from = waits ? targetId : sourceId;
+    const to = waits ? sourceId : targetId;
+    const fromProject = waits ? (targetProjectId ?? this.projectId) : this.projectId;
+    const toProject = waits ? this.projectId : (targetProjectId ?? this.projectId);
+    const toProjectId = await this.numericProjectId(toProject);
+    if (await this.hasLink(fromProject, from, toProjectId, to)) return;
+    await this.client.Issues.link(fromProject, from, toProjectId, to, { link_type: linkType });
+  }
+
+  /** The numeric identity of a project, as the link API names it. */
+  private async numericProjectId(project: string | number): Promise<number> {
+    if (typeof project === 'number') return project;
+    if (/^\d+$/.test(project)) return Number(project);
+    const known = this.projectIds.get(project);
+    if (known !== undefined) return known;
+    const shown = await this.client.Projects.show(project) as { id?: number };
+    const id = Number(shown?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('GitLab project readback unavailable');
+    this.projectIds.set(project, id);
+    return id;
+  }
+
+  /**
+   * Whether two issues are already linked.
+   *
+   * GitLab answers with the links of an issue from both sides, so a relation
+   * that was written the other way round is found as well.
+   */
+  private async hasLink(project: string | number, issue: number, targetProjectId: number, targetIssue: number): Promise<boolean> {
+    const links = await this.client.Issues.links(project, issue) as unknown as Array<{ iid?: number; projectId?: number; project_id?: number }>;
+    return links.some(link => Number(link.projectId ?? link.project_id) === targetProjectId && Number(link.iid) === targetIssue);
   }
 
   async isMRLinkedToIssue(id: number, canonicalWorkItemId: string): Promise<boolean> {

@@ -101,6 +101,18 @@
       "types": "./dist/domain/work-item/provider-types.d.ts",
       "import": "./dist/domain/work-item/provider-types.js"
     },
+    "./application/work-item/children": {
+      "types": "./dist/application/work-item/children.d.ts",
+      "import": "./dist/application/work-item/children.js"
+    },
+    "./application/work-item/apply-manifest": {
+      "types": "./dist/application/work-item/apply-manifest.d.ts",
+      "import": "./dist/application/work-item/apply-manifest.js"
+    },
+    "./application/work-item/inventory-items": {
+      "types": "./dist/application/work-item/inventory-items.d.ts",
+      "import": "./dist/application/work-item/inventory-items.js"
+    },
     "./infrastructure/config/manager": {
       "types": "./dist/infrastructure/config/manager.d.ts",
       "import": "./dist/infrastructure/config/manager.js"

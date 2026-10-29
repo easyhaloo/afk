@@ -33,9 +33,10 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['retro'], loader: () => import('./commands/retro.js').then(m => m.registerRetroCommands) },
   { names: ['graph'], loader: () => import('./commands/graph.js').then(m => m.registerGraphCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
+  { names: ['update'], loader: () => import('./commands/update.js').then(m => m.registerUpdateCommand) },
 ];
 
-/** Build the argv expected by Commander when parsing a matched nested command. */
+/** Build the argv expected by Commander when launching a nested command. */
 export function buildCommandArgv(command: string, args: string[], subcommand?: string): string[] {
   return subcommand
     ? ['afk', subcommand, ...args.slice(1)]

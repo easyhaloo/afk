@@ -1,5 +1,5 @@
 import { workspaceDataDirectory } from '../../workspace.js';
-import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -108,6 +108,87 @@ describe('LocalSandboxProvider', () => {
       metadata: { provider: 'opencode', transport: 'process' },
     })).resolves.toBeDefined();
     expect(tmux.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it('persists the Claude Code workspace trust before the agent process starts', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'afk-claude-config-'));
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      let trustedAtLaunch = false;
+      const tmux = {
+        createSession: vi.fn(async () => {
+          const config = JSON.parse(await readFile(join(configDir, '.claude.json'), 'utf8')) as {
+            projects?: { [key: string]: { hasTrustDialogAccepted?: boolean } };
+          };
+          trustedAtLaunch = config.projects?.[worktreePath]?.hasTrustDialogAccepted === true;
+          return {};
+        }),
+        sendPrompt: vi.fn(async () => {}),
+        killSession: vi.fn(async () => {}),
+        closeSession: vi.fn(),
+      };
+      const provider = new LocalSandboxProvider();
+      const sandbox = await provider.create({
+        worktreePath,
+        session: 'claude-trust-test',
+        executionMode: 'interactive',
+        metadata,
+        tmux: tmux as never,
+      });
+
+      await sandbox.startAgent({
+        command: { argv: ['claude', '--dangerously-skip-permissions'], cwd: worktreePath },
+        prompt: 'goal',
+        generation: 1,
+        signalType: 'goal_complete',
+        executionMode: 'interactive',
+        metadata,
+      });
+
+      expect(trustedAtLaunch).toBe(true);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
+  it('does not touch the Claude Code config for other agents', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'afk-claude-config-'));
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      const tmux = {
+        createSession: vi.fn(async () => ({})),
+        sendPrompt: vi.fn(async () => {}),
+        killSession: vi.fn(async () => {}),
+        closeSession: vi.fn(),
+      };
+      const provider = new LocalSandboxProvider();
+      const sandbox = await provider.create({
+        worktreePath,
+        session: 'codex-trust-test',
+        executionMode: 'interactive',
+        metadata: { provider: 'codex', transport: 'process' },
+        tmux: tmux as never,
+      });
+
+      await sandbox.startAgent({
+        command: { argv: ['codex', 'exec'], cwd: worktreePath },
+        prompt: 'goal',
+        generation: 1,
+        signalType: 'goal_complete',
+        executionMode: 'interactive',
+        metadata: { provider: 'codex', transport: 'process' },
+      });
+
+      await expect(readFile(join(configDir, '.claude.json'), 'utf8')).rejects.toThrow();
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
   });
 
   it('clears a prior completion signal before starting the next interactive phase', async () => {

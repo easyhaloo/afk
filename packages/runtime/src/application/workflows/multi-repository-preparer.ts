@@ -560,6 +560,11 @@ async function restoreRepository(
   workingBranch: string,
 ): Promise<void> {
   const git = simpleGit(repoRoot);
+  // Discard the agent's uncommitted edits before switching branches. A
+  // checkout refuses to run while local modifications would be overwritten,
+  // and that refusal turned a finished implementation into a failed run.
+  await git.raw(['reset', '--hard']);
+  await git.raw(['clean', '-fd']);
   if (snapshot.branch) await git.raw(['checkout', snapshot.branch]);
   else await git.raw(['checkout', '--detach', snapshot.head]);
   await git.raw(['reset', '--hard', snapshot.head]);

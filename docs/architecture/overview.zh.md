@@ -444,6 +444,14 @@ manifest 声明主仓基线，变更请求就落在该基线上。全局配置�
 文件路径。默认值保持单机单 loop；指定不同路径即可让多个 manifest 绑定的
 loop 并行，各执行各的工作项。
 
+Claude Code 第一次在从未打开过的目录里运行时，会弹出「Quick safety check」
+信任对话框，而 AFK 创建的每个 worktree 都是新目录。对话框会阻塞 agent 的
+TUI，statusline 因此不会渲染，运行会以 `blocked/hitl` 收场——即使实现本身
+没有问题。启动 Claude Code 之前，AFK 会把 worktree 登记为已信任：写入
+Claude Code 的配置文件（`~/.claude.json`，或 `$CLAUDE_CONFIG_DIR/.claude.json`）
+的 `projects[<绝对路径>].hasTrustDialogAccepted`。该写入是尽力而为，永不导致
+运行失败；`AFK_CLAUDE_TRUST_PRESEED=0` 可关闭它。
+
 ## 扩展机制
 
 插件运行时可以注册 provider。每个 provider 必须完整实现 `BacklogProvider`，

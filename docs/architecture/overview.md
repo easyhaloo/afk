@@ -558,6 +558,15 @@ only the fallback for an execution without a manifest.
 and status file. The default keeps one loop per machine; distinct paths let
 several manifest-bound loops run side by side, each on its own work item.
 
+Claude Code shows a "Quick safety check" dialog the first time it runs in a
+directory it has never seen, which is every worktree AFK creates. The dialog
+blocks the agent TUI, the statusline therefore never renders, and the run
+would be reported as `blocked/hitl` even though the implementation is fine.
+Before launching Claude Code, AFK records the worktree as trusted in the
+Claude Code config file — `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`
+— under `projects[<absolute path>].hasTrustDialogAccepted`. The write is
+best-effort and never fails a run; `AFK_CLAUDE_TRUST_PRESEED=0` disables it.
+
 ## Extension points
 
 Plugins can register provider implementations through the plugin runtime.

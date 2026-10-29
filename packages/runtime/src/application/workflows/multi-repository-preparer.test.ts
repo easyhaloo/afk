@@ -562,6 +562,54 @@ describe('MultiRepositoryPreparer', () => {
     }
   });
 
+  it('restores a checkout whose agent left uncommitted edits behind', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-multi-repo-'));
+    try {
+      const remote = join(root, 'remote.git');
+      const seed = join(root, 'seed');
+      const repoRoot = join(root, 'existing');
+      await fs.mkdir(remote);
+      await simpleGit(remote).init(true);
+      await fs.mkdir(seed);
+      const seedGit = simpleGit(seed);
+      await seedGit.init(['--initial-branch=main']);
+      await seedGit.addConfig('user.name', 'AFK Test');
+      await seedGit.addConfig('user.email', 'afk@example.test');
+      await fs.writeFile(join(seed, 'tracked.txt'), 'baseline\n');
+      await seedGit.add(['tracked.txt']);
+      await seedGit.commit('baseline');
+      await seedGit.addRemote('origin', remote);
+      await seedGit.push('origin', 'main', ['--set-upstream']);
+      await simpleGit().clone(remote, repoRoot, ['--branch', 'main']);
+      await configureLocalOrigin(repoRoot, remote, 'https://github.com/acme/api.git');
+      const originalHead = (await simpleGit(repoRoot).revparse(['HEAD'])).trim();
+
+      // The remote base branch moves on after the local branch was created:
+      // checking the local branch back out would rewrite tracked.txt.
+      await fs.writeFile(join(seed, 'tracked.txt'), 'remote change\n');
+      await seedGit.add(['tracked.txt']);
+      await seedGit.commit('remote change');
+      await seedGit.push('origin', 'main');
+
+      const prepared = await new MultiRepositoryPreparer().prepare([
+        repository({ repoRoot }),
+      ], root);
+
+      // The agent edited a tracked file and added new files without committing.
+      await fs.writeFile(join(repoRoot, 'tracked.txt'), 'agent edit\n');
+      await fs.writeFile(join(repoRoot, 'Agent.java'), 'class Agent {}\n');
+
+      await expect(prepared.finish({ status: 'success' })).resolves.toBeUndefined();
+
+      expect((await simpleGit(repoRoot).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('main');
+      expect((await simpleGit(repoRoot).revparse(['HEAD'])).trim()).toBe(originalHead);
+      await expect(fs.readFile(join(repoRoot, 'tracked.txt'), 'utf8')).resolves.toBe('baseline\n');
+      await expect(fs.access(join(repoRoot, 'Agent.java'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('holds one workspace lock until idempotent finish releases it once', async () => {
     const deps = dependencies();
     const prepared = await new MultiRepositoryPreparer(deps).prepare([repository()], '/workspace');

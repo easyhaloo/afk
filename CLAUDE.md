@@ -75,6 +75,11 @@ documents ship as `name.md` + `name.zh.md`; update both.
   [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) in the same commit.
   Increment at least the patch version; use a minor or major bump when the
   release requires it.
+- **CLI source changes require a CLI version bump.** If source code used by the
+  CLI changes — in `apps/cli/` or any workspace package the CLI depends on —
+  update `version` in `apps/cli/package.json` in the same commit. Treat this
+  as the release version for the CLI; do not rely on a later release commit to
+  add the bump. Keep any CLI-reported version derived from this canonical value.
 - **Build output is not source.** `dist/`, `dist-electron/`, `release/`, and
   test screenshots are generated. Do not review, edit, or commit them.
 - **Add focused tests** for every extracted service or pure function. Each

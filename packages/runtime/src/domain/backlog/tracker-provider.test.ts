@@ -55,7 +55,7 @@ describe('TrackerBacklogProvider', () => {
     const remote = { ...tracker({ id: 7, platform: 'github', projectId: 'org/other', title: 'Remote', description: 'Remote base', labels: ['stage::done'], state: 'closed', url: 'https://example/7' }), projectId: 'org/other' };
     const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
     const t = { ...tracker(issue), forProject: vi.fn(() => remote),
-      createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };
+      createIssue: vi.fn(async (input: any) => { issue.title = input.title; issue.description = input.description; issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };
     const provider = new TrackerBacklogProvider(t);
     const created = await provider.create({
       title: 'Child',

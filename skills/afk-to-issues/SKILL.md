@@ -16,11 +16,11 @@ disallowed-tools: >-
 
 **Goal:** Produce independently executable backlog items that collectively
 deliver an approved requirement, with verifiable completion conditions.
-A PRD may span one repository or multiple repositories. The output is a
-provider-neutral manifest; the configured external backlog system creates
-the records.
+A PRD may span one repository or multiple repositories. The approved manifest
+is the creation plan; after approval, use the AFK CLI to create and verify
+the backlog records in their target repositories.
 **Mode:** HITL-gated — analyze and draft first, obtain explicit approval,
-then emit the approved manifest.
+then create records through the AFK CLI.
 
 ## Backlog/commit boundary
 
@@ -241,14 +241,39 @@ dependencies across repositories, contract/rollout risks, verification, and
 unresolved questions. Wait for explicit approval. On revision, update the plan
 and repeat the quality gate.
 
-### 6. Emit handoff
+### 6. Create and verify through AFK CLI
 
-After approval, write the provider-neutral manifest and PRD reference to the
-requested artifact location. The configured backlog provider/importer creates
-the records in their respective repositories and resolves draft keys to
-canonical IDs. Do not claim creation succeeded unless the provider reports
-success and the created records and relationships have been read back and
-verified.
+After explicit approval, preserve the approved manifest as an audit/recovery
+artifact and create the records through the AFK CLI; do not stop at emitting
+a manifest or ask the user to manually import/apply it.
+
+1. Read the installed CLI's `afk backlog create --help` and confirm the
+   supported options before invoking commands. Use the explicit project and
+   platform for each task's `targetRepository`; never rely on the current
+   working directory to choose a repository in a multi-repository plan.
+2. Run the CLI's documented dry-run for each task, using the same target
+   project, description, execution mode, tags, and relationships intended for
+   real creation. Resolve the entire global DAG before creating any records.
+3. Create in topological order. For each item, use a stable idempotency key
+   derived from the approved plan identity and draft key. After each creation,
+   capture the provider's canonical ID and URL, then map the draft key to that
+   canonical identity before creating dependent tasks.
+4. Use canonical cross-project item identities for dependencies. Do not assume
+   bare issue numbers are globally unique. Do not use a cross-repository
+   item as `baseBacklogId` unless the runtime explicitly supports it; the
+   current execution-base contract requires the base item to belong to the
+   same repository. Cross-repository prerequisites should use `dependsOn`.
+5. After creation, read every created item back using the CLI and verify its
+   target project, title/body, execution mode, tags, parent/dependency links,
+   and returned URL. Validate the global graph against the approved plan.
+6. Save a creation ledger containing plan identity, draft key, target project,
+   canonical item ID, URL, creation result, and verification result. On partial
+   failure, resume from verified ledger entries and reuse idempotency keys;
+   do not recreate successful items or pretend the whole plan succeeded.
+
+If the CLI, credentials, target repository, or provider cannot support a
+required operation, stop and report the exact blocker. Never claim creation
+succeeded without provider confirmation and read-back verification.
 
 ## References
 
@@ -259,11 +284,13 @@ verified.
 
 ## Caveats
 
-- Never create provider records before the approval gate.
+- Never create backlog records before the approval gate.
 - Never include repository identity in the Issue body solely to repeat the
-  repository association; carry the target in manifest metadata.
+  repository association; use the target project when invoking the CLI.
 - Never claim repository analysis is complete when a relevant repository was
   inaccessible.
 - Do not turn inferred technical details into new product requirements.
-- Keep the global dependency graph acyclic and explain unresolved external
-  references for the importer.
+- Keep the global dependency graph acyclic; resolve draft keys to canonical
+  identities during topological creation.
+- Treat a partial multi-repository creation as partial until all records and
+  relationships have been verified.

@@ -22,15 +22,18 @@ function trackerOf(issue: TrackedIssue): TrackerProvider {
 describe('backlog creation and execution base', () => {
   it('plans canonical labels and verifies relationships without writing', async () => {
     const get = vi.fn(async (_id: string) => item);
-    const plan = await planBacklogCreate({ get }, { title: ' PRD ', description: 'Body', stage: 'prd',
+    const plan = await planBacklogCreate({ get }, { title: ' PRD ', description: 'Body', kind: 'prd',
       parentId: '007', baseBacklogId: '6', dependsOn: ['5', '05', 'github:org/other#5'], idempotencyKey: 'anchor' }, scope);
     expect(plan).toMatchObject({
-      title: 'PRD', state: 'prd',
+      title: 'PRD', kind: 'prd',
       parentId: 'github:org/repo#7', baseBacklogId: 'github:org/repo#6',
       dependsOn: ['github:org/repo#5', 'github:org/other#5'],
     });
+    // A PRD anchor is a container: it has no lifecycle position, so it gets
+    // no stage label, and it defaults to the human-in-the-loop mode.
+    expect(plan.state).toBeUndefined();
     expect(plan.labels).toEqual([
-      'stage::prd', 'mode::afk',
+      'kind::prd', 'mode::hitl',
       'parent::github:org/repo#7', 'base::github:org/repo#6',
       'depends-on::github:org/repo#5', 'depends-on::github:org/other#5',
       expect.stringMatching(/^idempotency::[a-f0-9]{64}$/),
@@ -38,6 +41,22 @@ describe('backlog creation and execution base', () => {
     expect(get.mock.calls.map(call => call[0])).toEqual([
       'github:org/repo#7', 'github:org/repo#6', 'github:org/repo#5', 'github:org/other#5',
     ]);
+  });
+
+  it('refuses to create an autonomous PRD anchor', async () => {
+    const get = vi.fn(async (_id: string) => item);
+    // An anchor groups children and is never executed on its own, so asking
+    // for an autonomous one is a contradiction rather than a default.
+    await expect(planBacklogCreate({ get }, { title: 'PRD', description: 'Body', kind: 'prd', executionMode: 'afk' }, scope))
+      .rejects.toThrow('cannot be autonomous');
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('plans an executable item with a lifecycle stage', async () => {
+    const get = vi.fn(async (_id: string) => item);
+    const plan = await planBacklogCreate({ get }, { title: 'Child', description: 'Body' }, scope);
+    expect(plan).toMatchObject({ state: 'ready', kind: undefined, executionMode: 'afk' });
+    expect(plan.labels).toEqual(['stage::ready-for-issues', 'mode::afk']);
   });
 
   it('resolves a relationship reference against the project the provider owns', async () => {

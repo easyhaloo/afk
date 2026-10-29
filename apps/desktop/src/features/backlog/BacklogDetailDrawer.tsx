@@ -2,7 +2,7 @@ import { Bot, ExternalLink, GitBranch, Hand, Hash, LoaderCircle, Tags, X } from 
 import { Overlay } from "../../overlay.js";
 import { useEffect, useRef, type ReactNode } from "react";
 import type { BacklogRuntimeSummary } from "../../../shared/backlog-contract.js";
-import { backlogStateLabel } from "./backlog-filter.js";
+import { backlogLifecycleClass, backlogLifecycleLabel } from "./backlog-filter.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 
 type BacklogDetailDrawerProps = {
@@ -52,7 +52,7 @@ export function BacklogDetailDrawer({ summary, busy, error, defaultAgent, onClos
             <h2 id="backlog-detail-title">{item.title}</h2>
             <div className="backlog-detail-summary">
               <small>#{item.id}</small><span aria-hidden="true">·</span>
-              <span className={`backlog-status-pill ${item.state}`}>{backlogStateLabel(item.state)}</span>
+              <span className={`backlog-status-pill ${backlogLifecycleClass(item)}`}>{backlogLifecycleLabel(item)}</span>
               <span className={`backlog-mode-tag is-${item.executionMode}`}>{item.executionMode === "afk" ? <Bot size={14} aria-hidden="true" /> : <Hand size={14} aria-hidden="true" />}{item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}</span>
             </div>
           </div>
@@ -68,9 +68,9 @@ export function BacklogDetailDrawer({ summary, busy, error, defaultAgent, onClos
             </section>
 
             <section className="backlog-detail-group" aria-label="Provider 状态">
-              <header><span className="backlog-detail-section-title">Provider 状态</span><strong>{backlogStateLabel(item.state)}</strong></header>
+              <header><span className="backlog-detail-section-title">Provider 状态</span><strong>{backlogLifecycleLabel(item)}</strong></header>
               <div className="backlog-detail-grid">
-                <DetailValue icon={<Hash size={13} />} label="状态" value={backlogStateLabel(item.state)} />
+                <DetailValue icon={<Hash size={13} />} label="状态" value={backlogLifecycleLabel(item)} />
                 <DetailValue icon={item.executionMode === "afk" ? <Bot size={13} /> : <Hand size={13} />} label="模式" value={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} />
                 <DetailValue icon={<Hash size={13} />} label="依赖" value={item.dependsOn.length ? item.dependsOn.map((id) => `#${id}`).join("、") : "无"} />
                 <DetailValue

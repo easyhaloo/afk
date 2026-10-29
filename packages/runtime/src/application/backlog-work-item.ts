@@ -1,8 +1,10 @@
 import type { WorkItem } from '@afk/core';
 import {
+  coreWorkKindByBacklogKind,
   toCoreWorkMode,
   toCoreWorkState,
   type BacklogExecutionMode,
+  type BacklogKind,
   type BacklogState,
 } from '@afk/application';
 
@@ -19,7 +21,10 @@ import {
 export interface BacklogWorkItemInput {
   id: string;
   title: string;
-  state: BacklogState;
+  /** The lifecycle position. A PRD anchor is a container and has none. */
+  state?: BacklogState;
+  /** The role of the item; `prd` marks an organizational parent. */
+  kind?: BacklogKind;
   executionMode: BacklogExecutionMode;
   parentId?: string;
   baseBacklogId?: string;
@@ -27,10 +32,12 @@ export interface BacklogWorkItemInput {
 }
 
 export function toCoreWorkItem(item: BacklogWorkItemInput): WorkItem {
+  const state = toCoreWorkState(item.state);
   return {
     id: item.id,
     title: item.title,
-    state: toCoreWorkState(item.state),
+    ...(state === undefined ? {} : { state }),
+    ...(item.kind === undefined ? {} : { kind: coreWorkKindByBacklogKind[item.kind] }),
     mode: toCoreWorkMode(item.executionMode),
     lineage: {
       parentId: item.parentId,

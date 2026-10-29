@@ -11,6 +11,7 @@ export function getStatusIcon(status: string): string {
     case 'rework': return '↺';
     case 'blocked': return '!';
     case 'done': return '✓';
+    case 'prd': return '◈';
     case 'active': return '●';
     case 'stale': return '!';
     case 'error': return '!';

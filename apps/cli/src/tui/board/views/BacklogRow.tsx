@@ -9,7 +9,22 @@ export interface BacklogRowProps {
   width: number;
 }
 
-export function backlogStateColor(state: BacklogViewModel['state']): string {
+/**
+ * The label a backlog row shows in its status slot.
+ *
+ * A PRD anchor is a container and has no lifecycle position, so it shows its
+ * role instead of an empty state. It is never mixed in with the executable
+ * items, which is what the separate role label makes visible.
+ */
+export type BacklogStatusLabel = Exclude<BacklogViewModel['state'], undefined> | 'prd' | 'none';
+
+export function backlogStatusLabel(backlog: BacklogViewModel): BacklogStatusLabel {
+  if (backlog.kind === 'prd') return 'prd';
+  return backlog.state ?? 'none';
+}
+
+export function backlogStateColor(state: BacklogStatusLabel): string {
+  if (state === 'prd') return 'blue';
   if (state === 'blocked') return 'red';
   if (state === 'in_progress') return 'yellow';
   if (state === 'verification') return 'magenta';
@@ -29,8 +44,8 @@ export function BacklogRow({ backlog, selected, width }: BacklogRowProps) {
     <OperationalRow
       width={width}
       selected={selected}
-      status={backlog.state}
-      statusColor={selected ? 'white' : backlogStateColor(backlog.state)}
+      status={backlogStatusLabel(backlog)}
+      statusColor={selected ? 'white' : backlogStateColor(backlogStatusLabel(backlog))}
       mode={backlog.executionMode}
       runtimeStatus={[backlog.runStatus ?? 'no-runtime', backlog.phase, backlog.progress].filter(Boolean).join('/')}
       id={backlog.id}

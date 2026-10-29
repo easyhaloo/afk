@@ -41,6 +41,7 @@ export function toGlobalWorkItemFromInventory(item: InventoryItem): GlobalWorkIt
     managed: item.managed,
     executionEligible: item.executionEligible,
     state: item.state,
+    ...(item.kind === undefined ? {} : { kind: item.kind }),
     executionMode: item.executionMode,
     ...(parentId === undefined ? {} : { parentId }),
     dependsOn: item.dependsOn.map(toWorkItemId).filter((value): value is WorkItemId => value !== undefined),

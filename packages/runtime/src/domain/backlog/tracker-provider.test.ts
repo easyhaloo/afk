@@ -43,10 +43,10 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('recognizes PRD anchors without allowing claims or adoption', async () => {
-    const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['stage::prd'], state: 'opened' });
+    const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['kind::prd', 'mode::hitl'], state: 'opened' });
     const provider = new TrackerBacklogProvider(t);
     const anchor = await provider.get('10');
-    expect(anchor).toMatchObject({ state: 'prd', executionEligible: false, executionMode: 'hitl' });
+    expect(anchor).toMatchObject({ kind: 'prd', state: undefined, executionEligible: false, executionMode: 'hitl' });
     await expect(provider.isRunnable(anchor)).resolves.toBe(false);
     await expect(provider.adopt('10')).rejects.toThrow('invalid adoption metadata');
   });
@@ -71,7 +71,7 @@ describe('TrackerBacklogProvider', () => {
       listIssues: vi.fn(async () => issue.labels.length ? [{ ...issue }] : []),
       createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }) };
     const provider = new TrackerBacklogProvider(t);
-    const input = { title: 'Anchor', description: 'Body', stage: 'prd' as const, idempotencyKey: 'migration/anchor' };
+    const input = { title: 'Anchor', description: 'Body', kind: 'prd' as const, idempotencyKey: 'migration/anchor' };
     expect((await provider.create(input)).id).toBe('github:org/repo#42');
     expect((await provider.create(input)).id).toBe('github:org/repo#42');
     expect(t.createIssue).toHaveBeenCalledTimes(1);

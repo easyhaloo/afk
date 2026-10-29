@@ -127,6 +127,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const items = (await Promise.all(issues.map(issue =>
       this.withChangeRequest(toBacklogItem(issue, this.scopeOf(this.tracker)), issue.labels, changes)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
+      (options.kind === undefined || item.kind === options.kind) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
       (options.parentId === undefined || this.sameReference(item.parentId, options.parentId)) &&
       (options.tag === undefined || item.tags.includes(options.tag)),
@@ -327,6 +328,9 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
+    // The role vetoes first: an organizational anchor is never executable,
+    // whatever lifecycle position it happens to carry.
+    if (item.kind === 'prd') return false;
     if (item.executionEligible === false || (item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
     const children = await this.childrenOf(item);
     if (children.length) return false;
@@ -338,6 +342,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {
+    if (item.kind === 'prd') return false;
     if (item.state !== 'in_progress' || item.executionMode !== 'afk') return false;
     const children = await this.childrenOf(item);
     if (children.length) return false;

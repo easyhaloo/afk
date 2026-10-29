@@ -1,5 +1,4 @@
 export type WorkState =
-  | 'prd'
   | 'ready'
   | 'claimed'
   | 'implementing'
@@ -35,11 +34,19 @@ export interface WorkItem {
   /**
    * The lifecycle state of the work item.
    *
-   * `prd` is an organizational parent: it groups children and is never
-   * executable. It is not `blocked` — a blocked item waits for a human to
-   * unblock it, while a PRD parent waits for its children to be implemented.
+   * An executable work item always has one. An organizational parent has
+   * none: it is a container, and "waiting for its children to be
+   * implemented" is not a position in the lifecycle.
    */
-  state: WorkState;
+  state?: WorkState;
+  /**
+   * The role of the work item.
+   *
+   * `prd` marks an organizational parent: it groups children and is never
+   * executable. It is a role, not a stage — the two are independent
+   * dimensions, and only the role decides that an item is not executable.
+   */
+  kind?: 'prd';
   mode: 'autonomous' | 'human';
   lineage: WorkLineage;
   revision: number;

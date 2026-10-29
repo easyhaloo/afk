@@ -1,9 +1,8 @@
-import type { BacklogItem, BacklogState } from "../../../shared/backlog-contract.js";
+import type { BacklogItem, BacklogKind, BacklogState } from "../../../shared/backlog-contract.js";
 
 export type SourceFilter = "all" | BacklogState;
 
 export const BACKLOG_STATE_LABELS: Record<BacklogState, string> = {
-  prd: "需求父项",
   ready: "待处理",
   rework: "返工中",
   in_progress: "进行中",
@@ -13,8 +12,35 @@ export const BACKLOG_STATE_LABELS: Record<BacklogState, string> = {
   blocked: "阻塞",
 };
 
+/**
+ * The label of a role.
+ *
+ * A PRD anchor is a container: it has no lifecycle position, so the role is
+ * what the reader sees.
+ */
+export const BACKLOG_KIND_LABELS: Record<BacklogKind, string> = {
+  prd: "PRD 锚点",
+};
+
 export function backlogStateLabel(state: BacklogState): string {
   return BACKLOG_STATE_LABELS[state];
+}
+
+/**
+ * The label a reader sees for an item's lifecycle position.
+ *
+ * A PRD anchor is a container: it has no lifecycle position, so the role is
+ * what the reader sees instead.
+ */
+export function backlogLifecycleLabel(item: { state?: BacklogState; kind?: BacklogKind }): string {
+  if (item.kind === "prd") return BACKLOG_KIND_LABELS.prd;
+  return item.state === undefined ? "—" : BACKLOG_STATE_LABELS[item.state];
+}
+
+/** The CSS modifier that goes with the lifecycle label. */
+export function backlogLifecycleClass(item: { state?: BacklogState; kind?: BacklogKind }): string {
+  if (item.kind === "prd") return "prd";
+  return item.state ?? "none";
 }
 
 export function filterBacklogItems(items: BacklogItem[], query: string, state: SourceFilter): BacklogItem[] {

@@ -11,8 +11,9 @@
  * graph then silently loses an edge.
  */
 
-import { BACKLOG_METADATA } from './initialization.js';
+import { BACKLOG_KIND_LABELS, BACKLOG_METADATA } from './initialization.js';
 import { extractBacklogTags } from './tags.js';
+import type { BacklogKind } from './index.js';
 import type { BacklogExecutionMode, BacklogState } from './index.js';
 import { formatWorkItemId, parseWorkItemId } from '../work-item/identity.js';
 import type { WorkItemId, WorkItemScope } from '../work-item/identity.js';
@@ -62,6 +63,8 @@ export interface BacklogRelations {
 export interface BacklogMetadata {
   state?: BacklogState;
   executionMode?: BacklogExecutionMode;
+  /** The role of the item; `prd` marks an organizational parent. */
+  kind?: BacklogKind;
   relations: BacklogRelations;
   /** Provider-neutral business tags. */
   tags: string[];
@@ -215,9 +218,12 @@ export function decodeBacklogMetadata(
     .find(([, label]) => labels.includes(label))?.[0] as BacklogState | undefined;
   const executionMode = Object.entries(BACKLOG_METADATA.executionModeLabels)
     .find(([, label]) => labels.includes(label))?.[0] as BacklogExecutionMode | undefined;
+  const kind = Object.entries(BACKLOG_KIND_LABELS)
+    .find(([, label]) => labels.includes(label))?.[0] as BacklogKind | undefined;
   return {
     state,
     executionMode,
+    kind,
     relations: decodeBacklogRelations(labels, scope, options),
     tags: extractBacklogTags(labels),
   };

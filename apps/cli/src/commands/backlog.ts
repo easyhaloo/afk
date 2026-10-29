@@ -45,7 +45,7 @@ import {
   type BacklogManagementProvider,
   type BacklogMergeReconciliation,
 } from '@afk/runtime/domain/backlog/commands';
-import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../output.js';
@@ -56,7 +56,8 @@ import {
   emitSuccess,
 } from '../output.js';
 
-const states: BacklogState[] = ['prd', 'ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
+const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
+const kinds: BacklogKind[] = ['prd'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
 const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'all'];
 
@@ -126,7 +127,10 @@ function configureBacklogJsonErrors(command: Command, kind: string, argv: readon
 
 function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
   console.log(`${chalk.bold(item.id)}  ${item.title}`);
-  detail(`state: ${item.state}  mode: ${item.executionMode}`);
+  // A PRD anchor is a container and has no lifecycle position, so saying
+  // "none" is more useful than printing an empty state.
+  detail(`state: ${item.state ?? 'none'}  mode: ${item.executionMode}`);
+  if (item.kind) detail(`role: ${item.kind} (organizational anchor; never executed)`);
   if (item.parentId) detail(`parent: ${item.parentId}`);
   if (item.baseBacklogId) detail(`execution-base: ${item.baseBacklogId}`);
   if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
@@ -170,6 +174,7 @@ function recordInventory(items: readonly GlobalWorkItem[]): void {
 export interface BacklogInventoryOptions extends JsonMode {
   platform?: string;
   state?: string;
+  kind?: string;
   mode?: string;
   tag?: string;
   project?: string;
@@ -189,6 +194,9 @@ export async function runBacklogInventory(
     if (options.state && !states.includes(options.state as BacklogState)) {
       throw new Error(`invalid backlog state: ${options.state}`);
     }
+    if (options.kind && !kinds.includes(options.kind as BacklogKind)) {
+      throw new Error(`invalid backlog role: ${options.kind}`);
+    }
     if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
@@ -199,6 +207,7 @@ export async function runBacklogInventory(
       completeResult,
       {
         state: options.state as BacklogState | undefined,
+        kind: options.kind as BacklogKind | undefined,
         mode: options.mode as BacklogExecutionMode | undefined,
         tag: options.tag,
         project: options.project,
@@ -318,18 +327,22 @@ function compareInventoryDiagnostics(left: InventoryDiagnostic, right: Inventory
  */
 export async function runBacklogList(
   provider: BacklogManagementProvider,
-  options: { state?: string; mode?: string; tag?: string; parent?: string; project?: string; json?: boolean } = {},
+  options: { state?: string; kind?: string; mode?: string; tag?: string; parent?: string; project?: string; json?: boolean } = {},
 ): Promise<void> {
   const kind = 'backlog.list';
   try {
     if (options.state && !states.includes(options.state as BacklogState)) {
       throw new Error(`invalid backlog state: ${options.state}`);
     }
+    if (options.kind && !kinds.includes(options.kind as BacklogKind)) {
+      throw new Error(`invalid backlog role: ${options.kind}`);
+    }
     if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
     const items = await listBacklogs(provider, {
       state: options.state as BacklogState | undefined,
+      kind: options.kind as BacklogKind | undefined,
       executionMode: options.mode as BacklogExecutionMode | undefined,
       tag: options.tag,
       parentId: options.parent,
@@ -429,7 +442,8 @@ function canonicalParentId(value: string): string {
 
 function printChildren(result: WorkItemChildrenResult<GlobalWorkItem>): void {
   console.log(`${chalk.bold(result.parent.id)}  ${result.parent.title}`);
-  detail(`state: ${result.parent.state}  mode: ${result.parent.executionMode}`);
+  detail(`state: ${result.parent.state ?? 'none'}  mode: ${result.parent.executionMode}`);
+  if (result.parent.kind) detail(`role: ${result.parent.kind} (organizational anchor; never executed)`);
   if (result.children.length === 0) {
     warning('No child issues found');
     return;
@@ -486,7 +500,7 @@ async function collectWorkItems(): Promise<{ items: readonly GlobalWorkItem[] } 
 
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
-  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; stage?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
+  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; kind?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
 ): Promise<void> {
   const kind = 'backlog.create';
   try {
@@ -494,15 +508,15 @@ export async function runBacklogCreate(
     if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
-    if (options.stage !== undefined && options.stage !== 'ready' && options.stage !== 'prd') {
-      throw new Error(`invalid creation stage: ${options.stage}`);
+    if (options.kind !== undefined && !kinds.includes(options.kind as BacklogKind)) {
+      throw new Error(`invalid backlog role: ${options.kind}`);
     }
     const description = options.description ?? await readDescription(options.descriptionFile);
     if (!description.trim()) throw new Error('empty backlog description. Provide --description-file or pipe Markdown through stdin.');
     const input: BacklogCreateInput = {
       title: options.title,
       description,
-      stage: options.stage as BacklogCreateInput['stage'],
+      kind: options.kind as BacklogCreateInput['kind'],
       idempotencyKey: options.idempotencyKey,
       parentId: options.parent,
       baseBacklogId: options.baseBacklog,
@@ -736,6 +750,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Inventory issues across all credential-accessible projects')
     .option('--platform <platform>', 'Provider scope (github|gitlab|all)', 'all')
     .option('--state <state>', `Filter by state (${states.join('|')})`)
+    .option('--kind <kind>', `Filter by role (${kinds.join('|')}); a PRD anchor has no state`)
     .option('--mode <mode>', `Filter by execution mode (${modes.join('|')})`)
     .option('--tag <tag>', 'Filter by business tag')
     .option('--project <project>', 'Filter by canonical provider project key')
@@ -755,6 +770,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   backlog.command('list')
     .description('List backlog items')
     .option('--state <state>', `Filter by state (${states.join('|')})`)
+    .option('--kind <kind>', `Filter by role (${kinds.join('|')}); a PRD anchor has no state`)
     .option('--mode <mode>', `Filter by execution mode (${modes.join('|')})`)
     .option('--tag <tag>', 'Filter by business tag')
     .option('--parent <id>', 'Filter by parent backlog ID')
@@ -816,8 +832,8 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--parent <id>', 'Organizational parent backlog ID or platform:project#id (does not select a git base branch)')
     .option('--base-backlog <id>', 'Backlog ID or platform:project#id whose unmerged branch is the explicit execution base')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
-    .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
-    .option('--stage <stage>', 'Initial stage (ready|prd); PRD parents cannot execute', 'ready')
+    .option('--mode <mode>', `Execution mode (${modes.join('|')}); defaults to afk, or hitl for a PRD anchor`)
+    .option('--kind <kind>', `Organizational role (${kinds.join('|')}); a PRD anchor is never executed`)
     .option('--dry-run', 'Validate and print the planned issue and labels without writing')
     .option('--idempotency-key <key>', 'Return the existing issue when this project already contains the key')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])

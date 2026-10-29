@@ -46,10 +46,10 @@ function runner(bundle: ProviderBundle): WorkflowRunner {
 }
 
 describe('WorkflowRunner backlog provider mode', () => {
-  it('rejects a PRD parent before claiming or preparing a workspace', async () => {
+  it('rejects a PRD anchor before claiming or preparing a workspace', async () => {
     const bundle = providers(vi.fn());
-    vi.mocked(bundle.backlog.get).mockResolvedValue({ ...item, state: 'prd' });
-    await expect(runner(bundle).run({ backlogId: '42', session: 'worker', targetBranch: 'main' })).rejects.toThrow('PRD parent');
+    vi.mocked(bundle.backlog.get).mockResolvedValue({ ...item, kind: 'prd' });
+    await expect(runner(bundle).run({ backlogId: '42', session: 'worker', targetBranch: 'main' })).rejects.toThrow('PRD anchor');
     expect(bundle.backlog.claim).not.toHaveBeenCalled();
     expect(bundle.branches.createBranch).not.toHaveBeenCalled();
   });

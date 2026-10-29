@@ -8,7 +8,8 @@ export interface ProviderInventoryQuery {
 
 export interface ProviderInventoryItem {
   project: { platform: 'github' | 'gitlab'; projectKey: string };
-  state: string;
+  /** The lifecycle position. An organizational parent has none. */
+  state?: string;
   executionMode: string;
   tags: readonly string[];
 }

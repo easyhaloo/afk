@@ -1,4 +1,12 @@
-export type BacklogState = 'prd' | 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+export type BacklogState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+
+/**
+ * The role of a backlog item.
+ *
+ * A role is independent of the lifecycle: `prd` marks an organizational
+ * parent that groups children and is never executable.
+ */
+export type BacklogKind = 'prd';
 export type BacklogExecutionMode = 'afk' | 'hitl';
 
 export type BacklogChangeRequest = {
@@ -27,6 +35,7 @@ export {
   isBacklogRelationLabel,
 } from './metadata-codec.js';
 export type { BacklogMetadata, BacklogMetadataOptions, BacklogMetadataScope, BacklogRelations } from './metadata-codec.js';
+export { BACKLOG_KIND_LABELS } from './initialization.js';
 export type { BacklogCreatePlan } from './creation.js';
 import type { BacklogCreatePlan } from './creation.js';
 export { buildBacklogGraph } from './graph.js';
@@ -57,6 +66,8 @@ export interface BacklogItem {
   project?: ProviderProjectRef;
   managed?: boolean;
   executionEligible?: boolean;
+  /** The role of the item; `prd` marks a parent that is never executable. */
+  kind?: BacklogKind;
   title: string;
   description?: string;
   /** Organizational grouping only; it never selects a git base branch. */
@@ -67,7 +78,8 @@ export interface BacklogItem {
    */
   baseBacklogId?: string;
   dependsOn: string[];
-  state: BacklogState;
+  /** The lifecycle position. An organizational parent has none. */
+  state?: BacklogState;
   /**
    * The state the provider's workflow label records, when it has one.
    *
@@ -90,7 +102,8 @@ export interface BacklogItem {
 export interface BacklogCreateInput {
   title: string;
   description: string;
-  stage?: 'ready' | 'prd';
+  /** The role of the created item; `prd` creates an organizational parent. */
+  kind?: BacklogKind;
   idempotencyKey?: string;
   parentId?: string;
   baseBacklogId?: string;
@@ -101,6 +114,8 @@ export interface BacklogCreateInput {
 
 export interface BacklogListOptions {
   state?: BacklogState;
+  /** Filter by role; `prd` selects the organizational anchors. */
+  kind?: BacklogKind;
   executionMode?: BacklogExecutionMode;
   parentId?: string;
   tag?: string;
@@ -186,9 +201,10 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     }
   }
 
-  async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
+  async list(options: { state?: BacklogState; kind?: BacklogKind; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
     return [...this.items.values()]
       .filter(item => options.state === undefined || item.state === options.state)
+      .filter(item => options.kind === undefined || item.kind === options.kind)
       .filter(item => options.executionMode === undefined || item.executionMode === options.executionMode)
       .filter(item => options.parentId === undefined || item.parentId === options.parentId)
       .filter(item => options.tag === undefined || item.tags.includes(options.tag))
@@ -209,7 +225,8 @@ export class InMemoryBacklogProvider implements BacklogProvider {
       ...(plan.parentId === undefined ? {} : { parentId: plan.parentId }),
       ...(plan.baseBacklogId === undefined ? {} : { baseBacklogId: plan.baseBacklogId }),
       dependsOn: [...plan.dependsOn],
-      state: plan.state,
+      ...(plan.state === undefined ? {} : { state: plan.state }),
+      ...(plan.kind === undefined ? {} : { kind: plan.kind }),
       executionMode: plan.executionMode,
       tags: [...plan.tags],
       branchName: deriveBacklogBranchName(id),
@@ -312,6 +329,9 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
+    // The role vetoes first: an organizational anchor is never executable,
+    // whatever lifecycle position it happens to carry.
+    if (item.kind === 'prd') return false;
     if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
     const hasIncompleteChild = [...this.items.values()]
       .some(candidate => candidate.parentId === item.id);

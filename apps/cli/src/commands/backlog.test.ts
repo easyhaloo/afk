@@ -90,8 +90,10 @@ describe('hard-cutover command surface', () => {
 
     expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
     expect(create?.options.map(option => option.long)).toEqual(expect.arrayContaining([
-      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--stage', '--dry-run', '--idempotency-key', '--tag', '--project', '--platform', '--json',
+      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--kind', '--dry-run', '--idempotency-key', '--tag', '--project', '--platform', '--json',
     ]));
+    // The stage option is gone: a PRD is a role, not a lifecycle position.
+    expect(create?.options.map(option => option.long)).not.toContain('--stage');
     expect(create?.options.find(option => option.long === '--base-backlog')?.description).toContain('explicit execution base');
     expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
   });
@@ -529,6 +531,33 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     });
   });
 
+  it('runBacklogList filters by role and rejects an unknown role', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    let received: unknown;
+    try {
+      await runBacklogList(stubProvider([stubItem], {
+        async list(options) { received = options; return []; },
+      }), { kind: 'prd', json: true });
+      // The role filter reaches the provider, so a PRD anchor is selectable
+      // even though it has no lifecycle state to filter on.
+      expect(received).toMatchObject({ kind: 'prd' });
+
+      captured.length = 0;
+      await runBacklogList(stubProvider([stubItem]), { kind: 'nope', json: true });
+      const failure = JSON.parse(captured.join(''));
+      expect(failure.error.message).toContain('invalid backlog role');
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+  });
+
   it('runBacklogList returns the structured failure envelope when the provider throws', async () => {
     const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);
@@ -598,10 +627,14 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     try {
       await runBacklogCreate(stubProvider([stubItem], { create, initialize }), {
-        title: 'PRD', description: 'Body', stage: 'prd', dryRun: true, parent: '42', json: true,
+        title: 'PRD', description: 'Body', kind: 'prd', dryRun: true, parent: '42', json: true,
       });
-      expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ ok: true, kind: 'backlog.create',
-        data: { dryRun: true, title: 'PRD', labels: ['stage::prd', 'mode::afk', 'parent::github:org/repo#42'] } });
+      const envelope = JSON.parse(String(output.mock.calls[0][0]));
+      expect(envelope).toMatchObject({ ok: true, kind: 'backlog.create',
+        data: { dryRun: true, title: 'PRD', kind: 'prd',
+          labels: ['kind::prd', 'mode::hitl', 'parent::github:org/repo#42'] } });
+      // A PRD anchor has no lifecycle position, so the plan carries no state.
+      expect(envelope.data.state).toBeUndefined();
       expect(create).not.toHaveBeenCalled();
       expect(initialize).not.toHaveBeenCalled();
     } finally {
@@ -818,7 +851,8 @@ describe('backlog children', () => {
     };
   }
 
-  const parent = workItem('gitlab:group/repo#7', { title: 'the PRD', state: 'prd' });
+  // A PRD anchor is a container: it carries the role and has no state.
+  const parent = workItem('gitlab:group/repo#7', { title: 'the PRD', kind: 'prd', state: undefined });
   const child = workItem('gitlab:group/repo#8', { parentId: parent.id, title: 'child issue' });
   const unmanaged = workItem('gitlab:group/repo#9', { parentId: parent.id, title: 'manual issue', managed: false });
 

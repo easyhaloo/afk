@@ -135,7 +135,7 @@ describe("work item children", () => {
     issueNumber: 7,
     project: { platform: "gitlab" as const, projectKey: "corp/req", name: "req" },
     title: "the PRD",
-    state: "prd" as const,
+    kind: "prd" as const,
   };
   const child = {
     ...inventory.items[0],

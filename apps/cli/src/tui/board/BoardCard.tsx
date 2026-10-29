@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { BacklogViewModel } from './data/backlog-adapter.js';
-import { backlogStateColor } from './views/BacklogRow.js';
+import { backlogStateColor, backlogStatusLabel } from './views/BacklogRow.js';
 import { getExecutionModeColor, getExecutionModeIcon, getStatusIcon } from './views/display.js';
 
 function isFullWidthCodePoint(codePoint: number): boolean {
@@ -51,7 +51,8 @@ export interface BoardCardProps {
 }
 
 export function BoardCard({ backlog, selected, width }: BoardCardProps) {
-  const stateColor = backlogStateColor(backlog.state);
+  const status = backlogStatusLabel(backlog);
+  const stateColor = backlogStateColor(status);
   const runtimeSummary = [backlog.phase, backlog.progress].filter(Boolean).join(' · ');
   const title = truncateByWidth(
     runtimeSummary ? `${runtimeSummary} · ${backlog.title}` : backlog.title,
@@ -62,10 +63,10 @@ export function BoardCard({ backlog, selected, width }: BoardCardProps) {
     <Box width={width} height={2} overflow="hidden" flexDirection="column">
       <Text color={selected ? 'white' : stateColor} wrap="truncate">
         {selected ? '▶ ' : '  '}
-        <Text color={stateColor}>{getStatusIcon(backlog.state)}</Text>
+        <Text color={stateColor}>{getStatusIcon(status)}</Text>
         <Text bold> #{backlog.id}</Text>
         <Text color={getExecutionModeColor(backlog.executionMode)}> {getExecutionModeIcon(backlog.executionMode)}</Text>
-        <Text dimColor> · {backlog.state} · {backlog.runStatus ?? 'no-runtime'}</Text>
+        <Text dimColor> · {status} · {backlog.runStatus ?? 'no-runtime'}</Text>
       </Text>
       <Text wrap="truncate" bold={selected}>{title}</Text>
     </Box>

@@ -28,6 +28,8 @@ export interface BacklogViewModel {
   title: string;
   description?: string;
   state: BacklogItem['state'];
+  /** The role of the item; `prd` marks an organizational anchor. */
+  kind?: BacklogItem['kind'];
   executionMode: BacklogItem['executionMode'];
   parentId?: string;
   dependsOn: string[];
@@ -48,6 +50,7 @@ export function toBacklogViewModel(item: BacklogItem): BacklogViewModel {
     title: item.title,
     description: item.description,
     state: item.state,
+    kind: item.kind,
     executionMode: item.executionMode,
     parentId: item.parentId,
     dependsOn: [...item.dependsOn],

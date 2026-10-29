@@ -49,10 +49,50 @@ function requireNodeSqlite<T>(requireNode: ReturnType<typeof createRequire>): T 
   }
 }
 
+/**
+ * One schema step between two stored versions.
+ *
+ * A migration runs inside the same transaction as the initialization, so a
+ * database that fails to migrate keeps its previous schema instead of a
+ * half-applied one.
+ */
+export interface SqliteMigration {
+  /** The stored version this step upgrades from. */
+  from: number;
+  /** The stored version this step produces. */
+  to: number;
+  migrate: (database: SqliteDatabase) => void;
+}
+
+/**
+ * Bring an older database up to the expected version.
+ *
+ * The steps must chain: each one starts where the previous one ended.
+ */
+function applyMigrations(
+  database: SqliteDatabase,
+  from: number,
+  to: number,
+  migrations: readonly SqliteMigration[],
+): void {
+  let version = from;
+  while (version < to) {
+    const migration = migrations.find(candidate => candidate.from === version);
+    if (!migration) throw new Error(`No AFK storage schema migration from version ${version}`);
+    migration.migrate(database);
+    version = migration.to;
+    database.exec(`PRAGMA user_version = ${version}`);
+  }
+}
+
 export function openSqlite(options: {
   file: string;
   schema: string;
   durability?: 'NORMAL' | 'FULL';
+  /** The schema version this database is expected to hold. Defaults to 1. */
+  version?: number;
+  /** The steps that bring an older database up to `version`. */
+  migrations?: readonly SqliteMigration[];
   initialize?: (database: SqliteDatabase) => void;
 }): SqliteDatabase {
   const requireNode = createRequire(import.meta.url);
@@ -62,20 +102,23 @@ export function openSqlite(options: {
   } catch {
     throw new Error('AFK SQLite storage requires a Node runtime with node:sqlite support (tested on Node 22.16+)');
   }
+  const expectedVersion = options.version ?? 1;
   if (options.file !== ':memory:') mkdirSync(dirname(options.file), { recursive: true, mode: 0o700 });
   const database = new Sqlite(options.file);
   try {
     if (options.file !== ':memory:' && process.platform !== 'win32') chmodSync(options.file, 0o600);
     database.exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;`);
     const version = Number(database.prepare('PRAGMA user_version').get()?.user_version);
-    if (version > 1) throw new Error(`Unsupported AFK storage schema version: ${version}`);
+    if (version > expectedVersion) throw new Error(`Unsupported AFK storage schema version: ${version}`);
     database.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = ${options.durability ?? 'NORMAL'};`);
     transaction(database, () => {
       const lockedVersion = Number(database.prepare('PRAGMA user_version').get()?.user_version);
-      if (lockedVersion > 1) throw new Error(`Unsupported AFK storage schema version: ${lockedVersion}`);
+      if (lockedVersion > expectedVersion) throw new Error(`Unsupported AFK storage schema version: ${lockedVersion}`);
       if (lockedVersion === 0) {
         database.exec(options.schema);
-        database.exec('PRAGMA user_version = 1');
+        database.exec(`PRAGMA user_version = ${expectedVersion}`);
+      } else {
+        applyMigrations(database, lockedVersion, expectedVersion, options.migrations ?? []);
       }
       options.initialize?.(database);
     });

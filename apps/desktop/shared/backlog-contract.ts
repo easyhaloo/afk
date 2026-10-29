@@ -18,7 +18,6 @@ import {
 } from "./work-item-run-validation.js";
 
 export const BACKLOG_STATES = [
-  "prd",
   "ready",
   "rework",
   "in_progress",
@@ -29,6 +28,17 @@ export const BACKLOG_STATES = [
 ] as const;
 
 export type BacklogState = typeof BACKLOG_STATES[number];
+
+/**
+ * The roles a work item can carry.
+ *
+ * A role says what kind of item this is, not where it is in a lifecycle. A
+ * PRD anchor carries the `prd` role: it groups children and is never
+ * executable, and it has no lifecycle position of its own.
+ */
+export const BACKLOG_KINDS = ["prd"] as const;
+
+export type BacklogKind = typeof BACKLOG_KINDS[number];
 
 export const BACKLOG_EXECUTION_MODES = ["afk", "hitl"] as const;
 export type BacklogExecutionMode = typeof BACKLOG_EXECUTION_MODES[number];
@@ -129,7 +139,10 @@ export type GlobalWorkItem = {
   description?: string;
   managed: boolean;
   executionEligible: boolean;
-  state: BacklogState;
+  /** The lifecycle position. A PRD anchor is a container and has none. */
+  state?: BacklogState;
+  /** The role of the item; `prd` marks a parent that is never executable. */
+  kind?: BacklogKind;
   executionMode: BacklogExecutionMode;
   parentId?: WorkItemId;
   dependsOn: WorkItemId[];
@@ -149,6 +162,8 @@ export type GlobalWorkItem = {
 export type WorkItemInventoryOptions = {
   platform?: BacklogPlatform | "all";
   state?: BacklogState;
+  /** Filter by role; `prd` selects the organizational anchors. */
+  kind?: BacklogKind;
   executionMode?: BacklogExecutionMode;
   tag?: string;
   project?: string;
@@ -194,7 +209,10 @@ export type BacklogItem = {
   parentId?: string;
   baseBacklogId?: string;
   dependsOn: string[];
-  state: BacklogState;
+  /** The lifecycle position. A PRD anchor is a container and has none. */
+  state?: BacklogState;
+  /** The role of the item; `prd` marks an organizational parent. */
+  kind?: BacklogKind;
   executionMode: BacklogExecutionMode;
   tags: string[];
   branchName: string;
@@ -426,13 +444,17 @@ export function parseProviderProjectRef(input: unknown): ProviderProjectRef {
 export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("global work item must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "issueNumber", "project", "title", "description", "managed", "executionEligible", "state", "executionMode", "parentId", "dependsOn", "tags", "branchName", "providerRef", "webUrl", "sources", "repositories", "executionPlan", "runs", "owner", "priority", "updatedAt"], "global work item");
+  assertExactKeys(candidate, ["id", "issueNumber", "project", "title", "description", "managed", "executionEligible", "state", "kind", "executionMode", "parentId", "dependsOn", "tags", "branchName", "providerRef", "webUrl", "sources", "repositories", "executionPlan", "runs", "owner", "priority", "updatedAt"], "global work item");
   const id = parseGlobalWorkItemIdentity(candidate.id, "global work item: id");
   const issueNumber = parseIssueNumber(candidate.issueNumber, "global work item");
   const project = parseProviderProjectRef(candidate.project);
   if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("global work item: managed and executionEligible must be booleans");
   if (candidate.executionEligible && !candidate.managed) throw new Error("global work item: unmanaged items cannot be execution eligible");
-  if (!isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("global work item has invalid lifecycle fields");
+  // A PRD anchor is a container: it has no lifecycle position, so the state
+  // is optional. Everything else always has one.
+  if (candidate.state !== undefined && !isBacklogState(candidate.state)) throw new Error("global work item has invalid lifecycle fields");
+  if (candidate.kind !== undefined && !isBacklogKind(candidate.kind)) throw new Error("global work item has an invalid role");
+  if (!isBacklogExecutionMode(candidate.executionMode)) throw new Error("global work item has invalid lifecycle fields");
   if (!Array.isArray(candidate.dependsOn)) throw new Error("global work item: dependsOn must be an array");
   if (!Array.isArray(candidate.tags) || candidate.tags.some(value => typeof value !== "string")) throw new Error("global work item: tags is invalid");
   const result: GlobalWorkItem = {
@@ -442,7 +464,8 @@ export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
     title: parseRequiredString(candidate.title, "global work item: title"),
     managed: candidate.managed,
     executionEligible: candidate.executionEligible,
-    state: candidate.state,
+    ...(candidate.state === undefined ? {} : { state: candidate.state }),
+    ...(candidate.kind === undefined ? {} : { kind: candidate.kind }),
     executionMode: candidate.executionMode,
     dependsOn: candidate.dependsOn.map(value => parseGlobalWorkItemIdentity(value, "global work item: dependsOn")),
     tags: candidate.tags as string[],
@@ -707,6 +730,10 @@ export function parseBacklogPlatform(value: unknown): BacklogPlatform | undefine
 
 export function isBacklogState(value: unknown): value is BacklogState {
   return typeof value === "string" && (BACKLOG_STATES as readonly string[]).includes(value);
+}
+
+export function isBacklogKind(value: unknown): value is BacklogKind {
+  return typeof value === "string" && (BACKLOG_KINDS as readonly string[]).includes(value);
 }
 
 export function isBacklogPlatform(value: unknown): value is BacklogPlatform {

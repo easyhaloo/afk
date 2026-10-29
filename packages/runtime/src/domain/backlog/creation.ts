@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
-import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogManagementProvider } from './index.js';
-import { BACKLOG_METADATA } from './initialization.js';
+import type {
+  BacklogCreateInput,
+  BacklogExecutionMode,
+  BacklogItem,
+  BacklogKind,
+  BacklogManagementProvider,
+  BacklogState,
+} from './index.js';
+import { BACKLOG_KIND_LABELS, BACKLOG_METADATA } from './initialization.js';
 import { validateBusinessTag } from './tags.js';
 import {
   canonicalizeBacklogReference,
@@ -12,7 +19,10 @@ import type { WorkItemId } from '../work-item/identity.js';
 export interface BacklogCreatePlan {
   title: string;
   description: string;
-  state: 'ready' | 'prd';
+  /** The lifecycle position. A PRD anchor is a container and has none. */
+  state?: BacklogState;
+  /** The role of the created item; `prd` marks an organizational parent. */
+  kind?: BacklogKind;
   executionMode: BacklogExecutionMode;
   /** Canonical global identity of the organizational parent. */
   parentId?: WorkItemId;
@@ -56,10 +66,15 @@ export async function planBacklogCreate(
 ): Promise<BacklogCreatePlan> {
   const title = input.title.trim();
   if (!title) throw new Error('backlog title must not be empty');
-  const state = input.stage ?? 'ready';
-  if (state !== 'ready' && state !== 'prd') throw new Error(`invalid creation stage: ${state}`);
-  const executionMode = input.executionMode ?? 'afk';
+  const kind = input.kind;
+  // A PRD anchor groups children and is never executed on its own, so it
+  // defaults to the human-in-the-loop mode. Asking for an autonomous PRD is
+  // a contradiction and is refused rather than silently downgraded.
+  const executionMode = input.executionMode ?? (kind === 'prd' ? 'hitl' : 'afk');
   if (executionMode !== 'afk' && executionMode !== 'hitl') throw new Error(`invalid execution mode: ${executionMode}`);
+  if (kind === 'prd' && executionMode === 'afk') {
+    throw new Error('a PRD parent cannot be autonomous; it is an organizational anchor');
+  }
   const parentId = input.parentId === undefined ? undefined : resolveReference(input.parentId, scope);
   const baseBacklogId = input.baseBacklogId === undefined ? undefined : resolveReference(input.baseBacklogId, scope);
   const dependsOn = [...new Set((input.dependsOn ?? []).map(id => resolveReference(id, scope)))];
@@ -67,8 +82,16 @@ export async function planBacklogCreate(
   if (input.idempotencyKey !== undefined && !input.idempotencyKey.trim()) throw new Error('idempotency key must not be empty');
   const idempotencyLabel = input.idempotencyKey === undefined ? undefined
     : `idempotency::${createHash('sha256').update(input.idempotencyKey).digest('hex')}`;
+  // A PRD anchor is a container, not a work item in a lifecycle: it gets no
+  // stage label at all. Its role label says what it is, and its mode label
+  // says it never runs by itself.
+  const state: BacklogState | undefined = kind === 'prd' ? undefined : 'ready';
+  const roleLabels = kind === 'prd'
+    ? [BACKLOG_KIND_LABELS.prd]
+    : [BACKLOG_METADATA.stateLabels.ready];
   const labels = [
-    BACKLOG_METADATA.stateLabels[state], BACKLOG_METADATA.executionModeLabels[executionMode], ...tags,
+    ...roleLabels,
+    BACKLOG_METADATA.executionModeLabels[executionMode], ...tags,
     ...encodeBacklogRelations({ parentId, baseBacklogId, dependsOn }),
     ...(idempotencyLabel ? [idempotencyLabel] : []),
   ];
@@ -78,7 +101,7 @@ export async function planBacklogCreate(
     Promise.all(dependsOn.map(id => provider.get(id))),
   ]);
   const links = { parent, executionBase, dependencies };
-  return { title, description: renderBacklogDescription(input.description, links), state, executionMode, parentId, baseBacklogId, dependsOn, tags, labels,
+  return { title, description: renderBacklogDescription(input.description, links), state, kind, executionMode, parentId, baseBacklogId, dependsOn, tags, labels,
     idempotencyLabel, links };
 }
 

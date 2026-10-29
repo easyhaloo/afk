@@ -87,6 +87,7 @@ single source of truth for the supported surface:
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
 | `afk backlog create <title> [--stage ready\|prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
+| `afk backlog children <prd-id>` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
@@ -286,6 +287,17 @@ the provider asks the cross-project graph for the children of an item before it
 claims it; a parent with children in another repository is never runnable. When
 the graph cannot be read, the adapter falls back to the local project scan and
 reports the failure.
+
+The children of one work item are answered by one query
+(`packages/runtime/src/application/work-item/children.ts`). It takes the
+canonical identity of the parent, because a bare issue number names a
+different issue in every repository, and it answers from the local inventory
+first. The inventory is a cache, so a missing or stale copy is collected again
+before the question is answered, and an identity the copy has never heard of is
+collected once more before it is reported as unknown. The children are ordered
+by project and issue number, so the list does not depend on when the inventory
+was collected. A child that AFK does not manage is reported as well, with its
+`managed` flag, because a hand-written issue attached to a PRD is a child too.
 
 Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
 accept a positive issue number in the explicitly selected project, or a

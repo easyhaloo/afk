@@ -1,7 +1,7 @@
 # ADR Process Guide
 
-**Purpose**: When and how to record Architecture Decisions during PRD drafting.
-**When**: Every afk-to-prd session where a significant technical choice is made.
+**Purpose**: Record significant technical decisions separately from the product requirements document.
+**When**: During technical design or implementation planning, when a technical choice meets the criteria below. The PRD workflow may identify the need for a future ADR, but must not make implementation decisions on behalf of the user.
 **Output**: `docs/adr/NNNN-title-slug.md` (status: `proposed`) in the target project.
 
 ---
@@ -49,13 +49,13 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 
 ## Process Steps
 
-### During PRD Drafting
+### After Product Requirements Are Confirmed
 
-1. While writing PRD, note any significant technical choices being made
-2. For each choice, ask: "Is this expensive to change later?" If yes → write ADR
-3. Fill in Context and Decision in PRD's `## Architecture Decisions` table
-4. Create `docs/adr/NNNN-title-slug.md` with full details (status: `proposed`)
-5. Reference ADR number in PRD document
+1. Keep the PRD focused on confirmed product context, user stories, scope, business rules, and observable behavior.
+2. If a technical decision is necessary, defer it to technical design rather than adding architecture choices or implementation details to the PRD.
+3. During technical design, assess the decision against the criteria below and create an ADR when warranted.
+4. Record the technical context, alternatives, decision, and consequences in `docs/adr/NNNN-title-slug.md`.
+5. Link the ADR from the technical design or implementation plan. Only mention a technical constraint in the PRD when it is a confirmed organizational constraint that affects product behavior.
 
 ### ADR Numbering
 
@@ -94,25 +94,9 @@ Use Watermill with Redis Stream mode.
 
 ---
 
-## Integration with PRD
+## Relationship to the PRD
 
-```markdown
-## Bounded Contexts
-
-| Context | Owner | Key Terms |
-|---------|-------|-----------|
-| WikiPage | core | Page, Slug, Layer |
-
-## Architecture Decisions
-
-| ADR | Decision | Module Mode | Status | PRD Section |
-|-----|----------|------------|--------|-------------|
-| ADR-0001 | Watermill Redis Stream mode | — | accepted | docs/adr/0001-watermill.md |
-| ADR-0002 | PostgreSQL for order data | Deep Module | accepted | docs/adr/0002-postgresql.md |
-| ADR-0003 | Use MinIO for object storage | — | proposed | docs/adr/0003-minio.md |
-
-*(Module Mode: Deep Module = vertical slicing by bounded context; Shallow Module = layered)*
-```
+The PRD is a product document, not an architecture decision log. Do not add an `Architecture Decisions` table, module ownership, module modes, database choices, or ADR lifecycle details to it. Keep those in technical design and ADR documents. The PRD may state a confirmed technical or organizational constraint only when it materially affects the product contract; describe the constraint and its product impact, not the implementation solution.
 
 ---
 

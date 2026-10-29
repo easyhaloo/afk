@@ -104,7 +104,7 @@ graph TD
 
 ### 依赖解析
 
-Backlog 通过结构化字段声明依赖：
+Backlog 通过 provider-neutral 字段声明关系。`baseBacklogId` 支持规范化的跨项目身份：同仓库未完成的基准任务可以提供执行分支；跨仓库基准任务保留追踪关系，但执行时使用目标仓库配置的基准分支，因为 Git 分支属于各自仓库：
 
 ```
 Backlog #10: dependsOn: [], baseBacklogId: null

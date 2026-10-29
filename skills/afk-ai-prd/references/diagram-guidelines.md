@@ -1,73 +1,76 @@
-# Diagram Guidelines for AI-Friendly PRDs
+# Diagram Guidelines for AI-Ready PRDs
 
-Use Mermaid code blocks as the canonical diagram source. A rendered image may
-be attached for convenience, but it is never the source of truth.
+Use Mermaid source as the canonical diagram representation when a diagram
+materially reduces ambiguity. Diagrams are optional; do not add them merely to
+fill a section.
 
 ## Diagram Selection
 
-| Need | Diagram | Required prefix |
+| Need | Diagram | ID prefix |
 |---|---|---|
 | User or business path | `flowchart` | `FLOW-###` |
-| Cross-boundary interaction | `sequenceDiagram` | `SEQ-###` |
-| Entity lifecycle | `stateDiagram-v2` | `STATE-###` |
-| Complex branching rule | `flowchart` decision tree | `RULE-###` |
+| Cross-boundary product interaction | `sequenceDiagram` | `SEQ-###` |
+| Product-visible lifecycle | `stateDiagram-v2` | `STATE-###` |
+| Complex branching business rule | `flowchart` decision tree | `RULE-###` |
 
-## Common Rules
+## Rules
 
-- Give every diagram a stable ID, purpose, and related requirement IDs.
-- Use the same actor, context, entity, and state names as the prose.
-- Label decision branches with explicit conditions, not `else` or `other`.
-- Include material failure, permission, cancellation, timeout, retry, and
-  duplicate-request paths.
-- Keep cross-boundary diagrams at the boundary level; do not diagram every
-  internal function call.
-- Do not introduce a component, API, event, or data store in a diagram unless
-  the PRD records it as a decision, constraint, or explicit assumption.
-- If prose and a diagram disagree, record an `Open Risk` and stop approval.
+- Give every diagram a stable ID, a concise purpose, and links to related
+  requirement or acceptance-criteria IDs.
+- Use the same actor, domain term, and state names as the PRD tables.
+- Label branches with explicit product or business conditions.
+- Include material permission, cancellation, failure, and retry outcomes only
+  when they affect confirmed product behavior.
+- Keep diagrams at the user/product/external-contract boundary. Do not diagram
+  internal function calls, modules, services, databases, or broker topology.
+- Do not introduce a technical component, API, event, or data store unless it
+  is part of a confirmed external product contract or explicit organizational
+  constraint. Otherwise defer it to technical design.
+- If a diagram conflicts with the PRD text, return to clarification and resolve
+  the product behavior before approval. Do not leave an open risk in a
+  published PRD.
 
 ## Flowcharts
 
 Use flowcharts for user-visible and business-process steps. Every path should
-have a meaningful end state or explicitly lead to a waiting state.
+have a meaningful end state or explicitly lead to a user-visible waiting state.
 
 ```mermaid
 flowchart TD
-    Start[User starts] --> Check{Precondition holds?}
-    Check -- Yes --> Success[System completes behavior]
-    Check -- No --> Failure[System explains why it cannot proceed]
+    Start[User starts] --> Check{Confirmed precondition holds?}
+    Check -- Yes --> Success[Product completes behavior]
+    Check -- No --> Failure[Product explains why it cannot proceed]
 ```
 
 ## Sequence Diagrams
 
-Use sequence diagrams for actors and systems that cross an ownership or process
-boundary. Show request/response direction and asynchronous behavior explicitly.
+Use sequence diagrams only for interactions across product or external-system
+boundaries. Show request/response meaning and asynchronous behavior, not
+internal method calls.
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant UI
-    participant Service
-    User->>UI: Starts action
-    UI->>Service: Sends request
-    Service-->>UI: Returns accepted result
-    UI-->>User: Shows observable state
+    participant Product
+    participant ExternalSystem
+    User->>Product: Starts action
+    Product->>ExternalSystem: Sends agreed request
+    ExternalSystem-->>Product: Returns result
+    Product-->>User: Shows observable outcome
 ```
-
-Use `alt` for mutually exclusive paths, `opt` for optional paths, and `par`
-for concurrent paths.
 
 ## State Diagrams
 
-Use state diagrams when an entity has a lifecycle. Define the initial state,
-terminal states, transition events, and prohibited transitions in prose or a
-table next to the diagram.
+Use state diagrams when an entity has a meaningful product lifecycle. Define
+initial and terminal states, allowed transitions, and prohibited transitions
+in a nearby table or concise text. Do not model internal execution states that
+are irrelevant to users or external consumers.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Pending
-    Pending --> Running: accepted
-    Running --> Succeeded: completed
-    Running --> Failed: unrecoverable error
-    Succeeded --> [*]
-    Failed --> [*]
+    Pending --> Completed: confirmed completion condition
+    Pending --> Rejected: confirmed rejection condition
+    Completed --> [*]
+    Rejected --> [*]
 ```

@@ -15,6 +15,8 @@ function tracker(issue: any): TrackerProvider {
     listIssues: vi.fn(async () => [{ ...issue }]),
     updateIssue: vi.fn(async (_id, updates) => {
       issue.labels = updates.labels ?? issue.labels;
+      if (updates.description !== undefined) issue.description = updates.description;
+      if (updates.title !== undefined) issue.title = updates.title;
       if (updates.state === 'closed') issue.state = 'closed';
     }),
     updateLabels: vi.fn(async (_id, delta) => {
@@ -52,13 +54,26 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('resolves qualified relationships in their own repository even when IIDs collide', async () => {
-    const remote = { ...tracker({ id: 7, platform: 'github', projectId: 'org/other', title: 'Remote', labels: ['stage::done'], state: 'closed' }), projectId: 'org/other' };
-    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
+    const remote = { ...tracker({ id: 7, platform: 'github', projectId: 'org/other', title: 'Remote', description: 'Remote base', labels: ['stage::done'], state: 'closed', url: 'https://example/7' }), projectId: 'org/other' };
+    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', description: '', labels: [] as string[], state: 'opened', url: 'https://example/42' };
     const t = { ...tracker(issue), forProject: vi.fn(() => remote),
-      createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };
+      createIssue: vi.fn(async (input: any) => { issue.title = input.title; issue.description = input.description; issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };
     const provider = new TrackerBacklogProvider(t);
-    const created = await provider.create({ title: 'Child', description: 'Body', parentId: 'github:org/other#7', dependsOn: ['github:org/other#7'] });
-    expect(created).toMatchObject({ parentId: 'github:org/other#7', dependsOn: ['github:org/other#7'] });
+    const created = await provider.create({
+      title: 'Child',
+      description: 'Body',
+      parentId: 'github:org/other#7',
+      baseBacklogId: 'github:org/other#7',
+      dependsOn: ['github:org/other#7'],
+      idempotencyKey: 'cross-project/create-readback',
+    });
+    expect(created).toMatchObject({
+      parentId: 'github:org/other#7',
+      baseBacklogId: 'github:org/other#7',
+      dependsOn: ['github:org/other#7'],
+    });
+    expect(created.description).toContain('Execution base: [#7](https://example/7)');
+    expect(created.description).toContain('Depends on: [#7](https://example/7)');
     expect(t.forProject).toHaveBeenCalledWith('org/other');
     expect(remote.getIssue).toHaveBeenCalledWith(7);
     expect(t.linkIssues).toHaveBeenCalledWith(42, 7, 'blocked_by', 'org/other');

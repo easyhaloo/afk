@@ -622,6 +622,52 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.data.title).toBe('fresh');
   });
 
+  it('passes canonical cross-project execution-base and dependency references through the CLI', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const create = vi.fn(async (input: BacklogCreateInput) => ({
+      ...stubItem,
+      id: 'github:org/service#88',
+      providerRef: 'github:org/service#88',
+      baseBacklogId: input.baseBacklogId,
+      dependsOn: [...(input.dependsOn ?? [])],
+    }));
+    try {
+      await runBacklogCreate(stubProvider([], { create }), {
+        title: 'Cross-repository implementation',
+        description: 'Implement the API consumer',
+        project: 'org/service',
+        platform: 'github',
+        baseBacklog: 'github:org/platform#17',
+        dependsOn: ['github:org/platform#17'],
+        idempotencyKey: 'prd-42/service-implementation',
+        json: true,
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Cross-repository implementation',
+      baseBacklogId: 'github:org/platform#17',
+      dependsOn: ['github:org/platform#17'],
+      idempotencyKey: 'prd-42/service-implementation',
+    }));
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.create',
+      data: {
+        id: 'github:org/service#88',
+        baseBacklogId: 'github:org/platform#17',
+        dependsOn: ['github:org/platform#17'],
+      },
+    });
+  });
+
   it('previews a PRD anchor and relationship labels without creating or initializing', async () => {
     const create = vi.fn();
     const initialize = vi.fn();

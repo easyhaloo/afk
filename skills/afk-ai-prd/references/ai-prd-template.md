@@ -1,249 +1,84 @@
-# AI-Friendly PRD Markdown Template
+# AI-Ready PRD Template
 
-Use this template as the canonical structure. Keep the headings, ID prefixes,
-and field labels stable so a person and an AI can locate the same contract.
-Replace angle-bracket placeholders. Do not leave `TBD`, `TODO`, or empty
-requirements in an approved PRD; unresolved content belongs in `Open Risks`.
+This is the canonical template for approved product requirements documents. Keep the required product context, but omit optional sections that do not apply. Replace all placeholders before approval. A published PRD contains confirmed product facts and decisions only; unresolved product questions remain in the clarification workflow and must not appear in the published document.
 
 ```markdown
-# PRD: <short title>
+# PRD: <short product or feature name>
 
-- **PRD ID**: PRD-2026-001
-- **Version**: 1.0.0
-- **Status**: Draft
-- **Owner**: <team or person>
-- **Created**: <YYYY-MM-DD>
-- **Updated**: <YYYY-MM-DD>
-- **Source**: <alignment record or approved request>
-
-> **Writing rule**: Use precise product and engineering terminology. Mark
-> content as `Confirmed`, `Inferred`, `Proposed`, or `Unknown` when its source
-> is not obvious. Model knowledge may surface candidates and common edge cases,
-> but only confirmed content becomes an approved requirement.
-
-## 1. Problem Statement
-
-### 1.1 Problem
-
-<Describe the user-visible problem, not the proposed implementation.>
-
-### 1.2 Affected Users
-
-- <role>
-
-### 1.3 Current Impact
-
-- <observable impact>
-
-### 1.4 Why Now
-
-<Explain why this problem is being addressed now.>
-
-## 2. Goals
-
-### GOAL-001: <outcome title>
-
-<State the measurable user or business outcome.>
-
-## 3. Non-Goals
-
-- <explicitly excluded behavior or scope>
-
-## 4. Users & Jobs
-
-### USER-001: <role>
-
-- **Role**: <who this is>
-- **Job**: <what the person needs to accomplish>
-- **Success**: <how the person knows the job is complete>
-
-## 5. Domain Glossary
-
-| Term | Definition |
+| Field | Value |
 |---|---|
-| <term> | <one precise definition> |
+| Version | <version> |
+| Status | Approved |
+| Owner | <confirmed owner or owning team> |
+| Last updated | <YYYY-MM-DD> |
 
-## 6. Functional Requirements
+## 1. Background & Problem
 
-### FR-001: <imperative requirement title>
+<Briefly describe the business context, why this matters now, who is affected, and the concrete problem or pain point. Do not describe the solution here.>
 
-- **Confidence**: Confirmed / Inferred / Proposed / Unknown
-- **Priority**: Must
-- **Surface**: User / Public API / Event / CLI/Batch / Policy
-- **Related Goal**: GOAL-001
-- **Actor**: USER-001
-- **Bounded Context**: <context>
-- **Trigger**: <event that starts the behavior>
+## 2. Goals & Success Measures
 
-#### Product Promise
-
-<State what the product surface promises to the user or consumer. Do not name
-an implementation component as the promise.>
-
-#### Preconditions
-
-- <condition that must already be true>
-
-#### Main Flow
-
-1. <observable system behavior>
-2. <observable system behavior>
-
-#### Abnormal Flows
-
-- If <condition>, the system MUST <observable response>.
-
-#### Completion Conditions
-
-- <observable postcondition>
-
-#### Invariants
-
-- <rule that must remain true>
-
-#### Acceptance Criteria
-
-##### AC-001: <scenario title>
-
-- **Given**: <initial condition>
-- **When**: <user or system action>
-- **Then**: <observable result>
-
-## 7. State Model
-
-### STATE-001: <entity lifecycle>
-
-| Current State | Event | Next State | Allowed |
-|---|---|---|---|
-| <state> | <event> | <state> | Yes |
-
-```mermaid
-stateDiagram-v2
-    [*] --> <InitialState>
-    <InitialState> --> <NextState>: <event>
-```
-
-## 8. User Flows
-
-### FLOW-001: <flow title>
-
-- **Purpose**: <what this diagram clarifies>
-- **Related Requirements**: FR-001
-- **Related Acceptance Criteria**: AC-001
-
-```mermaid
-flowchart TD
-    A[<start>] --> B{<decision>}
-    B -- Yes --> C[<success path>]
-    B -- No --> D[<failure path>]
-```
-
-## 9. Sequence Diagrams
-
-### SEQ-001: <interaction title>
-
-- **Purpose**: <what cross-boundary interaction this clarifies>
-- **Related Requirements**: FR-001
-- **Participants**: <actor>, <system>, <service>
-
-```mermaid
-sequenceDiagram
-    actor User as <actor>
-    participant System as <system>
-    User->>System: <request>
-    System-->>User: <response>
-```
-
-## 10. Non-Functional Requirements
-
-### NFR-001: <quality attribute>
-
-<Use a measurable constraint or observable behavior.>
-
-## 11. Technical Constraints & Decisions
-
-### CONSTRAINT-001: <product-affecting technical constraint>
-
-- **Constraint**: <what the product or integration must guarantee>
-- **Product Impact**: <which user-visible or consumer-visible behavior changes>
-- **Rationale**: <why this constraint exists>
-- **Implementation**: Defined in Technical Design; do not prescribe it here.
-- **Affected Requirements**: FR-001
-
-## 12. Key Decisions
-
-### DEC-001: <decision title>
-
-- **Decision**: <confirmed choice>
-- **Rationale**: <why>
-- **Impact**: <affected requirements or boundaries>
-- **Source**: <decision source>
-
-## 13. Assumptions
-
-### ASM-001: <assumption title>
-
-- **Assumption**: <unverified belief>
-- **Confidence**: High / Medium / Low
-- **Validation Needed**: Yes / No
-- **Affected Requirements**: FR-001
-
-## 14. Open Risks
-
-### RISK-001: <risk or open question>
-
-- **Question or Risk**: <unresolved content>
-- **Impact**: <what may change>
-- **Severity**: High / Medium / Low
-- **Owner**: <person or team>
-- **Affected Requirements**: FR-001
-- **Resolve Before**: Approval / Decomposition / Implementation
-
-## 15. Traceability
-
-| Source or Goal | Requirement, Diagram, or Criterion | Relationship |
+| Goal ID | Expected outcome | Success measure |
 |---|---|---|
-| GOAL-001 | FR-001 | implements |
-| FR-001 | AC-001 | verified by |
-| FR-001 | FLOW-001 | illustrated by |
+| GOAL-001 | <confirmed user or business outcome> | <confirmed measure/target, or qualitative outcome if no numeric target was agreed> |
 
-## 16. Change Log
+## 3. Users & User Stories
 
-### <YYYY-MM-DD> — Version <version>
+| User ID | User / role | User story | Value |
+|---|---|---|---|
+| USER-001 | <target user> | As a <role>, I want <capability> | So that <confirmed value> |
 
-- <change>
+## 4. Scope
 
-### Downstream Impact
+| In scope | Out of scope |
+|---|---|
+| <included product behavior> | <explicitly excluded behavior> |
 
-- <affected requirement, criterion, diagram, or backlog reference>
+## 5. Functional Requirements & Acceptance Criteria
+
+| Requirement ID | Requirement | Priority | Acceptance criteria |
+|---|---|---|---|
+| FR-001 | <one coherent, observable product behavior> | Must / Should / May | AC-001: Given <condition>, when <action>, then <observable result> |
+
+## 6. Business Rules
+
+| Rule ID | Rule | Applies when | Observable consequence |
+|---|---|---|---|
+| BR-001 | <confirmed rule in plain language> | <confirmed condition> | <result when the rule applies> |
+
+## 7. Product Constraints & Quality Requirements
+
+| ID | Constraint / quality | Required outcome | Rationale |
+|---|---|---|---|
+| NFR-001 | <confirmed quality attribute or product constraint> | <measurable or observable guarantee> | <confirmed reason> |
+
+## 8. Related Flow or State Model
+
+<Add a compact table or Mermaid diagram only when it materially clarifies a confirmed flow, lifecycle, or complex rule. Reference related FR/AC IDs.>
+
+## 9. Confirmed Product Decisions
+
+| Decision | Confirmed choice | Rationale |
+|---|---|---|
+| <decision> | <confirmed choice> | <reason, if known> |
+
+## 10. Traceability
+
+| Goal / User Story | Requirement | Acceptance Criterion |
+|---|---|---|
+| GOAL-001 / USER-001 | FR-001 | AC-001 |
 ```
 
 ## Authoring Rules
 
-- Use one requirement per `FR-###` heading.
-- Use one acceptance scenario per `AC-###` heading.
-- Describe product behavior first. Include UI or API behavior only when the
-  corresponding surface is part of the product contract.
-- Use concise, information-dense, domain-standard vocabulary instead of broad
-  adjectives or explanatory filler.
-- Use model prior knowledge to propose relevant edge cases and established
-  patterns, but label inferred or proposed content and keep it out of approved
-  requirements until confirmed.
-- Include technical constraints only when they affect product behavior,
-  quality, compatibility, security, compliance, scope, or material risk.
-- Do not turn implementation choices into requirements. Keep detailed
-  Technical Design in a separate document.
-- For UI requirements, specify user actions, visible outcomes, permissions,
-  errors, and state; leave layout and component details to UX or technical
-  design documents.
-- For API requirements, specify consumer intent, input/output semantics,
-  errors, idempotency, and compatibility; leave route and implementation
-  details to the API or technical design document.
-- Keep requirement IDs stable across revisions; never reuse a retired ID.
-- Keep diagram IDs stable unless the diagram represents a different concept.
-- Use `MUST`, `SHOULD`, and `MAY` when obligation levels matter.
-- Make every behavior observable and falsifiable.
-- Include error, permission, cancellation, retry, and duplicate-action behavior
-  when they are relevant to the feature.
-- Use a diagram only when it reduces ambiguity; conditional sections may say
-  `Not applicable — <reason>`.
+- Required content: background/problem, goals, target users and user stories, scope, functional requirements, and acceptance criteria.
+- Include business rules and quality requirements when they affect product behavior. Omit optional sections with no applicable confirmed content instead of adding boilerplate.
+- A user story states a user need and value, not an implementation task.
+- Each FR describes one coherent, observable product behavior. Each AC describes a testable outcome. Cover important success, permission, boundary, and failure cases where relevant.
+- Use stable IDs: `GOAL-###`, `USER-###`, `FR-###`, `AC-###`, `BR-###`, and `NFR-###`. Keep IDs stable across revisions and never reuse retired IDs.
+- Prefer tables for requirements, rules, scope, acceptance criteria, decisions, and traceability. Use concise prose for background and context; do not force every type of content into a table.
+- Write only confirmed product facts and decisions. Never leave `TBD`, `TODO`, `Unknown`, `Proposed`, open questions, or unapproved assumptions in an approved PRD.
+- Do not include code snippets, function/class names, source paths, database schemas, internal module designs, framework choices, algorithms, deployment details, test commands, issue IDs, or task decomposition.
+- Public interfaces may specify confirmed external inputs, outputs, observable errors, compatibility, and guarantees when these are part of the product contract.
+- Use numeric targets only when confirmed. Never invent metrics, policies, user commitments, or behavior.
+- Use diagrams only when they materially reduce ambiguity. Diagram details must agree with the requirements and link to relevant IDs.

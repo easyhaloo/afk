@@ -98,8 +98,18 @@ describe('backlog creation and execution base', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it('rejects a base branch from another repository', async () => {
-    const get = vi.fn(async () => ({ ...item, providerRef: 'github:org/other#1' }));
-    await expect(resolveBacklogExecutionBase({ get }, { ...item, baseBacklogId: 'github:org/other#1' }, 'main')).rejects.toThrow('same repository');
+  it('accepts a cross-repository execution-base reference but uses the target repository base branch', async () => {
+    const get = vi.fn(async () => ({
+      ...item,
+      id: 'github:org/other#1',
+      providerRef: 'github:org/other#1',
+      branchName: 'afk/backlog-1',
+    }));
+    await expect(resolveBacklogExecutionBase(
+      { get },
+      { ...item, baseBacklogId: 'github:org/other#1' },
+      'main',
+    )).resolves.toBe('main');
+    expect(get).toHaveBeenCalledWith('github:org/other#1');
   });
 });

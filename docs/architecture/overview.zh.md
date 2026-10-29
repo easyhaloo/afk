@@ -224,7 +224,10 @@ provider 写入的项目是它自己的私有状态，不属于 provider 契约�
 边在任何地方含义一致。
 
 各关系字段含义互不相同：`parentId` 表示组织分组，`dependsOn` 控制调度顺序，
-`baseBacklogId` 选择显式的 Git 执行基线。父级边和依赖边都不会隐式选择分支。
+`baseBacklogId` 显式引用执行基准任务。三种关系都支持规范化的跨项目身份。
+若基准任务与当前任务位于同一仓库，未完成的基准任务分支可作为 Git 基线；
+若位于不同仓库，则保留该引用用于追踪，但执行时使用目标仓库配置的基准分支，
+因为一个仓库的 Git 分支不能直接作为另一个仓库的 Git 基线。父级边和依赖边都不会隐式选择分支。
 
 backlog 图跨越项目。PRD 锚点可能位于需求仓库，其实现子项位于服务仓库，因此
 provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一个仓库有子项的父项永远
@@ -242,8 +245,9 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 每个条目独占一行，provider 报的 URL 就在标题旁边，因此在终端里点一下就能打开。
 
 创建关系参数（`--parent`、`--base-backlog`、`--depends-on`）接受显式选定项目内的
-正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。Git 执行基线
-必须属于执行仓库；多仓 Git 基线通过 execution manifest 配置。
+正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。`--base-backlog`
+支持跨仓引用；但跨仓任务的分支不能直接作为当前仓库的 Git 基线，运行时会保留该引用
+并使用目标仓库配置的基准分支。
 
 `afk run` 在准备工作区前，以尚未完成的基线 backlog 分支作为执行基线；基线已完成
 或合并时回落到配置分支。显式的 `--base-branch`、分支策略基线或 manifest 基线

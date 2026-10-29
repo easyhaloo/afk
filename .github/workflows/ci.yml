@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -28,6 +29,7 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
       desktop_e2e: ${{ steps.filter.outputs.desktop_e2e }}
       wiki_python: ${{ steps.filter.outputs.wiki_python }}
+      prd_tests: ${{ steps.filter.outputs.prd_tests }}
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
@@ -48,7 +50,7 @@ jobs:
              ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null ||
              ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             echo "Could not resolve the comparison range; enabling all checks."
-            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -56,7 +58,7 @@ jobs:
 
           if ! changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"; then
             echo "Could not compute changed paths; enabling all checks."
-            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -64,7 +66,7 @@ jobs:
 
           if [[ -z "$changed_files" ]]; then
             echo "No changed paths detected; enabling all checks as a safe fallback."
-            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -77,6 +79,7 @@ jobs:
           desktop=false
           desktop_e2e=false
           wiki_python=false
+          prd_tests=false
           global_config=false
 
           while IFS= read -r path; do
@@ -89,6 +92,9 @@ jobs:
             case "$path" in
               skills/wiki/*)
                 wiki_python=true
+                ;;
+              skills/afk-ai-prd/*|skills/afk-to-prd/*)
+                prd_tests=true
                 ;;
             esac
             case "$path" in
@@ -129,13 +135,13 @@ jobs:
             desktop_e2e=true
           fi
 
-          for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python; do
+          for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
             printf '%s=%s\n' "$key" "${!key}" >> "$GITHUB_OUTPUT"
           done
 
           echo "Detected areas:"
           printf '%s\n' "$changed_files"
-          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e wiki_python=$wiki_python"
+          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e wiki_python=$wiki_python prd_tests=$prd_tests"
 
   wiki-python-tests:
     name: Wiki Python Tests
@@ -237,6 +243,26 @@ jobs:
           console.log(`Plugin manifests valid; version ${manifests[0].value.version}`);
           NODE
 
+  prd-validator-tests:
+    name: PRD Validator Tests
+    needs: changes
+    if: needs.changes.outputs.prd_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile PRD validator
+        run: python -m py_compile skills/afk-ai-prd/scripts/validate_prd.py
+      - name: Run PRD validator tests
+        run: python -B -m unittest discover -s skills/afk-ai-prd/tests -p 'test_*.py' -v
+
   cli:
     name: Shared Packages And CLI
     needs: changes
@@ -288,6 +314,45 @@ jobs:
       - name: Test
         run: pnpm test
 
+
+  cli-pty-e2e:
+    name: CLI PTY E2E (advisory)
+    needs: changes
+    # Keep the long, advisory PTY setup out of pull-request critical-path CI.
+    # It still runs after changes land on main, alongside the required checks.
+    if: needs.changes.outputs.shared == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Cache node-gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/node-gyp
+          key: node-gyp-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            node-gyp-${{ runner.os }}-node22-
+
       - name: Build PTY E2E native dependencies
         run: pnpm rebuild node-pty puppeteer --pending --reporter=append-only
 
@@ -296,17 +361,24 @@ jobs:
         run: pnpm test:e2e:pty
 
   verify:
-    name: Verify
+    name: Verify + Desktop E2E
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Install Xvfb and Electron Linux deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -351,46 +423,7 @@ jobs:
         working-directory: apps/desktop
         run: pnpm test
 
-  desktop-e2e:
-    name: Desktop E2E (Electron + Playwright)
-    needs: [changes, verify]
-    if: needs.changes.outputs.desktop_e2e == 'true' && needs.verify.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install Xvfb and Electron Linux deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
-            libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
-
-      - name: Install apps/desktop dependencies
-        working-directory: apps/desktop
-        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
-
-      - name: Build native dependencies
-        run: |
-          pnpm --dir apps/desktop rebuild electron node-pty esbuild --pending --reporter=append-only
-
-      - name: Typecheck + build main
+      - name: Typecheck + build main for E2E
         working-directory: apps/desktop
         run: |
           pnpm typecheck

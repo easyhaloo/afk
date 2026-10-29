@@ -1,151 +1,124 @@
-# Backlog Manifest Item Template
+# Backlog Issue Body Template
 
-> The authoritative structure for provider-neutral AFK backlog items.
-> Audience: LLM agents writing issues, NOT human readers.
-> Optimize for: stable token structure, parseable fields, machine-checkable AC.
-
-## When to Use
-
-When emitting a backlog item that the autonomous workflow will process.
+> The body describes the work. Repository association comes from the Issue's
+> containing repository and is carried as `project` metadata in the
+> provider-neutral manifest; do not repeat it in this body.
+> Audience: coding agents and reviewers.
 
 ## Structure
 
 ```markdown
-# <Title>
+# <Outcome-oriented title>
 
 ## Context
 
-<one paragraph: what problem, why now>
+<problem, why it matters, and intended outcome>
+
+## Base Version
+
+- Base Ref: <explicit ref or inherit repository default when appropriate>
+- Base SHA: <resolved at execution start; omit while planning>
+
+## Change Scope
+
+### In Scope
+- <grounded modules, behaviors, and relevant tests>
+
+### Out of Scope
+- <explicit non-goals and changes requiring separate approval>
 
 ## Acceptance Criteria
 
-- [ ] <ac_text> -- <evidence_type> -- <check_command>
-- [ ] <ac_text> -- <evidence_type> -- <check_command>
+- [ ] <observable condition> -- <evidence_type> -- <check_command>
 
-## Out of Scope
+## Verification
 
-<bulleted list of explicit non-goals>
+- <relevant unit / integration / E2E checks and product-behavior checks>
 
 ## Dependencies
 
-<bulleted list of backlog IDs in `dependsOn`, or "none">
+- <canonical issue IDs after creation, or "none">
+
+## Traceability
+
+- Requirements: <PRD requirement IDs>
+- Acceptance Criteria: <PRD AC IDs>
+- Business Rules: <PRD BR IDs, when present>
 ```
 
 ## Field Reference
 
-| Field | Required | Format | Purpose |
-|-------|----------|--------|---------|
-| `# <Title>` | yes | one line | Issue name |
-| `## PRD` | yes (PRD Mode) | PRD artifact path or `none` | Link to source PRD artifact |
-| `## Context` | yes | one paragraph | Why this work |
-| `## Acceptance Criteria` | yes | list (≥1 item) | Machine-verifiable success |
-| `## Out of Scope` | no | list | Prevent scope creep |
-| `## Dependencies` | no | list or `none` | Execution ordering |
+| Field | Required | Purpose |
+|---|---|---|
+| Title | yes | States the intended outcome, not a commit message |
+| Context | yes | Explains the problem and intended result |
+| Base Version | when constrained | Records special branch/release constraints; otherwise inherit configured default |
+| Change Scope / In Scope | yes | Defines the expected change boundary, grounded in repository analysis |
+| Change Scope / Out of Scope | yes | Prevents unrelated changes and scope creep |
+| Acceptance Criteria | yes | Observable, bounded, falsifiable success conditions |
+| Verification | yes | Explains repository-local and cross-repository validation |
+| Dependencies | when applicable | Lists actual execution prerequisites |
+| Traceability | yes in PRD Mode | Connects work to approved requirements |
+
+Do not include a Repository field in the body. The Issue is already attached to a
+repository. The manifest/provider metadata must identify the target repository
+so the Issue is created in the correct place.
+
+## Base Version Rules
+
+- Use the repository's configured default branch when no special version
+  constraint is required; do not duplicate that default unnecessarily in the
+  body.
+- Explicitly state a branch/tag when the task targets a release line, old
+  maintenance branch, migration window, or compatibility baseline.
+- Resolve and record the actual base commit SHA at execution start. Do not
+  guess or freeze a potentially stale SHA during decomposition.
+- Branch naming and branch creation are execution workflow concerns unless a
+  team policy requires a specific branch pattern.
 
 ## Acceptance Criteria Item Format
 
-Each AC item is a single line with three `--`-separated fields:
+Each AC item uses three `--`-separated fields:
 
-```
+```markdown
 - [ ] <ac_text> -- <evidence_type> -- <check_command>
 ```
 
-### Field 1: `ac_text`
+Allowed evidence types: `test`, `curl`, `log`, `manual`, `none`.
 
-The condition being verified. Must be:
-- **Verifiable** (someone can point at shipped behavior and say "yes/no")
-- **Atomic** (one observable fact, not "and also...")
-- **Bounded** (no time/person pronouns like "developer feels")
-
-**Bad:** "code looks clean", "works correctly", "user is happy"
-**Good:** "API returns 200 for GET /health", "Login form rejects empty email"
-
-### Field 2: `evidence_type` (controlled vocabulary)
-
-Exactly one of:
-
-| Value | Meaning | Use when |
-|-------|---------|----------|
-| `test` | Automated unit/integration test | Code behavior |
-| `curl` | HTTP request assertion | API endpoints |
-| `log` | Process log line check | Background workers |
-| `manual` | Human inspection required | UI / copy / a11y |
-| `none` | Declarative; no runtime check | Removal / refactor |
-
-### Field 3: `check_command`
-
-Shell command that **exits 0 on PASS, non-zero on FAIL**.
-
-Examples:
-- `npm test -- --testPathPattern=auth/login` (test)
-- `curl -fsS http://localhost:3000/health` (curl)
-- `grep -q "ERROR" /var/log/worker.log` (log)
-- `echo "manual review needed"` (manual — always exits 0; gate is human signoff)
-- `! grep -rn "TODO" src/` (none — declarative; command verifies a property)
-
-## Examples
-
-### Complete backlog item
-
-```markdown
-# Add user login endpoint
-
-## Context
-
-Users currently have no way to authenticate. Need a POST /api/login
-endpoint that accepts email + password and returns a JWT.
-
-## Acceptance Criteria
-
-- [ ] POST /api/login with valid creds returns 200 + JWT -- curl -- curl -fsS -X POST -H "Content-Type: application/json" -d '{"email":"a@b.c","password":"x"}' http://localhost:3000/api/login | jq -e .token
-- [ ] POST /api/login with bad password returns 401 -- curl -- curl -fsS -o /dev/null -w "%{http_code}" -X POST ... | grep -q 401
-- [ ] AuthService.validatePassword unit tests pass -- test -- npm test -- --testPathPattern=auth
-- [ ] Rate-limit: 6th request in 1min returns 429 -- curl -- for i in {1..6}; do curl ...; done | tail -1 | grep -q 429
-
-## Out of Scope
-
-- Refresh token rotation
-- OAuth providers
-- Password reset flow
-
-## Dependencies
-
-none
-```
-
-### Minimal backlog item (no optional fields)
-
-```markdown
-# Remove deprecated /v1/users endpoint
-
-## Context
-
-/v1/users is unused; cleaning up before v2 release.
-
-## Acceptance Criteria
-
-- [ ] No source file imports from v1/users -- none -- ! grep -rn "v1/users" src/
-
-## Out of Scope
-
-- Migrating any v1 data
-```
+The check must be grounded in the actual repository. It must not mutate state,
+and must not use an always-success placeholder to pretend that behavior passed.
+For `manual`, describe the human check and keep it pending until sign-off.
+A passing command alone does not prove product acceptance; the observed
+behavior must match the criterion.
 
 ## Anti-Patterns
 
-- MUST NOT include `- [x]` items (everything starts unchecked)
-- MUST NOT put `--` inside `ac_text` (breaks 3-field parse)
-- MUST NOT use evidence types outside the controlled vocabulary
-- MUST NOT write `check_command` that mutates state without `--dry-run`
-- MUST NOT add AC items that have no observable check
+- Repeating repository identity in the Issue body.
+- Inventing file paths, commands, APIs, or modules before repository analysis.
+- Treating every directory/module as a separate task.
+- Omitting explicit non-goals.
+- Using an unpinned or wrong release branch when compatibility constraints exist.
+- Claiming a Base SHA is known before execution resolves it.
+- Using `echo "pass"` or similar commands as acceptance evidence.
+- Treating successful unit tests in each repository as proof of an integrated
+  cross-repository workflow.
+- Using provider IDs in the draft before the provider has created the records.
+- MUST NOT include `- [x]` items (everything starts unchecked).
+- MUST NOT put `--` inside the acceptance criterion text (breaks the
+  three-field parse).
+- MUST NOT use evidence types outside the controlled vocabulary.
+- MUST NOT write a `check_command` that mutates state without `--dry-run`.
+- MUST NOT add acceptance criteria that have no observable check.
 
 ## Handoff
 
-The backlog provider owns parsing and publication of this manifest.
-AFK applies the resulting provider-neutral fields (`project`, `ref`,
-`parentId`, `dependsOn`, `executionMode`, and business `tags`) with
-`afk backlog apply-manifest <file>`, and this skill does not create records
-itself. The `project` and `ref` fields are part of the manifest contract in
-`SKILL.md`: a record has to land in one repository, and a reference has to
-say whether it names an existing record or another item of the same
-manifest.
+After approval, the skill applies this manifest with the AFK CLI: run
+`afk backlog apply-manifest <file> --dry-run` first, read the plan it
+prints, then run the same command without `--dry-run`. The provider applies
+the provider-neutral fields (`project`, `ref`, `parentId`, `dependsOn`,
+`executionMode`, and business `tags`) and writes the relationships between
+the records. The `project` and `ref` fields are part of the manifest
+contract in `SKILL.md`: a record has to land in one repository, and a
+reference has to say whether it names an existing record or another item of
+the same manifest.

@@ -279,8 +279,14 @@ global inventory and the cross-project graph all use it, so a `parent::` edge
 means the same thing everywhere.
 
 Relationships have separate meanings: `parentId` is organizational grouping,
-`dependsOn` controls scheduling, and `baseBacklogId` selects an explicit Git
-execution base. Neither parent nor dependency edges implicitly select a branch.
+`dependsOn` controls scheduling, and `baseBacklogId` explicitly references an
+execution-base backlog. All three relationships accept canonical cross-project
+identities. When the base backlog is in the same repository, an unfinished
+base selects its branch; when it belongs to another repository, the reference
+is retained for traceability but execution uses the target repository's
+configured base branch because a Git branch in one repository is not a Git
+baseline in another. Neither parent nor dependency edges implicitly select a
+branch.
 
 The backlog graph spans projects. A PRD anchor may live in the requirements
 repository while its implementation children live in the service repository, so

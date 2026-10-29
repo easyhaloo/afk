@@ -116,7 +116,7 @@ graph TD
 
 ### Dependency Resolution
 
-Backlog items declare dependencies through provider-neutral fields:
+Backlog items declare relationships through provider-neutral fields. `baseBacklogId` accepts a canonical cross-project identity. A base in the same repository may select its unfinished branch; a base in another repository remains traceable but execution uses the target repository's configured base branch, since Git branches are repository-scoped:
 
 ```
 Backlog #10: dependsOn: [], baseBacklogId: null

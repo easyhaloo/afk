@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -313,6 +314,45 @@ jobs:
       - name: Test
         run: pnpm test
 
+
+  cli-pty-e2e:
+    name: CLI PTY E2E (advisory)
+    needs: changes
+    # Keep the long, advisory PTY setup out of pull-request critical-path CI.
+    # It still runs after changes land on main, alongside the required checks.
+    if: needs.changes.outputs.shared == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Cache node-gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/node-gyp
+          key: node-gyp-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            node-gyp-${{ runner.os }}-node22-
+
       - name: Build PTY E2E native dependencies
         run: pnpm rebuild node-pty puppeteer --pending --reporter=append-only
 
@@ -321,17 +361,24 @@ jobs:
         run: pnpm test:e2e:pty
 
   verify:
-    name: Verify
+    name: Verify + Desktop E2E
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Install Xvfb and Electron Linux deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -376,46 +423,7 @@ jobs:
         working-directory: apps/desktop
         run: pnpm test
 
-  desktop-e2e:
-    name: Desktop E2E (Electron + Playwright)
-    needs: [changes, verify]
-    if: needs.changes.outputs.desktop_e2e == 'true' && needs.verify.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install Xvfb and Electron Linux deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
-            libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
-
-      - name: Install apps/desktop dependencies
-        working-directory: apps/desktop
-        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
-
-      - name: Build native dependencies
-        run: |
-          pnpm --dir apps/desktop rebuild electron node-pty esbuild --pending --reporter=append-only
-
-      - name: Typecheck + build main
+      - name: Typecheck + build main for E2E
         working-directory: apps/desktop
         run: |
           pnpm typecheck

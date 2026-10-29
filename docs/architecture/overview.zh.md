@@ -67,6 +67,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
+| `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | 修改已存在 backlog 工作项的关系边 |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
@@ -266,6 +267,21 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 
 `afk backlog list` 与 `afk backlog inventory` 按状态和按角色分别过滤：锚点没有状态，
 所以 `--state ready` 永远不会返回锚点，选出锚点要用 `--kind prd`。
+
+### Backlog 关系边
+
+关系边在工作项创建时写入，但 backlog 会继续演进：依赖在被识别出来时才出现，
+当基线边指向的分支并不存在时必须被撤回。`afk backlog relation add` 与
+`afk backlog relation remove` 就是用来修改已存在工作项的关系边。
+
+编辑只声明它要动的那条边——`--parent`、`--base` 或 `--depends-on`——工作项的
+其余关系边原样保留。provider 把编辑转成承载它的最小标签增量，因此关系标签
+不会被整体重写；编辑没有提到的标签即使本 codec 解析不了也保持不动。引用可以是
+所属项目里的裸 issue 号，也可以是规范全局工作项身份，指向自身的引用会被拒绝。
+若某个依赖已经能到达本工作项，加这条边会成环，因此同样被拒绝。
+
+`afk backlog tag add` 与 `afk backlog tag remove` 刻意拒绝保留元数据前缀，
+关系前缀也在其中：业务标签和关系边是两件事，走不同的命令编辑。
 
 ### Backlog manifest
 

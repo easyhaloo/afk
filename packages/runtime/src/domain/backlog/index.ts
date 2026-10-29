@@ -17,6 +17,8 @@ export type BacklogChangeRequest = {
   url?: string;
 };
 import { randomUUID } from 'node:crypto';
+import type { BacklogRelationUpdate } from './metadata-codec.js';
+import { formatWorkItemId } from '../work-item/identity.js';
 export type { BacklogClaim, ClaimLease } from './claim.js';
 export { FilesystemClaimLock } from './claim.js';
 export type { BacklogProviderCapabilities } from './initialization.js';
@@ -33,12 +35,20 @@ export {
   decodeBacklogRelations,
   encodeBacklogRelations,
   isBacklogRelationLabel,
+  planRelationLabelDelta,
 } from './metadata-codec.js';
-export type { BacklogMetadata, BacklogMetadataOptions, BacklogMetadataScope, BacklogRelations } from './metadata-codec.js';
+export type {
+  BacklogLabelDelta,
+  BacklogMetadata,
+  BacklogMetadataOptions,
+  BacklogMetadataScope,
+  BacklogRelationUpdate,
+  BacklogRelations,
+} from './metadata-codec.js';
 export { BACKLOG_KIND_LABELS } from './initialization.js';
 export type { BacklogCreatePlan } from './creation.js';
 import type { BacklogCreatePlan } from './creation.js';
-export { buildBacklogGraph } from './graph.js';
+export { buildBacklogGraph, findDependencyCycle } from './graph.js';
 export type { BacklogGraph, BacklogGraphSource } from './graph.js';
 export { projectBacklogItem } from './projection.js';
 export type { BacklogIssueView } from './projection.js';
@@ -50,6 +60,11 @@ import { parseWorkItemId } from '../work-item/identity.js';
 import { validateBusinessTag } from './tags.js';
 import { planBacklogCreate } from './creation.js';
 import { deriveBacklogBranchName } from './branch-name.js';
+import {
+  decodeBacklogRelations,
+  encodeBacklogRelations,
+  planRelationLabelDelta,
+} from './metadata-codec.js';
 
 export interface BacklogItem {
   /**
@@ -141,6 +156,13 @@ export interface BacklogManagementProvider {
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
+  /**
+   * Edit the relationship edges of an item that already exists.
+   *
+   * It is optional because a provider that only reads — a credential-scoped
+   * inventory, for one — has nowhere to write an edge to.
+   */
+  applyRelationUpdate?(id: string, update: BacklogRelationUpdate): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -169,6 +191,8 @@ export interface BacklogProvider {
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
+  /** Edit the relationship edges of an item that already exists. */
+  applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
 }
@@ -321,6 +345,37 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   async removeTag(id: string, tag: string): Promise<void> {
     const item = await this.get(id);
     item.tags = item.tags.filter(existing => existing !== tag);
+    this.items.set(id, item);
+  }
+
+  /**
+   * Edit the relationship edges of an item.
+   *
+   * The in-memory backlog keeps structured relations rather than labels, so
+   * the edit travels through the same label planner the tracker-backed
+   * provider uses. One planner means the two providers cannot drift apart on
+   * what an edit means.
+   */
+  async applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    const item = await this.get(id);
+    const labels = encodeBacklogRelations({
+      ...(item.parentId ? { parentId: item.parentId as WorkItemId } : {}),
+      ...(item.baseBacklogId ? { baseBacklogId: item.baseBacklogId as WorkItemId } : {}),
+      dependsOn: item.dependsOn as WorkItemId[],
+    });
+    const selfId = formatWorkItemId({
+      platform: this.project.platform,
+      projectKey: this.project.projectKey,
+      issueNumber: Number(item.id),
+    });
+    const delta = planRelationLabelDelta(labels, update, this.project, { selfId });
+    const resulting = [...labels.filter(label => !delta.remove.includes(label)), ...delta.add];
+    const relations = decodeBacklogRelations(resulting, this.project, { strict: false });
+    if (relations.parentId) item.parentId = relations.parentId;
+    else delete item.parentId;
+    if (relations.baseBacklogId) item.baseBacklogId = relations.baseBacklogId;
+    else delete item.baseBacklogId;
+    item.dependsOn = [...relations.dependsOn];
     this.items.set(id, item);
   }
 

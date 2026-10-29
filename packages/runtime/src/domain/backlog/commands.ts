@@ -5,6 +5,7 @@ import type {
   BacklogItem,
   QABacklogProvider,
 } from './index.js';
+import type { BacklogRelationUpdate } from './metadata-codec.js';
 
 export { planBacklogCreate, resolveBacklogExecutionBase } from './creation.js';
 
@@ -37,6 +38,23 @@ export async function addBacklogTag(provider: BacklogManagementProvider, id: str
 
 export async function removeBacklogTag(provider: BacklogManagementProvider, id: string, tag: string): Promise<void> {
   await provider.removeTag(id, tag);
+}
+
+/**
+ * Edit the relationship edges of a backlog item.
+ *
+ * A relationship is written when an item is created; this is how an edge that
+ * was written earlier is changed or withdrawn. The provider owns the label
+ * spelling, so the edit travels as references and the provider turns them
+ * into the smallest label delta that carries them.
+ */
+export async function applyBacklogRelationUpdate(
+  provider: BacklogManagementProvider,
+  id: string,
+  update: BacklogRelationUpdate,
+): Promise<void> {
+  if (!provider.applyRelationUpdate) throw new Error('backlog provider does not support relationship edits');
+  await provider.applyRelationUpdate(id, update);
 }
 
 export interface BacklogChangeProvider {

@@ -12,6 +12,7 @@ import type {
   ReworkRecord,
   ReworkResolution,
 } from '../../domain/backlog/index.js';
+import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
 import { recordTrackerActivity, type TrackerPlatform } from './store.js';
 
 /** The provider project a recording provider belongs to. */
@@ -104,6 +105,10 @@ export class RecordingBacklogProvider implements BacklogProvider {
 
   removeTag(id: string, tag: string): Promise<void> {
     return this.provider.removeTag(id, tag);
+  }
+
+  applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    return this.provider.applyRelationUpdate(id, update);
   }
 
   initialize(): Promise<void> {

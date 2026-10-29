@@ -13,6 +13,8 @@ import {
   runBacklogInterrupt,
   runBacklogInventory,
   runBacklogList,
+  runBacklogRelationAdd,
+  runBacklogRelationRemove,
   runBacklogRetry,
   runBacklogShow,
   runBacklogTagAdd,
@@ -21,7 +23,7 @@ import {
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
-import type { BacklogCreateInput, BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
 import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
@@ -475,6 +477,20 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       if (!item) throw new Error(`backlog ${id} not found`);
       item.tags = item.tags.filter(existing => existing !== tag);
     },
+    async applyRelationUpdate(id: string, update: BacklogRelationUpdate) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      if (update.parent !== undefined) item.parentId = update.parent;
+      if (update.clearParent) item.parentId = undefined;
+      if (update.base !== undefined) item.baseBacklogId = update.base;
+      if (update.clearBase) item.baseBacklogId = undefined;
+      for (const dependency of update.addDependsOn ?? []) {
+        if (!item.dependsOn.includes(dependency)) item.dependsOn.push(dependency);
+      }
+      for (const dependency of update.removeDependsOn ?? []) {
+        item.dependsOn = item.dependsOn.filter(existing => existing !== dependency);
+      }
+    },
     async initialize() { /* noop */ },
     async transition(id, state) {
       const item = items.find(candidate => candidate.id === id);
@@ -725,8 +741,66 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.data.tags).not.toContain('urgent');
   });
 
-  it('runBacklogInterrupt emits the blocked hitl backlog', async () => {
+  it('runBacklogRelationAdd emits the success envelope with the updated item', async () => {
     const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRelationAdd(stubProvider([{ ...stubItem }]), '42', { parent: 'github:org/repo#7', json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.relation.add');
+    expect(envelope.data.parentId).toBe('github:org/repo#7');
+  });
+
+  it('runBacklogRelationRemove drops the edge it was asked to drop', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRelationRemove(
+        stubProvider([{ ...stubItem, parentId: 'github:org/repo#7', dependsOn: ['github:org/repo#9'] }]),
+        '42',
+        { parent: true, json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.relation.remove');
+    expect(envelope.data.parentId).toBeUndefined();
+    expect(envelope.data.dependsOn).toEqual(['github:org/repo#9']);
+  });
+
+  it('runBacklogRelationAdd refuses an edit that names no edge', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRelationAdd(stubProvider([{ ...stubItem }]), '42', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.relation.add');
+    expect(envelope.error.message).toMatch(/nothing to add/);
+  });
+
+  it('runBacklogInterrupt emits the blocked hitl backlog', async () => {    const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);
     process.stdout.write = (chunk: string | Uint8Array): boolean => {
       captured.push(typeof chunk === 'string' ? chunk : chunk.toString());

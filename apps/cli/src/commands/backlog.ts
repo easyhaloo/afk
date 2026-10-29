@@ -39,6 +39,7 @@ import type { InventoryItem, InventoryProject, InventorySnapshot } from '@afk/ap
 import {
   addBacklogTag,
   adoptBacklog,
+  applyBacklogRelationUpdate,
   confirmBacklogMerge,
   createBacklog,
   initializeBacklog,
@@ -52,7 +53,7 @@ import {
   type BacklogManagementProvider,
   type BacklogMergeReconciliation,
 } from '@afk/runtime/domain/backlog/commands';
-import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../output.js';
@@ -798,6 +799,91 @@ export async function runBacklogTagRemove(
   }
 }
 
+/** The relationship edges an add asks for. */
+export interface BacklogRelationAddOptions extends JsonMode {
+  parent?: string;
+  base?: string;
+  dependsOn?: string[];
+}
+
+/** The relationship edges a remove asks for. */
+export interface BacklogRelationRemoveOptions extends JsonMode {
+  parent?: boolean;
+  base?: boolean;
+  dependsOn?: string[];
+}
+
+export async function runBacklogRelationAdd(
+  provider: BacklogManagementProvider,
+  id: string,
+  options: BacklogRelationAddOptions,
+): Promise<void> {
+  const kind = 'backlog.relation.add';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    const update: BacklogRelationUpdate = {};
+    if (options.parent !== undefined) update.parent = options.parent;
+    if (options.base !== undefined) update.base = options.base;
+    if (options.dependsOn?.length) update.addDependsOn = options.dependsOn;
+    if (Object.keys(update).length === 0) {
+      throw new Error('nothing to add: pass --parent, --base or --depends-on');
+    }
+    await applyBacklogRelationUpdate(provider, id, update);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(kind, item);
+      return;
+    }
+    success(`Relationship added to backlog ${id}`);
+    detailRelations(item);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function runBacklogRelationRemove(
+  provider: BacklogManagementProvider,
+  id: string,
+  options: BacklogRelationRemoveOptions,
+): Promise<void> {
+  const kind = 'backlog.relation.remove';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    const update: BacklogRelationUpdate = {};
+    if (options.parent) update.clearParent = true;
+    if (options.base) update.clearBase = true;
+    if (options.dependsOn?.length) update.removeDependsOn = options.dependsOn;
+    if (Object.keys(update).length === 0) {
+      throw new Error('nothing to remove: pass --parent, --base or --depends-on');
+    }
+    await applyBacklogRelationUpdate(provider, id, update);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(kind, item);
+      return;
+    }
+    success(`Relationship removed from backlog ${id}`);
+    detailRelations(item);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+/** Report the relationship edges the item carries now. */
+function detailRelations(item: BacklogItem): void {
+  if (item.parentId) detail(`parent: ${item.parentId}`);
+  if (item.baseBacklogId) detail(`execution-base: ${item.baseBacklogId}`);
+  if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
+}
+
 export async function runBacklogInterrupt(
   provider: QABacklogProvider,
   id: string,
@@ -1191,6 +1277,49 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       }
     });
 
+  const relation = backlog.command('relation').description('Manage relationship edges on a backlog item');
+  relation.command('add')
+    .description('Add or replace a relationship edge on a backlog item')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .option('--parent <id>', 'Organizational parent backlog ID or platform:project#id')
+    .option('--base <id>', 'Execution base backlog ID or platform:project#id')
+    .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogRelationAdd(await backlogProviderFor(options.project, options.platform, options.id), options.id, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.relation.add', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  relation.command('remove')
+    .description('Remove a relationship edge from a backlog item')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .option('--parent', 'Drop the organizational parent edge')
+    .option('--base', 'Drop the execution base edge')
+    .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id to stop waiting for', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogRelationRemove(await backlogProviderFor(options.project, options.platform, options.id), options.id, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.relation.remove', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'init')!, 'backlog.init', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'adopt')!, 'backlog.adopt', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'inventory')!, 'backlog.inventory', argv);
@@ -1202,6 +1331,8 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'confirm-merge')!, 'backlog.confirm-merge', argv);
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'add')!, 'backlog.tag.add', argv);
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'remove')!, 'backlog.tag.remove', argv);
+  configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'add')!, 'backlog.relation.add', argv);
+  configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'remove')!, 'backlog.relation.remove', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

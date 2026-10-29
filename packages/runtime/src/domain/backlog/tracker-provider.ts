@@ -14,11 +14,15 @@ import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
 import {
+  BACKLOG_RELATION_PREFIX,
+  canonicalizeBacklogReference,
   decodeBacklogRelations,
+  planRelationLabelDelta,
   type BacklogMetadataScope,
+  type BacklogRelationUpdate,
 } from './metadata-codec.js';
 import { projectBacklogItem } from './projection.js';
-import type { BacklogGraphSource } from './graph.js';
+import { findDependencyCycle, type BacklogGraphSource } from './graph.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
 const MODE_LABELS: Record<BacklogExecutionMode, string> = BACKLOG_METADATA.executionModeLabels;
@@ -324,6 +328,47 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const issue = await target.tracker.getIssue(target.issueId);
     if (!issue.labels.includes(normalized)) return;
     await target.tracker.updateLabels(target.issueId, { add: [], remove: [normalized] });
+  }
+
+  /**
+   * Edit the relationship edges of an item that already exists.
+   *
+   * A relationship is written when an item is created, but a backlog is alive:
+   * a dependency appears when the dependency is discovered, and a baseline
+   * edge has to be withdrawn when it turns out to name a branch that does not
+   * exist. The codec decides which labels the edit touches, so the write is
+   * the smallest delta that carries it — the edge that was replaced is
+   * removed, the edge that was asked for is added, and every other label of
+   * the issue stays where it is.
+   */
+  async applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const scope = this.scopeOf(target.tracker);
+    const selfId = this.canonicalId(target.tracker, target.issueId);
+    const delta = planRelationLabelDelta(issue.labels, update, scope, { selfId });
+    const current = decodeBacklogRelations(issue.labels, scope, { strict: false, selfId, allowLegacyBase: true });
+    const additions = (update.addDependsOn ?? [])
+      .map(reference => canonicalizeBacklogReference(reference, scope))
+      .filter(reference => !current.dependsOn.includes(reference));
+    const cycle = await findDependencyCycle(selfId, additions, async dependency => {
+      const dependencyItem = await this.get(dependency).catch(() => undefined);
+      return (dependencyItem?.dependsOn ?? []) as WorkItemId[];
+    });
+    if (cycle) {
+      throw new Error(`invalid backlog relationship: dependency cycle, ${selfId} would wait for ${cycle}`);
+    }
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
+    // A platform only attaches a label that already exists, so a new edge
+    // needs its label definition before the edge can be written.
+    if (delta.add.length && target.tracker.ensureBacklogMetadata) {
+      await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
+        name,
+        color: 'C5DEF5',
+        description: 'AFK backlog metadata',
+      })));
+    }
+    await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
   }
 
   async initialize(): Promise<void> {

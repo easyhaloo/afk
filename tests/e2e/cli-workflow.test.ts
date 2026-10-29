@@ -150,6 +150,29 @@ describe('built CLI workflows', () => {
     expect((await backlog(['list', '--state', 'done'])).data).toHaveLength(1);
   });
 
+  it('edits a relationship edge of an existing backlog item through the built CLI', async () => {
+    const { root, backlog, issues } = await fixture();
+    const description = join(root, 'description.md');
+    await writeFile(description, 'Implement login\n\n- [ ] Login test passes\n');
+    const first = await backlog(['create', 'First', '--description-file', description]);
+    const second = await backlog(['create', 'Second', '--description-file', description]);
+    const firstId = String(first.data.id);
+    const secondId = String(second.data.id);
+
+    const added = await backlog(['relation', 'add', '--id', secondId, '--depends-on', firstId]);
+    expect(added.data.dependsOn).toEqual([firstId]);
+    expect(issues[1].labels).toContain(`depends-on::${firstId}`);
+
+    const withdrawn = await backlog(['relation', 'remove', '--id', secondId, '--depends-on', firstId]);
+    expect(withdrawn.data.dependsOn).toEqual([]);
+    expect(issues[1].labels).not.toContain(`depends-on::${firstId}`);
+
+    // An edge that points at the item itself is refused, and nothing is written.
+    const refused = await backlog(['relation', 'add', '--id', secondId, '--depends-on', secondId], 1);
+    expect(refused.error.message).toContain('itself');
+    expect(issues[1].labels).not.toContain(`depends-on::${secondId}`);
+  });
+
   it('adopts an unmanaged issue and preserves machine-readable validation and provider errors', async () => {
     const { backlog, issues } = await fixture();
     issues.push({ iid: 1, title: 'Manual task', description: 'Acceptance criteria', labels: ['billing'], state: 'opened', web_url: 'https://gitlab.example/acme/api/-/issues/1', project_id: 7 });

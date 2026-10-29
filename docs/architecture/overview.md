@@ -88,6 +88,7 @@ single source of truth for the supported surface:
 | `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
+| `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
 | `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
@@ -344,6 +345,28 @@ validation.
 `afk backlog list` and `afk backlog inventory` filter by state and by role
 separately: `--state ready` never returns an anchor, because an anchor has no
 state, and `--kind prd` is what selects them.
+
+### Backlog relationships
+
+A relationship is written when an item is created, but a backlog keeps moving:
+a dependency appears when the dependency is discovered, and a baseline edge has
+to be withdrawn when it turns out to name a branch that does not exist.
+`afk backlog relation add` and `afk backlog relation remove` are how an edge of
+an item that already exists is changed.
+
+The edit names the edge it touches — `--parent`, `--base` or `--depends-on` —
+and every other edge of the item stays where it is. The provider turns the edit
+into the smallest label delta that carries it, so a relationship label is never
+rewritten wholesale, and a label the edit does not mention is left alone even
+when this codec cannot parse it. A reference is either a plain issue number in
+the owning project or a canonical global work item identity, and a reference to
+the item itself is refused. A dependency that already reaches the item would
+close a cycle, so it is refused too.
+
+`afk backlog tag add` and `afk backlog tag remove` deliberately refuse the
+reserved metadata prefixes, including the relationship prefixes: a business
+tag and a relationship edge are different things and are edited through
+different commands.
 
 ### Backlog manifest
 

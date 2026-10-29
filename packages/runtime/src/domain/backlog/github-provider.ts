@@ -1,4 +1,5 @@
 import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
+import type { BacklogRelationUpdate } from './metadata-codec.js';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
 
@@ -26,6 +27,7 @@ export class GitHubBacklogProvider implements BacklogProvider {
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> { return this.implementation.resolveRework(id, reworkId, resolution); }
   addTag(id: string, tag: string): Promise<void> { return this.implementation.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.implementation.removeTag(id, tag); }
+  applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.implementation.applyRelationUpdate(id, update); }
   initialize(): Promise<void> { return this.implementation.initialize(); }
   isRunnable(item: BacklogItem): Promise<boolean> { return this.implementation.isRunnable(item); }
 }

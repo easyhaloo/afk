@@ -237,3 +237,133 @@ export function encodeBacklogRelations(relations: BacklogRelations): string[] {
     ...relations.dependsOn.map(id => `${BACKLOG_RELATION_PREFIX.dependsOn}${id}`),
   ];
 }
+
+/** The label changes one relationship edit asks for. */
+export interface BacklogLabelDelta {
+  add: string[];
+  remove: string[];
+}
+
+/**
+ * One edit to the relationship edges of a backlog item.
+ *
+ * The edit names the edges it touches; every other edge of the item stays as
+ * it is. A reference is either a plain issue number in the owning project or
+ * a canonical global work item identity.
+ */
+export interface BacklogRelationUpdate {
+  /** Point the item at a parent, replacing the parent edge it had. */
+  parent?: string;
+  /** Drop the parent edge. */
+  clearParent?: boolean;
+  /** Point the item at an execution baseline, replacing the edge it had. */
+  base?: string;
+  /** Drop the execution baseline edge. */
+  clearBase?: boolean;
+  /** Dependencies to add. */
+  addDependsOn?: string[];
+  /** Dependencies to drop. */
+  removeDependsOn?: string[];
+}
+
+/**
+ * Plan the label changes that apply a relationship edit.
+ *
+ * The edit is expressed in references, not in labels: a bare issue number is
+ * resolved against the scope of the project that owns the issue, and the
+ * canonical form is what gets written. An edge the edit does not mention is
+ * left alone — including an edge this codec cannot parse, because an
+ * operator who wants that edge gone asks for it by name.
+ *
+ * The result is a delta, not a label set: the provider adds and removes the
+ * minimum needed to carry the edit, and no other label of the issue moves.
+ */
+export function planRelationLabelDelta(
+  labels: readonly string[],
+  update: BacklogRelationUpdate,
+  scope: BacklogMetadataScope,
+  options: { selfId?: WorkItemId } = {},
+): BacklogLabelDelta {
+  if (update.parent !== undefined && update.clearParent) {
+    throw new Error('a backlog relation update cannot set and clear the parent edge at once');
+  }
+  if (update.base !== undefined && update.clearBase) {
+    throw new Error('a backlog relation update cannot set and clear the execution base edge at once');
+  }
+  const add = new Set<string>();
+  const remove = new Set<string>();
+  const relationLabels = labels.filter(isBacklogRelationLabel);
+
+  const parentLabels = relationLabels.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.parent));
+  if (update.parent !== undefined) {
+    const desired = `${BACKLOG_RELATION_PREFIX.parent}${relationReference(update.parent, scope, options.selfId, 'parent')}`;
+    add.add(desired);
+    for (const label of parentLabels) if (label !== desired) remove.add(label);
+  } else if (update.clearParent) {
+    for (const label of parentLabels) remove.add(label);
+  } else {
+    for (const label of parentLabels) add.add(label);
+  }
+
+  const baseLabels = relationLabels.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.base));
+  if (update.base !== undefined) {
+    const desired = `${BACKLOG_RELATION_PREFIX.base}${relationReference(update.base, scope, options.selfId, 'base')}`;
+    add.add(desired);
+    for (const label of baseLabels) if (label !== desired) remove.add(label);
+  } else if (update.clearBase) {
+    for (const label of baseLabels) remove.add(label);
+  } else {
+    for (const label of baseLabels) add.add(label);
+  }
+
+  const dependencyLabels = relationLabels.filter(label =>
+    label.startsWith(BACKLOG_RELATION_PREFIX.dependsOn) || label.startsWith(LEGACY_DEPENDS_ON_PREFIX));
+  const dropped = new Set<string>();
+  for (const reference of update.removeDependsOn ?? []) {
+    dropped.add(relationReference(reference, scope, options.selfId, 'dependency'));
+  }
+  for (const label of dependencyLabels) {
+    const canonical = normalizeRelationLabel(label);
+    const reference = canonical.slice(BACKLOG_RELATION_PREFIX.dependsOn.length);
+    if (dropped.has(reference)) {
+      remove.add(label);
+      continue;
+    }
+    // The legacy spelling is rewritten in the canonical form.
+    if (canonical !== label) {
+      remove.add(label);
+      add.add(canonical);
+      continue;
+    }
+    add.add(label);
+  }
+  for (const reference of update.addDependsOn ?? []) {
+    const canonical = relationReference(reference, scope, options.selfId, 'dependency');
+    if (dropped.has(canonical)) continue;
+    add.add(`${BACKLOG_RELATION_PREFIX.dependsOn}${canonical}`);
+  }
+
+  return {
+    add: [...add].filter(label => !labels.includes(label)),
+    remove: [...remove].filter(label => labels.includes(label)),
+  };
+}
+
+/**
+ * Canonicalize one reference of a relationship edit.
+ *
+ * A reference to the item itself is rejected: an item cannot be its own
+ * parent, its own execution baseline or its own dependency.
+ */
+function relationReference(
+  value: string,
+  scope: BacklogMetadataScope,
+  selfId: WorkItemId | undefined,
+  kind: 'parent' | 'base' | 'dependency',
+): WorkItemId {
+  const reference = canonicalizeBacklogReference(value, scope);
+  if (selfId && reference === selfId) {
+    throw new Error(`invalid backlog relationship: ${kind} reference ${value} points at the item itself`);
+  }
+  return reference;
+}

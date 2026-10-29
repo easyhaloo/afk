@@ -23,7 +23,8 @@ function item(id: string, overrides: Partial<GlobalWorkItem> = {}): GlobalWorkIt
   };
 }
 
-const parent = item('gitlab:group/repo#7', { state: 'prd', title: 'the PRD' });
+// A PRD anchor is a container: it carries the role and has no state.
+const parent = item('gitlab:group/repo#7', { kind: 'prd', state: undefined, executionEligible: false, title: 'the PRD' });
 const child = item('gitlab:group/repo#8', { parentId: parent.id, title: 'child' });
 const foreign = item('gitlab:group/other#9', { parentId: 'gitlab:group/repo#404', title: 'other parent' });
 

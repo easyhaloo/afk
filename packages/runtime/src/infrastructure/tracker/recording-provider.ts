@@ -1,6 +1,7 @@
 import type {
   BacklogClaim,
   BacklogCreateInput,
+  BacklogCreatePlan,
   BacklogExecutionMode,
   BacklogItem,
   BacklogListOptions,
@@ -11,7 +12,6 @@ import type {
   ReworkRecord,
   ReworkResolution,
 } from '../../domain/backlog/index.js';
-import type { WorkItemScope as BacklogScope } from '../../domain/work-item/types.js';
 import { recordTrackerActivity, type TrackerPlatform } from './store.js';
 
 /** The provider project a recording provider belongs to. */
@@ -45,11 +45,6 @@ export class RecordingBacklogProvider implements BacklogProvider {
     this.capabilities = provider.capabilities;
   }
 
-  /** The canonical identity scope of the project the wrapped provider writes to. */
-  get scope(): BacklogScope | undefined {
-    return this.provider.scope;
-  }
-
   async get(id: string): Promise<BacklogItem> {
     const item = await this.provider.get(id);
     this.record([item]);
@@ -67,6 +62,10 @@ export class RecordingBacklogProvider implements BacklogProvider {
     const items = await this.provider.list(options);
     this.record(items);
     return items;
+  }
+
+  async planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan> {
+    return this.provider.planCreate(input);
   }
 
   async create(input: BacklogCreateInput): Promise<BacklogItem> {

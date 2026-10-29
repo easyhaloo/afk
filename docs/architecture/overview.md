@@ -260,6 +260,14 @@ belongs to the project that provider writes to, and a canonical global
 identity, which may address another repository on the same provider host.
 Cross-platform and cross-host references are rejected.
 
+The project a provider writes to is its own private state, not part of the
+provider contract: a reference that names no project can only be resolved by
+the provider that owns that project. What the contract owns is the *behaviour*
+— `planCreate()` plans a creation without writing anything, and `create()`
+writes exactly that plan. A dry run and a real creation therefore go through
+the same code path, and every wrapper in the chain has to carry the behaviour
+because the port requires it.
+
 Relationship labels are stored in canonical form (`parent::github:acme/api#42`).
 Legacy bare-number labels (`parent::42`) are still read and resolve against the
 owning project. The backlog metadata codec

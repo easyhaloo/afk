@@ -1,5 +1,4 @@
-import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
-import type { WorkItemScope } from '../work-item/types.js';
+import type { BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
 
 /**
  * Physical capability boundary for backlog management and QA. It forwards
@@ -9,17 +8,13 @@ import type { WorkItemScope } from '../work-item/types.js';
 export class ManagementBacklogProvider implements QABacklogProvider {
   constructor(private readonly provider: BacklogProvider) {}
 
-  /** The canonical identity scope of the project the wrapped provider writes to. */
-  get scope(): WorkItemScope | undefined {
-    return this.provider.scope;
-  }
-
   get(id: string): Promise<BacklogItem> { return this.provider.get(id); }
   async adopt(id: string): Promise<BacklogItem> {
     if (!this.provider.adopt) throw new Error('backlog provider does not support explicit issue adoption');
     return this.provider.adopt(id);
   }
   list(options?: BacklogListOptions): Promise<BacklogItem[]> { return this.provider.list(options); }
+  planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan> { return this.provider.planCreate(input); }
   create(input: BacklogCreateInput): Promise<BacklogItem> { return this.provider.create(input); }
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> { return this.provider.transition(id, state, details); }
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.provider.setExecutionMode(id, mode); }

@@ -1,17 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
+import { TrackerBacklogProvider } from './tracker-provider.js';
 import { planBacklogCreate, renderBacklogDescription, resolveBacklogExecutionBase } from './creation.js';
-import type { BacklogItem } from './index.js';
+import type { BacklogItem, BacklogProvider } from './index.js';
+import type { TrackerProvider, TrackedIssue } from '../tracker/types.js';
 
 const scope = { platform: 'github' as const, projectKey: 'org/repo' };
 
 const item: BacklogItem = { id: 'github:org/repo#42', issueNumber: 42, title: 'Child', state: 'ready', executionMode: 'afk', tags: [], dependsOn: [],
   branchName: 'afk/backlog-42', providerRef: 'github:org/repo#42' };
 
+function trackerOf(issue: TrackedIssue): TrackerProvider {
+  return {
+    platform: 'github', projectId: 'org/repo',
+    getIssue: vi.fn(async () => issue),
+    listIssues: vi.fn(async () => [issue]),
+    listMRs: vi.fn(async () => []),
+    getMR: vi.fn(),
+  } as unknown as TrackerProvider;
+}
+
 describe('backlog creation and execution base', () => {
   it('plans canonical labels and verifies relationships without writing', async () => {
     const get = vi.fn(async (_id: string) => item);
-    const plan = await planBacklogCreate({ get, scope }, { title: ' PRD ', description: 'Body', stage: 'prd',
-      parentId: '007', baseBacklogId: '6', dependsOn: ['5', '05', 'github:org/other#5'], idempotencyKey: 'anchor' });
+    const plan = await planBacklogCreate({ get }, { title: ' PRD ', description: 'Body', stage: 'prd',
+      parentId: '007', baseBacklogId: '6', dependsOn: ['5', '05', 'github:org/other#5'], idempotencyKey: 'anchor' }, scope);
     expect(plan).toMatchObject({
       title: 'PRD', state: 'prd',
       parentId: 'github:org/repo#7', baseBacklogId: 'github:org/repo#6',
@@ -28,22 +40,27 @@ describe('backlog creation and execution base', () => {
     ]);
   });
 
-  it('refuses a relationship reference the provider cannot scope', async () => {
-    const get = vi.fn();
-    await expect(planBacklogCreate({ get }, { title: 'Child', description: 'Body', parentId: '7' }))
-      .rejects.toThrow('identity scope');
-    expect(get).not.toHaveBeenCalled();
+  it('resolves a relationship reference against the project the provider owns', async () => {
+    // The provider knows its own project, so a bare reference resolves
+    // without asking any wrapper for extra state.
+    const provider = new TrackerBacklogProvider(trackerOf({
+      id: 7, platform: 'github', projectId: 'org/repo', title: 'Parent', description: '', labels: [], state: 'opened', url: '',
+    }));
+    const plan = await provider.planCreate({ title: 'Child', description: 'Body', parentId: '7' });
+
+    expect(plan.parentId).toBe('github:org/repo#7');
+    expect(plan.labels).toContain('parent::github:org/repo#7');
   });
 
   it('rejects reserved relation tags before reading providers', async () => {
     const get = vi.fn();
-    await expect(planBacklogCreate({ get, scope }, { title: 'Child', description: 'Body', baseBacklogId: '1', tags: ['base::2'] })).rejects.toThrow('reserved');
+    await expect(planBacklogCreate({ get }, { title: 'Child', description: 'Body', baseBacklogId: '1', tags: ['base::2'] }, scope)).rejects.toThrow('reserved');
     expect(get).not.toHaveBeenCalled();
   });
 
   it('renders the preview and creation description with provider URLs', async () => {
     const parent = { ...item, id: 'github:org/repo#7', issueNumber: 7, webUrl: 'https://example/7' };
-    const plan = await planBacklogCreate({ get: async () => parent, scope }, { title: 'Child', description: 'Body', parentId: '7' });
+    const plan = await planBacklogCreate({ get: async () => parent }, { title: 'Child', description: 'Body', parentId: '7' }, scope);
     expect(plan.description).toBe('Body\n\n## Backlog Links\n\n- Parent backlog: [#7](https://example/7)\n');
     expect(renderBacklogDescription('Body', { ...plan.links, self: { ...item, issueNumber: 42, webUrl: 'https://example/42' } }))
       .toContain('- This backlog: [#42](https://example/42)');

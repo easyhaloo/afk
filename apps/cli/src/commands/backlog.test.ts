@@ -19,7 +19,8 @@ import {
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
-import type { BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
 import { emitSuccess, emitFailure } from '../output.js';
 import * as providerFactory from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
@@ -431,8 +432,14 @@ describe('json-output helpers', () => {
 function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider> = {}): QABacklogProvider {
   return {
     // The provider owns the project a bare relationship reference resolves
-    // against, so the plan can canonicalize it.
-    scope: { platform: 'github', projectKey: 'org/repo' },
+    // against, so the plan can canonicalize it — exactly like a real one.
+    async planCreate(input: BacklogCreateInput) {
+      return planBacklogCreate({ get: async (id: string) => {
+        const found = items.find(item => item.id === id || item.issueNumber === Number(id.slice(id.lastIndexOf('#') + 1)));
+        if (!found) throw new Error(`backlog ${id} not found`);
+        return found;
+      } }, input, { platform: 'github', projectKey: 'org/repo' });
+    },
     async list() { return items; },
     async get(id: string) {
       // A canonical global identity names the same issue as its number.

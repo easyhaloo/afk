@@ -27,6 +27,8 @@ export {
   isBacklogRelationLabel,
 } from './metadata-codec.js';
 export type { BacklogMetadata, BacklogMetadataOptions, BacklogMetadataScope, BacklogRelations } from './metadata-codec.js';
+export type { BacklogCreatePlan } from './creation.js';
+import type { BacklogCreatePlan } from './creation.js';
 export { buildBacklogGraph } from './graph.js';
 export type { BacklogGraph, BacklogGraphSource } from './graph.js';
 export { projectBacklogItem } from './projection.js';
@@ -37,6 +39,7 @@ import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-r
 import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
 import { parseWorkItemId } from '../work-item/identity.js';
 import { validateBusinessTag } from './tags.js';
+import { planBacklogCreate } from './creation.js';
 import { deriveBacklogBranchName } from './branch-name.js';
 
 export interface BacklogItem {
@@ -108,17 +111,18 @@ export interface BacklogListOptions {
  * It deliberately omits claim() so callers cannot start implementation work.
  */
 export interface BacklogManagementProvider {
-  /**
-   * The canonical identity scope of the project this provider writes to.
-   *
-   * A relationship reference that names no project — a bare issue number —
-   * resolves against this scope, so the stored label always carries a
-   * canonical global identity.
-   */
-  readonly scope?: WorkItemScope;
   get(id: string): Promise<BacklogItem>;
   adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
+  /**
+   * Plan the creation of one backlog item without writing anything.
+   *
+   * The plan belongs to the provider because the provider knows the project
+   * the item is created in, and that project resolves a relationship
+   * reference that names none. A dry run and the real creation must produce
+   * the same plan, so both go through this one behaviour.
+   */
+  planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
@@ -136,11 +140,11 @@ export interface QABacklogProvider extends BacklogManagementProvider {
 
 export interface BacklogProvider {
   readonly capabilities?: import('./initialization.js').BacklogProviderCapabilities;
-  /** The canonical identity scope of the project this provider writes to. */
-  readonly scope?: WorkItemScope;
   get(id: string): Promise<BacklogItem>;
   adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
+  /** Plan the creation of one backlog item without writing anything. */
+  planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   claim(id: string, owner: string): Promise<BacklogClaim | null>;
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
@@ -156,8 +160,8 @@ export interface BacklogProvider {
 
 export class InMemoryBacklogProvider implements BacklogProvider {
   readonly capabilities = { atomicClaim: true, tags: true, initialization: true } as const;
-  /** Synthetic scope: the in-memory backlog has no provider project. */
-  readonly scope: WorkItemScope = { platform: 'github', projectKey: 'afk/in-memory' };
+  /** The synthetic project the in-memory backlog lives in. */
+  private readonly project: WorkItemScope = { platform: 'github', projectKey: 'afk/in-memory' };
   private readonly items = new Map<string, BacklogItem>();
   private readonly owners = new Map<string, string>();
   private readonly reworks = new Map<string, ReworkRecord[]>();
@@ -191,20 +195,23 @@ export class InMemoryBacklogProvider implements BacklogProvider {
       .map(item => ({ ...item, dependsOn: [...item.dependsOn], tags: [...item.tags] }));
   }
 
+  async planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan> {
+    return planBacklogCreate(this, input, this.project);
+  }
+
   async create(input: BacklogCreateInput): Promise<BacklogItem> {
-    const title = input.title.trim();
-    if (!title) throw new Error('backlog title must not be empty');
+    const plan = await this.planCreate(input);
     const id = String(Math.max(0, ...[...this.items.keys()].map(value => Number(value)).filter(Number.isSafeInteger)) + 1);
     const item: BacklogItem = {
       id,
-      title,
+      title: plan.title,
       description: input.description,
-      parentId: input.parentId,
-      baseBacklogId: input.baseBacklogId,
-      dependsOn: [...new Set(input.dependsOn ?? [])],
-      state: input.stage ?? 'ready',
-      executionMode: input.executionMode ?? 'afk',
-      tags: [...new Set((input.tags ?? []).map(validateBusinessTag))],
+      ...(plan.parentId === undefined ? {} : { parentId: plan.parentId }),
+      ...(plan.baseBacklogId === undefined ? {} : { baseBacklogId: plan.baseBacklogId }),
+      dependsOn: [...plan.dependsOn],
+      state: plan.state,
+      executionMode: plan.executionMode,
+      tags: [...plan.tags],
       branchName: deriveBacklogBranchName(id),
       providerRef: `in-memory:${id}`,
     };

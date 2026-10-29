@@ -1,6 +1,7 @@
 import type { TrackerProvider } from '../../domain/tracker/types.js';
 import type {
   BacklogCreateInput,
+  BacklogCreatePlan,
   BacklogItem,
   BacklogListOptions,
   BacklogManagementProvider,
@@ -113,6 +114,10 @@ export class InventoryBacklogProvider implements BacklogManagementProvider {
       webUrl: issue.url,
     };
     return toBacklogItem(toGlobalWorkItem(project, providerIssue));
+  }
+
+  async planCreate(_input: BacklogCreateInput): Promise<BacklogCreatePlan> {
+    throw new Error('全局 Backlog 模式不能创建工作项；请在 Git 仓库目录内或使用 --project 指定项目');
   }
 
   async create(_input: BacklogCreateInput): Promise<BacklogItem> {

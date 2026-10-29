@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -53,18 +53,20 @@ describe('recording backlog provider', () => {
     rmSync(repository, { recursive: true, force: true });
   });
 
-  it('forwards the identity scope of the provider it wraps', async () => {
-    const scope = { platform: 'github' as const, projectKey: 'owner/repo' };
+  it('forwards the creation plan of the provider it wraps', async () => {
+    const plan = { labels: ['stage::ready-for-issues'], title: 'Ship the thing' } as never;
+    const planCreate = vi.fn(async () => plan);
     const provider = new RecordingBacklogProvider(
-      { ...stubProvider(), scope },
+      { ...stubProvider(), planCreate },
       { platform: 'github', project: 'owner/repo' },
       repository,
       directory,
     );
 
-    // A wrapper that drops the scope makes every relationship reference
-    // unresolvable, so the creation plan cannot canonicalize it.
-    expect(provider.scope).toEqual(scope);
+    // The dry run and the real creation must produce the same plan, so the
+    // recorder has to carry the planning behaviour of the provider it wraps.
+    await expect(provider.planCreate({ title: 'Ship the thing', description: 'body' })).resolves.toBe(plan);
+    expect(planCreate).toHaveBeenCalledOnce();
   });
 
   it('records the project, the repository and the issue it read', async () => {

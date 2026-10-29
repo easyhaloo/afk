@@ -12,7 +12,7 @@ import { isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } 
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
-import { planBacklogCreate, renderBacklogDescription } from './creation.js';
+import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
 import {
   decodeBacklogRelations,
   type BacklogMetadataScope,
@@ -85,11 +85,6 @@ export class TrackerBacklogProvider implements BacklogProvider {
     this.capabilities = { atomicClaim: true, tags: true, initialization: true };
   }
 
-  /** The canonical identity scope of the project this provider writes to. */
-  get scope(): WorkItemScope {
-    return this.scopeOf(this.tracker);
-  }
-
   async get(id: string): Promise<BacklogItem> {
     const target = this.resolveTarget(id);
     const issue = await target.tracker.getIssue(target.issueId);
@@ -139,8 +134,20 @@ export class TrackerBacklogProvider implements BacklogProvider {
     return items;
   }
 
+  /**
+   * Plan the creation of one backlog item.
+   *
+   * The provider owns the project the item is created in, so it resolves the
+   * relationship references that name no project. The dry run and the real
+   * creation share this plan, so an operator previewed exactly what the
+   * provider receives.
+   */
+  async planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan> {
+    return planBacklogCreate(this, input, this.scopeOf(this.tracker));
+  }
+
   async create(input: BacklogCreateInput): Promise<BacklogItem> {
-    const plan = await planBacklogCreate(this, input);
+    const plan = await this.planCreate(input);
     if (plan.idempotencyLabel) {
       // ponytail: label lookup covers sequential retries; concurrent creators need a distributed lock.
       const existing = (await this.tracker.listIssues({ state: 'all', labels: [plan.idempotencyLabel] }))

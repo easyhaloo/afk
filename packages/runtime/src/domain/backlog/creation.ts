@@ -29,22 +29,17 @@ export interface BacklogCreatePlan {
 /** The provider surface a creation plan needs. */
 export interface BacklogCreatePlanner {
   get(id: string): Promise<BacklogItem>;
-  /** The canonical identity scope of the project the plan writes to. */
-  readonly scope?: BacklogMetadataScope;
 }
 
 /**
  * Resolve one relationship reference to a canonical global identity.
  *
  * A reference that names no project — a bare issue number — belongs to the
- * project the provider writes to. Without that scope the reference cannot be
- * resolved, because the same issue number means different issues in different
- * repositories.
+ * project the item is created in. The provider owns that project, so it is
+ * the provider that passes the scope in; the plan never has to ask a wrapper
+ * for it.
  */
-function resolveReference(value: string, scope: BacklogMetadataScope | undefined): WorkItemId {
-  if (!scope) {
-    throw new Error('backlog provider does not expose an identity scope; a relationship reference must use platform:project#number');
-  }
+function resolveReference(value: string, scope: BacklogMetadataScope): WorkItemId {
   return canonicalizeBacklogReference(value, scope);
 }
 
@@ -54,14 +49,17 @@ function resolveReference(value: string, scope: BacklogMetadataScope | undefined
  * The dry run and the real creation share this plan, so what an operator
  * previewed is exactly what the provider receives.
  */
-export async function planBacklogCreate(provider: BacklogCreatePlanner, input: BacklogCreateInput): Promise<BacklogCreatePlan> {
+export async function planBacklogCreate(
+  provider: BacklogCreatePlanner,
+  input: BacklogCreateInput,
+  scope: BacklogMetadataScope,
+): Promise<BacklogCreatePlan> {
   const title = input.title.trim();
   if (!title) throw new Error('backlog title must not be empty');
   const state = input.stage ?? 'ready';
   if (state !== 'ready' && state !== 'prd') throw new Error(`invalid creation stage: ${state}`);
   const executionMode = input.executionMode ?? 'afk';
   if (executionMode !== 'afk' && executionMode !== 'hitl') throw new Error(`invalid execution mode: ${executionMode}`);
-  const scope = provider.scope;
   const parentId = input.parentId === undefined ? undefined : resolveReference(input.parentId, scope);
   const baseBacklogId = input.baseBacklogId === undefined ? undefined : resolveReference(input.baseBacklogId, scope);
   const dependsOn = [...new Set((input.dependsOn ?? []).map(id => resolveReference(id, scope)))];

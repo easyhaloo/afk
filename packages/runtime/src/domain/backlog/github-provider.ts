@@ -1,7 +1,6 @@
-import type { BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
+import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
-import type { WorkItemScope } from '../work-item/types.js';
 
 /** GitHub's production backlog boundary. Platform label mapping stays private. */
 export class GitHubBacklogProvider implements BacklogProvider {
@@ -14,12 +13,10 @@ export class GitHubBacklogProvider implements BacklogProvider {
     this.capabilities = this.implementation.capabilities;
   }
 
-  /** The canonical identity scope of the project this provider writes to. */
-  get scope(): WorkItemScope | undefined { return this.implementation.scope; }
-
   get(id: string): Promise<BacklogItem> { return this.implementation.get(id); }
   adopt(id: string): Promise<BacklogItem> { return this.implementation.adopt(id); }
   list(options?: BacklogListOptions): Promise<BacklogItem[]> { return this.implementation.list(options); }
+  planCreate(input: BacklogCreateInput): Promise<BacklogCreatePlan> { return this.implementation.planCreate(input); }
   create(input: BacklogCreateInput): Promise<BacklogItem> { return this.implementation.create(input); }
   claim(id: string, owner: string): Promise<BacklogClaim | null> { return this.implementation.claim(id, owner); }
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> { return this.implementation.transition(id, state, details); }

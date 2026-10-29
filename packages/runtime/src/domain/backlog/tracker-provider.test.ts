@@ -6,6 +6,7 @@ import { ManagementBacklogProvider } from './management-provider.js';
 import { adoptBacklog } from './commands.js';
 import type { ClaimLease } from './claim.js';
 import type { TrackerProvider } from '../tracker/types.js';
+import type { BacklogProvider } from './index.js';
 
 function tracker(issue: any): TrackerProvider {
   return {
@@ -28,15 +29,17 @@ function tracker(issue: any): TrackerProvider {
 }
 
 describe('TrackerBacklogProvider', () => {
-  it('forwards the identity scope through every provider wrapper', () => {
-    const t = tracker({ id: 42, platform: 'github', projectId: 'org/repo', labels: [], state: 'opened' });
-    const expected = { platform: 'github', projectKey: 'org/repo' };
+  it('plans the same creation through every provider wrapper', async () => {
+    const t = tracker({ id: 7, platform: 'github', projectId: 'org/repo', labels: [], state: 'opened' });
+    const expected = ['stage::ready-for-issues', 'mode::afk', 'parent::github:org/repo#7'];
+    const plan = async (provider: BacklogProvider) =>
+      (await provider.planCreate({ title: 'Child', description: 'Body', parentId: '7' })).labels;
 
-    // A wrapper that drops the scope makes every relationship reference
-    // unresolvable, so the creation plan cannot canonicalize it.
-    expect(new TrackerBacklogProvider(t).scope).toEqual(expected);
-    expect(new GitHubBacklogProvider(t).scope).toEqual(expected);
-    expect(new ManagementBacklogProvider(new GitHubBacklogProvider(t)).scope).toEqual(expected);
+    // The dry run and the real creation must produce the same plan, so every
+    // wrapper has to carry the planning behaviour of the provider it wraps.
+    expect(await plan(new TrackerBacklogProvider(t))).toEqual(expected);
+    expect(await plan(new GitHubBacklogProvider(t))).toEqual(expected);
+    expect(await plan(new ManagementBacklogProvider(new GitHubBacklogProvider(t)))).toEqual(expected);
   });
 
   it('recognizes PRD anchors without allowing claims or adoption', async () => {

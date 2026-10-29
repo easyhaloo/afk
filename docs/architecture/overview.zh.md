@@ -210,6 +210,11 @@ Provider Backlog 是业务事实来源。它的 `BacklogItem.id` 是该工作项
 provider 同时接受两种引用写法：裸 issue 编号归属于该 provider 写入的项目；规范
 全局身份可以指向同一 provider 主机上的另一个仓库。跨平台与跨主机引用会被明确拒绝。
 
+provider 写入的项目是它自己的私有状态，不属于 provider 契约：不指明项目的引用
+只能由拥有该项目的 provider 解析。契约拥有的是**行为**——`planCreate()` 规划一次
+创建且不写入任何内容，`create()` 写入的正是这份计划。dry-run 与真实创建因此走
+同一条代码路径，调用链上的每一层 wrapper 都必须携带该行为，因为端口要求它。
+
 关系标签以规范形式存储（`parent::github:acme/api#42`）。存量的裸编号标签
 （`parent::42`）仍可读取，并相对所属项目解析。backlog metadata codec
 （`packages/runtime/src/domain/backlog/metadata-codec.ts`）是解析、校验和序列化

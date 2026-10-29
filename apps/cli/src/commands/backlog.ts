@@ -27,7 +27,6 @@ import {
   adoptBacklog,
   confirmBacklogMerge,
   createBacklog,
-  planBacklogCreate,
   initializeBacklog,
   interruptBacklog,
   listBacklogs,
@@ -393,7 +392,7 @@ export async function runBacklogCreate(
       tags: options.tag,
     };
     if (options.dryRun) {
-      const { links, idempotencyLabel, ...plan } = await planBacklogCreate(provider, input);
+      const { links, idempotencyLabel, ...plan } = await provider.planCreate(input);
       if (options.json) emitSuccess(kind, { dryRun: true, ...plan });
       else process.stdout.write(`${JSON.stringify({ dryRun: true, ...plan }, null, 2)}\n`);
       return;

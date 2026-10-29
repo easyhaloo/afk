@@ -15,8 +15,8 @@ disallowed-tools: >-
 
 **Goal:** Produce independently executable backlog items with verifiable
 completion conditions. The output is a provider-neutral manifest for the
-external backlog/decomposition system. AFK consumes the resulting backlog;
-it does not create, link, or split provider records.
+backlog provider that owns the records. AFK can apply that manifest itself
+with `afk backlog apply-manifest`; this skill only writes it.
 **Mode:** HITL-gated — draft first, obtain explicit approval, then emit the
 approved manifest.
 
@@ -74,9 +74,11 @@ Emit one manifest entry per item with these provider-neutral fields:
 ```yaml
 - title: <short imperative title>
   description: <context and intended outcome>
-  parentId: <provider backlog id or null>
+  project: <canonical project key, platform:projectKey>
+  ref: <stable local name other items can point at>
+  parentId: <provider backlog id, manifest ref, or null>
   baseBacklogId: <provider backlog id used as the Git base, or null>
-  dependsOn: [<provider backlog ids>]
+  dependsOn: [<provider backlog ids or manifest refs>]
   executionMode: afk | hitl
   tags: [<business tags>]
   acceptanceCriteria:
@@ -92,13 +94,26 @@ Prefer `QA fails during startup and drops diagnostics` over
 before any code exists and contain the acceptance criteria; it must not read
 like a completed implementation report.
 
-`parentId`, `dependsOn`, and `baseBacklogId` are references supplied by the external provider;
-use stable temporary references in a draft and have the provider resolve them
-to IDs. Parents are organizational and are not runnable. Dependencies control
-scheduling. Only `baseBacklogId` selects an unmerged Git execution base. Every dependency
-must be complete before an `afk` item can be claimed. The provider assigns
-the canonical ID and initial state; do not invent state labels in this
-manifest.
+`project` names the repository the item belongs to, as a canonical project
+key: `platform:projectKey`, for example `github:acme/api` or
+`gitlab:gitlab.example.com/group/service`. A requirement that spans
+repositories has its items in the repositories that own them, so give every
+item the project that owns the work. Omit it only when the whole manifest
+belongs to one repository, and let the importer apply it there.
+
+`ref` is a name other items of the same manifest can point at. Use it when
+an item waits for, hangs under, or starts from another item of the same
+decomposition. Give each item a `ref` that says what it is, not a number:
+`kbase-route`, `atlas-endpoint`.
+
+`parentId`, `dependsOn`, and `baseBacklogId` are references. A reference is
+either the canonical ID of a record that already exists, or the `ref` of
+another item of this manifest. Parents are organizational and are not
+runnable. Dependencies control scheduling. Only `baseBacklogId` selects an
+unmerged Git execution base, and it has to name a record in the same
+repository as the item. Every dependency must be complete before an `afk`
+item can be claimed. The provider assigns the canonical ID and initial
+state; do not invent state labels in this manifest.
 
 That canonical ID is later passed unchanged as `afk run --backlog-id <id>`.
 Each execution receives a separate `runId`; never use a run ID as a manifest
@@ -134,9 +149,15 @@ incorporate the requested changes and repeat the gate.
 ### 5. Emit handoff
 
 After approval, write the provider-neutral manifest and PRD reference to the
-requested artifact location. Hand the artifact to the external backlog
-provider/importer. Do not invoke an AFK command, create a branch, start an
+requested artifact location. Hand the artifact to the backlog provider that
+owns the records. Do not invoke an AFK command, create a branch, start an
 agent, update provider metadata, or run QA.
+
+AFK is one such provider: `afk backlog apply-manifest <file>` reads the
+manifest, creates every record in the project that item names, and writes the
+relationships between them. Applying it is a separate step from this skill —
+run it after the manifest is approved, with `--dry-run` first to see the
+plan.
 
 ## References
 

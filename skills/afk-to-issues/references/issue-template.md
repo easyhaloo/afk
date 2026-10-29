@@ -141,6 +141,11 @@ none
 
 ## Handoff
 
-The external backlog provider owns parsing and publication of this manifest.
-AFK consumes the resulting provider-neutral fields (`parentId`, `dependsOn`,
-`executionMode`, and business `tags`) and does not create records here.
+The backlog provider owns parsing and publication of this manifest.
+AFK applies the resulting provider-neutral fields (`project`, `ref`,
+`parentId`, `dependsOn`, `executionMode`, and business `tags`) with
+`afk backlog apply-manifest <file>`, and this skill does not create records
+itself. The `project` and `ref` fields are part of the manifest contract in
+`SKILL.md`: a record has to land in one repository, and a reference has to
+say whether it names an existing record or another item of the same
+manifest.

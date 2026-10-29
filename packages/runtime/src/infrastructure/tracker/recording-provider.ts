@@ -11,6 +11,7 @@ import type {
   ReworkRecord,
   ReworkResolution,
 } from '../../domain/backlog/index.js';
+import type { WorkItemScope as BacklogScope } from '../../domain/work-item/types.js';
 import { recordTrackerActivity, type TrackerPlatform } from './store.js';
 
 /** The provider project a recording provider belongs to. */
@@ -42,6 +43,11 @@ export class RecordingBacklogProvider implements BacklogProvider {
     private readonly trackerDirectory?: string,
   ) {
     this.capabilities = provider.capabilities;
+  }
+
+  /** The canonical identity scope of the project the wrapped provider writes to. */
+  get scope(): BacklogScope | undefined {
+    return this.provider.scope;
   }
 
   async get(id: string): Promise<BacklogItem> {
@@ -112,7 +118,10 @@ export class RecordingBacklogProvider implements BacklogProvider {
   private record(items: readonly BacklogItem[]): void {
     const issues = items
       .filter(item => item?.id)
-      .map(item => ({ id: String(item.id), title: item.title }));
+      // The index resolves a bare issue id to its provider project, so it is
+      // keyed by the provider-local issue number rather than by the canonical
+      // global identity the domain model carries.
+      .map(item => ({ id: String(item.issueNumber ?? item.id), title: item.title }));
     if (issues.length === 0) return;
     recordTrackerActivity({
       platform: this.identity.platform,

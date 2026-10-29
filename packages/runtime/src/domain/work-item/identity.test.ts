@@ -1,11 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalProjectKey,
   encodeWorkItemIdForPath,
   formatWorkItemId,
+  gitLabProjectHost,
   parseWorkItemId,
 } from './identity.js';
 
 describe('work-item identity', () => {
+  it('names a GitHub project by its owner and repository', () => {
+    expect(canonicalProjectKey('github', 'openai/codex')).toBe('openai/codex');
+    expect(() => canonicalProjectKey('github', 'openai')).toThrow('owner/repo');
+  });
+
+  it('keeps the gitlab.com project key it always had', () => {
+    expect(canonicalProjectKey('gitlab', 'group/project', 'gitlab.com')).toBe('group/project');
+    expect(canonicalProjectKey('gitlab', 'group/project')).toBe('group/project');
+  });
+
+  it('qualifies a self-hosted GitLab project with its instance host', () => {
+    expect(canonicalProjectKey('gitlab', 'group/project', 'gitlab.corp')).toBe('gitlab.corp/group/project');
+    expect(canonicalProjectKey('gitlab', 'gitlab.corp/group/project', 'gitlab.corp')).toBe('gitlab.corp/group/project');
+  });
+
+  it('reads the host of a GitLab project key only when it names one', () => {
+    expect(gitLabProjectHost('gitlab.corp/group/project')).toBe('gitlab.corp');
+    expect(gitLabProjectHost('group/project')).toBeUndefined();
+    expect(gitLabProjectHost('group/subgroup/project')).toBeUndefined();
+  });
+
   it('formats and parses a GitHub owner/repository identity', () => {
     const id = formatWorkItemId({ platform: 'github', projectKey: 'openai/codex', issueNumber: 42 });
 

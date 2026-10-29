@@ -28,6 +28,17 @@ function tracker(issue: any): TrackerProvider {
 }
 
 describe('TrackerBacklogProvider', () => {
+  it('forwards the identity scope through every provider wrapper', () => {
+    const t = tracker({ id: 42, platform: 'github', projectId: 'org/repo', labels: [], state: 'opened' });
+    const expected = { platform: 'github', projectKey: 'org/repo' };
+
+    // A wrapper that drops the scope makes every relationship reference
+    // unresolvable, so the creation plan cannot canonicalize it.
+    expect(new TrackerBacklogProvider(t).scope).toEqual(expected);
+    expect(new GitHubBacklogProvider(t).scope).toEqual(expected);
+    expect(new ManagementBacklogProvider(new GitHubBacklogProvider(t)).scope).toEqual(expected);
+  });
+
   it('recognizes PRD anchors without allowing claims or adoption', async () => {
     const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['stage::prd'], state: 'opened' });
     const provider = new TrackerBacklogProvider(t);
@@ -58,8 +69,8 @@ describe('TrackerBacklogProvider', () => {
       createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }) };
     const provider = new TrackerBacklogProvider(t);
     const input = { title: 'Anchor', description: 'Body', stage: 'prd' as const, idempotencyKey: 'migration/anchor' };
-    expect((await provider.create(input)).id).toBe('42');
-    expect((await provider.create(input)).id).toBe('42');
+    expect((await provider.create(input)).id).toBe('github:org/repo#42');
+    expect((await provider.create(input)).id).toBe('github:org/repo#42');
     expect(t.createIssue).toHaveBeenCalledTimes(1);
     expect((await provider.get('42')).tags).toEqual([]);
   });
@@ -136,9 +147,9 @@ describe('TrackerBacklogProvider', () => {
       : new GitLabBacklogProvider(t));
 
     await expect(adoptBacklog(provider, '42')).resolves.toMatchObject({
-      id: '42', title: issue.title, description: issue.description,
+      id: `${platform}:org/repo#42`, title: issue.title, description: issue.description,
       state: 'ready', executionMode: 'afk', tags: ['feature', 'team::api'],
-      parentId: '7', baseBacklogId: '6', dependsOn: ['5'],
+      parentId: `${platform}:org/repo#7`, baseBacklogId: `${platform}:org/repo#6`, dependsOn: [`${platform}:org/repo#5`],
     });
     expect(t.updateLabels).toHaveBeenCalledWith(42, {
       add: ['stage::ready-for-issues', 'mode::afk'], remove: [],
@@ -208,10 +219,10 @@ describe('TrackerBacklogProvider', () => {
 
     await expect(provider.create({
       title: 'Child', description: '## Context\n\nImplement the capability.', parentId: '7', dependsOn: ['6'], tags: ['feature'],
-    })).resolves.toMatchObject({ id: '42', parentId: '7', dependsOn: ['6'], webUrl: 'https://example/42' });
+    })).resolves.toMatchObject({ id: 'github:org/repo#42', parentId: 'github:org/repo#7', dependsOn: ['github:org/repo#6'], webUrl: 'https://example/42' });
 
     expect(t.createIssue).toHaveBeenCalledWith(expect.objectContaining({
-      labels: ['stage::ready-for-issues', 'mode::afk', 'feature', 'parent::7', 'depends-on::6'],
+      labels: ['stage::ready-for-issues', 'mode::afk', 'feature', 'parent::github:org/repo#7', 'depends-on::github:org/repo#6'],
       description: expect.stringContaining('[#7](https://example/7)'),
     }));
     expect(t.linkIssues).toHaveBeenCalledWith(42, 6, 'blocked_by');
@@ -251,7 +262,8 @@ describe('TrackerBacklogProvider', () => {
     };
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
     await expect(provider.get('42')).resolves.toMatchObject({
-      id: '42', parentId: '10', baseBacklogId: '8', dependsOn: ['9'], state: 'ready', executionMode: 'afk', branchName: 'afk/backlog-42',
+      id: 'github:org/repo#42', parentId: 'github:org/repo#10', baseBacklogId: 'github:org/repo#8',
+      dependsOn: ['github:org/repo#9'], state: 'ready', executionMode: 'afk', branchName: 'afk/backlog-42',
       webUrl: 'https://example/42',
     });
   });
@@ -347,7 +359,7 @@ describe('TrackerBacklogProvider', () => {
     const provider = new TrackerBacklogProvider(t, { atomicClaim });
     await provider.claim('42', 'worker');
     expect(atomicClaim).toHaveBeenCalledWith('42', 'worker', 'ready', {
-      state: 'ready', executionMode: 'afk', parentId: undefined, dependencies: ['9'],
+      state: 'ready', executionMode: 'afk', parentId: undefined, dependencies: ['github:org/repo#9'],
     });
   });
 
@@ -356,9 +368,11 @@ describe('TrackerBacklogProvider', () => {
     const atomicClaim = vi.fn(async () => { issue.labels = ['stage::afk-in-progress', 'mode::afk', 'parent::10']; return true; });
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim });
 
-    await expect(provider.claim('42', 'worker')).resolves.toMatchObject({ item: { id: '42', parentId: '10', state: 'in_progress' } });
+    await expect(provider.claim('42', 'worker')).resolves.toMatchObject({
+      item: { id: 'github:org/repo#42', parentId: 'github:org/repo#10', state: 'in_progress' },
+    });
 
-    expect(atomicClaim).toHaveBeenCalledWith('42', 'worker', 'ready', expect.objectContaining({ parentId: '10' }));
+    expect(atomicClaim).toHaveBeenCalledWith('42', 'worker', 'ready', expect.objectContaining({ parentId: 'github:org/repo#10' }));
   });
 
   it('keeps a parent backlog non-runnable after every tracker child is done', async () => {
@@ -369,6 +383,39 @@ describe('TrackerBacklogProvider', () => {
     const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
 
     await expect(provider.isRunnable(await provider.get('10'))).resolves.toBe(false);
+  });
+
+  it('keeps a parent non-runnable when its child lives in another repository', async () => {
+    const parent = { id: 10, title: 'Parent', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(parent);
+    t.listIssues = vi.fn(async () => [{ ...parent }]);
+    const graph = {
+      childrenOf: vi.fn(async () => [{
+        id: 'gitlab:group/other#42', issueNumber: 42, title: 'Child', state: 'ready' as const,
+        executionMode: 'afk' as const, tags: [], dependsOn: [], branchName: 'afk/backlog-42',
+        providerRef: 'gitlab:group/other#42', parentId: 'github:org/repo#10',
+      }]),
+    };
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn(), graph });
+
+    await expect(provider.isRunnable(await provider.get('10'))).resolves.toBe(false);
+    expect(graph.childrenOf).toHaveBeenCalledWith('github:org/repo#10');
+  });
+
+  it('falls back to the local project scan when the cross-project graph cannot be read', async () => {
+    const parent = { id: 10, title: 'Parent', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const child = { id: 42, title: 'Child', description: '', labels: ['stage::done', 'parent::10'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(parent);
+    t.listIssues = vi.fn(async () => [{ ...parent }, { ...child }]);
+    const onGraphError = vi.fn();
+    const provider = new TrackerBacklogProvider(t, {
+      atomicClaim: vi.fn(),
+      graph: { childrenOf: vi.fn(async () => { throw new Error('inventory unavailable'); }) },
+      onGraphError,
+    });
+
+    await expect(provider.isRunnable(await provider.get('10'))).resolves.toBe(false);
+    expect(onGraphError).toHaveBeenCalled();
   });
 
   it('maps a closed issue without workflow labels to done for dependency checks', async () => {
@@ -540,7 +587,9 @@ describe('TrackerBacklogProvider', () => {
     const issue = { id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::10'], state: 'opened', url: '', projectId: 'org/repo' };
     const provider = new TrackerBacklogProvider(tracker(issue), { claimLock: { acquire: vi.fn(async () => lease('fallback-child')) } });
 
-    await expect(provider.claim('42', 'worker')).resolves.toMatchObject({ item: { id: '42', parentId: '10', state: 'in_progress' } });
+    await expect(provider.claim('42', 'worker')).resolves.toMatchObject({
+      item: { id: 'github:org/repo#42', parentId: 'github:org/repo#10', state: 'in_progress' },
+    });
   });
 
   it('uses native CAS without acquiring a fallback lease', async () => {

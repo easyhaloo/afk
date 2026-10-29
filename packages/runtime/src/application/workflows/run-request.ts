@@ -14,7 +14,7 @@ import {
   type ResolvedExecutionManifestRepository,
 } from './execution-manifest.js';
 import { resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
-import { parseWorkItemId } from '../../domain/work-item/identity.js';
+import { parseWorkItemId, canonicalProjectKey } from '../../domain/work-item/identity.js';
 import { executionWorkspacePath } from '../../infrastructure/workspace.js';
 import { resolveTrackerTarget } from '../../infrastructure/tracker/target.js';
 import { join } from 'node:path';
@@ -33,6 +33,8 @@ export interface WorkflowRunRequest {
   projectName?: string;
   trackerPlatform?: ExecutionManifestPlatform;
   trackerProjectId?: string;
+  /** The canonical project key of the provider project. */
+  trackerProjectKey?: string;
   trackerHost?: string;
   originalCwd: string;
   session: string;
@@ -85,6 +87,8 @@ export interface WorkflowRunCliInput {
   repositories?: WorkflowRunRepository[];
   trackerPlatform?: ExecutionManifestPlatform;
   trackerProjectId?: string;
+  /** The canonical project key of the provider project. */
+  trackerProjectKey?: string;
   trackerHost?: string;
   ext?: string[];
   extParams?: string[];
@@ -157,6 +161,7 @@ export function resolveWorkflowRequest(
     projectName: input.projectName ?? context.projectName,
     trackerPlatform: input.trackerPlatform,
     trackerProjectId: input.trackerProjectId,
+    trackerProjectKey: input.trackerProjectKey,
     trackerHost: input.trackerHost,
     originalCwd: context.originalCwd,
     session: input.session ?? `afk-${input.workItemId ?? backlogId}`,
@@ -206,8 +211,7 @@ export async function resolveWorkflowRunRequest(
       cwd: input.repoRoot ?? dependencies.cwd, issueId: input.backlogId,
     });
     const platform = target?.platform ?? resolved!.platform;
-    const projectKey = target?.projectKey ?? (platform === 'gitlab' && resolved?.host && resolved.host !== 'gitlab.com'
-      ? `${resolved.host}/${resolved.projectId}` : resolved!.projectId);
+    const projectKey = target?.projectKey ?? canonicalProjectKey(platform, resolved!.projectId, resolved?.host);
     const identity = target ?? parseWorkItemId(`${platform}:${projectKey}#${input.backlogId}`);
     const workspaceRoot = executionWorkspacePath(identity.id);
     const name = projectKey.split('/').at(-1)!;
@@ -220,7 +224,7 @@ export async function resolveWorkflowRunRequest(
       ? request.branchStrategy.branch : deriveBacklogBranchName(String(identity.issueNumber));
     const tracker = trackerContext({ platform, projectKey, providerHost: resolved?.host ?? input.trackerHost });
     return {
-      ...request, trackerPlatform: platform, trackerProjectId: tracker.projectId, trackerHost: tracker.host,
+      ...request, trackerPlatform: platform, trackerProjectId: tracker.projectId, trackerProjectKey: projectKey, trackerHost: tracker.host,
       repositories: [{ platform, projectKey, name, checkoutPath, repoRoot, baseBranch: request.baseBranch, workingBranch, primary: true,
         ...(tracker.host ? { providerHost: tracker.host } : {}) }],
     };
@@ -259,6 +263,7 @@ function applyExecutionManifest(
     projectName: primary.projectKey,
     trackerPlatform: manifest.tracker.platform,
     trackerProjectId: tracker.projectId,
+    trackerProjectKey: manifest.tracker.projectKey,
     trackerHost: tracker.host,
     repoRoot: primary.repoRoot,
     workspaceRoot: manifest.workspaceRoot,

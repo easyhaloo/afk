@@ -430,9 +430,14 @@ describe('json-output helpers', () => {
 
 function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider> = {}): QABacklogProvider {
   return {
+    // The provider owns the project a bare relationship reference resolves
+    // against, so the plan can canonicalize it.
+    scope: { platform: 'github', projectKey: 'org/repo' },
     async list() { return items; },
     async get(id: string) {
-      const found = items.find(item => item.id === id);
+      // A canonical global identity names the same issue as its number.
+      const issueNumber = Number(id.slice(id.lastIndexOf('#') + 1));
+      const found = items.find(item => item.id === id || item.issueNumber === issueNumber);
       if (!found) throw new Error(`backlog ${id} not found`);
       return found;
     },
@@ -491,7 +496,7 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
 }
 
 const stubItem: BacklogItem = {
-  id: '42', title: 'demo task', description: 'demo body',
+  id: '42', issueNumber: 42, title: 'demo task', description: 'demo body',
   parentId: undefined, baseBacklogId: undefined, dependsOn: [],
   state: 'ready', executionMode: 'afk', tags: ['billing'],
   branchName: 'afk/backlog-42', providerRef: 'stub:42', webUrl: 'https://example/42',
@@ -587,7 +592,7 @@ describe('backlog action handlers (JSON envelope mode)', () => {
         title: 'PRD', description: 'Body', stage: 'prd', dryRun: true, parent: '42', json: true,
       });
       expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ ok: true, kind: 'backlog.create',
-        data: { dryRun: true, title: 'PRD', labels: ['stage::prd', 'mode::afk', 'parent::42'] } });
+        data: { dryRun: true, title: 'PRD', labels: ['stage::prd', 'mode::afk', 'parent::github:org/repo#42'] } });
       expect(create).not.toHaveBeenCalled();
       expect(initialize).not.toHaveBeenCalled();
     } finally {

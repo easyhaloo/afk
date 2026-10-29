@@ -6,7 +6,7 @@ import type {
   BacklogManagementProvider,
 } from '../../domain/backlog/index.js';
 import type { GlobalWorkItem, ProviderProjectRef } from '../../domain/work-item/types.js';
-import { parseWorkItemId } from '../../domain/work-item/identity.js';
+import { gitLabProjectHost as gitLabHostOf, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
 import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
 import type { ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
@@ -29,11 +29,11 @@ export function isProjectDetectionFailure(error: unknown): boolean {
 }
 
 function gitLabApiProject(project: ProviderProjectRef): { projectId: string; host?: string } {
-  const host = project.providerHost ?? project.projectKey.split('/')[0];
-  const prefix = `${host}/`;
+  const host = project.providerHost;
+  const prefix = host ? `${host}/` : '';
   const projectId = project.providerProjectId
-    ?? (project.projectKey.startsWith(prefix) ? project.projectKey.slice(prefix.length) : project.projectKey);
-  return { projectId, host };
+    ?? (prefix && project.projectKey.startsWith(prefix) ? project.projectKey.slice(prefix.length) : project.projectKey);
+  return { projectId, ...(host ? { host } : {}) };
 }
 
 async function defaultTrackerFor(project: ProviderProjectRef): Promise<TrackerProvider> {
@@ -100,7 +100,7 @@ export class InventoryBacklogProvider implements BacklogManagementProvider {
     const project: ProviderProjectRef = {
       platform: parsed.platform,
       projectKey: parsed.projectKey,
-      ...(parsed.platform === 'gitlab' ? { providerHost: parsed.projectKey.split('/')[0] } : {}),
+      ...(parsed.platform === 'gitlab' && gitLabHostOf(parsed.projectKey) ? { providerHost: gitLabHostOf(parsed.projectKey) } : {}),
       name: parsed.projectKey.split('/').filter(Boolean).at(-1) ?? parsed.projectKey,
     };
     const issue = await this.trackerFor(project).then(tracker => tracker.getIssue(parsed.issueNumber));

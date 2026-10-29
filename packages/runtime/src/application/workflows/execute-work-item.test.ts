@@ -14,10 +14,10 @@ import { getLogContext } from '../../infrastructure/io/index.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
-  id: '42', workItemId: workItemId as BacklogItem['workItemId'], issueNumber: 42,
+  id: workItemId, workItemId: workItemId as BacklogItem['workItemId'], issueNumber: 42,
   project: { platform: 'github', projectKey: 'acme/api', name: 'api' },
   managed: true, executionEligible: true, title: 'Implement', dependsOn: [],
-  state: 'ready', executionMode: 'afk', tags: [], branchName: 'afk/42', providerRef: workItemId,
+  state: 'ready', executionMode: 'afk', tags: [], branchName: 'afk/backlog-42', providerRef: workItemId,
 };
 let directory: string;
 afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -119,18 +119,18 @@ describe('executeWorkItem', () => {
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     expect((await executeWorkItem(input, deps)).status).toBe('merge_ready');
     current.workItemId = undefined;
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
     expect(context.providers.backlog.transition).not.toHaveBeenCalled();
-    changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' });
+    changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' });
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'done' });
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'done' });
     const result = await deps.loadExecution('attempt-1');
     expect(result.summary).toMatchObject({ status: 'done', pr: { state: 'merged' } });
     expect(result.timeline.events.filter(event => event.data.kind === 'change.merge_verified')).toHaveLength(1);
-    expect(context.providers.backlog.transition).toHaveBeenCalledWith('42', 'done', { changeId: '5' });
+    expect(context.providers.backlog.transition).toHaveBeenCalledWith(workItemId, 'done', { changeId: '5' });
   });
 
   it('rejects a different or unlinked PR during root reconciliation', async () => {
@@ -143,9 +143,9 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn();
     deps.createContext = vi.fn(async () => context);
     await executeWorkItem(input, deps);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/other', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/other', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/identity/);
-    changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' });
+    changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' });
     changes.verifyIssueAssociation.mockRejectedValueOnce(new Error('not linked'));
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('not linked');
     expect(context.providers.backlog.transition).not.toHaveBeenCalled();
@@ -162,7 +162,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
     await executeWorkItem(input, deps);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     deps.recordAudit = vi.fn(async () => { throw new Error('audit unavailable'); });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('audit unavailable');
     expect((await deps.loadExecution('attempt-1')).summary.status).toBe('awaiting_merge');
@@ -181,7 +181,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
@@ -203,7 +203,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.setExecutionMode = vi.fn();
     deps.createContext = vi.fn(async () => context);
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
-    const change = { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' as const, sourceBranch: 'afk/42-qa', targetBranch: 'main' };
+    const change = { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' as const, sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' };
     changes.findForBacklog.mockResolvedValue(change);
     changes.get = vi.fn(async () => change);
     const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
@@ -211,8 +211,8 @@ describe('executeWorkItem', () => {
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
     await writeFile(join(journalDirectory, 'attempt-1.jsonl'), JSON.stringify({ executionId: 'attempt-1', workItemId, phase: 'publication_requested' }) + '\n');
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'merge_ready', changeUrl: change.url });
-    expect(context.providers.backlog.transition).toHaveBeenCalledWith('42', 'merge_ready', { changeId: '5' });
-    expect(context.providers.backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
+    expect(context.providers.backlog.transition).toHaveBeenCalledWith(workItemId, 'merge_ready', { changeId: '5' });
+    expect(context.providers.backlog.setExecutionMode).toHaveBeenCalledWith(workItemId, 'hitl');
     expect((await deps.loadExecution('attempt-1')).summary.status).toBe('awaiting_merge');
   });
 

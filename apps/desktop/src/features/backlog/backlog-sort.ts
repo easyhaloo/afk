@@ -33,13 +33,14 @@ export const WORK_ITEM_SORT_OPTIONS: typeof BACKLOG_SORT_OPTIONS = [
 const DEFAULT_SORT: BacklogSortSelection = { field: "id", direction: "asc" };
 
 const STATE_ORDER: Record<BacklogState, number> = {
-  ready: 0,
-  rework: 1,
-  in_progress: 2,
-  verification: 3,
-  merge_ready: 4,
-  blocked: 5,
-  done: 6,
+  prd: 0,
+  ready: 1,
+  rework: 2,
+  in_progress: 3,
+  verification: 4,
+  merge_ready: 5,
+  blocked: 6,
+  done: 7,
 };
 
 export function parseBacklogSort(value: string | undefined): BacklogSortSelection {

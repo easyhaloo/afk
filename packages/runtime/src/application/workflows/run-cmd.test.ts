@@ -62,7 +62,11 @@ describe('runWorkflowCli', () => {
     })).resolves.toEqual({ success: true, url: 'https://example.test/change/42' });
 
     expect(mocks.createTracker).toHaveBeenCalledWith('acme/api', '/workspace/repositories/api', 'github', undefined);
-    expect(mocks.createProviderBundle).toHaveBeenCalledWith(expect.anything(), '/workspace/repositories/api');
+    expect(mocks.createProviderBundle).toHaveBeenCalledWith(expect.anything(), '/workspace/repositories/api', expect.objectContaining({
+      // The provider needs the cross-project backlog graph, because a child
+      // backlog may live in another repository than its parent.
+      graph: expect.objectContaining({ childrenOf: expect.any(Function) }),
+    }));
     expect(mocks.runnerRun).toHaveBeenCalledWith(expect.objectContaining({
       repositories: mocks.request.repositories,
       backlogId: '42',

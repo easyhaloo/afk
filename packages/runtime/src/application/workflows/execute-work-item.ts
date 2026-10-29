@@ -11,6 +11,7 @@ import { QARunner } from '../runners/qa-runner.js';
 import { createGlobalWorkItemCatalogs, createTracker } from '../../infrastructure/provider/tracker-provider-factory.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
 import { createProviderBundle, type ProviderBundle, type ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
+import { createCrossProjectBacklogGraphSource } from '../../infrastructure/provider/backlog-graph.js';
 import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
@@ -25,7 +26,7 @@ import { projectWorkItemExecution } from '../../observability/work-item-executio
 import { parseExecutionManifest, readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
 import { executionManifestPath, executionWorkspacePath } from '../../infrastructure/workspace.js';
 import { resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request.js';
-import { withLogContext } from '../../infrastructure/io/index.js';
+import { withLogContext, logger } from '../../infrastructure/io/index.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -260,18 +261,29 @@ async function createContext(manifest: ResolvedExecutionManifest, input: Execute
     executionMode: 'interactive',
   }, config);
   const tracker = await createTracker(request.trackerProjectId ?? request.projectName, request.repoRoot, request.trackerPlatform, request.trackerHost);
-  return { request, providers: createProviderBundle(tracker, request.repoRoot) };
+  return {
+    request,
+    providers: createProviderBundle(tracker, request.repoRoot, {
+      // A child backlog may live in another repository than its parent, so the
+      // provider needs the whole backlog graph before it claims an item.
+      graph: createCrossProjectBacklogGraphSource({ platform: request.trackerPlatform }),
+      onGraphError: error => logger.warn({ error }, 'cross-project backlog graph is unavailable; falling back to the local project'),
+      ...(request.trackerProjectKey ? { projectKey: request.trackerProjectKey } : {}),
+    }),
+  };
 }
 
 function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest: ResolvedExecutionManifest, workItemId: string): void {
   const identity = parseWorkItemId(workItemId);
-  if (inventoryItem.id !== workItemId || item.id !== manifest.providerBacklogId
-    || Number(item.id) !== identity.issueNumber || inventoryItem.issueNumber !== identity.issueNumber
+  if (inventoryItem.id !== workItemId
+    || item.id !== workItemId
+    || Number(manifest.providerBacklogId) !== identity.issueNumber
+    || inventoryItem.issueNumber !== identity.issueNumber
     || inventoryItem.project.platform !== identity.platform || inventoryItem.project.projectKey !== identity.projectKey
     || (item.workItemId !== undefined && item.workItemId !== workItemId)
     || (item.issueNumber !== undefined && item.issueNumber !== identity.issueNumber)
     || (item.project !== undefined && (item.project.platform !== identity.platform || item.project.projectKey !== identity.projectKey))
-    || (item.providerRef !== workItemId && item.providerRef !== `${identity.platform}:${manifest.tracker.providerProjectId ?? identity.projectKey}#${identity.issueNumber}`)
+    || item.providerRef !== workItemId
     || manifest.tracker.platform !== identity.platform
     || manifest.tracker.projectKey !== identity.projectKey) {
     throw new Error(`work item identity does not match provider and execution manifest: ${workItemId}`);
@@ -498,11 +510,9 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, getWorkflowConfig());
     if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
     const item = await providers.backlog.get(request.backlogId);
-    const identity = parseWorkItemId(workItemId);
-    if (item.parentId || item.id !== manifest.providerBacklogId
+    if (item.parentId || item.id !== workItemId
       || (item.workItemId !== undefined && item.workItemId !== workItemId)
-      || (item.providerRef !== workItemId
-        && item.providerRef !== `${identity.platform}:${manifest.tracker.providerProjectId ?? identity.projectKey}#${identity.issueNumber}`)
+      || item.providerRef !== workItemId
       || (item.state !== 'verification' && item.state !== 'merge_ready' && item.state !== 'done')
       || (item.state === 'verification' && summary.status !== 'publishing')) {
       throw new Error('root backlog identity or merge state mismatch');

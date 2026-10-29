@@ -45,6 +45,7 @@ import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/type
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
 import { resolveBacklogExecutionBase } from '../domain/backlog/creation.js';
+import { parseWorkItemId } from '../domain/work-item/identity.js';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
 import {
@@ -104,9 +105,32 @@ function formatReworkContext(rework: import('../domain/backlog/index.js').Rework
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
+/**
+ * The issue number of a backlog reference.
+ *
+ * The reference is either a provider-local issue number or a canonical global
+ * identity; both name the same issue number.
+ */
+function issueNumberOf(reference: string): number {
+  if (/^[1-9]\d*$/.test(reference)) return Number(reference);
+  try {
+    return parseWorkItemId(reference).issueNumber;
+  } catch {
+    return 0;
+  }
+}
+
 export interface RunnerOptions {
   /** Canonical backlog ID. */
   backlogId: string;
+  /**
+   * The canonical global identity of the work item being executed.
+   *
+   * It is the identity the run, its events and its runtime record carry. It
+   * is never derived from the provider-local backlog id, because the same
+   * issue number in two repositories is two different work items.
+   */
+  workItemId?: string;
   observationRunId?: string;
   observationWorkItemId?: string;
   auditRequired?: boolean;
@@ -369,7 +393,7 @@ export class WorkflowRunner {
     let baseBranch = options.baseBranch ?? 'main';
 
     const backlogId = options.backlogId;
-    const iid = requestedIid ?? (Number.isSafeInteger(Number(backlogId)) ? Number(backlogId) : 0);
+    const iid = requestedIid ?? issueNumberOf(backlogId);
     let terminalOutcome: RunOutcomeStatus = 'failed';
     this.resourceScope = undefined;
     this.activeBacklog = undefined;
@@ -1352,7 +1376,7 @@ export class WorkflowRunner {
     return {
       traceId: runId,
       runId,
-      workItemId: options.observationWorkItemId ?? backlogId,
+      workItemId: options.observationWorkItemId ?? options.workItemId ?? backlogId,
       profileId: process.env.AFK_PROFILE ?? 'local',
       attempt: 1,
       actor: { kind: 'system', id: session },

@@ -1,57 +1,79 @@
 import { createHash } from 'node:crypto';
-import type { BacklogCreateInput, BacklogItem, BacklogManagementProvider } from './index.js';
+import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogManagementProvider } from './index.js';
 import { BACKLOG_METADATA } from './initialization.js';
 import { validateBusinessTag } from './tags.js';
-import { parseWorkItemId } from '../work-item/identity.js';
+import {
+  canonicalizeBacklogReference,
+  encodeBacklogRelations,
+  type BacklogMetadataScope,
+} from './metadata-codec.js';
+import type { WorkItemId } from '../work-item/identity.js';
 
-export function canonicalBacklogReference(value: string): string {
-  const normalized = value.trim();
-  if (normalized.includes(':')) return parseWorkItemId(normalized).id;
-  const issueId = Number(normalized);
-  if (!/^[0-9]+$/.test(normalized) || !Number.isSafeInteger(issueId) || issueId <= 0) {
-    throw new Error(`tracker backlog id must be a positive integer: ${value}`);
-  }
-  return String(issueId);
+export interface BacklogCreatePlan {
+  title: string;
+  description: string;
+  state: 'ready' | 'prd';
+  executionMode: BacklogExecutionMode;
+  /** Canonical global identity of the organizational parent. */
+  parentId?: WorkItemId;
+  /** Canonical global identity of the execution base. */
+  baseBacklogId?: WorkItemId;
+  /** Canonical global identities this item waits for. */
+  dependsOn: WorkItemId[];
+  tags: string[];
+  labels: string[];
+  idempotencyLabel?: string;
+  links: { parent?: BacklogItem; executionBase?: BacklogItem; dependencies: BacklogItem[] };
 }
 
-export function validateBacklogRelations(labels: readonly string[], selfIds: readonly string[] = [], allowLegacyBase = false): void {
-  const relations = labels.filter(label => ['parent::', 'base::', 'depends-on::', 'depends_on::'].some(prefix => label.startsWith(prefix)))
-    .map(label => label.replace(/^depends_on::/, 'depends-on::'));
-  if (new Set(relations).size !== relations.length
-    || ['parent::', 'base::'].some(prefix => relations.filter(label => label.startsWith(prefix)).length > 1)) {
-    throw new Error('invalid backlog relationship metadata: duplicate parent, base, or dependency');
-  }
-  for (const label of relations) {
-    const value = label.slice(label.indexOf('::') + 2);
-    if (allowLegacyBase && /^base::prd-[1-9]\d*$/.test(label)) continue;
-    if (canonicalBacklogReference(value) !== value || selfIds.includes(value)) {
-      throw new Error(`invalid backlog relationship metadata: ${label} must reference another canonical backlog ID`);
-    }
-  }
+/** The provider surface a creation plan needs. */
+export interface BacklogCreatePlanner {
+  get(id: string): Promise<BacklogItem>;
+  /** The canonical identity scope of the project the plan writes to. */
+  readonly scope?: BacklogMetadataScope;
 }
 
-export async function planBacklogCreate(provider: Pick<BacklogManagementProvider, 'get'>, input: BacklogCreateInput) {
+/**
+ * Resolve one relationship reference to a canonical global identity.
+ *
+ * A reference that names no project — a bare issue number — belongs to the
+ * project the provider writes to. Without that scope the reference cannot be
+ * resolved, because the same issue number means different issues in different
+ * repositories.
+ */
+function resolveReference(value: string, scope: BacklogMetadataScope | undefined): WorkItemId {
+  if (!scope) {
+    throw new Error('backlog provider does not expose an identity scope; a relationship reference must use platform:project#number');
+  }
+  return canonicalizeBacklogReference(value, scope);
+}
+
+/**
+ * Plan the creation of one backlog item.
+ *
+ * The dry run and the real creation share this plan, so what an operator
+ * previewed is exactly what the provider receives.
+ */
+export async function planBacklogCreate(provider: BacklogCreatePlanner, input: BacklogCreateInput): Promise<BacklogCreatePlan> {
   const title = input.title.trim();
   if (!title) throw new Error('backlog title must not be empty');
   const state = input.stage ?? 'ready';
   if (state !== 'ready' && state !== 'prd') throw new Error(`invalid creation stage: ${state}`);
   const executionMode = input.executionMode ?? 'afk';
   if (executionMode !== 'afk' && executionMode !== 'hitl') throw new Error(`invalid execution mode: ${executionMode}`);
-  const parentId = input.parentId === undefined ? undefined : canonicalBacklogReference(input.parentId);
-  const baseBacklogId = input.baseBacklogId === undefined ? undefined : canonicalBacklogReference(input.baseBacklogId);
-  const dependsOn = [...new Set((input.dependsOn ?? []).map(canonicalBacklogReference))];
+  const scope = provider.scope;
+  const parentId = input.parentId === undefined ? undefined : resolveReference(input.parentId, scope);
+  const baseBacklogId = input.baseBacklogId === undefined ? undefined : resolveReference(input.baseBacklogId, scope);
+  const dependsOn = [...new Set((input.dependsOn ?? []).map(id => resolveReference(id, scope)))];
   const tags = [...new Set((input.tags ?? []).map(validateBusinessTag))];
   if (input.idempotencyKey !== undefined && !input.idempotencyKey.trim()) throw new Error('idempotency key must not be empty');
   const idempotencyLabel = input.idempotencyKey === undefined ? undefined
     : `idempotency::${createHash('sha256').update(input.idempotencyKey).digest('hex')}`;
   const labels = [
     BACKLOG_METADATA.stateLabels[state], BACKLOG_METADATA.executionModeLabels[executionMode], ...tags,
-    ...(parentId ? [`parent::${parentId}`] : []),
-    ...(baseBacklogId ? [`base::${baseBacklogId}`] : []),
-    ...dependsOn.map(id => `depends-on::${id}`),
+    ...encodeBacklogRelations({ parentId, baseBacklogId, dependsOn }),
     ...(idempotencyLabel ? [idempotencyLabel] : []),
   ];
-  validateBacklogRelations(labels);
   const [parent, executionBase, dependencies] = await Promise.all([
     parentId ? provider.get(parentId) : undefined,
     baseBacklogId ? provider.get(baseBacklogId) : undefined,
@@ -62,20 +84,37 @@ export async function planBacklogCreate(provider: Pick<BacklogManagementProvider
     idempotencyLabel, links };
 }
 
+/**
+ * The human-readable link label of a backlog item.
+ *
+ * The issue number is what a reader recognizes; the canonical identity is
+ * machinery, not something to put in a body a human reads.
+ */
+function linkLabel(item: BacklogItem): string {
+  return `#${item.issueNumber ?? item.id}`;
+}
+
 export function renderBacklogDescription(
   description: string,
   links: { parent?: BacklogItem; executionBase?: BacklogItem; dependencies: BacklogItem[]; self?: BacklogItem },
 ): string {
   const entries = [
-    ...(links.self?.webUrl ? [`- This backlog: [#${links.self.id}](${links.self.webUrl})`] : []),
-    ...(links.parent?.webUrl ? [`- Parent backlog: [#${links.parent.id}](${links.parent.webUrl})`] : []),
-    ...(links.executionBase?.webUrl ? [`- Execution base: [#${links.executionBase.id}](${links.executionBase.webUrl})`] : []),
-    ...links.dependencies.flatMap(item => item.webUrl ? [`- Depends on: [#${item.id}](${item.webUrl})`] : []),
+    ...(links.self?.webUrl ? [`- This backlog: [${linkLabel(links.self)}](${links.self.webUrl})`] : []),
+    ...(links.parent?.webUrl ? [`- Parent backlog: [${linkLabel(links.parent)}](${links.parent.webUrl})`] : []),
+    ...(links.executionBase?.webUrl ? [`- Execution base: [${linkLabel(links.executionBase)}](${links.executionBase.webUrl})`] : []),
+    ...links.dependencies.flatMap(item => item.webUrl ? [`- Depends on: [${linkLabel(item)}](${item.webUrl})`] : []),
   ];
   if (entries.length === 0) return description;
   return `${description.trimEnd()}\n\n## Backlog Links\n\n${entries.join('\n')}\n`;
 }
 
+/**
+ * The Git branch an execution starts from.
+ *
+ * An unfinished base backlog selects its own branch; a completed or merged
+ * base falls back to the configured branch. The legacy `prd-N` base selects
+ * the `prd/N` branch of the repository that owned the PRD.
+ */
 export async function resolveBacklogExecutionBase(
   provider: Pick<BacklogManagementProvider, 'get'>, item: BacklogItem, fallback: string,
 ): Promise<string> {

@@ -1,4 +1,5 @@
 import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
+import type { WorkItemScope } from '../work-item/types.js';
 
 /**
  * Physical capability boundary for backlog management and QA. It forwards
@@ -7,6 +8,11 @@ import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogList
  */
 export class ManagementBacklogProvider implements QABacklogProvider {
   constructor(private readonly provider: BacklogProvider) {}
+
+  /** The canonical identity scope of the project the wrapped provider writes to. */
+  get scope(): WorkItemScope | undefined {
+    return this.provider.scope;
+  }
 
   get(id: string): Promise<BacklogItem> { return this.provider.get(id); }
   async adopt(id: string): Promise<BacklogItem> {

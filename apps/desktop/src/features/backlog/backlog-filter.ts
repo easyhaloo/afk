@@ -3,6 +3,7 @@ import type { BacklogItem, BacklogState } from "../../../shared/backlog-contract
 export type SourceFilter = "all" | BacklogState;
 
 export const BACKLOG_STATE_LABELS: Record<BacklogState, string> = {
+  prd: "需求父项",
   ready: "待处理",
   rework: "返工中",
   in_progress: "进行中",

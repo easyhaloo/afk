@@ -1,6 +1,7 @@
 import type { BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
+import type { WorkItemScope } from '../work-item/types.js';
 
 /** GitHub's production backlog boundary. Platform label mapping stays private. */
 export class GitHubBacklogProvider implements BacklogProvider {
@@ -12,6 +13,9 @@ export class GitHubBacklogProvider implements BacklogProvider {
     this.implementation = new TrackerBacklogProvider(tracker, options);
     this.capabilities = this.implementation.capabilities;
   }
+
+  /** The canonical identity scope of the project this provider writes to. */
+  get scope(): WorkItemScope | undefined { return this.implementation.scope; }
 
   get(id: string): Promise<BacklogItem> { return this.implementation.get(id); }
   adopt(id: string): Promise<BacklogItem> { return this.implementation.adopt(id); }

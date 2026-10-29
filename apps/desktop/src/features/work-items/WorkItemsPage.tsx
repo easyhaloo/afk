@@ -37,6 +37,7 @@ const emptyInventory: WorkItemInventoryResult = { items: [], projects: [], diagn
 const pageSize = 50;
 
 const stateLabels: Record<GlobalWorkItem["state"], string> = {
+  prd: "需求父项",
   ready: "待处理",
   rework: "返工",
   in_progress: "执行中",

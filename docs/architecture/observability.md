@@ -29,10 +29,13 @@ node apps/cli/dist/index.js run --backlog-id 123 --execution-mode batch
 
 `WorkflowRunner` 在 `AFK_EVENT_STORE_DIR` 追加 JSONL 审计事件；不能持久化事件时抛出 `AuditPersistenceError`，不会静默跳过审计。
 
-Provider Backlog owns business identity and lifecycle. `BacklogItem.id` is
-recorded as `Run.workItemId` and runtime/event `backlogId`; `runId` identifies
-only one attempt. Runtime heartbeat freshness is diagnostic: `stale` never
-changes the Provider Backlog state. Desktop launch records in
+Provider Backlog owns business identity and lifecycle. `BacklogItem.id` is the
+canonical global identity (`platform:projectKey#issueNumber`) and it is what
+`Run.workItemId` and the event context carry; `runId` identifies only one
+attempt. The runtime record keeps the provider-local issue number in
+`backlogId`, because that is the key Desktop joins the implementation and QA
+phases of one execution by. Runtime heartbeat freshness is diagnostic: `stale`
+never changes the Provider Backlog state. Desktop launch records in
 `~/.afk/workspaces/<workspace-hash>/work-item-runs.json` are Worker launch receipts,
 not execution or business-state evidence.
 

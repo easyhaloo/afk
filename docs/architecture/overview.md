@@ -238,22 +238,52 @@ the `backlog.adopt` envelope. Execution and loop never invoke adoption implicitl
 ## Work-item and execution identity
 
 The Provider Backlog is the business source of truth. Its `BacklogItem.id` is
-carried unchanged through `afk run --backlog-id <id>`, `Run.workItemId`,
-`TaskRuntimeRecord.backlogId`, TUI projections, and Desktop summaries.
-`runId` identifies one execution attempt and must never replace the Backlog ID.
+the **canonical global identity** of the item: `platform:projectKey#issueNumber`,
+for example `github:acme/api#42`. The same identity is carried through
+`afk run --backlog-id <id>`, `Run.workItemId`, the run events, TUI projections
+and Desktop summaries. `runId` identifies one execution attempt and must never
+replace the backlog identity.
+
+One item has one identity, whichever provider served it. Two repositories with
+the same issue number stay two different backlog items, and every relationship
+edge names the item it points at unambiguously. Relationship fields
+(`parentId`, `baseBacklogId`, `dependsOn`) carry the same canonical form.
+
+The canonical project key is derived by one rule, `canonicalProjectKey()`:
+GitHub projects are `owner/repo`; GitLab projects are `host/group/project` on a
+self-hosted instance and the bare `group/project` on gitlab.com. A first path
+segment that contains a dot is read as a host, which is the same rule the
+tracker adapter uses to route a relationship to another project.
+
+A provider accepts both spellings of a reference: a bare issue number, which
+belongs to the project that provider writes to, and a canonical global
+identity, which may address another repository on the same provider host.
+Cross-platform and cross-host references are rejected.
+
+Relationship labels are stored in canonical form (`parent::github:acme/api#42`).
+Legacy bare-number labels (`parent::42`) are still read and resolve against the
+owning project. The backlog metadata codec
+(`packages/runtime/src/domain/backlog/metadata-codec.ts`) is the only place
+that parses, validates and serializes these labels; the tracker adapter, the
+global inventory and the cross-project graph all use it, so a `parent::` edge
+means the same thing everywhere.
 
 Relationships have separate meanings: `parentId` is organizational grouping,
 `dependsOn` controls scheduling, and `baseBacklogId` selects an explicit Git
 execution base. Neither parent nor dependency edges implicitly select a branch.
 
+The backlog graph spans projects. A PRD anchor may live in the requirements
+repository while its implementation children live in the service repository, so
+the provider asks the cross-project graph for the children of an item before it
+claims it; a parent with children in another repository is never runnable. When
+the graph cannot be read, the adapter falls back to the local project scan and
+reports the failure.
+
 Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
-accept a positive issue number in the explicitly selected project, or a qualified
-`platform:projectKey#issueNumber` reference. Qualified references are preserved
-in provider labels and resolved against that project, so identical issue numbers
-in different repositories remain distinct. Cross-project parents and dependencies
-are supported within the authenticated provider host; cross-platform and cross-host
-references are rejected. A Git base must belong to the execution repository.
-Multi-repository Git bases belong in an execution manifest.
+accept a positive issue number in the explicitly selected project, or a
+qualified `platform:projectKey#issueNumber` reference. A Git base must belong
+to the execution repository. Multi-repository Git bases belong in an execution
+manifest.
 
 For `afk run`, an unfinished base backlog selects its branch before workspace
 preparation, and a completed/merged base falls back to the configured base.
@@ -262,7 +292,9 @@ Legacy `base::prd-N` metadata still selects `prd/N`. Implementation and QA use
 the same backlog base resolver; the normal target branch is unchanged.
 
 `--stage prd` creates an organizational anchor with `stage::prd`, which is
-never execution eligible. Existing PRD anchors are recognized even without mode
+never execution eligible. A PRD parent is its own core work item state, not a
+blocked item: an organizational parent and an item that waits for a human are
+different facts. Existing PRD anchors are recognized even without mode
 labels. Issues without mode labels default to `hitl` until explicitly adopted.
 `--dry-run` validates the same creation plan, including referenced issues, and
 prints the title, description, labels and relationships without provider writes.
@@ -287,9 +319,13 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 
 An item is runnable only when it is in `ready` or `rework`, uses the `afk` execution mode,
 has no child items, and all `dependsOn` items are `done`. `parentId` groups
-child items; a parent itself is never runnable. Any automation failure,
+child items; a parent itself is never runnable. "No child items" is decided on
+the backlog graph, so children in another repository count as children. Any automation failure,
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
+
+A `prd` item is an organizational parent. It is never execution eligible, and
+it is not `blocked`: it groups children instead of waiting for a human.
 
 QA FAIL persists a new rework record in the provider's issue comment/note,
 supersedes any active record, and increments `ReworkRecord.attempt` from the

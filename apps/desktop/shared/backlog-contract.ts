@@ -18,6 +18,7 @@ import {
 } from "./work-item-run-validation.js";
 
 export const BACKLOG_STATES = [
+  "prd",
   "ready",
   "rework",
   "in_progress",

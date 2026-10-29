@@ -1,4 +1,5 @@
 import type { ProviderProjectRef } from '../../domain/work-item/types.js';
+import { canonicalProjectKey } from '../../domain/work-item/identity.js';
 import type { CatalogPageResult, ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
 
 export interface GitHubCatalogProject {
@@ -102,7 +103,7 @@ export class GitLabProviderCatalog implements ProviderCatalog {
     const projects = await collectPages(page => this.client.listProjectsPage(page, this.perPage), this.perPage);
     return mapPageResult(projects, project => ({
       platform: this.platform,
-      projectKey: `${this.scopeKey}/${project.pathWithNamespace}`,
+      projectKey: canonicalProjectKey(this.platform, project.pathWithNamespace, this.scopeKey),
       providerHost: this.scopeKey,
       providerProjectId: String(project.id),
       name: project.name,

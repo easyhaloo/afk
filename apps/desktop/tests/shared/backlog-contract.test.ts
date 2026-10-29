@@ -20,7 +20,7 @@ import {
 describe("Backlog shared contract", () => {
   it("exports the canonical state and mode unions", () => {
     expect(BACKLOG_STATES).toEqual([
-      "ready", "rework", "in_progress", "verification", "merge_ready", "done", "blocked",
+      "prd", "ready", "rework", "in_progress", "verification", "merge_ready", "done", "blocked",
     ]);
     expect(BACKLOG_EXECUTION_MODES).toEqual(["afk", "hitl"]);
   });

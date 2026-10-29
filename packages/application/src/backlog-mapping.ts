@@ -10,6 +10,10 @@ import type { WorkItem, WorkState } from '@afk/core';
  * Electron desktop client, which is ESM like this package. One table, one
  * place a vocabulary change has to land — see
  * docs/architecture/blueprints/core-layer-architecture_zh.md.
+ *
+ * `prd` keeps its own core state. An organizational PRD parent and an item
+ * that is blocked on a human are different facts, and collapsing them makes
+ * the work item model unable to say which one it is.
  */
 
 export const BACKLOG_STATES = [
@@ -30,7 +34,7 @@ export const BACKLOG_EXECUTION_MODES = ['afk', 'hitl'] as const;
 export type BacklogExecutionMode = (typeof BACKLOG_EXECUTION_MODES)[number];
 
 export const coreWorkStateByBacklogState = {
-  prd: 'blocked',
+  prd: 'prd',
   ready: 'ready',
   rework: 'rework',
   in_progress: 'implementing',

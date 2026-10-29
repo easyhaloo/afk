@@ -129,7 +129,9 @@ describe('built CLI workflows', () => {
     const description = join(root, 'description.md');
     await writeFile(description, 'Implement login\n\n- [ ] Login test passes\n');
     const created = await backlog(['create', 'Login workflow', '--description-file', description, '--tag', 'billing']);
-    expect(created.data).toMatchObject({ id: '1', title: 'Login workflow', state: 'ready', executionMode: 'afk', tags: ['billing'] });
+    // The backlog carries its canonical global identity, not a bare issue number.
+    expect(created.data).toMatchObject({ issueNumber: 1, title: 'Login workflow', state: 'ready', executionMode: 'afk', tags: ['billing'] });
+    expect(created.data.id).toMatch(/^gitlab:127\.0\.0\.1:\d+\/acme\/api#1$/);
     expect((await backlog(['list', '--state', 'ready', '--tag', 'billing'])).data).toHaveLength(1);
     expect((await backlog(['show', '--id', '1'])).data.description).toContain('Login test passes');
     expect((await backlog(['tag', 'add', '--id', '1', '--tag', 'urgent'])).data.tags).toContain('urgent');

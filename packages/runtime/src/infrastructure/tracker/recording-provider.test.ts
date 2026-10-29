@@ -53,6 +53,20 @@ describe('recording backlog provider', () => {
     rmSync(repository, { recursive: true, force: true });
   });
 
+  it('forwards the identity scope of the provider it wraps', async () => {
+    const scope = { platform: 'github' as const, projectKey: 'owner/repo' };
+    const provider = new RecordingBacklogProvider(
+      { ...stubProvider(), scope },
+      { platform: 'github', project: 'owner/repo' },
+      repository,
+      directory,
+    );
+
+    // A wrapper that drops the scope makes every relationship reference
+    // unresolvable, so the creation plan cannot canonicalize it.
+    expect(provider.scope).toEqual(scope);
+  });
+
   it('records the project, the repository and the issue it read', async () => {
     const provider = new RecordingBacklogProvider(
       stubProvider(),

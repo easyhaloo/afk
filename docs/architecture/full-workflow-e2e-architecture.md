@@ -8,13 +8,13 @@
 | --- | --- |
 | CLI 命令注册 | [`apps/cli/src/command-registry.ts`](../../apps/cli/src/command-registry.ts) |
 | `afk run` | [`apps/cli/src/commands/run.ts`](../../apps/cli/src/commands/run.ts)、[`packages/runtime/src/application/workflows/run-cmd.ts`](../../packages/runtime/src/application/workflows/run-cmd.ts) |
-| `afk loop` | [`apps/cli/src/commands/loop.ts`](../../apps/cli/src/commands/loop.ts)、[`packages/runtime/src/application/runners/loop-runner.ts`](packages/runtime/src/application/runners/loop-runner.ts) |
+| `afk loop` | [`apps/cli/src/commands/loop.ts`](../../apps/cli/src/commands/loop.ts)、[`packages/runtime/src/application/modules/loop-runner.ts`](../../packages/runtime/src/application/runners/loop-runner.ts) |
 | 单项闭环 | [`packages/runtime/src/application/workflows/execute-work-item.ts`](../../packages/runtime/src/application/workflows/execute-work-item.ts) |
 | 工作流执行 | [`packages/runtime/src/application/workflow-engine.ts`](../../packages/runtime/src/application/workflow-engine.ts) |
 | 模板加载与编译 | [`packages/runtime/src/domain/templates/loader.ts`](../../packages/runtime/src/domain/templates/loader.ts)、[`packages/runtime/src/domain/templates/builtin.ts`](../../packages/runtime/src/domain/templates/builtin.ts)、[`packages/runtime/src/application/workflows/plan-executor.ts`](../../packages/runtime/src/application/workflows/plan-executor.ts) |
-| QA | [`apps/cli/src/commands/qa.ts`](../../apps/cli/src/commands/qa.ts)、[`packages/runtime/src/application/runners/qa-runner.ts`](packages/runtime/src/application/runners/qa-runner.ts) |
+| QA | [`apps/cli/src/commands/qa.ts`](../../apps/cli/src/commands/qa.ts)、[`packages/runtime/src/application/modules/qa-runner.ts`](../../packages/runtime/src/application/runners/qa-runner.ts) |
 | 审计事件 | [`packages/core/src/events.ts`](../../packages/core/src/events.ts)、[`packages/runtime/src/infrastructure/observability/jsonl-event-store.ts`](../../packages/runtime/src/infrastructure/observability/jsonl-event-store.ts) |
-| 桌面端与 E2E | [`apps/desktop/architecture.md`](apps/desktop/architecture.md)、[`apps/desktop/playwright.config.ts`](../../apps/desktop/playwright.config.ts)、[`apps/desktop/tests/e2e/_helpers/launch.ts`](../../apps/desktop/tests/e2e/_helpers/launch.ts) |
+| 桌面端与 E2E | [`apps/desktop/ARCHITECTURE.md`](../../apps/desktop/architecture.md)、[`apps/desktop/playwright.config.ts`](../../apps/desktop/playwright.config.ts)、[`apps/desktop/tests/e2e/_helpers/launch.ts`](../../apps/desktop/tests/e2e/_helpers/launch.ts) |
 
 ## 1. 范围与判定口径
 
@@ -153,18 +153,18 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 | 字段 | 所属对象 | 含义 | 使用边界 |
 | --- | --- | --- | --- |
-| `BacklogItem.id` | Provider Backlog | Provider 内部 backlog 主键 | 传给 `afk run --backlog-id`，用于状态迁移和 claim |
-| `workItemId` / `Run.workItemId` | 全局工作项、`Run`、事件上下文 | manifest-bound `executeWorkItem` 显式使用全局身份，例如 `github:team/repo#158`；普通 `afk run` 的 `Run.workItemId` / observation 默认沿用 Provider `backlogId` | 必须按入口核对命名空间，不能假定所有 `Run.workItemId` 都已全局化，也不能用 `runId` 替代 |
+| `BacklogItem.id` | Provider Backlog | 规范全局身份 `platform:projectKey#issueNumber` | 传给 `afk run --backlog-id`，用于状态迁移和 claim；不同仓库的相同 issue 编号是两个不同工作项 |
+| `workItemId` / `Run.workItemId` | 全局工作项、`Run`、事件上下文 | 全局身份，例如 `github:team/repo#158`；manifest-bound `executeWorkItem` 与普通 `afk run` 都使用它 | 已经是全局化的，不得用 `runId` 替代 |
 | `runId` | 核心 `Run`、事件流、runtime | 一次执行或阶段的身份 | 闭环实现阶段使用 `executionId`；QA runtime 独立使用 `qa-<backlogId>-<timestamp>-runtime`，不另建同名闭环事件流 |
 | `executionId` | `executeWorkItem` 结果、journal、闭环审计 | loop/闭环的一次执行编排身份 | 默认生成 UUID；当前闭环中同时作为 observation `runId` 和 `traceId` |
-| `parentId` | `BacklogItem` | 组织上的父子分组 | 不选择 Git 基线；root 与 child 的 QA 合并策略不同 |
-| `dependsOn` | `BacklogItem` | 任务级调度依赖 | 所有依赖达到 `done` 后任务才可运行；不自动选择分支 |
-| `baseBacklogId` | Provider backlog 投影 | 显式的未合并 Git 执行基线 | 用于 stacked work 的基线选择；和 `parentId`、`dependsOn` 是不同关系 |
+| `parentId` | `BacklogItem` | 组织上的父子分组，规范全局身份 | 不选择 Git 基线；root 与 child 的 QA 合并策略不同；跨仓子项由 backlog 图发现 |
+| `dependsOn` | `BacklogItem` | 任务级调度依赖，规范全局身份 | 所有依赖达到 `done` 后任务才可运行；不自动选择分支 |
+| `baseBacklogId` | Provider backlog 投影 | 显式的未合并 Git 执行基线，规范全局身份（或存量 `prd-N` 分支标记） | 用于 stacked work 的基线选择；和 `parentId`、`dependsOn` 是不同关系 |
 | `baseWorkItemId` | `@afk/core` `WorkLineage` | 核心模型中对应的显式执行基线字段 | 进入 core policy 时表示相同语义；适配层不得把它与父项或依赖项混用 |
 | `providerRef` | `BacklogItem` | Provider 原始引用 | 作为 Provider 边界校验字段，不是执行尝试 ID |
 | `correlationId` | `RunEvent` | 事件所属执行关联 | projection 用它生成 `executionId`；必须与同一事件流身份一致 |
 | `leaseEpoch` | `ObservationContext` | claim/租约世代 | 用于识别租约变更，不能当作任务或 run 身份 |
-| `TaskRuntimeRecord.backlogId` / `providerRef` | canonical runtime | Provider backlog 主键及 Provider 原始引用 | 不要求 `backlogId` 等于全局 `workItemId`；Desktop runtime 服务还按 workspace、可用的 `providerRef` 和启动时间过滤，执行历史按事件中的 `workItemId` 查询 |
+| `TaskRuntimeRecord.backlogId` / `providerRef` | canonical runtime | Provider 本地 issue 编号及 Provider 原始引用 | `backlogId` 不等于全局 `workItemId`，因为它是 Desktop 关联实现阶段与 QA 阶段的键；Desktop runtime 服务还按 workspace、可用的 `providerRef` 和启动时间过滤，执行历史按事件中的 `workItemId` 查询 |
 
 最小不变量是：`Run.workItemId === event.context.workItemId`，`run.requested.run.id === event.context.runId`；manifest-bound 闭环的 journal 与事件流必须使用同一个 `executionId` 和全局 `workItemId`。实现 runtime 的 `runId` 等于该 `executionId`，QA runtime 则通过 `backlogId`、`providerRef`、workspace 和时间关联，不能要求两阶段 runtime 的 `runId` 相等。执行历史投影的 `awaiting_merge` 对应 Provider 的 `merge_ready`，两者不是同一状态枚举。
 
@@ -300,37 +300,6 @@ QA 的验证证据不再只留在本机运行时归档里。Change Request 正�
 GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` 在浏览器里是 404，GitHub 只允许用带 token 的 `GET /repos/{owner}/{repo}/releases/assets/{asset_id}` 取内容，PR 正文里的链接点不开。实测 draft 附件经该 API 端点返回 200，published 后的 `browser_download_url` 无需认证即返回 200 且字节一致，所以附件 release 以 `prerelease: true` 发布：不占用 "Latest release"，链接却是评审者能直接打开的。重跑同一工作项时复用同一个 release，GitHub 拒绝同名附件，所以上传前先删除旧附件。
 
 这条链路此前从未接通：`TrackerProvider.uploadArtifacts` 有 GitLab 实现却没有调用方，GitHub 实现是返回空串的 TODO 空壳。Backlog 229 的 QA 因此只发出两行正文，逐条 AC 证据只落在 `~/.afk/runtime/tasks/diagnostics/<runId>/result.json`，二进制产物无处可寻（QA 提交里 `.afk/` 文件数为 0）。回归测试覆盖证据渲染、change provider 的上传接线与上传失败降级、GitHub pre-release 的创建与复用、同名附件先删后传、单个附件失败不影响其余附件，以及 runner 在缺清单时的留痕。
-
-### 7.4 各阶段证据的出口（2026-10-22）
-
-一次工作项的证据分两个阶段落在两个地方，skill 必须与之一致，否则 agent 会执行不存在的步骤。
-
-| 阶段 | 证据 | 出口 | 持久性 |
-| --- | --- | --- | --- |
-| 实现 | 命令输出等文本 | commit message 的 Progress 清单 | 随分支到达评审者 |
-| 实现 | 截图、trace、二进制 | 工作树内的 `.afk/artifacts.txt` 记录绝对路径 | 不持久：`.afk/` 被 Git 忽略，且工作树在运行结束后被清理 |
-| QA | 逐条 AC 的预期与实际、行为断言、附件 | Change Request 正文的 `## Verification Evidence` 段，附件上传到 provider 的 release | 持久，且评审者无需访问本机 |
-
-实现阶段不上传任何文件：那个阶段还没有 Change Request 可挂载，工作树也会在运行结束后被删除，因此只有文本证据能随分支存活。skill 曾要求 agent `git add .afk/artifacts.txt`——该路径被 Git 忽略，命令必然被拒绝；skill 还承诺一个并不存在的 "wrapup step" 会上传并嵌入 URL。两处都已改正，并由 `tests/contract/skill-evidence-contract.test.ts` 守卫：任何 skill 不得再要求暂存 `.afk/`，且必须写明附件由 QA 阶段上传。
-
-### 7.5 合并后的状态收敛（2026-10-22）
-
-人工在 GitLab 或 GitHub 上合并 Change Request 之后，backlog 仍停在 `merge_ready` + `hitl`：平台只负责关 issue，不改 AFK 的标签，而从 `merge_ready` 到 `done` 需要一次带审计的确认。
-
-`confirm-merge` 同时承担"合并"与"置为 done"，因此它始终是人工动作——它会在变更仍 open 时把 PR 合掉。自动收敛必须另走一条只读的路径：`reconcileMergedBacklog` 只在关联变更**已经 merged** 时把 backlog 收敛为 `done`，变更仍 open 时原样返回并说明原因，合并门禁的语义不变。`afk backlog reconcile-merge --id <id>` 是它的命令入口，`afk loop` 的每次轮询也会顺带收敛它自己绑定的那一项。
-
-收敛前逐项复核，与人工确认同标准：必须是根 backlog、状态为 `merge_ready` + `hitl`、变更的源分支是 QA 验证分支或实施分支、目标分支与配置一致、变更确实已 merged。任一条不满足即不动作。
-
-判定必须看**标签**而不是推导出来的状态。Provider 侧的推导是"issue 关闭即为 done"，与标签无关：变更合并后平台自动关掉 issue，backlog 读出来已经是 `done`，但标签仍停在 `stage::merge-ready`——评审者在平台上看到的仍是"待合并"。因此 `BacklogItem.labeledState` 单独暴露标签状态，收敛与人工确认都按它判定；`confirm-merge` 同样按标签判定，否则它会在"已 done"上直接返回，永远不修标签。
-
-触发方式有两种，调用的是同一条命令：
-
-| 触发 | 位置 | 适用 |
-| --- | --- | --- |
-| 轮询 | `afk loop` 每次 poll 顺带收敛自己绑定的那一项 | 本机常驻 daemon |
-| 事件 | GitHub Actions `qa-merge-reconcile.yml`（`pull_request: closed` + `merged == true`） | 平台侧即时，daemon 不在时也生效 |
-
-平台侧的 workflow 只做两件事：从标题 `Backlog <id>` 或正文 `Closes #<id>` 取出 backlog id，然后调用 `afk backlog reconcile-merge`；判定完成的依据是**标签变成 `done`**，而不是这次调用是否发生了转移（人工已确认过时同样算成功）。它需要 `issues: write` 权限，AFK CLI 由仓库源码构建。GitLab 的等价物是 `merge_request` 事件上的 CI job 调用同一条命令。
 
 ## 8. 验证边界与建议用例
 

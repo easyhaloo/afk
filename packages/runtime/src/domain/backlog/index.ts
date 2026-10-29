@@ -16,13 +16,37 @@ export { BACKLOG_METADATA } from './initialization.js';
 export type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
 export { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 export type { GlobalWorkItem, ProviderProjectRef, WorkItemId, WorkItemIdentityParts, WorkItemPlatform } from '../work-item/types.js';
-export { encodeWorkItemIdForPath, formatWorkItemId, parseWorkItemId, WORK_ITEM_PLATFORMS } from '../work-item/identity.js';
+export { encodeWorkItemIdForPath, formatWorkItemId, parseWorkItemId, WORK_ITEM_PLATFORMS, canonicalProjectKey, gitLabProjectHost } from '../work-item/identity.js';
+export type { WorkItemScope } from '../work-item/identity.js';
+export {
+  BACKLOG_RELATION_PREFIX,
+  canonicalizeBacklogReference,
+  decodeBacklogMetadata,
+  decodeBacklogRelations,
+  encodeBacklogRelations,
+  isBacklogRelationLabel,
+} from './metadata-codec.js';
+export type { BacklogMetadata, BacklogMetadataOptions, BacklogMetadataScope, BacklogRelations } from './metadata-codec.js';
+export { buildBacklogGraph } from './graph.js';
+export type { BacklogGraph, BacklogGraphSource } from './graph.js';
+export { projectBacklogItem } from './projection.js';
+export type { BacklogIssueView } from './projection.js';
+export { deriveBacklogBranchName } from './branch-name.js';
 import type { BacklogClaim } from './claim.js';
 import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
-import type { ProviderProjectRef, WorkItemId } from '../work-item/types.js';
+import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
+import { parseWorkItemId } from '../work-item/identity.js';
 import { validateBusinessTag } from './tags.js';
+import { deriveBacklogBranchName } from './branch-name.js';
 
 export interface BacklogItem {
+  /**
+   * The canonical global identity of this item: `platform:projectKey#issueNumber`.
+   *
+   * One identity, whichever provider served the item. Two repositories with
+   * the same issue number stay two different backlog items, and every
+   * relationship edge names the item it points at unambiguously.
+   */
   id: string;
   /** Canonical global identity supplied by provider inventory APIs. */
   workItemId?: WorkItemId;
@@ -34,7 +58,10 @@ export interface BacklogItem {
   description?: string;
   /** Organizational grouping only; it never selects a git base branch. */
   parentId?: string;
-  /** Optional backlog whose unmerged branch is the explicit execution base. */
+  /**
+   * Explicit execution base: the canonical identity of the backlog whose
+   * unmerged branch is the baseline, or the legacy `prd-N` branch token.
+   */
   baseBacklogId?: string;
   dependsOn: string[];
   state: BacklogState;
@@ -81,6 +108,14 @@ export interface BacklogListOptions {
  * It deliberately omits claim() so callers cannot start implementation work.
  */
 export interface BacklogManagementProvider {
+  /**
+   * The canonical identity scope of the project this provider writes to.
+   *
+   * A relationship reference that names no project — a bare issue number —
+   * resolves against this scope, so the stored label always carries a
+   * canonical global identity.
+   */
+  readonly scope?: WorkItemScope;
   get(id: string): Promise<BacklogItem>;
   adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
@@ -101,6 +136,8 @@ export interface QABacklogProvider extends BacklogManagementProvider {
 
 export interface BacklogProvider {
   readonly capabilities?: import('./initialization.js').BacklogProviderCapabilities;
+  /** The canonical identity scope of the project this provider writes to. */
+  readonly scope?: WorkItemScope;
   get(id: string): Promise<BacklogItem>;
   adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
@@ -117,14 +154,10 @@ export interface BacklogProvider {
   isRunnable(item: BacklogItem): Promise<boolean>;
 }
 
-export function deriveBacklogBranchName(id: string): string {
-  const normalized = id.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-  if (!normalized) throw new Error('backlog id must contain at least one usable character');
-  return `afk/backlog-${normalized}`;
-}
-
 export class InMemoryBacklogProvider implements BacklogProvider {
   readonly capabilities = { atomicClaim: true, tags: true, initialization: true } as const;
+  /** Synthetic scope: the in-memory backlog has no provider project. */
+  readonly scope: WorkItemScope = { platform: 'github', projectKey: 'afk/in-memory' };
   private readonly items = new Map<string, BacklogItem>();
   private readonly owners = new Map<string, string>();
   private readonly reworks = new Map<string, ReworkRecord[]>();
@@ -135,9 +168,18 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   }
 
   async get(id: string): Promise<BacklogItem> {
-    const item = this.items.get(id);
+    const item = this.items.get(this.itemKey(id));
     if (!item) throw new Error(`backlog item not found: ${id}`);
     return { ...item, dependsOn: [...item.dependsOn], tags: [...item.tags] };
+  }
+
+  /** Accept a canonical global identity as well as the stored key. */
+  private itemKey(id: string): string {
+    try {
+      return String(parseWorkItemId(id).issueNumber);
+    } catch {
+      return id;
+    }
   }
 
   async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {

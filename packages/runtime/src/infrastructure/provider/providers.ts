@@ -1,5 +1,6 @@
 import type { TrackerProvider } from '../../domain/tracker/types.js';
 import type { BacklogProvider, QABacklogProvider } from '../../domain/backlog/index.js';
+import type { BacklogGraphSource } from '../../domain/backlog/graph.js';
 import { GitHubBacklogProvider } from '../../domain/backlog/github-provider.js';
 import { GitLabBacklogProvider } from '../../domain/backlog/gitlab-provider.js';
 import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
@@ -29,6 +30,18 @@ export interface ProviderBundleOptions {
   claimTtlMs?: number;
   /** Directory that holds the local tracker index. Defaults to the workspace. */
   trackerDirectory?: string;
+  /**
+   * Cross-project backlog relationships.
+   *
+   * A child backlog may live in another repository than its parent, so the
+   * provider needs the whole backlog graph to decide whether an item still
+   * has children.
+   */
+  graph?: BacklogGraphSource;
+  /** Reports that the cross-project graph could not be read. */
+  onGraphError?: (error: unknown) => void;
+  /** The canonical project key of the project the tracker reads. */
+  projectKey?: string;
 }
 
 export function createProviderBundle(

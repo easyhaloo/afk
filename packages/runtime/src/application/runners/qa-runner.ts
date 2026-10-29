@@ -416,7 +416,10 @@ export class QARunner {
     try {
       await this.runtimeManager.start({
         runId,
-        backlogId: backlog.id,
+        // The runtime record is keyed by the provider-local issue number, the
+        // same key the implementation phase writes, so Desktop can join both
+        // phases of one execution.
+        backlogId: String(backlog.issueNumber ?? backlog.id),
         workspace: this.projectRoot,
         providerRef: backlog.providerRef,
         title: backlog.title,

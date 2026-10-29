@@ -1,7 +1,7 @@
 import type { BacklogExecutionMode, BacklogState } from '../backlog/index.js';
-import type { WorkItemId, WorkItemPlatform } from './identity.js';
+import type { WorkItemId, WorkItemPlatform, WorkItemScope } from './identity.js';
 
-export type { ParsedWorkItemId, WorkItemId, WorkItemIdentityParts, WorkItemPlatform } from './identity.js';
+export type { ParsedWorkItemId, WorkItemId, WorkItemIdentityParts, WorkItemPlatform, WorkItemScope } from './identity.js';
 
 export interface ProviderProjectRef {
   platform: WorkItemPlatform;

@@ -1,5 +1,4 @@
-import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index.js';
-import { deriveBacklogBranchName } from './index.js';
+import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState } from './index.js';
 import { FilesystemClaimLock, type ExpiredClaim } from './claim.js';
 import {
   NativeOrLockedClaimStrategy,
@@ -9,14 +8,20 @@ import {
   type ClaimLockFactory,
 } from './claim-strategy.js';
 import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization.js';
-import { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
+import { isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
-import { parseWorkItemId } from '../work-item/identity.js';
-import { planBacklogCreate, renderBacklogDescription, validateBacklogRelations } from './creation.js';
+import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
+import { planBacklogCreate, renderBacklogDescription } from './creation.js';
+import {
+  decodeBacklogRelations,
+  type BacklogMetadataScope,
+} from './metadata-codec.js';
+import { projectBacklogItem } from './projection.js';
+import type { BacklogGraphSource } from './graph.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
-const MODE_LABELS = BACKLOG_METADATA.executionModeLabels;
+const MODE_LABELS: Record<BacklogExecutionMode, string> = BACKLOG_METADATA.executionModeLabels;
 
 export type { AtomicClaimPredicate } from './claim-strategy.js';
 
@@ -31,12 +36,33 @@ export interface TrackerBacklogAdapterOptions {
   claimTtlMs?: number;
   /** Optional provider-side metadata setup hook (labels are adapter details). */
   ensureMetadata?: (metadata: typeof BACKLOG_METADATA) => Promise<void>;
+  /**
+   * The canonical project key of the project this adapter reads.
+   *
+   * The tracker client knows the provider project id, which for GitLab may be
+   * a numeric id rather than the project path. The canonical key is derived
+   * from the path, so a caller that already resolved the path passes it here.
+   */
+  projectKey?: string;
+  /**
+   * Cross-project backlog inventory.
+   *
+   * A relationship can address an issue in another repository, so "does this
+   * item have children?" cannot be answered by the current project alone.
+   * Without this source the adapter falls back to a local scan.
+   */
+  graph?: BacklogGraphSource;
+  /** How long a cross-project graph stays usable before it is read again. */
+  graphTtlMs?: number;
+  /** Reports that the cross-project graph could not be read. */
+  onGraphError?: (error: unknown) => void;
 }
 
 export class TrackerBacklogProvider implements BacklogProvider {
   readonly capabilities: BacklogProviderCapabilities;
   private readonly atomicClaim?: TrackerBacklogAdapterOptions['atomicClaim'];
   private readonly claimStrategy: NativeOrLockedClaimStrategy;
+  private graphCache = new Map<string, { at: number; children: BacklogItem[] }>();
 
   constructor(private readonly tracker: TrackerProvider, options: TrackerBacklogAdapterOptions = {}) {
     this.options = options;
@@ -59,20 +85,21 @@ export class TrackerBacklogProvider implements BacklogProvider {
     this.capabilities = { atomicClaim: true, tags: true, initialization: true };
   }
 
+  /** The canonical identity scope of the project this provider writes to. */
+  get scope(): WorkItemScope {
+    return this.scopeOf(this.tracker);
+  }
+
   async get(id: string): Promise<BacklogItem> {
-    if (id.includes(':')) {
-      const target = this.relationTarget(id);
-      const item = await new TrackerBacklogProvider(target.tracker, this.options).get(String(target.issueId));
-      return { ...item, id: parseWorkItemId(id).id };
-    }
-    const issue = await this.tracker.getIssue(this.issueId(id));
-    const changes = await this.tracker.listMRs({ state: 'all' });
-    return this.withChangeRequest(toBacklogItem(issue), issue.labels, changes);
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const changes = await target.tracker.listMRs({ state: 'all' });
+    return this.withChangeRequest(toBacklogItem(issue, this.scopeOf(target.tracker)), issue.labels, changes);
   }
 
   async adopt(id: string): Promise<BacklogItem> {
-    const issueId = this.issueId(id);
-    const issue = await this.tracker.getIssue(issueId);
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
     if (issue.state !== 'opened') throw new Error(`backlog ${id} must be open for adoption`);
     const desired = [STATE_LABELS.ready, MODE_LABELS.afk];
     const metadata = issue.labels.filter(isInternalBacklogLabel)
@@ -82,25 +109,28 @@ export class TrackerBacklogProvider implements BacklogProvider {
       throw new Error(`invalid adoption metadata for backlog ${id}: expected ready/afk without duplicate or conflicting AFK labels`);
     }
     try {
-      validateBacklogRelations(metadata, [String(issueId), `${this.tracker.platform}:${this.tracker.projectId}#${issueId}`,
-        `${this.tracker.platform}:${this.tracker.providerHost}/${this.tracker.projectId}#${issueId}`]);
+      decodeBacklogRelations(metadata, this.scopeOf(target.tracker), {
+        strict: true,
+        selfId: this.canonicalId(target.tracker, target.issueId),
+      });
     } catch (error) {
       throw new Error(`invalid adoption metadata for backlog ${id}: ${(error as Error).message}`);
     }
     const delta = labelDelta(issue.labels, desired, isWorkflowMetadataLabel);
     if (delta.add.length) {
       await this.initialize();
-      await this.applyLabelDelta(issueId, delta);
+      await this.applyLabelDelta(target.tracker, target.issueId, delta);
     }
     return this.get(id);
   }
 
-  async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
+  async list(options: BacklogListOptions = {}): Promise<BacklogItem[]> {
     // Read all issues so parent readiness can be derived from every child,
     // including completed children and dependencies.
     const issues = await this.tracker.listIssues({ state: 'all' });
     const changes = await this.tracker.listMRs({ state: 'all' });
-    const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue), issue.labels, changes)))).filter(item =>
+    const items = (await Promise.all(issues.map(issue =>
+      this.withChangeRequest(toBacklogItem(issue, this.scopeOf(this.tracker)), issue.labels, changes)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
       (options.parentId === undefined || this.sameReference(item.parentId, options.parentId)) &&
@@ -118,7 +148,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
       if (existing.length > 1) throw new Error('idempotency key matches multiple backlog items');
       if (existing.length) return this.get(String(existing[0].id));
     }
-    const dependencyTargets = plan.dependsOn.map(id => this.relationTarget(id));
+    const dependencyTargets = plan.dependsOn.map(id => this.resolveTarget(id));
     await this.initialize();
     const relationshipLabels = plan.labels.filter(label => isInternalBacklogLabel(label) && !isWorkflowMetadataLabel(label));
     if (relationshipLabels.length && this.tracker.ensureBacklogMetadata) {
@@ -146,12 +176,12 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async transition(id: string, state: BacklogState, _details?: { reason?: string; changeId?: string }): Promise<void> {
-    const issueId = this.issueId(id);
-    const issue = await this.tracker.getIssue(issueId);
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
     const currentMode = issue.labels.find(label => Object.values(MODE_LABELS).includes(label));
     const mode = state === 'blocked' ? MODE_LABELS.hitl : currentMode ?? MODE_LABELS.afk;
-    await this.updateWorkflowLabels(issueId, issue.labels, [STATE_LABELS[state], mode]);
-    if (state === 'done') await this.tracker.updateIssue(issueId, { state: 'closed' });
+    await this.updateWorkflowLabels(target.tracker, target.issueId, issue.labels, [STATE_LABELS[state], mode]);
+    if (state === 'done') await target.tracker.updateIssue(target.issueId, { state: 'closed' });
   }
 
   private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: Awaited<ReturnType<TrackerProvider['listMRs']>>): Promise<BacklogItem> {
@@ -174,25 +204,25 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
-    const issueId = this.issueId(id);
-    const issue = await this.tracker.getIssue(issueId);
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
     const currentStage = issue.labels.find(label => Object.values(STATE_LABELS).includes(label));
-    if (currentStage) await this.updateWorkflowLabels(issueId, issue.labels, [currentStage, MODE_LABELS[mode]]);
-    else await this.tracker.updateLabels(issueId, labelDelta(issue.labels, [MODE_LABELS[mode]], isModeLabel));
+    if (currentStage) await this.updateWorkflowLabels(target.tracker, target.issueId, issue.labels, [currentStage, MODE_LABELS[mode]]);
+    else await target.tracker.updateLabels(target.issueId, labelDelta(issue.labels, [MODE_LABELS[mode]], isModeLabel));
   }
 
-  private async updateWorkflowLabels(issueId: number, current: string[], desired: string[]): Promise<void> {
-    await this.applyLabelDelta(issueId, labelDelta(current, desired, isWorkflowMetadataLabel));
+  private async updateWorkflowLabels(tracker: TrackerProvider, issueId: number, current: string[], desired: string[]): Promise<void> {
+    await this.applyLabelDelta(tracker, issueId, labelDelta(current, desired, isWorkflowMetadataLabel));
   }
 
-  private async applyLabelDelta(issueId: number, delta: LabelDelta): Promise<void> {
+  private async applyLabelDelta(tracker: TrackerProvider, issueId: number, delta: LabelDelta): Promise<void> {
     if (delta.add.length === 0 && delta.remove.length === 0) return;
-    await this.tracker.updateLabels(issueId, delta);
+    await tracker.updateLabels(issueId, delta);
   }
 
   async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
-    const issueId = this.issueId(id);
-    const comments = await this.tracker.listIssueComments(issueId);
+    const target = this.resolveTarget(id);
+    const comments = await target.tracker.listIssueComments(target.issueId);
     const active = latestOpenRework(comments);
     if (active?.record.source === 'operator' && input.source === 'operator') {
       throw new Error(`backlog ${id} already has an open rework record`);
@@ -210,12 +240,12 @@ export class TrackerBacklogProvider implements BacklogProvider {
       status: 'open',
       createdAt: new Date().toISOString(),
     };
-    await this.tracker.addComment(issueId, renderReworkRecord(record));
+    await target.tracker.addComment(target.issueId, renderReworkRecord(record));
     if (active) {
       try {
-        await this.tracker.updateIssueComment(issueId, active.commentId, renderReworkRecord({ ...active.record, status: 'superseded' }));
+        await target.tracker.updateIssueComment(target.issueId, active.commentId, renderReworkRecord({ ...active.record, status: 'superseded' }));
       } catch (error) {
-        await this.supersedeCreatedRework(issueId, record).catch(() => {});
+        await this.supersedeCreatedRework(target.tracker, target.issueId, record).catch(() => {});
         throw error;
       }
     }
@@ -226,51 +256,52 @@ export class TrackerBacklogProvider implements BacklogProvider {
     return record;
   }
 
-  private async supersedeCreatedRework(issueId: number, record: ReworkRecord): Promise<void> {
-    const comments = await this.tracker.listIssueComments(issueId);
+  private async supersedeCreatedRework(tracker: TrackerProvider, issueId: number, record: ReworkRecord): Promise<void> {
+    const comments = await tracker.listIssueComments(issueId);
     const created = comments
       .map(parseReworkRecord)
       .find(entry => entry?.record.id === record.id && entry.record.status === 'open');
     if (created) {
-      await this.tracker.updateIssueComment(issueId, created.commentId, renderReworkRecord({ ...record, status: 'superseded' }));
+      await tracker.updateIssueComment(issueId, created.commentId, renderReworkRecord({ ...created.record, status: 'superseded' }));
     }
   }
 
   async getActiveRework(id: string): Promise<ReworkRecord | undefined> {
-    const comments = await this.tracker.listIssueComments(this.issueId(id));
+    const target = this.resolveTarget(id);
+    const comments = await target.tracker.listIssueComments(target.issueId);
     return latestOpenRework(comments)?.record;
   }
 
   async resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> {
-    const issueId = this.issueId(id);
-    const comments = await this.tracker.listIssueComments(issueId);
-    const target = comments
+    const target = this.resolveTarget(id);
+    const comments = await target.tracker.listIssueComments(target.issueId);
+    const rework = comments
       .map(parseReworkRecord)
       .find((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry?.record.id === reworkId && entry.record.status === 'open');
-    if (!target) throw new Error(`open rework record not found: ${reworkId}`);
+    if (!rework) throw new Error(`open rework record not found: ${reworkId}`);
     const record: ReworkRecord = {
-      ...target.record,
+      ...rework.record,
       status: 'resolved',
       resolvedAt: new Date().toISOString(),
       resolutionSummary: resolution.summary,
     };
-    await this.tracker.updateIssueComment(issueId, target.commentId, renderReworkRecord(record));
+    await target.tracker.updateIssueComment(target.issueId, rework.commentId, renderReworkRecord(record));
   }
 
   async addTag(id: string, tag: string): Promise<void> {
     const normalized = validateBusinessTag(tag);
-    const issueId = this.issueId(id);
-    const issue = await this.tracker.getIssue(issueId);
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
     if (issue.labels.includes(normalized)) return;
-    await this.tracker.updateLabels(issueId, { add: [normalized], remove: [] });
+    await target.tracker.updateLabels(target.issueId, { add: [normalized], remove: [] });
   }
 
   async removeTag(id: string, tag: string): Promise<void> {
     const normalized = validateBusinessTag(tag);
-    const issueId = this.issueId(id);
-    const issue = await this.tracker.getIssue(issueId);
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
     if (!issue.labels.includes(normalized)) return;
-    await this.tracker.updateLabels(issueId, { add: [], remove: [normalized] });
+    await target.tracker.updateLabels(target.issueId, { add: [], remove: [normalized] });
   }
 
   async initialize(): Promise<void> {
@@ -290,7 +321,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
     if (item.executionEligible === false || (item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
-    const children = await this.list({ parentId: item.id });
+    const children = await this.childrenOf(item);
     if (children.length) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = await this.get(dependencyId).catch(() => null);
@@ -301,7 +332,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
 
   private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {
     if (item.state !== 'in_progress' || item.executionMode !== 'afk') return false;
-    const children = await this.list({ parentId: item.id });
+    const children = await this.childrenOf(item);
     if (children.length) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = await this.get(dependencyId).catch(() => null);
@@ -310,8 +341,34 @@ export class TrackerBacklogProvider implements BacklogProvider {
     return true;
   }
 
+  /**
+   * The children of an item, across every reachable project.
+   *
+   * A PRD anchor and its implementation children may live in different
+   * repositories, so the local scan is only the fallback for a provider that
+   * cannot reach the other projects.
+   */
+  private async childrenOf(item: BacklogItem): Promise<BacklogItem[]> {
+    const source = this.options.graph;
+    if (!source) return this.list({ parentId: item.id });
+    const ttl = this.options.graphTtlMs ?? 30_000;
+    const now = Date.now();
+    const cached = this.graphCache.get(item.id);
+    if (cached && now - cached.at < ttl) return cached.children;
+    try {
+      const children = await source.childrenOf(item.id);
+      this.graphCache.set(item.id, { at: now, children });
+      return children;
+    } catch (error) {
+      this.graphCache.delete(item.id);
+      this.options.onGraphError?.(error);
+      return this.list({ parentId: item.id });
+    }
+  }
+
   private claimKey(id: string): string {
-    return `${this.tracker.platform}/${this.tracker.projectId}/${this.issueId(id)}`;
+    const target = this.resolveTarget(id);
+    return `${target.tracker.platform}/${target.tracker.projectId}/${target.issueId}`;
   }
 
   private async recoverExpiredClaim(key: string, _claim: ExpiredClaim): Promise<boolean> {
@@ -337,28 +394,62 @@ export class TrackerBacklogProvider implements BacklogProvider {
     }
   }
 
+  /** The canonical identity scope of the project a tracker reads. */
+  private scopeOf(tracker: TrackerProvider): BacklogMetadataScope {
+    const platform = tracker.platform;
+    const projectKey = tracker === this.tracker && this.options.projectKey
+      ? this.options.projectKey
+      : canonicalProjectKey(platform, String(tracker.projectId), tracker.providerHost);
+    return { platform, projectKey };
+  }
+
+  private canonicalId(tracker: TrackerProvider, issueNumber: number): WorkItemId {
+    const scope = this.scopeOf(tracker);
+    return formatWorkItemId({ platform: scope.platform, projectKey: scope.projectKey, issueNumber });
+  }
+
+  /**
+   * Resolve a backlog reference to the tracker and issue that own it.
+   *
+   * A bare issue number addresses this provider's project. A canonical global
+   * identity addresses the project it names, which may be another repository
+   * on the same provider host.
+   */
+  private resolveTarget(id: string): { tracker: TrackerProvider; issueId: number; id: WorkItemId } {
+    if (!id.includes(':')) {
+      const issueId = this.issueId(id);
+      return { tracker: this.tracker, issueId, id: this.canonicalId(this.tracker, issueId) };
+    }
+    const reference = parseWorkItemId(id);
+    if (reference.platform !== this.tracker.platform) throw new Error('cross-platform backlog relationships are not supported');
+    if (this.localProjectKeys().includes(reference.projectKey)) {
+      return { tracker: this.tracker, issueId: reference.issueNumber, id: reference.id };
+    }
+    if (!this.tracker.forProject) throw new Error('tracker does not support cross-project backlog relationships');
+    const tracker = this.tracker.forProject(reference.projectKey);
+    return { tracker, issueId: reference.issueNumber, id: reference.id };
+  }
+
+  /** Every spelling of the current project's key that a reference may use. */
+  private localProjectKeys(): string[] {
+    const projectId = String(this.tracker.projectId);
+    const keys = new Set<string>([projectId, this.scopeOf(this.tracker).projectKey]);
+    if (this.tracker.providerHost) keys.add(`${this.tracker.providerHost}/${projectId}`);
+    return [...keys];
+  }
+
   private issueId(id: string): number {
     const value = Number(id);
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`tracker backlog id must be a positive integer: ${id}`);
     return value;
   }
 
-  private relationTarget(id: string): { tracker: TrackerProvider; issueId: number } {
-    if (!id.includes(':')) return { tracker: this.tracker, issueId: this.issueId(id) };
-    const reference = parseWorkItemId(id);
-    if (reference.platform !== this.tracker.platform) throw new Error('cross-platform backlog relationships are not supported');
-    const localProjects = [String(this.tracker.projectId), `${this.tracker.providerHost}/${this.tracker.projectId}`];
-    if (localProjects.includes(reference.projectKey)) return { tracker: this.tracker, issueId: reference.issueNumber };
-    if (!this.tracker.forProject) throw new Error('tracker does not support cross-project backlog relationships');
-    return { tracker: this.tracker.forProject(reference.projectKey), issueId: reference.issueNumber };
-  }
-
   private sameReference(left: string | undefined, right: string): boolean {
     if (left === right) return true;
     if (!left) return false;
     try {
-      const leftTarget = this.relationTarget(left);
-      const rightTarget = this.relationTarget(right);
+      const leftTarget = this.resolveTarget(left);
+      const rightTarget = this.resolveTarget(right);
       return leftTarget.issueId === rightTarget.issueId && leftTarget.tracker.projectId === rightTarget.tracker.projectId;
     } catch {
       return false;
@@ -381,23 +472,20 @@ function labelDelta(current: readonly string[], desired: readonly string[], isWo
   };
 }
 
-function toBacklogItem(issue: TrackedIssue): BacklogItem {
-  validateBacklogRelations(issue.labels, [String(issue.id), `${issue.platform}:${issue.projectId}#${issue.id}`], true);
-  const parentId = issue.labels.find(label => label.startsWith('parent::'))?.slice('parent::'.length);
-  const baseBacklogId = issue.labels.find(label => label.startsWith('base::'))?.slice('base::'.length);
-  const dependsOn = issue.labels
-    .filter(label => label.startsWith('depends-on::') || label.startsWith('depends_on::'))
-    .map(label => label.slice(label.indexOf('::') + 2));
-  const labeledState = Object.entries(STATE_LABELS).find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
-  const state = issue.state === 'closed' || issue.state === 'merged' ? 'done' : labeledState ?? 'ready';
-  const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.afk) && !issue.labels.includes(MODE_LABELS.hitl) ? 'afk' : 'hitl';
-  const executionEligible = (state === 'ready' || state === 'rework') && labeledState !== undefined
-    && issue.labels.some(label => Object.values(MODE_LABELS).includes(label as typeof MODE_LABELS[keyof typeof MODE_LABELS]));
-  return {
-    id: String(issue.id), title: issue.title, description: issue.description, executionEligible,
-    parentId, baseBacklogId, dependsOn, state: state ?? 'ready', executionMode, tags: extractBacklogTags(issue.labels),
-    ...(labeledState ? { labeledState } : {}),
-    branchName: deriveBacklogBranchName(String(issue.id)), providerRef: `${issue.platform}:${issue.projectId}#${issue.id}`,
+/**
+ * Project one provider issue onto the canonical backlog model.
+ *
+ * The identity is global, so the same issue number in two repositories stays
+ * two different backlog items, and every relationship edge names the item it
+ * points at unambiguously.
+ */
+function toBacklogItem(issue: TrackedIssue, scope: BacklogMetadataScope): BacklogItem {
+  return projectBacklogItem({
+    issueNumber: issue.id,
+    title: issue.title,
+    description: issue.description,
+    labels: issue.labels,
+    state: issue.state,
     webUrl: issue.url,
-  };
+  }, scope);
 }

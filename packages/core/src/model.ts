@@ -1,4 +1,5 @@
 export type WorkState =
+  | 'prd'
   | 'ready'
   | 'claimed'
   | 'implementing'
@@ -31,6 +32,13 @@ export interface WorkLineage {
 export interface WorkItem {
   id: string;
   title: string;
+  /**
+   * The lifecycle state of the work item.
+   *
+   * `prd` is an organizational parent: it groups children and is never
+   * executable. It is not `blocked` — a blocked item waits for a human to
+   * unblock it, while a PRD parent waits for its children to be implemented.
+   */
   state: WorkState;
   mode: 'autonomous' | 'human';
   lineage: WorkLineage;

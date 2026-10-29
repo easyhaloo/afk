@@ -194,32 +194,52 @@ blocked、HITL 和其他生命周期状态无写入地拒绝。项目与平台�
 
 ## 工作项与执行身份
 
-Provider Backlog 是业务事实来源。其 `BacklogItem.id` 在
-`afk run --backlog-id <id>`、`Run.workItemId`、`TaskRuntimeRecord.backlogId`、
-TUI 投影和 Desktop 摘要之间原样传递。`runId` 标识一次执行尝试，
-绝不可替代 Backlog ID。
+Provider Backlog 是业务事实来源。它的 `BacklogItem.id` 是该工作项的**规范全局
+身份**：`platform:projectKey#issueNumber`，例如 `github:acme/api#42`。同一身份在
+`afk run --backlog-id <id>`、`Run.workItemId`、运行事件、TUI 投影和 Desktop 摘要
+之间原样传递。`runId` 标识一次执行尝试，绝不可替代 backlog 身份。
+
+无论由哪个 provider 提供，一个工作项只有一个身份。两个仓库中的相同 issue 编号
+仍然是两个不同的 backlog 工作项，每条关系边都无歧义地指向它所指的项。关系字段
+（`parentId`、`baseBacklogId`、`dependsOn`）同样使用该规范形式。
+
+规范项目键由唯一规则 `canonicalProjectKey()` 推导：GitHub 项目为 `owner/repo`；
+自建 GitLab 实例为 `host/group/project`，gitlab.com 为裸 `group/project`。首段含
+有点号时读作主机名，这与 tracker adapter 把关系路由到其他项目时使用的规则一致。
+
+provider 同时接受两种引用写法：裸 issue 编号归属于该 provider 写入的项目；规范
+全局身份可以指向同一 provider 主机上的另一个仓库。跨平台与跨主机引用会被明确拒绝。
+
+关系标签以规范形式存储（`parent::github:acme/api#42`）。存量的裸编号标签
+（`parent::42`）仍可读取，并相对所属项目解析。backlog metadata codec
+（`packages/runtime/src/domain/backlog/metadata-codec.ts`）是解析、校验和序列化
+这些标签的唯一位置；tracker adapter、全局库存和跨仓图都使用它，因此 `parent::`
+边在任何地方含义一致。
 
 各关系字段含义互不相同：`parentId` 表示组织分组，`dependsOn` 控制调度顺序，
 `baseBacklogId` 选择显式的 Git 执行基线。父级边和依赖边都不会隐式选择分支。
 
+backlog 图跨越项目。PRD 锚点可能位于需求仓库，其实现子项位于服务仓库，因此
+provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一个仓库有子项的父项永远
+不可运行。当跨仓图不可读时，adapter 回落到本地项目扫描并报告该失败。
+
 创建关系参数（`--parent`、`--base-backlog`、`--depends-on`）接受显式选定项目内的
-正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。完整引用原样
-保存在 provider 标签中，并在对应项目解析，因此不同仓库的相同编号不会混淆。
-支持同一认证 provider 主机内的跨项目父项与依赖；跨平台或跨主机引用会明确拒绝。
-Git 执行基线必须属于执行仓库；多仓 Git 基线通过 execution manifest 配置。
+正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。Git 执行基线
+必须属于执行仓库；多仓 Git 基线通过 execution manifest 配置。
 
 `afk run` 在准备工作区前，以尚未完成的基线 backlog 分支作为执行基线；基线已完成
 或合并时回落到配置分支。显式的 `--base-branch`、分支策略基线或 manifest 基线
 优先。存量 `base::prd-N` 继续选择 `prd/N`。实现执行与 QA 共用 backlog 基线
 解析逻辑，正常目标分支保持原有语义。
 
-`--stage prd` 创建带 `stage::prd` 的组织性锚点，始终不可执行；无 mode 标签的
-存量 PRD 锚点也能识别。缺少 mode 标签的 issue 默认 `hitl`，需显式 adopt 后
-才能自动执行。`--dry-run` 使用相同创建计划校验引用，并输出标题、描述、标签与
-关系，不写入 provider。`--idempotency-key` 持久化经过哈希的项目内元数据标签，
-顺序重试返回已有 issue（含已关闭项）。该键用于重试去重，不是分布式锁；并发创建
-需要由调用方串行化。业务标签不能注入保留元数据，重复 parent/base 标签或非法引用
-会被校验拒绝。
+`--stage prd` 创建带 `stage::prd` 的组织性锚点，始终不可执行。PRD 父项在 core
+工作项模型中拥有独立状态，而不是被当作 blocked：组织性父项与等待人工处理的项是
+两种不同的事实。无 mode 标签的存量 PRD 锚点也能识别。缺少 mode 标签的 issue 默认
+`hitl`，需显式 adopt 后才能自动执行。`--dry-run` 使用相同创建计划校验引用，并输出
+标题、描述、标签与关系，不写入 provider。`--idempotency-key` 持久化经过哈希的项目内
+元数据标签，顺序重试返回已有 issue（含已关闭项）。该键用于重试去重，不是分布式锁；
+并发创建需要由调用方串行化。业务标签不能注入保留元数据，重复 parent/base 标签或
+非法引用会被校验拒绝。
 
 CLI JSON 成功信封为 `{ok:true,kind,data}`；失败信封为
 `{ok:false,kind,data:null,error:{code,message,details?}}`，并返回非零退出码。
@@ -236,8 +256,12 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 
 只有状态为 `ready` 或 `rework`、执行模式为 `afk`、没有子 backlog 且所有 `dependsOn`
 均为 `done` 时，条目才可运行。`parentId` 用于聚合子 backlog，父 backlog
-本身不可运行。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
+本身不可运行。“没有子 backlog”由 backlog 图判定，因此位于其他仓库的子项同样
+计入。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
+
+`prd` 条目是组织性父项，始终不可执行，且它不是 `blocked`：它聚合子项，
+而不是等待人工介入。
 
 QA FAIL 在 Provider issue comment/note 中持久化新的返工记录，将旧 active
 记录标为 `superseded`，并从已持久化的最高值递增 `ReworkRecord.attempt`。

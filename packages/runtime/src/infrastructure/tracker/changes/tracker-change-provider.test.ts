@@ -129,7 +129,7 @@ describe('TrackerChangeProvider', () => {
       isMRLinkedToIssue: vi.fn().mockResolvedValue(true),
     } as unknown as TrackerProvider;
     const change = { id: '9', state: 'open' as const, sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' };
-    const provider = new TrackerChangeProvider(tracker);
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
     await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).resolves.toBeUndefined();
     expect(tracker.isMRLinkedToIssue).toHaveBeenCalledWith(9, 'github:owner/issues#158');
     vi.mocked(tracker.isMRLinkedToIssue).mockResolvedValue(false);
@@ -137,6 +137,26 @@ describe('TrackerChangeProvider', () => {
     await expect(provider.verifyIssueAssociation({ ...change, url: 'https://github.com/owner/code/pull/8' }, 'github:owner/issues#158')).rejects.toThrow(/mismatch/i);
     vi.mocked(tracker.isMRLinkedToIssue).mockRejectedValue(new Error('API unavailable'));
     await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).rejects.toThrow('API unavailable');
+  });
+
+  it('waits for the platform to link the change request to its issue', async () => {
+    // The platform resolves the issue references in the description in a
+    // background job, so the association is not there the moment the change
+    // request is created.
+    const isMRLinkedToIssue = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const tracker = {
+      platform: 'github', projectId: 'owner/code',
+      getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
+      isMRLinkedToIssue,
+    } as unknown as TrackerProvider;
+    const change = { id: '9', state: 'open' as const, sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 5_000, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).resolves.toBeUndefined();
+    expect(isMRLinkedToIssue).toHaveBeenCalledTimes(3);
   });
 
   it('uses only the QA result and issue closing reference, without repeating the PRD', () => {

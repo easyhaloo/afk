@@ -6,6 +6,12 @@ import { resolveGitLabProjectKey } from '../../../shared/gitlab-project.js';
 import { renderVerificationEvidence, type VerificationEvidence } from './verification-evidence.js';
 import { logger } from '../../io/index.js';
 
+/** How long AFK waits for the platform to link a merge request to its issue. */
+const ASSOCIATION_TIMEOUT_MS = 30_000;
+
+/** How often AFK asks the platform whether the association is there. */
+const ASSOCIATION_POLL_MS = 2_000;
+
 export function renderChangeDescription(
   backlog: BacklogItem,
   tracker?: Pick<TrackerProvider, 'platform' | 'projectId' | 'providerHost'>,
@@ -57,8 +63,21 @@ function resolveIssueNumber(backlog: BacklogItem, issue?: string): number {
   return candidates.find(candidate => Number.isSafeInteger(candidate) && candidate > 0) ?? Number.NaN;
 }
 
+export interface TrackerChangeProviderOptions {
+  /** How long to wait for the platform to link the change request to its issue. */
+  associationTimeoutMs?: number;
+  /** How often to ask the platform whether the association is there. */
+  associationPollMs?: number;
+}
+
 export class TrackerChangeProvider implements ChangeProvider {
-  constructor(private readonly tracker: TrackerProvider) {}
+  private readonly associationTimeoutMs: number;
+  private readonly associationPollMs: number;
+
+  constructor(private readonly tracker: TrackerProvider, options: TrackerChangeProviderOptions = {}) {
+    this.associationTimeoutMs = options.associationTimeoutMs ?? ASSOCIATION_TIMEOUT_MS;
+    this.associationPollMs = options.associationPollMs ?? ASSOCIATION_POLL_MS;
+  }
 
   async create(input: CreateChangeInput): Promise<ChangeRequest> {
     const artifacts = await this.uploadArtifacts(input);
@@ -111,8 +130,17 @@ export class TrackerChangeProvider implements ChangeProvider {
     if (fresh.url !== change.url || fresh.id !== change.id || fresh.sourceBranch !== change.sourceBranch || fresh.targetBranch !== change.targetBranch) {
       throw new Error('change request identity mismatch on provider readback');
     }
-    if (!(await this.tracker.isMRLinkedToIssue(id, issue.id))) {
-      throw new Error(`change request ${change.id} is not linked to ${issue.id} on the provider`);
+    // The platform resolves the issue references in the description in a
+    // background job, so a merge request that was created a moment ago is
+    // not linked to its issue yet. The association arrives on its own; the
+    // check has to wait for it instead of reporting a change that is fine.
+    const deadline = Date.now() + this.associationTimeoutMs;
+    for (;;) {
+      if (await this.tracker.isMRLinkedToIssue(id, issue.id)) return;
+      if (Date.now() >= deadline) {
+        throw new Error(`change request ${change.id} is not linked to ${issue.id} on the provider`);
+      }
+      await new Promise(resolve => setTimeout(resolve, this.associationPollMs));
     }
   }
 

@@ -12,7 +12,7 @@ export function renderChangeDescription(
   evidence?: VerificationEvidence,
 ): string {
   const issue = backlog.workItemId ?? (/^(github|gitlab):/.test(backlog.providerRef ?? '') ? backlog.providerRef : undefined);
-  const issueNumber = Number(backlog.id);
+  const issueNumber = resolveIssueNumber(backlog, issue);
   if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) throw new Error('backlog issue number is invalid');
   if (!issue || !tracker) return appendEvidence(`QA: PASS\nCloses #${issueNumber}`, evidence);
   const identity = parseWorkItemId(issue);
@@ -34,6 +34,27 @@ export function renderChangeDescription(
 function appendEvidence(body: string, evidence?: VerificationEvidence): string {
   const section = renderVerificationEvidence(evidence);
   return section ? `${body}\n\n${section}` : body;
+}
+
+/**
+ * The provider issue number of a backlog item.
+ *
+ * The backlog id is the canonical global identity — `platform:projectKey#issue`
+ * — so it is not a number. The issue number travels with the item itself, and
+ * the identity is the last fallback.
+ */
+function resolveIssueNumber(backlog: BacklogItem, issue?: string): number {
+  const candidates: number[] = [];
+  if (backlog.issueNumber !== undefined) candidates.push(backlog.issueNumber);
+  candidates.push(Number(backlog.id));
+  if (issue) {
+    try {
+      candidates.push(parseWorkItemId(issue).issueNumber);
+    } catch {
+      // A provider reference that is not a canonical identity carries no number.
+    }
+  }
+  return candidates.find(candidate => Number.isSafeInteger(candidate) && candidate > 0) ?? Number.NaN;
 }
 
 export class TrackerChangeProvider implements ChangeProvider {

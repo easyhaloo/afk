@@ -17,6 +17,32 @@ describe('TrackerChangeProvider', () => {
     expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/code', providerHost: 'gitlab.example.test' })).toBe('QA: PASS\nCloses team/issues#158');
   });
 
+  it('reads the issue number from a canonical backlog id', () => {
+    const backlog = {
+      id: 'gitlab:gitlab.example.test/team/issues#158',
+      issueNumber: 158,
+      title: 'Item',
+      workItemId: 'gitlab:gitlab.example.test/team/issues#158',
+    } as BacklogItem;
+    expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/code', providerHost: 'gitlab.example.test' }))
+      .toBe('QA: PASS\nCloses team/issues#158');
+  });
+
+  it('falls back to the work item identity when the item carries no issue number', () => {
+    const backlog = {
+      id: 'gitlab:gitlab.example.test/team/issues#158',
+      title: 'Item',
+      workItemId: 'gitlab:gitlab.example.test/team/issues#158',
+    } as BacklogItem;
+    expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/code', providerHost: 'gitlab.example.test' }))
+      .toBe('QA: PASS\nCloses team/issues#158');
+  });
+
+  it('rejects an item whose issue number cannot be resolved at all', () => {
+    const backlog = { id: 'not-a-number', title: 'Item' } as BacklogItem;
+    expect(() => renderChangeDescription(backlog)).toThrow(/issue number/i);
+  });
+
   it('publishes the qualified two-line reference without the PRD', async () => {
     const tracker = {
       platform: 'github', projectId: 'owner/code',

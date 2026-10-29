@@ -96,6 +96,20 @@ describe('normalized inventory', () => {
     expect((await store.query()).diagnostics[0].code).toBe('offline');
   });
 
+  it('answers which items belong to one parent', async () => {
+    const store = open();
+    await publish(store, [
+      item(1, { parentId: 'github:acme/prd#7' }),
+      item(2, { parentId: 'github:acme/prd#7' }),
+      item(3, { parentId: 'github:acme/prd#8' }),
+      item(4),
+    ]);
+
+    const children = await store.query({ parentId: 'github:acme/prd#7' });
+
+    expect(children.items.map(entry => entry.id)).toEqual(['github:acme/api#1', 'github:acme/api#2']);
+  });
+
   it('rolls back all changes when a later item is invalid', async () => {
     const store = open();
     await publish(store, [item(1)]);

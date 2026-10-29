@@ -1,5 +1,5 @@
 export type InventoryPlatform = 'github' | 'gitlab';
-export type InventoryState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+export type InventoryState = 'prd' | 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 
 export interface InventoryProject {
   platform: InventoryPlatform;
@@ -108,6 +108,8 @@ export interface InventoryQuery {
   project?: string;
   tag?: string;
   text?: string;
+  /** Canonical identity of the organizational parent; answers "the children of". */
+  parentId?: string;
   limit?: number;
   cursor?: string;
 }

@@ -156,7 +156,7 @@ export class SqliteInventoryStore implements LocalInventoryStore {
   private readPage(input: InventoryQuery, includeHidden: boolean): InventoryPage<Row> {
     const limit = parseLimit(input.limit);
     const revision = this.revision();
-    const filter = JSON.stringify({ platform: input.platform ?? 'all', state: input.state ?? '', executionMode: input.executionMode ?? '', project: input.project ?? '', tag: input.tag ?? '', text: input.text ?? '', hidden: includeHidden });
+    const filter = JSON.stringify({ platform: input.platform ?? 'all', state: input.state ?? '', executionMode: input.executionMode ?? '', project: input.project ?? '', tag: input.tag ?? '', text: input.text ?? '', parentId: input.parentId ?? '', hidden: includeHidden });
     const cursor = decodeCursor(input.cursor, revision, filter);
     const conditions = [includeHidden ? '1 = 1' : 'w.is_present = 1'];
     const params: unknown[] = [];
@@ -165,6 +165,7 @@ export class SqliteInventoryStore implements LocalInventoryStore {
     if (input.project) { conditions.push('r.project_key = ?'); params.push(input.project); }
     if (input.platform && input.platform !== 'all') { conditions.push('((w.sources_present = 0 AND r.platform = ?) OR EXISTS (SELECT 1 FROM work_item_sources sx WHERE sx.work_item_id = w.id AND sx.platform = ?))'); params.push(input.platform, input.platform); }
     if (input.tag) { conditions.push('EXISTS (SELECT 1 FROM work_item_tags tx WHERE tx.work_item_id = w.id AND tx.tag = ?)'); params.push(input.tag); }
+    if (input.parentId) { conditions.push('w.parent_id = ?'); params.push(input.parentId); }
     if (input.text) conditions.push(...this.searchCondition('work_item_search', 'w.row_id', input.text, params));
     if (cursor && 'time' in cursor) { conditions.push('(w.sort_updated_at < ? OR (w.sort_updated_at = ? AND w.id > ?))'); params.push(cursor.time, cursor.time, cursor.id); }
     const rows = this.database.prepare(`SELECT w.id,w.sort_updated_at FROM work_items w JOIN repositories r ON r.id = w.owner_repository_id WHERE ${conditions.join(' AND ')} ORDER BY w.sort_updated_at DESC,w.id ASC LIMIT ${limit + 1}`).all(...params);

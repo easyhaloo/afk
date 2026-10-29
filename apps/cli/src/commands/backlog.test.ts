@@ -9,6 +9,7 @@ import {
   runBacklogConfirmMerge,
   runBacklogCreate,
   runBacklogChildren,
+  resolveBacklogChildrenIdentity,
   runBacklogInterrupt,
   runBacklogInventory,
   runBacklogList,
@@ -893,7 +894,43 @@ describe('backlog children', () => {
   });
 
   it('reports an identity that is not a work item id', async () => {
-    const envelope = await capture(() => runBacklogChildren('42', { json: true }, {
+    const envelope = await capture(() => runBacklogChildren('not-an-id', { json: true }, {
+      read: async () => undefined,
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: false,
+      kind: 'backlog.children',
+      error: { code: 'validation' },
+    });
+  });
+
+  it('lists the children of an item addressed by its issue number', async () => {
+    const envelope = await capture(() => runBacklogChildren('7', { json: true }, {
+      resolve: async (value: string) => {
+        expect(value).toBe('7');
+        return parent.id;
+      },
+      read: async () => ({ items: [parent, child, unmanaged], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.children',
+      data: {
+        parent: { id: parent.id, title: 'the PRD' },
+        children: [{ id: child.id }, { id: unmanaged.id }],
+      },
+    });
+  });
+
+  it('reports an issue number whose project cannot be resolved', async () => {
+    const envelope = await capture(() => runBacklogChildren('7', { json: true }, {
+      resolve: async () => {
+        throw new Error('A tracker project must be resolved before the provider can be created.');
+      },
       read: async () => undefined,
       collect: async () => undefined,
     }));
@@ -916,5 +953,53 @@ describe('backlog children', () => {
       kind: 'backlog.children',
       error: { code: 'not_found' },
     });
+  });
+});
+
+describe('backlog children identity', () => {
+  const target = {
+    platform: 'gitlab' as const,
+    projectId: 'group/repo',
+    host: 'gitlab.example.test',
+    platformSource: 'index' as const,
+    projectSource: 'index' as const,
+  };
+
+  it('keeps a canonical identity as it is', async () => {
+    await expect(resolveBacklogChildrenIdentity('gitlab:group/repo#7', {}, { target: async () => target }))
+      .resolves.toBe('gitlab:group/repo#7');
+  });
+
+  it('reads an issue number through the project that owns it', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', {}, { target: async (options) => {
+      expect(options).toMatchObject({ issueId: '7' });
+      return target;
+    } })).resolves.toBe('gitlab:gitlab.example.test/group/repo#7');
+  });
+
+  it('passes an explicit project and platform on', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', { project: 'group/other', platform: 'gitlab' }, { target: async (options) => {
+      expect(options).toMatchObject({ project: 'group/other', platform: 'gitlab', issueId: '7' });
+      return { ...target, projectId: 'group/other' };
+    } })).resolves.toBe('gitlab:gitlab.example.test/group/other#7');
+  });
+
+  it('reads the instance from the index when the target does not name one', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', {}, {
+      target: async () => ({ ...target, host: undefined }),
+      host: () => 'gitlab.example.test',
+    })).resolves.toBe('gitlab:gitlab.example.test/group/repo#7');
+  });
+
+  it('keeps the host a project already carries', async () => {
+    await expect(resolveBacklogChildrenIdentity('7', { project: 'gitlab.example.test/group/other' }, {
+      target: async () => ({ ...target, projectId: 'gitlab.example.test/group/other', host: undefined }),
+      host: () => undefined,
+    })).resolves.toBe('gitlab:gitlab.example.test/group/other#7');
+  });
+
+  it('refuses an id that is neither an issue number nor a canonical identity', async () => {
+    await expect(resolveBacklogChildrenIdentity('not-an-id', {}, { target: async () => target }))
+      .rejects.toThrow(/must be an issue number or platform:projectKey#issueNumber/);
   });
 });

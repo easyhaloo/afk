@@ -14,7 +14,7 @@ import {
   filterGlobalWorkItemInventory,
 } from '@afk/runtime/infrastructure/provider/inventory';
 import { resolveTrackerTarget } from '@afk/runtime/infrastructure/tracker/target';
-import { recordTrackerActivity, trackerIdentityOf } from '@afk/runtime/infrastructure/tracker/store';
+import { recordTrackerActivity, trackerIdentityOf, findProjectByName, readTrackerStore } from '@afk/runtime/infrastructure/tracker/store';
 import type {
   GlobalWorkItem,
   GlobalWorkItemInventoryResult,
@@ -34,7 +34,7 @@ import {
   type BacklogManifestProviderFactory,
 } from '@afk/runtime/application/work-item/apply-manifest';
 import { planBacklogManifest } from '@afk/application';
-import { parseCanonicalProject, parseWorkItemId } from '@afk/runtime/domain/work-item/identity';
+import { parseCanonicalProject, parseWorkItemId, canonicalProjectKey, formatWorkItemId, gitLabProjectHost } from '@afk/runtime/domain/work-item/identity';
 import type { InventoryItem, InventoryProject, InventorySnapshot } from '@afk/application';
 import {
   addBacklogTag,
@@ -392,11 +392,88 @@ export async function runBacklogShow(
   }
 }
 
+export interface BacklogChildrenOptions extends JsonMode {
+  /** The project the queried item belongs to, when the id does not name one. */
+  project?: string;
+  /** Override provider detection. */
+  platform?: string;
+}
+
+/** Where the identity of the queried item is resolved from. */
+export interface BacklogChildrenIdentitySources {
+  /** Resolve the tracker target that owns the item. */
+  target?: typeof resolveTrackerTarget;
+  /** The instance a project lives on. */
+  host?: (projectId: string) => string | undefined;
+}
+
 export interface BacklogChildrenDependencies {
   /** The locally stored parent and its children. */
   read?: (parentId: string) => Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined>;
   /** Collect the items from the providers again. */
   collect?: () => Promise<{ items: readonly GlobalWorkItem[] } | undefined>;
+  /** The canonical identity of the queried item. */
+  resolve?: (value: string, options: BacklogChildrenOptions) => Promise<string>;
+}
+
+/**
+ * The identity of the queried item.
+ *
+ * A canonical identity already names the project it belongs to. An issue
+ * number does not: the same number is a different issue in every repository,
+ * so the project is resolved the way every other backlog command resolves it
+ * — the explicit flag first, then the local index, then the environment.
+ */
+export async function resolveBacklogChildrenIdentity(
+  value: string,
+  options: BacklogChildrenOptions = {},
+  sources: BacklogChildrenIdentitySources = {},
+): Promise<string> {
+  const text = value.trim();
+  if (!text) throw new Error('a work item id is required');
+  if (text.includes('#')) return canonicalParentId(text);
+  const issueNumber = Number(text);
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error(`work item id must be an issue number or platform:projectKey#issueNumber: ${value}`);
+  }
+  const resolveTarget = sources.target ?? resolveTrackerTarget;
+  const resolved = await resolveTarget({
+    ...(options.project === undefined ? {} : { project: options.project }),
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
+    issueId: text,
+  });
+  const host = resolved.host ?? (sources.host ?? hostOfProject)(resolved.projectId);
+  return formatWorkItemId({
+    platform: resolved.platform,
+    projectKey: projectKeyOf(resolved.platform, resolved.projectId, host),
+    issueNumber,
+  });
+}
+
+/**
+ * The instance a project lives on.
+ *
+ * A project path does not name the instance it belongs to — the same path can
+ * exist on two of them — so the identity would be wrong without it. The local
+ * index records where AFK last saw the project.
+ */
+function hostOfProject(projectId: string): string | undefined {
+  return findProjectByName(readTrackerStore(), projectId)?.host;
+}
+
+/**
+ * The canonical key of a project.
+ *
+ * A project that already carries its host is already a canonical key: the
+ * host is part of the identity, and guessing it would name a different
+ * project than the one the caller meant.
+ */
+function projectKeyOf(platform: TrackerPlatform, projectId: string, host?: string): string {
+  if (platform === 'gitlab') {
+    const embedded = gitLabProjectHost(projectId);
+    if (embedded) return canonicalProjectKey(platform, projectId.slice(embedded.length + 1), embedded);
+  }
+  return canonicalProjectKey(platform, projectId, host);
 }
 
 /**
@@ -408,12 +485,12 @@ export interface BacklogChildrenDependencies {
  */
 export async function runBacklogChildren(
   parentId: string,
-  options: JsonMode,
+  options: BacklogChildrenOptions,
   dependencies: BacklogChildrenDependencies = {},
 ): Promise<void> {
   const kind = 'backlog.children';
   try {
-    const identity = canonicalParentId(parentId);
+    const identity = await (dependencies.resolve ?? resolveBacklogChildrenIdentity)(parentId, options);
     const inventory = createMirrorWorkItemChildrenInventory({
       read: dependencies.read ?? readChildrenFromMirror,
       collect: dependencies.collect ?? collectWorkItems,
@@ -919,7 +996,9 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   backlog
     .command('children')
     .description('List the issues that belong to one work item')
-    .argument('<prd-id>', 'Canonical work item ID (platform:projectKey#issueNumber)')
+    .argument('<prd-id>', 'Issue number or canonical work item ID (platform:projectKey#issueNumber)')
+    .option('--project <project>', 'Project the item belongs to, when the id does not name one')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async (prdId: string, options) => {
       try {

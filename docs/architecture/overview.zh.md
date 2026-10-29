@@ -67,7 +67,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
-| `afk backlog children <prd-id>` | 跨所有可达项目列出归属于某个工作项的 issue |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
@@ -236,6 +236,9 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 缓存，缺失或过期时会重新采集后再回答，而本地库存从未见过的身份会再采集一次才判定
 为未知。子项按项目与 issue 编号排序，因此列表不依赖库存的采集时机。未被 AFK 纳管的
 子项同样会被返回，并标明 `managed`，因为手工挂到 PRD 上的 issue 也是子项。
+
+命令会替调用方解析这个身份：裸 issue 编号会在本地索引里查出它属于哪个项目，
+`--project` 与 `--platform` 则直接说明。只有脚本产出规范身份时，整串才需要被敲出来。
 
 创建关系参数（`--parent`、`--base-backlog`、`--depends-on`）接受显式选定项目内的
 正整数 issue 编号，或完整的 `platform:projectKey#issueNumber` 引用。Git 执行基线

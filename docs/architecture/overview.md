@@ -88,7 +88,7 @@ single source of truth for the supported surface:
 | `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
-| `afk backlog children <prd-id>` | List the issues that belong to one work item, across every reachable project |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
@@ -299,6 +299,11 @@ collected once more before it is reported as unknown. The children are ordered
 by project and issue number, so the list does not depend on when the inventory
 was collected. A child that AFK does not manage is reported as well, with its
 `managed` flag, because a hand-written issue attached to a PRD is a child too.
+
+The command resolves that identity for the caller: an issue number is looked
+up in the local index to find the project it belongs to, and `--project` and
+`--platform` say it outright. The canonical identity only has to be typed when
+a script produces it.
 
 Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
 accept a positive issue number in the explicitly selected project, or a

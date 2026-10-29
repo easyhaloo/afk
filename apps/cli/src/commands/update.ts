@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { lstat, readlink, realpath } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
-import { Command } from 'commander';
+import { lstat, realpath } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
+import { Command } from 'commander';
 
 const REPOSITORY = 'easyhaloo/afk';
 const RELEASE_API = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
@@ -65,10 +65,8 @@ async function findManagedInstallPrefix(): Promise<string> {
       if (!stat.isSymbolicLink()) continue;
       const target = await realpath(executable);
       if (target.startsWith(`${storage}/`) && target.endsWith('/dist/index.js')) return directory;
-      // Keep the link target explicit so a managed install cannot be confused with an unrelated binary.
-      await readlink(executable);
     } catch {
-      // Continue scanning PATH entries that do not contain a managed AFK installation.
+      // Ignore PATH entries that do not contain a managed AFK installation.
     }
   }
   throw new Error(

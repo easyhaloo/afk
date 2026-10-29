@@ -49,8 +49,12 @@ export function projectBacklogItem(issue: BacklogIssueView, scope: BacklogMetada
   const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.afk) && !issue.labels.includes(MODE_LABELS.hitl) ? 'afk' : 'hitl';
   const executionEligible = (state === 'ready' || state === 'rework') && labeledState !== undefined
     && issue.labels.some(label => Object.values(MODE_LABELS).includes(label as typeof MODE_LABELS[keyof typeof MODE_LABELS]));
+  // An issue AFK manages carries both a lifecycle label and a mode label. A
+  // manual issue may carry either or neither, and the difference decides
+  // whether its state is a recorded fact or a derived default.
+  const managed = labeledState !== undefined && metadata.executionMode !== undefined;
   return {
-    id, workItemId: id, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, executionEligible,
+    id, workItemId: id, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, managed, executionEligible,
     parentId: metadata.relations.parentId,
     baseBacklogId: metadata.relations.baseBacklogId ?? metadata.relations.legacyBaseRef,
     dependsOn: metadata.relations.dependsOn, state: state ?? 'ready', executionMode, tags: metadata.tags,

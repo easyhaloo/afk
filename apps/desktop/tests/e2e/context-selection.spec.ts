@@ -40,11 +40,16 @@ test.describe("contextual selection", () => {
     await expect(page.getByRole("button", { name: "选择仓库", exact: true })).toBeHidden();
     await trigger.click();
     if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/work-items-filters.png` });
-    const filterBounds = await page.locator(".selection-filter-panel > .select-menu > .select-menu-trigger").evaluateAll(elements => elements.map(element => {
+    const filterTriggers = page.locator(".selection-filter-panel > .select-menu > .select-menu-trigger");
+    // Name the filters the panel discloses instead of counting them: a new
+    // filter must be a deliberate update here, and a mismatch has to say which
+    // filter appeared rather than only how many.
+    const filterNames = await filterTriggers.evaluateAll(elements => elements.map(element => element.getAttribute("aria-label")));
+    expect(filterNames).toEqual(["选择 Provider", "选择仓库", "筛选状态", "筛选角色"]);
+    const filterBounds = await filterTriggers.evaluateAll(elements => elements.map(element => {
       const { left, right, width } = element.getBoundingClientRect();
       return { left, right, width };
     }));
-    expect(filterBounds).toHaveLength(3);
     for (const bounds of filterBounds.slice(1)) {
       expect(Math.abs(bounds.width - filterBounds[0].width)).toBeLessThanOrEqual(1);
       expect(Math.abs(bounds.left - filterBounds[0].left)).toBeLessThanOrEqual(1);

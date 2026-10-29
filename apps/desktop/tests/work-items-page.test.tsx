@@ -598,6 +598,46 @@ describe("WorkItemsPage", () => {
     act(() => renderer!.unmount());
   });
 
+  it("filters work items by role and keeps PRD anchors in their own group", async () => {
+    const anchor: WorkItemInventoryResult["items"][number] = {
+      id: "github:acme/api#7",
+      issueNumber: 7,
+      project: { platform: "github", projectKey: "acme/api", name: "api" },
+      title: "PRD anchor",
+      managed: true,
+      executionEligible: false,
+      kind: "prd",
+      executionMode: "hitl",
+      dependsOn: [],
+      tags: [],
+      branchName: "afk/prd-anchor",
+      providerRef: "github:acme/api#7",
+    };
+    const inventory: WorkItemInventoryResult = { ...result, items: [anchor, result.items[0], result.items[1]] };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    // A PRD anchor carries no lifecycle position, so the default pending
+    // filter leaves it out until the reader asks for every status.
+    expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(2);
+    expect(renderer!.root.findAllByProps({ className: "backlog-group-heading" })).toHaveLength(0);
+
+    await act(async () => { findButton(renderer!, "全部").props.onClick(); });
+    const headings = renderer!.root.findAllByProps({ className: "backlog-group-heading" });
+    expect(headings).toHaveLength(2);
+    expect(textContent(headings[0])).toContain("PRD 锚点");
+    expect(textContent(headings[1])).toContain("工作项");
+    expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(3);
+
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "筛选角色" }).props.onChange({ currentTarget: { value: "prd" } }); });
+    const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(rows).toHaveLength(1);
+    expect(textContent(rows[0])).toContain("PRD anchor");
+    expect(renderer!.root.findByProps({ "aria-label": "移除筛选：角色：PRD 锚点" })).toBeTruthy();
+    act(() => renderer!.unmount());
+  });
+
   it("uses platform SVG icons instead of provider text in source summaries", async () => {
     vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
     let renderer: ReturnType<typeof create>;

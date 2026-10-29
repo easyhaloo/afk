@@ -427,7 +427,7 @@ function canonicalParentId(value: string): string {
   }
 }
 
-function printChildren(result: WorkItemChildrenResult): void {
+function printChildren(result: WorkItemChildrenResult<GlobalWorkItem>): void {
   console.log(`${chalk.bold(result.parent.id)}  ${result.parent.title}`);
   detail(`state: ${result.parent.state}  mode: ${result.parent.executionMode}`);
   if (result.children.length === 0) {

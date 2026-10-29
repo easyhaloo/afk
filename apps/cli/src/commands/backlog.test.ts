@@ -597,7 +597,7 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
     };
-    const create = vi.fn(async (input: Parameters<BacklogManagementProvider['create']>[0]) => ({
+    const create = vi.fn(async (input: BacklogCreateInput) => ({
       ...stubItem,
       id: 'github:org/service#88',
       providerRef: 'github:org/service#88',

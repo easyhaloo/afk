@@ -109,9 +109,12 @@ export function renderBacklogDescription(
 /**
  * The Git branch an execution starts from.
  *
- * An unfinished base backlog selects its own branch; a completed or merged
- * base falls back to the configured branch. The legacy `prd-N` base selects
- * the `prd/N` branch of the repository that owned the PRD.
+ * An unfinished base backlog selects its own branch only when it belongs to
+ * the same repository as the item being executed. A branch in another
+ * repository is not a valid Git baseline for this checkout, so cross-repository
+ * base references remain recorded as global work-item links while execution
+ * uses the target repository's configured branch. Completed or merged bases
+ * also fall back to the configured branch.
  */
 export async function resolveBacklogExecutionBase(
   provider: Pick<BacklogManagementProvider, 'get'>, item: BacklogItem, fallback: string,
@@ -119,8 +122,8 @@ export async function resolveBacklogExecutionBase(
   if (!item.baseBacklogId) return fallback;
   if (/^prd-[1-9]\d*$/.test(item.baseBacklogId)) return `prd/${item.baseBacklogId.slice(4)}`;
   const base = await provider.get(item.baseBacklogId);
-  if (base.providerRef.slice(0, base.providerRef.lastIndexOf('#')) !== item.providerRef.slice(0, item.providerRef.lastIndexOf('#'))) {
-    throw new Error('execution base must belong to the same repository; use an execution manifest for multiple repositories');
-  }
+  const baseRepository = base.providerRef.slice(0, base.providerRef.lastIndexOf('#'));
+  const itemRepository = item.providerRef.slice(0, item.providerRef.lastIndexOf('#'));
+  if (baseRepository !== itemRepository) return fallback;
   return base.state === 'done' || base.changeRequest?.state === 'merged' ? fallback : base.branchName;
 }

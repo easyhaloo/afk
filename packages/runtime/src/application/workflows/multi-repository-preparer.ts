@@ -289,7 +289,7 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
         return {
           ...(branch === 'HEAD' ? {} : { branch }),
           head,
-          status,
+          status: withoutRuntimeArtifacts(status),
           workingBranchExisted: workingBranchHead !== undefined,
           ...(workingBranchHead ? { workingBranchHead } : {}),
         };
@@ -552,6 +552,28 @@ async function moveFailedOwnerLockToTombstone(
 
 function hasCode(error: unknown, code: string): boolean {
   return !!error && typeof error === 'object' && 'code' in error && error.code === code;
+}
+
+/**
+ * AFK's own runtime artifacts in a worktree.
+ *
+ * The completion signal the agent writes and the `.afk/` directory the QA
+ * runner reads are process state. Counting them as uncommitted changes made
+ * the preparer refuse a checkout that only carried them, which locked the
+ * work item out of every later attempt.
+ */
+const RUNTIME_ARTIFACTS = ['.afk-signal.json', '.afk-signal.json.tmp', '.afk'];
+
+function withoutRuntimeArtifacts(status: string): string {
+  if (!status) return '';
+  const remaining = status
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .filter(line => {
+      const path = line.slice(3).split(' -> ').pop()?.trim() ?? '';
+      return !RUNTIME_ARTIFACTS.some(artifact => path === artifact || path.startsWith(`${artifact}/`));
+    });
+  return remaining.join('\n');
 }
 
 async function localBranchHead(repoRoot: string, branch: string): Promise<string | undefined> {

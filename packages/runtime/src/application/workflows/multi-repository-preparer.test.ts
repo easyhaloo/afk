@@ -610,6 +610,41 @@ describe('MultiRepositoryPreparer', () => {
     }
   });
 
+  it('does not treat AFK runtime artifacts as uncommitted work', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-multi-repo-'));
+    try {
+      const remote = join(root, 'remote.git');
+      const seed = join(root, 'seed');
+      const repoRoot = join(root, 'existing');
+      await fs.mkdir(remote);
+      await simpleGit(remote).init(true);
+      await fs.mkdir(seed);
+      const seedGit = simpleGit(seed);
+      await seedGit.init(['--initial-branch=main']);
+      await seedGit.addConfig('user.name', 'AFK Test');
+      await seedGit.addConfig('user.email', 'afk@example.test');
+      await fs.writeFile(join(seed, 'tracked.txt'), 'baseline\n');
+      await seedGit.add(['tracked.txt']);
+      await seedGit.commit('baseline');
+      await seedGit.addRemote('origin', remote);
+      await seedGit.push('origin', 'main', ['--set-upstream']);
+      await simpleGit().clone(remote, repoRoot, ['--branch', 'main']);
+      await configureLocalOrigin(repoRoot, remote, 'https://github.com/acme/api.git');
+
+      // The completion signal of the previous attempt is still in the
+      // worktree: it is AFK's state, not the user's uncommitted work.
+      await fs.writeFile(join(repoRoot, '.afk-signal.json'), '{"type":"goal_complete"}\n');
+      await fs.mkdir(join(repoRoot, '.afk'), { recursive: true });
+      await fs.writeFile(join(repoRoot, '.afk', 'artifacts.txt'), '/tmp/evidence.log\n');
+
+      await expect(new MultiRepositoryPreparer().prepare([
+        repository({ repoRoot }),
+      ], root)).resolves.toBeDefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('continues a published working branch instead of restarting from the base', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-multi-repo-'));
     try {

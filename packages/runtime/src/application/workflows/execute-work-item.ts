@@ -352,7 +352,16 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         }
         if (!(await providers.backlog.isRunnable(item))) throw new Error(`work item ${workItemId} has unmet dependencies or is not runnable`);
         const existing = await providers.changes.findForBacklog(item);
-        if (existing?.state === 'open') throw new Error(`work item already has an open change request: ${existing.url ?? existing.id}`);
+        if (existing?.state === 'open') {
+          // A previous attempt can leave a review request behind. A work item
+          // that is being reworked is expected to have one: the verification
+          // reuses it and refreshes its evidence rather than asking the
+          // reviewer for a second one. A work item that never ran is not.
+          if (item.state !== 'rework') {
+            throw new Error(`work item already has an open change request: ${existing.url ?? existing.id}`);
+          }
+          logger.info({ workItemId, changeId: existing.id }, 'reusing the change request of an earlier attempt');
+        }
         request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
         await record('implementing');
         const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>

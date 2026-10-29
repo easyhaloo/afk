@@ -281,6 +281,12 @@ export class GitHubClient implements TrackerProvider {
       && linked.repository?.nameWithOwner.toLowerCase() === `${owner}/${repo}`.toLowerCase());
   }
 
+  async updateMR(id: number, updates: { description?: string }): Promise<void> {
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    await oct.pulls.update({ owner, repo, pull_number: id, ...(updates.description !== undefined ? { body: updates.description } : {}) });
+  }
+
   async getMR(id: number): Promise<TrackedMR> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
@@ -297,6 +303,7 @@ export class GitHubClient implements TrackerProvider {
       state,
       sourceBranch: data.head.ref,
       targetBranch: data.base.ref,
+      ...(data.body ? { description: data.body } : {}),
       mergeable: data.mergeable ?? undefined,
       url: data.html_url,
       projectId: this.projectId,

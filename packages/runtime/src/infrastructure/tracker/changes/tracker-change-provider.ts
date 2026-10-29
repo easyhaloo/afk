@@ -3,6 +3,7 @@ import type { ChangeProvider, ChangeRequest, CreateChangeInput } from './provide
 import type { TrackerProvider } from '../../../domain/tracker/types.js';
 import { parseWorkItemId } from '../../../domain/work-item/identity.js';
 import { resolveGitLabProjectKey } from '../../../shared/gitlab-project.js';
+import { closesIssue } from './closing-reference.js';
 import { renderVerificationEvidence, type VerificationEvidence } from './verification-evidence.js';
 import { logger } from '../../io/index.js';
 
@@ -12,6 +13,7 @@ const ASSOCIATION_TIMEOUT_MS = 30_000;
 /** How often AFK asks the platform whether the association is there. */
 const ASSOCIATION_POLL_MS = 2_000;
 
+/** The body a change request carries for a backlog item and its evidence. */
 export function renderChangeDescription(
   backlog: BacklogItem,
   tracker?: Pick<TrackerProvider, 'platform' | 'projectId' | 'providerHost'>,
@@ -111,7 +113,7 @@ export class TrackerChangeProvider implements ChangeProvider {
 
   async get(id: string): Promise<ChangeRequest> {
     const mr = await this.tracker.getMR(Number(id));
-    return { id: String(mr.id), state: mr.state === 'opened' ? 'open' : mr.state, sourceBranch: mr.sourceBranch, targetBranch: mr.targetBranch, mergeable: mr.mergeable, url: mr.url };
+    return { id: String(mr.id), state: mr.state === 'opened' ? 'open' : mr.state, sourceBranch: mr.sourceBranch, targetBranch: mr.targetBranch, mergeable: mr.mergeable, url: mr.url, ...(mr.description ? { description: mr.description } : {}) };
   }
 
   async findForBacklog(backlog: BacklogItem): Promise<ChangeRequest | null> {
@@ -130,18 +132,44 @@ export class TrackerChangeProvider implements ChangeProvider {
     if (fresh.url !== change.url || fresh.id !== change.id || fresh.sourceBranch !== change.sourceBranch || fresh.targetBranch !== change.targetBranch) {
       throw new Error('change request identity mismatch on provider readback');
     }
-    // The platform resolves the issue references in the description in a
-    // background job, so a merge request that was created a moment ago is
-    // not linked to its issue yet. The association arrives on its own; the
-    // check has to wait for it instead of reporting a change that is fine.
+    // The platform resolves the issue references in a description into a link
+    // between the merge request and the issue it closes — but only for a
+    // merge request that targets the default branch of its project. A change
+    // that has to land on a release branch never gets that link, even though
+    // its description names the issue it closes. The native link is the
+    // stronger evidence and is used first; the description is what remains.
     const deadline = Date.now() + this.associationTimeoutMs;
     for (;;) {
       if (await this.tracker.isMRLinkedToIssue(id, issue.id)) return;
+      if (closesIssue(fresh.description, issue.issueNumber, this.issueProjectPath(issue))) return;
       if (Date.now() >= deadline) {
         throw new Error(`change request ${change.id} is not linked to ${issue.id} on the provider`);
       }
       await new Promise(resolve => setTimeout(resolve, this.associationPollMs));
     }
+  }
+
+  /** The repository path the issue lives in, the way a reference spells it. */
+  private issueProjectPath(issue: { platform: string; projectKey: string }): string {
+    return issue.platform === 'gitlab'
+      ? resolveGitLabProjectKey(issue.projectKey, this.tracker.providerHost).projectPath
+      : issue.projectKey;
+  }
+
+  async refresh(
+    id: string,
+    backlog: BacklogItem,
+    evidence: Omit<VerificationEvidence, 'artifacts'>,
+  ): Promise<ChangeRequest> {
+    if (!this.tracker.updateMR) throw new Error('the provider cannot refresh a change request');
+    const change = await this.get(id);
+    const artifacts = await this.uploadArtifacts({
+      backlog, sourceBranch: change.sourceBranch, targetBranch: change.targetBranch,
+    });
+    await this.tracker.updateMR(Number(id), {
+      description: renderChangeDescription(backlog, this.tracker, { ...evidence, artifacts }),
+    });
+    return this.get(id);
   }
 
   async merge(id: string): Promise<void> { await this.tracker.mergeMR(Number(id), { deleteSourceBranch: true, squash: true }); }

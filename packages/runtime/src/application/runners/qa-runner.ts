@@ -319,17 +319,26 @@ export class QARunner {
         throw new Error(`existing change request ${existing.id} does not match QA branch and target`);
       }
       await this.recordArtifactManifest(backlogId, worktreePath);
-      const mr = existing ?? await this.providers.changes.create({
-        backlog, sourceBranch: verificationBranch, targetBranch, draft: false,
-        evidence: {
-          summary: signal.summary,
-          checks: signal.requiredChecks,
-          observations: signal.observations,
-          notes: signal.notes,
-        },
-        worktreePath,
-        commitSha: commitSha || undefined,
-      });
+      const evidence = {
+        summary: signal.summary,
+        checks: signal.requiredChecks,
+        observations: signal.observations,
+        notes: signal.notes,
+      };
+      let mr = existing;
+      if (mr) {
+        // A previous attempt left the review request behind. The evidence in
+        // its body is the evidence of that attempt, so it is refreshed with
+        // the one this attempt gathered.
+        mr = await this.providers.changes.refresh?.(mr.id, backlog, evidence) ?? mr;
+      } else {
+        mr = await this.providers.changes.create({
+          backlog, sourceBranch: verificationBranch, targetBranch, draft: false,
+          evidence,
+          worktreePath,
+          commitSha: commitSha || undefined,
+        });
+      }
       await this.afterPublication?.(mr);
       if (activeRework) {
         await this.providers.backlog.resolveRework(backlogId, activeRework.id, {

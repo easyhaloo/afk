@@ -458,6 +458,15 @@ describe('executeWorkItem', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('reuses the change request an earlier attempt left behind', async () => {
+    // A reworked work item is expected to carry the review request of the
+    // attempt that failed; the verification refreshes its evidence.
+    const { deps, run, changes } = await setup({ state: 'rework' });
+    changes.findForBacklog.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' });
+    await executeWorkItem(input, deps);
+    expect(run).toHaveBeenCalled();
+  });
+
   it('rejects a concurrent attempt before spawning another runner', async () => {
     const { deps, run } = await setup();
     let finish!: (value: { success: boolean }) => void;

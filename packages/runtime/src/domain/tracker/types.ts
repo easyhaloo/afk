@@ -148,6 +148,8 @@ export interface TrackedMR {
   targetBranch: string;
   url: string;
   projectId: string;
+  /** The body of the change request — it names the issues it closes. */
+  description?: string;
   mergeable?: boolean;
   pipeline?: { status: string };  // GitLab only
 }
@@ -190,6 +192,8 @@ export interface TrackerProvider {
   listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
   createMR(options: CreateMROptions): Promise<number>;
   mergeMR(id: number, options?: MergeMROptions): Promise<void>;
+  /** Refresh the body of a change request — the evidence it carries. */
+  updateMR?(id: number, updates: { description?: string }): Promise<void>;
   approveMR(id: number, options?: ApproveMROptions): Promise<void>;
   closeMR(id: number, options?: CloseMROptions): Promise<void>;
   reopenMR(id: number): Promise<void>;

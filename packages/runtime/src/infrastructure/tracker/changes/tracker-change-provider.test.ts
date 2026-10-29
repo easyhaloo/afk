@@ -159,6 +159,48 @@ describe('TrackerChangeProvider', () => {
     expect(isMRLinkedToIssue).toHaveBeenCalledTimes(3);
   });
 
+  it('accepts a change request that names the issue it closes', async () => {
+    // A merge request that targets a branch other than the default one never
+    // gets the platform link, even though its description names the issue.
+    const tracker = {
+      platform: 'gitlab', projectId: 'fang/services/k-base', providerHost: 'w.src.corp.qihoo.net',
+      getMR: vi.fn().mockResolvedValue({
+        id: 47, state: 'opened', sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+        url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/47',
+        description: 'QA: PASS\nCloses #3',
+      }),
+      isMRLinkedToIssue: vi.fn().mockResolvedValue(false),
+    } as unknown as TrackerProvider;
+    const change = {
+      id: '47', state: 'open' as const, sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+      url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/47',
+    };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'gitlab:w.src.corp.qihoo.net/fang/services/k-base#3'))
+      .resolves.toBeUndefined();
+  });
+
+  it('still refuses a change request that names no issue', async () => {
+    const tracker = {
+      platform: 'gitlab', projectId: 'fang/services/k-base', providerHost: 'w.src.corp.qihoo.net',
+      getMR: vi.fn().mockResolvedValue({
+        id: 48, state: 'opened', sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+        url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/48',
+        description: 'QA: PASS\n## Verification Evidence',
+      }),
+      isMRLinkedToIssue: vi.fn().mockResolvedValue(false),
+    } as unknown as TrackerProvider;
+    const change = {
+      id: '48', state: 'open' as const, sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+      url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/48',
+    };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'gitlab:w.src.corp.qihoo.net/fang/services/k-base#3'))
+      .rejects.toThrow(/not linked/i);
+  });
+
   it('uses only the QA result and issue closing reference, without repeating the PRD', () => {
     const backlog = {
       id: '158', title: '工作项列表排序', description: '# PRD\n\n大量需求正文',

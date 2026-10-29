@@ -219,6 +219,10 @@ export class GitLabClient implements TrackerProvider {
     return issues.some(candidate => Number(candidate.project_id) === Number(project.id) && Number(candidate.iid) === issue.issueNumber);
   }
 
+  async updateMR(id: number, updates: { description?: string }): Promise<void> {
+    await this.client.MergeRequests.edit(this.projectId, id, { description: updates.description });
+  }
+
   async getMR(id: number): Promise<TrackedMR> {
     const mr = await this.client.MergeRequests.show(this.projectId, id) as any;
     const mergeStatus = mr.detailed_merge_status ?? mr.merge_status;
@@ -229,6 +233,7 @@ export class GitLabClient implements TrackerProvider {
       state: mr.state === 'merged' ? 'merged' : mr.state === 'opened' ? 'opened' : 'closed',
       sourceBranch: mr.source_branch,
       targetBranch: mr.target_branch,
+      ...(mr.description ? { description: mr.description } : {}),
       mergeable: mergeStatus === 'mergeable' || mergeStatus === 'can_be_merged'
         ? true
         : typeof mergeStatus === 'string' && !['checking', 'unchecked', 'preparing', 'approvals_syncing'].includes(mergeStatus)

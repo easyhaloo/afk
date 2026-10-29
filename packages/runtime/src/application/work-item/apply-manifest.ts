@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { load } from 'js-yaml';
+import { z } from 'zod';
 import {
   planBacklogManifest,
   type BacklogManifest,
@@ -57,6 +58,28 @@ export async function readBacklogManifest(path: string): Promise<BacklogManifest
 }
 
 /**
+ * The shape of one item as it is written.
+ *
+ * A manifest is read with a schema, not by picking fields out of a parsed
+ * document: a manifest with a field nobody expects is a manifest somebody
+ * meant something else by, and it has to be refused rather than half-read.
+ */
+const manifestItemSchema = z.object({
+  title: z.string().min(1, 'a manifest item needs a title'),
+  description: z.string().min(1, 'a manifest item needs a description'),
+  project: z.string().min(1).optional(),
+  ref: z.string().min(1).optional(),
+  parentId: z.string().min(1).optional(),
+  baseBacklogId: z.string().min(1).optional(),
+  dependsOn: z.array(z.string().min(1)).default([]),
+  executionMode: z.enum(['afk', 'hitl']).optional(),
+  tags: z.array(z.string().min(1)).default([]),
+});
+
+/** The shape of a manifest as it is written. */
+const manifestSchema = z.array(manifestItemSchema);
+
+/**
  * Read a manifest from its source.
  *
  * A manifest is a list of items. Anything that is not a list, and any item
@@ -68,63 +91,12 @@ export function parseBacklogManifest(source: string): BacklogManifest {
   if (!Array.isArray(document)) {
     throw new Error('backlog manifest must be a list of items');
   }
-  return { items: document.map((entry, index) => parseItem(entry, index)) };
-}
-
-/** Read one item of a manifest. */
-function parseItem(entry: unknown, index: number): BacklogManifestItem {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-    throw new Error(`backlog manifest item ${index + 1} must be an object`);
+  const parsed = manifestSchema.safeParse(document);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(`backlog manifest ${issue?.path.join('.') || 'document'} is invalid: ${issue?.message}`);
   }
-  const candidate = entry as Record<string, unknown>;
-  const title = requiredText(candidate.title, `item ${index + 1} title`);
-  const description = requiredText(candidate.description, `item ${index + 1} description`);
-  const executionMode = candidate.executionMode === undefined
-    ? undefined
-    : parseExecutionMode(candidate.executionMode, index);
-  return {
-    title,
-    description,
-    ...(optionalText(candidate.project) === undefined ? {} : { project: optionalText(candidate.project) }),
-    ...(optionalText(candidate.ref) === undefined ? {} : { ref: optionalText(candidate.ref) }),
-    ...(optionalText(candidate.parentId) === undefined ? {} : { parentId: optionalText(candidate.parentId) }),
-    ...(optionalText(candidate.baseBacklogId) === undefined ? {} : { baseBacklogId: optionalText(candidate.baseBacklogId) }),
-    dependsOn: stringList(candidate.dependsOn, `item ${index + 1} dependsOn`),
-    ...(executionMode === undefined ? {} : { executionMode }),
-    tags: stringList(candidate.tags, `item ${index + 1} tags`),
-  };
-}
-
-/** The execution mode of an item, when it names one. */
-function parseExecutionMode(value: unknown, index: number): BacklogManifestExecutionMode {
-  if (value !== 'afk' && value !== 'hitl') {
-    throw new Error(`backlog manifest item ${index + 1} has an invalid executionMode: ${String(value)}`);
-  }
-  return value;
-}
-
-/** A field that has to carry text. */
-function requiredText(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`backlog manifest ${label} must not be empty`);
-  }
-  return value;
-}
-
-/** A field that may carry text. */
-function optionalText(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  return value;
-}
-
-/** A field that carries a list of strings. */
-function stringList(value: unknown, label: string): string[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) {
-    throw new Error(`backlog manifest ${label} must be a list of strings`);
-  }
-  return value as string[];
+  return { items: parsed.data.map(item => ({ ...item })) };
 }
 
 /**

@@ -86,6 +86,7 @@ single source of truth for the supported surface:
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
 | `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
+| `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog children <prd-id>` | List the issues that belong to one work item, across every reachable project |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
@@ -331,6 +332,40 @@ validation.
 `afk backlog list` and `afk backlog inventory` filter by state and by role
 separately: `--state ready` never returns an anchor, because an anchor has no
 state, and `--kind prd` is what selects them.
+
+### Backlog manifest
+
+`afk backlog apply-manifest <file>` applies a provider-neutral manifest: a
+YAML list of items, each with a title, a description, the project it belongs
+to, and the relationships it has. The manifest is the handoff a decomposition
+produces and AFK consumes.
+
+| Field | Meaning |
+| --- | --- |
+| `project` | The canonical project key the record belongs to: `platform:projectKey` |
+| `ref` | A manifest-local name other items can point at |
+| `parentId` | The organizational parent: a canonical ID or a manifest-local `ref` |
+| `baseBacklogId` | The Git execution base: a canonical ID or a manifest-local `ref` |
+| `dependsOn` | The records that must complete first |
+| `executionMode` | `afk` or `hitl` |
+| `tags` | Provider-neutral business tags |
+
+A requirement that spans repositories puts its items in the repositories that
+own them: each item names its own project, and the record is created there.
+A reference is either the canonical ID of a record that already exists, or the
+`ref` of another item of the same manifest — the second kind is resolved when
+the record it names has been created, so a parent, an execution base and a
+dependency are always created before the item that points at them. A
+dependency cycle is refused instead of being applied in some order.
+
+Cross-project relationships need the two projects to live on the same
+provider host; a relationship across providers is refused. An execution base
+has to live in the repository the item runs in, because a branch belongs to
+one repository.
+
+`--idempotency-key <prefix>` derives one retry key per item from the prefix
+and the item's `ref` (or its title), so applying the same manifest twice
+returns the records it already created instead of creating them again.
 
 CLI JSON success envelopes are `{ok:true,kind,data}`. Failures are
 `{ok:false,kind,data:null,error:{code,message,details?}}` with a nonzero exit code.

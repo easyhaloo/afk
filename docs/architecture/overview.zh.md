@@ -65,6 +65,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
 | `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
+| `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk backlog children <prd-id>` | 跨所有可达项目列出归属于某个工作项的 issue |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
@@ -257,6 +258,33 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 
 `afk backlog list` 与 `afk backlog inventory` 按状态和按角色分别过滤：锚点没有状态，
 所以 `--state ready` 永远不会返回锚点，选出锚点要用 `--kind prd`。
+
+### Backlog manifest
+
+`afk backlog apply-manifest <file>` 应用一份 provider 中立的 manifest：一份 YAML 条目
+列表，每条带标题、描述、所属项目与它之间的关系。manifest 是需求分解产出的交接物，
+由 AFK 消费。
+
+| 字段 | 含义 |
+| --- | --- |
+| `project` | 记录所属项目的规范项目键：`platform:projectKey` |
+| `ref` | 清单内可被其它条目引用的本地名 |
+| `parentId` | 组织性父项：规范 ID 或清单内 `ref` |
+| `baseBacklogId` | Git 执行基线：规范 ID 或清单内 `ref` |
+| `dependsOn` | 必须先完成的记录 |
+| `executionMode` | `afk` 或 `hitl` |
+| `tags` | provider 中立的业务标签 |
+
+跨仓需求把条目放进拥有该工作的仓：每条声明自己的项目，记录就建在那里。引用要么是
+已存在记录的规范 ID，要么是同一份 manifest 里另一条目的 `ref`——后者在它所指的记录
+建好之后才解析，因此父项、执行基线和依赖总是先于指向它们的条目建立。依赖成环会被
+直接拒绝，而不是按某种顺序硬建。
+
+跨项目关系要求两个项目在同一个 provider host 上；跨 provider 的关系会被拒绝。执行
+基线必须与条目运行所在的仓相同，因为分支只属于一个仓。
+
+`--idempotency-key <prefix>` 用前缀加条目的 `ref`（没有则用标题）派生出逐条重试键，
+因此同一份 manifest 应用两次会返回它已经建好的记录，而不是再建一遍。
 
 CLI JSON 成功信封为 `{ok:true,kind,data}`；失败信封为
 `{ok:false,kind,data:null,error:{code,message,details?}}`，并返回非零退出码。

@@ -64,6 +64,38 @@ export function gitLabProjectHost(projectKey: string): string | undefined {
   return first && first.includes('.') ? first : undefined;
 }
 
+/** A canonical project key, read back into the parts a provider needs. */
+export interface CanonicalProject {
+  platform: WorkItemPlatform;
+  /** The canonical project key. */
+  projectKey: string;
+  /** The provider project path or id, without the host. */
+  projectId: string;
+  /** The provider host, when the platform names one. */
+  host?: string;
+}
+
+/**
+ * Read a canonical project key back into the parts a provider needs.
+ *
+ * This is the inverse of `canonicalProjectKey`: it turns the key a manifest
+ * names into the platform, the project and the host a provider is created
+ * for, so a record can be written in exactly the repository its key names.
+ */
+export function parseCanonicalProject(value: string): CanonicalProject {
+  const separator = value.indexOf(':');
+  if (separator < 0) throw new Error(`canonical project key must use platform:projectKey: ${value}`);
+  const platform = parseWorkItemPlatform(value.slice(0, separator));
+  const projectKey = parseProjectKey(value.slice(separator + 1));
+  if (platform === 'github') {
+    return { platform, projectKey, projectId: projectKey };
+  }
+  const host = gitLabProjectHost(projectKey);
+  const projectId = host === undefined ? projectKey : projectKey.slice(host.length + 1);
+  if (!projectId) throw new Error(`GitLab project key must include a project path: ${value}`);
+  return { platform, projectKey, projectId, host };
+}
+
 export interface ParsedWorkItemId extends WorkItemIdentityParts {
   id: WorkItemId;
 }

@@ -1,5 +1,6 @@
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
+import { readFile } from 'node:fs/promises';
 import {
   createGlobalWorkItemCatalogs,
   createManagementProviders,
@@ -27,7 +28,13 @@ import {
   type WorkItemChildrenResult,
 } from '@afk/runtime/application/work-item/children';
 import { toGlobalWorkItems } from '@afk/runtime/application/work-item/inventory-items';
-import { parseWorkItemId } from '@afk/runtime/domain/work-item/identity';
+import {
+  applyBacklogManifest,
+  parseBacklogManifest,
+  type BacklogManifestProviderFactory,
+} from '@afk/runtime/application/work-item/apply-manifest';
+import { planBacklogManifest } from '@afk/application';
+import { parseCanonicalProject, parseWorkItemId } from '@afk/runtime/domain/work-item/identity';
 import type { InventoryItem, InventoryProject, InventorySnapshot } from '@afk/application';
 import {
   addBacklogTag,
@@ -427,6 +434,108 @@ export async function runBacklogChildren(
 }
 
 /**
+ * The dependencies of the manifest command.
+ *
+ * The manifest is read from a source and the records are written through a
+ * provider, and both are injected so the command can be exercised without a
+ * provider at all.
+ */
+export interface BacklogApplyManifestDependencies {
+  /** The manifest source. */
+  read: (path: string) => Promise<string>;
+  /** The provider of one canonical project key. */
+  create: BacklogManifestProviderFactory;
+}
+
+export interface BacklogApplyManifestOptions extends JsonMode {
+  /** The manifest file. */
+  manifest?: string;
+  /** The project an item without its own project belongs to. */
+  project?: string;
+  /** Override provider detection. */
+  platform?: string;
+  /** The prefix the per-item retry keys are derived from. */
+  idempotencyKey?: string;
+  /** Plan and report without writing anything. */
+  dryRun?: boolean;
+}
+
+/**
+ * Apply a backlog manifest.
+ *
+ * The manifest names what has to exist and, per item, which project it
+ * belongs to. Every record is written in the project it names, and the
+ * relationships between the records are written with them.
+ */
+export async function runBacklogApplyManifest(
+  dependencies: BacklogApplyManifestDependencies,
+  options: BacklogApplyManifestOptions = {},
+): Promise<void> {
+  const kind = 'backlog.apply-manifest';
+  try {
+    if (!options.manifest) throw new Error('a manifest file is required');
+    const manifest = parseBacklogManifest(await dependencies.read(options.manifest));
+    const plan = planBacklogManifest(manifest, {
+      ...(options.project === undefined ? {} : { defaultProject: options.project }),
+      ...(options.idempotencyKey === undefined ? {} : { idempotencyKeyPrefix: options.idempotencyKey }),
+    });
+    if (options.dryRun) {
+      const records = plan.entries.map(entry => ({
+        item: entry.item,
+        project: entry.project,
+        planned: true,
+      }));
+      if (options.json) {
+        emitSuccess(kind, { records, dryRun: true });
+        return;
+      }
+      for (const record of records) {
+        console.log(`${chalk.bold(record.project)}  ${record.item.title}`);
+      }
+      return;
+    }
+    const result = await applyBacklogManifest(plan, dependencies.create);
+    if (options.json) {
+      emitSuccess(kind, result);
+      return;
+    }
+    for (const record of result.records) {
+      success(`Created ${record.id}: ${record.item.title}`);
+      detail(`project: ${record.project}`);
+      if (record.url) detail(`url: ${record.url}`);
+    }
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    handleCommandError(error);
+  }
+}
+
+/**
+ * The provider of every project a manifest names.
+ *
+ * The canonical key says which repository a record belongs to, including
+ * the instance it lives on, so the provider is created for that repository
+ * and not for the one the command happens to run in.
+ */
+function manifestProviderFactory(): BacklogManifestProviderFactory {
+  const providers = new Map<string, Promise<BacklogManagementProvider>>();
+  return (project: string) => {
+    const existing = providers.get(project);
+    if (existing) return existing;
+    const created = (async () => {
+      const { platform, projectId, host } = parseCanonicalProject(project);
+      const bundle = await createManagementProviders(projectId, process.cwd(), platform, host);
+      return bundle.backlog;
+    })();
+    providers.set(project, created);
+    return created;
+  };
+}
+
+/**
  * The identity of the queried item.
  *
  * A bare issue number names a different issue in every repository, so only
@@ -818,6 +927,30 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.children', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  backlog
+    .command('apply-manifest')
+    .description('Create the backlog records a provider-neutral manifest names')
+    .argument('<manifest>', 'Manifest file (YAML)')
+    .option('--project <project>', 'Default target project (platform:projectKey)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--idempotency-key <key>', 'Prefix for the per-item retry keys')
+    .option('--dry-run', 'Report the plan without writing anything')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async (manifest: string, options) => {
+      try {
+        await runBacklogApplyManifest({
+          read: async path => readFile(path, 'utf8'),
+          create: manifestProviderFactory(),
+        }, { ...options, manifest });
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.apply-manifest', classifyError(error), (error as Error).message);
           return;
         }
         handleCommandError(error);

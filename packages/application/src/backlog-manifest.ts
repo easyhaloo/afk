@@ -218,20 +218,19 @@ function projectOfGlobalId(id: string): string | undefined {
 /**
  * Order the entries so every dependency comes before the item waiting for it.
  *
- * Only manifest-local dependencies constrain the order: a global identity
- * names a record that already exists and cannot delay anything.
+ * Only manifest-local references constrain the order: a global identity names
+ * a record that already exists and cannot delay anything. A local
+ * dependency, parent and execution base all have to exist before the item
+ * that names them is created, because the record is written with the link
+ * already in it.
  */
 function orderEntries(entries: BacklogManifestPlanEntry[]): BacklogManifestPlanEntry[] {
-  const byRef = new Map<string, BacklogManifestPlanEntry>();
-  for (const entry of entries) {
-    if (entry.item.ref !== undefined) byRef.set(entry.item.ref, entry);
-  }
   const remaining = [...entries];
   const ordered: BacklogManifestPlanEntry[] = [];
   const placed = new Set<string>();
   while (remaining.length > 0) {
-    const index = remaining.findIndex(entry => entry.dependsOn.every(reference =>
-      reference.kind !== 'local' || placed.has(reference.ref)));
+    const index = remaining.findIndex(entry => localReferences(entry)
+      .every(reference => placed.has(reference)));
     if (index < 0) {
       throw new Error('backlog manifest has a dependency cycle');
     }
@@ -240,4 +239,11 @@ function orderEntries(entries: BacklogManifestPlanEntry[]): BacklogManifestPlanE
     if (entry.item.ref !== undefined) placed.add(entry.item.ref);
   }
   return ordered;
+}
+
+/** The manifest-local names an entry has to wait for. */
+function localReferences(entry: BacklogManifestPlanEntry): string[] {
+  return [entry.parentId, entry.baseBacklogId, ...entry.dependsOn]
+    .filter((reference): reference is { kind: 'local'; ref: string } => reference?.kind === 'local')
+    .map(reference => reference.ref);
 }

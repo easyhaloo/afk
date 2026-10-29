@@ -103,6 +103,37 @@ describe('backlog manifest plan', () => {
     expect(plan.entries.map(entry => entry.item.ref)).toEqual(['one', 'two']);
   });
 
+  it('creates a parent before the item that points at it', () => {
+    // The parent has to exist before the child is created: the child records
+    // a link to it.
+    const unordered = planBacklogManifest({
+      items: [
+        item({ title: 'Child', project: 'github:org/api', ref: 'child', parentId: 'anchor' }),
+        item({ title: 'Anchor', project: 'github:org/req', ref: 'anchor' }),
+      ],
+    });
+    expect(unordered.entries.map(entry => entry.item.ref)).toEqual(['anchor', 'child']);
+  });
+
+  it('creates an execution base before the item that starts from it', () => {
+    const unordered = planBacklogManifest({
+      items: [
+        item({ title: 'Child', project: 'github:org/api', ref: 'child', baseBacklogId: 'base' }),
+        item({ title: 'Base', project: 'github:org/api', ref: 'base' }),
+      ],
+    });
+    expect(unordered.entries.map(entry => entry.item.ref)).toEqual(['base', 'child']);
+  });
+
+  it('rejects a cycle that runs through a parent edge', () => {
+    expect(() => planBacklogManifest({
+      items: [
+        item({ title: 'One', project: 'github:org/repo', ref: 'one', parentId: 'two' }),
+        item({ title: 'Two', project: 'github:org/repo', ref: 'two', parentId: 'one' }),
+      ],
+    })).toThrow(/cycle/i);
+  });
+
   it('rejects a dependency cycle', () => {
     expect(() => planBacklogManifest({
       items: [

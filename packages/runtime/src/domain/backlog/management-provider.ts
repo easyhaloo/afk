@@ -26,5 +26,6 @@ export class ManagementBacklogProvider implements QABacklogProvider {
   removeTag(id: string, tag: string): Promise<void> { return this.provider.removeTag(id, tag); }
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.provider.applyRelationUpdate(id, update); }
   applyRole(id: string, kind: BacklogKind): Promise<void> { return this.provider.applyRole(id, kind); }
+  applyMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.provider.applyMode(id, mode); }
   initialize(): Promise<void> { return this.provider.initialize(); }
 }

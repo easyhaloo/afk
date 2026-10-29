@@ -466,6 +466,10 @@ Claude Code 的配置文件（`~/.claude.json`，或 `$CLAUDE_CONFIG_DIR/.claude
 - 阻断条目时会一并关闭本次失败执行所回应的 operator rework 请求，使
   `afk backlog retry` 能再次发起。qa 来源的 rework 记录保持 open——它就是
   验证反馈本身，下一次 operator 重试会自行取代它。
+- 发布分支之前由 AFK 自己提交实现。agent 若留下未提交的改动，否则会发布出
+  一个空变更，工作也会在工作区恢复时丢失。
+- AFK 的运行时产物——完成信号与 `.afk/` 目录——不会被加入提交：它们是过程
+  状态，不是工作成果。
 - 优先使用原生认领；文件系统 fallback 仅适用于单机上的本地可信文件系统。
 - lease 清理由生命周期统一管理且必须幂等。
 - backlog ID 通过 provider-neutral 函数确定性映射到分支名。

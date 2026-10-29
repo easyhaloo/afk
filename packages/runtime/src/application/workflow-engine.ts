@@ -548,7 +548,10 @@ export class WorkflowRunner {
         return { success: false };
       }
       if (result.success && this.preparedRepositories) {
-        for (const repository of this.preparedRepositories.repositories) await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
+        for (const repository of this.preparedRepositories.repositories) {
+          await this.commitImplementationWork(iid, repository.handle.path);
+          await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
+        }
         try {
           await this.finishPreparedRepositories({ status: 'success' });
         } catch (error) {
@@ -1051,6 +1054,7 @@ export class WorkflowRunner {
       await this.markBacklogBlocked('claim heartbeat failed');
       return { success: false };
     }
+    await this.commitImplementationWork(iid, worktreePath);
     await this.recordImplementationCommit(worktreePath, targetBranch);
     if (!this.preparedRepositories) {
       // Push the implementation branch. QA creates the change request only
@@ -1070,6 +1074,21 @@ export class WorkflowRunner {
     logger.info({ iid, worktreePath }, 'worktree cleaned up');
 
     return { success: true };
+  }
+
+  /**
+   * Commit the agent's work.
+   *
+   * AFK publishes the implementation, so AFK owns the commit. An agent that
+   * leaves its changes uncommitted would otherwise publish an empty change,
+   * and the work would be lost when the workspace is restored.
+   */
+  private async commitImplementationWork(iid: number, worktreePath: string): Promise<string> {
+    const title = this.activeBacklog?.title?.trim();
+    const message = `feat: ${title ? `${title} ` : ''}(backlog ${iid})`;
+    const sha = await this.providers.branches.commit(worktreePath, message);
+    if (sha) logger.info({ iid, worktreePath, commitSha: sha }, 'implementation committed');
+    return sha;
   }
 
   private async recordImplementationCommit(worktreePath: string, branch: string): Promise<void> {

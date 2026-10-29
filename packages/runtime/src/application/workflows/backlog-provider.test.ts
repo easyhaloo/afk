@@ -297,6 +297,17 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it('commits the agent work before the branch is published', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    subject.activeBacklog = item;
+
+    await subject.autoWrapup(42, process.cwd(), 'worker', 'main');
+
+    expect(bundle.branches.commit).toHaveBeenCalledWith(process.cwd(), expect.stringContaining('backlog 42'));
+    expect(bundle.branches.push).toHaveBeenCalled();
+  });
+
   it('skips a backlog that was not atomically claimed', async () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;

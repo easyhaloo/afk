@@ -2,7 +2,7 @@ import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { simpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import type { BranchHandle } from '../../domain/branches/types.js';
 import type { WorkflowRunRepository } from './run-request.js';
 import type { RunOutcomeStatus } from './resource-scope.js';
@@ -301,6 +301,14 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
       },
       prepareWorkingBranch: async (repoRoot, baseBranch, workingBranch) => {
         const git = simpleGit(repoRoot);
+        // A published working branch is the previous attempt's work. A retry
+        // has to continue it: starting from the base again would make the
+        // agent redo the work under a different commit, and the push would
+        // then be rejected as a non-fast-forward.
+        if (await fetchRemoteBranch(git, workingBranch)) {
+          await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
+          return;
+        }
         if (await localBranchHead(repoRoot, workingBranch)) {
           await git.raw(['checkout', workingBranch]);
         } else {
@@ -551,6 +559,22 @@ async function localBranchHead(repoRoot: string, branch: string): Promise<string
     return (await simpleGit(repoRoot).revparse([`refs/heads/${branch}`])).trim();
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Fetch a remote branch and report whether it exists.
+ *
+ * The remote-tracking ref is written explicitly: a plain `git fetch origin
+ * <branch>` does not always update `refs/remotes/origin/<branch>`.
+ */
+async function fetchRemoteBranch(git: SimpleGit, branch: string): Promise<boolean> {
+  await git.raw(['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`]).catch(() => undefined);
+  try {
+    await git.revparse([`refs/remotes/origin/${branch}`]);
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -198,6 +198,20 @@ describe('GitBranchProvider', () => {
     expect(sha).not.toBe(base);
   });
 
+  it('keeps the runtime artifacts out of the commit', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await writeFile(join(repoPath, 'result.txt'), 'result\n');
+    await writeFile(join(repoPath, '.afk-signal.json'), '{"type":"goal_complete"}\n');
+    await mkdir(join(repoPath, '.afk'), { recursive: true });
+    await writeFile(join(repoPath, '.afk', 'artifacts.txt'), '/tmp/evidence.log\n');
+
+    await new GitBranchProvider(repoPath).commit(repoPath, 'implementation');
+
+    const files = (await git.raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toEqual(['result.txt']);
+  });
+
   it('commits a pending merge even when the merged trees are identical', async () => {
     const { repoPath } = await repository();
     const git = simpleGit(repoPath);

@@ -65,7 +65,11 @@ export class GitBranchProvider implements BranchProvider {
 
   async commit(worktreePath: string, message: string): Promise<string> {
     const git = simpleGit(worktreePath);
-    await git.add(['-A']);
+    // AFK's own runtime artifacts live in the worktree: the completion signal
+    // the agent writes and the artifact manifest the QA runner reads. They are
+    // process state, not work — publishing them would put them in the change
+    // request.
+    await git.raw(['add', '-A', '--', '.', ':!.afk-signal.json', ':!.afk']);
     if ((await git.status()).isClean() && !(await git.raw(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']).catch(() => ''))) return '';
     await git.commit(message);
     return (await git.revparse(['HEAD'])).trim();

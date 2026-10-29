@@ -610,6 +610,53 @@ describe('MultiRepositoryPreparer', () => {
     }
   });
 
+  it('continues a published working branch instead of restarting from the base', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-multi-repo-'));
+    try {
+      const remote = join(root, 'remote.git');
+      const seed = join(root, 'seed');
+      const repoRoot = join(root, 'existing');
+      await fs.mkdir(remote);
+      await simpleGit(remote).init(true);
+      await fs.mkdir(seed);
+      const seedGit = simpleGit(seed);
+      await seedGit.init(['--initial-branch=main']);
+      await seedGit.addConfig('user.name', 'AFK Test');
+      await seedGit.addConfig('user.email', 'afk@example.test');
+      await fs.writeFile(join(seed, 'tracked.txt'), 'baseline\n');
+      await seedGit.add(['tracked.txt']);
+      await seedGit.commit('baseline');
+      await seedGit.addRemote('origin', remote);
+      await seedGit.push('origin', 'main', ['--set-upstream']);
+      await simpleGit().clone(remote, repoRoot, ['--branch', 'main']);
+      await configureLocalOrigin(repoRoot, remote, 'https://github.com/acme/api.git');
+
+      // The previous attempt published its work on the working branch.
+      const workingBranch = 'afk/work-item-18';
+      await simpleGit(repoRoot).raw(['checkout', '-b', workingBranch]);
+      await fs.writeFile(join(repoRoot, 'tracked.txt'), 'first attempt\n');
+      await simpleGit(repoRoot).add(['tracked.txt']);
+      await simpleGit(repoRoot).commit('first attempt');
+      await simpleGit(repoRoot).push('origin', workingBranch, ['--set-upstream']);
+      await simpleGit(repoRoot).raw(['checkout', 'main']);
+      // The restore of the failed attempt removed the local branch.
+      await simpleGit(repoRoot).raw(['branch', '-D', workingBranch]);
+
+      const prepared = await new MultiRepositoryPreparer().prepare([
+        repository({ repoRoot }),
+      ], root);
+
+      // The retry starts from the published work, not from the base.
+      expect((await simpleGit(repoRoot).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe(workingBranch);
+      expect((await simpleGit(repoRoot).revparse(['HEAD'])).trim())
+        .toBe((await simpleGit(repoRoot).revparse([`origin/${workingBranch}`])).trim());
+      await expect(fs.readFile(join(repoRoot, 'tracked.txt'), 'utf8')).resolves.toBe('first attempt\n');
+      await prepared.finish({ status: 'success' });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('holds one workspace lock until idempotent finish releases it once', async () => {
     const deps = dependencies();
     const prepared = await new MultiRepositoryPreparer(deps).prepare([repository()], '/workspace');

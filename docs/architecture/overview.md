@@ -584,6 +584,11 @@ filesystem lease directory.
   execution answered, so `afk backlog retry` can ask for it again. A QA-sourced
   rework record stays open: it is the verification feedback, and the next
   operator retry supersedes it on its own.
+- AFK commits the implementation itself before it publishes the branch. An
+  agent that leaves its changes uncommitted would otherwise publish an empty
+  change, and the work would be lost when the workspace is restored.
+- AFK's runtime artifacts — the completion signal and the `.afk/` directory —
+  are never staged into a commit. They are process state, not work.
 - Native claim is preferred; the filesystem fallback is deliberately scoped to
   a trusted local filesystem on one host.
 - Lease cleanup is lifecycle-owned and idempotent.

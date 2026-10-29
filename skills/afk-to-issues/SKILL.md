@@ -266,11 +266,13 @@ a manifest or ask the user to manually import/apply it.
    plan identity and draft key. After each creation, capture the provider's
    canonical ID and URL, then map the draft key to that canonical identity
    before creating dependent tasks.
-4. Use canonical cross-project item identities for dependencies. Do not assume
-   bare issue numbers are globally unique. Do not use a cross-repository
-   item as `baseBacklogId` unless the runtime explicitly supports it; the
-   current execution-base contract requires the base item to belong to the
-   same repository. Cross-repository prerequisites should use `dependsOn`.
+4. Use canonical cross-project item identities for `parentId`,
+   `baseBacklogId`, and `dependsOn`. Do not assume bare issue numbers are
+   globally unique. Cross-repository `baseBacklogId` references are allowed;
+   however, a branch in another repository cannot be used as the Git base for
+   the target checkout. Runtime preserves that reference for traceability and
+   uses the target repository's configured base branch in this case. Use
+   `dependsOn` separately when completion ordering is required.
 5. After creation, read every created item back using the CLI and verify its
    target project, title/body, execution mode, tags, parent/dependency links,
    and returned URL. Validate the global graph against the approved plan.

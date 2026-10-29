@@ -665,6 +665,8 @@ describe('MultiRepositoryPreparer', () => {
       await seedGit.push('origin', 'main', ['--set-upstream']);
       await simpleGit().clone(remote, repoRoot, ['--branch', 'main']);
       await configureLocalOrigin(repoRoot, remote, 'https://github.com/acme/api.git');
+      await simpleGit(repoRoot).addConfig('user.name', 'AFK Test');
+      await simpleGit(repoRoot).addConfig('user.email', 'afk@example.test');
 
       // The previous attempt published its work on the working branch.
       const workingBranch = 'afk/work-item-18';

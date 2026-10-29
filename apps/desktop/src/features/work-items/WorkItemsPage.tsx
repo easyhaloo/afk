@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type {
   BacklogPlatform,
   GlobalWorkItem,
+  WorkItemChildrenResult,
   WorkItemInventoryDiagnostic,
   WorkItemInventoryResult,
   WorkItemRepositoryRef,
@@ -80,7 +81,7 @@ const terminalOptions: Array<{ value: WorkItemTerminalId; label: string }> = [
   { value: "terminal", label: "Terminal.app" },
 ];
 
-type DetailTab = "overview" | "plan" | "runs";
+type DetailTab = "overview" | "plan" | "runs" | "children";
 type RepositoryRunDraft = { selected: boolean; baseBranch: string };
 type WorkItemRunView = { key: string; runId: string; startedAt?: string; status: string; statusLabel: string; summary?: string; actions?: ReactNode; metadata: ReactNode; log?: ReactNode };
 
@@ -234,6 +235,9 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [sortSelection, setSortSelection] = useState<BacklogSortSelection>(() => parseBacklogSort("updatedAt:desc"));
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
+  const [childrenResult, setChildrenResult] = useState<WorkItemChildrenResult | null>(null);
+  const [childrenError, setChildrenError] = useState("");
+  const [childrenLoading, setChildrenLoading] = useState(false);
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
   const [runDetailOpen, setRunDetailOpen] = useState(false);
   const runSelectionButton = useRef<HTMLButtonElement | null>(null);
@@ -247,6 +251,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const requestVersion = useRef(0);
   const runRequestVersion = useRef(0);
+  const childrenRequestVersion = useRef(0);
   const selectedWorkItemId = useRef<string | null>(null);
   const lastFocusWorkItemId = useRef<string | null>(null);
   const selected = inventory.items.find(item => item.id === selectedItem?.id) ?? selectedItem;
@@ -277,6 +282,18 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     const timer = setInterval(() => { void load(false, true); }, 3000);
     return () => clearInterval(timer);
   }, [detailTab, selected?.id, selected?.runs]);
+
+  useEffect(() => {
+    if (detailTab !== "children" || !selected?.id) return;
+    if (typeof window.afkDesktop.workItems.children !== "function") return;
+    const version = ++childrenRequestVersion.current;
+    setChildrenLoading(true);
+    setChildrenError("");
+    void window.afkDesktop.workItems.children(selected.id)
+      .then(result => { if (version === childrenRequestVersion.current) setChildrenResult(result); })
+      .catch(cause => { if (version === childrenRequestVersion.current) setChildrenError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (version === childrenRequestVersion.current) setChildrenLoading(false); });
+  }, [detailTab, selected?.id]);
 
   const projectOptions = useMemo(() => [
     { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },
@@ -311,6 +328,8 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     selectedWorkItemId.current = item.id;
     setSelected(item);
     setDetailTab("overview");
+    setChildrenResult(null);
+    setChildrenError("");
     setSelectedRunKey(null);
     setRunDetailOpen(false);
     setRunSetupOpen(false);
@@ -497,6 +516,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
               <button type="button" className={detailTab === "overview" ? "active" : ""} aria-pressed={detailTab === "overview"} onClick={() => setDetailTab("overview")}>概览</button>
               <button type="button" className={detailTab === "plan" ? "active" : ""} aria-pressed={detailTab === "plan"} onClick={() => setDetailTab("plan")}>执行计划 <span>{selectedPlan.length}</span></button>
               <button type="button" className={detailTab === "runs" ? "active" : ""} aria-pressed={detailTab === "runs"} onClick={() => setDetailTab("runs")}>运行记录 <span>{selectedRuns.length + auditedRuns.length}</span></button>
+              <button type="button" className={detailTab === "children" ? "active" : ""} aria-pressed={detailTab === "children"} onClick={() => setDetailTab("children")}>子项 <span>{childrenResult?.children.length ?? 0}</span></button>
             </nav>
             <div className="work-item-detail-body">
               {detailTab === "overview" ? <>
@@ -522,6 +542,23 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
               {detailTab === "plan" ? <section className="work-item-detail-section">
                 <div className="work-item-section-heading"><h3>执行计划</h3><small>计划属于工作项，不属于任一仓库</small></div>
                 {selectedPlan.length ? selectedPlan.map((step, index) => <div className="work-item-plan-card" key={step.id}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{step.title}</b><small>{step.detail ?? "待补充执行说明"}</small></div><em className={step.status ?? "pending"}>{step.status === "completed" ? "已完成" : step.status === "running" ? "执行中" : step.status === "blocked" ? "阻塞" : "待执行"}</em></div>) : <WorkItemEmptySection>尚未生成执行计划；可在开始执行时选择工作流。</WorkItemEmptySection>}
+              </section> : null}
+
+              {detailTab === "children" ? <section className="work-item-detail-section">
+                <div className="work-item-section-heading"><h3>子项</h3><small>{childrenResult?.children.length ?? 0} 个关联 issue，可能位于其他仓库</small></div>
+                {childrenError ? <div className="work-item-run-error">读取子项失败：{childrenError}</div> : null}
+                {childrenLoading ? <WorkItemEmptySection>正在读取子项…</WorkItemEmptySection> : null}
+                {!childrenLoading && !childrenError && childrenResult && childrenResult.children.length ? childrenResult.children.map(child => (
+                  <button key={child.id} type="button" className="work-item-reference-card" onClick={() => {
+                    const target = inventory.items.find(item => item.id === child.id);
+                    if (target) openDetails(target);
+                  }}>
+                    <span className={`work-item-reference-icon ${child.project.platform}`}><ProviderIcon provider={child.project.platform} size={13} /></span>
+                    <span className="work-item-reference-copy"><b>{child.title}</b><small>{child.project.projectKey} #{child.issueNumber} · {stateLabels[child.state]}</small></span>
+                    <span className="work-item-role">{child.managed ? "已纳管" : "未纳管"}</span>
+                  </button>
+                )) : null}
+                {!childrenLoading && !childrenError && childrenResult && !childrenResult.children.length ? <WorkItemEmptySection>该工作项没有子项。</WorkItemEmptySection> : null}
               </section> : null}
 
               {detailTab === "runs" ? <section className="work-item-detail-section work-item-run-history" data-detail-open={runDetailOpen}>

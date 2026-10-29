@@ -1,4 +1,16 @@
-import type { GlobalWorkItem } from '../../domain/work-item/types.js';
+/**
+ * The fields a children query needs from an item.
+ *
+ * The query answers a question about identities, so it only needs the
+ * identity, the number and the project of an item. Every surface that asks
+ * keeps its own richer item shape and hands it over unchanged.
+ */
+export interface WorkItemChildrenEntry {
+  id: string;
+  issueNumber: number;
+  project: { projectKey: string };
+  parentId?: string;
+}
 
 /**
  * The children of one work item.
@@ -18,11 +30,11 @@ export interface WorkItemChildrenQuery {
 /** Where the answer came from. */
 export type WorkItemChildrenSource = 'inventory' | 'refreshed';
 
-export interface WorkItemChildrenResult {
+export interface WorkItemChildrenResult<Item extends WorkItemChildrenEntry> {
   /** The item whose children were asked for. */
-  parent: GlobalWorkItem;
+  parent: Item;
   /** Its direct children, ordered by project and issue number. */
-  children: GlobalWorkItem[];
+  children: Item[];
   /** Whether the answer came from the local copy or from a refresh. */
   source: WorkItemChildrenSource;
 }
@@ -34,14 +46,14 @@ export interface WorkItemChildrenResult {
  * nothing in it must be able to heal it, because the item may have been
  * created after the last collection.
  */
-export interface WorkItemChildrenInventory {
+export interface WorkItemChildrenInventory<Item extends WorkItemChildrenEntry> {
   /**
    * The locally known item and its children, and whether that copy is still
    * current. The parent is part of the answer, so it belongs in the read.
    */
-  read(parentId: string): Promise<{ items: readonly GlobalWorkItem[]; stale: boolean } | undefined>;
+  read(parentId: string): Promise<{ items: readonly Item[]; stale: boolean } | undefined>;
   /** Collect the items again from the providers. */
-  refresh(parentId: string): Promise<{ items: readonly GlobalWorkItem[] } | undefined>;
+  refresh(parentId: string): Promise<{ items: readonly Item[] } | undefined>;
 }
 
 /**
@@ -52,11 +64,11 @@ export interface WorkItemChildrenInventory {
  * what a copy is: the items of the last collection and the time it
  * succeeded.
  */
-export interface WorkItemChildrenStore {
+export interface WorkItemChildrenStore<Item extends WorkItemChildrenEntry> {
   /** The parent and its children as they are stored locally. */
-  read(parentId: string): Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined>;
+  read(parentId: string): Promise<{ items: readonly Item[]; lastSuccessAt?: number } | undefined>;
   /** Collect the items again from the providers. */
-  collect(): Promise<{ items: readonly GlobalWorkItem[] } | undefined>;
+  collect(): Promise<{ items: readonly Item[] } | undefined>;
 }
 
 /** How long a stored copy is trusted before it is collected again. */
@@ -69,10 +81,10 @@ export const DEFAULT_CHILDREN_STALE_AFTER_MS = 5 * 60_000;
  * succeeded has no time to compare against, so it is stale too: the first
  * query after a fresh install pays for the collection.
  */
-export function createMirrorWorkItemChildrenInventory(
-  store: WorkItemChildrenStore,
+export function createMirrorWorkItemChildrenInventory<Item extends WorkItemChildrenEntry>(
+  store: WorkItemChildrenStore<Item>,
   options: { staleAfterMs?: number } = {},
-): WorkItemChildrenInventory {
+): WorkItemChildrenInventory<Item> {
   const staleAfterMs = options.staleAfterMs ?? DEFAULT_CHILDREN_STALE_AFTER_MS;
   return {
     async read(parentId) {
@@ -98,10 +110,10 @@ export function createMirrorWorkItemChildrenInventory(
  * before it is reported as unknown — the item may simply be newer than the
  * last collection.
  */
-export async function listWorkItemChildren(
-  inventory: WorkItemChildrenInventory,
+export async function listWorkItemChildren<Item extends WorkItemChildrenEntry>(
+  inventory: WorkItemChildrenInventory<Item>,
   query: WorkItemChildrenQuery,
-): Promise<WorkItemChildrenResult> {
+): Promise<WorkItemChildrenResult<Item>> {
   const local = await inventory.read(query.parentId);
   let items = local?.items ?? [];
   let refreshed = false;
@@ -129,7 +141,7 @@ export async function listWorkItemChildren(
   return { parent, children, source: refreshed ? 'refreshed' : 'inventory' };
 }
 
-function findItem(items: readonly GlobalWorkItem[], id: string): GlobalWorkItem | undefined {
+function findItem<Item extends WorkItemChildrenEntry>(items: readonly Item[], id: string): Item | undefined {
   return items.find(item => item.id === id);
 }
 
@@ -137,7 +149,7 @@ function findItem(items: readonly GlobalWorkItem[], id: string): GlobalWorkItem 
  * Siblings are read as a list, so their order must not depend on when the
  * inventory happened to be collected.
  */
-function compareByProjectAndNumber(left: GlobalWorkItem, right: GlobalWorkItem): number {
+function compareByProjectAndNumber(left: WorkItemChildrenEntry, right: WorkItemChildrenEntry): number {
   return left.project.projectKey.localeCompare(right.project.projectKey)
     || left.issueNumber - right.issueNumber;
 }

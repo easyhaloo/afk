@@ -169,6 +169,19 @@ export type WorkItemInventoryResult = {
   complete: boolean;
 };
 
+/**
+ * The issues that belong to one work item.
+ *
+ * A PRD anchor and the issues it was split into live in different
+ * repositories, so the answer is a list of work items rather than a list of
+ * issues of one project.
+ */
+export type WorkItemChildrenResult = {
+  parent: GlobalWorkItem;
+  children: GlobalWorkItem[];
+  source: "inventory" | "refreshed";
+};
+
 export type BacklogItem = {
   id: string;
   workItemId?: WorkItemId;
@@ -586,6 +599,20 @@ export function parseWorkItemInventoryResult(input: unknown): WorkItemInventoryR
     projects: candidate.projects.map(parseProviderProjectRef),
     diagnostics,
     complete: candidate.complete,
+  };
+}
+
+/** Read the children of one work item out of an IPC payload. */
+export function parseWorkItemChildrenResult(input: unknown): WorkItemChildrenResult {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item children result must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["parent", "children", "source"], "work item children result");
+  if (!Array.isArray(candidate.children)) throw new Error("work item children result: children must be an array");
+  if (candidate.source !== "inventory" && candidate.source !== "refreshed") throw new Error("work item children result: source is invalid");
+  return {
+    parent: parseGlobalWorkItem(candidate.parent),
+    children: candidate.children.map(parseGlobalWorkItem),
+    source: candidate.source,
   };
 }
 

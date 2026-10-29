@@ -233,6 +233,7 @@ export type DesktopApi = {
   };
   workItems: {
     list: (options?: WorkItemInventoryOptions, forceRefresh?: boolean) => Promise<WorkItemInventoryResult>;
+    children: (workItemId: string) => Promise<WorkItemChildrenResult>;
     start: (input: WorkItemRunStartInput) => Promise<WorkItemRunStartResult>;
     executions: (options?: ExecutionQueryOptions) => Promise<{ executions: ExecutionSummary[]; nextCursor?: string }>;
     executionRunDetail: (runId: string, workItemId: string) => Promise<ExecutionRunDetail>;
@@ -302,6 +303,7 @@ export const IPC_CHANNELS = {
   backlogTagRemove: "afk:backlog-tag-remove",
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
+  workItemsChildren: "afk:work-items-children",
   workItemsStart: "afk:work-items-start",
   workItemsExecutions: "afk:work-items-executions",
   workItemsExecutionRunDetail: "afk:work-items-execution-run-detail",
@@ -343,6 +345,7 @@ import type {
   BacklogItem,
   BacklogListOptions,
   BacklogRuntimeSummary,
+  WorkItemChildrenResult,
   WorkItemInventoryOptions,
   WorkItemInventoryResult,
   WorkItemRunStartInput,

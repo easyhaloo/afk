@@ -255,6 +255,10 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => parseWorkItemInventoryOptions(v),
     (v) => { if (v !== undefined && typeof v !== "boolean") throw new Error("刷新参数无效"); return v as boolean | undefined; },
   ], ([options, forceRefresh]) => workItemInventoryService.list(options, forceRefresh === true).then(inventory => workItemRunHistoryService.merge(inventory)));
+  registerHandler(IPC_CHANNELS.workItemsChildren, (value: unknown) => {
+    if (typeof value !== "string" || !value.trim()) throw new Error("工作项 ID 无效");
+    return value;
+  }, (workItemId) => workItemInventoryService.children(workItemId));
   registerHandler(IPC_CHANNELS.workItemsStart, parseWorkItemRunStartInput, (input) => workItemExecutionService.start(input).then(result => { backlogService.invalidateListCache(); return result; }));
   registerHandler(IPC_CHANNELS.workItemsExecutions, parseExecutionQueryOptions, async (options) => {
     const page = await workItemExecutionQueryService.list(options);

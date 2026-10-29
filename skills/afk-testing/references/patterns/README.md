@@ -4,6 +4,12 @@ Load only references that match the implementation or risk. The structured index
 is `catalog.yaml`. This is a catalog for choosing tests, not a checklist that
 every project must implement.
 
+For reusable natural-language business-rule candidates (for example, account
+lifecycle, authorization, tenant isolation, upload/download, and audit behavior),
+see [Business Rule Library](../business-rules/README.md). These candidates help
+discover missing test scenarios; they do not override project requirements or
+automatically define organization-specific policies.
+
 ## 1. Interaction and communication
 
 | Pattern | Reference | Typical validation claims |
@@ -23,7 +29,7 @@ every project must implement.
 | Business rules and status mapping | `business-rules-and-status.md` | Rule-to-case traceability, allowed/rejected status transitions |
 | State machine and lifecycle | `workflows-and-state.md` | Guard conditions, legal transitions, terminal states |
 | Long-running workflow / process manager | `workflows-and-state.md` | Checkpoint, timeout, resume, cancellation, recovery |
-| Orchestration / choreography / fan-out-fan-in | `workflows-and-state.md` | Step coordination, partial results, deadline, correlation |
+| Orchestration / choreography / fan-out-fan-in | `workflows-and-state.md` | Step coordination, partial results, deadline, recovery |
 | Saga / compensation | `workflows-and-state.md` | Partial failure, compensation, eventual consistency |
 | Event sourcing / CQRS / outbox | `workflows-and-state.md` | Replay, projections, commit/publish consistency, deduplication |
 
@@ -86,7 +92,7 @@ every project must implement.
 | Fuzzing | `testing-techniques.md` | Parsers, decoders, untrusted input |
 | Model-based / stateful sequence testing | `testing-techniques.md` | State machines and multi-step workflows |
 | Differential / golden / snapshot | `testing-techniques.md` | Compare implementations or stable artifacts |
-| Mutation / negative controls | `testing-techniques.md` | Validate whether assertions detect plausible bugs |
+| Mutation / negative controls | `testing-techniques.md` | Validate whether assertions detect plausible incorrect behavior |
 | Exploratory / risk-based | `testing-techniques.md` | Discover hidden failures and prioritize risk |
 | Isolation / flakiness analysis | `testing-techniques.md` | Reproducible, independent test execution |
 

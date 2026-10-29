@@ -4,8 +4,10 @@
 version: 1
 
 business_rules:
-  # Paths to authoritative requirements, status maps, API/event schemas, or
-  # user-maintained business-rule documents. Use repository-relative paths.
+  # Only authoritative project sources belong here: requirements, PRDs, API/event
+  # contracts, or confirmed natural-language rule documents. The built-in
+  # candidates in references/business-rules/ are discovery aids, not project truth.
+  # Use repository-relative paths.
   sources: []
 
 commands:

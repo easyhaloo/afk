@@ -28,6 +28,7 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
       desktop_e2e: ${{ steps.filter.outputs.desktop_e2e }}
       wiki_python: ${{ steps.filter.outputs.wiki_python }}
+      prd_tests: ${{ steps.filter.outputs.prd_tests }}
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
@@ -48,7 +49,7 @@ jobs:
              ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null ||
              ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             echo "Could not resolve the comparison range; enabling all checks."
-            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -56,7 +57,7 @@ jobs:
 
           if ! changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"; then
             echo "Could not compute changed paths; enabling all checks."
-            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -64,7 +65,7 @@ jobs:
 
           if [[ -z "$changed_files" ]]; then
             echo "No changed paths detected; enabling all checks as a safe fallback."
-            for key in docs skill_docs plugin shared desktop desktop_e2e; do
+            for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -77,6 +78,7 @@ jobs:
           desktop=false
           desktop_e2e=false
           wiki_python=false
+          prd_tests=false
           global_config=false
 
           while IFS= read -r path; do
@@ -89,6 +91,9 @@ jobs:
             case "$path" in
               skills/wiki/*)
                 wiki_python=true
+                ;;
+              skills/afk-ai-prd/*|skills/afk-to-prd/*)
+                prd_tests=true
                 ;;
             esac
             case "$path" in
@@ -129,13 +134,13 @@ jobs:
             desktop_e2e=true
           fi
 
-          for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python; do
+          for key in docs skill_docs plugin shared desktop desktop_e2e wiki_python prd_tests; do
             printf '%s=%s\n' "$key" "${!key}" >> "$GITHUB_OUTPUT"
           done
 
           echo "Detected areas:"
           printf '%s\n' "$changed_files"
-          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e wiki_python=$wiki_python"
+          echo "docs=$docs skill_docs=$skill_docs plugin=$plugin shared=$shared desktop=$desktop desktop_e2e=$desktop_e2e wiki_python=$wiki_python prd_tests=$prd_tests"
 
   wiki-python-tests:
     name: Wiki Python Tests
@@ -236,6 +241,26 @@ jobs:
           }
           console.log(`Plugin manifests valid; version ${manifests[0].value.version}`);
           NODE
+
+  prd-validator-tests:
+    name: PRD Validator Tests
+    needs: changes
+    if: needs.changes.outputs.prd_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile PRD validator
+        run: python -m py_compile skills/afk-ai-prd/scripts/validate_prd.py
+      - name: Run PRD validator tests
+        run: python -B -m unittest discover -s skills/afk-ai-prd/tests -p 'test_*.py' -v
 
   cli:
     name: Shared Packages And CLI

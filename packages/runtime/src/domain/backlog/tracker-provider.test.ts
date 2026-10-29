@@ -57,8 +57,21 @@ describe('TrackerBacklogProvider', () => {
     const t = { ...tracker(issue), forProject: vi.fn(() => remote),
       createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }), linkIssues: vi.fn(async () => {}) };
     const provider = new TrackerBacklogProvider(t);
-    const created = await provider.create({ title: 'Child', description: 'Body', parentId: 'github:org/other#7', dependsOn: ['github:org/other#7'] });
-    expect(created).toMatchObject({ parentId: 'github:org/other#7', dependsOn: ['github:org/other#7'] });
+    const created = await provider.create({
+      title: 'Child',
+      description: 'Body',
+      parentId: 'github:org/other#7',
+      baseBacklogId: 'github:org/other#7',
+      dependsOn: ['github:org/other#7'],
+      idempotencyKey: 'cross-project/create-readback',
+    });
+    expect(created).toMatchObject({
+      parentId: 'github:org/other#7',
+      baseBacklogId: 'github:org/other#7',
+      dependsOn: ['github:org/other#7'],
+    });
+    expect(created.description).toContain('Execution base: [#7](https://example/7)');
+    expect(created.description).toContain('Depends on: [#7](https://example/7)');
     expect(t.forProject).toHaveBeenCalledWith('org/other');
     expect(remote.getIssue).toHaveBeenCalledWith(7);
     expect(t.linkIssues).toHaveBeenCalledWith(42, 7, 'blocked_by', 'org/other');

@@ -49,12 +49,15 @@ function fixture() {
   };
   const changes = {
     findForBacklog: vi.fn(async () => null),
-    create: vi.fn(async ({ sourceBranch, targetBranch }: any) => ({ id: 'pr-60', sourceBranch, targetBranch, url: 'https://example.test/pr/60' })),
+    create: vi.fn(async ({ sourceBranch, targetBranch }: any) => ({ id: 'pr-60', sourceBranch, targetBranch, url: 'https://example.test/pr/60', mergeState: 'mergeable' })),
+    get: vi.fn(async () => ({ id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', mergeState: 'mergeable', url: 'https://example.test/pr/60' })),
     merge: vi.fn(async () => {}),
   };
   const branches = {
     createVerificationWorktree: vi.fn(async () => ({ branchName: 'qa-60', worktreePath: process.cwd() })),
-    commit: vi.fn(async () => 'commit-60'),
+    commit: vi.fn(async () => ({ sha: 'commit-60', skippedBinaryFiles: [] })),
+    mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    listUnresolvedConflicts: vi.fn(async () => []),
     push: vi.fn(async () => {}),
     cleanup: vi.fn(async () => {}),
   };
@@ -124,7 +127,7 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     });
     const runner = new QARunner({ ...f.providers, backlog }, { ...config, maxQaReworkAttempts }, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider,
-      executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+      executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       runtimeManager: {
         start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn(),
       } as any,
@@ -169,7 +172,7 @@ describe('QARunner execution boundary', () => {
       agentRuntime: runtime,
       executionMode: 'batch',
       tmux: tmux as any,
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
@@ -204,7 +207,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       executionBaseBranch: '2025-11-8-show',
     });
 
@@ -231,7 +234,7 @@ describe('QARunner execution boundary', () => {
         sandboxProvider: f.sandboxProvider,
         agentProvider: f.agentProvider,
         executionMode: 'batch',
-        mergeBranch: vi.fn(async () => {}),
+        mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       });
 
       await expect(runner.process('60')).resolves.toMatchObject({
@@ -258,7 +261,7 @@ describe('QARunner execution boundary', () => {
       agentProvider: f.agentProvider,
       executionMode: 'interactive',
       tmux: tmux as any,
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
@@ -267,18 +270,18 @@ describe('QARunner execution boundary', () => {
 
   it('configures the interactive statusline after merging the QA worktree', async () => {
     const f = fixture();
-    const mergeBranch = vi.fn(async () => {});
+    const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     ioMocks.configureStatusline.mockClear();
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'interactive',
-      tmux: {} as any, mergeBranch,
+      tmux: {} as any, mergeFeatureIntoBaseline,
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
-    expect(mergeBranch).toHaveBeenCalled();
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalled();
     expect(ioMocks.configureStatusline).toHaveBeenCalledWith(process.cwd());
-    expect(mergeBranch.mock.invocationCallOrder[0]).toBeLessThan(ioMocks.configureStatusline.mock.invocationCallOrder[0]);
+    expect(mergeFeatureIntoBaseline.mock.invocationCallOrder[0]).toBeLessThan(ioMocks.configureStatusline.mock.invocationCallOrder[0]);
   });
 
   it('publishes an independent QA runtime record through completion', async () => {
@@ -300,7 +303,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       runtimeManager: runtime as any,
       agentRuntime: {
         kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
@@ -343,7 +346,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       runtimeManager: runtime as any,
     });
 
@@ -422,7 +425,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({
@@ -448,7 +451,7 @@ describe('QARunner execution boundary', () => {
     const f = fixture();
     f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1', summary: 'search shortcut failed' });
     const runner = new QARunner(f.providers, config, {
-      sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+      sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
@@ -459,18 +462,18 @@ describe('QARunner execution boundary', () => {
     const f = fixture();
     const root = { ...(await f.providers.backlog.get('60')), parentId: undefined };
     f.providers.backlog.get.mockResolvedValue(root);
-    const mergeBranch = vi.fn(async () => {});
+    const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch,
+      mergeFeatureIntoBaseline,
     });
 
     const result = await runner.process('60');
 
     expect(result).toMatchObject({ success: true, autoMerged: false });
-    expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
     expect(f.providers.branches.commit).toHaveBeenCalledWith(process.cwd(), expect.stringContaining('QA'));
     expect(f.providers.branches.push).toHaveBeenCalledWith('qa-60', process.cwd());
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -488,13 +491,108 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       onCommit,
     });
 
     await runner.process('60');
 
     expect(onCommit).toHaveBeenCalledWith('commit-60', 'qa-60');
+  });
+
+  it('resolves a merge conflict in the QA worktree before verifying', async () => {
+    const f = fixture();
+    f.providers.branches.mergeFeatureIntoBaseline.mockResolvedValue({ merged: false, conflicts: ['shared.txt', 'notes.bin'] });
+    f.providers.branches.listUnresolvedConflicts.mockResolvedValue([]);
+    const prompts: string[] = [];
+    f.agentProvider.createExecution = vi.fn(async (options: any) => {
+      prompts.push(options.prompt);
+      return f.execution;
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: true, autoMerged: false });
+    // The conflict is resolved in the worktree the change request is
+    // published from, and the resolution is committed there.
+    expect(f.providers.branches.commit).toHaveBeenCalledWith(process.cwd(), 'Resolve merge conflict with main');
+    expect(prompts[0]).toContain('shared.txt');
+    expect(prompts[0]).toContain('notes.bin');
+    expect(prompts[0]).toContain('main');
+    // The verification runs after the conflict is gone.
+    expect(prompts).toHaveLength(2);
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+  });
+
+  it('reports a conflict nobody can resolve to a person', async () => {
+    const f = fixture();
+    f.providers.branches.mergeFeatureIntoBaseline.mockResolvedValue({ merged: false, conflicts: ['notes.bin'] });
+    f.providers.branches.listUnresolvedConflicts.mockResolvedValue(['notes.bin']);
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: false, failureCode: 'merge_conflict' });
+    expect(result.summary).toContain('notes.bin');
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', expect.objectContaining({
+      reason: expect.stringContaining('notes.bin'),
+    }));
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+    expect(f.providers.changes.create).not.toHaveBeenCalled();
+  });
+
+  it('sends a published change request that conflicts back for another round', async () => {
+    const f = fixture();
+    f.changes.get.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      mergeState: 'conflict', url: 'https://example.test/pr/60',
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: false, rework: true, failureCode: 'merge_conflict' });
+    expect(f.providers.backlog.createRework).toHaveBeenCalledWith('60', expect.objectContaining({ source: 'conflict' }));
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'rework', expect.objectContaining({
+      reason: expect.stringContaining('conflicts with main'),
+    }));
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'afk');
+    // A change request that cannot land is never handed over as ready.
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+  });
+
+  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {
+    const f = fixture();
+    f.changes.get.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      mergeState: 'unknown', url: 'https://example.test/pr/60',
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: true, autoMerged: false });
+    expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
   });
 
   it('publishes the per-criterion evidence and the artifact worktree with the change request', async () => {
@@ -516,7 +614,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await runner.process('60');
@@ -548,7 +646,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
@@ -566,7 +664,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       runtimeManager: {
         start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity,
       } as any,
@@ -587,7 +685,7 @@ describe('QARunner execution boundary', () => {
     const onCommit = vi.fn(async () => { expect(getLogContext()).toEqual(context); });
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}), onCommit,
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), onCommit,
     });
     await withLogContext(context, () => runner.process('60'));
     expect(onCommit).toHaveBeenCalledOnce();
@@ -603,7 +701,7 @@ describe('QARunner execution boundary', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       onCommit,
     });
 
@@ -621,7 +719,7 @@ describe('QARunner execution boundary', () => {
       const f = fixture();
       const runner = new QARunner(f.providers, { ...config, goalBudget: condition === 'tokens' ? 100 : 1000 }, {
         sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, projectRoot: root,
-        executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+        executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       });
       const result = await runner.process('60');
       expect(result).toMatchObject({ success: false, summary: expect.stringContaining(condition === 'corrupt' ? 'corrupt' : 'budget exhausted') });
@@ -651,7 +749,7 @@ describe('QARunner execution boundary', () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         const runner = new QARunner(f.providers, { ...config, goalBudget: 1000 }, {
           sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, projectRoot: root,
-          executionMode: 'batch', mergeBranch: vi.fn(async () => {}), onSession,
+          executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), onSession,
         });
         expect(await runner.process('60')).toMatchObject({ success: true });
       }
@@ -672,7 +770,7 @@ describe('QARunner execution boundary', () => {
     const beforeChange = vi.fn(async () => { throw new Error('audit unavailable'); });
     const runner = new QARunner(fixtureData.providers, config, {
       sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
-      executionMode: 'batch', mergeBranch: vi.fn(async () => {}), beforeChange,
+      executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), beforeChange,
     });
     expect(await runner.process('60')).toMatchObject({ success: false });
     expect(beforeChange).toHaveBeenCalledWith('publish', expect.objectContaining({ id: '60' }));
@@ -691,7 +789,7 @@ describe('QARunner execution boundary', () => {
     // never consulted about a merge.
     const runner = new QARunner(fixtureData.providers, { ...config, autoMerge: true }, {
       sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
-      executionMode: 'batch', mergeBranch: vi.fn(async () => {}), beforeChange,
+      executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), beforeChange,
     });
     expect(await runner.process('60')).toMatchObject({ success: false });
     expect(beforeChange).toHaveBeenCalledWith('merge', expect.objectContaining({ id: '60' }), expect.objectContaining({ id: 'pr-60' }));
@@ -706,7 +804,7 @@ describe('QARunner execution boundary', () => {
     const afterPublication = vi.fn(async () => {});
     const runner = new QARunner(fixtureData.providers, config, {
       sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
-      executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+      executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       beforeChange: vi.fn(async () => {}), afterPublication,
     });
     expect(await runner.process('60')).toMatchObject({ success: true, autoMerged: false, mrUrl: 'https://example.test/pr/60' });
@@ -719,12 +817,12 @@ describe('QARunner execution boundary', () => {
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
     f.providers.backlog.get.mockResolvedValue(child);
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
-    const mergeBranch = vi.fn(async () => {});
+    const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch,
+      mergeFeatureIntoBaseline,
     });
 
     const result = await runner.process('60');
@@ -732,7 +830,7 @@ describe('QARunner execution boundary', () => {
     // Merging is a person's decision: the change is published into the
     // configured target branch and waits there.
     expect(result).toMatchObject({ success: true, autoMerged: false });
-    expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'main' }));
     expect(f.providers.changes.merge).not.toHaveBeenCalled();
     expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
@@ -744,12 +842,12 @@ describe('QARunner execution boundary', () => {
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
     f.providers.backlog.get.mockResolvedValue(child);
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
-    const mergeBranch = vi.fn(async () => {});
+    const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     const runner = new QARunner(f.providers, { ...config, autoMerge: true }, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch,
+      mergeFeatureIntoBaseline,
     });
 
     const result = await runner.process('60');
@@ -764,17 +862,17 @@ describe('QARunner execution boundary', () => {
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10', baseBacklogId: '11' };
     const executionBase = { ...child, id: '11', title: 'stack base', parentId: undefined, baseBacklogId: undefined, state: 'verification', branchName: 'afk/backlog-11' };
     f.providers.backlog.get.mockImplementation(async (id: string) => id === '11' ? executionBase : child);
-    const mergeBranch = vi.fn(async () => {});
+    const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     const runner = new QARunner(f.providers, { ...config, autoMerge: true }, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch,
+      mergeFeatureIntoBaseline,
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true, autoMerged: true });
 
-    expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-11', 'afk/backlog-60');
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-11', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'afk/backlog-11' }));
   });
 });
@@ -803,7 +901,7 @@ describe('QARunner workspace independence', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       projectRoot: '/workspace',
       repositories: [{ platform: 'github', projectKey: 'org/repo', repoRoot: '/workspace/repo', baseBranch: 'main', workingBranch: 'afk/backlog-60', primary: true }] as any,
       prepareRepositories: prepareRepositories as any,
@@ -828,7 +926,7 @@ describe('QARunner workspace independence', () => {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       prepareRepositories: prepareRepositories as any,
       runtimeManager: { start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn() } as any,
     });

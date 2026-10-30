@@ -1,4 +1,5 @@
 import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { ChangeMergeState } from '../../../domain/tracker/types.js';
 import type { VerificationEvidence } from './verification-evidence.js';
 
 export interface ChangeRequest {
@@ -7,6 +8,12 @@ export interface ChangeRequest {
   sourceBranch: string;
   targetBranch: string;
   mergeable?: boolean;
+  /**
+   * The precise merge verdict. 'conflict' means the two branches changed the
+   * same lines; 'unknown' covers a verdict the platform has not computed or
+   * a reason that is not a conflict.
+   */
+  mergeState?: ChangeMergeState;
   url?: string;
   /** The body of the change request — it names the issues it closes. */
   description?: string;

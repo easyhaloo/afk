@@ -139,6 +139,17 @@ export interface TrackerIssueComment {
 /**
  * Unified TrackedMR across platforms
  */
+/**
+ * What the provider knows about a change request's ability to land.
+ *
+ * 'unknown' covers both "the platform has not computed it yet" and "it
+ * cannot land for a reason that is not a conflict" — a failing check, a
+ * missing approval, a branch that is merely behind. Only 'conflict' means
+ * the two branches changed the same lines, which is the one case a person
+ * has to resolve by hand.
+ */
+export type ChangeMergeState = 'mergeable' | 'conflict' | 'unknown';
+
 export interface TrackedMR {
   id: number;
   platform: Platform;
@@ -151,6 +162,8 @@ export interface TrackedMR {
   /** The body of the change request — it names the issues it closes. */
   description?: string;
   mergeable?: boolean;
+  /** The precise merge verdict; 'conflict' only for a real conflict. */
+  mergeState?: ChangeMergeState;
   pipeline?: { status: string };  // GitLab only
 }
 

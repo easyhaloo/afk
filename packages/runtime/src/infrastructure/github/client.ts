@@ -5,6 +5,7 @@ import type {
   TrackerProvider,
   TrackedIssue,
   TrackedMR,
+  ChangeMergeState,
   ListOptions,
   CreateIssueOptions,
   UpdateIssueOptions,
@@ -305,6 +306,7 @@ export class GitHubClient implements TrackerProvider {
       targetBranch: data.base.ref,
       ...(data.body ? { description: data.body } : {}),
       mergeable: data.mergeable ?? undefined,
+      mergeState: githubMergeState(data.mergeable_state, data.mergeable),
       url: data.html_url,
       projectId: this.projectId,
     };
@@ -609,4 +611,19 @@ export async function readArtifactPaths(markerPath: string): Promise<string[]> {
 export function artifactReleaseTag(options: UploadArtifactsOptions): string {
   const id = options.backlogId?.replace(/[^A-Za-z0-9._-]/g, '-');
   return id ? `afk-qa-artifacts-${id}` : 'afk-qa-artifacts';
+}
+
+/**
+ * Translate GitHub's merge verdict into the precise state AFK acts on.
+ *
+ * GitHub reports 'dirty' when the branches changed the same lines, and
+ * 'blocked' or 'behind' for reasons that a person does not have to resolve
+ * by hand. Only 'dirty' is a conflict; a null verdict means GitHub has not
+ * computed it yet.
+ */
+function githubMergeState(mergeableState: string | null | undefined, mergeable: boolean | null | undefined): ChangeMergeState {
+  if (mergeableState === 'dirty') return 'conflict';
+  if (mergeableState === 'clean') return 'mergeable';
+  if (mergeable === true) return 'mergeable';
+  return 'unknown';
 }

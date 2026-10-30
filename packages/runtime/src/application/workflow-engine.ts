@@ -103,6 +103,12 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
 }
 
 function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
+  if (rework.source === 'conflict') {
+    // The change request could not be merged because the target branch
+    // changed the same lines. Making the change compatible with the target
+    // here is what keeps the next merge conflict-free.
+    return `\n\nAn open merge-conflict rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
+  }
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
@@ -1086,9 +1092,16 @@ export class WorkflowRunner {
   private async commitImplementationWork(iid: number, worktreePath: string): Promise<string> {
     const title = this.activeBacklog?.title?.trim();
     const message = `feat: ${title ? `${title} ` : ''}(backlog ${iid})`;
-    const sha = await this.providers.branches.commit(worktreePath, message);
-    if (sha) logger.info({ iid, worktreePath, commitSha: sha }, 'implementation committed');
-    return sha;
+    const commit = await this.providers.branches.commit(worktreePath, message);
+    if (commit.skippedBinaryFiles.length > 0) {
+      // A binary leftover has no text to merge. Publishing it would make the
+      // change request unmergeable the moment the target branch touches the
+      // same file, so it stays in the worktree and is reported here.
+      logger.warn({ iid, worktreePath, skippedBinaryFiles: commit.skippedBinaryFiles },
+        'binary files left out of the implementation commit');
+    }
+    if (commit.sha) logger.info({ iid, worktreePath, commitSha: commit.sha }, 'implementation committed');
+    return commit.sha;
   }
 
   private async recordImplementationCommit(worktreePath: string, branch: string): Promise<void> {

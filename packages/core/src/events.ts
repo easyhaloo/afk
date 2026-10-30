@@ -30,7 +30,8 @@ export type RunFailureReasonCode =
   | 'qa_timeout'
   | 'qa_execution_failed'
   | 'qa_rework'
-  | 'provider_change_unconfirmed';
+  | 'provider_change_unconfirmed'
+  | 'merge_conflict';
 
 export interface EvidenceRef {
   uri: string;

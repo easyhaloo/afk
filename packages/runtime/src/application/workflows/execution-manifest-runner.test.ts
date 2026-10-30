@@ -74,7 +74,7 @@ describe('execution manifest request to runner boundary', () => {
         claim: claimBacklog, transition: vi.fn(async () => undefined), setExecutionMode: vi.fn(async () => undefined),
         get: vi.fn(async () => claimedItem), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(),
       },
-      branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn() },
+      branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), cleanup: vi.fn() },
       changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
     } as unknown as ProviderBundle;
     const agent = { name: 'claude-code', capabilities: new Set() } as unknown as AgentProvider;
@@ -312,7 +312,7 @@ function providersForRun(): ProviderBundle {
       get: vi.fn(async () => item), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(async () => undefined),
     },
     branches: {
-      createBranch: vi.fn(), createVerificationWorktree: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn(),
+      createBranch: vi.fn(), createVerificationWorktree: vi.fn(), push: vi.fn(), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), cleanup: vi.fn(),
     },
     changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
   } as unknown as ProviderBundle;

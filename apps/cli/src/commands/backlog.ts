@@ -151,6 +151,15 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
   if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
   if (item.tags.length) detail(`tags: ${item.tags.join(', ')}`);
   detail(`branch: ${item.branchName}`);
+  if (item.changeRequest) {
+    const change = item.changeRequest;
+    // A conflict is the one merge verdict a person has to act on, so it is
+    // spelled out rather than left in the state column.
+    const verdict = change.mergeState === 'conflict'
+      ? ' — CONFLICTS with the target branch, it cannot be merged as it stands'
+      : change.mergeState === 'mergeable' ? ' — can be merged' : '';
+    detail(`change: ${change.id} (${change.state}) ${change.sourceBranch} → ${change.targetBranch}${verdict}`);
+  }
 }
 
 export type JsonMode = { json?: boolean };

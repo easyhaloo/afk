@@ -113,7 +113,7 @@ export class TrackerChangeProvider implements ChangeProvider {
 
   async get(id: string): Promise<ChangeRequest> {
     const mr = await this.tracker.getMR(Number(id));
-    return { id: String(mr.id), state: mr.state === 'opened' ? 'open' : mr.state, sourceBranch: mr.sourceBranch, targetBranch: mr.targetBranch, mergeable: mr.mergeable, url: mr.url, ...(mr.description ? { description: mr.description } : {}) };
+    return { id: String(mr.id), state: mr.state === 'opened' ? 'open' : mr.state, sourceBranch: mr.sourceBranch, targetBranch: mr.targetBranch, mergeable: mr.mergeable, mergeState: mr.mergeState, url: mr.url, ...(mr.description ? { description: mr.description } : {}) };
   }
 
   async findForBacklog(backlog: BacklogItem): Promise<ChangeRequest | null> {

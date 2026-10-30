@@ -197,12 +197,13 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 ## 5. 内置模板覆盖矩阵
 
-当前 `builtinTemplates()` 注册以下 6 个模板；名称由 `packages/runtime/src/domain/templates/templates.test.ts` 固定断言。
+当前 `builtinTemplates()` 注册以下 7 个模板；名称由 `packages/runtime/src/domain/templates/templates.test.ts` 固定断言。
 
 | 模板 | 图结构 | 主要能力 | 全流程验证重点 | 终态边界 |
 | --- | --- | --- | --- | --- |
 | `issue-implementation` | `implement → verify-ac → publish → queue-qa` | 默认实现流程；包含两个 agent step 和两个 system step | claim、工作树、实现、AC 验证、push、verification | QA 不在模板内完成；后续 `QARunner` 决定 `merge_ready` 或 `done` |
 | `pre-merge-qa-verification` | `verify-ac` | 已合并最新基线后的 QA agent；要求结构化 `goal_complete` | QA 工作树、AC/集成测试、PASS/FAIL 解析、诊断保存 | PASS 由 QA runner 提交/push/发布；Agent 本身不负责 MR |
+| `merge-conflict-resolution` | `resolve-conflicts` | 在 QA 工作树里解决目标分支与变更分支的冲突 | 未合并路径的读取、冲突文件的逐个处理、解决后仍有冲突则交人 | 解决结果由 QA runner 提交；Agent 不提交、不推送、不建 MR |
 | `simple-loop` | `run` | 单 agent step 的最小执行模板 | 单步 prompt、完成信号、单步 runtime 和事件 | 由 runner 的 wrap-up 和 backlog 路由决定 |
 | `sequential-review` | `implement → review → fix` | 依赖顺序和失败条件分支 | `review` 失败时 `fix` 可运行；成功时不应误跑 fix | 后续仍由 runner wrap-up 处理分支和状态 |
 | `parallel-planner` | `plan-frontend ∥ plan-backend ∥ plan-infra` | 同层多个 planner 并发；每步声明独立 named branch | 并发执行、互不复用工作树、结果全量记录 | 模板本身没有合并/QA terminalizer |

@@ -66,7 +66,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
 | `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
-| `afk backlog list/show/tag` | 查看和管理 backlog |
+| `afk backlog list/show/tag` | 查看和管理 backlog；`show` 会给出变更请求及其能否落地 |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | 修改已存在 backlog 工作项的关系边 |
 | `afk backlog role --id <id> --kind prd` | 把一个 backlog 工作项设为 PRD 锚点角色 |
 | `afk backlog mode --id <id> --mode afk\|hitl` | 切换一个 backlog 工作项的执行方 |
@@ -75,7 +75,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
-| `afk backlog confirm-merge` | 合并已批准的 backlog 变更并置为 done |
+| `afk backlog confirm-merge` | 合并已批准的 backlog 变更（根项或子项均可）并置为 done |
 | `afk backlog reconcile-merge` | 当变更已在平台合并时，将 backlog 收敛为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
 | `afk execute --work-item-id <id> [--execution-manifest <path>]` | 实现、独立验证并发布一个托管工作项 |
@@ -429,6 +429,32 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 需要完全无人值守流水线的安装，可以让合并不经人确认：在 `~/.afk/config.yml` 里设
 `autoMerge: true`，或设 `AFK_AUTO_MERGE=1`。默认关闭——安装不主动要求，AFK 就绝不
 合并任何变更。
+
+### 当变更请求产生冲突
+
+变更请求可能与目标分支冲突：两边改了同一批行。冲突既不是 QA 失败，也不是一个需要人
+来合并的变更——它是 AFK 能自己做的工作。这套流程有四步，发生在 QA 轮内部、变更请求交
+付给人之前。
+
+1. **冲突在工作发生的地方显形。** QA 轮把目标分支放进 QA 工作树，再把变更分支合进去。
+   这次合并就是冲突显形的地方；AFK 从 git 留下的未合并路径读冲突，而不是读合并的退出
+   码——本地化的 git 用自己的语言报告退出结果，退出码并不可靠。
+2. **AFK 在 QA 工作树里解决它。** QA 工作树**就是**变更请求自己的分支，所以在这里做
+   出的解决，恰好落在变更发布的位置。一个专门的 agent（`merge-conflict-resolution` 模
+   板）负责解决冲突文件：与本次变更无关的文件取目标分支的版本；与本次变更相关的文件
+   保留两侧的意图。
+3. **AFK 验证结果。** 解决结果被提交，验证在解决后的代码树上进行。agent 这一轮之后仍
+   存在的冲突不会被猜测：条目转为 `blocked` + `hitl`，并写明冲突文件，交由人来收尾。
+4. **AFK 核对已发布的东西。** 变更请求发布后，AFK 读取平台的判定。只有真冲突才算数—
+   —平台尚未计算的判定、CI 未过、缺少审批都不算。真冲突的变更请求会带着一条
+   `conflict` rework 记录回到下一轮，冲突信息随记录传递。它绝不会被当作
+   `merge_ready` 交出去。
+
+合并闸门不受影响：解决冲突是为了让人仍然能自己决定要不要合并。
+
+**二进制文件谁也合不了。** 两边改了同一个二进制文件时，不存在文本层面的合并——人手动
+也解不了。AFK 不会把这类文件放进它为 agent 残留改动所做的兜底提交，而是把它报告出来。
+发布它只会让之后的任何冲突变成死胡同。
 
 带 `prd` 角色的条目是组织性父项。它**没有任何生命周期状态**——它聚合子项，而不是
 等待人工介入，而“等待子项完成”并不是生命周期中的一个位置。让它不可执行的是角色，

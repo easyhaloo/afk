@@ -15,10 +15,17 @@ export type BacklogChangeRequest = {
   sourceBranch: string;
   targetBranch: string;
   url?: string;
+  /**
+   * Whether the change can land. 'conflict' means the target branch changed
+   * the same lines, so the change needs another round before a person can
+   * merge it.
+   */
+  mergeState?: ChangeMergeState;
 };
 import { randomUUID } from 'node:crypto';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
 import { formatWorkItemId } from '../work-item/identity.js';
+import type { ChangeMergeState } from '../tracker/types.js';
 export type { BacklogClaim, ClaimLease } from './claim.js';
 export { FilesystemClaimLock } from './claim.js';
 export type { BacklogProviderCapabilities } from './initialization.js';

@@ -87,7 +87,7 @@ single source of truth for the supported surface:
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
 | `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
-| `afk backlog list/show/tag` | Inspect and manage backlog records |
+| `afk backlog list/show/tag` | Inspect and manage backlog records; `show` names the change request and whether it can land |
 | `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
 | `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
 | `afk backlog mode --id <id> --mode afk\|hitl` | Switch who runs a backlog item |
@@ -96,7 +96,7 @@ single source of truth for the supported surface:
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
-| `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
+| `afk backlog confirm-merge` | Merge an approved backlog change — root or child — and mark it done |
 | `afk backlog reconcile-merge` | Complete a backlog whose change is already merged on the provider |
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk execute --work-item-id <id> [--execution-manifest <path>]` | Implement, independently verify, and publish one managed work item |
@@ -541,6 +541,41 @@ where an operator knows better.
 An installation that runs a fully autonomous pipeline can ask for the merge to happen
 without a person: set `autoMerge: true` in `~/.afk/config.yml`, or `AFK_AUTO_MERGE=1`. The
 default is off, so a change is never merged by AFK unless the installation asks for it.
+
+### When the change request conflicts
+
+A change request can conflict with its target branch: both sides changed the same lines.
+A conflict is not a QA failure and not a merge that needs a person — it is work AFK can do.
+The flow has four steps, and it happens inside the QA round, before the change request is
+handed over.
+
+1. **The conflict shows up where the work happens.** The QA round puts the target branch
+   in the QA worktree and merges the change branch into it. That merge is where a conflict
+   becomes visible, and AFK reads it from the unmerged paths git leaves behind — not from
+   the merge's exit code, which a localized git reports in its own language.
+2. **AFK resolves it in the QA worktree.** The QA worktree *is* the change request's
+   branch, so a resolution made there lands exactly where the change is published from.
+   A dedicated agent (`merge-conflict-resolution` template) resolves the conflicted files:
+   a file that has nothing to do with the change takes the target branch's version, a
+   file that does keeps the intent of both sides.
+3. **AFK verifies the result.** The resolution is committed, and the verification runs on
+   the resolved tree. A conflict that is still there after the agent's turn is not
+   guessed at: the item goes to `blocked` + `hitl` with the conflicting files named, for
+   a person to finish.
+4. **AFK checks what it published.** After the change request is published, AFK reads the
+   platform's verdict. Only a real conflict counts — a verdict the platform has not
+   computed yet, a failing check, or a missing approval do not. A change request that
+   really conflicts goes back for another round as a `conflict` rework record, which
+   carries the conflict into the next attempt. It is never handed over as
+   `merge_ready`.
+
+The merge gate is unaffected: a conflict is resolved so that a person still has to decide
+whether to merge.
+
+**A binary file cannot be merged by anybody.** When both sides changed the same binary
+file, no text merge exists — a person cannot resolve it either. AFK keeps such a file out
+of the fallback commit it makes for whatever the agent left in the worktree, and reports
+it. Publishing it would turn any later conflict into a dead end.
 
 An item with the `prd` role is an organizational parent. It has no lifecycle
 state at all — it groups children instead of waiting for a human, and "waiting

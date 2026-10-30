@@ -4,6 +4,7 @@ import type {
   TrackerProvider,
   TrackedIssue,
   TrackedMR,
+  ChangeMergeState,
   ListOptions,
   CreateIssueOptions,
   UpdateIssueOptions,
@@ -239,6 +240,7 @@ export class GitLabClient implements TrackerProvider {
         : typeof mergeStatus === 'string' && !['checking', 'unchecked', 'preparing', 'approvals_syncing'].includes(mergeStatus)
           ? false
           : undefined,
+      mergeState: mergeStateOf(mergeStatus),
       url: mr.web_url,
       projectId: String(this.projectId),
       pipeline: mr.head_pipeline ? { status: mr.head_pipeline.status } : undefined,
@@ -497,4 +499,19 @@ export class GitLabClient implements TrackerProvider {
       committed_date: c.committed_date || '',
     }));
   }
+}
+
+/**
+ * Translate a GitLab merge status into the precise verdict AFK acts on.
+ *
+ * GitLab reports many reasons a change request cannot land — a failing
+ * check, a missing approval, a branch that is merely behind. Only the
+ * statuses that name a conflict mean the two branches changed the same
+ * lines, so only those become 'conflict'; everything else stays 'unknown'.
+ */
+function mergeStateOf(status: unknown): ChangeMergeState {
+  if (typeof status !== 'string') return 'unknown';
+  if (status === 'conflict' || status === 'cannot_be_merged') return 'conflict';
+  if (status === 'mergeable' || status === 'can_be_merged') return 'mergeable';
+  return 'unknown';
 }

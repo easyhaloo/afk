@@ -215,7 +215,12 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: Awaited<ReturnType<TrackerProvider['listMRs']>>): Promise<BacklogItem> {
-    if (!labels.includes(STATE_LABELS.merge_ready) && !labels.includes(STATE_LABELS.done)) return item;
+    // A change request that is waiting for a person, and one that is on its
+    // way back for another round, both have to be visible: the first is the
+    // merge gate, the second is where a conflict went.
+    if (!labels.includes(STATE_LABELS.merge_ready)
+      && !labels.includes(STATE_LABELS.done)
+      && !labels.includes(STATE_LABELS.rework)) return item;
     const candidate = changes.find(change => change.sourceBranch === `${item.branchName}-qa`)
       ?? changes.find(change => change.sourceBranch === item.branchName);
     if (!candidate) return item;
@@ -229,6 +234,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
         sourceBranch: change.sourceBranch,
         targetBranch: change.targetBranch,
         ...(change.url ? { url: change.url } : {}),
+        ...(change.mergeState ? { mergeState: change.mergeState } : {}),
       },
     };
   }

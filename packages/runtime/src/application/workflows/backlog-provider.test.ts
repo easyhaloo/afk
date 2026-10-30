@@ -22,7 +22,7 @@ function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
       get: vi.fn(async () => item), list: vi.fn(async () => []), isRunnable: vi.fn(async () => true),
       getActiveRework: vi.fn(async () => undefined),
     },
-    branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn() },
+    branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), cleanup: vi.fn() },
     changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
   } as unknown as ProviderBundle;
 }

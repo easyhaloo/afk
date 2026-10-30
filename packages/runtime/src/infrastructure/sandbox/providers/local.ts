@@ -39,6 +39,7 @@ import {
   type WorktreeInfo,
 } from '../types.js';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
+import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 
@@ -52,6 +53,19 @@ const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
 ] as const);
 
 const ISOLATION_LEVEL: IsolationLevel = 'workspace';
+
+/**
+ * How often the idle watchdog reads the terminal.
+ *
+ * Reading the pane is a tmux round trip, and the watchdog only needs to
+ * know whether anything changed — not how often it changed.
+ */
+const IDLE_PANE_INTERVAL_MS = 5_000;
+
+/**
+ * How often the completion loop polls for the signal file.
+ */
+const POLL_INTERVAL_MS = 2_000;
 
 /**
  * Local sandbox backed by git worktree + tmux.
@@ -208,6 +222,8 @@ export class LocalAgentExecution implements AgentExecution {
   private readonly generation: number;
   private readonly prompt: string;
   private readonly signalType: 'goal_complete';
+  private readonly paneIntervalMs: number;
+  private readonly pollIntervalMs: number;
   private done = false;
   private interruptAcked = false;
 
@@ -220,6 +236,10 @@ export class LocalAgentExecution implements AgentExecution {
     signalType: 'goal_complete';
     metadata: AgentExecutionMetadata;
     tmux: TmuxClient;
+    /** How often the idle watchdog reads the terminal. */
+    paneIntervalMs?: number;
+    /** How often the completion loop polls for the signal file. */
+    pollIntervalMs?: number;
   }) {
     this.id = randomUUID();
     this.worktreePath = opts.worktreePath;
@@ -230,6 +250,8 @@ export class LocalAgentExecution implements AgentExecution {
     this.signalType = opts.signalType;
     this.sessionId = opts.sessionName;
     this.metadata = opts.metadata;
+    this.paneIntervalMs = opts.paneIntervalMs ?? IDLE_PANE_INTERVAL_MS;
+    this.pollIntervalMs = opts.pollIntervalMs ?? POLL_INTERVAL_MS;
   }
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
@@ -257,10 +279,14 @@ export class LocalAgentExecution implements AgentExecution {
   async waitForResult(options?: {
     completionTimeoutMs?: number;
     contextHighTokens?: number;
+    idleTimeoutMs?: number;
   }): Promise<ExecutionResult> {
     const completionTimeoutMs = options?.completionTimeoutMs ?? 600_000;
     const contextHighTokens = options?.contextHighTokens ?? Infinity;
+    const idleTimeoutMs = options?.idleTimeoutMs;
     const start = Date.now();
+    const activity = new ActivityWatch();
+    let lastPaneRead = 0;
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -311,6 +337,31 @@ export class LocalAgentExecution implements AgentExecution {
         }
       } catch { /* ignore */ }
 
+      // The agent lives in a tmux session, and the session goes when the
+      // agent exits — a crashed TUI, a disconnected stream. A session that
+      // is gone will never write a completion signal, so waiting for one
+      // waits until the hard timeout.
+      //
+      // This runs *after* the signal check on purpose: an agent that
+      // finished and quit leaves both a signal and no session, and that
+      // run is a success, not a corpse.
+      if (typeof this.tmux.hasSession === 'function' && !(await this.tmux.hasSession(this.sessionName))) {
+        this.done = true;
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'failed',
+          provider: 'local',
+          sessionId: this.sessionId,
+          commits: [],
+          branch: this.sessionName,
+          error: {
+            code: 'AGENT_GONE',
+            message: `the agent session ${this.sessionName} ended before it reported completion`,
+          },
+        };
+      }
+
       // Check token threshold (context near limit → return context_high result).
       // Only checked after confirming goal is not yet complete.
       try {
@@ -333,7 +384,37 @@ export class LocalAgentExecution implements AgentExecution {
         }
       } catch { /* ignore polling errors */ }
 
-      await this.sleep(2000);
+      // The idle watchdog: an agent that says nothing for too long is not
+      // working, and the pane is what it says it with.
+      if (idleTimeoutMs !== undefined && idleTimeoutMs > 0) {
+        const now = Date.now();
+        if (now - lastPaneRead >= this.paneIntervalMs) {
+          lastPaneRead = now;
+          let pane = '';
+          try {
+            pane = await this.tmux.capturePane(this.sessionName, 'main', { lines: 50, history: 100 });
+          } catch { /* an unreadable pane is not evidence of an idle agent */ }
+          activity.observe(pane);
+          if (activity.idleMs() >= idleTimeoutMs) {
+            this.done = true;
+            return {
+              version: 1,
+              runId: this.id,
+              status: 'timed_out',
+              provider: 'local',
+              sessionId: this.sessionId,
+              commits: [],
+              branch: this.sessionName,
+              error: {
+                code: 'AGENT_IDLE',
+                message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s`,
+              },
+            };
+          }
+        }
+      }
+
+      await this.sleep(this.pollIntervalMs);
     }
   }
 

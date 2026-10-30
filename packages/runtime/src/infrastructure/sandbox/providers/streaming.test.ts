@@ -335,4 +335,38 @@ describe('StreamingAgentExecution', () => {
       );
     });
   });
+
+  describe('idle watchdog', () => {
+    it('gives up on a batch agent that stops producing output', async () => {
+      const execution = new StreamingAgentExecution({
+        command: command('setInterval(() => {}, 10000)'),
+        prompt: 'go',
+        signalType: 'goal_complete',
+        worktreePath: process.cwd(),
+        metadata: PROCESS_METADATA,
+      });
+      execution.start();
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 20 });
+
+      expect(result.status).toBe('timed_out');
+      expect(result.error).toMatchObject({ code: 'AGENT_IDLE' });
+    });
+
+    it('keeps waiting while the batch agent keeps producing output', async () => {
+      const execution = new StreamingAgentExecution({
+        command: command("setInterval(() => process.stdout.write('.'), 10); setTimeout(() => process.exit(0), 400)"),
+        prompt: 'go',
+        signalType: 'goal_complete',
+        worktreePath: process.cwd(),
+        metadata: PROCESS_METADATA,
+      });
+      execution.start();
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 400 });
+
+      expect(result.status).not.toBe('timed_out');
+      expect(result.error?.code).not.toBe('AGENT_IDLE');
+    });
+  });
 });

@@ -50,6 +50,8 @@ export interface WorkflowRunRequest {
   maxRetries: number;
   hardTimeoutMs: number;
   completionTimeoutMs: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs: number;
   maxHandoffs: number;
   contextHighTokens: number;
   maxTotalTokens: number;
@@ -82,6 +84,7 @@ export interface WorkflowRunCliInput {
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
+  idleTimeoutMs?: number;
   maxHandoffs?: number;
   contextHighTokens?: number;
   maxTotalTokens?: number;
@@ -107,8 +110,9 @@ const defaults = {
   targetBranch: 'main',
   baseBranch: 'main',
   maxRetries: 2,
-  hardTimeoutMs: 7_200_000,
+  hardTimeoutMs: 14_400_000,
   completionTimeoutMs: 7_200_000,
+  idleTimeoutMs: 1_800_000,
   contextHighTokens: 100_000,
   goalBudget: 10_000_000,
   sandboxProvider: 'local' as SandboxProviderName,
@@ -181,6 +185,7 @@ export function resolveWorkflowRequest(
     maxRetries: input.maxRetries ?? config.maxRetries ?? defaults.maxRetries,
     hardTimeoutMs: input.hardTimeoutMs ?? config.workflowHardTimeout ?? defaults.hardTimeoutMs,
     completionTimeoutMs: input.completionTimeoutMs ?? config.completionTimeout ?? defaults.completionTimeoutMs,
+    idleTimeoutMs: input.idleTimeoutMs ?? config.idleTimeout ?? defaults.idleTimeoutMs,
     maxHandoffs: input.maxHandoffs ?? Math.min(Math.ceil(budget / 1_000_000), 20),
     contextHighTokens: input.contextHighTokens ?? config.contextThreshold ?? defaults.contextHighTokens,
     maxTotalTokens: budget,

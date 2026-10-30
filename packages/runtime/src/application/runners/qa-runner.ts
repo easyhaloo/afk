@@ -215,7 +215,10 @@ export class QARunner {
       await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
-      const result = await execution.waitForResult({ completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout });
+      const result = await execution.waitForResult({
+        completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout,
+        idleTimeoutMs: this.config.idleTimeout,
+      });
       await this.recordBudgetUsage(budgetStore, budget, execution, result);
       await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
@@ -358,7 +361,10 @@ export class QARunner {
         runtime: this.agentRuntime,
       });
       try {
-        const result = await execution.waitForResult({ completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout });
+        const result = await execution.waitForResult({
+          completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout,
+          idleTimeoutMs: this.config.idleTimeout,
+        });
         const remaining = await this.providers.branches.listUnresolvedConflicts(worktreePath);
         if (remaining.length > 0) {
           const summary = `merge conflict with ${targetBranch} could not be resolved: ${remaining.join(', ')}`;

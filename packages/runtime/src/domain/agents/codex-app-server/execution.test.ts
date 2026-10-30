@@ -301,4 +301,34 @@ describe('CodexAppServerExecution', () => {
     expect(error?.message).not.toContain('sk-startup');
     expect(error?.message).not.toContain('sk-cleanup');
   });
-});
+
+  it('gives up on a turn that stops talking', async () => {
+    const transport = new ScriptedTransport();
+    const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);
+
+    const result = await execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 30 });
+
+    expect(result.status).toBe('timed_out');
+    expect(result.error).toMatchObject({ code: 'AGENT_IDLE' });
+  });
+
+  it('re-arms the idle watchdog whenever the agent reports something', async () => {
+    const transport = new ScriptedTransport();
+    const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);
+    const pending = execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 200 });
+
+    // The agent keeps saying something, so the watchdog never fires — it
+    // keeps re-arming on every notification.
+    for (let i = 0; i < 4; i++) {
+      await new Promise(resolve => setTimeout(resolve, 80));
+      transport.push({ jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'turn-1', startedAtMs: 1791849600000,
+        item: { id: `cmd-${i}`, type: 'commandExecution', command: 'work', status: 'inProgress', exitCode: null },
+      } });
+    }
+    await execution.interrupt('manual');
+
+    const result = await pending;
+    expect(result.status).toBe('aborted');
+    expect(result.error?.code).not.toBe('AGENT_IDLE');
+  });});

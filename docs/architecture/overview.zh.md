@@ -456,6 +456,36 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 也解不了。AFK 不会把这类文件放进它为 agent 残留改动所做的兜底提交，而是把它报告出来。
 发布它只会让之后的任何冲突变成死胡同。
 
+### 当 agent 不再应答
+
+agent 可能在不通知任何人的情况下死掉：TUI 崩溃、模型流断连、进程随机器一起被杀。runner
+会一直等一个永远不会到达的完成信号，等到硬超时为止——一场早就输掉的运行，却烧掉几个小时
+的空白。两个看门狗把这种沉默变成结论。
+
+1. **会话没了。** 交互式 agent 活在 tmux 会话里，会话随 agent 一起死。AFK 发现会话不见了
+   就立刻结束这一轮（`AGENT_GONE`），而不是等一个永远不会写出来的信号。
+2. **agent 不出声了。** `idleTimeout` 是 agent 最长可以静默多久。tmux 路径盯着可见面板，
+   batch 路径盯着输出，容器路径盯着输出文件，app-server 路径每收到一条通知就重新计时。
+   静默超过上限就结束这一轮（`AGENT_IDLE`）。
+
+跑完就退出的 agent，会同时留下完成信号和「没有会话」两件事。信号优先：这轮是成功，不是
+尸体。完成超时在会话检查之前判定，所以真正的工作超时仍然报成超时，而不是「agent 死了」。
+
+四个超时回答的是不同的问题，区别很重要：
+
+| 配置 | 回答什么问题 | 默认值 |
+| --- | --- | --- |
+| `idleTimeout` | agent 最长可以多久不出声？ | 30 分钟 |
+| `completionTimeout` | 单次等待 agent 最长可以多久？ | 2 小时 |
+| `qaTimeout` | 验证轮最长可以持续多久？ | 1 小时 |
+| `workflowHardTimeout` | 整个工作流最长可以持续多久？ | 4 小时 |
+
+`workflowHardTimeout` 不是软上限：它到期时，一个独立进程组的看门狗会真的杀掉 tmux 会话。
+所以它必须大于 `completionTimeout` + `qaTimeout`，否则验证轮会在它自己拿到的预算用完之前
+就被砍断。这些值在 `~/.afk/config.yml` 里配（`idleTimeout`、`completionTimeout`、
+`qaTimeout`、`workflowHardTimeout`），或用 `AFK_IDLE_TIMEOUT`、
+`AFK_COMPLETION_TIMEOUT`、`AFK_QA_TIMEOUT`、`AFK_WORKFLOW_HARD_TIMEOUT`。
+
 带 `prd` 角色的条目是组织性父项。它**没有任何生命周期状态**——它聚合子项，而不是
 等待人工介入，而“等待子项完成”并不是生命周期中的一个位置。让它不可执行的是角色，
 而不是某个状态。

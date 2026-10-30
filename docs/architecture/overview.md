@@ -577,6 +577,41 @@ file, no text merge exists — a person cannot resolve it either. AFK keeps such
 of the fallback commit it makes for whatever the agent left in the worktree, and reports
 it. Publishing it would turn any later conflict into a dead end.
 
+### When the agent stops answering
+
+An agent can die without telling anyone: a TUI crashes, a model stream drops, the process
+is killed with the machine. The runner waits for a completion signal that can never arrive,
+and the wait runs until the hard timeout — hours of nothing for a run that was already lost.
+Two watchdogs turn that silence into a verdict.
+
+1. **The session is gone.** An interactive agent lives in a tmux session, and the session
+   dies with the agent. AFK notices the missing session and ends the run at once
+   (`AGENT_GONE`) instead of waiting for a signal that will never be written.
+2. **The agent went quiet.** `idleTimeout` is the longest the agent may say nothing. The
+   tmux path watches the visible pane, the batch path watches its output, the container
+   path watches its output file, and the app-server path re-arms on every notification.
+   Silence past the limit ends the run (`AGENT_IDLE`).
+
+A finished agent that quits leaves both a completion signal and no session. The signal
+wins: the run is a success, not a corpse. The completion timeout is checked before the
+session, so a genuine work timeout is still reported as a timeout and not as a dead agent.
+
+The four timeouts answer different questions, and the difference matters:
+
+| Setting | Question it answers | Default |
+| --- | --- | --- |
+| `idleTimeout` | How long may the agent say nothing? | 30 min |
+| `completionTimeout` | How long may one agent wait? | 2 h |
+| `qaTimeout` | How long may the verification round take? | 1 h |
+| `workflowHardTimeout` | How long may the whole workflow take? | 4 h |
+
+`workflowHardTimeout` is not a soft cap: a detached watchdog kills the tmux session when
+it fires. It therefore has to exceed `completionTimeout` + `qaTimeout`, or it cuts the
+verification round short of the budget the verification round was given. Set them in
+`~/.afk/config.yml` (`idleTimeout`, `completionTimeout`, `qaTimeout`,
+`workflowHardTimeout`) or with `AFK_IDLE_TIMEOUT`, `AFK_COMPLETION_TIMEOUT`,
+`AFK_QA_TIMEOUT`, `AFK_WORKFLOW_HARD_TIMEOUT`.
+
 An item with the `prd` role is an organizational parent. It has no lifecycle
 state at all — it groups children instead of waiting for a human, and "waiting
 for its children" is not a position in the lifecycle. The role, not a state,

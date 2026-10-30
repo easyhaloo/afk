@@ -150,6 +150,8 @@ export interface RunnerOptions {
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs?: number;
   /** Max automatic context-handoff rounds before falling back to terminal handoff. */
   maxHandoffs?: number;
   /** Absolute token threshold that triggers context handoff (runner polls statusline). */
@@ -261,6 +263,8 @@ interface StepRunCtx {
   baseBranch: string;
   hardTimeoutMs: number;
   completionTimeoutMs: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs: number;
   contextHighTokens: number;
   budget: BudgetManager;
   persistBudget: () => Promise<void>;
@@ -393,6 +397,7 @@ export class WorkflowRunner {
       targetBranch,
       hardTimeoutMs = this.config.workflowHardTimeout,
       completionTimeoutMs = this.config.completionTimeout,
+      idleTimeoutMs = this.config.idleTimeout,
       maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20),
       contextHighTokens = this.config.contextThreshold,
       maxTotalTokens = this.config.goalBudget,
@@ -543,7 +548,7 @@ export class WorkflowRunner {
 
     try {
       let result = await this.runBody({
-        iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs,
+        iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, maxHandoffs,
         contextHighTokens, maxTotalTokens, projectName: options.projectName, repoRoot: this.repoRoot,
         workspaceRoot: this.workspaceRoot,
         branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode,
@@ -753,6 +758,7 @@ export class WorkflowRunner {
         wtPath: branchHandle.path,
         hardTimeoutMs: effectiveTimeout,
         completionTimeoutMs: ctx.completionTimeoutMs,
+        idleTimeoutMs: ctx.idleTimeoutMs,
         contextHighTokens: ctx.contextHighTokens,
         budget: ctx.budget,
         persistBudget: ctx.persistBudget,
@@ -855,7 +861,7 @@ export class WorkflowRunner {
 
   private async runBody(ctx: {
     iid: number; session: string; targetBranch: string;
-    baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
+    baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number; idleTimeoutMs: number;
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
     projectName?: string;
     repoRoot: string;
@@ -864,7 +870,7 @@ export class WorkflowRunner {
     template: string;
     executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
     if (!this.activeBacklog) throw new Error('backlog is not active');
     const budgetStore = new BudgetStore(workspaceRoot, this.activeBacklog.workItemId ?? this.activeBacklog.providerRef);
     const savedBudget = await budgetStore.load();
@@ -983,7 +989,7 @@ export class WorkflowRunner {
       executeAgent: (step, results) => this.runStep(step, {
         iid, session: `${session}-${step.id}`, baseSession: session,
         primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, stepIndex: 0,
+        hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, stepIndex: 0,
         executionMode: step.executionMode ?? executionMode, persistBudget,
       }, results),
       executeSystem: async step => {
@@ -1003,7 +1009,7 @@ export class WorkflowRunner {
     if (verification?.status === 'failed') {
       const recovered = await this.retryFailedAcVerification(loadedTemplate, {
         iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
+        hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
       }, verification, stepResults);
       if (recovered) {
         if (!this.preparedRepositories) {
@@ -1164,6 +1170,7 @@ export class WorkflowRunner {
     wtPath: string;
     hardTimeoutMs: number;
     completionTimeoutMs: number;
+    idleTimeoutMs: number;
     contextHighTokens: number;
     budget: BudgetManager;
     persistBudget: () => Promise<void>;
@@ -1211,6 +1218,7 @@ export class WorkflowRunner {
       const result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
+        idleTimeoutMs: p.idleTimeoutMs,
       });
       await this.writeRuntimeDiagnostics(result, execution);
 

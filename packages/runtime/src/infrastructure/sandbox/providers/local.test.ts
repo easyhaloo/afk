@@ -290,4 +290,103 @@ describe('LocalSandboxProvider', () => {
       structuredOutput: signal,
     });
   });
+
+  describe('agent watchdogs', () => {
+    const localExecution = (worktreePath: string, tmux: unknown) => new LocalAgentExecution({
+      worktreePath,
+      sessionName: 'watchdog-session',
+      command: { argv: ['agent'], cwd: worktreePath },
+      generation: 1,
+      prompt: 'do the work',
+      signalType: 'goal_complete',
+      metadata: { provider: 'claude-code', transport: 'process' },
+      tmux: tmux as never,
+      paneIntervalMs: 1,
+      pollIntervalMs: 1,
+    });
+
+    it('fails as soon as the agent session is gone instead of waiting for the hard timeout', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-gone-'));
+      const tmux = {
+        hasSession: vi.fn(async () => false),
+        capturePane: vi.fn(async () => ''),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const result = await localExecution(worktreePath, tmux)
+        .waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toMatchObject({ code: 'AGENT_GONE' });
+    });
+
+    it('reports completion when the agent finished and then quit', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-quit-'));
+      await writeFile(
+        join(worktreePath, '.afk-signal.json'),
+        JSON.stringify({
+          type: 'goal_complete',
+          timestamp: new Date().toISOString(),
+          kind: 'task',
+          summary: 'the agent finished before it exited',
+        }),
+      );
+      const tmux = {
+        hasSession: vi.fn(async () => false),
+        capturePane: vi.fn(async () => ''),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const result = await localExecution(worktreePath, tmux)
+        .waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('completed');
+    });
+
+    it('gives up on an agent that has stopped talking', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-idle-'));
+      const tmux = {
+        hasSession: vi.fn(async () => true),
+        capturePane: vi.fn(async () => 'the same pane, forever'),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const result = await localExecution(worktreePath, tmux)
+        .waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 20 });
+
+      expect(result.status).toBe('timed_out');
+      expect(result.error).toMatchObject({ code: 'AGENT_IDLE' });
+    });
+
+    it('keeps waiting while the agent keeps talking', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-talking-'));
+      let pane = 0;
+      const tmux = {
+        hasSession: vi.fn(async () => true),
+        capturePane: vi.fn(async () => `pane ${pane++}`),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const execution = localExecution(worktreePath, tmux);
+      setTimeout(() => {
+        void writeFile(
+          join(worktreePath, '.afk-signal.json'),
+          JSON.stringify({
+            type: 'goal_complete',
+            timestamp: new Date().toISOString(),
+            kind: 'task',
+            summary: 'the agent kept going and finished',
+          }),
+        );
+      }, 60);
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 40 });
+
+      expect(result.status).toBe('completed');
+    });
+  });
 });

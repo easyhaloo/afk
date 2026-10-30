@@ -468,3 +468,45 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
     }
   });
 });
+
+describe('ContainerAgentExecution — idle watchdog', () => {
+  it('gives up on a container that stops producing output', async () => {
+    const wtPath = fs.mkdtempSync(join(os.tmpdir(), 'afk-container-idle-'));
+    try {
+      const outputPath = join(wtPath, 'output.log');
+      fs.writeFileSync(outputPath, '');
+      const provider = {
+        engine: 'docker',
+        binary: 'docker',
+        isAvailable: async () => true,
+        create: async () => ({ id: 'c1', name: 'c1', engine: 'docker' }),
+        exec: async () => ({ execId: 'e1' }),
+        killExec: async () => {},
+        killContainer: async () => {},
+        remove: async () => {},
+        inspect: async () => ({ id: 'c1', name: 'c1', status: 'running', mounts: [] }),
+      } as unknown as ContainerProvider;
+
+      const execution = new ContainerAgentExecution({
+        provider,
+        containerId: 'c1',
+        worktreePath: wtPath,
+        sessionName: 'container-session',
+        generation: 1,
+        signalType: 'goal_complete',
+        execId: 'e1',
+        outputPath,
+        errorPath: join(wtPath, 'error.log'),
+        exitPath: join(wtPath, 'exit.code'),
+        metadata: PROCESS_METADATA,
+      });
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 20 });
+
+      expect(result.status).toBe('timed_out');
+      expect(result.error).toMatchObject({ code: 'AGENT_IDLE' });
+    } finally {
+      fs.rmSync(wtPath, { recursive: true, force: true });
+    }
+  });
+});

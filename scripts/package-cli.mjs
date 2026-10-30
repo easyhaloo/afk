@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -32,6 +32,79 @@ function run(command, arguments_, options = {}) {
   return result.stdout?.trim();
 }
 
+/**
+ * Agent CLIs are resolved from PATH at runtime (see packages/runtime/src/domain/agents/*),
+ * never bundled. A packaged agent binary is both huge (~236MB) and a licensing problem,
+ * so treat it as a hard release failure rather than a size warning.
+ */
+const FORBIDDEN_BUNDLED_AGENT = /claude-code|codex/i;
+const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024;
+const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024;
+const DEVELOPMENT_ARTIFACT = [/\.d\.ts$/, /\.d\.mts$/, /\.d\.cts$/, /\.map$/];
+
+async function walk(directory) {
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true });
+  return entries.map(entry => ({ entry, path: join(entry.parentPath ?? entry.path, entry.name) }));
+}
+
+/** Strip type declarations and source maps: runtime-irrelevant, and `.map` files carry `sourcesContent`. */
+async function pruneDevelopmentArtifacts(directory) {
+  let removed = 0;
+  let bytes = 0;
+  for (const { entry, path } of await walk(directory)) {
+    if (!entry.isFile() || !DEVELOPMENT_ARTIFACT.some(pattern => pattern.test(entry.name))) continue;
+    bytes += (await stat(path)).size;
+    await rm(path, { force: true });
+    removed += 1;
+  }
+  console.log(`Pruned ${removed} development artifacts (${(bytes / 1024 / 1024).toFixed(1)}MB).`);
+}
+
+async function assertNoBundledAgent(directory) {
+  const packages = [];
+  const oversized = [];
+  for (const { entry, path } of await walk(directory)) {
+    if (entry.isDirectory()) {
+      if (FORBIDDEN_BUNDLED_AGENT.test(entry.name)) packages.push(path);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const { size } = await stat(path);
+    if (size > MAX_SINGLE_FILE_BYTES) oversized.push(`${(size / 1024 / 1024).toFixed(0)}MB ${path}`);
+  }
+  const offenders = [...packages, ...oversized];
+  if (offenders.length) {
+    throw new Error(`refusing to package agent binaries (resolve them from PATH at runtime instead):\n  ${offenders.join('\n  ')}`);
+  }
+}
+
+/**
+ * `pnpm deploy --legacy` additionally materializes `.pnpm/@/`, a mirror where the scope was
+ * parsed as an empty string and every package is stored a second time. Nothing symlinks into
+ * it and `.modules.yaml` never mentions it, so it is dead weight — but only remove it once
+ * every entry is proven to have a real counterpart in the store.
+ */
+async function pruneDuplicateScopeMirror(directory) {
+  const store = join(directory, 'node_modules/.pnpm');
+  const mirror = join(store, '@');
+  if (!(await stat(mirror).catch(() => undefined))) return;
+  const storeEntries = await readdir(store);
+  const orphans = [];
+  for (const name of await readdir(mirror)) {
+    for (const version of await readdir(join(mirror, name))) {
+      const expected = `${name}@${version}`;
+      if (!storeEntries.some(entry => entry === expected || entry.startsWith(`${expected}_`))) orphans.push(expected);
+    }
+  }
+  if (orphans.length) throw new Error(`.pnpm/@ mirror entries have no counterpart in the store: ${orphans.join(', ')}`);
+  let bytes = 0;
+  for (const { entry, path } of await walk(mirror)) {
+    if (entry.isFile()) bytes += (await stat(path)).size;
+  }
+  await rm(mirror, { recursive: true, force: true });
+  console.log(`Removed duplicate .pnpm/@ mirror (${(bytes / 1024 / 1024).toFixed(1)}MB).`);
+}
+
 const temporary = await mkdtemp(join(tmpdir(), 'afk-release-'));
 try {
   console.log(`Building AFK ${version} for ${process.platform}/${process.arch}...`);
@@ -49,10 +122,18 @@ try {
       else await rm(file, { force: true });
     }
   }
+  await assertNoBundledAgent(join(temporary, 'afk'));
+  await pruneDuplicateScopeMirror(join(temporary, 'afk'));
+  await pruneDevelopmentArtifacts(join(temporary, 'afk'));
   await writeFile(join(temporary, 'afk/release.json'), JSON.stringify({ version, platform: process.platform, arch: process.arch, nodeMinimum: '22.16.0' }) + '\n');
   const asset = `afk-${process.platform}-${process.arch}.tar.gz`;
   const archive = join(temporary, asset);
   run('tar', ['-czf', archive, '-C', temporary, 'afk'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  const archiveSize = (await stat(archive)).size;
+  if (archiveSize > MAX_ARCHIVE_BYTES) {
+    throw new Error(`release archive is ${(archiveSize / 1024 / 1024).toFixed(1)}MB, over the ${MAX_ARCHIVE_BYTES / 1024 / 1024}MB budget`);
+  }
+  console.log(`Archive size: ${(archiveSize / 1024 / 1024).toFixed(1)}MB.`);
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(archive)) hash.update(chunk);
   const checksum = `${archive}.sha256`;

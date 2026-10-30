@@ -350,7 +350,7 @@ export class LocalAgentExecution implements AgentExecution {
       // own rollout. The terminal stays open, so without this the wait would
       // run on until the hard timeout for a turn that is already over.
       if (this.turnWatcher) {
-        const failure = await this.turnWatcher.check(this.worktreePath);
+        const failure = await this.turnWatcher.check(this.worktreePath, start);
         if (failure) {
           this.done = true;
           return {

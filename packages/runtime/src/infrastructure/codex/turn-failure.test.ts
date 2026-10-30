@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodexTurnWatcher, findCodexRolloutForDirectory, readCodexTurnFailure } from './turn-failure.js';
@@ -66,8 +66,25 @@ describe('codex turn failure', () => {
     await writeRollout(day, 'rollout-other.jsonl', '/somewhere/else', [sessionMeta('/somewhere/else')]);
     await writeRollout(day, 'rollout-mine.jsonl', WORKDIR, [sessionMeta(WORKDIR)]);
 
-    await expect(findCodexRolloutForDirectory(WORKDIR, root)).resolves.toContain('rollout-mine.jsonl');
-    await expect(findCodexRolloutForDirectory('/nowhere', root)).resolves.toBeUndefined();
+    await expect(findCodexRolloutForDirectory(WORKDIR, { rootDir: root })).resolves.toContain('rollout-mine.jsonl');
+    await expect(findCodexRolloutForDirectory('/nowhere', { rootDir: root })).resolves.toBeUndefined();
+  });
+
+  it('leaves out a rollout from an earlier attempt in the same worktree', async () => {
+    const { root, day } = await fixtureRoot();
+    const earlier = await writeRollout(day, 'rollout-earlier.jsonl', WORKDIR, [
+      sessionMeta(WORKDIR),
+      taskComplete({ message: 'stream disconnected before completion' }),
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const later = await writeRollout(day, 'rollout-later.jsonl', WORKDIR, [sessionMeta(WORKDIR)]);
+
+    // Nothing was written after this moment, so no rollout belongs to it.
+    expect(await findCodexRolloutForDirectory(WORKDIR, { rootDir: root, sinceMs: Date.now() + 60_000 })).toBeUndefined();
+
+    // The attempt that started between the two files sees only the second.
+    const since = (await stat(earlier)).mtimeMs + 5;
+    expect(await findCodexRolloutForDirectory(WORKDIR, { rootDir: root, sinceMs: since })).toBe(later);
   });
 
   describe('watching', () => {
@@ -76,7 +93,7 @@ describe('codex turn failure', () => {
       const path = await writeRollout(day, 'rollout-watch.jsonl', WORKDIR, [sessionMeta(WORKDIR)]);
       const watcher = new CodexTurnWatcher();
 
-      await expect(watcher.check(WORKDIR, root)).resolves.toBeUndefined();
+      await expect(watcher.check(WORKDIR, undefined, root)).resolves.toBeUndefined();
 
       await writeFile(
         path,
@@ -86,7 +103,7 @@ describe('codex turn failure', () => {
         ].join('\n') + '\n',
       );
 
-      await expect(watcher.check(WORKDIR, root)).resolves.toMatchObject({
+      await expect(watcher.check(WORKDIR, undefined, root)).resolves.toMatchObject({
         message: 'stream disconnected before completion',
       });
     });
@@ -99,9 +116,9 @@ describe('codex turn failure', () => {
       ]);
       const watcher = new CodexTurnWatcher();
 
-      await expect(watcher.check(WORKDIR, root)).resolves.toMatchObject({ message: 'stream disconnected before completion' });
+      await expect(watcher.check(WORKDIR, undefined, root)).resolves.toMatchObject({ message: 'stream disconnected before completion' });
       // The rollout did not grow, so it is not read again — and the verdict stands.
-      await expect(watcher.check(WORKDIR, root)).resolves.toMatchObject({ message: 'stream disconnected before completion' });
+      await expect(watcher.check(WORKDIR, undefined, root)).resolves.toMatchObject({ message: 'stream disconnected before completion' });
     });
   });
 });

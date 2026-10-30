@@ -30,11 +30,16 @@ export interface CodexTurnFailure {
  * key that ties a transcript to the work AFK started. The newest file wins:
  * Codex appends to one file per session, and a worktree can be visited more
  * than once.
+ *
+ * `sinceMs` matters: a worktree that was visited before still has its older
+ * rollout on disk, and an attempt must not be judged by the attempt before
+ * it. Only a rollout written at or after that moment belongs to this attempt.
  */
 export async function findCodexRolloutForDirectory(
   workingDirectory: string,
-  rootDir?: string,
+  options: { sinceMs?: number; rootDir?: string } = {},
 ): Promise<string | undefined> {
+  const { sinceMs, rootDir } = options;
   const sessionsRoot = join(rootDir ?? homedir(), '.codex', 'sessions');
   let yearDirs: string[];
   try {
@@ -70,9 +75,10 @@ export async function findCodexRolloutForDirectory(
         }
         for (const file of files) {
           const path = join(dayPath, file);
-          if (!(await rolloutBelongsToDirectory(path, workingDirectory))) continue;
           const info = await stat(path).catch(() => undefined);
           if (!info) continue;
+          if (sinceMs !== undefined && info.mtimeMs < sinceMs) continue;
+          if (!(await rolloutBelongsToDirectory(path, workingDirectory))) continue;
           if (!newest || info.mtimeMs > newest.modifiedAt) newest = { path, modifiedAt: info.mtimeMs };
         }
       }
@@ -152,9 +158,12 @@ export class CodexTurnWatcher {
    *
    * Returns the failure when the last Codex turn ended in one, undefined
    * otherwise — including when the verdict is not known yet.
+   *
+   * `sinceMs` is when this attempt started: a rollout from an earlier attempt
+   * in the same worktree is not this attempt's business.
    */
-  async check(workingDirectory: string, rootDir?: string): Promise<CodexTurnFailure | undefined> {
-    const path = await this.resolvePath(workingDirectory, rootDir);
+  async check(workingDirectory: string, sinceMs?: number, rootDir?: string): Promise<CodexTurnFailure | undefined> {
+    const path = await this.resolvePath(workingDirectory, sinceMs, rootDir);
     if (!path) return this.lastFailure;
 
     const size = (await stat(path).catch(() => undefined))?.size ?? 0;
@@ -166,14 +175,14 @@ export class CodexTurnWatcher {
     return this.lastFailure;
   }
 
-  private async resolvePath(workingDirectory: string, rootDir?: string): Promise<string | undefined> {
+  private async resolvePath(workingDirectory: string, sinceMs?: number, rootDir?: string): Promise<string | undefined> {
     if (this.path) {
       const stillThere = await stat(this.path).catch(() => undefined);
       if (stillThere) return this.path;
       this.path = undefined;
       this.lastSize = -1;
     }
-    this.path = await findCodexRolloutForDirectory(workingDirectory, rootDir);
+    this.path = await findCodexRolloutForDirectory(workingDirectory, { sinceMs, rootDir });
     return this.path;
   }
 }

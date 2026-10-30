@@ -71,7 +71,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog role --id <id> --kind prd` | 把一个 backlog 工作项设为 PRD 锚点角色 |
 | `afk backlog mode --id <id> --mode afk\|hitl` | 切换一个 backlog 工作项的执行方 |
 | `afk backlog base --id <id> --branch <ref>` | 在工作项正文中记录它起始的基线 ref |
-| `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue，并给出每项当前可执行或不可执行的原因 |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
@@ -82,7 +82,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
 | `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
-| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
+| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看（`--all` 列出 loop 运行目录下的全部 loop）与优雅停止 |
 | `afk observe` | 默认以友好文本读取 append-only 的 AFK 运行审计事件，支持 `--json`（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
 | `afk observe <runId>` / `afk log <runId>` | `afk observe execution <runId>` 的简写，支持相同的 `--watch`、`--tail`、`--root` 和 `--json` 参数 |
 | `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | 查看带详情的运行时间线，可持续追踪新事件或限制首次展示的历史数量 |
@@ -322,6 +322,39 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 ref、仓库默认分支、`main`。manifest 存在时仍以 manifest 为准——它是执行自己对
 「基于什么运行」的记录——因此操作者可以在不修改 issue 的前提下为单次执行做
 覆盖。
+
+### 工作项为什么不动
+
+生命周期标签说明工作项处在什么位置，而不是它为什么停着不动。一屏 `ready`
+的工作项分不清「在排队」和「死锁」，因此凡是报告工作项的入口，都会一并报告
+原因：
+
+| 原因 | 含义 |
+| --- | --- |
+| `not_execution_eligible` | 该项是容器（PRD 锚点），不是可执行的工作 |
+| `blocked_for_human` | 该项被阻塞，等待人工处理 |
+| `execution_in_progress` | AFK 正在处理该项 |
+| `awaiting_merge` | 变更已通过 QA，等待合并 |
+| `state_not_runnable` | 该生命周期位置不是 AFK 启动工作的位置 |
+| `execution_mode_hitl` | 该项由人工执行，AFK 不得接手 |
+| `not_managed` | 该项的生命周期不由 AFK 管理 |
+| `has_children` | 该项拥有子项，工作在子项上 |
+| `dependency_not_done` | 至少一个依赖尚未完成 |
+
+依赖这一条会指名尚未完成的依赖，所以给出的答案是「要谁动手」，而不只是
+「得有人动手」。这些规则只存在一处（`@afk/runtime` 的 backlog 域），loop、
+命令行与 Desktop 客户端对同一问题给出同一个答案。loop 会把跳过原因写进
+日志，`afk backlog children <id>` 会为某个 PRD 的每个子项报告该原因。
+
+### 活得比进程更久的认领
+
+认领会活得比持有它的进程更久：重启后的 loop 发现自己负责的工作项仍标记为
+进行中，却已经没有任何东西在执行它。轮询只寻找尚未开始的工作，于是这样的
+工作项再也不会动——一次重启就静默地变成了停滞。
+
+因此 loop 启动时会把**自己负责的**认领交还队列。已经存在未关闭变更请求的
+工作项回到 `rework`，因为那个位置的执行会复用已有变更请求，而不是拒绝再开
+一个。别的 loop 的认领不动——那是别的 loop 的工作。
 
 ### Backlog manifest
 

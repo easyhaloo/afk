@@ -14,6 +14,7 @@ import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
 import { applyExecutionBaseBranch, parseExecutionBaseBranch } from './execution-base.js';
+import { evaluateRunnability, type Runnability } from './runnability.js';
 import {
   BACKLOG_RELATION_PREFIX,
   canonicalizeBacklogReference,
@@ -447,17 +448,30 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    // The role vetoes first: an organizational anchor is never executable,
-    // whatever lifecycle position it happens to carry.
-    if (item.kind === 'prd') return false;
-    if (item.executionEligible === false || (item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
+    return (await this.explainRunnability(item)).runnable;
+  }
+
+  /**
+   * Whether the item may start now, and what holds it back.
+   *
+   * The children and the dependencies may live in other repositories, so
+   * both are read through the same graph the claim uses: the answer has to
+   * agree with the one the claim path reaches.
+   */
+  async explainRunnability(item: BacklogItem): Promise<Runnability> {
     const children = await this.childrenOf(item);
-    if (children.length) return false;
-    for (const dependencyId of item.dependsOn) {
+    const dependencies = await Promise.all(item.dependsOn.map(async dependencyId => {
       const dependency = await this.get(dependencyId).catch(() => null);
-      if (!dependency || dependency.state !== 'done') return false;
-    }
-    return true;
+      return { id: dependencyId, state: dependency?.state };
+    }));
+    return evaluateRunnability({
+      container: item.kind === 'prd',
+      state: item.state,
+      executionMode: item.executionMode,
+      executionEligible: item.executionEligible,
+      hasChildren: children.length > 0,
+      dependencies,
+    });
   }
 
   private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {

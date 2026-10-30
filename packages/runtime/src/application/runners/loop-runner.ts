@@ -4,6 +4,7 @@ import { logger } from '../../infrastructure/io/index.js';
 import { loopPidFilePath, loopStatusFilePath } from '../../infrastructure/process/pid-file.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import { parseWorkItemId, type BacklogItem } from '../../domain/backlog/index.js';
+import { describeRunnability } from '../../domain/backlog/runnability.js';
 import { reconcileMergedBacklog } from '../../domain/backlog/commands.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
@@ -158,6 +159,12 @@ export class LoopRunner {
       },
       'loop started'
     );
+
+    // A claim outlives the process that took it. A loop that restarts finds
+    // its item still marked in progress, with nothing executing it any more:
+    // the previous process died holding the claim. The poll only looks for
+    // work that has not started, so such an item would never move again.
+    await this.recoverOrphanedClaims();
 
     // Initial poll — don't wait a full interval to notice the first issue
     void this.poll();
@@ -342,10 +349,15 @@ export class LoopRunner {
 
         // Reserve BEFORE any await so overlapping ticks cannot double-start.
         this.inFlight.add(issueId);
-        const check = { ok: await this.providers.backlog.isRunnable(issue) };
-        if (!check.ok) {
+        const runnability = await this.providers.backlog.explainRunnability(issue);
+        if (!runnability.runnable) {
           this.inFlight.delete(issueId);
-          logger.info({ iid: issueId, reason: (check as any).reason }, 'issue skipped by preconditions');
+          // The reason is the whole point of the skip: without it a log full
+          // of "skipped" cannot tell a queue from a deadlock.
+          logger.info(
+            { iid: issueId, reason: runnability.reason, blockedBy: runnability.blockedBy },
+            'issue skipped by preconditions',
+          );
           skipped++;
           continue;
         }
@@ -392,6 +404,50 @@ export class LoopRunner {
       } catch (error) {
         logger.warn({ iid: id, error }, 'failed to reconcile a merged backlog');
       }
+    }
+  }
+
+  /**
+   * Return a claim the previous process left behind to the queue.
+   *
+   * Only the items this loop owns are touched: another loop's claim is
+   * another loop's work. An item that already has an open change request
+   * goes back to `rework`, because that is the position whose execution
+   * reuses the change request instead of refusing to open a second one.
+   */
+  private async recoverOrphanedClaims(): Promise<void> {
+    let claimed: BacklogItem[];
+    try {
+      claimed = await this.providers.backlog.list({ state: 'in_progress', executionMode: 'afk' });
+    } catch (error) {
+      // A provider that cannot be read leaves the claims where they are. That
+      // is no worse than not looking, and the poll still runs.
+      logger.warn({ err: error }, 'failed to read the claims left behind by a previous run');
+      return;
+    }
+    for (const issue of claimed) {
+      const issueId = String(issue.id);
+      if (!this.isInScope(issue)) continue;
+      const existing = await this.findChangeRequest(issue);
+      const state = existing?.state === 'open' ? 'rework' : 'ready';
+      logger.warn({ iid: issueId, state, changeRequest: existing?.id }, 'recovering a claim left behind by a previous run');
+      await this.providers.backlog.transition(issueId, state);
+      this.emitEvent(`${issueId} recovered from a previous run — returned to the queue as ${state}`);
+    }
+  }
+
+  /**
+   * The change request an item already has, if the provider can tell.
+   *
+   * A provider that cannot answer leaves the recovery on the safe side: the
+   * item goes back to `ready`, and the execution that follows reports an open
+   * change request rather than opening a second one.
+   */
+  private async findChangeRequest(item: BacklogItem): Promise<{ id?: string; state?: string } | null> {
+    try {
+      return await this.providers.changes.findForBacklog(item);
+    } catch {
+      return null;
     }
   }
 

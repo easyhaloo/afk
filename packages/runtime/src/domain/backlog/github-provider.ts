@@ -1,4 +1,4 @@
-import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
+import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution, Runnability } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
@@ -33,4 +33,5 @@ export class GitHubBacklogProvider implements BacklogProvider {
   applyExecutionBase(id: string, baseBranch: string): Promise<void> { return this.implementation.applyExecutionBase(id, baseBranch); }
   initialize(): Promise<void> { return this.implementation.initialize(); }
   isRunnable(item: BacklogItem): Promise<boolean> { return this.implementation.isRunnable(item); }
+  explainRunnability(item: BacklogItem): Promise<Runnability> { return this.implementation.explainRunnability(item); }
 }

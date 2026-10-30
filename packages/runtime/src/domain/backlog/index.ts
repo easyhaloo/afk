@@ -57,6 +57,9 @@ export type { BacklogIssueView } from './projection.js';
 export { deriveBacklogBranchName } from './branch-name.js';
 import { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection } from './execution-base.js';
 export { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection };
+export { describeRunnability, evaluateRunnability, RUNNABLE_STATES } from './runnability.js';
+export type { Runnability, RunnabilityReason, RunnabilitySubject } from './runnability.js';
+import { evaluateRunnability, type Runnability } from './runnability.js';
 import type { BacklogClaim } from './claim.js';
 import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
 import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
@@ -234,6 +237,14 @@ export interface BacklogProvider {
   applyExecutionBase(id: string, baseBranch: string): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
+  /**
+   * Whether the item may start now, and what holds it back.
+   *
+   * A boolean answer cannot tell a queue from a deadlock, so the provider
+   * reports the reason as well: which rule refused, and which dependencies
+   * still have work to do.
+   */
+  explainRunnability(item: BacklogItem): Promise<Runnability>;
 }
 
 export class InMemoryBacklogProvider implements BacklogProvider {
@@ -457,17 +468,20 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    // The role vetoes first: an organizational anchor is never executable,
-    // whatever lifecycle position it happens to carry.
-    if (item.kind === 'prd') return false;
-    if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
-    const hasIncompleteChild = [...this.items.values()]
-      .some(candidate => candidate.parentId === item.id);
-    if (hasIncompleteChild) return false;
-    for (const dependencyId of item.dependsOn) {
-      const dependency = this.items.get(dependencyId);
-      if (!dependency || dependency.state !== 'done') return false;
-    }
-    return true;
+    return (await this.explainRunnability(item)).runnable;
+  }
+
+  async explainRunnability(item: BacklogItem): Promise<Runnability> {
+    const hasChildren = [...this.items.values()].some(candidate => candidate.parentId === item.id);
+    return evaluateRunnability({
+      // The role vetoes first: an organizational anchor is never executable,
+      // whatever lifecycle position it happens to carry.
+      container: item.kind === 'prd',
+      state: item.state,
+      executionMode: item.executionMode,
+      executionEligible: item.executionEligible,
+      hasChildren,
+      dependencies: item.dependsOn.map(id => ({ id, state: this.items.get(id)?.state })),
+    });
   }
 }

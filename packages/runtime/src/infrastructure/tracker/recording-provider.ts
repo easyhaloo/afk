@@ -9,6 +9,7 @@ import type {
   BacklogProvider,
   BacklogProviderCapabilities,
   BacklogState,
+  Runnability,
   NewReworkRecord,
   ReworkRecord,
   ReworkResolution,
@@ -129,6 +130,9 @@ export class RecordingBacklogProvider implements BacklogProvider {
 
   isRunnable(item: BacklogItem): Promise<boolean> {
     return this.provider.isRunnable(item);
+  }
+  explainRunnability(item: BacklogItem): Promise<Runnability> {
+    return this.provider.explainRunnability(item);
   }
 
   private record(items: readonly BacklogItem[]): void {

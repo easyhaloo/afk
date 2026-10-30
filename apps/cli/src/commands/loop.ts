@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
+import * as path from 'path';
 import { createWorkflowProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import { LoopRunner } from '@afk/runtime/application/runners/loop-runner';
 import { installLoopSignalHandlers } from './loop-signals.js';
@@ -12,6 +13,7 @@ import { handleCommandError, success, info, warning, fail, detail } from '../out
 import { spawnDetached, waitForProcessPid } from '@afk/runtime/infrastructure/process/daemon';
 import {
   loopPidFilePath,
+  loopRunsDirectory,
   loopStatusFilePath,
   readPid,
   removePidFile,
@@ -52,9 +54,12 @@ export function registerLoopCommands(program: Command): void {
     try { await startLoop(options); } catch (error) { handleCommandError(error); }
   });
 
-  loop.command('status').description('Show status of the running loop daemon').action(() => {
-    try { showStatus(); } catch (error) { handleCommandError(error); }
-  });
+  loop.command('status')
+    .description('Show status of the running loop daemon')
+    .option('--all', 'Show every loop under the loop runs directory')
+    .action((options: { all?: boolean }) => {
+      try { options.all ? showAllLoopStatus() : showStatus(); } catch (error) { handleCommandError(error); }
+    });
 
   loop.command('stop').description('Stop the running loop daemon (SIGTERM, then SIGKILL after timeout)')
     .option('-t, --timeout <seconds>', 'Max wait for graceful shutdown before SIGKILL', parsePositiveInt)
@@ -166,6 +171,82 @@ function showStatus(): void {
     detail(`done:       ${status.totals.completed}`);
     detail(`failed:     ${status.totals.failed}`);
   } catch { detail('(status file not yet written — wait for first status tick)'); }
+}
+
+/**
+ * Every loop AFK is running, one line each.
+ *
+ * A deployment often runs one loop per work item, each with its own pid and
+ * status file. The single-loop answer says "not running" for all of them,
+ * because it only knows about one pid file — so the directory of loop runs
+ * is the thing an operator actually has to look at.
+ */
+function showAllLoopStatus(): void {
+  const root = loopRunsDirectory();
+  if (!fs.existsSync(root)) {
+    warning(`afk loop: no loop runs directory (${root})`);
+    return;
+  }
+  const entries = fs.readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => ({ tag: entry.name, dir: path.join(root, entry.name) }))
+    .sort((left, right) => left.tag.localeCompare(right.tag));
+  if (entries.length === 0) {
+    warning(`afk loop: no loops under ${root}`);
+    return;
+  }
+  const header = ['LOOP', 'STATE', 'EXEC', 'DONE', 'FAILED', 'LAST ERROR'];
+  const widths = [16, 9, 5, 5, 7, 0];
+  const rows: string[][] = [];
+  for (const entry of entries) {
+    const pid = readPidFile(path.join(entry.dir, 'loop.pid'));
+    const alive = pid !== null && isProcessAlive(pid);
+    const status = readLoopStatus(path.join(entry.dir, 'status.json'));
+    const errors = status ? Object.entries(status.lastError ?? {}) : [];
+    rows.push([
+      entry.tag,
+      alive ? 'running' : (pid === null ? 'no pid' : 'stopped'),
+      String(status?.execution?.active ?? 0),
+      String(status?.totals?.completed ?? 0),
+      String(status?.totals?.failed ?? 0),
+      errors.length === 0 ? '' : errors.map(([id, reason]) => `${id}: ${reason}`).join('; '),
+    ]);
+  }
+  console.log();
+  for (const [index, cell] of header.entries()) {
+    process.stdout.write(chalk.bold(cell.padEnd(widths[index])));
+  }
+  console.log();
+  for (const row of rows) {
+    for (const [index, cell] of row.entries()) {
+      process.stdout.write(cell.padEnd(widths[index]).slice(0, widths[index] || undefined));
+    }
+    console.log();
+  }
+  console.log();
+}
+
+/** The pid a loop run recorded, or null when it never started. */
+function readPidFile(file: string): number | null {
+  try {
+    const value = Number(fs.readFileSync(file, 'utf-8').trim());
+    return Number.isInteger(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The status snapshot a loop run wrote, or undefined when it wrote none. */
+function readLoopStatus(file: string): {
+  execution?: { active?: number };
+  totals?: { completed?: number; failed?: number };
+  lastError?: Record<string, string>;
+} | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    return undefined;
+  }
 }
 
 async function stopLoop(timeoutSeconds: number): Promise<void> {

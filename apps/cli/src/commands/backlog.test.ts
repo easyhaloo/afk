@@ -1174,8 +1174,28 @@ describe('backlog children', () => {
     });
   });
 
-  it('prints the provider URL of every item next to its title', async () => {
-    const output = await captureText(() => runBacklogChildren(parent.id, {}, {
+  it('says why a child is not moving, not only where it stands', async () => {
+    const waiting = workItem('gitlab:group/repo#10', {
+      parentId: parent.id, title: 'waiting', executionMode: 'afk', executionEligible: true,
+      dependsOn: ['gitlab:group/repo#11'],
+    });
+    const dependency = workItem('gitlab:group/repo#11', { state: 'blocked' });
+    const envelope = await capture(() => runBacklogChildren(parent.id, { json: true }, {
+      read: async () => ({ items: [parent, waiting, dependency], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    const children = (envelope.data as { children: { id: string; runnability?: unknown }[] }).children;
+    // The state says where the item stands; the runnability says what holds
+    // it back. A board of states alone cannot tell a queue from a deadlock.
+    expect(children.find(candidate => candidate.id === waiting.id)?.runnability).toEqual({
+      runnable: false,
+      reason: 'dependency_not_done',
+      blockedBy: ['gitlab:group/repo#11'],
+    });
+  });
+
+  it('prints the provider URL of every item next to its title', async () => {    const output = await captureText(() => runBacklogChildren(parent.id, {}, {
       read: async () => ({ items: [parent, child], lastSuccessAt: Date.now() }),
       collect: async () => undefined,
     }));

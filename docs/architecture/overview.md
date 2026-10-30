@@ -92,7 +92,7 @@ single source of truth for the supported surface:
 | `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
 | `afk backlog mode --id <id> --mode afk\|hitl` | Switch who runs a backlog item |
 | `afk backlog base --id <id> --branch <ref>` | Record the ref a backlog item starts from, in its body |
-| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project, each with the reason it is or is not runnable |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
@@ -103,7 +103,7 @@ single source of truth for the supported surface:
 | `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
-| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
+| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status (`--all` shows every loop in the loop runs directory), and graceful stop |
 | `afk observe` | Read append-only AFK run audit events as text by default, or with `--json` (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
 | `afk observe <runId>` / `afk log <runId>` | Short forms of `afk observe execution <runId>` with the same `--watch`, `--tail`, `--root`, and `--json` options |
 | `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | Show a detailed run timeline; optionally follow new events or limit the initial history |
@@ -417,6 +417,44 @@ declares, then the repository's default branch, then `main`. The manifest
 still wins when it exists — it is the execution's own record of what it runs
 against — so an operator can override the body for one run without editing
 the issue.
+
+### Why a work item is not moving
+
+A lifecycle label says where a work item sits, not why it is standing still. A
+board of `ready` items cannot tell a queue from a deadlock, so every surface
+that reports a work item reports the reason as well:
+
+| Reason | Meaning |
+| --- | --- |
+| `not_execution_eligible` | The item is a container (a PRD anchor), not executable work |
+| `blocked_for_human` | The item is blocked and waits for a person |
+| `execution_in_progress` | AFK is already working on it |
+| `awaiting_merge` | The change passed QA and waits to be merged |
+| `state_not_runnable` | The lifecycle position is not one AFK starts work from |
+| `execution_mode_hitl` | A human runs this item, so AFK must not pick it up |
+| `not_managed` | AFK does not own the lifecycle of this item |
+| `has_children` | The item owns children; the children are the work |
+| `dependency_not_done` | At least one dependency has not finished |
+
+The dependency rule names the dependencies that have not finished, so the
+answer says who has to act rather than only that somebody has to. The rules
+live in one place (`@afk/runtime` domain backlog), and the loop, the command
+line and the desktop client answer the same question the same way. The loop
+records the reason in its log for every issue it skips, and
+`afk backlog children <id>` reports it for every child of a PRD.
+
+### A claim that outlived its process
+
+A claim outlives the process that took it: a loop that restarts finds its
+item still marked in progress, with nothing executing it any more. The poll
+only looks for work that has not started, so such an item would never move
+again — a restart would silently become a stall.
+
+On startup a loop therefore returns the claims it owns to the queue. An item
+that already has an open change request goes back to `rework`, because that is
+the position whose execution reuses the change request instead of refusing to
+open a second one. Only the items the loop owns are touched: another loop's
+claim is another loop's work.
 
 ### Backlog manifest
 

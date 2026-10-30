@@ -28,6 +28,8 @@ import {
   type WorkItemChildrenResult,
 } from '@afk/runtime/application/work-item/children';
 import { toGlobalWorkItems } from '@afk/runtime/application/work-item/inventory-items';
+import { explainRunnabilityInInventory } from '@afk/runtime/application/work-item/runnability';
+import { describeRunnability } from '@afk/runtime/domain/backlog/runnability';
 import {
   applyBacklogManifest,
   parseBacklogManifest,
@@ -501,11 +503,21 @@ export async function runBacklogChildren(
       collect: dependencies.collect ?? collectWorkItems,
     });
     const result = await listWorkItemChildren(inventory, { parentId: identity });
+    // The state says where an item stands; the runnability says why it is not
+    // moving. A board of `ready` items cannot tell a queue from a deadlock
+    // without that second answer.
+    const runnability = explainRunnabilityInInventory(result.items);
+    const withRunnability = (item: GlobalWorkItem): GlobalWorkItem => {
+      const explanation = runnability.get(String(item.id));
+      return explanation ? { ...item, runnability: explanation } : item;
+    };
+    const parent = withRunnability(result.parent);
+    const children = result.children.map(withRunnability);
     if (options.json) {
-      emitSuccess(kind, { parent: result.parent, children: result.children, source: result.source });
+      emitSuccess(kind, { parent, children, source: result.source });
       return;
     }
-    printChildren(result);
+    printChildren({ ...result, parent, children });
   } catch (error) {
     if (options.json) {
       emitFailure(kind, classifyError(error), (error as Error).message);
@@ -642,6 +654,7 @@ function printChildren(result: WorkItemChildrenResult<GlobalWorkItem>): void {
   for (const child of result.children) {
     console.log(itemLine(child));
     detail(`state: ${child.state}  mode: ${child.executionMode}  managed: ${child.managed ? 'yes' : 'no'}`);
+    if (child.runnability) detail(`→ ${describeRunnability(child.runnability)}`);
   }
 }
 
@@ -670,7 +683,13 @@ async function openInventoryMirror(): Promise<SqliteInventoryStore | undefined> 
   return new SqliteInventoryStore({ namespaceKey });
 }
 
-/** The parent and its children as the local mirror holds them. */
+/**
+ * The parent, its children and the dependencies they wait on, as the local
+ * mirror holds them.
+ *
+ * A dependency may live in another repository, so it is read as well: without
+ * it a child looks blocked by work nobody can see.
+ */
 async function readChildrenFromMirror(
   parentId: string,
 ): Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined> {
@@ -679,8 +698,11 @@ async function readChildrenFromMirror(
   try {
     const page = await store.query({ parentId });
     const parent = await store.get(parentId);
-    const items = [...(parent ? [parent] : []), ...page.items];
-    return { items: toGlobalWorkItems(items), lastSuccessAt: page.lastSuccessAt };
+    const items = toGlobalWorkItems([...(parent ? [parent] : []), ...page.items]);
+    const dependencyIds = new Set(items.flatMap(item => item.dependsOn.map(String)));
+    const dependencies = await Promise.all([...dependencyIds].map(async id => store.get(id)));
+    const present = dependencies.filter((item): item is NonNullable<typeof item> => item !== undefined);
+    return { items: [...items, ...toGlobalWorkItems(present)], lastSuccessAt: page.lastSuccessAt };
   } finally {
     store.close();
   }

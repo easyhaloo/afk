@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LoopRunner } from './loop-runner.js';
+import { logger } from '../../infrastructure/io/index.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { BacklogItem } from '../../domain/backlog/index.js';
 
@@ -23,9 +24,13 @@ function providersFor(items: BacklogItem[] = [item]) {
   const backlog = {
     get: vi.fn(async (id: string) => items.find(candidate => candidate.id === id) ?? item),
     list: vi.fn(async ({ state }: { state: string }) => items.filter(candidate => candidate.state === state)),
-    isRunnable: vi.fn(async () => true), claim: vi.fn(),
+    isRunnable: vi.fn(async () => true),
+    explainRunnability: vi.fn(async () => ({ runnable: true, blockedBy: [] })),
+    transition: vi.fn(async () => undefined),
+    claim: vi.fn(),
   };
-  return { providers: { backlog, branches: {}, changes: {} } as unknown as ProviderBundle, backlog };
+  const changes = { findForBacklog: vi.fn(async () => null) };
+  return { providers: { backlog, branches: {}, changes } as unknown as ProviderBundle, backlog, changes };
 }
 
 describe('LoopRunner manifest-bound execution', () => {
@@ -322,6 +327,69 @@ describe('LoopRunner manifest-bound execution', () => {
       await subject.stop();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it('records why an item was skipped, not only that it was skipped', async () => {
+    const { providers, backlog } = providersFor();
+    const explanation = { runnable: false, reason: 'dependency_not_done', blockedBy: ['github:org/repo#7'] };
+    backlog.explainRunnability = vi.fn(async () => explanation);
+    const executeManagedWorkItem = vi.fn();
+    const subject = new LoopRunner(providers, { ...selection, readManifest, executeManagedWorkItem });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const logged = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    try {
+      await internals.poll();
+      // The reason reaches the log: without it a log full of "skipped" cannot
+      // tell a queue from a deadlock.
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({ iid: '42', reason: 'dependency_not_done', blockedBy: ['github:org/repo#7'] }),
+        'issue skipped by preconditions',
+      );
+      expect(executeManagedWorkItem).not.toHaveBeenCalled();
+      expect(subject.getStatus().totals.started).toBe(0);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('returns a claim left behind by a previous run to the queue', async () => {
+    const claimed = { ...item, state: 'in_progress' as const };
+    const { providers, backlog } = providersFor([claimed]);
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'ready');
+  });
+
+  it('returns a claim with an open change request as rework, so the change is reused', async () => {
+    const claimed = { ...item, state: 'in_progress' as const };
+    const { providers, backlog, changes } = providersFor([claimed]);
+    changes.findForBacklog = vi.fn(async () => ({ id: '7', state: 'open' }));
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    // `rework` is the position whose execution reuses the open change
+    // request instead of refusing to open a second one.
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'rework');
+  });
+
+  it('leaves a claim that belongs to another loop alone', async () => {
+    const claimed = { ...item, id: '43', state: 'in_progress' as const };
+    const { providers, backlog } = providersFor([claimed]);
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).not.toHaveBeenCalled();
   });
 
 });

@@ -22,6 +22,18 @@ export function loopStatusFilePath(env: NodeJS.ProcessEnv = process.env): string
   return configured ? path.resolve(configured) : path.join(AFK_HOME, 'loop-status.json');
 }
 
+/**
+ * Where the per-work-item loop runs live.
+ *
+ * A deployment that runs one loop per work item gives each one its own pid
+ * and status file. They share a directory, so the directory is the thing an
+ * operator can look at to see every loop at once.
+ */
+export function loopRunsDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.AFK_LOOP_RUNS_DIR?.trim();
+  return configured ? path.resolve(configured) : path.join(AFK_HOME, 'loop-runs');
+}
+
 export function ensurePidDirectory(): void {
   fs.mkdirSync(path.dirname(loopPidFilePath()), { recursive: true });
 }

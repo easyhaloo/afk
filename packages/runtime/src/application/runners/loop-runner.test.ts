@@ -392,4 +392,30 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(backlog.transition).not.toHaveBeenCalled();
   });
 
+  it('brings back an item that waits for a QA run nobody will run', async () => {
+    // The QA run was killed with the process that owned it. Nothing else
+    // ever picks the item up again, because a verification waits for a
+    // verification.
+    const interrupted = { ...item, state: 'verification' as const };
+    const { providers, backlog } = providersFor([interrupted]);
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'ready');
+  });
+
+  it('brings back an interrupted QA as rework when it already has a change request', async () => {
+    const interrupted = { ...item, state: 'verification' as const };
+    const { providers, backlog, changes } = providersFor([interrupted]);
+    changes.findForBacklog = vi.fn(async () => ({ id: '7', state: 'open' }));
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'rework');
+  });
+
 });

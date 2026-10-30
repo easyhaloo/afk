@@ -427,15 +427,22 @@ export class LoopRunner {
    */
   private async recoverOrphanedClaims(): Promise<void> {
     let claimed: BacklogItem[];
+    let interrupted: BacklogItem[];
     try {
-      claimed = await this.providers.backlog.list({ state: 'in_progress', executionMode: 'afk' });
+      // An item that waits for a QA run nobody will ever run is orphaned in
+      // the same way a claim is: the process that owned it is gone. It has to
+      // come back too, or it waits for a verification that never happens.
+      [claimed, interrupted] = await Promise.all([
+        this.providers.backlog.list({ state: 'in_progress', executionMode: 'afk' }),
+        this.providers.backlog.list({ state: 'verification', executionMode: 'afk' }),
+      ]);
     } catch (error) {
       // A provider that cannot be read leaves the claims where they are. That
       // is no worse than not looking, and the poll still runs.
       logger.warn({ err: error }, 'failed to read the claims left behind by a previous run');
       return;
     }
-    for (const issue of claimed) {
+    for (const issue of [...claimed, ...interrupted]) {
       const issueId = String(issue.id);
       if (!this.isInScope(issue)) continue;
       const existing = await this.findChangeRequest(issue);

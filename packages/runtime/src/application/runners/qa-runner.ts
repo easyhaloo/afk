@@ -334,7 +334,9 @@ export class QARunner {
     const goal = step.prompt
       .replaceAll('{targetBranch}', targetBranch)
       .replaceAll('{conflicts}', conflicts.map(file => `- ${file}`).join('\n'));
-    const prompt = buildExecutionPrompt(goal, this.executionMode, 'qa');
+    // A task completion, not a QA one: this agent resolves conflicts, it
+    // does not verify acceptance criteria and it produces no QA evidence.
+    const prompt = buildExecutionPrompt(goal, this.executionMode, 'task');
     // A sandbox of its own: in interactive mode the sandbox owns the tmux
     // session, and two agents cannot share one.
     const conflictSandbox = await this.sandboxProvider.create({

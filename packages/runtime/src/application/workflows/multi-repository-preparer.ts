@@ -7,6 +7,7 @@ import type { BranchHandle } from '../../domain/branches/types.js';
 import type { WorkflowRunRepository } from './run-request.js';
 import type { RunOutcomeStatus } from './resource-scope.js';
 import { gitLabCloneUrl } from '../../shared/gitlab-project.js';
+import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 
@@ -246,7 +247,14 @@ function remoteIdentity(host: string, rawPath: string): { host: string; path: st
   return { host: host.toLowerCase(), path };
 }
 
-function defaultDependencies(): MultiRepositoryPreparerDependencies {
+/**
+ * The real filesystem and git dependencies.
+ *
+ * Exported so that the behaviour of a real repository — a branch that has
+ * unpublished work, a branch that does not — is covered by a test rather than
+ * by a mock that agrees with whatever the code does.
+ */
+export function defaultDependencies(): MultiRepositoryPreparerDependencies {
   return {
     filesystem: {
       validateRepositoryPath,
@@ -285,7 +293,7 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
         const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
         const head = (await git.revparse(['HEAD'])).trim();
         const status = (await git.raw(['status', '--porcelain=v1'])).trim();
-        const workingBranchHead = await localBranchHead(repoRoot, workingBranch);
+        const workingBranchHead = await localBranchHead(git, workingBranch);
         return {
           ...(branch === 'HEAD' ? {} : { branch }),
           head,
@@ -306,17 +314,32 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
         // agent redo the work under a different commit, and the push would
         // then be rejected as a non-fast-forward.
         if (await fetchRemoteBranch(git, workingBranch)) {
+          // A commit that was made and never published is the same kind of
+          // work — it is just not on the remote yet. Resetting to the
+          // published branch would drop it: the commit would become
+          // unreachable, the next attempt would find nothing to verify, and
+          // the work would be gone. So the local branch is kept whenever the
+          // published branch does not already contain it; the published work
+          // is merged back in when the branch is published.
+          const localHead = await localBranchHead(git, workingBranch);
+          const remoteHead = await remoteBranchHead(git, workingBranch);
+          if (localHead && remoteHead && !(await isAncestorCommit(git, localHead, remoteHead))) {
+            await git.raw(['checkout', '-B', workingBranch, localHead]);
+            return;
+          }
           await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
           return;
         }
-        if (await localBranchHead(repoRoot, workingBranch)) {
+        if (await localBranchHead(git, workingBranch)) {
           await git.raw(['checkout', workingBranch]);
         } else {
           await git.raw(['checkout', '-b', workingBranch, `origin/${baseBranch}`]);
         }
       },
       finalize: async (repoRoot, workingBranch) => {
-        await simpleGit(repoRoot).push('origin', workingBranch, ['--set-upstream']);
+        const git = simpleGit(repoRoot);
+        await reconcilePublishedBranch(git, workingBranch);
+        await git.push('origin', workingBranch, ['--set-upstream']);
       },
       restore: restoreRepository,
     },
@@ -576,9 +599,9 @@ function withoutRuntimeArtifacts(status: string): string {
   return remaining.join('\n');
 }
 
-async function localBranchHead(repoRoot: string, branch: string): Promise<string | undefined> {
+async function localBranchHead(git: SimpleGit, branch: string): Promise<string | undefined> {
   try {
-    return (await simpleGit(repoRoot).revparse([`refs/heads/${branch}`])).trim();
+    return (await git.revparse([`refs/heads/${branch}`])).trim();
   } catch {
     return undefined;
   }
@@ -597,6 +620,45 @@ async function fetchRemoteBranch(git: SimpleGit, branch: string): Promise<boolea
     return true;
   } catch {
     return false;
+  }
+}
+
+/** The commit a published branch points at. */
+async function remoteBranchHead(git: SimpleGit, branch: string): Promise<string | undefined> {
+  try {
+    return (await git.revparse([`refs/remotes/origin/${branch}`])).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Bring the published branch into the working branch before it is published
+ * again.
+ *
+ * The push is rejected when the remote has commits the working branch does
+ * not have, and the rejection would leave the run without a change request.
+ * The published work is taken as it is when it is simply ahead, and merged in
+ * when the two have diverged — the same rule the single-repository publisher
+ * follows.
+ */
+async function reconcilePublishedBranch(git: SimpleGit, branch: string): Promise<void> {
+  if (!await fetchRemoteBranch(git, branch)) return;
+  const localHead = await localBranchHead(git, branch);
+  const remoteHead = await remoteBranchHead(git, branch);
+  if (!localHead || !remoteHead || localHead === remoteHead) return;
+  if (await isAncestorCommit(git, localHead, remoteHead)) {
+    await git.raw(['merge', '--ff-only', `origin/${branch}`]);
+    return;
+  }
+  if (await isAncestorCommit(git, remoteHead, localHead)) return;
+  try {
+    await git.raw(['merge', `origin/${branch}`, '--no-edit']);
+  } catch (error) {
+    // Leave the working tree as it was: a half-finished merge would be
+    // published as if it were work.
+    await git.raw(['merge', '--abort']).catch(() => undefined);
+    throw error;
   }
 }
 

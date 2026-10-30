@@ -621,6 +621,32 @@ that ended this way is repeated in the same worktree, with the same goal, bounde
 run's retry budget. A timeout is not repeated this way: a timeout says the work did not
 finish in the budget it was given, which is a fact about the work.
 
+### When the branch preparation would throw the work away
+
+A retry starts by preparing the working branch again. The preparation used to take the
+published branch as the truth and reset the local one to it, whatever the last attempt had
+committed locally. A commit that was made and never published became unreachable, the next
+attempt found nothing to verify, and the work was gone: a change request with nothing in it,
+and a verification that failed every criterion because the branch was identical to its
+target.
+
+The branch is prepared at whichever side holds work the other does not:
+
+| Published branch | Local branch | Prepared at |
+| --- | --- | --- |
+| contains the local one | — | the published branch; nothing is lost |
+| does not contain the local one | contains the published one | the local branch; the unpublished work survives |
+| does not contain the local one | has commits of its own | the local branch; the published work is merged back in when the branch is published |
+
+Publishing reconciles the two sides before it pushes: a published branch that is simply
+ahead is taken as it is, and a branch that has diverged is merged, so the push is not
+rejected as a non-fast-forward and neither side is lost.
+
+Ancestry is read from the merge base rather than from `git merge-base --is-ancestor`. That
+command reports "no" by exiting with a status code and printing nothing at all, so a git
+client that decides failure by looking for an error message sees a successful command with
+empty output — and the answer would be "yes" for every pair of commits.
+
 ### When this machine cannot verify the work
 
 An acceptance criterion names the command that settles it. That command needs tools, and
@@ -791,6 +817,9 @@ filesystem lease directory.
 - AFK commits the implementation itself before it publishes the branch. An
   agent that leaves its changes uncommitted would otherwise publish an empty
   change, and the work would be lost when the workspace is restored.
+- Work that was committed but never published is not thrown away. The working
+  branch is prepared at whichever side holds it, and the published work is
+  merged back in when the branch is published.
 - AFK's runtime artifacts — the completion signal and the `.afk/` directory —
   are never staged into a commit. They are process state, not work.
 - Native claim is preferred; the filesystem fallback is deliberately scoped to

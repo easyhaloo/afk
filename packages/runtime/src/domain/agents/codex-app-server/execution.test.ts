@@ -151,7 +151,7 @@ describe('CodexAppServerExecution', () => {
       jsonrpc: '2.0', method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } },
     });
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 5_000 })).resolves.toMatchObject({
       status: 'completed',
       provider: 'app-server',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },

@@ -11,6 +11,7 @@ import type {
 } from './provider.js';
 import { strategyForConfig } from '../../../domain/branches/registry.js';
 import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types.js';
+import { isAncestorCommit } from '../git-ancestry.js';
 
 export class GitBranchProvider implements BranchProvider {
   private readonly handles = new Map<string, StrategyHandle>();
@@ -59,9 +60,9 @@ export class GitBranchProvider implements BranchProvider {
       const localHead = (await git.revparse(['HEAD'])).trim();
       const remoteHead = (await git.revparse([remoteBranch])).trim();
       if (localHead !== remoteHead) {
-        if (await isAncestor(git, localHead, remoteHead)) {
+        if (await isAncestorCommit(git, localHead, remoteHead)) {
           await git.merge(['--ff-only', remoteBranch]);
-        } else if (!(await isAncestor(git, remoteHead, localHead))) {
+        } else if (!(await isAncestorCommit(git, remoteHead, localHead))) {
           await git.merge([remoteBranch, '--no-edit']);
         }
       }
@@ -208,10 +209,6 @@ async function refExists(git: ReturnType<typeof simpleGit>, ref: string): Promis
     ? `refs/remotes/${ref}`
     : `refs/heads/${ref}`;
   return (await git.raw(['for-each-ref', '--format=%(refname)', remoteRef])).trim() === remoteRef;
-}
-
-async function isAncestor(git: ReturnType<typeof simpleGit>, ancestor: string, descendant: string): Promise<boolean> {
-  return (await git.raw(['merge-base', ancestor, descendant])).trim() === ancestor;
 }
 
 /**

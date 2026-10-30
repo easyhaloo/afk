@@ -155,6 +155,38 @@ describe('QARunner execution boundary', () => {
     }
   });
 
+  it('never starts the agent when the machine cannot run the acceptance criteria', async () => {
+    const f = fixture();
+    f.providers.backlog.get.mockResolvedValue({
+      ...(await f.providers.backlog.get()),
+      description: [
+        '## Acceptance Criteria',
+        '',
+        '- [ ] 收件箱在某些条件下不能为空 -- test -- afk-tool-that-does-not-exist run',
+        '',
+      ].join('\n'),
+    } as never);
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+      runtimeManager: {
+        start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn(),
+      } as any,
+    });
+
+    const outcome = await runner.process('60');
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.failureCode).toBe('qa_environment_missing');
+    expect(outcome.summary).toContain('afk-tool-that-does-not-exist');
+    expect(f.sandbox.startAgent).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith(
+      '60', 'blocked', { reason: expect.stringContaining('afk-tool-that-does-not-exist') },
+    );
+  });
+
   it('runs batch QA through SandboxProvider without tmux readiness calls', async () => {
     const f = fixture();
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });

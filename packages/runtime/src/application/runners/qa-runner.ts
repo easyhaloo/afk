@@ -28,11 +28,12 @@ import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type P
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
+import { runQaPreflight } from './qa-preflight.js';
 import type { RunEventData } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
-type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failureCode?: 'qa_timeout' | 'qa_execution_failed' | 'qa_rework' | 'provider_change_unconfirmed' | 'merge_conflict'; failedCriteria?: QAFailureCriterion[] };
+type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failureCode?: 'qa_timeout' | 'qa_execution_failed' | 'qa_rework' | 'provider_change_unconfirmed' | 'merge_conflict' | 'qa_environment_missing'; failedCriteria?: QAFailureCriterion[] };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -199,6 +200,22 @@ export class QARunner {
       }
 
       const description = backlog.description?.trim();
+      // The verification agent is about to be asked to settle criteria that
+      // name their own check commands. If this machine cannot run those
+      // commands, the agent would spend the whole round finding that out.
+      const preflight = await runQaPreflight(
+        { description: backlog.description, tags: backlog.tags },
+        worktreePath,
+      );
+      if (preflight.blocked) {
+        runtimeErrorSummary = preflight.summary;
+        logger.warn({ backlogId: id, blockers: preflight.blockers }, 'QA environment cannot run the acceptance criteria');
+        await this.markBlocked(id, preflight.summary!);
+        return { success: false, summary: preflight.summary, failureCode: 'qa_environment_missing' };
+      }
+      if (preflight.inconclusive.length > 0) {
+        logger.info({ backlogId: id, inconclusive: preflight.inconclusive }, 'QA environment probe was not conclusive; continuing');
+      }
       const goal = `${qaStep.prompt.replaceAll('{iid}', id)}\n\nBacklog title: ${backlog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
       const prompt = buildExecutionPrompt(goal, this.executionMode, 'qa');
       execution = await this.agentProvider.createExecution({

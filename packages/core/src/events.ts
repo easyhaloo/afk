@@ -31,7 +31,11 @@ export type RunFailureReasonCode =
   | 'qa_execution_failed'
   | 'qa_rework'
   | 'provider_change_unconfirmed'
-  | 'merge_conflict';
+  | 'merge_conflict'
+  /** The machine cannot run the acceptance criteria's own check commands. */
+  | 'qa_environment_missing'
+  /** The agent died or stopped answering, and the attempt was retried. */
+  | 'agent_turn_failed';
 
 export interface EvidenceRef {
   uri: string;

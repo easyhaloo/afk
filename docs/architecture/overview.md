@@ -612,6 +612,39 @@ verification round short of the budget the verification round was given. Set the
 `workflowHardTimeout`) or with `AFK_IDLE_TIMEOUT`, `AFK_COMPLETION_TIMEOUT`,
 `AFK_QA_TIMEOUT`, `AFK_WORKFLOW_HARD_TIMEOUT`.
 
+**An agent that died is repeated, not waited out.** A dead agent says nothing about the
+work: the changes it made are still in the worktree, and the upstream model service may
+well be reachable again a minute later. Codex reports a turn that died — a stream the
+gateway cut — in its own rollout file, and AFK reads it there: the terminal stays open
+after such a turn, so nothing about the process would say the turn is over. An attempt
+that ended this way is repeated in the same worktree, with the same goal, bounded by the
+run's retry budget. A timeout is not repeated this way: a timeout says the work did not
+finish in the budget it was given, which is a fact about the work.
+
+### When this machine cannot verify the work
+
+An acceptance criterion names the command that settles it. That command needs tools, and
+the tools may not be here: a suite that cannot import the framework it tests, a build
+tool without its JDK, a `pytest` that is not installed at all. A verification agent
+discovers this by running into it — which takes as long as the agent's patience, and
+ends as an unexplained timeout.
+
+AFK asks first. Before the verification agent starts, the criteria's own check commands
+are read for the binaries they run, and each of those binaries is probed the way the
+criterion would exercise it: a pytest suite is collected, not asked for its version;
+Maven is asked for the version that names its JDK. What the probe finds is classified.
+Only what is clearly the machine's fault blocks the round — a missing binary, a missing
+dependency, a missing runtime. A check that fails for any other reason is left to the
+agent, because the preflight must not block work that would have passed.
+
+A blocked round names what is missing and which criterion needed it, so the person who
+picks it up knows what to install rather than having to read a transcript.
+
+Acceptance criteria are read in their three-field form — `- [ ] <text> -- <type> -- <command>`,
+where the type is one of `test`, `curl`, `log`, `manual`, `bash` or `none`. The type is
+the anchor, so a `--` inside the text or the command cannot be mistaken for the
+separator.
+
 An item with the `prd` role is an organizational parent. It has no lifecycle
 state at all — it groups children instead of waiting for a human, and "waiting
 for its children" is not a position in the lifecycle. The role, not a state,
@@ -747,6 +780,10 @@ filesystem lease directory.
 
 - A failed transition, conflict, timeout, or expired lease is `blocked` plus
   `hitl`; it is never silently retried as automatic work.
+- An agent that died is the one exception: a step whose agent went away or
+  stopped answering is repeated in the same worktree, with the same goal,
+  bounded by the run's retry budget. Nothing about the work changed, so
+  repeating it is not a retry of the work — it is the same attempt.
 - Blocking an item also closes the operator rework request the failed
   execution answered, so `afk backlog retry` can ask for it again. A QA-sourced
   rework record stays open: it is the verification feedback, and the next

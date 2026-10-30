@@ -40,6 +40,7 @@ import {
 } from '../types.js';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { ActivityWatch } from '../../../domain/agents/activity.js';
+import { CodexTurnWatcher } from '../../../infrastructure/codex/turn-failure.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 
@@ -224,6 +225,11 @@ export class LocalAgentExecution implements AgentExecution {
   private readonly signalType: 'goal_complete';
   private readonly paneIntervalMs: number;
   private readonly pollIntervalMs: number;
+  /**
+   * Codex says in its own rollout when a turn died. The terminal stays open
+   * after that, so nothing about the process would tell us the turn is over.
+   */
+  private readonly turnWatcher: CodexTurnWatcher | undefined;
   private done = false;
   private interruptAcked = false;
 
@@ -240,6 +246,8 @@ export class LocalAgentExecution implements AgentExecution {
     paneIntervalMs?: number;
     /** How often the completion loop polls for the signal file. */
     pollIntervalMs?: number;
+    /** How to tell that the agent's turn died. */
+    turnWatcher?: CodexTurnWatcher;
   }) {
     this.id = randomUUID();
     this.worktreePath = opts.worktreePath;
@@ -252,6 +260,7 @@ export class LocalAgentExecution implements AgentExecution {
     this.metadata = opts.metadata;
     this.paneIntervalMs = opts.paneIntervalMs ?? IDLE_PANE_INTERVAL_MS;
     this.pollIntervalMs = opts.pollIntervalMs ?? POLL_INTERVAL_MS;
+    this.turnWatcher = opts.turnWatcher ?? (opts.metadata?.provider === 'codex' ? new CodexTurnWatcher() : undefined);
   }
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
@@ -336,6 +345,29 @@ export class LocalAgentExecution implements AgentExecution {
           };
         }
       } catch { /* ignore */ }
+
+      // Codex reports a turn that died — a stream the gateway cut — in its
+      // own rollout. The terminal stays open, so without this the wait would
+      // run on until the hard timeout for a turn that is already over.
+      if (this.turnWatcher) {
+        const failure = await this.turnWatcher.check(this.worktreePath);
+        if (failure) {
+          this.done = true;
+          return {
+            version: 1,
+            runId: this.id,
+            status: 'failed',
+            provider: 'local',
+            sessionId: this.sessionId,
+            commits: [],
+            branch: this.sessionName,
+            error: {
+              code: 'AGENT_TURN_FAILED',
+              message: failure.message,
+            },
+          };
+        }
+      }
 
       // The agent lives in a tmux session, and the session goes when the
       // agent exits — a crashed TUI, a disconnected stream. A session that

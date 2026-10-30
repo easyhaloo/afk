@@ -388,5 +388,40 @@ describe('LocalSandboxProvider', () => {
 
       expect(result.status).toBe('completed');
     });
+
+    it('ends the run when the agent reports that its turn died', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-turn-failed-'));
+      const tmux = {
+        hasSession: vi.fn(async () => true),
+        capturePane: vi.fn(async () => 'the terminal is still open'),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+      const turnWatcher = {
+        check: vi.fn(async () => ({ message: 'stream disconnected before completion: error sending request' })),
+      };
+
+      const execution = new LocalAgentExecution({
+        worktreePath,
+        sessionName: 'turn-failed-session',
+        command: { argv: ['codex'], cwd: worktreePath },
+        generation: 1,
+        prompt: 'do the work',
+        signalType: 'goal_complete',
+        metadata: { provider: 'codex', transport: 'process' },
+        tmux: tmux as never,
+        paneIntervalMs: 1,
+        pollIntervalMs: 1,
+        turnWatcher: turnWatcher as never,
+      });
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toMatchObject({
+        code: 'AGENT_TURN_FAILED',
+        message: 'stream disconnected before completion: error sending request',
+      });
+    });
   });
 });

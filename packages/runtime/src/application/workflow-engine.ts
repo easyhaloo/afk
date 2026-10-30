@@ -6,6 +6,7 @@ import { WorktreeManager } from '../infrastructure/git/index.js';
 import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index.js';
 import { createSandboxProvider } from '../infrastructure/sandbox/index.js';
 import { createAgentProvider } from '../domain/agents/index.js';
+import { isRetryableAgentFailure } from '../domain/agents/failure.js';
 import type {
   Sandbox,
   SandboxProvider,
@@ -1184,6 +1185,7 @@ export class WorkflowRunner {
   }): Promise<PhaseResult> {
     const basePrompt = p.prompt ?? (p as unknown as { goalBase?: string }).goalBase ?? '';
     let resumedExecution: AgentExecution | undefined;
+    let agentFailures = 0;
     for (let round = 1; ; round++) {
       if (!resumedExecution && p.budget.isExhausted() && round === 1) {
         this.runtimeErrorSummary = `work item budget exhausted: ${p.budget.exhaustionReason()}`;
@@ -1226,6 +1228,21 @@ export class WorkflowRunner {
       if (telemetry) {
         p.budget.recordSession(telemetry.sessionId, telemetry.totalTokens);
         await p.persistBudget();
+      }
+
+      // An agent that died on its own — a stream the upstream gateway cut,
+      // a process that went away — is not a verdict on the work. The attempt
+      // is repeated in the same worktree, where the work already done is
+      // still on disk. A handoff round is not consumed: this is a retry of
+      // the same step, not the next attempt.
+      if (result.status === 'failed' && isRetryableAgentFailure(result) && agentFailures < this.config.maxRetries) {
+        agentFailures++;
+        logger.warn(
+          { iid: p.iid, round, attempt: agentFailures, error: result.error?.code, message: result.error?.message },
+          'the agent failed in a way that can be retried; repeating the step',
+        );
+        round--;
+        continue;
       }
 
       switch (result.status) {

@@ -6,6 +6,7 @@ import {
   createBacklog,
   interruptBacklog,
   reconcileMergedBacklog,
+  resolveExpectedTargetBranch,
   retryBacklog,
 } from './commands.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
@@ -285,7 +286,7 @@ describe('backlog commands', () => {
     expect(provider.transition).not.toHaveBeenCalled();
   });
 
-  it('refuses to reconcile a change that targets another branch or belongs to a child', async () => {
+  it('refuses to reconcile a change that targets another branch', async () => {
     const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
     const provider = lifecycleProvider(item);
     const changes = {
@@ -298,13 +299,50 @@ describe('backlog commands', () => {
     expect(outcome.reconciled).toBe(false);
     expect(outcome.reason).toMatch(/targets release/);
     expect(provider.transition).not.toHaveBeenCalled();
+  });
 
-    const child = backlogItem({ id: '43', parentId: '42', state: 'merge_ready', executionMode: 'hitl' });
-    const childProvider = lifecycleProvider(child);
-    const childOutcome = await reconcileMergedBacklog(childProvider, changes, child.id, 'main');
-    expect(childOutcome.reconciled).toBe(false);
-    expect(childOutcome.reason).toMatch(/not a root backlog/);
-    expect(childProvider.transition).not.toHaveBeenCalled();
+  it('reconciles a child whose change was merged by a human', async () => {
+    // A child waits for its human merge as "merge pending" when AFK merged
+    // it, and as blocked when AFK could not. Both are the same situation,
+    // and nothing else would ever bring the child in line with the branch
+    // its work already landed on.
+    const child = backlogItem({ id: '43', parentId: '42', state: 'blocked', executionMode: 'hitl' });
+    const provider = lifecycleProvider(child);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'merged', sourceBranch: `${child.branchName}-qa`, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, child.id, 'release');
+    expect(outcome.reconciled).toBe(true);
+    expect(outcome.reason).toMatch(/mr-10 is merged/);
+    expect(provider.transition).toHaveBeenCalledWith('43', 'done', { changeId: 'mr-10' });
+  });
+
+  it('leaves a blocked item alone while its change is still open', async () => {
+    const child = backlogItem({ id: '43', parentId: '42', state: 'blocked', executionMode: 'hitl' });
+    const provider = lifecycleProvider(child);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'open', sourceBranch: `${child.branchName}-qa`, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, child.id, 'release');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/merge gate is still open/);
+    expect(provider.transition).not.toHaveBeenCalled();
+  });
+
+  it('resolves the branch a change has to have targeted from the item itself', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl', executionBase: '2025-11-8-show' });
+    const provider = lifecycleProvider(item);
+
+    // The body declares the ref the work starts from, and the execution
+    // manifest is derived from it — so it is the branch the change lands on.
+    expect(await resolveExpectedTargetBranch(provider, item, 'main')).toBe('2025-11-8-show');
+    expect(await resolveExpectedTargetBranch(provider, backlogItem({ state: 'ready', executionMode: 'afk' }), 'main')).toBe('main');
   });
 
   it('reports an already completed backlog instead of reconciling it again', async () => {

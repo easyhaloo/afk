@@ -5,7 +5,7 @@ import { loopPidFilePath, loopStatusFilePath } from '../../infrastructure/proces
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import { parseWorkItemId, type BacklogItem } from '../../domain/backlog/index.js';
 import { describeRunnability } from '../../domain/backlog/runnability.js';
-import { reconcileMergedBacklog } from '../../domain/backlog/commands.js';
+import { reconcileMergedBacklog, resolveExpectedTargetBranch } from '../../domain/backlog/commands.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 
@@ -386,16 +386,26 @@ export class LoopRunner {
    * bookkeeping, and this loop brings it in line — it never merges anything.
    */
   private async reconcileMergedChanges(): Promise<void> {
-    const candidates = await this.providers.backlog.list({ state: 'merge_ready', executionMode: 'hitl' });
+    // A root waits for its human merge as "merge pending"; a child whose
+    // merge AFK could not perform is blocked instead. Both are the same
+    // situation — the work is verified and only the merge is left — so both
+    // are read here.
+    const [mergeReady, blocked] = await Promise.all([
+      this.providers.backlog.list({ state: 'merge_ready', executionMode: 'hitl' }),
+      this.providers.backlog.list({ state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    const candidates = [...mergeReady, ...blocked]
+      .filter((candidate, index, all) => all.findIndex(other => String(other.id) === String(candidate.id)) === index);
     for (const candidate of candidates) {
       const id = String(candidate.id);
       if (!this.opts.backlogIds.has(id)) continue;
       try {
+        const expectedTargetBranch = await resolveExpectedTargetBranch(this.providers.backlog, candidate, this.opts.targetBranch);
         const outcome = await reconcileMergedBacklog(
           this.providers.backlog,
           this.providers.changes,
           id,
-          this.opts.targetBranch,
+          expectedTargetBranch,
         );
         if (outcome.reconciled) {
           this.emitEvent(`${id} reconciled to done: ${outcome.reason}`);

@@ -8,6 +8,7 @@ import type {
   QABacklogProvider,
 } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
+import { resolveBacklogExecutionBase } from './creation.js';
 
 export { planBacklogCreate, resolveBacklogExecutionBase } from './creation.js';
 
@@ -243,6 +244,10 @@ export interface BacklogMergeReconciliation {
  * This function never merges: it only reports the provider state the human
  * merge already produced. A backlog whose change is still open is left
  * untouched, so the merge gate keeps its meaning.
+ *
+ * The reconciliation is not limited to the roots: a child whose merge AFK
+ * could not perform waits for a human in the same way, and nothing else
+ * would ever bring it in line with the branch the work already landed on.
  */
 export async function reconcileMergedBacklog(
   provider: QABacklogProvider,
@@ -251,17 +256,19 @@ export async function reconcileMergedBacklog(
   expectedTargetBranch: string,
 ): Promise<BacklogMergeReconciliation> {
   const item = await provider.get(id);
-  if (item.parentId) {
-    return { reconciled: false, reason: `backlog ${id} is not a root backlog`, item };
-  }
   // A closed issue derives as done even when its label still says "merge
   // pending" — that stale label is exactly what this reconciles.
   const labeledState = item.labeledState ?? item.state;
   if (labeledState === 'done') {
     return { reconciled: false, reason: `backlog ${id} is already done`, item };
   }
-  if (labeledState !== 'merge_ready' || item.executionMode !== 'hitl') {
-    return { reconciled: false, reason: `backlog ${id} is ${labeledState}/${item.executionMode}; only merge_ready + hitl can be reconciled`, item };
+  // A root waits for its human merge as "merge pending"; a child whose merge
+  // AFK could not perform is blocked instead. Both states say the same thing
+  // here: the work is verified and only the merge is left. What decides the
+  // outcome is never the state — it is whether the provider says the change
+  // is merged into the branch it was supposed to target.
+  if ((labeledState !== 'merge_ready' && labeledState !== 'blocked') || item.executionMode !== 'hitl') {
+    return { reconciled: false, reason: `backlog ${id} is ${labeledState}/${item.executionMode}; only merge_ready or blocked + hitl can be reconciled`, item };
   }
   const change = await changes.findForBacklog(item);
   if (!change) {
@@ -279,6 +286,23 @@ export async function reconcileMergedBacklog(
   }
   await provider.transition(id, 'done', { changeId: change.id });
   return { reconciled: true, reason: `associated change ${change.id} is merged`, item: await provider.get(id) };
+}
+
+/**
+ * The branch the change of a work item is expected to target.
+ *
+ * The body declares the ref the work starts from, and the execution manifest
+ * is derived from it — so the declaration is the branch the change request
+ * lands on. An explicit base edge is the older way of saying the same thing,
+ * and the configured branch is the last resort.
+ */
+export async function resolveExpectedTargetBranch(
+  provider: Pick<QABacklogProvider, 'get'>,
+  item: BacklogItem,
+  fallback: string,
+): Promise<string> {
+  if (item.executionBase) return item.executionBase;
+  return resolveBacklogExecutionBase(provider, item, fallback);
 }
 
 function requiredReason(reason: string): string {

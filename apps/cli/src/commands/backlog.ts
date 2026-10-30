@@ -51,6 +51,7 @@ import {
   interruptBacklog,
   listBacklogs,
   reconcileMergedBacklog,
+  resolveExpectedTargetBranch,
   removeBacklogTag,
   retryBacklog,
   showBacklog,
@@ -1055,10 +1056,16 @@ export async function runBacklogReconcileMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,
   id: string,
-  expectedTargetBranch: string,
-  options: JsonMode = {},
+  fallbackTargetBranch: string,
+  options: JsonMode & { targetBranch?: string } = {},
 ): Promise<void> {
   try {
+    // The branch the change has to have targeted: the one the body declares,
+    // which is the branch the execution manifest was derived from — unless
+    // the operator names one.
+    const item = await provider.get(id);
+    const expectedTargetBranch = options.targetBranch
+      ?? await resolveExpectedTargetBranch(provider, item, fallbackTargetBranch);
     const outcome = await reconcileMergedBacklog(provider, changes, id, expectedTargetBranch);
     if (options.json) {
       emitSuccess<BacklogMergeReconciliation>('backlog.reconcile-merge', outcome);
@@ -1330,10 +1337,11 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   backlog.command('reconcile-merge')
-    .description('Complete a root backlog whose change is already merged on the provider')
+    .description('Complete a backlog whose change is already merged on the provider')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {

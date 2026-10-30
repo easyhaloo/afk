@@ -97,7 +97,7 @@ single source of truth for the supported surface:
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
 | `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
-| `afk backlog reconcile-merge` | Complete a root backlog whose change is already merged on the provider |
+| `afk backlog reconcile-merge` | Complete a backlog whose change is already merged on the provider |
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk execute --work-item-id <id> [--execution-manifest <path>]` | Implement, independently verify, and publish one managed work item |
 | `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
@@ -519,6 +519,29 @@ the backlog graph, so children in another repository count as children. Any auto
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
 
+### The merge gate
+
+Merging is a person's decision. AFK implements the work, verifies it independently, and
+publishes the change request; the change then waits as `merge_ready` + `hitl` for somebody
+to merge it. A child item waits exactly like a root does — where an item sits in the tree
+does not change who confirms its merge.
+
+Two commands close the gate, and both are human actions:
+
+- `afk backlog confirm-merge` merges the change request on the provider and marks the item
+  `done`. The command performs the merge, so it stays an operator action.
+- `afk backlog reconcile-merge` does not merge anything: it brings an item in line with a
+  change that a person has already merged on the provider.
+
+The branch the change has to have targeted is resolved from the item itself — the ref its
+body declares, which is the ref the execution manifest was derived from — then an explicit
+base edge, then the configured branch. Both commands take `--target-branch` for the case
+where an operator knows better.
+
+An installation that runs a fully autonomous pipeline can ask for the merge to happen
+without a person: set `autoMerge: true` in `~/.afk/config.yml`, or `AFK_AUTO_MERGE=1`. The
+default is off, so a change is never merged by AFK unless the installation asks for it.
+
 An item with the `prd` role is an organizational parent. It has no lifecycle
 state at all — it groups children instead of waiting for a human, and "waiting
 for its children" is not a position in the lifecycle. The role, not a state,
@@ -600,8 +623,8 @@ sequenceDiagram
     R->>C: create change request
     R->>P: transition verification
     R->>Q: verify item
-    Q->>C: merge change request
-    Q->>P: transition done
+    Q->>P: transition merge_ready + hitl
+    Note over Q,C: a person merges the change request
     R->>P: release lease (resource scope)
 ```
 

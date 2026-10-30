@@ -1024,9 +1024,15 @@ export async function runBacklogConfirmMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,
   id: string,
-  expectedTargetBranch: string,
-  options: JsonMode = {},
+  fallbackTargetBranch: string,
+  options: JsonMode & { targetBranch?: string } = {},
 ): Promise<void> {
+  // The branch the change has to have targeted: the one the body declares,
+  // which is the branch the execution manifest was derived from — unless
+  // the operator names one.
+  const item = await provider.get(id);
+  const expectedTargetBranch = options.targetBranch
+    ?? await resolveExpectedTargetBranch(provider, item, fallbackTargetBranch);
   await runLifecycleAction('backlog.confirm-merge', options, () => confirmBacklogMerge(provider, changes, id, expectedTargetBranch), `Backlog ${id} merged and completed`);
 }
 
@@ -1318,10 +1324,11 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   backlog.command('confirm-merge')
-    .description('Merge an approved root backlog change and mark it done')
+    .description('Merge an approved backlog change and mark it done')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {

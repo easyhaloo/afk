@@ -426,10 +426,13 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         const published = change && change.id && change.url && change.url === qaResult.mrUrl
           && (change.state === 'open' || change.state === 'merged');
         if (published) await providers.changes.verifyIssueAssociation(change, workItemId);
-        const rootPublished = !item.parentId && qaResult.autoMerged === false && change?.state === 'open' && finalItem?.state === 'merge_ready';
-        const childMerged = !!item.parentId && qaResult.autoMerged === true && change?.state === 'merged' && finalItem?.state === 'done';
-        const status: ExecuteWorkItemStatus = qaResult.success && published && (rootPublished || childMerged)
-          ? childMerged ? 'done' : 'merge_ready'
+        // The change is published and waits for a person to confirm the merge.
+        // A child waits exactly like a root does, so the shape of the
+        // outcome no longer depends on where the item sits in the tree.
+        const awaitingHumanMerge = qaResult.autoMerged === false && change?.state === 'open' && finalItem?.state === 'merge_ready';
+        const mergedByAgent = qaResult.autoMerged === true && change?.state === 'merged' && finalItem?.state === 'done';
+        const status: ExecuteWorkItemStatus = qaResult.success && published && (awaitingHumanMerge || mergedByAgent)
+          ? mergedByAgent ? 'done' : 'merge_ready'
           : qaResult.rework ? 'rework' : 'blocked';
         if (status === 'merge_ready' || status === 'done') {
           await audit({ kind: 'change.published', changeId: String(change!.id), url: change!.url! });

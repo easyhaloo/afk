@@ -40,6 +40,14 @@ export interface WorkflowConfig {
   maxQaReworkAttempts: number;
   targetBranch: string;
   trackerTargetBranch: string;
+  /**
+   * Whether AFK merges a change request by itself.
+   *
+   * Merging is a person's decision: AFK implements, verifies and publishes
+   * the change, and a person confirms the merge. An installation that runs a
+   * fully autonomous pipeline can ask for the merge to happen without them.
+   */
+  autoMerge: boolean;
   goalBudget: number;
   /** Optional named AFK workflow template selected for executions. */
   template?: string;
@@ -84,6 +92,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   maxQaReworkAttempts: 3,
   targetBranch: 'main',
   trackerTargetBranch: 'main',
+  autoMerge: false,
   goalBudget: 10_000_000,
   agents: {
     codex: {
@@ -153,6 +162,7 @@ export function loadWorkflowConfig(
     maxQaReworkAttempts,
     targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW.trackerTargetBranch,
+    autoMerge: configBoolean(file.autoMerge) ?? envBoolean('AFK_AUTO_MERGE') ?? DEFAULT_WORKFLOW.autoMerge,
     goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget, env),
     template: configString(file.template),
     agents: { codex: loadCodexConfig(file, env) },
@@ -273,6 +283,18 @@ function configString(value: unknown): string | undefined {
 
 function configNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function configBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/** A boolean environment variable: only an explicit true or false counts. */
+function envBoolean(name: string, env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const value = env[name]?.trim().toLowerCase();
+  if (value === 'true' || value === '1' || value === 'yes') return true;
+  if (value === 'false' || value === '0' || value === 'no') return false;
+  return undefined;
 }
 
 function recordValue(value: unknown): ConfigObject {

@@ -234,7 +234,6 @@ describe('backlog commands', () => {
   });
 
   it.each([
-    [{ parentId: '7', state: 'merge_ready', executionMode: 'hitl' }, 'must be a root backlog'],
     [{ state: 'verification', executionMode: 'hitl' }, 'requires merge_ready + hitl'],
     [{ state: 'merge_ready', executionMode: 'afk' }, 'requires merge_ready + hitl'],
   ] as const)('rejects merge confirmation when %s', async (overrides, message) => {
@@ -244,6 +243,22 @@ describe('backlog commands', () => {
 
     await expect(confirmBacklogMerge(provider, changes, item.id, 'main')).rejects.toThrow(message);
     expect(changes.findForBacklog).not.toHaveBeenCalled();
+  });
+
+  it('confirms the merge of a child backlog, which waits like a root does', async () => {
+    // A child waits for a person to merge its change exactly like a root
+    // does, so the confirmation has to reach it as well.
+    const child = backlogItem({ id: '43', parentId: '42', state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(child);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'open', sourceBranch: `${child.branchName}-qa`, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'merged', targetBranch: 'release' }),
+    };
+
+    await expect(confirmBacklogMerge(provider, changes, '43', 'release')).resolves.toMatchObject({ id: '43' });
+    expect(changes.merge).toHaveBeenCalledWith('mr-10');
+    expect(provider.transition).toHaveBeenCalledWith('43', 'done', { changeId: 'mr-10' });
   });
 
   it('treats already reached lifecycle targets as idempotent success', async () => {

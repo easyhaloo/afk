@@ -75,8 +75,8 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
-| `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
-| `afk backlog reconcile-merge` | 当变更已在平台合并时，将根 backlog 收敛为 done |
+| `afk backlog confirm-merge` | 合并已批准的 backlog 变更并置为 done |
+| `afk backlog reconcile-merge` | 当变更已在平台合并时，将 backlog 收敛为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
 | `afk execute --work-item-id <id> [--execution-manifest <path>]` | 实现、独立验证并发布一个托管工作项 |
 | `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
@@ -409,6 +409,27 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 计入。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
 
+### 合并闸门
+
+合并是人的决定。AFK 实现工作、独立验证它、发布变更请求；变更随后以
+`merge_ready` + `hitl` 等待人工合并。子项与根项的等待方式完全一致——条目在树中的
+位置不改变谁来确认它的合并。
+
+两个命令关闭这道闸门，二者都是人工动作：
+
+- `afk backlog confirm-merge` 在 provider 上合并变更请求并把条目置为 `done`。命令本身
+  执行合并，因此它始终是操作者的动作。
+- `afk backlog reconcile-merge` 不做任何合并：它只把条目与「人已经在 provider 上合并
+  好的变更」对齐。
+
+变更必须命中的分支由条目自身解析：正文声明的 ref（也就是执行 manifest 推导时的
+那个 ref），其次是显式的 base 边，最后是配置的分支。两个命令都接受
+`--target-branch`，供操作者在更清楚时指定。
+
+需要完全无人值守流水线的安装，可以让合并不经人确认：在 `~/.afk/config.yml` 里设
+`autoMerge: true`，或设 `AFK_AUTO_MERGE=1`。默认关闭——安装不主动要求，AFK 就绝不
+合并任何变更。
+
 带 `prd` 角色的条目是组织性父项。它**没有任何生命周期状态**——它聚合子项，而不是
 等待人工介入，而“等待子项完成”并不是生命周期中的一个位置。让它不可执行的是角色，
 而不是某个状态。
@@ -480,8 +501,8 @@ sequenceDiagram
     R->>C: 创建变更请求
     R->>P: transition verification
     R->>Q: 验证 backlog
-    Q->>C: 合并变更请求
-    Q->>P: transition done
+    Q->>P: transition merge_ready + hitl
+    Note over Q,C: 由人合并变更请求
     R->>P: 资源作用域释放 lease
 ```
 

@@ -204,7 +204,6 @@ export async function confirmBacklogMerge(
   expectedTargetBranch: string,
 ): Promise<BacklogItem> {
   const item = await provider.get(id);
-  if (item.parentId) throw new Error(`merge confirmation must be a root backlog: ${id}`);
   // A closed issue derives as done even when its label still says "merge
   // pending", so the label decides whether there is anything left to do.
   const labeledState = item.labeledState ?? item.state;

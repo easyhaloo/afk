@@ -346,9 +346,14 @@ export class QARunner {
         });
       }
       await this.providers.backlog.transition(backlogId, 'merge_ready', { changeId: String(mr.id) });
-      if (!backlog.parentId) {
+      // Merging is a person's decision. AFK implements, verifies and
+      // publishes the change; the merge waits for a human to confirm it.
+      // Only an installation that asks for the merge to happen on its own
+      // merges here, and a root backlog never merges itself either — its
+      // change is the one the whole set of slices hangs on.
+      if (!backlog.parentId || !this.config.autoMerge) {
         await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
-        logger.info({ backlogId, changeId: mr.id }, 'root backlog QA passed; awaiting human merge');
+        logger.info({ backlogId, changeId: mr.id }, 'change published; awaiting human merge');
         return { success: true, autoMerged: false, mrUrl: mr.url };
       }
       await this.beforeChange?.('merge', backlog, mr);

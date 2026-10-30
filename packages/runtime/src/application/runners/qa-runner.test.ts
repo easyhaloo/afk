@@ -595,6 +595,32 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
   });
 
+  it('hands a conflict that outlived the attempt limit to a person', async () => {
+    const f = fixture();
+    f.changes.get.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      mergeState: 'conflict', url: 'https://example.test/pr/60',
+    });
+    // The previous round is still open: a conflict means it did not do its
+    // job, so the attempt count carries on.
+    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r3', attempt: 3, status: 'open', source: 'conflict' });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: false, failureCode: 'merge_conflict' });
+    expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', expect.objectContaining({
+      reason: expect.stringContaining('conflicts with main'),
+    }));
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+  });
+
   it('publishes the per-criterion evidence and the artifact worktree with the change request', async () => {
     const f = fixture();
     f.execution.waitForResult.mockResolvedValue({

@@ -190,7 +190,7 @@ export class QARunner {
       // request's own branch — so the resolution lands exactly where the
       // change request is published from.
       if (!merge.merged) {
-        const resolution = await this.resolveMergeConflicts(id, worktreePath, session, sandbox, merge.conflicts, baselineBranch);
+        const resolution = await this.resolveMergeConflicts(id, worktreePath, session, merge.conflicts, baselineBranch);
         if (!resolution.resolved) {
           runtimeErrorSummary = resolution.summary;
           await this.markBlocked(id, resolution.summary);
@@ -320,7 +320,6 @@ export class QARunner {
     backlogId: string,
     worktreePath: string,
     session: string,
-    sandbox: Sandbox,
     conflicts: string[],
     targetBranch: string,
   ): Promise<{ resolved: boolean; summary: string }> {
@@ -336,26 +335,43 @@ export class QARunner {
       .replaceAll('{targetBranch}', targetBranch)
       .replaceAll('{conflicts}', conflicts.map(file => `- ${file}`).join('\n'));
     const prompt = buildExecutionPrompt(goal, this.executionMode, 'qa');
-    const execution = await this.agentProvider.createExecution({
-      sandbox,
+    // A sandbox of its own: in interactive mode the sandbox owns the tmux
+    // session, and two agents cannot share one.
+    const conflictSandbox = await this.sandboxProvider.create({
       worktreePath,
-      sessionId: `${session}-conflict`,
-      prompt,
-      signalType: 'goal_complete',
-      generation: 1,
+      session: `${session}-conflict`,
       executionMode: this.executionMode,
-      runtime: this.agentRuntime,
+      tmux: this.executionMode === 'interactive' ? this.tmux : undefined,
+      workspaceRoot: this.projectRoot,
     });
-    const result = await execution.waitForResult({ completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout });
-    const remaining = await this.providers.branches.listUnresolvedConflicts(worktreePath);
-    if (remaining.length > 0) {
-      const summary = `merge conflict with ${targetBranch} could not be resolved: ${remaining.join(', ')}`;
-      logger.warn({ backlogId, worktreePath, remaining, status: result.status }, 'merge conflict resolution left conflicts behind');
-      return { resolved: false, summary };
+    try {
+      const execution = await this.agentProvider.createExecution({
+        sandbox: conflictSandbox,
+        worktreePath,
+        sessionId: `${session}-conflict`,
+        prompt,
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: this.executionMode,
+        runtime: this.agentRuntime,
+      });
+      try {
+        const result = await execution.waitForResult({ completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout });
+        const remaining = await this.providers.branches.listUnresolvedConflicts(worktreePath);
+        if (remaining.length > 0) {
+          const summary = `merge conflict with ${targetBranch} could not be resolved: ${remaining.join(', ')}`;
+          logger.warn({ backlogId, worktreePath, remaining, status: result.status }, 'merge conflict resolution left conflicts behind');
+          return { resolved: false, summary };
+        }
+        const commit = await this.providers.branches.commit(worktreePath, `Resolve merge conflict with ${targetBranch}`);
+        logger.info({ backlogId, worktreePath, commitSha: commit.sha, skippedBinaryFiles: commit.skippedBinaryFiles }, 'merge conflict resolved');
+        return { resolved: true, summary: `resolved ${conflicts.length} merge conflict(s) with ${targetBranch}` };
+      } finally {
+        await execution.kill().catch(() => {});
+      }
+    } finally {
+      await conflictSandbox.close().catch(error => logger.warn({ backlogId, error }, 'failed to close the conflict resolution sandbox'));
     }
-    const commit = await this.providers.branches.commit(worktreePath, `Resolve merge conflict with ${targetBranch}`);
-    logger.info({ backlogId, worktreePath, commitSha: commit.sha, skippedBinaryFiles: commit.skippedBinaryFiles }, 'merge conflict resolved');
-    return { resolved: true, summary: `resolved ${conflicts.length} merge conflict(s) with ${targetBranch}` };
   }
 
   private async handleExecutionFailure(
@@ -421,11 +437,6 @@ export class QARunner {
         });
       }
       await this.afterPublication?.(mr);
-      if (activeRework) {
-        await this.providers.backlog.resolveRework(backlogId, activeRework.id, {
-          summary: `QA passed after rework ${activeRework.id}.`,
-        });
-      }
       // The change request is only ready for a person when the platform says
       // it can land. A conflict means the target branch moved under the
       // change, so the change goes back for another round instead of being
@@ -440,6 +451,11 @@ export class QARunner {
         }
         logger.warn({ backlogId, changeId: mr.id, reworkId: rework.id, conflict }, 'published change request conflicts with the target branch');
         return { success: false, rework: true, summary, failureCode: 'merge_conflict' };
+      }
+      if (activeRework) {
+        await this.providers.backlog.resolveRework(backlogId, activeRework.id, {
+          summary: `QA passed after rework ${activeRework.id}.`,
+        });
       }
       await this.providers.backlog.transition(backlogId, 'merge_ready', { changeId: String(mr.id) });
       // Merging is a person's decision. AFK implements, verifies and
@@ -550,8 +566,10 @@ export class QARunner {
    * Send the change back for another round.
    *
    * The rework record carries the conflict, so the next round knows what it
-   * has to make compatible. A conflict that outlives the attempt limit goes
-   * to a person instead.
+   * has to make compatible. The previous rework record is still open when
+   * this runs — a conflict means it did not do its job — so it is
+   * superseded by this one and the attempt count carries on. A conflict that
+   * outlives the attempt limit goes to a person instead.
    */
   private async openConflictRework(
     backlogId: string,

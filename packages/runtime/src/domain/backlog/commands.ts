@@ -1,10 +1,14 @@
 import type {
   BacklogCreateInput,
+  BacklogExecutionMode,
+  BacklogKind,
   BacklogListOptions,
   BacklogManagementProvider,
   BacklogItem,
   QABacklogProvider,
 } from './index.js';
+import type { BacklogRelationUpdate } from './metadata-codec.js';
+import { resolveBacklogExecutionBase } from './creation.js';
 
 export { planBacklogCreate, resolveBacklogExecutionBase } from './creation.js';
 
@@ -37,6 +41,71 @@ export async function addBacklogTag(provider: BacklogManagementProvider, id: str
 
 export async function removeBacklogTag(provider: BacklogManagementProvider, id: string, tag: string): Promise<void> {
   await provider.removeTag(id, tag);
+}
+
+/**
+ * Edit the relationship edges of a backlog item.
+ *
+ * A relationship is written when an item is created; this is how an edge that
+ * was written earlier is changed or withdrawn. The provider owns the label
+ * spelling, so the edit travels as references and the provider turns them
+ * into the smallest label delta that carries them.
+ */
+export async function applyBacklogRelationUpdate(
+  provider: BacklogManagementProvider,
+  id: string,
+  update: BacklogRelationUpdate,
+): Promise<void> {
+  if (!provider.applyRelationUpdate) throw new Error('backlog provider does not support relationship edits');
+  await provider.applyRelationUpdate(id, update);
+}
+
+/**
+ * Give a backlog item the organizational role of a PRD anchor.
+ *
+ * The role label is reserved metadata, so it cannot arrive as a business
+ * tag. An anchor carries no lifecycle state and never runs by itself, so the
+ * edit replaces the stage and mode labels the item had.
+ */
+export async function applyBacklogRole(
+  provider: BacklogManagementProvider,
+  id: string,
+  kind: BacklogKind,
+): Promise<void> {
+  if (!provider.applyRole) throw new Error('backlog provider does not support role edits');
+  await provider.applyRole(id, kind);
+}
+
+/**
+ * Switch who runs a backlog item.
+ *
+ * The execution mode is the operator's decision about who drives the item, so
+ * it is edited on the item itself: the state, the business tags and the
+ * relationships of the item stay exactly where they are.
+ */
+export async function applyBacklogMode(
+  provider: BacklogManagementProvider,
+  id: string,
+  mode: BacklogExecutionMode,
+): Promise<void> {
+  if (!provider.applyMode) throw new Error('backlog provider does not support execution mode edits');
+  await provider.applyMode(id, mode);
+}
+
+/**
+ * Record the ref the work starts from.
+ *
+ * The ref is a fact about the work and the repository it lands in, so it is
+ * written into the body of the item. Nothing else about the item changes.
+ */
+export async function applyBacklogExecutionBase(
+  provider: BacklogManagementProvider,
+  id: string,
+  baseBranch: string,
+): Promise<void> {
+  if (!baseBranch?.trim()) throw new Error('execution base branch is required');
+  if (!provider.applyExecutionBase) throw new Error('backlog provider does not support execution base edits');
+  await provider.applyExecutionBase(id, baseBranch.trim());
 }
 
 export interface BacklogChangeProvider {
@@ -72,6 +141,11 @@ export async function retryBacklog(
   if (item.state !== 'blocked' || item.executionMode !== 'hitl') {
     throw new Error(`invalid lifecycle transition: retry requires blocked + hitl for backlog ${id}`);
   }
+  // A retry answers the previous operator request, so it closes first: the
+  // provider keeps at most one open operator rework record, and an attempt
+  // that failed before the record could be closed would otherwise block every
+  // further retry.
+  await closeOperatorRework(provider, id, `Superseded by a new operator retry: ${summary}`);
   await provider.createRework(id, {
     source: 'operator',
     summary,
@@ -81,6 +155,48 @@ export async function retryBacklog(
   return provider.get(id);
 }
 
+/**
+ * Block an item and close the operator rework request the failed execution
+ * answered.
+ *
+ * An operator rework record is an outstanding request for rework. The attempt
+ * that answered it has now failed, so the request is answered — negatively —
+ * and the operator has to be able to ask for it again. Leaving the record
+ * open makes `retry` refuse with "already has an open rework record", and the
+ * item can never be executed again.
+ *
+ * A QA-sourced record is left alone: it is the verification feedback itself,
+ * and the next operator retry supersedes it on its own.
+ */
+export async function blockBacklog(
+  provider: QABacklogProvider,
+  id: string,
+  reason: string,
+): Promise<void> {
+  const summary = requiredReason(reason);
+  await closeOperatorRework(provider, id, summary);
+  await provider.transition(id, 'blocked', { reason: summary });
+  await provider.setExecutionMode(id, 'hitl');
+}
+
+/**
+ * Close the operator rework request the failed execution answered.
+ *
+ * Best-effort on purpose: the blocked transition is the outcome that matters,
+ * so a provider that cannot report or close rework records must not keep the
+ * item out of the blocked state. A record that stays open only costs the
+ * operator one more retry attempt.
+ */
+async function closeOperatorRework(provider: QABacklogProvider, id: string, summary: string): Promise<void> {
+  try {
+    const active = await provider.getActiveRework(id);
+    if (active?.source !== 'operator') return;
+    await provider.resolveRework(id, active.id, { summary: `Rework ${active.id} did not pass: ${summary}` });
+  } catch {
+    /* the item is blocked either way */
+  }
+}
+
 export async function confirmBacklogMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,
@@ -88,7 +204,6 @@ export async function confirmBacklogMerge(
   expectedTargetBranch: string,
 ): Promise<BacklogItem> {
   const item = await provider.get(id);
-  if (item.parentId) throw new Error(`merge confirmation must be a root backlog: ${id}`);
   // A closed issue derives as done even when its label still says "merge
   // pending", so the label decides whether there is anything left to do.
   const labeledState = item.labeledState ?? item.state;
@@ -128,6 +243,10 @@ export interface BacklogMergeReconciliation {
  * This function never merges: it only reports the provider state the human
  * merge already produced. A backlog whose change is still open is left
  * untouched, so the merge gate keeps its meaning.
+ *
+ * The reconciliation is not limited to the roots: a child whose merge AFK
+ * could not perform waits for a human in the same way, and nothing else
+ * would ever bring it in line with the branch the work already landed on.
  */
 export async function reconcileMergedBacklog(
   provider: QABacklogProvider,
@@ -136,17 +255,19 @@ export async function reconcileMergedBacklog(
   expectedTargetBranch: string,
 ): Promise<BacklogMergeReconciliation> {
   const item = await provider.get(id);
-  if (item.parentId) {
-    return { reconciled: false, reason: `backlog ${id} is not a root backlog`, item };
-  }
   // A closed issue derives as done even when its label still says "merge
   // pending" — that stale label is exactly what this reconciles.
   const labeledState = item.labeledState ?? item.state;
   if (labeledState === 'done') {
     return { reconciled: false, reason: `backlog ${id} is already done`, item };
   }
-  if (labeledState !== 'merge_ready' || item.executionMode !== 'hitl') {
-    return { reconciled: false, reason: `backlog ${id} is ${labeledState}/${item.executionMode}; only merge_ready + hitl can be reconciled`, item };
+  // A root waits for its human merge as "merge pending"; a child whose merge
+  // AFK could not perform is blocked instead. Both states say the same thing
+  // here: the work is verified and only the merge is left. What decides the
+  // outcome is never the state — it is whether the provider says the change
+  // is merged into the branch it was supposed to target.
+  if ((labeledState !== 'merge_ready' && labeledState !== 'blocked') || item.executionMode !== 'hitl') {
+    return { reconciled: false, reason: `backlog ${id} is ${labeledState}/${item.executionMode}; only merge_ready or blocked + hitl can be reconciled`, item };
   }
   const change = await changes.findForBacklog(item);
   if (!change) {
@@ -164,6 +285,23 @@ export async function reconcileMergedBacklog(
   }
   await provider.transition(id, 'done', { changeId: change.id });
   return { reconciled: true, reason: `associated change ${change.id} is merged`, item: await provider.get(id) };
+}
+
+/**
+ * The branch the change of a work item is expected to target.
+ *
+ * The body declares the ref the work starts from, and the execution manifest
+ * is derived from it — so the declaration is the branch the change request
+ * lands on. An explicit base edge is the older way of saying the same thing,
+ * and the configured branch is the last resort.
+ */
+export async function resolveExpectedTargetBranch(
+  provider: Pick<QABacklogProvider, 'get'>,
+  item: BacklogItem,
+  fallback: string,
+): Promise<string> {
+  if (item.executionBase) return item.executionBase;
+  return resolveBacklogExecutionBase(provider, item, fallback);
 }
 
 function requiredReason(reason: string): string {

@@ -35,6 +35,7 @@ import type {
 } from '../types.js';
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
+import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 
 export class StreamingAgentExecution implements AgentExecution {
@@ -277,9 +278,12 @@ export class StreamingAgentExecution implements AgentExecution {
   async waitForResult(options?: {
     completionTimeoutMs?: number;
     contextHighTokens?: number;
+    idleTimeoutMs?: number;
   }): Promise<ExecutionResult> {
     const completionTimeoutMs = options?.completionTimeoutMs ?? 600_000;
+    const idleTimeoutMs = options?.idleTimeoutMs;
     const start = Date.now();
+    const activity = new ActivityWatch();
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -295,6 +299,27 @@ export class StreamingAgentExecution implements AgentExecution {
           tools: this.tools.size ? [...this.tools.values()] : undefined,
           commits: [],
         };
+      }
+      // The idle watchdog: a process that is alive but says nothing is not
+      // working, and its output is what it says it with.
+      if (idleTimeoutMs !== undefined && idleTimeoutMs > 0) {
+        activity.observe(`${this.stdoutTail.length}:${this.tools.size}`);
+        if (activity.idleMs() >= idleTimeoutMs) {
+          this.kill();
+          return {
+            version: 1,
+            runId: this.id,
+            status: 'timed_out',
+            provider: 'batch',
+            sessionId: this.sessionId,
+            tools: this.tools.size ? [...this.tools.values()] : undefined,
+            commits: [],
+            error: {
+              code: 'AGENT_IDLE',
+              message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s`,
+            },
+          };
+        }
       }
       await this.sleep(500);
     }

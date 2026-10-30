@@ -14,6 +14,8 @@ export interface AgentStepExecutionRequest {
   generation: number;
   maxRetries: number;
   completionTimeoutMs: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs: number;
   contextHighTokens: number;
   iid?: number;
 }
@@ -50,6 +52,7 @@ export class AgentExecutionService {
       result = await execution.waitForResult({
         completionTimeoutMs: request.completionTimeoutMs,
         contextHighTokens: request.contextHighTokens,
+        idleTimeoutMs: request.idleTimeoutMs,
       });
       result = this.validateCompletion(result, request);
       await writer.writeResult(result);

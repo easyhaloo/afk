@@ -98,6 +98,42 @@ describe('executeWorkItem', () => {
     expect(JSON.parse(await readFile(executionManifestPath(workItemId), 'utf8')).workItemId).toBe(workItemId);
   });
 
+  it('derives the base branch from the ref the work item body declares', async () => {
+    const { deps } = await setup();
+    delete deps.readManifest;
+    // The manifest of an earlier test lives at the same place; the derived
+    // one is what this test is about.
+    await rm(executionManifestPath(workItemId), { force: true });
+    deps.lookupWorkItem = vi.fn(async () => ({
+      id: workItemId, issueNumber: 42, managed: true, executionEligible: true, executionMode: 'afk', state: 'ready',
+      project: { platform: 'github', projectKey: 'acme/api', name: 'api', defaultBranch: 'master' },
+      branchName: 'afk/backlog-42',
+      description: '## Base Version\n\n- Base Ref: 2025-11-8-show\n',
+    } as any));
+
+    await executeWorkItem({ ...input, executionId: 'attempt-base-ref', manifestPath: undefined }, deps);
+
+    const manifest = JSON.parse(await readFile(executionManifestPath(workItemId), 'utf8'));
+    expect(manifest.repositories[0].baseBranch).toBe('2025-11-8-show');
+  });
+
+  it('falls back to the repository default branch when the body declares no ref', async () => {
+    const { deps } = await setup();
+    delete deps.readManifest;
+    await rm(executionManifestPath(workItemId), { force: true });
+    deps.lookupWorkItem = vi.fn(async () => ({
+      id: workItemId, issueNumber: 42, managed: true, executionEligible: true, executionMode: 'afk', state: 'ready',
+      project: { platform: 'github', projectKey: 'acme/api', name: 'api', defaultBranch: 'master' },
+      branchName: 'afk/backlog-42',
+      description: '## Context\n\nno ref here',
+    } as any));
+
+    await executeWorkItem({ ...input, executionId: 'attempt-default-branch', manifestPath: undefined }, deps);
+
+    const manifest = JSON.parse(await readFile(executionManifestPath(workItemId), 'utf8'));
+    expect(manifest.repositories[0].baseBranch).toBe('master');
+  });
+
   it('loads the default execution through application ports without an injected loader', async () => {
     const { deps, directory } = await setup();
     const previous = process.env.AFK_EVENT_STORE_DIR;
@@ -420,6 +456,15 @@ describe('executeWorkItem', () => {
     changes.findForBacklog.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' });
     await expect(executeWorkItem(input, deps)).rejects.toThrow(/already has an open change request/);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('reuses the change request an earlier attempt left behind', async () => {
+    // A reworked work item is expected to carry the review request of the
+    // attempt that failed; the verification refreshes its evidence.
+    const { deps, run, changes } = await setup({ state: 'rework' });
+    changes.findForBacklog.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' });
+    await executeWorkItem(input, deps);
+    expect(run).toHaveBeenCalled();
   });
 
   it('rejects a concurrent attempt before spawning another runner', async () => {

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LoopRunner } from './loop-runner.js';
+import { logger } from '../../infrastructure/io/index.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { BacklogItem } from '../../domain/backlog/index.js';
 
@@ -23,18 +24,46 @@ function providersFor(items: BacklogItem[] = [item]) {
   const backlog = {
     get: vi.fn(async (id: string) => items.find(candidate => candidate.id === id) ?? item),
     list: vi.fn(async ({ state }: { state: string }) => items.filter(candidate => candidate.state === state)),
-    isRunnable: vi.fn(async () => true), claim: vi.fn(),
+    isRunnable: vi.fn(async () => true),
+    explainRunnability: vi.fn(async () => ({ runnable: true, blockedBy: [] })),
+    transition: vi.fn(async () => undefined),
+    claim: vi.fn(),
   };
-  return { providers: { backlog, branches: {}, changes: {} } as unknown as ProviderBundle, backlog };
+  const changes = { findForBacklog: vi.fn(async () => null) };
+  return { providers: { backlog, branches: {}, changes } as unknown as ProviderBundle, backlog, changes };
 }
 
 describe('LoopRunner manifest-bound execution', () => {
-  it('rejects a manifest-less or ambiguous scope before any provider operation', () => {
+  it('rejects an ambiguous scope before any provider operation', () => {
     const { providers, backlog } = providersFor();
-    expect(() => new LoopRunner(providers)).toThrow(/execution manifest/);
-    expect(() => new LoopRunner(providers, { backlogIds: ['42'] })).toThrow(/execution manifest/);
+    expect(() => new LoopRunner(providers)).toThrow(/exactly one backlog ID and one work item ID/);
+    expect(() => new LoopRunner(providers, { backlogIds: ['42'] })).toThrow(/exactly one backlog ID and one work item ID/);
     expect(() => new LoopRunner(providers, { ...selection, backlogIds: ['42', '43'] })).toThrow(/exactly one/);
     expect(backlog.list).not.toHaveBeenCalled();
+  });
+
+  it('derives the manifest from the work item when none is named', async () => {
+    const { providers, backlog } = providersFor([{ ...item, state: 'rework' as const }]);
+    const executeManagedWorkItem = vi.fn(async () => ({ status: 'merge_ready' } as any));
+    const subject = new LoopRunner(providers, {
+      ...selection,
+      managedExecution: { workItemId: 'github:org/repo#42' },
+      readManifest,
+      executeManagedWorkItem,
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    await internals.poll();
+    await vi.waitFor(() => expect(subject.getStatus().totals.completed).toBe(1));
+
+    // No manifest was named, so the execution derives one from the work item
+    // instead of being handed a path that does not exist.
+    expect(executeManagedWorkItem).toHaveBeenCalledWith({
+      workItemId: 'github:org/repo#42', template: undefined,
+    });
+    expect(backlog.list).toHaveBeenCalled();
   });
 
   it('rejects mismatched manifest before polling or claiming', async () => {
@@ -71,6 +100,26 @@ describe('LoopRunner manifest-bound execution', () => {
     });
     expect(subject.getStatus().execution).toEqual({ active: 0, ids: [] });
     expect(internals.inFlight.has('42')).toBe(false);
+  });
+
+  it('executes the manifest-bound work item when the provider lists canonical ids', async () => {
+    // A real tracker provider lists every backlog item under its canonical
+    // global id, while the loop scope carries the provider backlog id.
+    const canonical = {
+      ...item, id: 'github:org/repo#42', workItemId: 'github:org/repo#42', providerRef: 'github:org/repo#42',
+    };
+    const { providers } = providersFor([canonical]);
+    const executeManagedWorkItem = vi.fn(async () => ({ status: 'merge_ready' } as any));
+    const subject = new LoopRunner(providers, { ...selection, readManifest, executeManagedWorkItem });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.poll();
+
+    await vi.waitFor(() => expect(subject.getStatus().totals.completed).toBe(1));
+    expect(executeManagedWorkItem).toHaveBeenCalledOnce();
   });
 
   it('completes a merged backlog during the poll without merging the change itself', async () => {
@@ -162,6 +211,24 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(subject.getStatus().totals.failed).toBe(1);
     expect(subject.getStatus().lastError['42']).toContain('audit unavailable');
     expect(internals.inFlight.has('42')).toBe(false);
+  });
+
+  it('takes the default pid and status paths from the environment', () => {
+    const previousPid = process.env.AFK_LOOP_PID_FILE;
+    const previousStatus = process.env.AFK_LOOP_STATUS_FILE;
+    process.env.AFK_LOOP_PID_FILE = '/tmp/afk-loop-side-by-side/loop.pid';
+    process.env.AFK_LOOP_STATUS_FILE = '/tmp/afk-loop-side-by-side/status.json';
+    try {
+      const { providers } = providersFor();
+      const subject = new LoopRunner(providers, { ...selection, readManifest });
+      expect((subject as any).opts.pidFilePath).toBe('/tmp/afk-loop-side-by-side/loop.pid');
+      expect((subject as any).opts.statusFilePath).toBe('/tmp/afk-loop-side-by-side/status.json');
+    } finally {
+      if (previousPid === undefined) delete process.env.AFK_LOOP_PID_FILE;
+      else process.env.AFK_LOOP_PID_FILE = previousPid;
+      if (previousStatus === undefined) delete process.env.AFK_LOOP_STATUS_FILE;
+      else process.env.AFK_LOOP_STATUS_FILE = previousStatus;
+    }
   });
 
   it('makes duplicate stop calls idempotent', async () => {
@@ -260,6 +327,95 @@ describe('LoopRunner manifest-bound execution', () => {
       await subject.stop();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it('records why an item was skipped, not only that it was skipped', async () => {
+    const { providers, backlog } = providersFor();
+    const explanation = { runnable: false, reason: 'dependency_not_done', blockedBy: ['github:org/repo#7'] };
+    backlog.explainRunnability = vi.fn(async () => explanation);
+    const executeManagedWorkItem = vi.fn();
+    const subject = new LoopRunner(providers, { ...selection, readManifest, executeManagedWorkItem });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const logged = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    try {
+      await internals.poll();
+      // The reason reaches the log: without it a log full of "skipped" cannot
+      // tell a queue from a deadlock.
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({ iid: '42', reason: 'dependency_not_done', blockedBy: ['github:org/repo#7'] }),
+        'issue skipped by preconditions',
+      );
+      expect(executeManagedWorkItem).not.toHaveBeenCalled();
+      expect(subject.getStatus().totals.started).toBe(0);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('returns a claim left behind by a previous run to the queue', async () => {
+    const claimed = { ...item, state: 'in_progress' as const };
+    const { providers, backlog } = providersFor([claimed]);
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'ready');
+  });
+
+  it('returns a claim with an open change request as rework, so the change is reused', async () => {
+    const claimed = { ...item, state: 'in_progress' as const };
+    const { providers, backlog, changes } = providersFor([claimed]);
+    changes.findForBacklog = vi.fn(async () => ({ id: '7', state: 'open' }));
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    // `rework` is the position whose execution reuses the open change
+    // request instead of refusing to open a second one.
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'rework');
+  });
+
+  it('leaves a claim that belongs to another loop alone', async () => {
+    const claimed = { ...item, id: '43', state: 'in_progress' as const };
+    const { providers, backlog } = providersFor([claimed]);
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).not.toHaveBeenCalled();
+  });
+
+  it('brings back an item that waits for a QA run nobody will run', async () => {
+    // The QA run was killed with the process that owned it. Nothing else
+    // ever picks the item up again, because a verification waits for a
+    // verification.
+    const interrupted = { ...item, state: 'verification' as const };
+    const { providers, backlog } = providersFor([interrupted]);
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'ready');
+  });
+
+  it('brings back an interrupted QA as rework when it already has a change request', async () => {
+    const interrupted = { ...item, state: 'verification' as const };
+    const { providers, backlog, changes } = providersFor([interrupted]);
+    changes.findForBacklog = vi.fn(async () => ({ id: '7', state: 'open' }));
+    const subject = new LoopRunner(providers, { ...selection, readManifest });
+    const internals = subject as any;
+
+    await internals.recoverOrphanedClaims();
+
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'rework');
   });
 
 });

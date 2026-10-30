@@ -11,7 +11,7 @@
  * graph then silently loses an edge.
  */
 
-import { BACKLOG_KIND_LABELS, BACKLOG_METADATA } from './initialization.js';
+import { BACKLOG_KIND_LABELS, BACKLOG_LABEL_PREFIX, BACKLOG_METADATA } from './initialization.js';
 import { extractBacklogTags } from './tags.js';
 import type { BacklogKind } from './index.js';
 import type { BacklogExecutionMode, BacklogState } from './index.js';
@@ -236,4 +236,185 @@ export function encodeBacklogRelations(relations: BacklogRelations): string[] {
     ...(relations.baseBacklogId ? [`${BACKLOG_RELATION_PREFIX.base}${relations.baseBacklogId}`] : []),
     ...relations.dependsOn.map(id => `${BACKLOG_RELATION_PREFIX.dependsOn}${id}`),
   ];
+}
+
+/** The label changes one relationship edit asks for. */
+export interface BacklogLabelDelta {
+  add: string[];
+  remove: string[];
+}
+
+/**
+ * One edit to the relationship edges of a backlog item.
+ *
+ * The edit names the edges it touches; every other edge of the item stays as
+ * it is. A reference is either a plain issue number in the owning project or
+ * a canonical global work item identity.
+ */
+export interface BacklogRelationUpdate {
+  /** Point the item at a parent, replacing the parent edge it had. */
+  parent?: string;
+  /** Drop the parent edge. */
+  clearParent?: boolean;
+  /** Point the item at an execution baseline, replacing the edge it had. */
+  base?: string;
+  /** Drop the execution baseline edge. */
+  clearBase?: boolean;
+  /** Dependencies to add. */
+  addDependsOn?: string[];
+  /** Dependencies to drop. */
+  removeDependsOn?: string[];
+}
+
+/**
+ * Plan the label changes that apply a relationship edit.
+ *
+ * The edit is expressed in references, not in labels: a bare issue number is
+ * resolved against the scope of the project that owns the issue, and the
+ * canonical form is what gets written. An edge the edit does not mention is
+ * left alone — including an edge this codec cannot parse, because an
+ * operator who wants that edge gone asks for it by name.
+ *
+ * The result is a delta, not a label set: the provider adds and removes the
+ * minimum needed to carry the edit, and no other label of the issue moves.
+ */
+export function planRelationLabelDelta(
+  labels: readonly string[],
+  update: BacklogRelationUpdate,
+  scope: BacklogMetadataScope,
+  options: { selfId?: WorkItemId } = {},
+): BacklogLabelDelta {
+  if (update.parent !== undefined && update.clearParent) {
+    throw new Error('a backlog relation update cannot set and clear the parent edge at once');
+  }
+  if (update.base !== undefined && update.clearBase) {
+    throw new Error('a backlog relation update cannot set and clear the execution base edge at once');
+  }
+  const add = new Set<string>();
+  const remove = new Set<string>();
+  const relationLabels = labels.filter(isBacklogRelationLabel);
+
+  const parentLabels = relationLabels.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.parent));
+  if (update.parent !== undefined) {
+    const desired = `${BACKLOG_RELATION_PREFIX.parent}${relationReference(update.parent, scope, options.selfId, 'parent')}`;
+    add.add(desired);
+    for (const label of parentLabels) if (label !== desired) remove.add(label);
+  } else if (update.clearParent) {
+    for (const label of parentLabels) remove.add(label);
+  } else {
+    for (const label of parentLabels) add.add(label);
+  }
+
+  const baseLabels = relationLabels.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.base));
+  if (update.base !== undefined) {
+    const desired = `${BACKLOG_RELATION_PREFIX.base}${relationReference(update.base, scope, options.selfId, 'base')}`;
+    add.add(desired);
+    for (const label of baseLabels) if (label !== desired) remove.add(label);
+  } else if (update.clearBase) {
+    for (const label of baseLabels) remove.add(label);
+  } else {
+    for (const label of baseLabels) add.add(label);
+  }
+
+  const dependencyLabels = relationLabels.filter(label =>
+    label.startsWith(BACKLOG_RELATION_PREFIX.dependsOn) || label.startsWith(LEGACY_DEPENDS_ON_PREFIX));
+  const dropped = new Set<string>();
+  for (const reference of update.removeDependsOn ?? []) {
+    dropped.add(relationReference(reference, scope, options.selfId, 'dependency'));
+  }
+  for (const label of dependencyLabels) {
+    const canonical = normalizeRelationLabel(label);
+    const reference = canonical.slice(BACKLOG_RELATION_PREFIX.dependsOn.length);
+    if (dropped.has(reference)) {
+      remove.add(label);
+      continue;
+    }
+    // The legacy spelling is rewritten in the canonical form.
+    if (canonical !== label) {
+      remove.add(label);
+      add.add(canonical);
+      continue;
+    }
+    add.add(label);
+  }
+  for (const reference of update.addDependsOn ?? []) {
+    const canonical = relationReference(reference, scope, options.selfId, 'dependency');
+    if (dropped.has(canonical)) continue;
+    add.add(`${BACKLOG_RELATION_PREFIX.dependsOn}${canonical}`);
+  }
+
+  return {
+    add: [...add].filter(label => !labels.includes(label)),
+    remove: [...remove].filter(label => labels.includes(label)),
+  };
+}
+
+/**
+ * Canonicalize one reference of a relationship edit.
+ *
+ * A reference to the item itself is rejected: an item cannot be its own
+ * parent, its own execution baseline or its own dependency.
+ */
+function relationReference(
+  value: string,
+  scope: BacklogMetadataScope,
+  selfId: WorkItemId | undefined,
+  kind: 'parent' | 'base' | 'dependency',
+): WorkItemId {
+  const reference = canonicalizeBacklogReference(value, scope);
+  if (selfId && reference === selfId) {
+    throw new Error(`invalid backlog relationship: ${kind} reference ${value} points at the item itself`);
+  }
+  return reference;
+}
+
+/**
+ * Plan the label changes that give an item a role.
+ *
+ * An organizational anchor is not a work item in a lifecycle: it carries the
+ * role label, no stage label at all, and the human-in-the-loop mode, because
+ * an anchor never runs by itself. Every other label of the issue — the
+ * business tags, the relationships, the idempotency marker — is left where it
+ * is, so giving a role never disturbs the graph the item belongs to.
+ */
+export function planRoleLabelDelta(
+  labels: readonly string[],
+  kind: BacklogKind,
+): BacklogLabelDelta {
+  const roleLabel = BACKLOG_KIND_LABELS[kind];
+  const modeLabel = BACKLOG_METADATA.executionModeLabels.hitl;
+  const desired = new Set([roleLabel, modeLabel]);
+  const remove = new Set<string>();
+  for (const label of labels) {
+    // A label the edit asks for is never removed: a provider applies the
+    // removals first, and a label in both lists would simply disappear.
+    if (desired.has(label)) continue;
+    if (label.startsWith(BACKLOG_LABEL_PREFIX.kind)) remove.add(label);
+    if (label.startsWith(BACKLOG_LABEL_PREFIX.state)) remove.add(label);
+    if (label.startsWith(BACKLOG_LABEL_PREFIX.mode)) remove.add(label);
+  }
+  return {
+    add: [...desired].filter(label => !labels.includes(label)),
+    remove: [...remove].filter(label => labels.includes(label)),
+  };
+}
+
+/**
+ * Plan the label changes that switch who runs an item.
+ *
+ * The execution mode is the only thing the edit touches: the stage, the role,
+ * the business tags and the relationships of the item stay exactly where they
+ * are, so an operator can hand an item to a human or back to AFK without
+ * disturbing the graph it belongs to.
+ */
+export function planModeLabelDelta(
+  labels: readonly string[],
+  mode: BacklogExecutionMode,
+): BacklogLabelDelta {
+  const modeLabel = BACKLOG_METADATA.executionModeLabels[mode];
+  return {
+    add: labels.includes(modeLabel) ? [] : [modeLabel],
+    remove: labels.filter(label =>
+      label !== modeLabel && label.startsWith(BACKLOG_LABEL_PREFIX.mode)),
+  };
 }

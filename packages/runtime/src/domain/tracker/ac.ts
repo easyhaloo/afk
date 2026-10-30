@@ -1,5 +1,6 @@
 import type { TrackedIssue } from './types.js';
-import type { ACItem } from './ac-types.js';
+import type { ACItem, AcceptanceCriteria, EvidenceType } from './ac-types.js';
+import { EVIDENCE_TYPES } from './ac-types.js';
 
 /**
  * AC is represented as issue labels with prefix `ac::`.
@@ -83,16 +84,55 @@ export function parseACLegacy(description: string): ACItem[] | null {
     const firstLine = block.split('\n')[0];
     const checkboxMatch = firstLine.match(/^[-*]\s+\[\s\]\s+(.+)$/);
     if (!checkboxMatch) continue;
-    const text = checkboxMatch[1].trim();
+    const raw = checkboxMatch[1].trim();
     const verifyLines = block.split('\n').slice(1).map(l => l.trim()).filter(l => l.startsWith('_verify:'));
-    const checkCommand = verifyLines.map(l => l.replace(/^_verify:\s*/, '')).join('; ');
-    if (checkCommand) {
-      items.push({ index: idx++, text, evidenceType: 'bash', checkCommand });
+    const verifyCommand = verifyLines.map(l => l.replace(/^_verify:\s*/, '')).join('; ');
+    const parsed = parseThreeFieldAC(raw);
+    if (parsed) {
+      items.push({ index: idx++, text: parsed.text, evidenceType: parsed.evidenceType, checkCommand: parsed.checkCommand });
+    } else if (verifyCommand) {
+      items.push({ index: idx++, text: raw, evidenceType: 'bash', checkCommand: verifyCommand });
     } else {
-      items.push({ index: idx++, text, evidenceType: 'none', checkCommand: '' });
+      items.push({ index: idx++, text: raw, evidenceType: 'none', checkCommand: '' });
     }
   }
   return items.length > 0 ? items : null;
+}
+
+/**
+ * Parse the authoritative three-field form `- [ ] <text> -- <type> -- <command>`.
+ *
+ * The type field is the anchor: it has to be one of the known evidence types,
+ * so a `--` inside the text or inside the command cannot be mistaken for the
+ * separator. The command may be absent — `- [ ] <text> -- manual` is a
+ * criterion only a person can settle.
+ *
+ * Returns null when the line is not in the three-field form at all.
+ */
+export function parseThreeFieldAC(raw: string): { text: string; evidenceType: EvidenceType; checkCommand: string } | null {
+  const separator = /\s+--\s+/g;
+  const parts: string[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = separator.exec(raw)) !== null) {
+    parts.push(raw.slice(last, match.index));
+    last = match.index + match[0].length;
+  }
+  parts.push(raw.slice(last));
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const candidate = parts[i + 1].trim().toLowerCase();
+    if (!isEvidenceType(candidate)) continue;
+    const text = parts.slice(0, i + 1).join(' -- ').trim();
+    if (!text) return null;
+    const checkCommand = parts.slice(i + 2).join(' -- ').trim();
+    return { text, evidenceType: candidate, checkCommand };
+  }
+  return null;
+}
+
+function isEvidenceType(value: string): value is EvidenceType {
+  return (EVIDENCE_TYPES as readonly string[]).includes(value);
 }
 
 /**

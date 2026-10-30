@@ -1,4 +1,5 @@
-import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
+import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution, Runnability } from './index.js';
+import type { BacklogRelationUpdate } from './metadata-codec.js';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
 
@@ -26,6 +27,11 @@ export class GitLabBacklogProvider implements BacklogProvider {
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> { return this.implementation.resolveRework(id, reworkId, resolution); }
   addTag(id: string, tag: string): Promise<void> { return this.implementation.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.implementation.removeTag(id, tag); }
+  applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.implementation.applyRelationUpdate(id, update); }
+  applyRole(id: string, kind: BacklogKind): Promise<void> { return this.implementation.applyRole(id, kind); }
+  applyMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.implementation.applyMode(id, mode); }
+  applyExecutionBase(id: string, baseBranch: string): Promise<void> { return this.implementation.applyExecutionBase(id, baseBranch); }
   initialize(): Promise<void> { return this.implementation.initialize(); }
   isRunnable(item: BacklogItem): Promise<boolean> { return this.implementation.isRunnable(item); }
+  explainRunnability(item: BacklogItem): Promise<Runnability> { return this.implementation.explainRunnability(item); }
 }

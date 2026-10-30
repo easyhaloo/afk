@@ -1,4 +1,4 @@
-import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState } from './index.js';
+import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState } from './index.js';
 import { FilesystemClaimLock, type ExpiredClaim } from './claim.js';
 import {
   NativeOrLockedClaimStrategy,
@@ -13,12 +13,20 @@ import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewRework
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
+import { applyExecutionBaseBranch, parseExecutionBaseBranch } from './execution-base.js';
+import { evaluateRunnability, type Runnability } from './runnability.js';
 import {
+  BACKLOG_RELATION_PREFIX,
+  canonicalizeBacklogReference,
   decodeBacklogRelations,
+  planRelationLabelDelta,
+  planModeLabelDelta,
+  planRoleLabelDelta,
   type BacklogMetadataScope,
+  type BacklogRelationUpdate,
 } from './metadata-codec.js';
 import { projectBacklogItem } from './projection.js';
-import type { BacklogGraphSource } from './graph.js';
+import { findDependencyCycle, type BacklogGraphSource } from './graph.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
 const MODE_LABELS: Record<BacklogExecutionMode, string> = BACKLOG_METADATA.executionModeLabels;
@@ -207,7 +215,12 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: Awaited<ReturnType<TrackerProvider['listMRs']>>): Promise<BacklogItem> {
-    if (!labels.includes(STATE_LABELS.merge_ready) && !labels.includes(STATE_LABELS.done)) return item;
+    // A change request that is waiting for a person, and one that is on its
+    // way back for another round, both have to be visible: the first is the
+    // merge gate, the second is where a conflict went.
+    if (!labels.includes(STATE_LABELS.merge_ready)
+      && !labels.includes(STATE_LABELS.done)
+      && !labels.includes(STATE_LABELS.rework)) return item;
     const candidate = changes.find(change => change.sourceBranch === `${item.branchName}-qa`)
       ?? changes.find(change => change.sourceBranch === item.branchName);
     if (!candidate) return item;
@@ -221,6 +234,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
         sourceBranch: change.sourceBranch,
         targetBranch: change.targetBranch,
         ...(change.url ? { url: change.url } : {}),
+        ...(change.mergeState ? { mergeState: change.mergeState } : {}),
       },
     };
   }
@@ -326,6 +340,104 @@ export class TrackerBacklogProvider implements BacklogProvider {
     await target.tracker.updateLabels(target.issueId, { add: [], remove: [normalized] });
   }
 
+  /**
+   * Edit the relationship edges of an item that already exists.
+   *
+   * A relationship is written when an item is created, but a backlog is alive:
+   * a dependency appears when the dependency is discovered, and a baseline
+   * edge has to be withdrawn when it turns out to name a branch that does not
+   * exist. The codec decides which labels the edit touches, so the write is
+   * the smallest delta that carries it — the edge that was replaced is
+   * removed, the edge that was asked for is added, and every other label of
+   * the issue stays where it is.
+   */
+  async applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const scope = this.scopeOf(target.tracker);
+    const selfId = this.canonicalId(target.tracker, target.issueId);
+    const delta = planRelationLabelDelta(issue.labels, update, scope, { selfId });
+    const current = decodeBacklogRelations(issue.labels, scope, { strict: false, selfId, allowLegacyBase: true });
+    const additions = (update.addDependsOn ?? [])
+      .map(reference => canonicalizeBacklogReference(reference, scope))
+      .filter(reference => !current.dependsOn.includes(reference));
+    const cycle = await findDependencyCycle(selfId, additions, async dependency => {
+      const dependencyItem = await this.get(dependency).catch(() => undefined);
+      return (dependencyItem?.dependsOn ?? []) as WorkItemId[];
+    });
+    if (cycle) {
+      throw new Error(`invalid backlog relationship: dependency cycle, ${selfId} would wait for ${cycle}`);
+    }
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
+    // A platform only attaches a label that already exists, so a new edge
+    // needs its label definition before the edge can be written.
+    if (delta.add.length && target.tracker.ensureBacklogMetadata) {
+      await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
+        name,
+        color: 'C5DEF5',
+        description: 'AFK backlog metadata',
+      })));
+    }
+    await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+  }
+
+  /**
+   * Give an item the organizational role of a PRD anchor.
+   *
+   * The role is written as a label, and the role label is reserved metadata:
+   * an anchor carries no stage label at all, and the human-in-the-loop mode
+   * says it never runs by itself. Every other label of the issue stays where
+   * it is, so an item can become an anchor without losing its children, its
+   * dependencies or its business tags.
+   */
+  async applyRole(id: string, kind: BacklogKind): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const delta = planRoleLabelDelta(issue.labels, kind);
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
+    if (delta.add.length && target.tracker.ensureBacklogMetadata) {
+      await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
+        name,
+        color: 'C5DEF5',
+        description: 'AFK backlog metadata',
+      })));
+    }
+    await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+  }
+
+  /**
+   * Record the ref the work starts from.
+   *
+   * The ref belongs in the body of the item. A branch name means nothing
+   * outside the repository that has it, so a label would carry a
+   * repository-local fact across every repository the credentials reach. The
+   * body is where a person writes it down and where AFK reads it back.
+   */
+  async applyExecutionBase(id: string, baseBranch: string): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const description = issue.description ?? '';
+    if (parseExecutionBaseBranch(description) === baseBranch) return;
+    await target.tracker.updateIssue(target.issueId, {
+      description: applyExecutionBaseBranch(description, baseBranch),
+    });
+  }
+
+  async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const delta = planModeLabelDelta(issue.labels, mode);
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
+    if (delta.add.length && target.tracker.ensureBacklogMetadata) {
+      await target.tracker.ensureBacklogMetadata(delta.add.map(name => ({
+        name,
+        color: '0052CC',
+        description: 'AFK backlog metadata',
+      })));
+    }
+    await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+  }
+
   async initialize(): Promise<void> {
     // Prefer an adapter-native provisioning hook. It creates AFK lifecycle labels
     // before issue creation while preserving labels that the repository owns.
@@ -342,17 +454,30 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    // The role vetoes first: an organizational anchor is never executable,
-    // whatever lifecycle position it happens to carry.
-    if (item.kind === 'prd') return false;
-    if (item.executionEligible === false || (item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
+    return (await this.explainRunnability(item)).runnable;
+  }
+
+  /**
+   * Whether the item may start now, and what holds it back.
+   *
+   * The children and the dependencies may live in other repositories, so
+   * both are read through the same graph the claim uses: the answer has to
+   * agree with the one the claim path reaches.
+   */
+  async explainRunnability(item: BacklogItem): Promise<Runnability> {
     const children = await this.childrenOf(item);
-    if (children.length) return false;
-    for (const dependencyId of item.dependsOn) {
+    const dependencies = await Promise.all(item.dependsOn.map(async dependencyId => {
       const dependency = await this.get(dependencyId).catch(() => null);
-      if (!dependency || dependency.state !== 'done') return false;
-    }
-    return true;
+      return { id: dependencyId, state: dependency?.state };
+    }));
+    return evaluateRunnability({
+      container: item.kind === 'prd',
+      state: item.state,
+      executionMode: item.executionMode,
+      executionEligible: item.executionEligible,
+      hasChildren: children.length > 0,
+      dependencies,
+    });
   }
 
   private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {

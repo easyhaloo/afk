@@ -1,6 +1,7 @@
 import { createManagementProviders, type TrackerPlatform } from './infrastructure/provider/tracker-provider-factory.js';
-import { addBacklogTag, confirmBacklogMerge, createBacklog, interruptBacklog, listBacklogs, removeBacklogTag, showBacklog } from './domain/backlog/commands.js';
-import type { BacklogCreateInput, BacklogListOptions } from './domain/backlog/index.js';
+import { addBacklogTag, applyBacklogExecutionBase, applyBacklogMode, applyBacklogRelationUpdate, applyBacklogRole, confirmBacklogMerge, createBacklog, interruptBacklog, listBacklogs, removeBacklogTag, showBacklog } from './domain/backlog/commands.js';
+import type { BacklogCreateInput, BacklogExecutionMode, BacklogKind, BacklogListOptions } from './domain/backlog/index.js';
+import type { BacklogRelationUpdate } from './domain/backlog/metadata-codec.js';
 import type { ManagementProviderBundle } from './infrastructure/provider/providers.js';
 import { loadWorkflowConfig } from './infrastructure/config/manager.js';
 
@@ -26,6 +27,26 @@ export function createBacklogRuntime(factory: ProviderFactory = createManagement
     async removeTag(workspace: string, id: string, tag: string) {
       const backlog = await provider(workspace);
       await removeBacklogTag(backlog, id, tag);
+      return showBacklog(backlog, id);
+    },
+    async applyRelationUpdate(workspace: string, id: string, update: BacklogRelationUpdate) {
+      const backlog = await provider(workspace);
+      await applyBacklogRelationUpdate(backlog, id, update);
+      return showBacklog(backlog, id);
+    },
+    async applyRole(workspace: string, id: string, kind: BacklogKind) {
+      const backlog = await provider(workspace);
+      await applyBacklogRole(backlog, id, kind);
+      return showBacklog(backlog, id);
+    },
+    async applyMode(workspace: string, id: string, mode: BacklogExecutionMode) {
+      const backlog = await provider(workspace);
+      await applyBacklogMode(backlog, id, mode);
+      return showBacklog(backlog, id);
+    },
+    async applyExecutionBase(workspace: string, id: string, baseBranch: string) {
+      const backlog = await provider(workspace);
+      await applyBacklogExecutionBase(backlog, id, baseBranch);
       return showBacklog(backlog, id);
     },
     async interrupt(workspace: string, id: string, reason: string) {

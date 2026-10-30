@@ -40,6 +40,8 @@ export class CodexAppServerExecution implements AgentExecution {
   private readonly tools = new Map<string, AgentToolCallSummary>();
   private threadId?: string;
   private turnId?: string;
+  /** Re-arms the idle watchdog whenever the agent says something. */
+  private onActivity?: () => void;
 
   private constructor(
     private readonly options: AgentExecutionOptions,
@@ -92,15 +94,34 @@ export class CodexAppServerExecution implements AgentExecution {
     return next.done ? null : next.value;
   }
 
-  async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
+  async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number; idleTimeoutMs?: number }): Promise<ExecutionResult> {
     const timeoutMs = options?.completionTimeoutMs ?? 600_000;
+    const idleTimeoutMs = options?.idleTimeoutMs;
     const timer = setTimeout(() => {
       void this.finish(this.buildResult('timed_out'));
     }, timeoutMs);
+    // The idle watchdog: a turn that says nothing for too long is not
+    // working. The app-server reports every turn event as a notification,
+    // so the last one says when the agent was last alive.
+    let idleTimer: NodeJS.Timeout | undefined;
+    if (idleTimeoutMs !== undefined && idleTimeoutMs > 0) {
+      const arm = (): void => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          void this.finish(this.buildResult('timed_out', {
+            code: 'AGENT_IDLE',
+            message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s`,
+          }));
+        }, idleTimeoutMs);
+      };
+      arm();
+      this.onActivity = arm;
+    }
     try {
       return await this.resultPromise;
     } finally {
       clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
     }
   }
 
@@ -151,6 +172,8 @@ export class CodexAppServerExecution implements AgentExecution {
 
   private async consumeNotifications(): Promise<void> {
     for await (const notification of this.client.notifications()) {
+      // The agent just said something, whatever it was.
+      this.onActivity?.();
       collectAgentToolEvent('codex', notification, this.tools);
       for (const event of normalizeAppServerNotification(notification)) {
         if (event.type === 'result') {

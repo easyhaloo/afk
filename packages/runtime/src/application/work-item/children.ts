@@ -35,6 +35,14 @@ export interface WorkItemChildrenResult<Item extends WorkItemChildrenEntry> {
   parent: Item;
   /** Its direct children, ordered by project and issue number. */
   children: Item[];
+  /**
+   * Every item the answer was derived from.
+   *
+   * A dependency may live outside the subtree, so the items the answer
+   * rests on are part of the answer: a caller that wants to explain why a
+   * child is waiting needs the whole set, not only the children.
+   */
+  items: readonly Item[];
   /** Whether the answer came from the local copy or from a refresh. */
   source: WorkItemChildrenSource;
 }
@@ -138,7 +146,7 @@ export async function listWorkItemChildren<Item extends WorkItemChildrenEntry>(
     .filter(item => item.parentId === query.parentId)
     .sort(compareByProjectAndNumber);
 
-  return { parent, children, source: refreshed ? 'refreshed' : 'inventory' };
+  return { parent, children, items, source: refreshed ? 'refreshed' : 'inventory' };
 }
 
 function findItem<Item extends WorkItemChildrenEntry>(items: readonly Item[], id: string): Item | undefined {

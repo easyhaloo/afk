@@ -85,21 +85,25 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
+| `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
-| `afk backlog list/show/tag` | Inspect and manage backlog records |
-| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project |
+| `afk backlog list/show/tag` | Inspect and manage backlog records; `show` names the change request and whether it can land |
+| `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
+| `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
+| `afk backlog mode --id <id> --mode afk\|hitl` | Switch who runs a backlog item |
+| `afk backlog base --id <id> --branch <ref>` | Record the ref a backlog item starts from, in its body |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project, each with the reason it is or is not runnable |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
-| `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
-| `afk backlog reconcile-merge` | Complete a root backlog whose change is already merged on the provider |
+| `afk backlog confirm-merge` | Merge an approved backlog change — root or child — and mark it done |
+| `afk backlog reconcile-merge` | Complete a backlog whose change is already merged on the provider |
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk execute --work-item-id <id> [--execution-manifest <path>]` | Implement, independently verify, and publish one managed work item |
 | `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
-| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
+| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status (`--all` shows every loop in the loop runs directory), and graceful stop |
 | `afk observe` | Read append-only AFK run audit events as text by default, or with `--json` (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
 | `afk observe <runId>` / `afk log <runId>` | Short forms of `afk observe execution <runId>` with the same `--watch`, `--tail`, `--root`, and `--json` options |
 | `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | Show a detailed run timeline; optionally follow new events or limit the initial history |
@@ -345,6 +349,113 @@ validation.
 separately: `--state ready` never returns an anchor, because an anchor has no
 state, and `--kind prd` is what selects them.
 
+### Backlog relationships
+
+A relationship is written when an item is created, but a backlog keeps moving:
+a dependency appears when the dependency is discovered, and a baseline edge has
+to be withdrawn when it turns out to name a branch that does not exist.
+`afk backlog relation add` and `afk backlog relation remove` are how an edge of
+an item that already exists is changed.
+
+The edit names the edge it touches — `--parent`, `--base` or `--depends-on` —
+and every other edge of the item stays where it is. The provider turns the edit
+into the smallest label delta that carries it, so a relationship label is never
+rewritten wholesale, and a label the edit does not mention is left alone even
+when this codec cannot parse it. A reference is either a plain issue number in
+the owning project or a canonical global work item identity, and a reference to
+the item itself is refused. A dependency that already reaches the item would
+close a cycle, so it is refused too.
+
+`afk backlog tag add` and `afk backlog tag remove` deliberately refuse the
+reserved metadata prefixes, including the relationship prefixes: a business
+tag and a relationship edge are different things and are edited through
+different commands.
+
+### Backlog roles
+
+The role label is reserved metadata too, so it cannot arrive as a business
+tag. `afk backlog role --id <id> --kind prd` gives an item that already
+exists the organizational role of a PRD anchor: the role label goes on, the
+stage label goes away, and the human-in-the-loop mode says it never runs by
+itself. An anchor has no lifecycle position at all — it is a container.
+
+Every other label of the issue stays where it is, so an item can become an
+anchor without losing its children, its dependencies or its business tags.
+The edit is idempotent: an item that already carries the role is left alone.
+
+### Backlog execution mode
+
+`afk backlog mode --id <id> --mode afk|hitl` switches who runs an item that
+already exists. The execution mode is reserved metadata, so the edit replaces
+the mode label and nothing else: the state, the role, the business tags and
+the relationships of the item stay exactly where they are. The edit is
+idempotent, and it is the way an operator hands an item to AFK or takes it
+back for a human.
+
+### The ref a work item starts from
+
+A repository can be developed on `master` while the work starts from a release
+ref, and the provider's default branch says nothing about the second case. The
+ref is therefore a fact about the work, and it lives in the body of the item:
+
+```text
+## Base Version
+
+- Base Ref: 2025-11-8-show
+```
+
+A branch name means nothing outside the repository that has it, so a label
+would carry a repository-local fact across every repository the credentials
+reach. `afk backlog create --base-branch <ref>` writes the block when the
+item is created, and `afk backlog base --id <id> --branch <ref>` records it
+on an item that already exists. Both leave everything else about the item
+alone, and both are idempotent.
+
+The execution reads the block back: an execution manifest that does not exist
+yet is derived from the work item, and its base branch is the ref the body
+declares, then the repository's default branch, then `main`. The manifest
+still wins when it exists — it is the execution's own record of what it runs
+against — so an operator can override the body for one run without editing
+the issue.
+
+### Why a work item is not moving
+
+A lifecycle label says where a work item sits, not why it is standing still. A
+board of `ready` items cannot tell a queue from a deadlock, so every surface
+that reports a work item reports the reason as well:
+
+| Reason | Meaning |
+| --- | --- |
+| `not_execution_eligible` | The item is a container (a PRD anchor), not executable work |
+| `blocked_for_human` | The item is blocked and waits for a person |
+| `execution_in_progress` | AFK is already working on it |
+| `awaiting_merge` | The change passed QA and waits to be merged |
+| `state_not_runnable` | The lifecycle position is not one AFK starts work from |
+| `execution_mode_hitl` | A human runs this item, so AFK must not pick it up |
+| `not_managed` | AFK does not own the lifecycle of this item |
+| `has_children` | The item owns children; the children are the work |
+| `dependency_not_done` | At least one dependency has not finished |
+
+The dependency rule names the dependencies that have not finished, so the
+answer says who has to act rather than only that somebody has to. The rules
+live in one place (`@afk/runtime` domain backlog), and the loop, the command
+line and the desktop client answer the same question the same way. The loop
+records the reason in its log for every issue it skips, and
+`afk backlog children <id>` reports it for every child of a PRD.
+
+### A claim that outlived its process
+
+A claim outlives the process that took it: a loop that restarts finds its
+item still marked in progress, with nothing executing it any more. The poll
+only looks for work that has not started, so such an item would never move
+again — a restart would silently become a stall.
+
+On startup a loop therefore returns the claims it owns to the queue. An item
+that already has an open change request goes back to `rework`, because that is
+the position whose execution reuses the change request instead of refusing to
+open a second one. Only the items the loop owns are touched: another loop's
+claim is another loop's work.
+
 ### Backlog manifest
 
 `afk backlog apply-manifest <file>` applies a provider-neutral manifest: a
@@ -407,6 +518,158 @@ child items; a parent itself is never runnable. "No child items" is decided on
 the backlog graph, so children in another repository count as children. Any automation failure,
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
+
+### The merge gate
+
+Merging is a person's decision. AFK implements the work, verifies it independently, and
+publishes the change request; the change then waits as `merge_ready` + `hitl` for somebody
+to merge it. A child item waits exactly like a root does — where an item sits in the tree
+does not change who confirms its merge.
+
+Two commands close the gate, and both are human actions:
+
+- `afk backlog confirm-merge` merges the change request on the provider and marks the item
+  `done`. The command performs the merge, so it stays an operator action.
+- `afk backlog reconcile-merge` does not merge anything: it brings an item in line with a
+  change that a person has already merged on the provider.
+
+The branch the change has to have targeted is resolved from the item itself — the ref its
+body declares, which is the ref the execution manifest was derived from — then an explicit
+base edge, then the configured branch. Both commands take `--target-branch` for the case
+where an operator knows better.
+
+An installation that runs a fully autonomous pipeline can ask for the merge to happen
+without a person: set `autoMerge: true` in `~/.afk/config.yml`, or `AFK_AUTO_MERGE=1`. The
+default is off, so a change is never merged by AFK unless the installation asks for it.
+
+### When the change request conflicts
+
+A change request can conflict with its target branch: both sides changed the same lines.
+A conflict is not a QA failure and not a merge that needs a person — it is work AFK can do.
+The flow has four steps, and it happens inside the QA round, before the change request is
+handed over.
+
+1. **The conflict shows up where the work happens.** The QA round puts the target branch
+   in the QA worktree and merges the change branch into it. That merge is where a conflict
+   becomes visible, and AFK reads it from the unmerged paths git leaves behind — not from
+   the merge's exit code, which a localized git reports in its own language.
+2. **AFK resolves it in the QA worktree.** The QA worktree *is* the change request's
+   branch, so a resolution made there lands exactly where the change is published from.
+   A dedicated agent (`merge-conflict-resolution` template) resolves the conflicted files:
+   a file that has nothing to do with the change takes the target branch's version, a
+   file that does keeps the intent of both sides.
+3. **AFK verifies the result.** The resolution is committed, and the verification runs on
+   the resolved tree. A conflict that is still there after the agent's turn is not
+   guessed at: the item goes to `blocked` + `hitl` with the conflicting files named, for
+   a person to finish.
+4. **AFK checks what it published.** After the change request is published, AFK reads the
+   platform's verdict. Only a real conflict counts — a verdict the platform has not
+   computed yet, a failing check, or a missing approval do not. A change request that
+   really conflicts goes back for another round as a `conflict` rework record, which
+   carries the conflict into the next attempt. It is never handed over as
+   `merge_ready`.
+
+The merge gate is unaffected: a conflict is resolved so that a person still has to decide
+whether to merge.
+
+**A binary file cannot be merged by anybody.** When both sides changed the same binary
+file, no text merge exists — a person cannot resolve it either. AFK keeps such a file out
+of the fallback commit it makes for whatever the agent left in the worktree, and reports
+it. Publishing it would turn any later conflict into a dead end.
+
+### When the agent stops answering
+
+An agent can die without telling anyone: a TUI crashes, a model stream drops, the process
+is killed with the machine. The runner waits for a completion signal that can never arrive,
+and the wait runs until the hard timeout — hours of nothing for a run that was already lost.
+Two watchdogs turn that silence into a verdict.
+
+1. **The session is gone.** An interactive agent lives in a tmux session, and the session
+   dies with the agent. AFK notices the missing session and ends the run at once
+   (`AGENT_GONE`) instead of waiting for a signal that will never be written.
+2. **The agent went quiet.** `idleTimeout` is the longest the agent may say nothing. The
+   tmux path watches the visible pane, the batch path watches its output, the container
+   path watches its output file, and the app-server path re-arms on every notification.
+   Silence past the limit ends the run (`AGENT_IDLE`).
+
+A finished agent that quits leaves both a completion signal and no session. The signal
+wins: the run is a success, not a corpse. The completion timeout is checked before the
+session, so a genuine work timeout is still reported as a timeout and not as a dead agent.
+
+The four timeouts answer different questions, and the difference matters:
+
+| Setting | Question it answers | Default |
+| --- | --- | --- |
+| `idleTimeout` | How long may the agent say nothing? | 30 min |
+| `completionTimeout` | How long may one agent wait? | 2 h |
+| `qaTimeout` | How long may the verification round take? | 1 h |
+| `workflowHardTimeout` | How long may the whole workflow take? | 4 h |
+
+`workflowHardTimeout` is not a soft cap: a detached watchdog kills the tmux session when
+it fires. It therefore has to exceed `completionTimeout` + `qaTimeout`, or it cuts the
+verification round short of the budget the verification round was given. Set them in
+`~/.afk/config.yml` (`idleTimeout`, `completionTimeout`, `qaTimeout`,
+`workflowHardTimeout`) or with `AFK_IDLE_TIMEOUT`, `AFK_COMPLETION_TIMEOUT`,
+`AFK_QA_TIMEOUT`, `AFK_WORKFLOW_HARD_TIMEOUT`.
+
+**An agent that died is repeated, not waited out.** A dead agent says nothing about the
+work: the changes it made are still in the worktree, and the upstream model service may
+well be reachable again a minute later. Codex reports a turn that died — a stream the
+gateway cut — in its own rollout file, and AFK reads it there: the terminal stays open
+after such a turn, so nothing about the process would say the turn is over. An attempt
+that ended this way is repeated in the same worktree, with the same goal, bounded by the
+run's retry budget. A timeout is not repeated this way: a timeout says the work did not
+finish in the budget it was given, which is a fact about the work.
+
+### When the branch preparation would throw the work away
+
+A retry starts by preparing the working branch again. The preparation used to take the
+published branch as the truth and reset the local one to it, whatever the last attempt had
+committed locally. A commit that was made and never published became unreachable, the next
+attempt found nothing to verify, and the work was gone: a change request with nothing in it,
+and a verification that failed every criterion because the branch was identical to its
+target.
+
+The branch is prepared at whichever side holds work the other does not:
+
+| Published branch | Local branch | Prepared at |
+| --- | --- | --- |
+| contains the local one | — | the published branch; nothing is lost |
+| does not contain the local one | contains the published one | the local branch; the unpublished work survives |
+| does not contain the local one | has commits of its own | the local branch; the published work is merged back in when the branch is published |
+
+Publishing reconciles the two sides before it pushes: a published branch that is simply
+ahead is taken as it is, and a branch that has diverged is merged, so the push is not
+rejected as a non-fast-forward and neither side is lost.
+
+Ancestry is read from the merge base rather than from `git merge-base --is-ancestor`. That
+command reports "no" by exiting with a status code and printing nothing at all, so a git
+client that decides failure by looking for an error message sees a successful command with
+empty output — and the answer would be "yes" for every pair of commits.
+
+### When this machine cannot verify the work
+
+An acceptance criterion names the command that settles it. That command needs tools, and
+the tools may not be here: a suite that cannot import the framework it tests, a build
+tool without its JDK, a `pytest` that is not installed at all. A verification agent
+discovers this by running into it — which takes as long as the agent's patience, and
+ends as an unexplained timeout.
+
+AFK asks first. Before the verification agent starts, the criteria's own check commands
+are read for the binaries they run, and each of those binaries is probed the way the
+criterion would exercise it: a pytest suite is collected, not asked for its version;
+Maven is asked for the version that names its JDK. What the probe finds is classified.
+Only what is clearly the machine's fault blocks the round — a missing binary, a missing
+dependency, a missing runtime. A check that fails for any other reason is left to the
+agent, because the preflight must not block work that would have passed.
+
+A blocked round names what is missing and which criterion needed it, so the person who
+picks it up knows what to install rather than having to read a transcript.
+
+Acceptance criteria are read in their three-field form — `- [ ] <text> -- <type> -- <command>`,
+where the type is one of `test`, `curl`, `log`, `manual`, `bash` or `none`. The type is
+the anchor, so a `--` inside the text or the command cannot be mistaken for the
+separator.
 
 An item with the `prd` role is an organizational parent. It has no lifecycle
 state at all — it groups children instead of waiting for a human, and "waiting
@@ -489,8 +752,8 @@ sequenceDiagram
     R->>C: create change request
     R->>P: transition verification
     R->>Q: verify item
-    Q->>C: merge change request
-    Q->>P: transition done
+    Q->>P: transition merge_ready + hitl
+    Note over Q,C: a person merges the change request
     R->>P: release lease (resource scope)
 ```
 
@@ -498,6 +761,37 @@ sequenceDiagram
 manifest, and delegates to `executeWorkItem`. The former separate
 implementation/QA queue is removed. The standalone QA command remains a
 lower-level verification operation.
+
+The scoped backlog ID is the provider backlog id of the manifest, while a
+provider lists backlog items under their canonical global id. The loop
+therefore matches the manifest-bound work item by its canonical id, so one
+manifest-bound loop executes exactly one work item.
+
+A manifest declares the baseline of its primary repository, and that baseline
+is where the change request lands. The globally configured `targetBranch` is
+only the fallback for an execution without a manifest.
+
+`AFK_LOOP_PID_FILE` and `AFK_LOOP_STATUS_FILE` relocate the loop's pid file
+and status file. The default keeps one loop per machine; distinct paths let
+several manifest-bound loops run side by side, each on its own work item.
+
+Claude Code shows a "Quick safety check" dialog the first time it runs in a
+directory it has never seen, which is every worktree AFK creates. The dialog
+blocks the agent TUI, the statusline therefore never renders, and the run
+would be reported as `blocked/hitl` even though the implementation is fine.
+Before launching Claude Code, AFK records the worktree as trusted in the
+Claude Code config file — `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`
+— under `projects[<absolute path>].hasTrustDialogAccepted`. The write is
+best-effort and never fails a run; `AFK_CLAUDE_TRUST_PRESEED=0` disables it.
+
+An agent TUI can own the keyboard with a modal of its own. Codex greets the
+user with an "Update available" prompt as soon as a newer version is
+installed, and while that prompt is open the Enter presses that submit the
+goal are swallowed: the goal then sits in the composer and the run waits for
+a completion signal that never arrives. AFK therefore starts Codex with
+`check_for_update_on_startup=false`, waits for the Codex composer to be ready
+before it types the goal, and presses Enter again when the composer still
+holds the goal.
 
 ## Extension points
 
@@ -512,8 +806,27 @@ filesystem lease directory.
 
 - A failed transition, conflict, timeout, or expired lease is `blocked` plus
   `hitl`; it is never silently retried as automatic work.
+- An agent that died is the one exception: a step whose agent went away or
+  stopped answering is repeated in the same worktree, with the same goal,
+  bounded by the run's retry budget. Nothing about the work changed, so
+  repeating it is not a retry of the work — it is the same attempt.
+- Blocking an item also closes the operator rework request the failed
+  execution answered, so `afk backlog retry` can ask for it again. A QA-sourced
+  rework record stays open: it is the verification feedback, and the next
+  operator retry supersedes it on its own.
+- AFK commits the implementation itself before it publishes the branch. An
+  agent that leaves its changes uncommitted would otherwise publish an empty
+  change, and the work would be lost when the workspace is restored.
+- Work that was committed but never published is not thrown away. The working
+  branch is prepared at whichever side holds it, and the published work is
+  merged back in when the branch is published.
+- AFK's runtime artifacts — the completion signal and the `.afk/` directory —
+  are never staged into a commit. They are process state, not work.
 - Native claim is preferred; the filesystem fallback is deliberately scoped to
   a trusted local filesystem on one host.
+- An interactive agent must receive the goal, not merely have it typed. AFK
+  checks the composer state after submitting and repeats the submit while the
+  goal is still pending, so a TUI modal cannot silently strand a run.
 - Lease cleanup is lifecycle-owned and idempotent.
 - Backlog IDs map deterministically to branches through the provider-neutral
   branch naming function.

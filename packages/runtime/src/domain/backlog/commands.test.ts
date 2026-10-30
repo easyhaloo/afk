@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   adoptBacklog,
+  blockBacklog,
   confirmBacklogMerge,
   createBacklog,
   interruptBacklog,
   reconcileMergedBacklog,
+  resolveExpectedTargetBranch,
   retryBacklog,
 } from './commands.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
@@ -94,6 +96,72 @@ describe('backlog commands', () => {
     expect(provider.createRework).not.toHaveBeenCalled();
   });
 
+  it('closes the open rework record when a blocked execution ends', async () => {
+    const provider = lifecycleProvider(backlogItem({ state: 'blocked', executionMode: 'hitl' }));
+    provider.getActiveRework = vi.fn(async () => ({
+      version: 1 as const,
+      id: 'r1',
+      attempt: 1,
+      status: 'open' as const,
+      source: 'operator' as const,
+      summary: 'first attempt',
+      failedCriteria: [],
+      requiredChecks: [],
+      createdAt: '2026-09-17T00:00:00.000Z',
+    }));
+
+    await blockBacklog(provider, '42', 'QA timed out');
+
+    expect(provider.resolveRework).toHaveBeenCalledWith('42', 'r1', {
+      summary: 'Rework r1 did not pass: QA timed out',
+    });
+    expect(provider.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'QA timed out' });
+    expect(provider.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
+  });
+
+  it('lets an operator retry an item whose rework attempt failed', async () => {
+    const provider = new InMemoryBacklogProvider([
+      backlogItem({ id: '42', state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    await provider.createRework('42', {
+      source: 'operator',
+      summary: 'first attempt',
+      failedCriteria: [],
+      requiredChecks: [],
+    });
+    // The attempt answered the rework request and failed.
+    await provider.transition('42', 'blocked', { reason: 'QA timed out' });
+    await provider.setExecutionMode('42', 'hitl');
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', status: 'open' });
+
+    await expect(retryBacklog(provider, '42', 'second attempt')).resolves.toMatchObject({
+      state: 'rework',
+      executionMode: 'afk',
+    });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', status: 'open' });
+  });
+
+  it('lets an operator retry an item whose failed attempt left its request open', async () => {
+    const provider = new InMemoryBacklogProvider([
+      backlogItem({ id: '42', state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    await provider.createRework('42', {
+      source: 'operator',
+      summary: 'first attempt',
+      failedCriteria: [],
+      requiredChecks: [],
+    });
+    await provider.transition('42', 'blocked', { reason: 'QA timed out' });
+    await provider.setExecutionMode('42', 'hitl');
+
+    // The retry answers the previous request, so it closes that one first.
+    await expect(retryBacklog(provider, '42', 'second attempt')).resolves.toMatchObject({
+      state: 'rework',
+      executionMode: 'afk',
+    });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', status: 'open' });
+  });
+
   it('merges the associated root change, confirms merged, then marks the backlog done', async () => {
     const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
     const provider = lifecycleProvider(item);
@@ -166,7 +234,6 @@ describe('backlog commands', () => {
   });
 
   it.each([
-    [{ parentId: '7', state: 'merge_ready', executionMode: 'hitl' }, 'must be a root backlog'],
     [{ state: 'verification', executionMode: 'hitl' }, 'requires merge_ready + hitl'],
     [{ state: 'merge_ready', executionMode: 'afk' }, 'requires merge_ready + hitl'],
   ] as const)('rejects merge confirmation when %s', async (overrides, message) => {
@@ -176,6 +243,22 @@ describe('backlog commands', () => {
 
     await expect(confirmBacklogMerge(provider, changes, item.id, 'main')).rejects.toThrow(message);
     expect(changes.findForBacklog).not.toHaveBeenCalled();
+  });
+
+  it('confirms the merge of a child backlog, which waits like a root does', async () => {
+    // A child waits for a person to merge its change exactly like a root
+    // does, so the confirmation has to reach it as well.
+    const child = backlogItem({ id: '43', parentId: '42', state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(child);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'open', sourceBranch: `${child.branchName}-qa`, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'merged', targetBranch: 'release' }),
+    };
+
+    await expect(confirmBacklogMerge(provider, changes, '43', 'release')).resolves.toMatchObject({ id: '43' });
+    expect(changes.merge).toHaveBeenCalledWith('mr-10');
+    expect(provider.transition).toHaveBeenCalledWith('43', 'done', { changeId: 'mr-10' });
   });
 
   it('treats already reached lifecycle targets as idempotent success', async () => {
@@ -218,7 +301,7 @@ describe('backlog commands', () => {
     expect(provider.transition).not.toHaveBeenCalled();
   });
 
-  it('refuses to reconcile a change that targets another branch or belongs to a child', async () => {
+  it('refuses to reconcile a change that targets another branch', async () => {
     const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
     const provider = lifecycleProvider(item);
     const changes = {
@@ -231,13 +314,50 @@ describe('backlog commands', () => {
     expect(outcome.reconciled).toBe(false);
     expect(outcome.reason).toMatch(/targets release/);
     expect(provider.transition).not.toHaveBeenCalled();
+  });
 
-    const child = backlogItem({ id: '43', parentId: '42', state: 'merge_ready', executionMode: 'hitl' });
-    const childProvider = lifecycleProvider(child);
-    const childOutcome = await reconcileMergedBacklog(childProvider, changes, child.id, 'main');
-    expect(childOutcome.reconciled).toBe(false);
-    expect(childOutcome.reason).toMatch(/not a root backlog/);
-    expect(childProvider.transition).not.toHaveBeenCalled();
+  it('reconciles a child whose change was merged by a human', async () => {
+    // A child waits for its human merge as "merge pending" when AFK merged
+    // it, and as blocked when AFK could not. Both are the same situation,
+    // and nothing else would ever bring the child in line with the branch
+    // its work already landed on.
+    const child = backlogItem({ id: '43', parentId: '42', state: 'blocked', executionMode: 'hitl' });
+    const provider = lifecycleProvider(child);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'merged', sourceBranch: `${child.branchName}-qa`, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, child.id, 'release');
+    expect(outcome.reconciled).toBe(true);
+    expect(outcome.reason).toMatch(/mr-10 is merged/);
+    expect(provider.transition).toHaveBeenCalledWith('43', 'done', { changeId: 'mr-10' });
+  });
+
+  it('leaves a blocked item alone while its change is still open', async () => {
+    const child = backlogItem({ id: '43', parentId: '42', state: 'blocked', executionMode: 'hitl' });
+    const provider = lifecycleProvider(child);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-10', state: 'open', sourceBranch: `${child.branchName}-qa`, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, child.id, 'release');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/merge gate is still open/);
+    expect(provider.transition).not.toHaveBeenCalled();
+  });
+
+  it('resolves the branch a change has to have targeted from the item itself', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl', executionBase: '2025-11-8-show' });
+    const provider = lifecycleProvider(item);
+
+    // The body declares the ref the work starts from, and the execution
+    // manifest is derived from it — so it is the branch the change lands on.
+    expect(await resolveExpectedTargetBranch(provider, item, 'main')).toBe('2025-11-8-show');
+    expect(await resolveExpectedTargetBranch(provider, backlogItem({ state: 'ready', executionMode: 'afk' }), 'main')).toBe('main');
   });
 
   it('reports an already completed backlog instead of reconciling it again', async () => {
@@ -299,6 +419,8 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
   transition: ReturnType<typeof vi.fn>;
   setExecutionMode: ReturnType<typeof vi.fn>;
   createRework: ReturnType<typeof vi.fn>;
+  getActiveRework: ReturnType<typeof vi.fn>;
+  resolveRework: ReturnType<typeof vi.fn>;
 } {
   const current = { ...item };
   return {

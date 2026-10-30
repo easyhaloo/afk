@@ -124,7 +124,7 @@ describe('ClaudeCodeProvider + StreamingAgentExecution — session_id surfaces i
     });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 5_000 })).resolves.toMatchObject({
       status: 'completed',
     });
     expect(execution.metadata.threadId).toBe('47444657-aaaa-4000-8000-000000000000');

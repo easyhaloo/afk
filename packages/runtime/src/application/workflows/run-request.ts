@@ -40,10 +40,18 @@ export interface WorkflowRunRequest {
   session: string;
   targetBranch: string;
   baseBranch: string;
+  /**
+   * The baseline a manifest-bound execution declared. It is the branch the
+   * change request has to land on, so it is kept apart from `baseBranch`,
+   * which is the branch a worktree is cut from.
+   */
+  executionBaseBranch?: string;
   baseBranchExplicit?: boolean;
   maxRetries: number;
   hardTimeoutMs: number;
   completionTimeoutMs: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs: number;
   maxHandoffs: number;
   contextHighTokens: number;
   maxTotalTokens: number;
@@ -71,9 +79,12 @@ export interface WorkflowRunCliInput {
   workspaceRoot?: string;
   targetBranch?: string;
   baseBranch?: string;
+  /** The baseline a manifest-bound execution declared for its change request. */
+  executionBaseBranch?: string;
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
+  idleTimeoutMs?: number;
   maxHandoffs?: number;
   contextHighTokens?: number;
   maxTotalTokens?: number;
@@ -99,8 +110,9 @@ const defaults = {
   targetBranch: 'main',
   baseBranch: 'main',
   maxRetries: 2,
-  hardTimeoutMs: 7_200_000,
+  hardTimeoutMs: 14_400_000,
   completionTimeoutMs: 7_200_000,
+  idleTimeoutMs: 1_800_000,
   contextHighTokens: 100_000,
   goalBudget: 10_000_000,
   sandboxProvider: 'local' as SandboxProviderName,
@@ -167,11 +179,13 @@ export function resolveWorkflowRequest(
     session: input.session ?? `afk-${input.workItemId ?? backlogId}`,
     targetBranch: input.targetBranch ?? config.targetBranch ?? defaults.targetBranch,
     baseBranch: input.baseBranch ?? config.trackerTargetBranch ?? config.targetBranch ?? defaults.baseBranch,
+    ...(input.executionBaseBranch ? { executionBaseBranch: input.executionBaseBranch } : {}),
     baseBranchExplicit: input.baseBranch !== undefined
       || ((input.branchStrategy?.type === 'named' || input.branchStrategy?.type === 'merge-to-head') && input.branchStrategy.baseBranch !== undefined),
     maxRetries: input.maxRetries ?? config.maxRetries ?? defaults.maxRetries,
     hardTimeoutMs: input.hardTimeoutMs ?? config.workflowHardTimeout ?? defaults.hardTimeoutMs,
     completionTimeoutMs: input.completionTimeoutMs ?? config.completionTimeout ?? defaults.completionTimeoutMs,
+    idleTimeoutMs: input.idleTimeoutMs ?? config.idleTimeout ?? defaults.idleTimeoutMs,
     maxHandoffs: input.maxHandoffs ?? Math.min(Math.ceil(budget / 1_000_000), 20),
     contextHighTokens: input.contextHighTokens ?? config.contextThreshold ?? defaults.contextHighTokens,
     maxTotalTokens: budget,
@@ -268,6 +282,7 @@ function applyExecutionManifest(
     repoRoot: primary.repoRoot,
     workspaceRoot: manifest.workspaceRoot,
     baseBranch: primary.baseBranch,
+    executionBaseBranch: primary.baseBranch,
     targetBranch: manifest.workingBranch,
     branchStrategy,
     repositories: manifest.repositories,

@@ -5,8 +5,16 @@ import { readSignal, readSignalSync } from '../io/signal.js';
 import { TIMEOUTS } from '../../shared/constants.js';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
+import { composerIsEmpty, supportsComposerState } from './agent-composer.js';
+import { logger } from '../io/logger.js';
 
 export { normalizeTmuxSessionName };
+
+/** How often AFK re-checks whether the agent accepted the goal. */
+const PROMPT_SUBMIT_POLL_MS = 1000;
+
+/** How many extra Enter presses AFK may spend on a goal that was not accepted. */
+const PROMPT_SUBMIT_ATTEMPTS = 3;
 
 export interface TmuxSession {
   name: string;
@@ -234,18 +242,29 @@ export class TmuxClient {
     timeout: number = 30000,
     provider: string = 'claude-code',
     session?: string,
+    window: string = 'main',
   ): Promise<boolean> {
     if (provider !== 'claude-code') {
       if (!session) return true;
       const start = Date.now();
+      let sessionSeen = false;
       while (Date.now() - start < timeout) {
-        if (await this.hasSession(session)) {
-          await this.sleep(500);
-          return true;
+        if (!sessionSeen && await this.hasSession(session)) sessionSeen = true;
+        if (sessionSeen) {
+          if (!supportsComposerState(provider)) {
+            await this.sleep(500);
+            return true;
+          }
+          // The session exists, but the TUI may still be starting up. Sending
+          // the goal before the composer exists loses the keystrokes.
+          const pane = await this.capturePane(session, window);
+          if (composerIsEmpty(provider, pane)) return true;
         }
         await this.sleep(500);
       }
-      return false;
+      // A provider whose composer marker AFK cannot read must not fail the
+      // run: the session exists and the goal can still be submitted.
+      return sessionSeen;
     }
 
     const { promises: fs } = await import('fs');
@@ -275,13 +294,14 @@ export class TmuxClient {
     signalType: string = 'goal_complete',
     provider: string = 'claude-code',
   ): Promise<void> {
-    const hasPrompt = await this.waitForPrompt(worktreeDir, 30000, provider, session);
+    const hasPrompt = await this.waitForPrompt(worktreeDir, 30000, provider, session, window);
     if (!hasPrompt) throw new Error(`Timeout waiting for ${provider} prompt`);
 
+    const target = `${normalizeTmuxSessionName(session)}:${window}`;
     // Type the prompt text directly (which already contains `/goal ` prefix).
     // The text is submitted as a single line
     // (no embedded newlines which would cause premature submission in the TUI).
-    await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, '--', prompt]);
+    await this.exec(['send-keys', '-t', target, '--', prompt]);
     await this.sleep(500);
 
     // After the agent completes the goal, it reports completion via
@@ -289,9 +309,41 @@ export class TmuxClient {
     //
     // Double-tap C-m to submit: the first Enter can be lost if the TUI is
     // mid-redraw on a long wrapped line; the second is a harmless no-op.
-    await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, 'C-m']);
+    await this.exec(['send-keys', '-t', target, 'C-m']);
     await this.sleep(300);
-    await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, 'C-m']);
+    await this.exec(['send-keys', '-t', target, 'C-m']);
+
+    if (!supportsComposerState(provider)) return;
+    await this.confirmPromptSubmitted(session, window, provider);
+  }
+
+  /**
+   * Make sure the goal actually reached the agent.
+   *
+   * An agent TUI can open a modal of its own — Codex shows "Update available"
+   * when a newer version is installed — and such a modal grabs the keyboard.
+   * The Enter presses that submit the goal are then swallowed, the goal stays
+   * in the composer, and the run waits for a signal that will never arrive.
+   * Pressing Enter again submits it.
+   */
+  private async confirmPromptSubmitted(
+    session: string,
+    window: string,
+    provider: string,
+  ): Promise<void> {
+    const target = `${normalizeTmuxSessionName(session)}:${window}`;
+    for (let attempt = 0; attempt < PROMPT_SUBMIT_ATTEMPTS; attempt += 1) {
+      await this.sleep(PROMPT_SUBMIT_POLL_MS);
+      const pane = await this.capturePane(session, window);
+      if (composerIsEmpty(provider, pane)) return;
+      await this.exec(['send-keys', '-t', target, 'C-m']);
+    }
+    const pane = await this.capturePane(session, window);
+    if (composerIsEmpty(provider, pane)) return;
+    logger.warn(
+      { session, window, provider },
+      'agent composer still holds the goal after repeated submit attempts',
+    );
   }
 
   /**

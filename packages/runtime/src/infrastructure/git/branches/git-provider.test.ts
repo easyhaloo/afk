@@ -189,13 +189,27 @@ describe('GitBranchProvider', () => {
     const git = simpleGit(repoPath);
     const provider = new GitBranchProvider(repoPath);
     const base = (await git.revparse(['HEAD'])).trim();
-    expect(await provider.commit(repoPath, 'no changes')).toBe('');
+    expect((await provider.commit(repoPath, 'no changes')).sha).toBe('');
     expect((await git.revparse(['HEAD'])).trim()).toBe(base);
     await writeFile(join(repoPath, 'result.txt'), 'result\n');
-    const sha = await provider.commit(repoPath, 'QA result');
+    const { sha } = await provider.commit(repoPath, 'QA result');
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
     expect(sha).toBe((await git.revparse(['HEAD'])).trim());
     expect(sha).not.toBe(base);
+  });
+
+  it('keeps the runtime artifacts out of the commit', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await writeFile(join(repoPath, 'result.txt'), 'result\n');
+    await writeFile(join(repoPath, '.afk-signal.json'), '{"type":"goal_complete"}\n');
+    await mkdir(join(repoPath, '.afk'), { recursive: true });
+    await writeFile(join(repoPath, '.afk', 'artifacts.txt'), '/tmp/evidence.log\n');
+
+    await new GitBranchProvider(repoPath).commit(repoPath, 'implementation');
+
+    const files = (await git.raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toEqual(['result.txt']);
   });
 
   it('commits a pending merge even when the merged trees are identical', async () => {
@@ -206,8 +220,76 @@ describe('GitBranchProvider', () => {
     await git.checkout('main');
     await git.merge(['empty-change', '--no-ff', '--no-commit']);
     expect((await git.status()).isClean()).toBe(true);
-    const sha = await new GitBranchProvider(repoPath).commit(repoPath, 'QA merge');
+    const { sha } = await new GitBranchProvider(repoPath).commit(repoPath, 'QA merge');
     expect(sha).toBe((await git.revparse(['HEAD'])).trim());
     expect((await git.raw(['rev-list', '--parents', '-n', '1', 'HEAD'])).trim().split(' ')).toHaveLength(3);
+  });
+
+  it('leaves a binary leftover out of the commit and reports it', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await writeFile(join(repoPath, 'result.txt'), 'result\n');
+    await writeFile(join(repoPath, 'notes.bin'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+
+    const commit = await new GitBranchProvider(repoPath).commit(repoPath, 'implementation');
+
+    expect(commit.skippedBinaryFiles).toEqual(['notes.bin']);
+    const files = (await git.raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toEqual(['result.txt']);
+    // The working tree keeps the change: nothing is lost, it just does not
+    // travel into the change request.
+    expect((await git.raw(['status', '--porcelain']))).toContain('notes.bin');
+  });
+
+  it('reports the files that conflict when the feature branch meets the baseline', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await writeFile(join(repoPath, 'shared.txt'), 'base\n');
+    await git.add('shared.txt');
+    await git.commit('shared');
+    await git.raw(['branch', '-M', 'main']);
+    await git.push('origin', 'main');
+
+    await git.checkoutLocalBranch('afk/backlog-42');
+    await writeFile(join(repoPath, 'shared.txt'), 'feature\n');
+    await git.add('shared.txt');
+    await git.commit('feature change');
+    await git.push('origin', 'afk/backlog-42');
+
+    await git.checkout('main');
+    await writeFile(join(repoPath, 'shared.txt'), 'baseline moved on\n');
+    await git.add('shared.txt');
+    await git.commit('baseline change');
+    await git.push('origin', 'main');
+
+    const provider = new GitBranchProvider(repoPath);
+    const merge = await provider.mergeFeatureIntoBaseline(repoPath, 'main', 'afk/backlog-42');
+
+    expect(merge.merged).toBe(false);
+    expect(merge.conflicts).toEqual(['shared.txt']);
+    // The merge stays in progress so the caller can resolve it in place.
+    expect(await provider.listUnresolvedConflicts(repoPath)).toEqual(['shared.txt']);
+  });
+
+  it('merges the feature branch cleanly when both sides touched other files', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await git.checkoutLocalBranch('afk/backlog-42');
+    await writeFile(join(repoPath, 'feature.txt'), 'feature\n');
+    await git.add('feature.txt');
+    await git.commit('feature change');
+    await git.push('origin', 'afk/backlog-42');
+
+    await git.checkout('main');
+    await writeFile(join(repoPath, 'baseline.txt'), 'baseline\n');
+    await git.add('baseline.txt');
+    await git.commit('baseline change');
+    await git.push('origin', 'main');
+
+    const provider = new GitBranchProvider(repoPath);
+    const merge = await provider.mergeFeatureIntoBaseline(repoPath, 'main', 'afk/backlog-42');
+
+    expect(merge).toEqual({ merged: true, conflicts: [] });
+    expect(await provider.listUnresolvedConflicts(repoPath)).toEqual([]);
   });
 });

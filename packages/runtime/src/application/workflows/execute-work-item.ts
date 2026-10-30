@@ -14,6 +14,7 @@ import { createProviderBundle, type ProviderBundle, type ManagementProviderBundl
 import { createCrossProjectBacklogGraphSource } from '../../infrastructure/provider/backlog-graph.js';
 import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
+import { parseExecutionBaseBranch } from '../../domain/backlog/execution-base.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { prepareAgentRuntime } from '../../domain/agents/index.js';
@@ -224,6 +225,11 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
       if (item.id !== workItemId || !item.managed || !item.executionEligible) throw new Error(`work item ${workItemId} is not executable`);
       const project = item.project;
       const name = project.projectKey.split('/').at(-1)!;
+      // The work item body declares the ref the work starts from. The
+      // repository's default branch is a setting of the repository and says
+      // nothing about this piece of work — a repository can be developed on
+      // `master` while the work starts from a release ref.
+      const baseBranch = parseExecutionBaseBranch(item.description) ?? project.defaultBranch ?? 'main';
       const manifest = parseExecutionManifest({
         schemaVersion: 1, workItemId, providerBacklogId: String(item.issueNumber),
         tracker: { platform: project.platform, projectKey: project.projectKey,
@@ -233,7 +239,7 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
         repositories: [{ platform: project.platform, projectKey: project.projectKey,
           ...(project.providerHost ? { providerHost: project.providerHost } : {}),
           ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}),
-          name, checkoutPath: `repositories/${name}`, baseBranch: project.defaultBranch ?? 'main', workingBranch: item.branchName, primary: true }],
+          name, checkoutPath: `repositories/${name}`, baseBranch, workingBranch: item.branchName, primary: true }],
       }, { manifestPath, backlogId: workItemId });
       await mkdir(workspaceDataDirectory(executionWorkspacePath(workItemId)), { recursive: true });
       const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`;
@@ -346,7 +352,16 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         }
         if (!(await providers.backlog.isRunnable(item))) throw new Error(`work item ${workItemId} has unmet dependencies or is not runnable`);
         const existing = await providers.changes.findForBacklog(item);
-        if (existing?.state === 'open') throw new Error(`work item already has an open change request: ${existing.url ?? existing.id}`);
+        if (existing?.state === 'open') {
+          // A previous attempt can leave a review request behind. A work item
+          // that is being reworked is expected to have one: the verification
+          // reuses it and refreshes its evidence rather than asking the
+          // reviewer for a second one. A work item that never ran is not.
+          if (item.state !== 'rework') {
+            throw new Error(`work item already has an open change request: ${existing.url ?? existing.id}`);
+          }
+          logger.info({ workItemId, changeId: existing.id }, 'reusing the change request of an earlier attempt');
+        }
         request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
         await record('implementing');
         const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
@@ -376,6 +391,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           new QARunner(bundle, workflowConfig, {
             agentRuntime: runRequest.agentRuntime, executionMode: 'interactive', projectRoot: runRequest.workspaceRoot,
             repositories: runRequest.repositories,
+            executionBaseBranch: runRequest.executionBaseBranch,
             beforeChange: async (action, _backlog, change) => {
               if (action === 'publish') await auditQAPass();
               if (action === 'merge' && change) await providers.changes.verifyIssueAssociation(change, workItemId);
@@ -410,10 +426,13 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         const published = change && change.id && change.url && change.url === qaResult.mrUrl
           && (change.state === 'open' || change.state === 'merged');
         if (published) await providers.changes.verifyIssueAssociation(change, workItemId);
-        const rootPublished = !item.parentId && qaResult.autoMerged === false && change?.state === 'open' && finalItem?.state === 'merge_ready';
-        const childMerged = !!item.parentId && qaResult.autoMerged === true && change?.state === 'merged' && finalItem?.state === 'done';
-        const status: ExecuteWorkItemStatus = qaResult.success && published && (rootPublished || childMerged)
-          ? childMerged ? 'done' : 'merge_ready'
+        // The change is published and waits for a person to confirm the merge.
+        // A child waits exactly like a root does, so the shape of the
+        // outcome no longer depends on where the item sits in the tree.
+        const awaitingHumanMerge = qaResult.autoMerged === false && change?.state === 'open' && finalItem?.state === 'merge_ready';
+        const mergedByAgent = qaResult.autoMerged === true && change?.state === 'merged' && finalItem?.state === 'done';
+        const status: ExecuteWorkItemStatus = qaResult.success && published && (awaitingHumanMerge || mergedByAgent)
+          ? mergedByAgent ? 'done' : 'merge_ready'
           : qaResult.rework ? 'rework' : 'blocked';
         if (status === 'merge_ready' || status === 'done') {
           await audit({ kind: 'change.published', changeId: String(change!.id), url: change!.url! });

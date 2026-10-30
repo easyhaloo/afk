@@ -1,10 +1,11 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { logger } from '../../infrastructure/io/index.js';
+import { loopPidFilePath, loopStatusFilePath } from '../../infrastructure/process/pid-file.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
-import { parseWorkItemId } from '../../domain/backlog/index.js';
-import { reconcileMergedBacklog } from '../../domain/backlog/commands.js';
+import { parseWorkItemId, type BacklogItem } from '../../domain/backlog/index.js';
+import { describeRunnability } from '../../domain/backlog/runnability.js';
+import { reconcileMergedBacklog, resolveExpectedTargetBranch } from '../../domain/backlog/commands.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 
@@ -21,7 +22,7 @@ export interface LoopRunnerOptions {
   backlogIds: readonly string[];
   /** Workflow template passed to each execution. */
   template?: string;
-  managedExecution: { workItemId: string; manifestPath: string };
+  managedExecution: { workItemId: string; manifestPath?: string };
   readManifest?: typeof readExecutionManifest;
   executeManagedWorkItem?: typeof executeWorkItem;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
@@ -53,7 +54,7 @@ interface InternalOptions {
   maxIterations: number | undefined;
   backlogIds: ReadonlySet<string>;
   template: string | undefined;
-  managedExecution: { backlogId: string; workItemId: string; manifestPath: string; providerRef?: string };
+  managedExecution: { backlogId: string; workItemId: string; manifestPath?: string; providerRef?: string };
   readManifest: typeof readExecutionManifest;
   executeManagedWorkItem: typeof executeWorkItem;
   pidFilePath: string;
@@ -65,8 +66,7 @@ const DEFAULTS = {
   pollIntervalMs: 60_000,
   statusIntervalMs: 30_000,
   shutdownTimeoutMs: 300_000,
-  pidFilePath: path.join(os.homedir(), '.afk', 'loop.pid'),
-  statusFilePath: path.join(os.homedir(), '.afk', 'loop-status.json'),
+  maxIterations: undefined as number | undefined,
   targetBranch: 'main',
 };
 
@@ -105,8 +105,8 @@ export class LoopRunner {
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
-    if (options.backlogIds?.length !== 1 || !options.managedExecution?.manifestPath) {
-      throw new Error('loop execution requires exactly one backlog ID, work item ID, and execution manifest');
+    if (options.backlogIds?.length !== 1 || !options.managedExecution?.workItemId) {
+      throw new Error('loop execution requires exactly one backlog ID and one work item ID');
     }
     const managedExecution = {
       backlogId: String(options.backlogIds![0]),
@@ -123,8 +123,8 @@ export class LoopRunner {
       managedExecution,
       readManifest: options.readManifest ?? readExecutionManifest,
       executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
-      pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
-      statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
+      pidFilePath: options.pidFilePath ?? loopPidFilePath(),
+      statusFilePath: options.statusFilePath ?? loopStatusFilePath(),
       targetBranch: options.targetBranch ?? DEFAULTS.targetBranch,
     };
   }
@@ -160,6 +160,12 @@ export class LoopRunner {
       'loop started'
     );
 
+    // A claim outlives the process that took it. A loop that restarts finds
+    // its item still marked in progress, with nothing executing it any more:
+    // the previous process died holding the claim. The poll only looks for
+    // work that has not started, so such an item would never move again.
+    await this.recoverOrphanedClaims();
+
     // Initial poll — don't wait a full interval to notice the first issue
     void this.poll();
 
@@ -174,14 +180,29 @@ export class LoopRunner {
 
   private async validateManagedExecution(): Promise<void> {
     const managed = this.opts.managedExecution;
-    const manifest = await this.opts.readManifest(managed.manifestPath, managed.workItemId);
     const identity = parseWorkItemId(managed.workItemId);
+    if (!managed.manifestPath) {
+      // Without a manifest the execution derives one from the work item: the
+      // repository it lives in, the ref its body declares, and the branch AFK
+      // works on.
+      managed.providerRef = `${identity.platform}:${identity.projectKey}#${identity.issueNumber}`;
+      return;
+    }
+    const manifest = await this.readManagedManifest(managed);
     if (manifest.workItemId !== managed.workItemId || manifest.providerBacklogId !== managed.backlogId
       || Number(managed.backlogId) !== identity.issueNumber
       || manifest.tracker.platform !== identity.platform || manifest.tracker.projectKey !== identity.projectKey) {
       throw new Error(`execution manifest identity does not match work item ${managed.workItemId} and backlog ${managed.backlogId}`);
     }
     managed.providerRef = `${identity.platform}:${manifest.tracker.providerProjectId ?? identity.projectKey}#${identity.issueNumber}`;
+  }
+
+  /** The manifest of the managed execution. */
+  private async readManagedManifest(
+    managed: { manifestPath?: string; workItemId: string },
+  ): Promise<Awaited<ReturnType<typeof readExecutionManifest>>> {
+    if (!managed.manifestPath) throw new Error('execution manifest path is required');
+    return this.opts.readManifest(managed.manifestPath, managed.workItemId);
   }
 
   /**
@@ -280,6 +301,17 @@ export class LoopRunner {
   }
 
   /**
+   * The poll scope is the manifest-bound work item.
+   *
+   * A provider lists every backlog item under its canonical global id, while
+   * the scope carries the provider backlog id, so the canonical id of the
+   * managed work item is the match that holds for every provider.
+   */
+  private isInScope(issue: BacklogItem): boolean {
+    return this.opts.backlogIds.has(String(issue.id)) || issue.id === this.opts.managedExecution.workItemId;
+  }
+
+  /**
    * Pull the runnable work item from the provider and start its execution.
    * Tracker errors are logged and swallowed — the loop never dies from a
    * single bad poll.
@@ -303,7 +335,7 @@ export class LoopRunner {
       ]);
       const issues = [...readyIssues, ...reworkIssues]
         .filter((issue, index, all) => all.findIndex(candidate => candidate.id === issue.id) === index)
-        .filter(issue => this.opts.backlogIds.has(String(issue.id)));
+        .filter(issue => this.isInScope(issue));
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;
@@ -317,10 +349,15 @@ export class LoopRunner {
 
         // Reserve BEFORE any await so overlapping ticks cannot double-start.
         this.inFlight.add(issueId);
-        const check = { ok: await this.providers.backlog.isRunnable(issue) };
-        if (!check.ok) {
+        const runnability = await this.providers.backlog.explainRunnability(issue);
+        if (!runnability.runnable) {
           this.inFlight.delete(issueId);
-          logger.info({ iid: issueId, reason: (check as any).reason }, 'issue skipped by preconditions');
+          // The reason is the whole point of the skip: without it a log full
+          // of "skipped" cannot tell a queue from a deadlock.
+          logger.info(
+            { iid: issueId, reason: runnability.reason, blockedBy: runnability.blockedBy },
+            'issue skipped by preconditions',
+          );
           skipped++;
           continue;
         }
@@ -349,16 +386,26 @@ export class LoopRunner {
    * bookkeeping, and this loop brings it in line — it never merges anything.
    */
   private async reconcileMergedChanges(): Promise<void> {
-    const candidates = await this.providers.backlog.list({ state: 'merge_ready', executionMode: 'hitl' });
+    // A root waits for its human merge as "merge pending"; a child whose
+    // merge AFK could not perform is blocked instead. Both are the same
+    // situation — the work is verified and only the merge is left — so both
+    // are read here.
+    const [mergeReady, blocked] = await Promise.all([
+      this.providers.backlog.list({ state: 'merge_ready', executionMode: 'hitl' }),
+      this.providers.backlog.list({ state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    const candidates = [...mergeReady, ...blocked]
+      .filter((candidate, index, all) => all.findIndex(other => String(other.id) === String(candidate.id)) === index);
     for (const candidate of candidates) {
       const id = String(candidate.id);
       if (!this.opts.backlogIds.has(id)) continue;
       try {
+        const expectedTargetBranch = await resolveExpectedTargetBranch(this.providers.backlog, candidate, this.opts.targetBranch);
         const outcome = await reconcileMergedBacklog(
           this.providers.backlog,
           this.providers.changes,
           id,
-          this.opts.targetBranch,
+          expectedTargetBranch,
         );
         if (outcome.reconciled) {
           this.emitEvent(`${id} reconciled to done: ${outcome.reason}`);
@@ -367,6 +414,57 @@ export class LoopRunner {
       } catch (error) {
         logger.warn({ iid: id, error }, 'failed to reconcile a merged backlog');
       }
+    }
+  }
+
+  /**
+   * Return a claim the previous process left behind to the queue.
+   *
+   * Only the items this loop owns are touched: another loop's claim is
+   * another loop's work. An item that already has an open change request
+   * goes back to `rework`, because that is the position whose execution
+   * reuses the change request instead of refusing to open a second one.
+   */
+  private async recoverOrphanedClaims(): Promise<void> {
+    let claimed: BacklogItem[];
+    let interrupted: BacklogItem[];
+    try {
+      // An item that waits for a QA run nobody will ever run is orphaned in
+      // the same way a claim is: the process that owned it is gone. It has to
+      // come back too, or it waits for a verification that never happens.
+      [claimed, interrupted] = await Promise.all([
+        this.providers.backlog.list({ state: 'in_progress', executionMode: 'afk' }),
+        this.providers.backlog.list({ state: 'verification', executionMode: 'afk' }),
+      ]);
+    } catch (error) {
+      // A provider that cannot be read leaves the claims where they are. That
+      // is no worse than not looking, and the poll still runs.
+      logger.warn({ err: error }, 'failed to read the claims left behind by a previous run');
+      return;
+    }
+    for (const issue of [...claimed, ...interrupted]) {
+      const issueId = String(issue.id);
+      if (!this.isInScope(issue)) continue;
+      const existing = await this.findChangeRequest(issue);
+      const state = existing?.state === 'open' ? 'rework' : 'ready';
+      logger.warn({ iid: issueId, state, changeRequest: existing?.id }, 'recovering a claim left behind by a previous run');
+      await this.providers.backlog.transition(issueId, state);
+      this.emitEvent(`${issueId} recovered from a previous run — returned to the queue as ${state}`);
+    }
+  }
+
+  /**
+   * The change request an item already has, if the provider can tell.
+   *
+   * A provider that cannot answer leaves the recovery on the safe side: the
+   * item goes back to `ready`, and the execution that follows reports an open
+   * change request rather than opening a second one.
+   */
+  private async findChangeRequest(item: BacklogItem): Promise<{ id?: string; state?: string } | null> {
+    try {
+      return await this.providers.changes.findForBacklog(item);
+    } catch {
+      return null;
     }
   }
 
@@ -385,7 +483,7 @@ export class LoopRunner {
       }
       const result = await this.opts.executeManagedWorkItem({
         workItemId: managed.workItemId,
-        manifestPath: managed.manifestPath,
+        ...(managed.manifestPath ? { manifestPath: managed.manifestPath } : {}),
         template: this.opts.template,
       });
       const elapsed = formatDuration(Date.now() - startedAt);

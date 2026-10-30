@@ -15,8 +15,17 @@ export type BacklogChangeRequest = {
   sourceBranch: string;
   targetBranch: string;
   url?: string;
+  /**
+   * Whether the change can land. 'conflict' means the target branch changed
+   * the same lines, so the change needs another round before a person can
+   * merge it.
+   */
+  mergeState?: ChangeMergeState;
 };
 import { randomUUID } from 'node:crypto';
+import type { BacklogRelationUpdate } from './metadata-codec.js';
+import { formatWorkItemId } from '../work-item/identity.js';
+import type { ChangeMergeState } from '../tracker/types.js';
 export type { BacklogClaim, ClaimLease } from './claim.js';
 export { FilesystemClaimLock } from './claim.js';
 export type { BacklogProviderCapabilities } from './initialization.js';
@@ -33,16 +42,31 @@ export {
   decodeBacklogRelations,
   encodeBacklogRelations,
   isBacklogRelationLabel,
+  planRelationLabelDelta,
+  planRoleLabelDelta,
 } from './metadata-codec.js';
-export type { BacklogMetadata, BacklogMetadataOptions, BacklogMetadataScope, BacklogRelations } from './metadata-codec.js';
+export type {
+  BacklogLabelDelta,
+  BacklogMetadata,
+  BacklogMetadataOptions,
+  BacklogMetadataScope,
+  BacklogRelationUpdate,
+  BacklogRelations,
+} from './metadata-codec.js';
 export { BACKLOG_KIND_LABELS } from './initialization.js';
+export { BACKLOG_LABEL_PREFIX } from './initialization.js';
 export type { BacklogCreatePlan } from './creation.js';
 import type { BacklogCreatePlan } from './creation.js';
-export { buildBacklogGraph } from './graph.js';
+export { buildBacklogGraph, findDependencyCycle } from './graph.js';
 export type { BacklogGraph, BacklogGraphSource } from './graph.js';
 export { projectBacklogItem } from './projection.js';
 export type { BacklogIssueView } from './projection.js';
 export { deriveBacklogBranchName } from './branch-name.js';
+import { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection } from './execution-base.js';
+export { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection };
+export { describeRunnability, evaluateRunnability, RUNNABLE_STATES } from './runnability.js';
+export type { Runnability, RunnabilityReason, RunnabilitySubject } from './runnability.js';
+import { evaluateRunnability, type Runnability } from './runnability.js';
 import type { BacklogClaim } from './claim.js';
 import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
 import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
@@ -50,6 +74,11 @@ import { parseWorkItemId } from '../work-item/identity.js';
 import { validateBusinessTag } from './tags.js';
 import { planBacklogCreate } from './creation.js';
 import { deriveBacklogBranchName } from './branch-name.js';
+import {
+  decodeBacklogRelations,
+  encodeBacklogRelations,
+  planRelationLabelDelta,
+} from './metadata-codec.js';
 
 export interface BacklogItem {
   /**
@@ -70,6 +99,14 @@ export interface BacklogItem {
   kind?: BacklogKind;
   title: string;
   description?: string;
+  /**
+   * The ref the work starts from, as the body declares it.
+   *
+   * A branch name means nothing outside the repository that has it, so it
+   * travels in the body rather than in a label. The execution reads it back
+   * from here, and the repository's default branch is only the fallback.
+   */
+  executionBase?: string;
   /** Organizational grouping only; it never selects a git base branch. */
   parentId?: string;
   /**
@@ -141,6 +178,34 @@ export interface BacklogManagementProvider {
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
+  /**
+   * Edit the relationship edges of an item that already exists.
+   *
+   * It is optional because a provider that only reads — a credential-scoped
+   * inventory, for one — has nowhere to write an edge to.
+   */
+  applyRelationUpdate?(id: string, update: BacklogRelationUpdate): Promise<void>;
+  /**
+   * Give an item the organizational role of a PRD anchor.
+   *
+   * An anchor carries no lifecycle state and never runs by itself, so the
+   * role replaces the stage and mode labels the item had.
+   */
+  applyRole?(id: string, kind: BacklogKind): Promise<void>;
+  /**
+   * Switch who runs an item.
+   *
+   * It is optional because a provider that only reads — a credential-scoped
+   * inventory, for one — has nowhere to write the mode to.
+   */
+  applyMode?(id: string, mode: BacklogExecutionMode): Promise<void>;
+  /**
+   * Record the ref the work starts from.
+   *
+   * It is optional for the same reason the mode edit is: a provider that only
+   * reads has nowhere to write the base to.
+   */
+  applyExecutionBase?(id: string, baseBranch: string): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -169,8 +234,24 @@ export interface BacklogProvider {
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
+  /** Edit the relationship edges of an item that already exists. */
+  applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void>;
+  /** Give an item the organizational role of a PRD anchor. */
+  applyRole(id: string, kind: BacklogKind): Promise<void>;
+  /** Switch who runs an item. */
+  applyMode(id: string, mode: BacklogExecutionMode): Promise<void>;
+  /** Record the ref the work starts from. */
+  applyExecutionBase(id: string, baseBranch: string): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
+  /**
+   * Whether the item may start now, and what holds it back.
+   *
+   * A boolean answer cannot tell a queue from a deadlock, so the provider
+   * reports the reason as well: which rule refused, and which dependencies
+   * still have work to do.
+   */
+  explainRunnability(item: BacklogItem): Promise<Runnability>;
 }
 
 export class InMemoryBacklogProvider implements BacklogProvider {
@@ -324,22 +405,90 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     this.items.set(id, item);
   }
 
+  /**
+   * Edit the relationship edges of an item.
+   *
+   * The in-memory backlog keeps structured relations rather than labels, so
+   * the edit travels through the same label planner the tracker-backed
+   * provider uses. One planner means the two providers cannot drift apart on
+   * what an edit means.
+   */
+  async applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    const item = await this.get(id);
+    const labels = encodeBacklogRelations({
+      ...(item.parentId ? { parentId: item.parentId as WorkItemId } : {}),
+      ...(item.baseBacklogId ? { baseBacklogId: item.baseBacklogId as WorkItemId } : {}),
+      dependsOn: item.dependsOn as WorkItemId[],
+    });
+    const selfId = formatWorkItemId({
+      platform: this.project.platform,
+      projectKey: this.project.projectKey,
+      issueNumber: Number(item.id),
+    });
+    const delta = planRelationLabelDelta(labels, update, this.project, { selfId });
+    const resulting = [...labels.filter(label => !delta.remove.includes(label)), ...delta.add];
+    const relations = decodeBacklogRelations(resulting, this.project, { strict: false });
+    if (relations.parentId) item.parentId = relations.parentId;
+    else delete item.parentId;
+    if (relations.baseBacklogId) item.baseBacklogId = relations.baseBacklogId;
+    else delete item.baseBacklogId;
+    item.dependsOn = [...relations.dependsOn];
+    this.items.set(id, item);
+  }
+
+  /**
+   * Give an item the organizational role of a PRD anchor.
+   *
+   * The role says what the item is: an anchor carries no lifecycle state and
+   * never runs by itself, so the stage label goes away and the mode becomes
+   * human-in-the-loop.
+   */
+  async applyRole(id: string, kind: BacklogKind): Promise<void> {
+    const item = await this.get(id);
+    item.kind = kind;
+    delete item.state;
+    item.executionMode = 'hitl';
+    this.items.set(id, item);
+  }
+
+  /**
+   * Switch who runs an item. Only the mode changes: the state, the role and
+   * the relationships of the item stay where they are.
+   */
+  async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    const item = await this.get(id);
+    item.executionMode = mode;
+    this.items.set(id, item);
+  }
+
+  /**
+   * Record the ref the work starts from. Only the body changes.
+   */
+  async applyExecutionBase(id: string, baseBranch: string): Promise<void> {
+    const item = await this.get(id);
+    item.description = applyExecutionBaseBranch(item.description ?? '', baseBranch);
+    this.items.set(id, item);
+  }
+
   async initialize(): Promise<void> {
     // In-memory storage has no external metadata to create.
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    // The role vetoes first: an organizational anchor is never executable,
-    // whatever lifecycle position it happens to carry.
-    if (item.kind === 'prd') return false;
-    if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
-    const hasIncompleteChild = [...this.items.values()]
-      .some(candidate => candidate.parentId === item.id);
-    if (hasIncompleteChild) return false;
-    for (const dependencyId of item.dependsOn) {
-      const dependency = this.items.get(dependencyId);
-      if (!dependency || dependency.state !== 'done') return false;
-    }
-    return true;
+    return (await this.explainRunnability(item)).runnable;
+  }
+
+  async explainRunnability(item: BacklogItem): Promise<Runnability> {
+    const hasChildren = [...this.items.values()].some(candidate => candidate.parentId === item.id);
+    return evaluateRunnability({
+      // The role vetoes first: an organizational anchor is never executable,
+      // whatever lifecycle position it happens to carry.
+      container: item.kind === 'prd',
+      state: item.state,
+      executionMode: item.executionMode,
+      executionEligible: item.executionEligible,
+      hasChildren,
+      dependencies: item.dependsOn.map(id => ({ id, state: this.items.get(id)?.state })),
+    });
   }
 }

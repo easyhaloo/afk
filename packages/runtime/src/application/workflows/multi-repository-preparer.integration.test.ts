@@ -6,6 +6,7 @@ import { simpleGit } from 'simple-git';
 import { MultiRepositoryPreparer } from './multi-repository-preparer.js';
 import { resolveWorkflowRunRequest } from './run-request.js';
 import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 
 async function createRemote(
   root: string,
@@ -92,7 +93,9 @@ describe('multi-repository execution manifest integration', () => {
       expect((await webGit.revparse(['HEAD'])).trim()).toBe(firstWebHead);
       expect((await apiGit.revparse([`refs/heads/${workingBranch}`])).trim()).toBe(firstApiHead);
       expect((await webGit.revparse([`refs/heads/${workingBranch}`])).trim()).toBe(firstWebHead);
-      expect(await apiGit.raw(['merge-base', '--is-ancestor', existingHead, firstApiHead])).toBe('');
+      // The work the first attempt did sits on top of the work that was
+      // already there, so nothing was lost when the branch was prepared again.
+      expect(await isAncestorCommit(apiGit, existingHead, firstApiHead)).toBe(true);
       expect(await readFile(join(apiRoot, 'first-api.txt'), 'utf8')).toBe('first attempt\n');
       expect(await readFile(join(webRoot, 'first-web.txt'), 'utf8')).toBe('first attempt\n');
       expect(await branchExists(api.remote, workingBranch)).toBe(false);

@@ -1,10 +1,14 @@
 {
   "name": "afk",
-  "version": "0.1.2",
-  "description": "Away From Keyboard — autonomous development workflow CLI + Skills system",
+  "version": "0.2.16",
+  "description": "Away From Keyboard \u2014 autonomous development workflow CLI + Skills system",
   "type": "module",
-  "bin": { "afk": "./dist/index.js" },
-  "files": ["dist"],
+  "bin": {
+    "afk": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "node ../../scripts/build-package.mjs && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
@@ -33,5 +37,7 @@
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"
   },
-  "engines": { "node": ">=22.16" }
+  "engines": {
+    "node": ">=22.16"
+  }
 }

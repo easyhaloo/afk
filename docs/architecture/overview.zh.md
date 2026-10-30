@@ -64,21 +64,25 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
-| `afk backlog create <title> [--kind prd] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
+| `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | 创建一个 provider 背书的 backlog 工作项，或预览标签与关系 |
 | `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | 按 manifest 建立它所描述的 backlog 记录，每条落在它自己声明的项目里 |
-| `afk backlog list/show/tag` | 查看和管理 backlog |
-| `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue |
+| `afk backlog list/show/tag` | 查看和管理 backlog；`show` 会给出变更请求及其能否落地 |
+| `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | 修改已存在 backlog 工作项的关系边 |
+| `afk backlog role --id <id> --kind prd` | 把一个 backlog 工作项设为 PRD 锚点角色 |
+| `afk backlog mode --id <id> --mode afk\|hitl` | 切换一个 backlog 工作项的执行方 |
+| `afk backlog base --id <id> --branch <ref>` | 在工作项正文中记录它起始的基线 ref |
+| `afk backlog children <id> [--project <project>] [--platform <platform>]` | 跨所有可达项目列出归属于某个工作项的 issue，并给出每项当前可执行或不可执行的原因 |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
-| `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
-| `afk backlog reconcile-merge` | 当变更已在平台合并时，将根 backlog 收敛为 done |
+| `afk backlog confirm-merge` | 合并已批准的 backlog 变更（根项或子项均可）并置为 done |
+| `afk backlog reconcile-merge` | 当变更已在平台合并时，将 backlog 收敛为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
 | `afk execute --work-item-id <id> [--execution-manifest <path>]` | 实现、独立验证并发布一个托管工作项 |
 | `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
 | `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
-| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
+| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看（`--all` 列出 loop 运行目录下的全部 loop）与优雅停止 |
 | `afk observe` | 默认以友好文本读取 append-only 的 AFK 运行审计事件，支持 `--json`（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
 | `afk observe <runId>` / `afk log <runId>` | `afk observe execution <runId>` 的简写，支持相同的 `--watch`、`--tail`、`--root` 和 `--json` 参数 |
 | `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | 查看带详情的运行时间线，可持续追踪新事件或限制首次展示的历史数量 |
@@ -267,6 +271,91 @@ provider 在 claim 之前会向跨仓图查询该工作项的子项；在另一�
 `afk backlog list` 与 `afk backlog inventory` 按状态和按角色分别过滤：锚点没有状态，
 所以 `--state ready` 永远不会返回锚点，选出锚点要用 `--kind prd`。
 
+### Backlog 关系边
+
+关系边在工作项创建时写入，但 backlog 会继续演进：依赖在被识别出来时才出现，
+当基线边指向的分支并不存在时必须被撤回。`afk backlog relation add` 与
+`afk backlog relation remove` 就是用来修改已存在工作项的关系边。
+
+编辑只声明它要动的那条边——`--parent`、`--base` 或 `--depends-on`——工作项的
+其余关系边原样保留。provider 把编辑转成承载它的最小标签增量，因此关系标签
+不会被整体重写；编辑没有提到的标签即使本 codec 解析不了也保持不动。引用可以是
+所属项目里的裸 issue 号，也可以是规范全局工作项身份，指向自身的引用会被拒绝。
+若某个依赖已经能到达本工作项，加这条边会成环，因此同样被拒绝。
+
+`afk backlog tag add` 与 `afk backlog tag remove` 刻意拒绝保留元数据前缀，
+关系前缀也在其中：业务标签和关系边是两件事，走不同的命令编辑。
+
+### Backlog 角色
+
+角色标签同样是保留元数据，所以不能当业务标签传进来。
+`afk backlog role --id <id> --kind prd` 给一个已存在的工作项赋上 PRD 锚点角色：
+加上角色标签，去掉 stage 标签，模式换成 human-in-the-loop，表示它本身永不执行。
+锚点完全没有生命周期位置——它是个容器。
+
+该 issue 的其余标签一律不动，因此一个工作项变成锚点时，不会丢掉它的子项、
+依赖或业务标签。这个编辑是幂等的：已经带该角色的工作项不会被改动。
+
+### Backlog 执行模式
+
+`afk backlog mode --id <id> --mode afk|hitl` 切换一个已存在工作项的执行方。
+执行模式同样是保留元数据，所以这个编辑只替换模式标签：状态、角色、业务标签
+与关系一律不动。这个编辑是幂等的，操作者用它把工作项交给 AFK，或收回给人工。
+
+### 工作项从哪个 ref 起始
+
+一个仓库可以在 `master` 上开发，而这项工作从某个发布 ref 起始——provider 的
+默认分支说不出后一种情况。这个 ref 是关于工作本身的事实，因此写在工作项正文：
+
+```text
+## Base Version
+
+- Base Ref: 2025-11-8-show
+```
+
+分支名在拥有它的仓库之外没有任何意义，用标签会把仓库内的事实带到凭据可达的
+每一个仓库。`afk backlog create --base-branch <ref>` 在创建时写入该区块，
+`afk backlog base --id <id> --branch <ref>` 为已存在的工作项补记它。两者都不动
+工作项的其他内容，且都是幂等的。
+
+执行时会读回该区块：manifest 不存在时由工作项推导，其基线依次取正文声明的
+ref、仓库默认分支、`main`。manifest 存在时仍以 manifest 为准——它是执行自己对
+「基于什么运行」的记录——因此操作者可以在不修改 issue 的前提下为单次执行做
+覆盖。
+
+### 工作项为什么不动
+
+生命周期标签说明工作项处在什么位置，而不是它为什么停着不动。一屏 `ready`
+的工作项分不清「在排队」和「死锁」，因此凡是报告工作项的入口，都会一并报告
+原因：
+
+| 原因 | 含义 |
+| --- | --- |
+| `not_execution_eligible` | 该项是容器（PRD 锚点），不是可执行的工作 |
+| `blocked_for_human` | 该项被阻塞，等待人工处理 |
+| `execution_in_progress` | AFK 正在处理该项 |
+| `awaiting_merge` | 变更已通过 QA，等待合并 |
+| `state_not_runnable` | 该生命周期位置不是 AFK 启动工作的位置 |
+| `execution_mode_hitl` | 该项由人工执行，AFK 不得接手 |
+| `not_managed` | 该项的生命周期不由 AFK 管理 |
+| `has_children` | 该项拥有子项，工作在子项上 |
+| `dependency_not_done` | 至少一个依赖尚未完成 |
+
+依赖这一条会指名尚未完成的依赖，所以给出的答案是「要谁动手」，而不只是
+「得有人动手」。这些规则只存在一处（`@afk/runtime` 的 backlog 域），loop、
+命令行与 Desktop 客户端对同一问题给出同一个答案。loop 会把跳过原因写进
+日志，`afk backlog children <id>` 会为某个 PRD 的每个子项报告该原因。
+
+### 活得比进程更久的认领
+
+认领会活得比持有它的进程更久：重启后的 loop 发现自己负责的工作项仍标记为
+进行中，却已经没有任何东西在执行它。轮询只寻找尚未开始的工作，于是这样的
+工作项再也不会动——一次重启就静默地变成了停滞。
+
+因此 loop 启动时会把**自己负责的**认领交还队列。已经存在未关闭变更请求的
+工作项回到 `rework`，因为那个位置的执行会复用已有变更请求，而不是拒绝再开
+一个。别的 loop 的认领不动——那是别的 loop 的工作。
+
 ### Backlog manifest
 
 `afk backlog apply-manifest <file>` 应用一份 provider 中立的 manifest：一份 YAML 条目
@@ -319,6 +408,129 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 本身不可运行。“没有子 backlog”由 backlog 图判定，因此位于其他仓库的子项同样
 计入。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
+
+### 合并闸门
+
+合并是人的决定。AFK 实现工作、独立验证它、发布变更请求；变更随后以
+`merge_ready` + `hitl` 等待人工合并。子项与根项的等待方式完全一致——条目在树中的
+位置不改变谁来确认它的合并。
+
+两个命令关闭这道闸门，二者都是人工动作：
+
+- `afk backlog confirm-merge` 在 provider 上合并变更请求并把条目置为 `done`。命令本身
+  执行合并，因此它始终是操作者的动作。
+- `afk backlog reconcile-merge` 不做任何合并：它只把条目与「人已经在 provider 上合并
+  好的变更」对齐。
+
+变更必须命中的分支由条目自身解析：正文声明的 ref（也就是执行 manifest 推导时的
+那个 ref），其次是显式的 base 边，最后是配置的分支。两个命令都接受
+`--target-branch`，供操作者在更清楚时指定。
+
+需要完全无人值守流水线的安装，可以让合并不经人确认：在 `~/.afk/config.yml` 里设
+`autoMerge: true`，或设 `AFK_AUTO_MERGE=1`。默认关闭——安装不主动要求，AFK 就绝不
+合并任何变更。
+
+### 当变更请求产生冲突
+
+变更请求可能与目标分支冲突：两边改了同一批行。冲突既不是 QA 失败，也不是一个需要人
+来合并的变更——它是 AFK 能自己做的工作。这套流程有四步，发生在 QA 轮内部、变更请求交
+付给人之前。
+
+1. **冲突在工作发生的地方显形。** QA 轮把目标分支放进 QA 工作树，再把变更分支合进去。
+   这次合并就是冲突显形的地方；AFK 从 git 留下的未合并路径读冲突，而不是读合并的退出
+   码——本地化的 git 用自己的语言报告退出结果，退出码并不可靠。
+2. **AFK 在 QA 工作树里解决它。** QA 工作树**就是**变更请求自己的分支，所以在这里做
+   出的解决，恰好落在变更发布的位置。一个专门的 agent（`merge-conflict-resolution` 模
+   板）负责解决冲突文件：与本次变更无关的文件取目标分支的版本；与本次变更相关的文件
+   保留两侧的意图。
+3. **AFK 验证结果。** 解决结果被提交，验证在解决后的代码树上进行。agent 这一轮之后仍
+   存在的冲突不会被猜测：条目转为 `blocked` + `hitl`，并写明冲突文件，交由人来收尾。
+4. **AFK 核对已发布的东西。** 变更请求发布后，AFK 读取平台的判定。只有真冲突才算数—
+   —平台尚未计算的判定、CI 未过、缺少审批都不算。真冲突的变更请求会带着一条
+   `conflict` rework 记录回到下一轮，冲突信息随记录传递。它绝不会被当作
+   `merge_ready` 交出去。
+
+合并闸门不受影响：解决冲突是为了让人仍然能自己决定要不要合并。
+
+**二进制文件谁也合不了。** 两边改了同一个二进制文件时，不存在文本层面的合并——人手动
+也解不了。AFK 不会把这类文件放进它为 agent 残留改动所做的兜底提交，而是把它报告出来。
+发布它只会让之后的任何冲突变成死胡同。
+
+### 当 agent 不再应答
+
+agent 可能在不通知任何人的情况下死掉：TUI 崩溃、模型流断连、进程随机器一起被杀。runner
+会一直等一个永远不会到达的完成信号，等到硬超时为止——一场早就输掉的运行，却烧掉几个小时
+的空白。两个看门狗把这种沉默变成结论。
+
+1. **会话没了。** 交互式 agent 活在 tmux 会话里，会话随 agent 一起死。AFK 发现会话不见了
+   就立刻结束这一轮（`AGENT_GONE`），而不是等一个永远不会写出来的信号。
+2. **agent 不出声了。** `idleTimeout` 是 agent 最长可以静默多久。tmux 路径盯着可见面板，
+   batch 路径盯着输出，容器路径盯着输出文件，app-server 路径每收到一条通知就重新计时。
+   静默超过上限就结束这一轮（`AGENT_IDLE`）。
+
+跑完就退出的 agent，会同时留下完成信号和「没有会话」两件事。信号优先：这轮是成功，不是
+尸体。完成超时在会话检查之前判定，所以真正的工作超时仍然报成超时，而不是「agent 死了」。
+
+四个超时回答的是不同的问题，区别很重要：
+
+| 配置 | 回答什么问题 | 默认值 |
+| --- | --- | --- |
+| `idleTimeout` | agent 最长可以多久不出声？ | 30 分钟 |
+| `completionTimeout` | 单次等待 agent 最长可以多久？ | 2 小时 |
+| `qaTimeout` | 验证轮最长可以持续多久？ | 1 小时 |
+| `workflowHardTimeout` | 整个工作流最长可以持续多久？ | 4 小时 |
+
+`workflowHardTimeout` 不是软上限：它到期时，一个独立进程组的看门狗会真的杀掉 tmux 会话。
+所以它必须大于 `completionTimeout` + `qaTimeout`，否则验证轮会在它自己拿到的预算用完之前
+就被砍断。这些值在 `~/.afk/config.yml` 里配（`idleTimeout`、`completionTimeout`、
+`qaTimeout`、`workflowHardTimeout`），或用 `AFK_IDLE_TIMEOUT`、
+`AFK_COMPLETION_TIMEOUT`、`AFK_QA_TIMEOUT`、`AFK_WORKFLOW_HARD_TIMEOUT`。
+
+**死掉的 agent 会被重跑，而不是被等死。** agent 死了说明不了工作的任何事：它已经做出的
+改动还在工作树里，上游模型服务很可能一分钟后又通了。codex 会把它死掉的那一轮写进自己的
+rollout 文件（网关切断流时它就是这么写的），AFK 就从那里读——这种轮次结束后终端还开着，
+所以从进程本身看不出这一轮已经结束。以这种方式结束的尝试会在同一个工作树里、用同一个
+目标重跑，次数由运行的重试预算封顶。**超时不在此列**：超时说的是「这份工作没在给它的
+预算内做完」，那是关于工作的事实。
+
+### 当分支准备会把工作扔掉
+
+重试的第一步是重新准备工作分支。以前的准备把已发布的分支当成事实来源，把本地分支重置过去，
+不管上一轮在本地提交了什么。于是「做了但没发布」的提交变成不可达对象，下一轮什么也验证不了，
+工作就没了：变更请求里空空如也，验证时每一条标准都不通过——因为这条分支和它的目标一模一样。
+
+分支现在准备在「手里有对方没有的工作」的那一侧：
+
+| 已发布分支 | 本地分支 | 准备在哪 |
+| --- | --- | --- |
+| 包含本地分支 | — | 已发布分支；什么都没丢 |
+| 不包含本地分支 | 包含已发布分支 | 本地分支；没发布的工作保住了 |
+| 不包含本地分支 | 有自己的提交 | 本地分支；发布时把已发布的工作合回来 |
+
+发布前会先把两边对齐再推：已发布分支只是更靠前就直接采用，分叉了就合并——这样 push 不会
+因为非 fast-forward 被拒，两边的工作也都不会丢。
+
+祖先关系用 merge base 读，而不是用 `git merge-base --is-ancestor`。那条命令回答「不是」的方式
+是带一个状态码退出并且什么都不打印——于是那种「靠错误信息判断失败」的 git 客户端看到的是一次
+成功但输出为空的命令，答案对任何一对提交都会变成「是」。
+
+### 当这台机器没法验证
+
+验收标准会写明settle它的命令。那条命令需要工具，而工具可能不在这儿：import 不了被测
+框架的测试套件、没有 JDK 的构建工具、根本没装的 `pytest`。验证 agent 是撞上它才知道的
+——那要花掉 agent 的全部耐心，最后以一个说不清原因的超时收场。
+
+AFK 先问。验证 agent 启动之前，验收标准自己的检查命令会被读出它要跑哪些二进制，然后
+每一个都用「这条标准会怎么用它」的方式探一遍：pytest 套件是被 collect，不只是问版本；
+Maven 问的是会报出 JDK 的那个版本。探出来的东西会被分类。**只有明确是机器的问题才会
+阻断这一轮**——缺二进制、缺依赖、缺运行时。其它任何原因的失败都留给 agent，因为前置
+自检不能把本来能过的工作挡在门外。
+
+被阻断的一轮会写明缺什么、哪条标准需要它，接手的人知道要装什么，而不用去读 transcript。
+
+验收标准按三字段格式读取——`- [ ] <文本> -- <类型> -- <命令>`，类型是 `test`、`curl`、
+`log`、`manual`、`bash`、`none` 之一。类型是锚点，所以文本或命令里的 `--` 不会被误认
+成分隔符。
 
 带 `prd` 角色的条目是组织性父项。它**没有任何生命周期状态**——它聚合子项，而不是
 等待人工介入，而“等待子项完成”并不是生命周期中的一个位置。让它不可执行的是角色，
@@ -391,13 +603,38 @@ sequenceDiagram
     R->>C: 创建变更请求
     R->>P: transition verification
     R->>Q: 验证 backlog
-    Q->>C: 合并变更请求
-    Q->>P: transition done
+    Q->>P: transition merge_ready + hitl
+    Note over Q,C: 由人合并变更请求
     R->>P: 资源作用域释放 lease
 ```
 
 `afk loop` 在进程内复用同一流程并集成 QA；独立 `qa` 命令使用管理 bundle，
 不会认领实现任务。
+
+作用域里的 backlog ID 是 manifest 的 provider backlog id，而 provider 列出的
+backlog 条目使用规范全局 ID。loop 因此按 manifest 绑定的规范 ID 匹配，
+一个 manifest 绑定的 loop 只执行一个工作项。
+
+manifest 声明主仓基线，变更请求就落在该基线上。全局配置的 `targetBranch`
+只作为无 manifest 执行时的回落值。
+
+`AFK_LOOP_PID_FILE` 与 `AFK_LOOP_STATUS_FILE` 可改写 loop 的 pid 文件与状态
+文件路径。默认值保持单机单 loop；指定不同路径即可让多个 manifest 绑定的
+loop 并行，各执行各的工作项。
+
+Claude Code 第一次在从未打开过的目录里运行时，会弹出「Quick safety check」
+信任对话框，而 AFK 创建的每个 worktree 都是新目录。对话框会阻塞 agent 的
+TUI，statusline 因此不会渲染，运行会以 `blocked/hitl` 收场——即使实现本身
+没有问题。启动 Claude Code 之前，AFK 会把 worktree 登记为已信任：写入
+Claude Code 的配置文件（`~/.claude.json`，或 `$CLAUDE_CONFIG_DIR/.claude.json`）
+的 `projects[<绝对路径>].hasTrustDialogAccepted`。该写入是尽力而为，永不导致
+运行失败；`AFK_CLAUDE_TRUST_PRESEED=0` 可关闭它。
+
+agent 的 TUI 还可能用自己的弹窗独占键盘。Codex 在检测到已安装更新版本时会弹出
+「Update available」提示，弹窗打开期间用于提交目标的 Enter 会被吞掉：目标留在
+输入框里，运行则一直等待一个永远不会到来的完成信号。因此 AFK 以
+`check_for_update_on_startup=false` 启动 Codex，先等 Codex 的输入框就绪再键入
+目标，并在输入框仍持有目标时再次按下 Enter。
 
 ## 扩展机制
 
@@ -410,6 +647,20 @@ sequenceDiagram
 
 - 任何失败转换、冲突、超时或 lease 过期都进入 `blocked + hitl`，不会静默
   作为自动任务重试。
+- 死掉的 agent 是唯一的例外：agent 走了或不再出声的步骤，会在同一个工作树里、
+  用同一个目标重跑，次数由运行的重试预算封顶。工作本身没变，所以重跑它不是
+  重做工作——是同一次尝试再来一遍。
+- 阻断条目时会一并关闭本次失败执行所回应的 operator rework 请求，使
+  `afk backlog retry` 能再次发起。qa 来源的 rework 记录保持 open——它就是
+  验证反馈本身，下一次 operator 重试会自行取代它。
+- 发布分支之前由 AFK 自己提交实现。agent 若留下未提交的改动，否则会发布出
+  一个空变更，工作也会在工作区恢复时丢失。
+- 提交了但没发布的工作不会被扔掉。工作分支准备在手里有它的那一侧，已发布的
+  工作在发布分支时合回来。
+- AFK 的运行时产物——完成信号与 `.afk/` 目录——不会被加入提交：它们是过程
+  状态，不是工作成果。
 - 优先使用原生认领；文件系统 fallback 仅适用于单机上的本地可信文件系统。
+- 交互式 agent 必须真正收到目标，而不只是被键入。AFK 在提交后检查输入框状态，
+  只要目标仍处于待提交状态就重复提交，使 TUI 弹窗无法悄悄搁浅一次运行。
 - lease 清理由生命周期统一管理且必须幂等。
 - backlog ID 通过 provider-neutral 函数确定性映射到分支名。

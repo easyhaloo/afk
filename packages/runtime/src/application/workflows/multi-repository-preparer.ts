@@ -2,11 +2,12 @@ import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { simpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import type { BranchHandle } from '../../domain/branches/types.js';
 import type { WorkflowRunRepository } from './run-request.js';
 import type { RunOutcomeStatus } from './resource-scope.js';
 import { gitLabCloneUrl } from '../../shared/gitlab-project.js';
+import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 
@@ -246,7 +247,14 @@ function remoteIdentity(host: string, rawPath: string): { host: string; path: st
   return { host: host.toLowerCase(), path };
 }
 
-function defaultDependencies(): MultiRepositoryPreparerDependencies {
+/**
+ * The real filesystem and git dependencies.
+ *
+ * Exported so that the behaviour of a real repository — a branch that has
+ * unpublished work, a branch that does not — is covered by a test rather than
+ * by a mock that agrees with whatever the code does.
+ */
+export function defaultDependencies(): MultiRepositoryPreparerDependencies {
   return {
     filesystem: {
       validateRepositoryPath,
@@ -285,11 +293,11 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
         const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
         const head = (await git.revparse(['HEAD'])).trim();
         const status = (await git.raw(['status', '--porcelain=v1'])).trim();
-        const workingBranchHead = await localBranchHead(repoRoot, workingBranch);
+        const workingBranchHead = await localBranchHead(git, workingBranch);
         return {
           ...(branch === 'HEAD' ? {} : { branch }),
           head,
-          status,
+          status: withoutRuntimeArtifacts(status),
           workingBranchExisted: workingBranchHead !== undefined,
           ...(workingBranchHead ? { workingBranchHead } : {}),
         };
@@ -301,14 +309,37 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
       },
       prepareWorkingBranch: async (repoRoot, baseBranch, workingBranch) => {
         const git = simpleGit(repoRoot);
-        if (await localBranchHead(repoRoot, workingBranch)) {
+        // A published working branch is the previous attempt's work. A retry
+        // has to continue it: starting from the base again would make the
+        // agent redo the work under a different commit, and the push would
+        // then be rejected as a non-fast-forward.
+        if (await fetchRemoteBranch(git, workingBranch)) {
+          // A commit that was made and never published is the same kind of
+          // work — it is just not on the remote yet. Resetting to the
+          // published branch would drop it: the commit would become
+          // unreachable, the next attempt would find nothing to verify, and
+          // the work would be gone. So the local branch is kept whenever the
+          // published branch does not already contain it; the published work
+          // is merged back in when the branch is published.
+          const localHead = await localBranchHead(git, workingBranch);
+          const remoteHead = await remoteBranchHead(git, workingBranch);
+          if (localHead && remoteHead && !(await isAncestorCommit(git, localHead, remoteHead))) {
+            await git.raw(['checkout', '-B', workingBranch, localHead]);
+            return;
+          }
+          await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
+          return;
+        }
+        if (await localBranchHead(git, workingBranch)) {
           await git.raw(['checkout', workingBranch]);
         } else {
           await git.raw(['checkout', '-b', workingBranch, `origin/${baseBranch}`]);
         }
       },
       finalize: async (repoRoot, workingBranch) => {
-        await simpleGit(repoRoot).push('origin', workingBranch, ['--set-upstream']);
+        const git = simpleGit(repoRoot);
+        await reconcilePublishedBranch(git, workingBranch);
+        await git.push('origin', workingBranch, ['--set-upstream']);
       },
       restore: restoreRepository,
     },
@@ -546,11 +577,88 @@ function hasCode(error: unknown, code: string): boolean {
   return !!error && typeof error === 'object' && 'code' in error && error.code === code;
 }
 
-async function localBranchHead(repoRoot: string, branch: string): Promise<string | undefined> {
+/**
+ * AFK's own runtime artifacts in a worktree.
+ *
+ * The completion signal the agent writes and the `.afk/` directory the QA
+ * runner reads are process state. Counting them as uncommitted changes made
+ * the preparer refuse a checkout that only carried them, which locked the
+ * work item out of every later attempt.
+ */
+const RUNTIME_ARTIFACTS = ['.afk-signal.json', '.afk-signal.json.tmp', '.afk'];
+
+function withoutRuntimeArtifacts(status: string): string {
+  if (!status) return '';
+  const remaining = status
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .filter(line => {
+      const path = line.slice(3).split(' -> ').pop()?.trim() ?? '';
+      return !RUNTIME_ARTIFACTS.some(artifact => path === artifact || path.startsWith(`${artifact}/`));
+    });
+  return remaining.join('\n');
+}
+
+async function localBranchHead(git: SimpleGit, branch: string): Promise<string | undefined> {
   try {
-    return (await simpleGit(repoRoot).revparse([`refs/heads/${branch}`])).trim();
+    return (await git.revparse([`refs/heads/${branch}`])).trim();
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Fetch a remote branch and report whether it exists.
+ *
+ * The remote-tracking ref is written explicitly: a plain `git fetch origin
+ * <branch>` does not always update `refs/remotes/origin/<branch>`.
+ */
+async function fetchRemoteBranch(git: SimpleGit, branch: string): Promise<boolean> {
+  await git.raw(['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`]).catch(() => undefined);
+  try {
+    await git.revparse([`refs/remotes/origin/${branch}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The commit a published branch points at. */
+async function remoteBranchHead(git: SimpleGit, branch: string): Promise<string | undefined> {
+  try {
+    return (await git.revparse([`refs/remotes/origin/${branch}`])).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Bring the published branch into the working branch before it is published
+ * again.
+ *
+ * The push is rejected when the remote has commits the working branch does
+ * not have, and the rejection would leave the run without a change request.
+ * The published work is taken as it is when it is simply ahead, and merged in
+ * when the two have diverged — the same rule the single-repository publisher
+ * follows.
+ */
+async function reconcilePublishedBranch(git: SimpleGit, branch: string): Promise<void> {
+  if (!await fetchRemoteBranch(git, branch)) return;
+  const localHead = await localBranchHead(git, branch);
+  const remoteHead = await remoteBranchHead(git, branch);
+  if (!localHead || !remoteHead || localHead === remoteHead) return;
+  if (await isAncestorCommit(git, localHead, remoteHead)) {
+    await git.raw(['merge', '--ff-only', `origin/${branch}`]);
+    return;
+  }
+  if (await isAncestorCommit(git, remoteHead, localHead)) return;
+  try {
+    await git.raw(['merge', `origin/${branch}`, '--no-edit']);
+  } catch (error) {
+    // Leave the working tree as it was: a half-finished merge would be
+    // published as if it were work.
+    await git.raw(['merge', '--abort']).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -560,6 +668,11 @@ async function restoreRepository(
   workingBranch: string,
 ): Promise<void> {
   const git = simpleGit(repoRoot);
+  // Discard the agent's uncommitted edits before switching branches. A
+  // checkout refuses to run while local modifications would be overwritten,
+  // and that refusal turned a finished implementation into a failed run.
+  await git.raw(['reset', '--hard']);
+  await git.raw(['clean', '-fd']);
   if (snapshot.branch) await git.raw(['checkout', snapshot.branch]);
   else await git.raw(['checkout', '--detach', snapshot.head]);
   await git.raw(['reset', '--hard', snapshot.head]);

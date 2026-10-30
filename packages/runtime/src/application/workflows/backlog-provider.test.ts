@@ -22,7 +22,7 @@ function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
       get: vi.fn(async () => item), list: vi.fn(async () => []), isRunnable: vi.fn(async () => true),
       getActiveRework: vi.fn(async () => undefined),
     },
-    branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn() },
+    branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), cleanup: vi.fn() },
     changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
   } as unknown as ProviderBundle;
 }
@@ -295,6 +295,17 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(bundle.backlog.transition).toHaveBeenCalledWith('42', 'verification', undefined);
     expect(subject.activeBacklog).toBe(item);
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits the agent work before the branch is published', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    subject.activeBacklog = item;
+
+    await subject.autoWrapup(42, process.cwd(), 'worker', 'main');
+
+    expect(bundle.branches.commit).toHaveBeenCalledWith(process.cwd(), expect.stringContaining('backlog 42'));
+    expect(bundle.branches.push).toHaveBeenCalled();
   });
 
   it('skips a backlog that was not atomically claimed', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBacklogGraph } from './graph.js';
+import { buildBacklogGraph, findDependencyCycle } from './graph.js';
 import type { BacklogItem } from './index.js';
 
 function item(id: string, overrides: Partial<BacklogItem> = {}): BacklogItem {
@@ -35,5 +35,35 @@ describe('backlog graph', () => {
 
     expect(graph.roots()).toEqual([parent]);
     expect(graph.childrenOf('github:org/repo#99')).toEqual([]);
+  });
+});
+
+describe('backlog dependency cycle', () => {
+  it('reports the dependency that already reaches the item', async () => {
+    const chain: Record<string, string[]> = {
+      'github:org/repo#8': ['github:org/repo#9'],
+    };
+    const read = async (id: string) => chain[id] ?? [];
+
+    await expect(findDependencyCycle('github:org/repo#9', ['github:org/repo#8'], read))
+      .resolves.toBe('github:org/repo#9');
+  });
+
+  it('reports no cycle when the dependency chain never comes back', async () => {
+    const chain: Record<string, string[]> = {
+      'github:org/repo#8': ['github:org/repo#7'],
+      'github:org/repo#7': [],
+    };
+    const read = async (id: string) => chain[id] ?? [];
+
+    await expect(findDependencyCycle('github:org/repo#9', ['github:org/repo#8'], read))
+      .resolves.toBeUndefined();
+  });
+
+  it('stops at an item it has already walked through', async () => {
+    const read = async (id: string) => (id === 'github:org/repo#8' ? ['github:org/repo#8'] : []);
+
+    await expect(findDependencyCycle('github:org/repo#9', ['github:org/repo#8'], read))
+      .resolves.toBeUndefined();
   });
 });

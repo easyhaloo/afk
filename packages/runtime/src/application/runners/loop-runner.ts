@@ -345,11 +345,25 @@ export class LoopRunner {
         const issueId = String(issue.id);
         if (!this.running) break;
 
-        if (this.inFlight.has(issueId)) { skipped++; continue; }
+        if (this.inFlight.has(issueId)) {
+          // The reason is written down here too. A skip that says nothing is
+          // the one shape a deadlock can hide in: the item is reserved, so
+          // every poll passes over it, and nothing in the log says why.
+          logger.info({ iid: issueId }, 'issue skipped: already reserved');
+          skipped++;
+          continue;
+        }
 
         // Reserve BEFORE any await so overlapping ticks cannot double-start.
         this.inFlight.add(issueId);
-        const runnability = await this.providers.backlog.explainRunnability(issue);
+        const runnability = await this.providers.backlog.explainRunnability(issue).catch((error: unknown) => {
+          // A provider that cannot answer must not wedge the work item. The
+          // reservation is released, or the item stays reserved for the rest
+          // of the process's life and is never run again — silently, because
+          // the skip that finds it reserved says nothing.
+          this.inFlight.delete(issueId);
+          throw error;
+        });
         if (!runnability.runnable) {
           this.inFlight.delete(issueId);
           // The reason is the whole point of the skip: without it a log full

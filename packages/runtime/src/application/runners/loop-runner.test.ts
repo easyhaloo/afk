@@ -329,6 +329,60 @@ describe('LoopRunner manifest-bound execution', () => {
     }
   });
 
+  it('releases the reservation when the provider cannot answer', async () => {
+    const { providers, backlog } = providersFor();
+    let calls = 0;
+    backlog.explainRunnability = vi.fn(async () => {
+      calls += 1;
+      // A provider that cannot be reached: the network is down for a moment.
+      if (calls === 1) throw new Error('getaddrinfo ENOTFOUND w.src.corp.qihoo.net');
+      return { runnable: true, blockedBy: [] };
+    });
+    const executeManagedWorkItem = vi.fn(async () => ({ status: 'merge_ready' } as any));
+    const subject = new LoopRunner(providers, { ...selection, readManifest, executeManagedWorkItem, shutdownTimeoutMs: 10 });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    try {
+      // The first poll cannot reach the provider.
+      await internals.poll();
+      expect(subject.getStatus().totals.started).toBe(0);
+
+      // The next poll finds the item runnable: a provider that could not
+      // answer must not have reserved the item forever.
+      await internals.poll();
+      expect(subject.getStatus().totals.started).toBe(1);
+    } finally {
+      await subject.stop();
+    }
+  });
+
+  it('says why an item was skipped because it is already reserved', async () => {
+    const { providers } = providersFor();
+    const executeManagedWorkItem = vi.fn();
+    const subject = new LoopRunner(providers, { ...selection, readManifest, executeManagedWorkItem, shutdownTimeoutMs: 10 });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const logged = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    try {
+      internals.inFlight.add('42');
+      await internals.poll();
+      // A skip that says nothing is the one shape a deadlock can hide in.
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({ iid: '42' }),
+        'issue skipped: already reserved',
+      );
+      expect(executeManagedWorkItem).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it('records why an item was skipped, not only that it was skipped', async () => {
     const { providers, backlog } = providersFor();
     const explanation = { runnable: false, reason: 'dependency_not_done', blockedBy: ['github:org/repo#7'] };

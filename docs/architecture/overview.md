@@ -443,6 +443,15 @@ line and the desktop client answer the same question the same way. The loop
 records the reason in its log for every issue it skips, and
 `afk backlog children <id>` reports it for every child of a PRD.
 
+A skip that says nothing is the one shape a deadlock can hide in, so the loop
+writes down why it passed over an issue — including the case where the issue
+is already reserved by a run in flight. A reservation ends with the run that
+took it, and it also ends when the provider cannot answer: a loop that loses
+the network for a moment must not come back to a work item it has reserved
+forever. Before, one such moment was enough. The reservation stayed, every
+later poll passed over the issue without a word, and the item was never run
+again — with nothing in the log to say so.
+
 ### A claim that outlived its process
 
 A claim outlives the process that took it: a loop that restarts finds its

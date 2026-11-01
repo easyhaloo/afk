@@ -432,9 +432,9 @@ ready/rework --claim--> in_progress --> verification --> merge_ready --> done
 那个 ref），其次是显式的 base 边，最后是配置的分支。两个命令都接受
 `--target-branch`，供操作者在更清楚时指定。
 
-需要完全无人值守流水线的安装，可以让合并不经人确认：在 `~/.afk/config.yml` 里设
-`autoMerge: true`，或设 `AFK_AUTO_MERGE=1`。默认关闭——安装不主动要求，AFK 就绝不
-合并任何变更。
+AFK 自己从不合并任何变更，也没有哪个开关能打开它：变更请求发出去之后就停在那里等；
+AFK 唯一会执行的合并，是人用 `afk backlog confirm-merge` 明确要求的，平台自己的合并
+按钮是另一种。
 
 ### 当变更请求产生冲突
 

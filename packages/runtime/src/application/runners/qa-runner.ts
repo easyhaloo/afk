@@ -33,7 +33,7 @@ import type { RunEventData } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
-type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failureCode?: 'qa_timeout' | 'qa_execution_failed' | 'qa_rework' | 'provider_change_unconfirmed' | 'merge_conflict' | 'qa_environment_missing'; failedCriteria?: QAFailureCriterion[] };
+type QAProcessResult = { success: boolean; mrUrl?: string; rework?: boolean; summary?: string; failureCode?: 'qa_timeout' | 'qa_execution_failed' | 'qa_rework' | 'provider_change_unconfirmed' | 'merge_conflict' | 'qa_environment_missing'; failedCriteria?: QAFailureCriterion[] };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -58,7 +58,7 @@ export interface QARunnerDependencies {
     featureBranch: string,
   ) => Promise<BaselineMergeResult>;
   runtimeManager?: TaskRuntimeManager;
-  beforeChange?: (action: 'publish' | 'merge', backlog: BacklogItem, change?: ChangeRequest) => Promise<void>;
+  beforeChange?: (action: 'publish', backlog: BacklogItem) => Promise<void>;
   afterPublication?: (change: ChangeRequest) => Promise<void>;
   onCommit?: (commitSha: string, branch: string) => Promise<void>;
   onSession?: (data: Extract<RunEventData, { kind: 'agent.session_recorded' }>) => Promise<void>;
@@ -485,19 +485,12 @@ export class QARunner {
       await this.providers.backlog.transition(backlogId, 'merge_ready', { changeId: String(mr.id) });
       // Merging is a person's decision. AFK implements, verifies and
       // publishes the change; the merge waits for a human to confirm it.
-      // Only an installation that asks for the merge to happen on its own
-      // merges here, and a root backlog never merges itself either — its
-      // change is the one the whole set of slices hangs on.
-      if (!backlog.parentId || !this.config.autoMerge) {
-        await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
-        logger.info({ backlogId, changeId: mr.id }, 'change published; awaiting human merge');
-        return { success: true, autoMerged: false, mrUrl: mr.url };
-      }
-      await this.beforeChange?.('merge', backlog, mr);
-      await this.providers.changes.merge(String(mr.id));
-      await this.providers.backlog.transition(backlogId, 'done', { changeId: String(mr.id) });
-      logger.info({ backlogId, changeId: mr.id, targetBranch }, 'child backlog change merged');
-      return { success: true, autoMerged: true, mrUrl: mr.url };
+      // AFK never merges on its own: the only merge it performs is the one a
+      // person asks for with `afk backlog confirm-merge`, and the platform's
+      // own merge button is the other one.
+      await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+      logger.info({ backlogId, changeId: mr.id }, 'change published; awaiting human merge');
+      return { success: true, mrUrl: mr.url };
     } catch (error) {
       const summary = `QA terminal routing failed: ${error instanceof Error ? error.message : String(error)}`;
       await this.markBlocked(backlogId, summary);

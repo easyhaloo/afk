@@ -28,7 +28,7 @@ async function setup(overrides: Partial<BacklogItem> = {}) {
   const get = vi.fn(async (id: string) => id === '42' ? current : { ...item, id, state: 'done' as const });
   const isRunnable = vi.fn(async () => true);
   const run = vi.fn(async () => { current.state = 'verification'; return { success: true }; });
-  const process = vi.fn(async () => { current.state = 'merge_ready'; return { success: true, autoMerged: false, mrUrl: 'https://github.com/acme/api/pull/5' }; });
+  const process = vi.fn(async () => { current.state = 'merge_ready'; return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' }; });
   const changes = {
     findForBacklog: vi.fn(async () => current.state === 'merge_ready' || current.state === 'done' ? {
       id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open',
@@ -431,15 +431,18 @@ describe('executeWorkItem', () => {
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['run.finished']);
   });
 
-  it('recognizes an eligible child only after its change is merged', async () => {
+  it('leaves a child waiting for a person rather than completing it', async () => {
     const { deps, current, process, changes } = await setup({ parentId: '41' });
     process.mockImplementationOnce(async () => {
-      current.state = 'done';
-      return { success: true, autoMerged: true, mrUrl: 'https://github.com/acme/api/pull/5' };
+      current.state = 'merge_ready';
+      return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' };
     });
-    changes.findForBacklog.mockImplementation(async () => current.state === 'done'
-      ? { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged' } : null);
-    expect((await executeWorkItem(input, deps)).status).toBe('done');
+    changes.findForBacklog.mockImplementation(async () => current.state === 'merge_ready'
+      ? { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' } : null);
+    // AFK never merges and never completes an item by itself: the change
+    // waits for a person, and the reconciliation path is what brings the item
+    // in line with a merge that already happened.
+    expect((await executeWorkItem(input, deps)).status).toBe('merge_ready');
   });
 
   it('does not start a runner when attempt journaling is unavailable', async () => {

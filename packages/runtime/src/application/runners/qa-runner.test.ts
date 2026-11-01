@@ -23,8 +23,6 @@ const config = {
   qaTimeout: 2000,
   contextThreshold: 100_000,
   maxQaReworkAttempts: 3,
-  // Merging is a person's decision unless an installation asks for it.
-  autoMerge: false,
 } as any;
 
 function fixture() {
@@ -504,7 +502,7 @@ describe('QARunner execution boundary', () => {
 
     const result = await runner.process('60');
 
-    expect(result).toMatchObject({ success: true, autoMerged: false });
+    expect(result).toMatchObject({ success: true });
     expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
     expect(f.providers.branches.commit).toHaveBeenCalledWith(process.cwd(), expect.stringContaining('QA'));
     expect(f.providers.branches.push).toHaveBeenCalledWith('qa-60', process.cwd());
@@ -549,7 +547,7 @@ describe('QARunner execution boundary', () => {
 
     const result = await runner.process('60');
 
-    expect(result).toMatchObject({ success: true, autoMerged: false });
+    expect(result).toMatchObject({ success: true });
     // The conflict is resolved in the worktree the change request is
     // published from, and the resolution is committed there.
     expect(f.providers.branches.commit).toHaveBeenCalledWith(process.cwd(), 'Resolve merge conflict with main');
@@ -622,7 +620,7 @@ describe('QARunner execution boundary', () => {
 
     const result = await runner.process('60');
 
-    expect(result).toMatchObject({ success: true, autoMerged: false });
+    expect(result).toMatchObject({ success: true });
     expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
     expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
   });
@@ -836,22 +834,21 @@ describe('QARunner execution boundary', () => {
     expect(fixtureData.changes.merge).not.toHaveBeenCalled();
   });
 
-  it('does not merge a child when the attempt audit refuses merge', async () => {
+  it('never merges a change on its own, not even a child backlog', async () => {
     const fixtureData = fixture();
     fixtureData.providers.backlog.get.mockResolvedValue({ ...await fixtureData.providers.backlog.get('60'), parentId: '11' });
-    const beforeChange = vi.fn(async (action: string) => {
-      if (action === 'merge') throw new Error('audit unavailable');
-    });
-    // Only an installation that asks for the merge to happen on its own gets
-    // that far; without it the change waits for a person and the audit is
-    // never consulted about a merge.
-    const runner = new QARunner(fixtureData.providers, { ...config, autoMerge: true }, {
+    const runner = new QARunner(fixtureData.providers, config, {
       sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
-      executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), beforeChange,
+      executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
-    expect(await runner.process('60')).toMatchObject({ success: false });
-    expect(beforeChange).toHaveBeenCalledWith('merge', expect.objectContaining({ id: '60' }), expect.objectContaining({ id: 'pr-60' }));
+
+    // The merge is a person's decision. AFK publishes the change request and
+    // waits for it — it has no way to merge one on its own.
+    expect(await runner.process('60')).toMatchObject({ success: true });
     expect(fixtureData.changes.merge).not.toHaveBeenCalled();
+    expect(fixtureData.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+    expect(fixtureData.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'done', expect.anything());
+    expect(fixtureData.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
   });
 
   it('reuses a matching open change instead of creating a duplicate for an audited attempt', async () => {
@@ -865,7 +862,7 @@ describe('QARunner execution boundary', () => {
       executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       beforeChange: vi.fn(async () => {}), afterPublication,
     });
-    expect(await runner.process('60')).toMatchObject({ success: true, autoMerged: false, mrUrl: 'https://example.test/pr/60' });
+    expect(await runner.process('60')).toMatchObject({ success: true, mrUrl: 'https://example.test/pr/60' });
     expect(fixtureData.changes.create).not.toHaveBeenCalled();
     expect(afterPublication).toHaveBeenCalledWith(expect.objectContaining({ id: 'pr-60' }));
   });
@@ -887,7 +884,7 @@ describe('QARunner execution boundary', () => {
 
     // Merging is a person's decision: the change is published into the
     // configured target branch and waits there.
-    expect(result).toMatchObject({ success: true, autoMerged: false });
+    expect(result).toMatchObject({ success: true });
     expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'main' }));
     expect(f.providers.changes.merge).not.toHaveBeenCalled();
@@ -895,13 +892,13 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
   });
 
-  it('auto-merges an organizational child backlog only when the installation asks for it', async () => {
+  it('publishes an organizational child backlog and waits for a human to merge it', async () => {
     const f = fixture();
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
     f.providers.backlog.get.mockResolvedValue(child);
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
-    const runner = new QARunner(f.providers, { ...config, autoMerge: true }, {
+    const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
@@ -910,9 +907,10 @@ describe('QARunner execution boundary', () => {
 
     const result = await runner.process('60');
 
-    expect(result).toMatchObject({ success: true, autoMerged: true });
-    expect(f.providers.changes.merge).toHaveBeenCalledWith('pr-60');
-    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'done', expect.anything());
+    expect(result).toMatchObject({ success: true });
+    expect(f.providers.changes.merge).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'done', expect.anything());
   });
 
   it('uses an explicit unmerged execution base for QA verification and merge target', async () => {
@@ -921,14 +919,14 @@ describe('QARunner execution boundary', () => {
     const executionBase = { ...child, id: '11', title: 'stack base', parentId: undefined, baseBacklogId: undefined, state: 'verification', branchName: 'afk/backlog-11' };
     f.providers.backlog.get.mockImplementation(async (id: string) => id === '11' ? executionBase : child);
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
-    const runner = new QARunner(f.providers, { ...config, autoMerge: true }, {
+    const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
       executionMode: 'batch',
       mergeFeatureIntoBaseline,
     });
 
-    await expect(runner.process('60')).resolves.toMatchObject({ success: true, autoMerged: true });
+    await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
     expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-11', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'afk/backlog-11' }));

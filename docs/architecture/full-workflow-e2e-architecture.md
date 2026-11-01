@@ -28,7 +28,7 @@
   → WorkflowRunner 执行模板步骤
   → 实现分支推送并进入 verification
   → QARunner 执行 QA
-  → root 任务进入 merge_ready 等待人工合并，或 child 任务自动合并进入 done
+  → 任务进入 merge_ready 等待人工合并（AFK 不自行合并）
   → 事件、runtime、执行 journal、CLI/Agent 日志形成证据
   → Desktop 通过 Main/IPC 查询 Backlog、runtime 和事件投影
   → Playwright Electron E2E 保存运行结果、截图或 trace
@@ -63,7 +63,7 @@ flowchart LR
     Verification --> QA[QARunner]
     QA --> Change[Change Provider]
     Change --> MergeReady[merge_ready + human gate]
-    Change --> Done[child merge + done]
+    Change --> Done[人工合并 + done]
     QA --> Rework[rework]
     Runner --> Blocked[blocked + hitl]
     Execute --> Journal[workspace .afk/executions/*.jsonl]
@@ -146,7 +146,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 3. 实现成功后要求 Provider 状态已经进入 `verification`。
 4. 调用 `QARunner`，写入 `qa.started`，根据 QA 结果写入 `qa.passed` 或 `qa.failed`。
 5. QA PASS 时提交 QA 分支、push、创建或复用 Change Request，并校验变更与 work item 的关联。
-6. root backlog 留在 `merge_ready` 并打开人工 gate；child backlog 执行合并并进入 `done`。
+6. backlog 留在 `merge_ready` 并打开人工 gate；AFK 不自行合并，`done` 由人合并后经审计验证产生。
 7. QA FAIL 持久化递增的 rework attempt，并 supersede 旧 active 记录；低于 `maxQaReworkAttempts`（默认 3）时回到 `rework` + `afk`，达到上限时进入 `blocked` + `hitl` 且不再返回 rework。后续 FAIL 保留到限记录，不会重新开启自动返工；不可恢复的错误也进入 `blocked`。边界及配置见 [Backlog 生命周期](overview.zh.md#backlog-生命周期)。
 
 返回值的 `status` 是执行尝试的结果：`merge_ready`、`done`、`rework`、`blocked` 或 `not_claimed`。它不能直接替换 Provider 的 backlog ID 或生命周期状态。
@@ -159,7 +159,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 | `workItemId` / `Run.workItemId` | 全局工作项、`Run`、事件上下文 | 全局身份，例如 `github:team/repo#158`；manifest-bound `executeWorkItem` 与普通 `afk run` 都使用它 | 已经是全局化的，不得用 `runId` 替代 |
 | `runId` | 核心 `Run`、事件流、runtime | 一次执行或阶段的身份 | 闭环实现阶段使用 `executionId`；QA runtime 独立使用 `qa-<backlogId>-<timestamp>-runtime`，不另建同名闭环事件流 |
 | `executionId` | `executeWorkItem` 结果、journal、闭环审计 | loop/闭环的一次执行编排身份 | 默认生成 UUID；当前闭环中同时作为 observation `runId` 和 `traceId` |
-| `parentId` | `BacklogItem` | 组织上的父子分组，规范全局身份 | 不选择 Git 基线；root 与 child 的 QA 合并策略不同；跨仓子项由 backlog 图发现 |
+| `parentId` | `BacklogItem` | 组织上的父子分组，规范全局身份 | 不选择 Git 基线；root 与 child 的 QA 验证一致，合并一律由人发起；跨仓子项由 backlog 图发现 |
 | `dependsOn` | `BacklogItem` | 任务级调度依赖，规范全局身份 | 所有依赖达到 `done` 后任务才可运行；不自动选择分支 |
 | `baseBacklogId` | Provider backlog 投影 | 显式的未合并 Git 执行基线，规范全局身份（或存量 `prd-N` 分支标记） | 用于 stacked work 的基线选择；和 `parentId`、`dependsOn` 是不同关系 |
 | `baseWorkItemId` | `@afk/core` `WorkLineage` | 核心模型中对应的显式执行基线字段 | 进入 core policy 时表示相同语义；适配层不得把它与父项或依赖项混用 |
@@ -201,7 +201,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 | 模板 | 图结构 | 主要能力 | 全流程验证重点 | 终态边界 |
 | --- | --- | --- | --- | --- |
-| `issue-implementation` | `implement → verify-ac → publish → queue-qa` | 默认实现流程；包含两个 agent step 和两个 system step | claim、工作树、实现、AC 验证、push、verification | QA 不在模板内完成；后续 `QARunner` 决定 `merge_ready` 或 `done` |
+| `issue-implementation` | `implement → verify-ac → publish → queue-qa` | 默认实现流程；包含两个 agent step 和两个 system step | claim、工作树、实现、AC 验证、push、verification | QA 不在模板内完成；后续 `QARunner` 决定 `merge_ready`，合并由人发起 |
 | `pre-merge-qa-verification` | `verify-ac` | 已合并最新基线后的 QA agent；要求结构化 `goal_complete` | QA 工作树、AC/集成测试、PASS/FAIL 解析、诊断保存 | PASS 由 QA runner 提交/push/发布；Agent 本身不负责 MR |
 | `merge-conflict-resolution` | `resolve-conflicts` | 在 QA 工作树里解决目标分支与变更分支的冲突 | 未合并路径的读取、冲突文件的逐个处理、解决后仍有冲突则交人 | 解决结果由 QA runner 提交；Agent 不提交、不推送、不建 MR |
 | `simple-loop` | `run` | 单 agent step 的最小执行模板 | 单步 prompt、完成信号、单步 runtime 和事件 | 由 runner 的 wrap-up 和 backlog 路由决定 |
@@ -228,7 +228,7 @@ stateDiagram-v2
     in_progress --> blocked: failure / timeout / lease loss
     verification --> rework: QA FAIL
     verification --> merge_ready: QA PASS + change published
-    merge_ready --> done: child auto merge / root human merge + audit verification
+    merge_ready --> done: human merge + audit verification
     blocked --> [*]
     rework --> [*]: 等待下一次 loop/run
     done --> [*]
@@ -246,7 +246,7 @@ stateDiagram-v2
 }
 ```
 
-FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、发布 Change Request；`executeWorkItem` 注入的回调负责复用检查和 issue association 验证，独立 QA CLI 没有注入这些闭环审计回调。root 项切到 `merge_ready` 和 `hitl`；child 项也先进入 `merge_ready`，再执行 merge 并切到 `done`。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
+FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、发布 Change Request；`executeWorkItem` 注入的回调负责复用检查和 issue association 验证，独立 QA CLI 没有注入这些闭环审计回调。所有项都切到 `merge_ready` 和 `hitl`：AFK 不自行合并，child 与 root 在这一点上没有区别。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
 
 QA 工作树的依赖目录不是指向主检出的单个符号链接。pnpm 12 会拒绝把符号链接当作任务运行状态目录（`ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH`），带 `--filter` 的 workspace 运行在软链布局下直接失败。`GitBranchProvider` 为 QA 工作树物化一个真实的 `node_modules` 目录，其条目（包含 `.pnpm` 存储和 `.bin`）逐项链接到主检出；pnpm 自身的可变状态 `.pnpm-task-run-state-v1` 与 `.pnpm-workspace-state-v1.json` 不共享，留在工作树本地，避免并行工作树互相写入。
 
@@ -310,7 +310,7 @@ GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` �
 | --- | --- | --- | --- |
 | 模板纯测试 | 注册、schema、依赖层级、`when` 条件、cycle 拒绝 | `packages/runtime/src/domain/templates/templates.test.ts`、compiler/resolver 测试 | Agent、Git、Provider、桌面端真实行为 |
 | workflow 集成测试 | claim、lease、worktree、system action、失败清理、runtime | `packages/runtime/src/application/workflow-engine*.test.ts`、workflow tests | 外部 Provider 真实网络结果 |
-| `executeWorkItem` 测试 | manifest 身份、锁、journal、QA 路由、root/child 分支 | `execute-work-item.test.ts`、审计事件投影 | 桌面 UI 和真实 Electron 进程 |
+| `executeWorkItem` 测试 | manifest 身份、锁、journal、QA 路由 | `execute-work-item.test.ts`、审计事件投影 | 桌面 UI 和真实 Electron 进程 |
 | loop 测试 | poll、单实例、状态文件、SIGTERM、重试、max iterations | `loop-runner.test.ts`、loop CLI tests | 跨重启恢复内存 `inFlight` |
 | CLI/provider E2E | 真实 claim、push、change request、QA、merge | 隔离 Provider 项目和脱敏命令日志 | 不应使用生产任务做回归 |
 | Desktop Electron E2E | Main/preload/IPC/renderer、导航、筛选、workflow 画布、任务入口 | `apps/desktop/tests/e2e/*.spec.ts`、截图/trace | 真实 GitHub/GitLab、真实 Agent、真实 MR merge |

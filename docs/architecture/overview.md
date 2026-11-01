@@ -547,9 +547,10 @@ body declares, which is the ref the execution manifest was derived from — then
 base edge, then the configured branch. Both commands take `--target-branch` for the case
 where an operator knows better.
 
-An installation that runs a fully autonomous pipeline can ask for the merge to happen
-without a person: set `autoMerge: true` in `~/.afk/config.yml`, or `AFK_AUTO_MERGE=1`. The
-default is off, so a change is never merged by AFK unless the installation asks for it.
+AFK never merges a change on its own, and there is no setting that turns it on. The
+change request is published and waits there; the only merge AFK performs is the one a
+person asks for with `afk backlog confirm-merge`, and the platform's own merge button
+is the other one.
 
 ### When the change request conflicts
 

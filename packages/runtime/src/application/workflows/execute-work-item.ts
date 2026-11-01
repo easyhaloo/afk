@@ -392,10 +392,9 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
             agentRuntime: runRequest.agentRuntime, executionMode: 'interactive', projectRoot: runRequest.workspaceRoot,
             repositories: runRequest.repositories,
             executionBaseBranch: runRequest.executionBaseBranch,
-            beforeChange: async (action, _backlog, change) => {
-              if (action === 'publish') await auditQAPass();
-              if (action === 'merge' && change) await providers.changes.verifyIssueAssociation(change, workItemId);
-              await record(action === 'publish' ? 'publication_requested' : 'merge_requested', change ? { changeId: change.id, changeUrl: change.url } : {});
+            beforeChange: async () => {
+              await auditQAPass();
+              await record('publication_requested', {});
             },
             afterPublication: async change => {
               await providers.changes.verifyIssueAssociation(change, workItemId);
@@ -429,17 +428,13 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         // The change is published and waits for a person to confirm the merge.
         // A child waits exactly like a root does, so the shape of the
         // outcome no longer depends on where the item sits in the tree.
-        const awaitingHumanMerge = qaResult.autoMerged === false && change?.state === 'open' && finalItem?.state === 'merge_ready';
-        const mergedByAgent = qaResult.autoMerged === true && change?.state === 'merged' && finalItem?.state === 'done';
-        const status: ExecuteWorkItemStatus = qaResult.success && published && (awaitingHumanMerge || mergedByAgent)
-          ? mergedByAgent ? 'done' : 'merge_ready'
+        const awaitingHumanMerge = change?.state === 'open' && finalItem?.state === 'merge_ready';
+        const status: ExecuteWorkItemStatus = qaResult.success && published && awaitingHumanMerge
+          ? 'merge_ready'
           : qaResult.rework ? 'rework' : 'blocked';
-        if (status === 'merge_ready' || status === 'done') {
+        if (status === 'merge_ready') {
           await audit({ kind: 'change.published', changeId: String(change!.id), url: change!.url! });
-          if (status === 'done') {
-            await audit({ kind: 'change.merge_verified', changeId: String(change!.id), targetBranch: request.targetBranch, child: true });
-            await audit({ kind: 'run.finished', outcome: 'succeeded' });
-          } else await audit({ kind: 'human_gate.opened', gateId: `merge:${change!.id}`, reason: 'awaiting human merge' });
+          await audit({ kind: 'human_gate.opened', gateId: `merge:${change!.id}`, reason: 'awaiting human merge' });
         } else await audit({
           kind: 'run.finished',
           outcome: 'failed',

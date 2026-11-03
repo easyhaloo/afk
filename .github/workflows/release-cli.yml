@@ -3,7 +3,6 @@ name: Release CLI
 on:
   push:
     branches: [main]
-    tags: ['cli-v*']
   workflow_dispatch:
 
 permissions:
@@ -16,8 +15,6 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
@@ -25,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -43,17 +41,22 @@ jobs:
             requested="${GITHUB_REF_NAME#cli-v}"
             [[ "${requested}" == "${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} does not match CLI version ${version}" >&2; exit 1; }
             tag="${GITHUB_REF_NAME}"
-          elif ! git ls-remote --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git tag -a "${tag}" -m "AFK CLI ${version}"
-            git push origin "${tag}"
           fi
 
           if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             publish=false
           else
             publish=true
+            # A tag created by an earlier successful package attempt may be reused
+            # only when it points at this exact source commit. Never build from a
+            # stale tag after a failed package job.
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              existing_tag_sha="$(git rev-parse "${tag}^{commit}")"
+              if [[ "${existing_tag_sha}" != "${GITHUB_SHA}" ]]; then
+                echo "::error::Tag ${tag} points to ${existing_tag_sha}, not ${GITHUB_SHA}. Increment apps/cli/package.json before retrying this release." >&2
+                exit 1
+              fi
+            fi
           fi
           echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
@@ -83,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 12.5.1
@@ -101,7 +104,7 @@ jobs:
       - name: Prepare build tool
         run: pnpm rebuild esbuild
       - name: Test installer
-        run: pnpm exec vitest run tests/cli-install.test.ts
+        run: pnpm exec vitest run tests/cli-install.test.ts tests/package-cli-validation.test.ts
       - name: Build, package and verify offline installation
         run: pnpm release:cli --version "${{ needs.prepare.outputs.version }}"
       - uses: actions/upload-artifact@v4
@@ -120,6 +123,7 @@ jobs:
       # gh release create --verify-tag requires a local Git repository and tag refs.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
@@ -129,4 +133,23 @@ jobs:
       - name: Publish CLI release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ needs.prepare.outputs.tag }}" release/cli/* --verify-tag --title "AFK CLI ${{ needs.prepare.outputs.version }}" --generate-notes --latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          version="${{ needs.prepare.outputs.version }}"
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            existing_tag_sha="$(git rev-parse "${tag}^{commit}")"
+            if [[ "${existing_tag_sha}" != "${GITHUB_SHA}" ]]; then
+              echo "::error::Refusing to publish ${tag}: it points to ${existing_tag_sha}, not ${GITHUB_SHA}." >&2
+              exit 1
+            fi
+          else
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git tag -a "${tag}" -m "AFK CLI ${version}"
+            git push origin "refs/tags/${tag}"
+          fi
+
+          gh release create "${tag}" release/cli/* --verify-tag --title "AFK CLI ${version}" --generate-notes --latest

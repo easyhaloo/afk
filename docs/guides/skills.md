@@ -56,7 +56,6 @@ These categories help users discover skills by goal. They do not define a mandat
 |---|---|---|
 | [afk-skill-craft](../../skills/afk-skill-craft/) | `/afk-skill-craft` | Create, diagnose, and refactor skills |
 | [reasoning-guard](../../skills/reasoning-guard/) | `/reasoning-guard` | Detect reasoning degradation in-session |
-| [reasoning-watchdog](../../skills/reasoning-watchdog/) | `/reasoning-watchdog` | Persistent reasoning monitoring through hooks |
 | [jev-agent-guard](../../skills/jev-agent-guard/) | `/jev-agent-guard` | Install checkpoints for coding agents |
 
 ### Knowledge & Engineering Governance
@@ -75,7 +74,6 @@ These categories help users discover skills by goal. They do not define a mandat
 - **`afk-do` vs. `afk-implement`**: `afk-do` is the task-analysis and methodology-selection entry point; `afk-implement` executes the implementation workflow.
 - **`afk-testing`, `afk-change-driven-testing`, and `afk-qa`**: the first handles specialist testing work; the second adds focused tests for changed legacy flows without changing production behavior; `afk-qa` is the independent acceptance gate.
 - **`afk-grill-me` vs. `afk-grill-me-context`**: the first interviews from an ambiguous request; the second finds and validates gaps in existing materials.
-- **`reasoning-guard` vs. `reasoning-watchdog`**: the first checks reasoning within the current session; the second runs persistently through hooks.
 - **`afk-scheduler` vs. `afk-hand-off`**: the first schedules work items by dependencies; the second preserves state for a safe handoff.
 
 Categories are for navigation; they do not require every task to invoke every skill.
@@ -111,7 +109,6 @@ User Request
 /afk-branch-migrate ─→ Cross-branch Code Migration
 /md-to-pdf ──────────→ Markdown to PDF
 /reasoning-guard ────→ In-session Reasoning Path Guardian
-/reasoning-watchdog ──→ Hooks-based Automatic Reasoning Monitor
 /afk-skill-craft ────→ Skill Create / Diagnose / Refactor
 ```
 
@@ -900,44 +897,6 @@ tests/api-workflow/
 - Suitable for temporary reasoning monitoring needs
 
 **Collaboration with Other Skills:**
-- **Opposite** → **reasoning-watchdog** — Hooks-based automated version, suitable for persistent monitoring scenarios
-
----
-
-### 18. reasoning-watchdog
-
-**Purpose:** Hooks-based automatic reasoning path guardian — Install PostToolUse/PreToolUse/SessionEnd hooks into Claude Code, automatically detect and intercept reasoning degradation
-
-**Triggering Scenarios:**
-- reasoning-watchdog system already installed, need to check status or tune thresholds
-- Need persistent, automated reasoning monitoring
-
-**Workflow:**
-1. **Install** — `npm run install` registers hooks to `~/.claude/settings.json`
-2. **Auto-detect** — PostToolUse hook monitors repeated operations, token burning, etc.
-3. **Intercept** — PreToolUse hook injects corrective prompts and blocks next action
-4. **Cleanup** — SessionEnd hook cleans up session state files
-
-**Architecture:**
-```
-Claude Code session
-  └── PostToolUse hook → Detect error signals
-  └── PreToolUse hook  → Inject corrective prompt + block next action
-  └── SessionEnd hook  → Clean up session state files
-```
-
-**Design Decisions:**
-
-**Why use hooks instead of in-session monitoring?**
-- Persistent installation, auto-activates on each startup
-- No human intervention needed, suitable for long-term use
-
-**Difference from reasoning-guard:**
-- reasoning-guard: In-session, no background process, temporary use
-- reasoning-watchdog: Hooks installed, auto runs in background, persistent
-
-**Collaboration with Other Skills:**
-- **Opposite** → **reasoning-guard** — In-session version, for temporary monitoring
 
 ---
 
@@ -957,7 +916,6 @@ Each skill solves one category of problems, avoiding feature overlap:
 - **afk-scheduler** — Background scheduling
 - **md-to-pdf** — Document conversion
 - **reasoning-guard** — Reasoning path guardian
-- **reasoning-watchdog** — Automatic reasoning monitor
 - **afk-skill-craft** — Skill create/diagnose/refactor
 
 ### 2. Explicit Trigger Conditions

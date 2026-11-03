@@ -1,842 +1,174 @@
-# AFK architecture
+# AFK architecture overview
 
-## Workspace organization
+AFK turns backlog work items already planned and decomposed by an external system into **traceable, independently verified code changes awaiting human merge**. It owns execution and pre-delivery control, not requirements planning, task decomposition, or the final merge decision.
 
-The root is a private pnpm workspace. `apps/cli` owns the `afk` executable,
-Commander commands, shell completion, and the Ink TUI. `apps/desktop` owns
-Electron main/preload, IPC validation and the React renderer. Both consume
-the same shared packages through declared exports:
+This page explains the system boundary, core components, sources of truth, and end-to-end flow. See [Execution architecture](./execution.zh.md) for execution details and [System architecture design](./system-architecture-design.md) for the deeper design rationale.
 
-| Package | Responsibility |
+## System boundary
+
+AFK sits between a backlog provider, code repositories, and coding agents. It manages work from claim through verification and publication of a change request.
+
+| Participant | Facts or capabilities it owns | AFK's responsibility |
+| --- | --- | --- |
+| Backlog provider (such as GitHub or GitLab) | Work-item identity, business state, relationships, and metadata | Validate eligibility, advance lifecycle state, and record outcomes |
+| Git repository | Branches, commits, worktrees, and change history | Isolate execution, preserve changes, and publish change requests |
+| Coding agent | Code modification and execution feedback | Supply the goal and constraints, supervise execution, and verify results independently |
+| Operator | Authorization, exception handling, and merge decisions | Provide a takeover path without bypassing verification or audit boundaries |
+
+AFK consumes the output of an external planning system; it does not perform requirements decomposition. An agent executes work but is not the final judge of its result. An agent's completion claim does not replace independent QA. After a change request is published, it waits at a human merge gate; AFK does not decide to merge autonomously.
+
+## System structure
+
+The repository is a pnpm workspace. Applications consume shared capabilities through declared package exports rather than relative imports into another workspace's source.
+
+| Component | Primary responsibility |
 | --- | --- |
-| `packages/core` (`@afk/core`) | Pure models, events, reducer, policy and ports |
-| `packages/application` (`@afk/application`) | Shared use cases, inventory and execution queries; depends on Core |
-| `packages/runtime` (`@afk/runtime`) | Workflow execution, backlog operations and Node adapters for providers, Git, tmux, sandbox and storage |
-| `packages/workflow-graph` (`@afk/workflow-graph`) | Pure workflow graph projection, layout and validation |
+| `apps/cli` | CLI commands, shell completion, terminal interaction, and operations entry points |
+| `apps/desktop` | Electron main process, preload, IPC, and React UI |
+| `packages/core` (`@afk/core`) | Domain models, events, reducers, policies, and ports |
+| `packages/application` (`@afk/application`) | Shared use cases, manifests, and execution queries; depends on Core |
+| `packages/runtime` (`@afk/runtime`) | Workflow execution, backlog operations, and Provider, Git, tmux, sandbox, and storage adapters |
+| `packages/workflow-graph` (`@afk/workflow-graph`) | Workflow graph projection, layout, and validation |
 
-Applications must not import another workspace's source by relative path.
-Shared packages must not depend on applications; the workspace graph must be
-acyclic. Desktop renderer code must not import `@afk/runtime`; Node access
-stays behind main-process IPC. Runtime retains its existing internal layer
-rules. The architecture check enforces these rules and package exports.
+Dependencies must be one-way and acyclic: applications depend on shared packages, and shared packages do not depend on applications. The Desktop renderer must not import `@afk/runtime`; Node capabilities are exposed through main-process IPC.
 
-Desktop backlog operations and graph generation call Runtime directly.
-Managed work-item execution runs the same `executeWorkItem` used by CLI in a
-bundled, detached Node worker. This preserves task process isolation and
-allows execution to outlive the desktop window. Desktop never looks up or calls
-the AFK CLI. Stop, recovery and merge confirmation call shared Runtime directly;
-execution has a single Worker path with no command override or fallback.
+CLI and Desktop share Runtime. Desktop backlog management and graph generation call Runtime directly. Managed work items run through a separate Node Worker that invokes the same `executeWorkItem` path as CLI, preserving process isolation and allowing work to continue after the Desktop window closes. Desktop does not execute work by invoking the AFK CLI.
 
-Each workspace owns its build, typecheck and tests. Root commands run shared
-packages and CLI in dependency order, then repository contract tests. Desktop
-validation runs separately with `pnpm --filter afk-control-electron typecheck`,
-`build` and `test`. The CLI binary is `apps/cli/dist/index.js`; root no longer
-publishes an executable or contains application source.
+## Core responsibilities and boundaries
 
-## Execution and system paths
+### Provider and Runtime
 
-CLI and Desktop share the Runtime path resolver. Execution starts under
-`~/.loop-workspace/<platform>/<project segments>/<issue>/`; repository checkouts
-live in `repositories/` under that directory. The invocation directory and
-`AFK_WORKSPACE` do not change this root. `afk run` without a manifest resolves
-the provider identity and prepares an isolated checkout there.
+- **`BacklogProvider`** supplies canonical work-item identity, title and description, lifecycle state, execution mode, relationships, business tags, and branch mapping.
+- **`BranchProvider`** owns branch and worktree operations.
+- **`ChangeProvider`** owns change-request creation, lookup, and merge operations.
+- **Runner / Runtime** coordinates these interfaces; provider-specific label parsing and API details should not leak into the execution flow.
+- **Agent / Sandbox** performs authorized work. It does not own backlog lifecycle state, claim authority, or the final acceptance decision.
+- **QA** independently checks acceptance criteria and determines whether work passes, needs rework, or must be blocked.
 
-Configuration and AFK system data live in `~/.afk/`. Global workflow settings
-and templates are `config.yml` and `workflows/`; the tracker index is
-`tracker-projects.json`. Per-workspace metadata, manifests, launch receipts,
-budgets, sessions, diagnostic runs and execution journals live in
-`~/.afk/workspaces/<sha256-of-absolute-workspace-path>/`. Hashing preserves
-workspace isolation without placing system records in code repositories.
+Platform adapters encapsulate their clients and platform-specific behavior. A new platform should implement the Provider contract rather than add platform-specific branches to Runner.
 
-`afk execute --work-item-id <id>` locates the shared manifest automatically;
-when missing, it creates one from the authoritative provider project and
-working branch. `--execution-manifest` remains an explicit input override;
-its location never changes the canonical execution root. `reconcile` requires
-an existing manifest and never creates a new execution configuration.
-Existing files in the former repository-local locations are left untouched;
-move any needed configuration to `~/.afk/` before starting new executions.
-Agent completion signals and QA artifact manifests remain execution-local
-protocol files; they are not configuration or lifecycle state stores.
+### Sources of truth
 
-## Architecture guard
+Different state categories have different authoritative sources and must not be conflated.
 
-`pnpm architecture:check --check-packages` enforces layer direction and checks
-the `packages/core` and `packages/application` roots for pure
-source imports and dependency direction. The guard also
-disallows generic records and legacy client-factory imports. The legacy migration is complete:
-`scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
-and patterns. New legacy files or imports fail the check. Delete the stale
-baseline record when removing an entry.
+| Data | Source of truth | Meaning |
+| --- | --- | --- |
+| Work item and business lifecycle | Backlog provider | Local caches and UI projections cannot override provider state |
+| Execution-attempt phase, heartbeat, progress, and diagnostics | Runtime execution records | Describes one attempt; a stale heartbeat may be shown as `stale` without changing backlog state |
+| Worker launch receipt | Desktop work-item run record | Records Worker startup, not provider lifecycle state |
+| Commit, phase-transition, and execution audit evidence | AFK append-only audit events | Supports traceability and explanation of recorded activity; it cannot recover output that was never recorded |
 
-Layer direction applies to relative imports between non-test files in
-`packages/runtime/src/domain`, `packages/runtime/src/application`,
-`packages/runtime/src/infrastructure`, and `packages/runtime/src/shared`.
-Application boundaries in `apps/cli` and `apps/desktop` are checked by the
-workspace import guard. Passing `--require-packages` makes a missing package
-root a failure instead of a skipped check.
+Configuration and AFK system data live under `~/.afk/`. Workspace metadata, execution manifests, launch receipts, budgets, sessions, diagnostics, and execution audit records are isolated under directories keyed by the workspace-path hash. The execution directory and system-state directory serve different purposes and are not interchangeable.
 
-## Scope and command surface
+## Work-item identity and relationships
 
-AFK executes backlog items that were already created and decomposed by an
-external planner. It does not create or split work. The command registry is the
-single source of truth for the supported surface:
+Every work item has a canonical global identity, for example `github:acme/api#42`. This identity remains consistent across runs, events, CLI, and Desktop projections. A `runId` identifies one execution attempt and must not replace the work-item identity.
 
-| Command | Responsibility |
-| --- | --- |
-| `afk backlog init` | Provision provider metadata |
-| `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title> [--kind prd] [--base-branch <ref>] [--dry-run] [--idempotency-key <key>]` | Create one provider-backed backlog item or preview its labels and relationships |
-| `afk backlog apply-manifest <file> [--project <project>] [--idempotency-key <key>] [--dry-run]` | Create the backlog records a provider-neutral manifest names, each in the project it names |
-| `afk backlog list/show/tag` | Inspect and manage backlog records; `show` names the change request and whether it can land |
-| `afk backlog relation add\|remove --id <id> [--parent <id>] [--base <id>] [--depends-on <id>]` | Edit the relationship edges of a backlog item that already exists |
-| `afk backlog role --id <id> --kind prd` | Give a backlog item the organizational role of a PRD anchor |
-| `afk backlog mode --id <id> --mode afk\|hitl` | Switch who runs a backlog item |
-| `afk backlog base --id <id> --branch <ref>` | Record the ref a backlog item starts from, in its body |
-| `afk backlog children <id> [--project <project>] [--platform <platform>]` | List the issues that belong to one work item, across every reachable project, each with the reason it is or is not runnable |
-| `afk backlog inventory` | Inventory issues across all credential-accessible projects |
-| `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
-| `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
-| `afk backlog confirm-merge` | Merge an approved backlog change — root or child — and mark it done |
-| `afk backlog reconcile-merge` | Complete a backlog whose change is already merged on the provider |
-| `afk run --backlog-id <id>` | Execute one claimed item |
-| `afk execute --work-item-id <id> [--execution-manifest <path>]` | Implement, independently verify, and publish one managed work item |
-| `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
-| `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
-| `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
-| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status (`--all` shows every loop in the loop runs directory), and graceful stop |
-| `afk observe` | Read append-only AFK run audit events as text by default, or with `--json` (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
-| `afk observe <runId>` / `afk log <runId>` | Short forms of `afk observe execution <runId>` with the same `--watch`, `--tail`, `--root`, and `--json` options |
-| `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | Show a detailed run timeline; optionally follow new events or limit the initial history |
-| `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
-| `afk retro show <report>` | Read a generated retro report |
-| `afk graph workflow <template>` | Generate a deterministic workflow graph |
-| `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
+Three relationship types have distinct meanings:
 
-The [wiki skill](../../skills/wiki/SKILL.md) bundles a separate Python CLI;
-its argparse registry in `skills/wiki/scripts/wiki.py` owns this surface.
-It does not add an `afk` command. All operations accept `--vault` and `--json`,
-before or after the subcommand. Vault resolution is `--vault` → `WIKI_VAULT`
-→ nearest ancestor `.wiki.json` → user `wiki/config.json` under
-`XDG_CONFIG_HOME` (default `~/.config`). Configurations contain a `vault`
-string; relative paths are based on the configuration's directory.
+| Field | Meaning | Controls scheduling or Git baseline? |
+| --- | --- | --- |
+| `parentId` | Organizes work items into a parent-child hierarchy | No. A parent is not executable; its children may live in other repositories |
+| `dependsOn` | Declares work that must finish first | Yes. Dependencies must be `done` before the item can run |
+| `baseBacklogId` | References a work item used as an execution baseline | Used to select or trace the baseline; a Git branch cannot be reused directly across repositories |
 
-| Skill-local command | Responsibility |
-| --- | --- |
-| `wiki.py locate` | Show the resolved vault and configuration source |
-| `wiki.py search <query> [--regex] [--limit <count>]` | Search titles, aliases, and content |
-| `wiki.py read <path> [--heading <heading>]` | Read a page or section and its whole-file hash |
-| `wiki.py lint [path] [--max-age-days <days>]` | Report vault-local or portable quality checks |
-| `wiki.py ingest --plan <file-or-dash> [--apply] [--max-age-days <days>]` | Preview or apply an evidence-backed change plan |
+Cross-repository references retain their canonical identity for traceability, but an execution baseline must respect the target repository's Git semantics. Parent, dependency, and baseline relationships do not implicitly substitute for one another.
 
-There are no aliases for removed command groups. Provider metadata labels are
-an adapter detail and never part of this CLI contract.
-
-### Reading and following runs
-
-```bash
-afk observe runs
-afk observe <runId>
-afk log <runId> --watch --tail 20
-afk observe execution <runId>
-afk observe timeline <runId> --tail 20 --watch
-afk observe execution <runId> --watch --tail 0
-afk observe execution <runId> --json
-```
-
-`observe <runId>` uses `execution` as the default subcommand; existing named
-subcommands still take precedence. `log <runId>` is a direct shortcut to the
-same run viewer, including the same option validation and JSON contract.
-
-Text output includes the recorded run state, phase, active step or human gate,
-integrity, local time zone, elapsed time, and latest event. Workspace paths and
-branches remain in the summary even when `--tail` hides their original event.
-Timeline entries expand event fields, including steps, commits, change URLs,
-session/transcript references, complete multiline error summaries, and QA
-expected/actual criteria. Failed events without a recorded reason say so.
-These are audit events, not a live agent stdout/stderr stream; unrecorded
-details cannot be reconstructed. A running state without an active step is
-not by itself a failure.
-
-`--watch` polls once per second and appends new events without repeating the
-history. It stays quiet without changes, displays human-review gates while
-waiting, and exits after a terminal event. Ctrl-C or SIGTERM stops only the
-observer. Invalid integrity stops following, marks the state untrusted, and
-excludes unverified details. A replaced or shortened history requires restarting
-the observer. `--tail` accepts a non-negative integer and counts complete events;
-zero suppresses the initial timeline while retaining the summary.
-
-`--json` preserves the existing single-document JSON contracts and cannot be
-combined with `--watch` or `--tail`. Text redirected to a file or pipe has no
-color escapes; `NO_COLOR` also disables colors in a terminal.
-
-## Provider boundaries
-
-`BacklogProvider` is the canonical source for item identity, title and
-description, state, execution mode, parent, dependencies, business tags, and
-the branch mapping. `BranchProvider` owns branch and worktree operations.
-`ChangeProvider` owns change-request creation, lookup, and merge. The runner
-coordinates these interfaces and never parses provider labels.
-
-GitHub and GitLab are concrete `BacklogProvider` implementations selected by
-the provider bundle. They delegate common tracker mechanics internally while
-keeping platform validation and construction at the platform boundary. A
-future integration such as Linear implements `BacklogProvider` directly; no
-tracker-specific type is required by the runner.
-
-The management bundle wraps a concrete provider in a claim-free facade. Its
-backlog surface includes lookup, listing, metadata initialization, business
-tag updates, and the state/mode updates needed by QA. It has no `claim()` at
-the type or runtime boundary. The execution bundle is the only path that
-exposes claiming and runnable checks.
-
-### Tracker target resolution
-
-The provider project a command talks to is a tracker target: one platform and
-one project, resolved together and never mixed. The project is chosen by the
-first source that names one:
-
-1. the explicit `--project` flag
-2. the local tracker index, by issue id
-3. the local tracker index, by working directory
-4. the `AFK_TRACKER_PROJECT` environment variable
-5. the `origin` remote of the working directory
-
-The platform follows the project: the `--platform` flag wins, then the
-platform recorded next to the project, then `AFK_TRACKER_PLATFORM`, then the
-shape of the project key, then the git remote, then the configured
-credentials.
-
-The git remote is therefore optional. Read-only commands such as
-`afk backlog show` run from any directory once the target is known, and an
-unresolvable target fails with an actionable error instead of a platform
-detection failure. When the platform is still unknown, a numeric project key
-or a key with three or more path segments resolves to GitLab; an `owner/repo`
-key resolves to GitHub unless only GitLab credentials are configured.
-
-### Local tracker index
-
-`~/.afk/tracker-projects.json` records the provider projects AFK has
-worked with: the project, the local repositories it was
-reached from, and the issues it contains. Every provider read, inventory and
-execution writes what it saw, so a later command resolves a bare issue id or
-a working directory to its provider project without any configuration. This
-is how a user who works across several repositories addresses a project
-without remembering its key or configuring each repository.
-
-The index is a local cache, not a source of truth: provider state always
-comes from the provider, and a missing or damaged index only means "no
-association known". When several recorded projects carry the same issue id,
-the project that owns the working directory wins; otherwise the most recently
-updated project wins, and `--project` always overrides that choice.
-
-`adopt` is an optional management/provider capability; unsupported providers
-return an explicit error. The tracker adapter checks the issue's raw state and
-metadata rather than inferring readiness from domain defaults. It accepts only
-open issues with absent or canonical ready/afk lifecycle labels, rejects unknown,
-duplicate or conflicting AFK metadata and malformed or self-referencing
-parent/base/dependency IDs, and preserves business labels, relationships and the
-issue body. Adoption initializes provider metadata only when labels are missing,
-then adds only the missing ready/afk labels with no removals. An already ready/afk
-item is a no-write success; closed, blocked, HITL and other lifecycle states are
-rejected without writes. Project and platform are required, and `--json` emits
-the `backlog.adopt` envelope. Execution and loop never invoke adoption implicitly.
-
-## Work-item and execution identity
-
-The Provider Backlog is the business source of truth. Its `BacklogItem.id` is
-the **canonical global identity** of the item: `platform:projectKey#issueNumber`,
-for example `github:acme/api#42`. The same identity is carried through
-`afk run --backlog-id <id>`, `Run.workItemId`, the run events, TUI projections
-and Desktop summaries. `runId` identifies one execution attempt and must never
-replace the backlog identity.
-
-One item has one identity, whichever provider served it. Two repositories with
-the same issue number stay two different backlog items, and every relationship
-edge names the item it points at unambiguously. Relationship fields
-(`parentId`, `baseBacklogId`, `dependsOn`) carry the same canonical form.
-
-The canonical project key is derived by one rule, `canonicalProjectKey()`:
-GitHub projects are `owner/repo`; GitLab projects are `host/group/project` on a
-self-hosted instance and the bare `group/project` on gitlab.com. A first path
-segment that contains a dot is read as a host, which is the same rule the
-tracker adapter uses to route a relationship to another project.
-
-A provider accepts both spellings of a reference: a bare issue number, which
-belongs to the project that provider writes to, and a canonical global
-identity, which may address another repository on the same provider host.
-Cross-platform and cross-host references are rejected.
-
-The project a provider writes to is its own private state, not part of the
-provider contract: a reference that names no project can only be resolved by
-the provider that owns that project. What the contract owns is the *behaviour*
-— `planCreate()` plans a creation without writing anything, and `create()`
-writes exactly that plan. A dry run and a real creation therefore go through
-the same code path, and every wrapper in the chain has to carry the behaviour
-because the port requires it.
-
-Relationship labels are stored in canonical form (`parent::github:acme/api#42`).
-Legacy bare-number labels (`parent::42`) are still read and resolve against the
-owning project. The backlog metadata codec
-(`packages/runtime/src/domain/backlog/metadata-codec.ts`) is the only place
-that parses, validates and serializes these labels; the tracker adapter, the
-global inventory and the cross-project graph all use it, so a `parent::` edge
-means the same thing everywhere.
-
-Relationships have separate meanings: `parentId` is organizational grouping,
-`dependsOn` controls scheduling, and `baseBacklogId` explicitly references an
-execution-base backlog. All three relationships accept canonical cross-project
-identities. When the base backlog is in the same repository, an unfinished
-base selects its branch; when it belongs to another repository, the reference
-is retained for traceability but execution uses the target repository's
-configured base branch because a Git branch in one repository is not a Git
-baseline in another. Neither parent nor dependency edges implicitly select a
-branch.
-
-The backlog graph spans projects. A PRD anchor may live in the requirements
-repository while its implementation children live in the service repository, so
-the provider asks the cross-project graph for the children of an item before it
-claims it; a parent with children in another repository is never runnable. When
-the graph cannot be read, the adapter falls back to the local project scan and
-reports the failure.
-
-The children of one work item are answered by one query
-(`packages/runtime/src/application/work-item/children.ts`). It takes the
-canonical identity of the parent, because a bare issue number names a
-different issue in every repository, and it answers from the local inventory
-first. The inventory is a cache, so a missing or stale copy is collected again
-before the question is answered, and an identity the copy has never heard of is
-collected once more before it is reported as unknown. The children are ordered
-by project and issue number, so the list does not depend on when the inventory
-was collected. A child that AFK does not manage is reported as well, with its
-`managed` flag, because a hand-written issue attached to a PRD is a child too.
-
-The command resolves that identity for the caller: an issue number is looked
-up in the local index to find the project it belongs to, and `--project` and
-`--platform` say it outright. The canonical identity only has to be typed when
-a script produces it. Every item is printed on one line with the URL the
-provider reported, so the entry can be opened from the terminal.
-
-Creation relationship flags (`--parent`, `--base-backlog`, `--depends-on`)
-accept a positive issue number in the explicitly selected project, or a
-qualified `platform:projectKey#issueNumber` reference. A Git base must belong
-to the execution repository. Multi-repository Git bases belong in an execution
-manifest.
-
-For `afk run`, an unfinished base backlog selects its branch before workspace
-preparation, and a completed/merged base falls back to the configured base.
-An explicit `--base-branch`, branch strategy base, or manifest base takes precedence.
-Legacy `base::prd-N` metadata still selects `prd/N`. Implementation and QA use
-the same backlog base resolver; the normal target branch is unchanged.
-
-`--kind prd` creates an organizational anchor with the `kind::prd` label, which
-is never execution eligible. A role is not a stage: an anchor is a container,
-so it has **no lifecycle state at all** — it does not belong to the `ready`
-bucket, and its non-executability comes from the role rather than from a
-state. The seven `stage::*` labels are the only lifecycle positions, and every
-non-anchor work item carries exactly one of them. Issues without mode labels
-default to `hitl` until explicitly adopted. `--dry-run` validates the same
-creation plan, including referenced issues, and prints the title, description,
-labels and relationships without provider writes. An anchor defaults to the
-`hitl` mode; asking for an autonomous anchor is refused rather than
-downgraded. `--idempotency-key` persists a hashed, project-scoped metadata
-label: sequential retries return the existing issue, including closed issues.
-It is a retry key, not a distributed lock; concurrent creators must be
-serialized by the caller. Reserved metadata labels cannot be supplied as
-business tags, and duplicate parent/base labels or invalid references fail
-validation.
-
-`afk backlog list` and `afk backlog inventory` filter by state and by role
-separately: `--state ready` never returns an anchor, because an anchor has no
-state, and `--kind prd` is what selects them.
-
-### Backlog relationships
-
-A relationship is written when an item is created, but a backlog keeps moving:
-a dependency appears when the dependency is discovered, and a baseline edge has
-to be withdrawn when it turns out to name a branch that does not exist.
-`afk backlog relation add` and `afk backlog relation remove` are how an edge of
-an item that already exists is changed.
-
-The edit names the edge it touches — `--parent`, `--base` or `--depends-on` —
-and every other edge of the item stays where it is. The provider turns the edit
-into the smallest label delta that carries it, so a relationship label is never
-rewritten wholesale, and a label the edit does not mention is left alone even
-when this codec cannot parse it. A reference is either a plain issue number in
-the owning project or a canonical global work item identity, and a reference to
-the item itself is refused. A dependency that already reaches the item would
-close a cycle, so it is refused too.
-
-`afk backlog tag add` and `afk backlog tag remove` deliberately refuse the
-reserved metadata prefixes, including the relationship prefixes: a business
-tag and a relationship edge are different things and are edited through
-different commands.
-
-### Backlog roles
-
-The role label is reserved metadata too, so it cannot arrive as a business
-tag. `afk backlog role --id <id> --kind prd` gives an item that already
-exists the organizational role of a PRD anchor: the role label goes on, the
-stage label goes away, and the human-in-the-loop mode says it never runs by
-itself. An anchor has no lifecycle position at all — it is a container.
-
-Every other label of the issue stays where it is, so an item can become an
-anchor without losing its children, its dependencies or its business tags.
-The edit is idempotent: an item that already carries the role is left alone.
-
-### Backlog execution mode
-
-`afk backlog mode --id <id> --mode afk|hitl` switches who runs an item that
-already exists. The execution mode is reserved metadata, so the edit replaces
-the mode label and nothing else: the state, the role, the business tags and
-the relationships of the item stay exactly where they are. The edit is
-idempotent, and it is the way an operator hands an item to AFK or takes it
-back for a human.
-
-### The ref a work item starts from
-
-A repository can be developed on `master` while the work starts from a release
-ref, and the provider's default branch says nothing about the second case. The
-ref is therefore a fact about the work, and it lives in the body of the item:
+## Lifecycle and human gate
 
 ```text
-## Base Version
-
-- Base Ref: 2025-11-8-show
+ready / rework
+      |
+    claim
+      v
+ in_progress
+      |
+      v
+ verification
+      |
+      v
+ merge_ready  -- human merge -->  done
+      |
+      +-- failure, conflict, timeout, or uncertain claim --> blocked + hitl
 ```
 
-A branch name means nothing outside the repository that has it, so a label
-would carry a repository-local fact across every repository the credentials
-reach. `afk backlog create --base-branch <ref>` writes the block when the
-item is created, and `afk backlog base --id <id> --branch <ref>` records it
-on an item that already exists. Both leave everything else about the item
-alone, and both are idempotent.
+An item is runnable only when its state is `ready` or `rework`, its execution mode is `afk`, it has no children, and every `dependsOn` item is `done`. A parent is an organizational container, not an executable task. Child checks account for cross-repository relationships.
 
-The execution reads the block back: an execution manifest that does not exist
-yet is derived from the work item, and its base branch is the ref the body
-declares, then the repository's default branch, then `main`. The manifest
-still wins when it exists — it is the execution's own record of what it runs
-against — so an operator can override the body for one run without editing
-the issue.
+- **`in_progress`**: the item has been claimed and execution is underway.
+- **`verification`**: implementation has entered independent verification.
+- **`merge_ready`**: the change is ready for human review and merge; it is not complete.
+- **`done`**: the change has been confirmed merged, either by an explicit merge action or reconciliation with a merge already performed on the provider.
+- **`blocked + hitl`**: the automated flow cannot safely continue and requires operator intervention.
 
-### Why a work item is not moving
+`afk backlog confirm-merge` explicitly initiates a merge at the operator's request. `afk backlog reconcile-merge` only reconciles a change that has already been merged by a person. AFK never merges without explicit authorization.
 
-A lifecycle label says where a work item sits, not why it is standing still. A
-board of `ready` items cannot tell a queue from a deadlock, so every surface
-that reports a work item reports the reason as well:
-
-| Reason | Meaning |
-| --- | --- |
-| `not_execution_eligible` | The item is a container (a PRD anchor), not executable work |
-| `blocked_for_human` | The item is blocked and waits for a person |
-| `execution_in_progress` | AFK is already working on it |
-| `awaiting_merge` | The change passed QA and waits to be merged |
-| `state_not_runnable` | The lifecycle position is not one AFK starts work from |
-| `execution_mode_hitl` | A human runs this item, so AFK must not pick it up |
-| `not_managed` | AFK does not own the lifecycle of this item |
-| `has_children` | The item owns children; the children are the work |
-| `dependency_not_done` | At least one dependency has not finished |
-
-The dependency rule names the dependencies that have not finished, so the
-answer says who has to act rather than only that somebody has to. The rules
-live in one place (`@afk/runtime` domain backlog), and the loop, the command
-line and the desktop client answer the same question the same way. The loop
-records the reason in its log for every issue it skips, and
-`afk backlog children <id>` reports it for every child of a PRD.
-
-A skip that says nothing is the one shape a deadlock can hide in, so the loop
-writes down why it passed over an issue — including the case where the issue
-is already reserved by a run in flight. A reservation ends with the run that
-took it, and it also ends when the provider cannot answer: a loop that loses
-the network for a moment must not come back to a work item it has reserved
-forever. Before, one such moment was enough. The reservation stayed, every
-later poll passed over the issue without a word, and the item was never run
-again — with nothing in the log to say so.
-
-### A claim that outlived its process
-
-A claim outlives the process that took it: a loop that restarts finds its
-item still marked in progress, with nothing executing it any more. The poll
-only looks for work that has not started, so such an item would never move
-again — a restart would silently become a stall.
-
-On startup a loop therefore returns the claims it owns to the queue. An item
-that already has an open change request goes back to `rework`, because that is
-the position whose execution reuses the change request instead of refusing to
-open a second one. Only the items the loop owns are touched: another loop's
-claim is another loop's work.
-
-### Backlog manifest
-
-`afk backlog apply-manifest <file>` applies a provider-neutral manifest: a
-YAML list of items, each with a title, a description, the project it belongs
-to, and the relationships it has. The manifest is the handoff a decomposition
-produces and AFK consumes.
-
-| Field | Meaning |
-| --- | --- |
-| `project` | The canonical project key the record belongs to: `platform:projectKey` |
-| `ref` | A manifest-local name other items can point at |
-| `parentId` | The organizational parent: a canonical ID or a manifest-local `ref` |
-| `baseBacklogId` | The Git execution base: a canonical ID or a manifest-local `ref` |
-| `dependsOn` | The records that must complete first |
-| `executionMode` | `afk` or `hitl` |
-| `tags` | Provider-neutral business tags |
-
-A requirement that spans repositories puts its items in the repositories that
-own them: each item names its own project, and the record is created there.
-A reference is either the canonical ID of a record that already exists, or the
-`ref` of another item of the same manifest — the second kind is resolved when
-the record it names has been created, so a parent, an execution base and a
-dependency are always created before the item that points at them. A
-dependency cycle is refused instead of being applied in some order.
-
-Cross-project relationships need the two projects to live on the same
-provider host; a relationship across providers is refused. An execution base
-has to live in the repository the item runs in, because a branch belongs to
-one repository.
-
-`--idempotency-key <prefix>` derives one retry key per item from the prefix
-and the item's `ref` (or its title), so applying the same manifest twice
-returns the records it already created instead of creating them again.
-
-A dependency edge is written twice: as the portable `depends-on::<id>` label,
-which is the edge AFK reads back, and as a provider-native link for the people
-who read the tracker. On GitLab that link is a `blocks` link that starts at
-the record being waited for, because that is how GitLab shows "is blocked by",
-and the target project is named by its numeric identity, because the body of a
-link carries an id. On GitHub it is a comment that names the record. A repeated
-run writes a relation that is missing and leaves a relation that is already
-there alone, so applying a manifest twice converges on the manifest.
-
-CLI JSON success envelopes are `{ok:true,kind,data}`. Failures are
-`{ok:false,kind,data:null,error:{code,message,details?}}` with a nonzero exit code.
-Automation must check both the exit status and `ok` before reading `data`.
-
-## Backlog lifecycle
-
-```text
-ready/rework --claim--> in_progress --> verification --> merge_ready --> done
-   \                         \
-    \                         +--> blocked (execution mode: hitl)
-     +--> blocked (conflict, failure, timeout, or expired lease)
-```
-
-An item is runnable only when it is in `ready` or `rework`, uses the `afk` execution mode,
-has no child items, and all `dependsOn` items are `done`. `parentId` groups
-child items; a parent itself is never runnable. "No child items" is decided on
-the backlog graph, so children in another repository count as children. Any automation failure,
-conflict, timeout, or uncertain lease recovery transitions the item to
-`blocked` and routes it to `hitl`.
-
-### The merge gate
-
-Merging is a person's decision. AFK implements the work, verifies it independently, and
-publishes the change request; the change then waits as `merge_ready` + `hitl` for somebody
-to merge it. A child item waits exactly like a root does — where an item sits in the tree
-does not change who confirms its merge.
-
-Two commands close the gate, and both are human actions:
-
-- `afk backlog confirm-merge` merges the change request on the provider and marks the item
-  `done`. The command performs the merge, so it stays an operator action.
-- `afk backlog reconcile-merge` does not merge anything: it brings an item in line with a
-  change that a person has already merged on the provider.
-
-The branch the change has to have targeted is resolved from the item itself — the ref its
-body declares, which is the ref the execution manifest was derived from — then an explicit
-base edge, then the configured branch. Both commands take `--target-branch` for the case
-where an operator knows better.
-
-AFK never merges a change on its own, and there is no setting that turns it on. The
-change request is published and waits there; the only merge AFK performs is the one a
-person asks for with `afk backlog confirm-merge`, and the platform's own merge button
-is the other one.
-
-### When the change request conflicts
-
-A change request can conflict with its target branch: both sides changed the same lines.
-A conflict is not a QA failure and not a merge that needs a person — it is work AFK can do.
-The flow has four steps, and it happens inside the QA round, before the change request is
-handed over.
-
-1. **The conflict shows up where the work happens.** The QA round puts the target branch
-   in the QA worktree and merges the change branch into it. That merge is where a conflict
-   becomes visible, and AFK reads it from the unmerged paths git leaves behind — not from
-   the merge's exit code, which a localized git reports in its own language.
-2. **AFK resolves it in the QA worktree.** The QA worktree *is* the change request's
-   branch, so a resolution made there lands exactly where the change is published from.
-   A dedicated agent (`merge-conflict-resolution` template) resolves the conflicted files:
-   a file that has nothing to do with the change takes the target branch's version, a
-   file that does keeps the intent of both sides.
-3. **AFK verifies the result.** The resolution is committed, and the verification runs on
-   the resolved tree. A conflict that is still there after the agent's turn is not
-   guessed at: the item goes to `blocked` + `hitl` with the conflicting files named, for
-   a person to finish.
-4. **AFK checks what it published.** After the change request is published, AFK reads the
-   platform's verdict. Only a real conflict counts — a verdict the platform has not
-   computed yet, a failing check, or a missing approval do not. A change request that
-   really conflicts goes back for another round as a `conflict` rework record, which
-   carries the conflict into the next attempt. It is never handed over as
-   `merge_ready`.
-
-The merge gate is unaffected: a conflict is resolved so that a person still has to decide
-whether to merge.
-
-**A binary file cannot be merged by anybody.** When both sides changed the same binary
-file, no text merge exists — a person cannot resolve it either. AFK keeps such a file out
-of the fallback commit it makes for whatever the agent left in the worktree, and reports
-it. Publishing it would turn any later conflict into a dead end.
-
-### When the agent stops answering
-
-An agent can die without telling anyone: a TUI crashes, a model stream drops, the process
-is killed with the machine. The runner waits for a completion signal that can never arrive,
-and the wait runs until the hard timeout — hours of nothing for a run that was already lost.
-Two watchdogs turn that silence into a verdict.
-
-1. **The session is gone.** An interactive agent lives in a tmux session, and the session
-   dies with the agent. AFK notices the missing session and ends the run at once
-   (`AGENT_GONE`) instead of waiting for a signal that will never be written.
-2. **The agent went quiet.** `idleTimeout` is the longest the agent may say nothing. The
-   tmux path watches the visible pane, the batch path watches its output, the container
-   path watches its output file, and the app-server path re-arms on every notification.
-   Silence past the limit ends the run (`AGENT_IDLE`).
-
-A finished agent that quits leaves both a completion signal and no session. The signal
-wins: the run is a success, not a corpse. The completion timeout is checked before the
-session, so a genuine work timeout is still reported as a timeout and not as a dead agent.
-
-The four timeouts answer different questions, and the difference matters:
-
-| Setting | Question it answers | Default |
-| --- | --- | --- |
-| `idleTimeout` | How long may the agent say nothing? | 30 min |
-| `completionTimeout` | How long may one agent wait? | 2 h |
-| `qaTimeout` | How long may the verification round take? | 1 h |
-| `workflowHardTimeout` | How long may the whole workflow take? | 4 h |
-
-`workflowHardTimeout` is not a soft cap: a detached watchdog kills the tmux session when
-it fires. It therefore has to exceed `completionTimeout` + `qaTimeout`, or it cuts the
-verification round short of the budget the verification round was given. Set them in
-`~/.afk/config.yml` (`idleTimeout`, `completionTimeout`, `qaTimeout`,
-`workflowHardTimeout`) or with `AFK_IDLE_TIMEOUT`, `AFK_COMPLETION_TIMEOUT`,
-`AFK_QA_TIMEOUT`, `AFK_WORKFLOW_HARD_TIMEOUT`.
-
-**An agent that died is repeated, not waited out.** A dead agent says nothing about the
-work: the changes it made are still in the worktree, and the upstream model service may
-well be reachable again a minute later. Codex reports a turn that died — a stream the
-gateway cut — in its own rollout file, and AFK reads it there: the terminal stays open
-after such a turn, so nothing about the process would say the turn is over. An attempt
-that ended this way is repeated in the same worktree, with the same goal, bounded by the
-run's retry budget. A timeout is not repeated this way: a timeout says the work did not
-finish in the budget it was given, which is a fact about the work.
-
-### When the branch preparation would throw the work away
-
-A retry starts by preparing the working branch again. The preparation used to take the
-published branch as the truth and reset the local one to it, whatever the last attempt had
-committed locally. A commit that was made and never published became unreachable, the next
-attempt found nothing to verify, and the work was gone: a change request with nothing in it,
-and a verification that failed every criterion because the branch was identical to its
-target.
-
-The branch is prepared at whichever side holds work the other does not:
-
-| Published branch | Local branch | Prepared at |
-| --- | --- | --- |
-| contains the local one | — | the published branch; nothing is lost |
-| does not contain the local one | contains the published one | the local branch; the unpublished work survives |
-| does not contain the local one | has commits of its own | the local branch; the published work is merged back in when the branch is published |
-
-Publishing reconciles the two sides before it pushes: a published branch that is simply
-ahead is taken as it is, and a branch that has diverged is merged, so the push is not
-rejected as a non-fast-forward and neither side is lost.
-
-Ancestry is read from the merge base rather than from `git merge-base --is-ancestor`. That
-command reports "no" by exiting with a status code and printing nothing at all, so a git
-client that decides failure by looking for an error message sees a successful command with
-empty output — and the answer would be "yes" for every pair of commits.
-
-### When this machine cannot verify the work
-
-An acceptance criterion names the command that settles it. That command needs tools, and
-the tools may not be here: a suite that cannot import the framework it tests, a build
-tool without its JDK, a `pytest` that is not installed at all. A verification agent
-discovers this by running into it — which takes as long as the agent's patience, and
-ends as an unexplained timeout.
-
-AFK asks first. Before the verification agent starts, the criteria's own check commands
-are read for the binaries they run, and each of those binaries is probed the way the
-criterion would exercise it: a pytest suite is collected, not asked for its version;
-Maven is asked for the version that names its JDK. What the probe finds is classified.
-Only what is clearly the machine's fault blocks the round — a missing binary, a missing
-dependency, a missing runtime. A check that fails for any other reason is left to the
-agent, because the preflight must not block work that would have passed.
-
-A blocked round names what is missing and which criterion needed it, so the person who
-picks it up knows what to install rather than having to read a transcript.
-
-Acceptance criteria are read in their three-field form — `- [ ] <text> -- <type> -- <command>`,
-where the type is one of `test`, `curl`, `log`, `manual`, `bash` or `none`. The type is
-the anchor, so a `--` inside the text or the command cannot be mistaken for the
-separator.
-
-An item with the `prd` role is an organizational parent. It has no lifecycle
-state at all — it groups children instead of waiting for a human, and "waiting
-for its children" is not a position in the lifecycle. The role, not a state,
-is what makes it ineligible to run.
-
-QA FAIL persists a new rework record in the provider's issue comment/note,
-supersedes any active record, and increments `ReworkRecord.attempt` from the
-highest persisted attempt. QA record creation only persists evidence;
-`QARunner` owns the subsequent state/mode routing. Operator retry still creates
-its record and routes directly to `rework` + `afk`.
-
-`WorkflowConfig.maxQaReworkAttempts` defaults to **3** and must be a positive
-integer. Set `maxQaReworkAttempts: 3` in `~/.afk/config.yml` or use
-`AFK_MAX_QA_REWORK_ATTEMPTS=3`; the configuration file takes precedence. With no prior
-records, the first FAIL is attempt 1, the second FAIL is attempt 2, and both
-allow `rework` + `afk`. The third FAIL persists attempt 3 and returns
-`success: false` without `rework`, routing directly to `blocked` + `hitl`.
-Further FAIL calls retain that record and cannot reopen automatic rework.
-A limit of 1 blocks the first FAIL. Attempts include earlier resolved,
-superseded, and operator records; restarting a runner does not reset them.
-QA PASS can still resolve an active record. This limit is separate from
-`maxRetries` (execution retries) and `maxSelfIterations` (AC corrections).
-The handoff/token `BudgetManager` restores its snapshot from
-`~/.afk/workspaces/<workspace hash>/budgets/` per canonical work item. Handoff rounds and native
-harness token usage persist across runs; session IDs are deduplicated and a
-corrupt snapshot fails closed before a new agent execution starts.
-
-The `commit.recorded` audit event links implementation and QA commits to the
-real local SHA and branch. It is emitted only for a new commit; a change
-request SHA is never substituted.
-
-## Runtime and Desktop projections
-
-Canonical runtime files under `~/.afk/runtime/tasks` own execution-attempt
-status, phase, heartbeat, progress, and diagnostics. A heartbeat older than the
-freshness threshold is displayed as runtime `stale`; it does not mutate the
-Provider Backlog lifecycle state.
-
-Desktop reads `work-item-runs.json` from the system data directory for the
-execution workspace located by canonical `workItemId`. These records contain Worker launch receipts, not
-Provider lifecycle state. Runtime records must explicitly name their workspace;
-Desktop joins them by exact `backlogId`, execution workspace and provider.
-Missing or malformed runtime data leaves the Backlog visible with an explicit
-no-runtime state. There is no reader for the removed backlog run store.
-
-## Claim boundary and local fallback
-
-Providers may expose a native conditional claim (CAS). The execution provider
-uses that operation whenever available. Otherwise it acquires a durable lease
-under `${AFK_STATE_DIR:-~/.afk/state}` and, while holding it, rereads and
-validates the item, performs `ready -> in_progress`, and rereads to confirm the
-claim. The returned lease is heartbeated by the runner and released exactly
-once by the run resource scope on success, failure, timeout, crash, or handoff.
-
-The filesystem lease is a single-host mechanism backed by a local trusted
-filesystem; it is not a multi-host consensus or crash-recovery mechanism.
-Multi-host execution requires provider-native CAS (a shared filesystem alone is
-not sufficient). Lease paths are
-namespaced by provider, project, and backlog ID. Symlinked state paths are
-rejected, stale leases fail closed by default, and expiry recovery is allowed
-only after the provider durably records `blocked` with mode `hitl`.
-
-## End-to-end flow
+## End-to-end execution path
 
 ```mermaid
 sequenceDiagram
-    participant P as BacklogProvider
-    participant R as WorkflowRunner
-    participant B as BranchProvider
-    participant A as Agent/Sandbox
-    participant Q as QARunner
-    participant C as ChangeProvider
+    participant U as Operator / External planner
+    participant P as Backlog provider
+    participant R as Runtime / Runner
+    participant G as Git / Branch provider
+    participant A as Agent / Sandbox
+    participant Q as QA
+    participant C as Change provider
 
-    R->>P: claim(backlogId, owner)
-    P-->>R: claim lease + item
-    R->>B: create branch/worktree
-    R->>A: execute item
-    A-->>R: completion signal
-    R->>C: create change request
-    R->>P: transition verification
-    R->>Q: verify item
-    Q->>P: transition merge_ready + hitl
-    Note over Q,C: a person merges the change request
-    R->>P: release lease (resource scope)
+    U->>P: Provide decomposed work item
+    R->>P: Read, validate, and claim item
+    P-->>R: Item and claim result
+    R->>G: Prepare isolated branch and worktree
+    R->>A: Supply goal and constraints
+    A-->>R: Execution result and changes
+    R->>G: Save and prepare changes
+    R->>C: Publish change request
+    R->>P: Advance to verification
+    R->>Q: Independently verify acceptance criteria
+    Q->>P: Record verification result and lifecycle
+    P-->>U: merge_ready or blocked
+    U->>C: Decide whether to merge
+    U->>P: Confirm or reconcile merge outcome
 ```
 
-`afk loop` accepts exactly one scoped backlog ID and matching execution
-manifest, and delegates to `executeWorkItem`. The former separate
-implementation/QA queue is removed. The standalone QA command remains a
-lower-level verification operation.
+The key sequence is to validate eligibility before starting, isolate the execution environment, and let independent verification assess the result after the executor reports completion. Only verified changes proceed to the human merge gate.
 
-The scoped backlog ID is the provider backlog id of the manifest, while a
-provider lists backlog items under their canonical global id. The loop
-therefore matches the manifest-bound work item by its canonical id, so one
-manifest-bound loop executes exactly one work item.
+## Claiming and concurrency safety
 
-A manifest declares the baseline of its primary repository, and that baseline
-is where the change request lands. The globally configured `targetBranch` is
-only the fallback for an execution without a manifest.
+When a provider supports native conditional claims (CAS), AFK prefers that mechanism. Otherwise, Runtime can use a durable file lease under `${AFK_STATE_DIR:-~/.afk/state}`, rereading and validating the item while holding the lease before performing and confirming the state transition.
 
-`AFK_LOOP_PID_FILE` and `AFK_LOOP_STATUS_FILE` relocate the loop's pid file
-and status file. The default keeps one loop per machine; distinct paths let
-several manifest-bound loops run side by side, each on its own work item.
+A filesystem lease is limited to a trusted local filesystem on one host. It does not provide multi-host consensus or cross-host crash recovery. Multi-host execution requires provider-native CAS; a shared filesystem alone is not sufficient. An uncertain claim, expired lease, or failed state transition must fail closed and require human handling.
 
-Claude Code shows a "Quick safety check" dialog the first time it runs in a
-directory it has never seen, which is every worktree AFK creates. The dialog
-blocks the agent TUI, the statusline therefore never renders, and the run
-would be reported as `blocked/hitl` even though the implementation is fine.
-Before launching Claude Code, AFK records the worktree as trusted in the
-Claude Code config file — `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`
-— under `projects[<absolute path>].hasTrustDialogAccepted`. The write is
-best-effort and never fails a run; `AFK_CLAUDE_TRUST_PRESEED=0` disables it.
+## Failure handling and recovery
 
-An agent TUI can own the keyboard with a modal of its own. Codex greets the
-user with an "Update available" prompt as soon as a newer version is
-installed, and while that prompt is open the Enter presses that submit the
-goal are swallowed: the goal then sits in the composer and the run waits for
-a completion signal that never arrives. AFK therefore starts Codex with
-`check_for_update_on_startup=false`, waits for the Codex composer to be ready
-before it types the goal, and presses Enter again when the composer still
-holds the goal.
+Different failures represent different facts. They must not all be treated as an ordinary agent failure or retried unconditionally.
 
-## Extension points
+| Situation | Handling principle |
+| --- | --- |
+| Agent process or session disappears, or execution is interrupted unexpectedly | Within the configured retry budget, the execution step may be repeated in the same workspace with the same goal |
+| Execution times out | Treat it as work that did not finish within its budget; do not equate it with an unexpected agent exit |
+| QA fails | Persist verification evidence and route according to the rework policy; block after the limit is reached |
+| Change request conflicts | Attempt resolution within the verification flow and verify again; block if it cannot be resolved safely |
+| Required tools or dependencies are missing from the verification environment | Record what is missing and which acceptance criteria are affected, then hand off to an operator |
+| Claim, state transition, or recovery outcome is uncertain | Fail closed; do not assume success or silently retry concurrently |
 
-Plugins can register provider implementations through the plugin runtime.
-Each provider supplies the complete `BacklogProvider` contract, including
-parent/dependency validation, state transitions, execution mode, tags, and
-claim behavior. Platform clients remain private to their provider. No
-database or additional middleware is required; local state is kept in the
-filesystem lease directory.
+Runtime records, audit events, and provider state have distinct responsibilities. When diagnosing an issue, inspect the authoritative business state, the corresponding execution attempt, and its audit evidence rather than relying only on the UI or an agent's completion claim.
 
-## Reliability rules
+## Architecture constraints and extension
 
-- A failed transition, conflict, timeout, or expired lease is `blocked` plus
-  `hitl`; it is never silently retried as automatic work.
-- An agent that died is the one exception: a step whose agent went away or
-  stopped answering is repeated in the same worktree, with the same goal,
-  bounded by the run's retry budget. Nothing about the work changed, so
-  repeating it is not a retry of the work — it is the same attempt.
-- Blocking an item also closes the operator rework request the failed
-  execution answered, so `afk backlog retry` can ask for it again. A QA-sourced
-  rework record stays open: it is the verification feedback, and the next
-  operator retry supersedes it on its own.
-- AFK commits the implementation itself before it publishes the branch. An
-  agent that leaves its changes uncommitted would otherwise publish an empty
-  change, and the work would be lost when the workspace is restored.
-- Work that was committed but never published is not thrown away. The working
-  branch is prepared at whichever side holds it, and the published work is
-  merged back in when the branch is published.
-- AFK's runtime artifacts — the completion signal and the `.afk/` directory —
-  are never staged into a commit. They are process state, not work.
-- Native claim is preferred; the filesystem fallback is deliberately scoped to
-  a trusted local filesystem on one host.
-- An interactive agent must receive the goal, not merely have it typed. AFK
-  checks the composer state after submitting and repeats the submit while the
-  goal is still pending, so a TUI modal cannot silently strand a run.
-- Lease cleanup is lifecycle-owned and idempotent.
-- Backlog IDs map deterministically to branches through the provider-neutral
-  branch naming function.
+The following constraints are enforced by code and architecture checks, not just documented conventions:
+
+- Workspaces interact through declared package exports, with one-way and acyclic dependencies.
+- Core and Application preserve the domain-core boundary; Runtime's domain, application, infrastructure, and shared layers follow their defined dependency direction.
+- The Desktop renderer does not depend directly on Node Runtime; managed execution uses a separate Worker.
+- Provider-specific metadata and client details remain inside the Provider boundary.
+- Claiming, lifecycle transitions, verification, and audit do not depend on an agent voluntarily following prompt instructions.
+- New platform integrations extend the Provider contract; new execution capabilities must not bypass lifecycle controls, verification, or the human merge gate.
+
+Run `pnpm architecture:check --check-packages` to check package dependencies and architecture boundaries. The current source and guard scripts are authoritative; if documentation and implementation disagree, inspect the code and tests before updating the documentation.
+
+## Related documentation
+
+- [Execution architecture](./execution.zh.md): execution lifecycle, run modes, and execution constraints.
+- [System architecture design](./system-architecture-design.md): deeper system boundaries, architecture decisions, and reliability analysis.
+- [Chinese architecture overview](./overview.zh.md): Chinese version of this overview.
+- [Documentation index](../index.md): documentation categories and entry points.

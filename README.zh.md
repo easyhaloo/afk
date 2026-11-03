@@ -163,7 +163,6 @@ afk signal goal-complete --summary "<summary>"
 | `/md-to-pdf` | Markdown 转 PDF | 导出带 Mermaid 图表的文档 |
 | `/reasoning-guard` | 推理守卫 | 检测多轮推理降级 |
 | `/reasoning-watchdog` | 推理监控 | 基于 Hooks 的推理降级拦截 |
-| `/afk-ai-prd` | AI 友好 PRD | Agent 可解析、拆解并验收的 PRD |
 | `/afk-llm-dev-guide` | LLM 应用指南 | LLM 架构与上下文工程 |
 | `/jev-agent-guard` | Agent 检查点 | 为不同编码 Agent 安装检查点 |
 | `/software-complexity-governance` | 复杂度治理 | 度量复杂度、耦合度与技术债 |

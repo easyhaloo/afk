@@ -8,7 +8,7 @@ AFK 连接工单平台、代码仓库与编码 Agent 运行时，将已经拆分
 
 ## 整体架构
 
-![AFK 系统架构图](assets/afk-architecture.svg)
+![AFK 中文系统架构图](assets/afk-architecture.zh.svg)
 
 AFK 当前采用 pnpm workspace，提供两个产品入口：**CLI/TUI** 和 **AFK Control Desktop**。两个入口共享 Core、Application 和 Runtime 包。Runtime 组合工单/分支/变更 Provider、Agent Provider、Sandbox、工作流执行、QA 和本地证据存储。
 

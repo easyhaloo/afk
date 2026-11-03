@@ -59,7 +59,6 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 
 ## 文档维护与归档
 
-- [Documentation maintenance audit](architecture/documentation-maintenance.md) — 当前文档分类、已修正项与待持续核验项。
 - `_archive/` 保存已完成的实现计划、旧设计规格、原型和调研快照，不作为现行规范。归档材料仅用于追溯历史决策。
 
 ## 文档维护约定

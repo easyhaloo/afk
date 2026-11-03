@@ -1,6 +1,6 @@
 # AFK 文档导航
 
-本目录以当前实现、使用指南、架构决策和研究材料为主。仓库根的 `README.md` / `README.zh.md` 是项目入口；本页负责深入文档导航。
+本目录以当前实现、使用指南和架构决策为主。仓库根的 `README.md` / `README.zh.md` 是项目入口；本页负责深入文档导航。
 
 ## 从这里开始
 
@@ -26,7 +26,6 @@
 | [architecture/design-system.md](architecture/design-system.md) | Desktop UI 设计标准 |
 | [architecture/glossary.md](architecture/glossary.md) | 领域术语 |
 | [architecture/diagrams/](architecture/diagrams/README.zh.md) | 架构图源文件及说明 |
-| [architecture/blueprints/](architecture/blueprints/) | 历史蓝图与提案；每份文档的采纳状态以其状态说明为准，不视为当前实现规范 |
 
 ## 指南（guides/）
 
@@ -52,15 +51,11 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0019](adr/0019-desktop-run-log-viewer-projection.md) | Desktop run log viewer projection | in progress |
 | [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop as singular change request | accepted |
 
-## 研究材料（research/）
+## 保留的研究材料（research/）
 
-研究材料用于记录调研过程，不作为当前架构或实现事实的唯一依据。带有明确日期、旧源码路径或旧命令的材料应先核对源码再引用。
+研究报告仅作为阶段性参考，不作为当前架构或实现事实的唯一依据。保留与 AFK 编码 Agent 工具选型直接相关的中英对照研究；其他一次性调研、已被当前实现取代的设计材料及重复格式已移除。
 
-- [Agent CLI comparison (EN)](research/agent-cli-comparison.md) · [中文版本](research/agent-cli-comparison.zh.md)
-- [LLM application design methodology](research/llm-app-design-methodology.md)
-- [DT-MDP LLM research](research/dt-mdp-llm-research.md)
-- [JumpServer public-key upload research](research/jumpserver-public-key-upload-2026-09-21.md)
-- [Observability survey (historical)](research/observability-survey-2026-08-02.md) — historical snapshot, not current implementation guidance
+- [Agent CLI comparison (EN)](research/agent-cli-comparison.md) · [中文版本](research/agent-cli-comparison.zh.md) — 2026-10-20 工具版本快照，结论使用前需重新验证。
 
 ## 文档维护与归档
 

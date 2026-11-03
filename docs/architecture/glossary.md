@@ -1,46 +1,41 @@
 # AFK Domain Glossary
 
-The vocabulary for talking about the AFK workflow system. Architecture reviews
-and design discussions use these terms; keep them in lockstep with the code.
+This glossary defines the terms used by current AFK architecture documentation. Runtime behavior and supported commands are determined by the current source code and tests; this page provides concise shared terminology rather than a substitute for implementation details.
 
-## Workflow execution
+## Work items and identity
 
-- **WorkflowRunner** - Orchestrates a two-phase run (implement -> verify) for
-  one issue: worktree, tmux session, goal dispatch, signal polling, auto-wrapup.
-  Owns the phase loop and the handoff-budget decisions (WHEN to hand off);
-  delegates handoff execution to the HandoffCoordinator.
-  `packages/runtime/src/application/workflow-engine.ts`.
+- **Work item** — A task created and decomposed by an upstream planning or backlog system. AFK consumes it for execution; it does not own requirements decomposition.
+- **Canonical work-item ID** — The provider-qualified identity used across provider records, runtime events, CLI, and Desktop projections, for example `github:acme/api#42`.
+- **Execution attempt** — One attempt to execute a work item. `runId` / `executionId` identify an execution record according to the calling workflow; neither replaces the canonical work-item ID.
+- **`parentId`** — Organizes work items into a parent-child hierarchy. A parent is a container, not an executable child task.
+- **`dependsOn`** — Declares prerequisite work items. Dependencies must reach `done` before the dependent item is eligible.
+- **`baseBacklogId`** — References a work item used to select or trace an execution baseline. It is distinct from parent-child and dependency relationships.
 
-- **HandoffCoordinator** - Owns every way a context handoff resolves (auto
-  relaunch, terminal, manual flip): negotiate summary, persist recovery doc,
-  post issue comment, restart or terminate the session. One interface -
-  `handoff(ctx, mode: 'auto' | 'terminal', reason?)` - hides the
-  negotiate/persist/notify/relaunch cluster. The manual flip is an internal
-  failure mode of `'auto'`. `packages/runtime/src/application/workflows/handoff.ts`.
+## Execution and lifecycle
 
-- **Watchdog** - Detached process-group that fires after the hard timeout:
-  writes a timeout signal, then kills the tmux session. Armed per phase /
-  generation; disarmed during handoff negotiation and on cleanup.
-  `packages/runtime/src/application/workflows/watchdog.ts`.
+- **BacklogProvider** — The port through which AFK reads and updates provider-backed work items and their business lifecycle. Provider state is authoritative for backlog status.
+- **WorkflowRunner** — Executes the implementation workflow for a claimed work item, coordinating workflow steps and runtime resources. See `packages/runtime/src/application/workflow-engine.ts`.
+- **`executeWorkItem`** — The managed work-item path that coordinates eligibility/manifest checks, implementation, independent QA, change-request handling, and the human merge gate. See `packages/runtime/src/application/workflows/execute-work-item.ts`.
+- **LoopRunner** — Repeatedly polls and delegates execution for a manifest-bound work item. It is not a global scheduler for arbitrary backlog items. See `packages/runtime/src/application/runners/loop-runner.ts`.
+- **QARunner** — Performs independent QA after implementation; an agent's completion claim is not itself QA evidence.
+- **Change request** — A provider-hosted pull/merge request used to review the proposed change. Publishing it does not mean the work item is complete.
+- **`merge_ready`** — The change is ready for a human merge decision. It is not equivalent to `done`.
+- **`done`** — The merge outcome has been confirmed through the provider-backed lifecycle.
+- **`blocked + hitl`** — Automated execution cannot safely continue and requires human intervention.
+- **Human merge gate** — The explicit boundary where a person decides whether to merge. AFK does not autonomously make the final merge decision.
 
-- **Signal** - The interactive agent/runner communication protocol via
-  `.afk-signal.json`: `goal_complete`, `ac_result`, `handoff_ready`, `timeout`,
-  `idle`. Batch agents use `ExecutionResult` instead. Context overflow is NOT a
-  signal: the runner is the sole authority, polling statusline token usage
-  directly. `packages/runtime/src/infrastructure/io/signal.ts`.
+## Runtime state and evidence
 
-- **TrackerProvider** - The seam over GitLab and GitHub (issues, MRs/PRs,
-  labels, comments, AC parsing). `packages/runtime/src/domain/tracker/types.ts`.
-
-- **LoopRunner** - Drives the full pipeline (implement -> QA -> done) for every
-  `stage::ready-for-issues` issue, continuously. Two pools (N parallel
-  WorkflowRunners, one serial QARunner) with tracker labels as source of truth.
-  `packages/runtime/src/application/runners/loop-runner.ts`.
+- **Runtime record** — Execution-attempt state such as phase, heartbeat, progress, and diagnostics. It is not the authoritative backlog state.
+- **Run event / audit event** — An append-only record of execution facts, used for traceability and diagnosis. Events cannot prove outputs that were never recorded.
+- **Evidence reference** — A reference to stored evidence used by QA or diagnosis. Evidence and logs should follow the project's redaction and data-governance rules.
+- **Worker launch receipt** — Desktop metadata that records whether a Worker was launched. It does not prove that execution or QA completed.
+- **Claim / lease** — The mechanism used to establish and track execution ownership. A local filesystem lease is a single-host mechanism, not distributed multi-host consensus.
+- **Fail closed** — When required identity, claim, state, or verification evidence is uncertain or invalid, stop safely rather than assume success or continue with an unsafe side effect.
 
 ## Packages
 
-- **@afk/core** - Pure domain types and reducers, no Node/Electron/DOM
-  dependencies. `packages/core/`.
-
-- **@afk/application** - Use-case layer over @afk/core: execution, inventory,
-  observation, provider-inventory. `packages/application/`.
+- **`@afk/core`** — Domain models, events, reducers, policies, and ports without Node/Electron application dependencies.
+- **`@afk/application`** — Shared use cases and application-level queries built on Core.
+- **`@afk/runtime`** — Execution orchestration and infrastructure adapters for providers, Git, agents/sandboxes, and persistence.
+- **`@afk/workflow-graph`** — Workflow graph representation, projection, layout, and validation.

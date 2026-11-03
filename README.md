@@ -139,37 +139,69 @@ Full command reference: `afk --help`.
 
 See [Full Workflow & E2E Architecture](docs/architecture/full-workflow-e2e-architecture.md) for the lifecycle, states, evidence, and verification boundaries.
 
-## Skills (Claude Code)
+## Skills（Claude Code）
 
-| Skill | Purpose | When to Use |
-|-------|---------|-------------|
-| `/afk-grill-me` | Requirements interview | Ambiguous requirements or likely gaps |
-| `/afk-grill-me-context` | Gap-fill interview | Existing drafts/docs need verification |
-| `/afk-to-prd` | Generate PRD | After requirements alignment |
-| `/afk-to-issues` | Decompose to issues | After PRD approval |
-| `/afk-do` | Task orchestration | Clear feature or task description |
-| `/afk-research` | Technical research | Understand the implementation before coding |
-| `/afk-prototype` | Validate an approach | Validate a technical approach before committing |
-| `/afk-implement` | Implementation workflow | Clear implementation target |
-| `/afk-testing` | Testing specialist | Design, execute, diagnose, and assess tests |
-| `/afk-change-driven-testing` | Change-driven testing | Add focused regression tests for changed business flows |
-| `/afk-qa` | Independent verification | Verify work before merge |
-| `/afk-diagnose` | Diagnose failures | Specific, reproducible failures |
-| `/afk-branch-migrate` | Cross-branch migration | Cherry-pick between divergent branches |
-| `/afk-hand-off` | Work handoff | Transfer work to another developer or session |
-| `/afk-scheduler` | Scheduling assistance | Coordinate multiple issues and dependencies |
-| `/afk-skill-craft` | Skill authoring | Create, diagnose, or refactor skills |
-| `/api-workflow` | API testing | Multi-step API chains with browser testing |
-| `/md-to-pdf` | Markdown to PDF | Export Markdown with Mermaid diagrams |
-| `/reasoning-guard` | Reasoning guard | Detect multi-turn reasoning degradation |
-| `/reasoning-watchdog` | Reasoning monitor | Hooks-based reasoning degradation interception |
-| `/afk-to-prd` | AI-ready PRD | Clarify, approve, validate, and publish confirmed product requirements |
-| `/afk-llm-dev-guide` | LLM application guide | LLM architecture and context engineering |
-| `/jev-agent-guard` | Agent checkpoints | Install checkpoints across coding agents |
-| `/software-complexity-governance` | Complexity governance | Measure complexity, coupling, and technical debt |
-| `/wiki` | Knowledge management | Search, read, ingest, and lint project knowledge |
+Skills 按使用目的进行逻辑分类，目录与触发命令保持原样。需要查看职责边界、工作流程和协作关系时，请阅读 [Skills Guide](docs/guides/skills.md)。
 
-See [Skills Guide](docs/guides/skills.md) for details.
+### Requirements & Product Planning
+
+| Skill | Purpose |
+|---|---|
+| [`/afk-grill-me`](skills/afk-grill-me/) | Requirements interview |
+| [`/afk-grill-me-context`](skills/afk-grill-me-context/) | Context-aware clarification |
+| [`/afk-to-prd`](skills/afk-to-prd/) | Create and publish an approved PRD |
+| [`/afk-to-issues`](skills/afk-to-issues/) | Decompose requirements into backlog work items |
+
+### Development & Technical Exploration
+
+| Skill | Purpose |
+|---|---|
+| [`/afk-do`](skills/afk-do/) | Task analysis and development-workflow entry point |
+| [`/afk-research`](skills/afk-research/) | Investigate existing implementation and approaches |
+| [`/afk-prototype`](skills/afk-prototype/) | Validate technical feasibility |
+| [`/afk-implement`](skills/afk-implement/) | Execute implementation workflow |
+| [`/afk-diagnose`](skills/afk-diagnose/) | Diagnose reproducible failures |
+| [`/afk-branch-migrate`](skills/afk-branch-migrate/) | Migrate changes across divergent branches |
+| [`/afk-llm-dev-guide`](skills/afk-llm-dev-guide/) | LLM application architecture and context engineering |
+
+### Testing & Quality Assurance
+
+| Skill | Purpose |
+|---|---|
+| [`/afk-testing`](skills/afk-testing/) | Test design, execution, failure diagnosis, and effectiveness review |
+| [`/afk-change-driven-testing`](skills/afk-change-driven-testing/) | Add regression tests for changed legacy business flows |
+| [`/afk-qa`](skills/afk-qa/) | Independent acceptance verification before merge |
+| [`/api-workflow`](skills/api-workflow/) | Multi-step API and browser-hybrid testing |
+
+### Orchestration & Session Continuity
+
+| Skill | Purpose |
+|---|---|
+| [`/afk-scheduler`](skills/afk-scheduler/) | Schedule work items by dependencies |
+| [`/afk-hand-off`](skills/afk-hand-off/) | Capture progress, decisions, blockers, and next steps |
+| [`/session-time-analysis`](skills/session-time-analysis/) | Analyze session time distribution and bottlenecks |
+
+### Agent Engineering & Reasoning Governance
+
+| Skill | Purpose |
+|---|---|
+| [`/afk-skill-craft`](skills/afk-skill-craft/) | Create, diagnose, and refactor skills |
+| [`/reasoning-guard`](skills/reasoning-guard/) | Detect reasoning degradation in-session |
+| [`/reasoning-watchdog`](skills/reasoning-watchdog/) | Monitor reasoning quality persistently through hooks |
+| [`/jev-agent-guard`](skills/jev-agent-guard/) | Install checkpoints for coding agents |
+
+### Knowledge & Engineering Governance
+
+| Skill | Purpose |
+|---|---|
+| [`/wiki`](skills/wiki/) | Search, read, ingest, and lint project knowledge |
+| [`/software-complexity-governance`](skills/software-complexity-governance/) | Assess complexity, coupling, and technical debt |
+
+### Documentation & Format Conversion
+
+| Skill | Purpose |
+|---|---|
+| [`/md-to-pdf`](skills/md-to-pdf/) | Export Markdown documents to PDF |
 
 ## Development
 

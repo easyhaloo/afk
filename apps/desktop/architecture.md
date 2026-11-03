@@ -23,7 +23,7 @@ tests/                            desktop package unit tests
 Desktop lives in `apps/desktop`, alongside `apps/cli`. Both use the shared
 Core, Application and Runtime workspace packages; neither application imports
 another workspace's source through relative paths. The renderer never imports
-Runtime. See [workspace organization](../../docs/architecture/overview.md#workspace-organization).
+Runtime. See [workspace organization](../../docs/architecture/overview.md#system-structure).
 
 Backlog management uses `electron/services/runtime-backlog-service.ts` to call
 `@afk/runtime/backlog`, preserving workspace-scoped list caching and IPC DTO

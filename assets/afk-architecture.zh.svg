@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1320" viewBox="0 0 1600 1320" role="img" aria-labelledby="title desc">
+  <title id="title">AFK — 自治开发执行架构</title>
+  <desc id="desc">AFK 当前架构：CLI、桌面端与 Skills 入口，共享代码包，Provider 与 Agent 适配器，托管执行生命周期，以及审计与运行观察。</desc>
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101d35"/>
+      <stop offset="1" stop-color="#243e68"/>
+    </linearGradient>
+    <linearGradient id="runtime" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eaf2ff"/>
+      <stop offset="1" stop-color="#dce9ff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="blueArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+    </marker>
+    <style>
+      text { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; fill: #17243b; }
+      .kicker { font-size: 13px; font-weight: 700; letter-spacing: 2px; fill: #9fb6dc; }
+      .title { font-size: 34px; font-weight: 750; fill: #ffffff; }
+      .subtitle { font-size: 15px; fill: #cfdaeb; }
+      .section { font-size: 15px; font-weight: 750; letter-spacing: 1.3px; fill: #334155; }
+      .card { fill: #ffffff; stroke: #d7e0ec; stroke-width: 1.5; }
+      .card-title { font-size: 17px; font-weight: 750; }
+      .body { font-size: 13px; fill: #475569; }
+      .small { font-size: 11.5px; fill: #64748b; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: #334155; }
+      .pkg-title { font-size: 17px; font-weight: 800; }
+      .pkg-name { font-size: 11px; font-weight: 700; letter-spacing: .8px; fill: #64748b; }
+      .step-num { font-size: 11px; font-weight: 800; fill: #ffffff; }
+      .step-title { font-size: 15px; font-weight: 750; }
+      .step-body { font-size: 12px; fill: #526174; }
+      .arrow-line { fill: none; stroke: #8292a8; stroke-width: 2; marker-end: url(#arrow); }
+      .blue-line { fill: none; stroke: #2563eb; stroke-width: 2.2; marker-end: url(#blueArrow); }
+      .dashed { stroke-dasharray: 6 6; }
+      .pill { fill: #f1f5f9; stroke: #e2e8f0; }
+      .pill-text { font-size: 10.5px; font-weight: 650; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1320" fill="#f4f7fb"/>
+  <rect x="0" y="0" width="1600" height="112" fill="url(#header)"/>
+  <text x="58" y="34" class="kicker">当前实现 · Monorepo 架构</text>
+  <text x="58" y="76" class="title">AFK — 自治开发执行架构</text>
+  <text x="1540" y="47" text-anchor="end" class="subtitle">共享运行时 · 可替换适配器 · 证据驱动交付</text>
+
+  <!-- Entry points -->
+  <text x="58" y="145" class="section">产品入口与 Agent 集成</text>
+
+  <rect x="58" y="165" width="470" height="130" rx="14" class="card"/>
+  <rect x="58" y="165" width="7" height="130" rx="4" fill="#2563eb"/>
+  <text x="82" y="197" class="card-title">AFK CLI + Ink TUI</text>
+  <text x="82" y="222" class="body">Commander 命令入口 · 交互式终端仪表盘</text>
+  <text x="82" y="246" class="body">run / execute / loop · Backlog · QA · 观察与运维</text>
+  <rect x="82" y="261" width="116" height="22" rx="11" class="pill"/>
+  <text x="140" y="276" text-anchor="middle" class="pill-text">apps/cli</text>
+
+  <rect x="565" y="165" width="470" height="130" rx="14" class="card"/>
+  <rect x="565" y="165" width="7" height="130" rx="4" fill="#0f766e"/>
+  <text x="589" y="197" class="card-title">AFK Control Desktop</text>
+  <text x="589" y="222" class="body">React Renderer → 类型化 Preload IPC → Electron Main</text>
+  <text x="589" y="246" class="body">Main 服务 + 独立 Node 执行 Worker</text>
+  <rect x="589" y="261" width="148" height="22" rx="11" class="pill"/>
+  <text x="663" y="276" text-anchor="middle" class="pill-text">apps/desktop</text>
+  <text x="1015" y="277" text-anchor="end" class="small">调用共享 Runtime，不通过 AFK CLI 子进程执行</text>
+
+  <rect x="1072" y="165" width="470" height="130" rx="14" class="card"/>
+  <rect x="1072" y="165" width="7" height="130" rx="4" fill="#7c3aed"/>
+  <text x="1096" y="197" class="card-title">Skills &amp; Knowledge</text>
+  <text x="1096" y="222" class="body">Agent 工作手册：调研 · PRD · 实现 · 测试 · QA</text>
+  <text x="1096" y="246" class="body">Wiki 知识管理流程（独立 Python CLI）</text>
+  <rect x="1096" y="261" width="146" height="22" rx="11" class="pill"/>
+  <text x="1169" y="276" text-anchor="middle" class="pill-text">skills/ + plugin</text>
+
+  <path d="M293 295 V330 H565 V357" class="blue-line"/>
+  <path d="M800 295 V357" class="blue-line"/>
+  <path d="M1307 295 V557 H612 V588" class="arrow-line dashed"/>
+  <text x="1320" y="322" class="small">Skills 指导 Agent 的工作方式</text>
+
+  <!-- Shared packages -->
+  <text x="58" y="347" class="section">共享 TypeScript Workspace · 依赖方向</text>
+
+  <rect x="58" y="370" width="310" height="150" rx="14" fill="#ffffff" stroke="#b9c8dc" stroke-width="1.5"/>
+  <rect x="58" y="370" width="310" height="8" rx="4" fill="#0f766e"/>
+  <text x="82" y="407" class="pkg-title">Core</text>
+  <text x="82" y="428" class="pkg-name">@afk/core</text>
+  <text x="82" y="459" class="body">纯业务契约</text>
+  <text x="82" y="481" class="body">模型 · 事件 · Reducer · 策略 · Ports</text>
+  <text x="82" y="502" class="small">不依赖 Node.js、Electron、React 或 Provider SDK</text>
+
+  <rect x="405" y="370" width="330" height="150" rx="14" fill="#ffffff" stroke="#b9c8dc" stroke-width="1.5"/>
+  <rect x="405" y="370" width="330" height="8" rx="4" fill="#2563eb"/>
+  <text x="429" y="407" class="pkg-title">Application</text>
+  <text x="429" y="428" class="pkg-name">@afk/application</text>
+  <text x="429" y="459" class="body">共享业务用例与查询契约</text>
+  <text x="429" y="481" class="body">Inventory · 执行 · 观察</text>
+  <text x="429" y="502" class="small">仅依赖 Core</text>
+
+  <rect x="772" y="370" width="525" height="150" rx="14" fill="url(#runtime)" stroke="#8bb2f5" stroke-width="1.8"/>
+  <rect x="772" y="370" width="525" height="8" rx="4" fill="#1d4ed8"/>
+  <text x="796" y="407" class="pkg-title">Runtime</text>
+  <text x="796" y="428" class="pkg-name">@afk/runtime · 执行编排与适配器组合</text>
+  <text x="796" y="459" class="body">Workflow Engine · WorkflowRunner · PlanExecutor · 模板</text>
+  <text x="796" y="481" class="body">executeWorkItem · QARunner · LoopRunner · 会话 / 交接</text>
+  <text x="796" y="502" class="small">领域规则 + 基础设施适配器 · Node 执行边界</text>
+
+  <rect x="1330" y="370" width="212" height="150" rx="14" fill="#ffffff" stroke="#c4b5fd" stroke-width="1.5"/>
+  <rect x="1330" y="370" width="212" height="8" rx="4" fill="#7c3aed"/>
+  <text x="1350" y="407" class="pkg-title">Workflow Graph</text>
+  <text x="1350" y="428" class="pkg-name">@afk/workflow-graph</text>
+  <text x="1350" y="459" class="body">Graph IR</text>
+  <text x="1350" y="481" class="body">投影 · 布局</text>
+  <text x="1350" y="502" class="body">校验 · 路由</text>
+
+  <path d="M368 445 H405" class="blue-line"/>
+  <path d="M735 445 H772" class="blue-line"/>
+  <path d="M1330 445 H1300" class="arrow-line"/>
+  <text x="386" y="432" text-anchor="middle" class="small">依赖</text>
+  <text x="754" y="432" text-anchor="middle" class="small">依赖</text>
+  <text x="1315" y="432" text-anchor="middle" class="small">使用</text>
+
+  <!-- Runtime adapters -->
+  <text x="58" y="559" class="section">Runtime 适配器与执行基座</text>
+
+  <rect x="58" y="585" width="355" height="170" rx="14" class="card"/>
+  <rect x="58" y="585" width="355" height="7" rx="4" fill="#0891b2"/>
+  <text x="82" y="621" class="card-title">工单与变更 Provider</text>
+  <text x="82" y="648" class="body">BacklogProvider · BranchProvider · ChangeProvider</text>
+  <text x="82" y="673" class="body">GitHub / GitLab 实现</text>
+  <text x="82" y="698" class="body">规范工作项身份与关联关系</text>
+  <text x="82" y="729" class="small">Provider Backlog 是业务状态权威来源</text>
+
+  <rect x="435" y="585" width="355" height="170" rx="14" class="card"/>
+  <rect x="435" y="585" width="355" height="7" rx="4" fill="#7c3aed"/>
+  <text x="459" y="621" class="card-title">Agent Provider</text>
+  <text x="459" y="648" class="body">Claude Code · Codex · Cursor</text>
+  <text x="459" y="673" class="body">OpenCode · Pi · GitHub Copilot</text>
+  <text x="459" y="698" class="body">感知能力差异的进程与会话适配器</text>
+  <text x="459" y="729" class="small">可替换的编码 Agent 运行时</text>
+
+  <rect x="812" y="585" width="355" height="170" rx="14" class="card"/>
+  <rect x="812" y="585" width="355" height="7" rx="4" fill="#d97706"/>
+  <text x="836" y="621" class="card-title">Sandbox 与进程控制</text>
+  <text x="836" y="648" class="body">Local · Docker · Podman</text>
+  <text x="836" y="673" class="body">tmux · 进程生命周期 · 流式输出 / 中断</text>
+  <text x="836" y="698" class="body">会话捕获 · 恢复 / 交接 · 看门狗</text>
+  <text x="836" y="729" class="small">隔离级别与运行时能力均显式声明</text>
+
+  <rect x="1189" y="585" width="353" height="170" rx="14" class="card"/>
+  <rect x="1189" y="585" width="353" height="7" rx="4" fill="#64748b"/>
+  <text x="1213" y="621" class="card-title">工作区与持久化</text>
+  <text x="1213" y="648" class="body">Git 分支 · Worktree · 多仓库准备</text>
+  <text x="1213" y="673" class="body">配置 · Inventory · 本地运行记录</text>
+  <text x="1213" y="698" class="body">执行 Journal · 预算 · 追加式事件</text>
+  <text x="1213" y="729" class="small">~/.afk/ + 工作区本地证据</text>
+
+  <path d="M930 520 V548 H235 V585" class="arrow-line"/>
+  <path d="M1035 520 V548 H612 V585" class="arrow-line"/>
+  <path d="M1140 520 V548 H989 V585" class="arrow-line"/>
+  <path d="M1230 520 V548 H1365 V585" class="arrow-line"/>
+
+  <!-- Lifecycle -->
+  <text x="58" y="805" class="section">托管式执行生命周期</text>
+  <text x="1542" y="805" text-anchor="end" class="small">AFK 消费上游已拆分的工作项；需求规划由上游负责</text>
+
+  <rect x="48" y="835" width="238" height="176" rx="13" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <circle cx="75" cy="864" r="14" fill="#0f766e"/><text x="75" y="868" text-anchor="middle" class="step-num">01</text>
+  <text x="98" y="869" class="step-title">Provider Backlog</text>
+  <text x="68" y="905" class="step-body">Ready / rework 工作项</text>
+  <text x="68" y="927" class="step-body">验收标准 + 依赖关系</text>
+  <text x="68" y="949" class="step-body">规范化身份</text>
+  <text x="68" y="982" class="small">GitHub / GitLab 是状态事实源</text>
+
+  <rect x="302" y="835" width="238" height="176" rx="13" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <circle cx="329" cy="864" r="14" fill="#2563eb"/><text x="329" y="868" text-anchor="middle" class="step-num">02</text>
+  <text x="352" y="869" class="step-title">前置校验与认领</text>
+  <text x="322" y="905" class="step-body">可执行性 + 依赖检查</text>
+  <text x="322" y="927" class="step-body">Manifest / 项目校验</text>
+  <text x="322" y="949" class="step-body">Claim 租约 + 执行身份</text>
+  <text x="322" y="982" class="small">存在不确定性时保守停止 / 转人工</text>
+
+  <rect x="556" y="835" width="238" height="176" rx="13" fill="#ffffff" stroke="#93c5fd" stroke-width="1.7"/>
+  <circle cx="583" cy="864" r="14" fill="#2563eb"/><text x="583" y="868" text-anchor="middle" class="step-num">03</text>
+  <text x="606" y="869" class="step-title">实现阶段</text>
+  <text x="576" y="905" class="step-body">工作流模板 + PlanExecutor</text>
+  <text x="576" y="927" class="step-body">Agent 在隔离 Worktree / Sandbox 中执行</text>
+  <text x="576" y="949" class="step-body">推送分支 → verification</text>
+  <text x="576" y="982" class="small">afk run 仅负责实现阶段</text>
+
+  <rect x="810" y="835" width="238" height="176" rx="13" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <circle cx="837" cy="864" r="14" fill="#d97706"/><text x="837" y="868" text-anchor="middle" class="step-num">04</text>
+  <text x="860" y="869" class="step-title">独立 QA 验证</text>
+  <text x="830" y="905" class="step-body">独立的 QARunner</text>
+  <text x="830" y="927" class="step-body">验收检查 + 测试证据</text>
+  <text x="830" y="949" class="step-body">有限次数返工，或 blocked / HITL</text>
+  <text x="830" y="982" class="small">executeWorkItem 托管实现 + QA</text>
+
+  <rect x="1064" y="835" width="238" height="176" rx="13" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <circle cx="1091" cy="864" r="14" fill="#0891b2"/><text x="1091" y="868" text-anchor="middle" class="step-num">05</text>
+  <text x="1114" y="869" class="step-title">变更请求</text>
+  <text x="1084" y="905" class="step-body">创建 / 校验 PR 或 MR</text>
+  <text x="1084" y="927" class="step-body">校验与工作项的关联</text>
+  <text x="1084" y="949" class="step-body">产出可合并证据</text>
+  <text x="1084" y="982" class="small">ChangeProvider</text>
+
+  <rect x="1318" y="835" width="238" height="176" rx="13" fill="#ffffff" stroke="#86b99b" stroke-width="1.7"/>
+  <circle cx="1345" cy="864" r="14" fill="#0f766e"/><text x="1345" y="868" text-anchor="middle" class="step-num">06</text>
+  <text x="1368" y="869" class="step-title">人工合并门禁</text>
+  <text x="1338" y="905" class="step-body">merge_ready + HITL</text>
+  <text x="1338" y="927" class="step-body">人工审核并执行合并</text>
+  <text x="1338" y="949" class="step-body">合并核验通过 → done</text>
+  <text x="1338" y="982" class="small">不自动执行最终合并</text>
+
+  <path d="M286 923 H302" class="blue-line"/>
+  <path d="M540 923 H556" class="blue-line"/>
+  <path d="M794 923 H810" class="blue-line"/>
+  <path d="M1048 923 H1064" class="blue-line"/>
+  <path d="M1302 923 H1318" class="blue-line"/>
+
+  <!-- Data and observability -->
+  <text x="58" y="1060" class="section">权威数据、执行证据与运行观察</text>
+  <rect x="58" y="1080" width="720" height="145" rx="14" fill="#ffffff" stroke="#d7e0ec" stroke-width="1.5"/>
+  <text x="82" y="1114" class="card-title">事实来源与本地证据</text>
+  <text x="82" y="1142" class="body">Provider Backlog = 业务状态权威 · Git 托管平台 = 分支 / 合并事实</text>
+  <text x="82" y="1167" class="body">~/.afk = 配置、Inventory、Runtime 与预算 · 工作区 = Manifest 与执行 Journal</text>
+  <text x="82" y="1192" class="body">追加式 JSONL 事件与诊断信息记录每次执行尝试</text>
+
+  <rect x="822" y="1080" width="720" height="145" rx="14" fill="#ffffff" stroke="#d7e0ec" stroke-width="1.5"/>
+  <text x="846" y="1114" class="card-title">只读视图与运行状态可视化</text>
+  <text x="846" y="1142" class="body">afk observe · CLI/TUI 运行视图 · Desktop Run Center / 执行时间线</text>
+  <text x="846" y="1167" class="body">基于 Provider 状态、审计事件和 Runtime 诊断构建只读投影</text>
+  <text x="846" y="1192" class="small">进程退出码或 Agent 自报结果均不能单独证明任务完成</text>
+
+  <rect x="58" y="1244" width="1484" height="50" rx="10" fill="#e8eef7"/>
+  <text x="80" y="1275" font-size="12.5" font-weight="700" fill="#334155">架构边界</text>
+  <text x="190" y="1275" font-size="12.5" fill="#475569">afk loop 仅绑定单个 Manifest 工作项</text>
+  <text x="770" y="1275" font-size="12.5" fill="#475569">Desktop 通过独立 Worker 调用共享 Runtime，而非启动 AFK CLI 子进程</text>
+</svg>

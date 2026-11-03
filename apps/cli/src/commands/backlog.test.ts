@@ -710,7 +710,7 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       const envelope = JSON.parse(String(output.mock.calls[0][0]));
       expect(envelope).toMatchObject({ ok: true, kind: 'backlog.create',
         data: { dryRun: true, title: 'PRD', kind: 'prd',
-          labels: ['kind::prd', 'mode::hitl', 'parent::github:org/repo#42'] } });
+          labels: ['kind::prd', 'mode::hitl', 'parent::42'] } });
       // A PRD anchor has no lifecycle position, so the plan carries no state.
       expect(envelope.data.state).toBeUndefined();
       expect(create).not.toHaveBeenCalled();

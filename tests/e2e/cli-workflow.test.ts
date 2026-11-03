@@ -158,19 +158,23 @@ describe('built CLI workflows', () => {
     const second = await backlog(['create', 'Second', '--description-file', description]);
     const firstId = String(first.data.id);
     const secondId = String(second.data.id);
+    // A relation inside the owning project is written as the issue number;
+    // one that crosses a project boundary keeps the canonical identity.
+    const firstNumber = String(first.data.issueNumber);
+    const secondNumber = String(second.data.issueNumber);
 
     const added = await backlog(['relation', 'add', '--id', secondId, '--depends-on', firstId]);
     expect(added.data.dependsOn).toEqual([firstId]);
-    expect(issues[1].labels).toContain(`depends-on::${firstId}`);
+    expect(issues[1].labels).toContain(`depends-on::${firstNumber}`);
 
     const withdrawn = await backlog(['relation', 'remove', '--id', secondId, '--depends-on', firstId]);
     expect(withdrawn.data.dependsOn).toEqual([]);
-    expect(issues[1].labels).not.toContain(`depends-on::${firstId}`);
+    expect(issues[1].labels).not.toContain(`depends-on::${firstNumber}`);
 
     // An edge that points at the item itself is refused, and nothing is written.
     const refused = await backlog(['relation', 'add', '--id', secondId, '--depends-on', secondId], 1);
     expect(refused.error.message).toContain('itself');
-    expect(issues[1].labels).not.toContain(`depends-on::${secondId}`);
+    expect(issues[1].labels).not.toContain(`depends-on::${secondNumber}`);
   });
 
   it('turns a backlog item into a PRD anchor through the built CLI', async () => {

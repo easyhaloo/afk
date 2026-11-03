@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { idempotencyMarker, withIdempotencyMarker } from './idempotency.js';
 import { TrackerBacklogProvider } from './tracker-provider.js';
 import { GitHubBacklogProvider } from './github-provider.js';
 import { GitLabBacklogProvider } from './gitlab-provider.js';
@@ -27,13 +28,14 @@ function tracker(issue: any): TrackerProvider {
     }),
     listMRs: vi.fn(async () => []),
     getMR: vi.fn(),
+    linkIssues: vi.fn(async () => {}),
   } as unknown as TrackerProvider;
 }
 
 describe('TrackerBacklogProvider', () => {
   it('plans the same creation through every provider wrapper', async () => {
     const t = tracker({ id: 7, platform: 'github', projectId: 'org/repo', labels: [], state: 'opened' });
-    const expected = ['stage::ready-for-issues', 'mode::afk', 'parent::github:org/repo#7'];
+    const expected = ['stage::ready-for-issues', 'mode::afk', 'parent::7'];
     const plan = async (provider: BacklogProvider) =>
       (await provider.planCreate({ title: 'Child', description: 'Body', parentId: '7' })).labels;
 
@@ -109,10 +111,10 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('returns an existing issue for a repeated idempotency key', async () => {
-    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Anchor', labels: [] as string[], state: 'opened' };
+    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Anchor', labels: [] as string[], description: '', state: 'opened' };
     const t = { ...tracker(issue), ensureBacklogMetadata: vi.fn(async () => {}),
-      listIssues: vi.fn(async () => issue.labels.length ? [{ ...issue }] : []),
-      createIssue: vi.fn(async (input: any) => { issue.labels = input.labels; return 42; }) };
+      listIssues: vi.fn(async () => issue.description ? [{ ...issue }] : []),
+      createIssue: vi.fn(async (input: any) => { issue.description = input.description; return 42; }) };
     const provider = new TrackerBacklogProvider(t);
     const input = { title: 'Anchor', description: 'Body', kind: 'prd' as const, idempotencyKey: 'migration/anchor' };
     expect((await provider.create(input)).id).toBe('github:org/repo#42');
@@ -123,11 +125,12 @@ describe('TrackerBacklogProvider', () => {
 
   it('writes the dependency links of a record an earlier run created', async () => {
     const dependency = { id: 6, platform: 'github', projectId: 'org/repo', title: 'Dependency', labels: [] as string[], state: 'opened' };
-    const existing = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[], state: 'opened' };
+    const existing = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Child', labels: [] as string[],
+      description: withIdempotencyMarker('Body', idempotencyMarker('manifest/child')), state: 'opened' };
     const t = tracker(existing);
     // The record exists but the run that created it stopped before it wrote
     // the relation, so the repeated run has to write the relation itself.
-    t.listIssues = vi.fn(async (options: any) => options?.labels?.length ? [{ ...existing, labels: options.labels }] : []);
+    t.listIssues = vi.fn(async () => [{ ...existing }]);
     t.getIssue = vi.fn(async (id: number) => (id === 6 ? { ...dependency } : { ...existing }));
     t.createIssue = vi.fn(async () => 42);
     t.linkIssues = vi.fn(async () => {});
@@ -286,7 +289,7 @@ describe('TrackerBacklogProvider', () => {
     })).resolves.toMatchObject({ id: 'github:org/repo#42', parentId: 'github:org/repo#7', dependsOn: ['github:org/repo#6'], webUrl: 'https://example/42' });
 
     expect(t.createIssue).toHaveBeenCalledWith(expect.objectContaining({
-      labels: ['stage::ready-for-issues', 'mode::afk', 'feature', 'parent::github:org/repo#7', 'depends-on::github:org/repo#6'],
+      labels: ['stage::ready-for-issues', 'mode::afk', 'feature', 'parent::7', 'depends-on::6'],
       description: expect.stringContaining('[#7](https://example/7)'),
     }));
     expect(t.linkIssues).toHaveBeenCalledWith(42, 6, 'blocked_by');
@@ -527,9 +530,12 @@ describe('TrackerBacklogProvider', () => {
     await provider.applyRelationUpdate('42', { parent: '2' });
 
     expect(t.updateLabels).toHaveBeenCalledWith(42, {
-      add: ['parent::github:org/repo#2'],
+      add: ['parent::2'],
       remove: ['parent::github:org/repo#1'],
     });
+    // The edge a person reads is a link as well: a label chip filters the
+    // issue list and leads nowhere.
+    expect(t.linkIssues).toHaveBeenCalledWith(42, 2, 'related_to');
     expect(t.updateIssue).not.toHaveBeenCalled();
     await expect(provider.get('42')).resolves.toMatchObject({ parentId: 'github:org/repo#2' });
   });

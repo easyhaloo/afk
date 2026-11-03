@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type {
   BacklogCreateInput,
   BacklogExecutionMode,
@@ -14,6 +13,7 @@ import {
   encodeBacklogRelations,
   type BacklogMetadataScope,
 } from './metadata-codec.js';
+import { idempotencyMarker as idempotencyMarkerOf, withIdempotencyMarker } from './idempotency.js';
 import type { WorkItemId } from '../work-item/identity.js';
 
 export interface BacklogCreatePlan {
@@ -32,7 +32,7 @@ export interface BacklogCreatePlan {
   dependsOn: WorkItemId[];
   tags: string[];
   labels: string[];
-  idempotencyLabel?: string;
+  idempotencyMarker?: string;
   links: { parent?: BacklogItem; executionBase?: BacklogItem; dependencies: BacklogItem[] };
 }
 
@@ -80,8 +80,8 @@ export async function planBacklogCreate(
   const dependsOn = [...new Set((input.dependsOn ?? []).map(id => resolveReference(id, scope)))];
   const tags = [...new Set((input.tags ?? []).map(validateBusinessTag))];
   if (input.idempotencyKey !== undefined && !input.idempotencyKey.trim()) throw new Error('idempotency key must not be empty');
-  const idempotencyLabel = input.idempotencyKey === undefined ? undefined
-    : `idempotency::${createHash('sha256').update(input.idempotencyKey).digest('hex')}`;
+  const idempotencyMarker = input.idempotencyKey === undefined ? undefined
+    : idempotencyMarkerOf(input.idempotencyKey);
   // A PRD anchor is a container, not a work item in a lifecycle: it gets no
   // stage label at all. Its role label says what it is, and its mode label
   // says it never runs by itself.
@@ -92,8 +92,7 @@ export async function planBacklogCreate(
   const labels = [
     ...roleLabels,
     BACKLOG_METADATA.executionModeLabels[executionMode], ...tags,
-    ...encodeBacklogRelations({ parentId, baseBacklogId, dependsOn }),
-    ...(idempotencyLabel ? [idempotencyLabel] : []),
+    ...encodeBacklogRelations({ parentId, baseBacklogId, dependsOn }, scope),
   ];
   const [parent, executionBase, dependencies] = await Promise.all([
     parentId ? provider.get(parentId) : undefined,
@@ -101,8 +100,9 @@ export async function planBacklogCreate(
     Promise.all(dependsOn.map(id => provider.get(id))),
   ]);
   const links = { parent, executionBase, dependencies };
-  return { title, description: renderBacklogDescription(input.description, links), state, kind, executionMode, parentId, baseBacklogId, dependsOn, tags, labels,
-    idempotencyLabel, links };
+  const body = renderBacklogDescription(input.description, links);
+  return { title, description: idempotencyMarker === undefined ? body : withIdempotencyMarker(body, idempotencyMarker), state, kind, executionMode, parentId, baseBacklogId, dependsOn, tags, labels,
+    idempotencyMarker, links };
 }
 
 /**
@@ -115,6 +115,18 @@ function linkLabel(item: BacklogItem): string {
   return `#${item.issueNumber ?? item.id}`;
 }
 
+const BACKLOG_LINKS_HEADING = '## Backlog Links';
+
+/**
+ * The bullets AFK owns inside the links section.
+ *
+ * A body may already carry the section — a manifest author can write one — and
+ * AFK's own entries have to replace whatever stood there before, not sit next
+ * to it. A stale entry is worse than a missing one: it points somewhere the
+ * reader is expected to follow.
+ */
+const MANAGED_LINK_PREFIXES = ['- This backlog:', '- Parent backlog:', '- Execution base:', '- Depends on:'];
+
 export function renderBacklogDescription(
   description: string,
   links: { parent?: BacklogItem; executionBase?: BacklogItem; dependencies: BacklogItem[]; self?: BacklogItem },
@@ -126,7 +138,26 @@ export function renderBacklogDescription(
     ...links.dependencies.flatMap(item => item.webUrl ? [`- Depends on: [${linkLabel(item)}](${item.webUrl})`] : []),
   ];
   if (entries.length === 0) return description;
-  return `${description.trimEnd()}\n\n## Backlog Links\n\n${entries.join('\n')}\n`;
+
+  const headingIndex = description.indexOf(BACKLOG_LINKS_HEADING);
+  if (headingIndex < 0) {
+    return `${description.trimEnd()}\n\n${BACKLOG_LINKS_HEADING}\n\n${entries.join('\n')}\n`;
+  }
+
+  // The section already exists: write AFK's entries into it instead of
+  // appending a second section with the same name.
+  const before = description.slice(0, headingIndex);
+  const after = description.slice(headingIndex + BACKLOG_LINKS_HEADING.length);
+  const nextHeading = after.search(/\n##\s/);
+  const section = (nextHeading < 0 ? after : after.slice(0, nextHeading)).trim();
+  const rest = nextHeading < 0 ? '' : after.slice(nextHeading);
+
+  const kept = section
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('- ') && !MANAGED_LINK_PREFIXES.some(prefix => line.startsWith(prefix)));
+  const merged = [...kept, ...entries.filter(entry => !kept.includes(entry))];
+  return `${before}${BACKLOG_LINKS_HEADING}\n\n${merged.join('\n')}\n${rest}`;
 }
 
 /**

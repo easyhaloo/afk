@@ -170,6 +170,10 @@ afk backlog show --id 42 --platform gitlab
 afk backlog show --id 42 --project my-org/my-repo --platform github
 ```
 
+`--project` 既接受裸 provider 路径，也接受规范项目键（`platform:projectKey`；实例
+不是默认实例时，键里带实例主机名）。两者指的是同一个仓库，因此手里已经拿着规范
+键的调用方不必再剥前缀。
+
 Provider 分配规范 Backlog ID；变更单创建与合并由类型化工作流步骤完成，不再提供独立 MR 公共命令。
 
 ### 完整工作流示例

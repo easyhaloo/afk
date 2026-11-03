@@ -104,7 +104,7 @@ describe('backlog relation label delta', () => {
   it('replaces the parent edge and leaves every other label alone', () => {
     const labels = ['stage::ready-for-issues', 'mode::afk', 'parent::github:org/repo#1', 'depends-on::github:org/repo#9'];
     expect(planRelationLabelDelta(labels, { parent: '2' }, scope)).toEqual({
-      add: ['parent::github:org/repo#2'],
+      add: ['parent::2'],
       remove: ['parent::github:org/repo#1'],
     });
   });
@@ -126,7 +126,7 @@ describe('backlog relation label delta', () => {
   it('keeps the edges the edit does not mention', () => {
     const labels = ['parent::github:org/repo#1', 'base::github:org/repo#3', 'depends-on::github:org/repo#9'];
     expect(planRelationLabelDelta(labels, { addDependsOn: ['4'] }, scope)).toEqual({
-      add: ['depends-on::github:org/repo#4'],
+      add: ['depends-on::4'],
       remove: [],
     });
   });
@@ -139,16 +139,30 @@ describe('backlog relation label delta', () => {
     });
   });
 
-  it('rewrites the legacy dependency spelling in the canonical form', () => {
+  it('rewrites the legacy dependency spelling in the current form', () => {
     expect(planRelationLabelDelta(['depends_on::github:org/repo#9'], { addDependsOn: ['9'] }, scope)).toEqual({
-      add: ['depends-on::github:org/repo#9'],
+      add: ['depends-on::9'],
       remove: ['depends_on::github:org/repo#9'],
     });
   });
 
   it('changes nothing when the edge is already the one that was asked for', () => {
-    expect(planRelationLabelDelta(['parent::github:org/repo#2'], { parent: '2' }, scope)).toEqual({ add: [], remove: [] });
-    expect(planRelationLabelDelta(['depends-on::github:org/repo#4'], { addDependsOn: ['4'] }, scope)).toEqual({ add: [], remove: [] });
+    expect(planRelationLabelDelta(['parent::2'], { parent: '2' }, scope)).toEqual({ add: [], remove: [] });
+    expect(planRelationLabelDelta(['depends-on::4'], { addDependsOn: ['4'] }, scope)).toEqual({ add: [], remove: [] });
+  });
+
+  it('normalizes an edge that was written in the canonical form when it is touched', () => {
+    expect(planRelationLabelDelta(['parent::github:org/repo#1'], { parent: '2' }, scope)).toEqual({
+      add: ['parent::2'],
+      remove: ['parent::github:org/repo#1'],
+    });
+  });
+
+  it('withdraws a dependency that was written in the short form', () => {
+    expect(planRelationLabelDelta(['depends-on::9'], { removeDependsOn: ['9'] }, scope)).toEqual({
+      add: [],
+      remove: ['depends-on::9'],
+    });
   });
 
   it('refuses an edge that points at the item itself', () => {
@@ -163,7 +177,7 @@ describe('backlog relation label delta', () => {
 
   it('leaves a label it cannot parse alone until the edge is named', () => {
     expect(planRelationLabelDelta(['parent::not-a-reference'], { addDependsOn: ['4'] }, scope)).toEqual({
-      add: ['depends-on::github:org/repo#4'],
+      add: ['depends-on::4'],
       remove: [],
     });
     expect(planRelationLabelDelta(['parent::not-a-reference'], { clearParent: true }, scope)).toEqual({

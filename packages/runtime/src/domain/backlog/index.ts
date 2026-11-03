@@ -419,7 +419,7 @@ export class InMemoryBacklogProvider implements BacklogProvider {
       ...(item.parentId ? { parentId: item.parentId as WorkItemId } : {}),
       ...(item.baseBacklogId ? { baseBacklogId: item.baseBacklogId as WorkItemId } : {}),
       dependsOn: item.dependsOn as WorkItemId[],
-    });
+    }, this.project);
     const selfId = formatWorkItemId({
       platform: this.project.platform,
       projectKey: this.project.projectKey,

@@ -195,3 +195,35 @@ describe('backlog manifest application', () => {
     expect(created[0]?.input.tags).toEqual(['backend']);
   });
 });
+
+describe('backlog manifest role', () => {
+  it('reads the organizational role of an item', () => {
+    const manifest = parseBacklogManifest(`
+- title: Publish the route map
+  description: Publish the enterprise route mapping.
+  project: gitlab:group/repo
+  kind: prd
+- title: Resolve the endpoint
+  description: Resolve the private endpoint.
+  project: gitlab:group/repo
+`);
+
+    expect(manifest.items[0]?.kind).toBe('prd');
+    expect(manifest.items[1]?.kind).toBeUndefined();
+  });
+
+  it('carries the role into the record it creates', async () => {
+    const created: Recorded[] = [];
+    const manifest: BacklogManifest = {
+      items: [
+        { title: 'Publish the route map', description: 'Body.', project: 'github:org/api', kind: 'prd', executionMode: 'hitl', dependsOn: [], tags: [] },
+        { title: 'Resolve the endpoint', description: 'Body.', project: 'github:org/api', dependsOn: [], tags: [] },
+      ],
+    };
+
+    await applyBacklogManifest(planBacklogManifest(manifest), async (project) => provider(created, project));
+
+    expect(created[0]?.input.kind).toBe('prd');
+    expect(created[1]?.input.kind).toBeUndefined();
+  });
+});

@@ -42,6 +42,15 @@ export interface BacklogManifestItem {
   dependsOn: string[];
   /** How the item runs once it exists. */
   executionMode?: BacklogManifestExecutionMode;
+  /**
+   * The organizational role of the record.
+   *
+   * A PRD anchor is a container that groups its children and never runs
+   * itself, so a manifest that names one needs a way to say so — otherwise the
+   * anchor has to be created by a separate command and the manifest stops
+   * being the whole plan.
+   */
+  kind?: 'prd';
   /** Provider-neutral business tags. */
   tags: string[];
 }

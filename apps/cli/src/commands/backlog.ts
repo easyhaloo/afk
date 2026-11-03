@@ -36,7 +36,7 @@ import {
   type BacklogManifestProviderFactory,
 } from '@afk/runtime/application/work-item/apply-manifest';
 import { planBacklogManifest } from '@afk/application';
-import { parseCanonicalProject, parseWorkItemId, canonicalProjectKey, formatWorkItemId, gitLabProjectHost } from '@afk/runtime/domain/work-item/identity';
+import { parseCanonicalProject, parseProjectArgument, parseWorkItemId, canonicalProjectKey, formatWorkItemId, gitLabProjectHost } from '@afk/runtime/domain/work-item/identity';
 import type { InventoryItem, InventoryProject, InventorySnapshot } from '@afk/application';
 import {
   addBacklogTag,
@@ -99,14 +99,14 @@ async function resolveBacklogTarget(
   platform?: unknown,
   issueId?: string,
 ): Promise<BacklogTarget> {
+  const named = project === undefined ? undefined : parseProjectArgument(project);
   const target = await resolveTrackerTarget({
-    project,
-    platform: asPlatform(platform),
+    project: named?.projectId ?? project,
+    platform: asPlatform(platform) ?? named?.platform,
     issueId,
     cwd: process.cwd(),
   });
-  return { platform: target.platform, projectId: target.projectId, host: target.host };
-}
+  return { platform: target.platform, projectId: target.projectId, host: target.host ?? named?.host };}
 
 /** Create the management bundle for a resolved target. */
 function providersFor(target: BacklogTarget): Promise<ManagementProviderBundle> {
@@ -759,7 +759,7 @@ export async function runBacklogCreate(
       tags: options.tag,
     };
     if (options.dryRun) {
-      const { links, idempotencyLabel, ...plan } = await provider.planCreate(input);
+      const { links, idempotencyMarker, ...plan } = await provider.planCreate(input);
       if (options.json) emitSuccess(kind, { dryRun: true, ...plan });
       else process.stdout.write(`${JSON.stringify({ dryRun: true, ...plan }, null, 2)}\n`);
       return;

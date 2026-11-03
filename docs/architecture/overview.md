@@ -72,7 +72,7 @@ Three relationship types have distinct meanings:
 | `dependsOn` | Declares work that must finish first | Yes. Dependencies must be `done` before the item can run |
 | `baseBacklogId` | References a work item used as an execution baseline | Used to select or trace the baseline; a Git branch cannot be reused directly across repositories |
 
-Cross-repository references retain their canonical identity for traceability, but an execution baseline must respect the target repository's Git semantics. Parent, dependency, and baseline relationships do not implicitly substitute for one another.
+Cross-repository references retain their canonical identity for traceability, but an execution baseline must respect the target repository's Git semantics. A relation inside one repository is written as the issue number; a relation across repositories keeps the canonical identity. Parent, dependency, and baseline relationships do not implicitly substitute for one another.
 
 ## Lifecycle and human gate
 

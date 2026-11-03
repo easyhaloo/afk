@@ -32,12 +32,16 @@ describe('backlog creation and execution base', () => {
     // A PRD anchor is a container: it has no lifecycle position, so it gets
     // no stage label, and it defaults to the human-in-the-loop mode.
     expect(plan.state).toBeUndefined();
+    // A relation that stays in the owning project is written as the issue
+    // number; one that crosses a project boundary keeps the canonical form.
     expect(plan.labels).toEqual([
       'kind::prd', 'mode::hitl',
-      'parent::github:org/repo#7', 'base::github:org/repo#6',
-      'depends-on::github:org/repo#5', 'depends-on::github:org/other#5',
-      expect.stringMatching(/^idempotency::[a-f0-9]{64}$/),
+      'parent::7', 'base::6',
+      'depends-on::5', 'depends-on::github:org/other#5',
     ]);
+    // The retry marker is a comment in the body, not a label a reader sees.
+    expect(plan.labels.some(label => label.startsWith('idempotency::'))).toBe(false);
+    expect(plan.description).toMatch(/<!-- afk:idempotency:[a-f0-9]{64} -->/);
     expect(get.mock.calls.map(call => call[0])).toEqual([
       'github:org/repo#7', 'github:org/repo#6', 'github:org/repo#5', 'github:org/other#5',
     ]);
@@ -68,7 +72,26 @@ describe('backlog creation and execution base', () => {
     const plan = await provider.planCreate({ title: 'Child', description: 'Body', parentId: '7' });
 
     expect(plan.parentId).toBe('github:org/repo#7');
-    expect(plan.labels).toContain('parent::github:org/repo#7');
+    expect(plan.labels).toContain('parent::7');
+  });
+
+  it('keeps the canonical form of a relation that crosses a project boundary', async () => {
+    const get = vi.fn(async (_id: string) => item);
+    const plan = await planBacklogCreate({ get }, { title: 'Child', description: 'Body',
+      parentId: 'github:org/other#5' }, scope);
+
+    expect(plan.parentId).toBe('github:org/other#5');
+    expect(plan.labels).toContain('parent::github:org/other#5');
+  });
+
+  it('carries the retry marker in the body rather than in a label', async () => {
+    const get = vi.fn(async (_id: string) => item);
+    const plan = await planBacklogCreate({ get }, { title: 'Child', description: 'Body',
+      idempotencyKey: 'anchor' }, scope);
+
+    expect(plan.idempotencyMarker).toMatch(/^afk:idempotency:[a-f0-9]{64}$/);
+    expect(plan.labels.some(label => label.startsWith('idempotency::'))).toBe(false);
+    expect(plan.description).toContain(`<!-- ${plan.idempotencyMarker} -->`);
   });
 
   it('rejects reserved relation tags before reading providers', async () => {
@@ -111,5 +134,45 @@ describe('backlog creation and execution base', () => {
       'main',
     )).resolves.toBe('main');
     expect(get).toHaveBeenCalledWith('github:org/other#1');
+  });
+});
+
+describe('backlog description links section', () => {
+  const self = { ...item, issueNumber: 42, webUrl: 'https://example.test/42' };
+  const parent = { ...item, id: 'github:org/repo#7', issueNumber: 7, webUrl: 'https://example.test/7' };
+
+  it('appends the section when the body does not carry one', () => {
+    const rendered = renderBacklogDescription('Body', { self, parent, dependencies: [] });
+    expect(rendered).toContain('## Backlog Links');
+    expect(rendered).toContain('- This backlog: [#42](https://example.test/42)');
+    expect(rendered).toContain('- Parent backlog: [#7](https://example.test/7)');
+  });
+
+  it('writes into the section the body already carries instead of adding a second one', () => {
+    const body = 'Body\n\n## Backlog Links\n\n- This backlog: [#{SELF}](https://example.test/{SELF})';
+    const rendered = renderBacklogDescription(body, { self, parent, dependencies: [] });
+    expect(rendered.match(/## Backlog Links/g)).toHaveLength(1);
+    expect(rendered).not.toContain('{SELF}');
+    expect(rendered).toContain('- This backlog: [#42](https://example.test/42)');
+    expect(rendered).toContain('- Parent backlog: [#7](https://example.test/7)');
+  });
+
+  it('keeps a bullet the section carries that AFK does not own', () => {
+    const body = 'Body\n\n## Backlog Links\n\n- Note kept by the author';
+    const rendered = renderBacklogDescription(body, { self, dependencies: [] });
+    expect(rendered).toContain('- Note kept by the author');
+    expect(rendered).toContain('- This backlog: [#42](https://example.test/42)');
+  });
+
+  it('leaves the following section alone', () => {
+    const body = 'Body\n\n## Backlog Links\n\n- This backlog: [#{SELF}](https://example.test/{SELF})\n\n## Notes\n\nKept.';
+    const rendered = renderBacklogDescription(body, { self, dependencies: [] });
+    expect(rendered).toContain('## Notes');
+    expect(rendered).toContain('Kept.');
+    expect(rendered.match(/## Backlog Links/g)).toHaveLength(1);
+  });
+
+  it('leaves the body alone when there is no link to record', () => {
+    expect(renderBacklogDescription('Body', { dependencies: [] })).toBe('Body');
   });
 });

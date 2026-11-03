@@ -73,6 +73,11 @@ const manifestItemSchema = z.object({
   baseBacklogId: z.string().min(1).optional(),
   dependsOn: z.array(z.string().min(1)).default([]),
   executionMode: z.enum(['afk', 'hitl']).optional(),
+  // The organizational role of the record. A PRD anchor is a container that
+  // groups its children and never runs itself, so a manifest that names one
+  // needs a way to say so — otherwise the anchor has to be created by a
+  // separate command and the manifest stops being the whole plan.
+  kind: z.enum(['prd']).optional(),
   tags: z.array(z.string().min(1)).default([]),
 });
 
@@ -148,6 +153,7 @@ function toCreateInput(entry: BacklogManifestPlanEntry, created: ReadonlyMap<str
     ...(entry.baseBacklogId === undefined ? {} : { baseBacklogId: resolveReference(entry.baseBacklogId, created) }),
     dependsOn: entry.dependsOn.map(reference => resolveReference(reference, created)),
     ...(entry.item.executionMode === undefined ? {} : { executionMode: entry.item.executionMode }),
+    ...(entry.item.kind === undefined ? {} : { kind: entry.item.kind }),
     ...(entry.item.tags.length ? { tags: entry.item.tags } : {}),
     ...(entry.idempotencyKey === undefined ? {} : { idempotencyKey: entry.idempotencyKey }),
   };

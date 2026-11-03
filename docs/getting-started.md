@@ -192,6 +192,11 @@ Outside a git repository, name the project explicitly instead:
 afk backlog show --id 42 --project my-org/my-repo --platform github
 ```
 
+`--project` accepts either a bare provider path or the canonical project key
+(`platform:projectKey`, with the instance host in the key when the instance is
+not the default one). Both name the same repository, so a caller that already
+holds a canonical key does not have to strip the prefix.
+
 The provider owns the canonical Backlog ID. AFK creates and merges change
 requests as typed workflow steps rather than through a separate public MR command.
 

@@ -98,7 +98,9 @@ export class GitHubClient implements TrackerProvider {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
-    const { data } = await oct.request('GET /repos/{owner}/{repo}/issues', {
+    // Every page is read: a caller that looks through the project's issues
+    // has to see all of them, not the first page of them.
+    const data = await oct.paginate('GET /repos/{owner}/{repo}/issues', {
       owner,
       repo,
       state,

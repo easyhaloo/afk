@@ -4,6 +4,7 @@ import {
   encodeWorkItemIdForPath,
   formatWorkItemId,
   gitLabProjectHost,
+  parseProjectArgument,
   parseWorkItemId,
 } from './identity.js';
 
@@ -99,5 +100,36 @@ describe('work-item identity', () => {
     expect(encoded).not.toBe('..');
     expect(encoded).toContain('gitlab');
     expect(encodeWorkItemIdForPath(id)).toBe(encoded);
+  });
+});
+
+describe('project argument', () => {
+  it('reads a canonical project key into the parts a provider needs', () => {
+    expect(parseProjectArgument('gitlab:group/subgroup/project')).toEqual({
+      platform: 'gitlab',
+      projectId: 'group/subgroup/project',
+      host: undefined,
+    });
+    expect(parseProjectArgument('github:openai/codex')).toEqual({
+      platform: 'github',
+      projectId: 'openai/codex',
+      host: undefined,
+    });
+  });
+
+  it('keeps the instance host apart from the project path', () => {
+    expect(parseProjectArgument('gitlab:git.corp.example/group/project')).toEqual({
+      platform: 'gitlab',
+      projectId: 'group/project',
+      host: 'git.corp.example',
+    });
+  });
+
+  it('leaves a bare provider path to the provider that owns it', () => {
+    expect(parseProjectArgument('group/subgroup/project')).toBeUndefined();
+  });
+
+  it('does not read an unknown prefix as a platform', () => {
+    expect(parseProjectArgument('ftp://example/repo')).toBeUndefined();
   });
 });

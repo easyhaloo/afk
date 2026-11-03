@@ -39,6 +39,14 @@ async function defaultTrackerFor(project: ProviderProjectRef): Promise<TrackerPr
 }
 
 /**
+ * The issue number a canonical identity ends in.
+ */
+function issueNumberOf(id: string): number | undefined {
+  const match = /#([1-9]\d*)$/.exec(id);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
  * A backlog graph that spans every project the credentials can reach.
  *
  * The children of an item are the issues that carry `parent::<identity>`.
@@ -68,20 +76,48 @@ export function createCrossProjectBacklogGraphSource(options: CrossProjectBacklo
 
   return {
     async childrenOf(id: string): Promise<BacklogItem[]> {
-      const label = `${BACKLOG_RELATION_PREFIX.parent}${id}`;
+      // A relation label is either the canonical identity of the parent or,
+      // when the parent lives in the same project, its issue number. The short
+      // form only means something inside the project it is read in, so it is
+      // queried per project and the decoded identity decides which candidate
+      // really points here.
+      const labels = [`${BACKLOG_RELATION_PREFIX.parent}${id}`];
+      const issueNumber = issueNumberOf(id);
+      if (issueNumber !== undefined) labels.push(`${BACKLOG_RELATION_PREFIX.parent}${issueNumber}`);
+
       const children: BacklogItem[] = [];
+      const seen = new Set<string>();
       for (const project of await projects()) {
         const tracker = await trackerFor(project);
-        const issues = await tracker.listIssues({ state: 'all', labels: [label] });
-        for (const issue of issues) {
-          children.push(projectBacklogItem({
-            issueNumber: issue.id,
-            title: issue.title,
-            description: issue.description,
-            labels: issue.labels,
-            state: issue.state,
-            webUrl: issue.url,
-          }, { platform: project.platform, projectKey: project.projectKey }));
+        // The providers filter labels with AND semantics, so each form of the
+        // label needs its own query.
+        const found = (await Promise.all(labels.map(label => tracker.listIssues({ state: 'all', labels: [label] }))))
+          .flat();
+        for (const issue of found) {
+          let child: BacklogItem;
+          try {
+            child = projectBacklogItem({
+              issueNumber: issue.id,
+              title: issue.title,
+              description: issue.description,
+              labels: issue.labels,
+              state: issue.state,
+              webUrl: issue.url,
+            }, { platform: project.platform, projectKey: project.projectKey });
+          } catch {
+            // The projection is fail-closed: an issue whose metadata cannot be
+            // trusted is not a child anybody may act on. A scan over several
+            // repositories must not let one unreadable issue hide the others.
+            continue;
+          }
+          // The label query matched text. The decoded parent identity is the
+          // authority on whether this issue points here: a short-form label in
+          // another project names that project's issue, not this one.
+          if (child.parentId !== id) continue;
+          const key = `${project.platform}:${project.projectKey}#${issue.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          children.push(child);
         }
       }
       return children;

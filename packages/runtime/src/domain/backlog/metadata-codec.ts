@@ -229,12 +229,58 @@ export function decodeBacklogMetadata(
   };
 }
 
-/** Write relationship edges back into provider labels. */
-export function encodeBacklogRelations(relations: BacklogRelations): string[] {
+/**
+ * The label value that names one relation target.
+ *
+ * A relation that stays inside one project is written as the issue number:
+ * these labels are read by people in the provider's issue list, and the
+ * canonical identity of a same-project issue tells a reader nothing the issue
+ * it sits on did not already say. A relation that crosses a project boundary
+ * has to name the other project, so it keeps the canonical form.
+ *
+ * The short form only means anything inside the project it is read in, which
+ * is why a reader resolves it against the owning project rather than matching
+ * the label text across repositories.
+ */
+export function relationLabelValue(target: string, scope: BacklogMetadataScope): string {
+  const parts = parseWorkItemId(target);
+  if (parts.platform === scope.platform && parts.projectKey === scope.projectKey) {
+    return String(parts.issueNumber);
+  }
+  return target;
+}
+
+/**
+ * The canonical identity a relation label names.
+ *
+ * A label value is either an issue number in the owning project or a canonical
+ * identity. A value that is neither cannot be compared to a reference, so it
+ * is returned unchanged and the edge it names is left alone.
+ */
+function relationLabelReference(value: string, scope: BacklogMetadataScope): string {
+  try {
+    return canonicalizeBacklogReference(value, scope);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Write relationship edges back into provider labels.
+ *
+ * The scope is the project the item itself lives in; it decides which edges
+ * can be written in the short form. Without it every edge keeps the canonical
+ * identity, which is always readable.
+ */
+export function encodeBacklogRelations(
+  relations: BacklogRelations,
+  scope?: BacklogMetadataScope,
+): string[] {
+  const value = (target: WorkItemId) => (scope ? relationLabelValue(target, scope) : target);
   return [
-    ...(relations.parentId ? [`${BACKLOG_RELATION_PREFIX.parent}${relations.parentId}`] : []),
-    ...(relations.baseBacklogId ? [`${BACKLOG_RELATION_PREFIX.base}${relations.baseBacklogId}`] : []),
-    ...relations.dependsOn.map(id => `${BACKLOG_RELATION_PREFIX.dependsOn}${id}`),
+    ...(relations.parentId ? [`${BACKLOG_RELATION_PREFIX.parent}${value(relations.parentId)}`] : []),
+    ...(relations.baseBacklogId ? [`${BACKLOG_RELATION_PREFIX.base}${value(relations.baseBacklogId)}`] : []),
+    ...relations.dependsOn.map(id => `${BACKLOG_RELATION_PREFIX.dependsOn}${value(id)}`),
   ];
 }
 
@@ -296,7 +342,7 @@ export function planRelationLabelDelta(
 
   const parentLabels = relationLabels.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.parent));
   if (update.parent !== undefined) {
-    const desired = `${BACKLOG_RELATION_PREFIX.parent}${relationReference(update.parent, scope, options.selfId, 'parent')}`;
+    const desired = `${BACKLOG_RELATION_PREFIX.parent}${relationLabelValue(relationReference(update.parent, scope, options.selfId, 'parent'), scope)}`;
     add.add(desired);
     for (const label of parentLabels) if (label !== desired) remove.add(label);
   } else if (update.clearParent) {
@@ -307,7 +353,7 @@ export function planRelationLabelDelta(
 
   const baseLabels = relationLabels.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.base));
   if (update.base !== undefined) {
-    const desired = `${BACKLOG_RELATION_PREFIX.base}${relationReference(update.base, scope, options.selfId, 'base')}`;
+    const desired = `${BACKLOG_RELATION_PREFIX.base}${relationLabelValue(relationReference(update.base, scope, options.selfId, 'base'), scope)}`;
     add.add(desired);
     for (const label of baseLabels) if (label !== desired) remove.add(label);
   } else if (update.clearBase) {
@@ -324,15 +370,19 @@ export function planRelationLabelDelta(
   }
   for (const label of dependencyLabels) {
     const canonical = normalizeRelationLabel(label);
-    const reference = canonical.slice(BACKLOG_RELATION_PREFIX.dependsOn.length);
+    // The label value is compared as the identity it names, not as text: a
+    // dependency may be written in the short form or the canonical one, and
+    // both name the same record.
+    const reference = relationLabelReference(canonical.slice(BACKLOG_RELATION_PREFIX.dependsOn.length), scope);
     if (dropped.has(reference)) {
       remove.add(label);
       continue;
     }
-    // The legacy spelling is rewritten in the canonical form.
+    // The legacy spelling is rewritten in the current form, so one edge does
+    // not end up carried by two labels.
     if (canonical !== label) {
       remove.add(label);
-      add.add(canonical);
+      add.add(`${BACKLOG_RELATION_PREFIX.dependsOn}${relationLabelValue(reference, scope)}`);
       continue;
     }
     add.add(label);
@@ -340,7 +390,7 @@ export function planRelationLabelDelta(
   for (const reference of update.addDependsOn ?? []) {
     const canonical = relationReference(reference, scope, options.selfId, 'dependency');
     if (dropped.has(canonical)) continue;
-    add.add(`${BACKLOG_RELATION_PREFIX.dependsOn}${canonical}`);
+    add.add(`${BACKLOG_RELATION_PREFIX.dependsOn}${relationLabelValue(canonical, scope)}`);
   }
 
   return {

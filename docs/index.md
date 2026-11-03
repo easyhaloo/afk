@@ -50,6 +50,7 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0018](adr/0018-evidence-classification-and-redaction.md) | Evidence classification and redaction | accepted |
 | [0019](adr/0019-desktop-run-log-viewer-projection.md) | Desktop run log viewer projection | in progress |
 | [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop as singular change request | accepted |
+| [0021](adr/0021-backlog-relation-carrying.md) | Backlog 关系的承载方式与记录可读性 | accepted |
 
 ## 保留的研究材料（research/）
 

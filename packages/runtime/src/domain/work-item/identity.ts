@@ -100,6 +100,28 @@ export interface ParsedWorkItemId extends WorkItemIdentityParts {
   id: WorkItemId;
 }
 
+/**
+ * The repository a project argument names, in any of the forms that name one.
+ *
+ * A caller may hold the canonical project key the manifest uses
+ * (`platform:projectKey`, with the instance host in the key when the instance
+ * is not the default one) or a bare provider path. They name the same
+ * repository, so a command that takes a project accepts both: a caller that
+ * already holds a canonical key should not have to strip the prefix to hand
+ * it over.
+ *
+ * A value that names no platform is returned as `undefined`: it is a bare
+ * provider path, and the provider that owns it decides what it means.
+ */
+export function parseProjectArgument(value: string): { platform: WorkItemPlatform; projectId: string; host?: string } | undefined {
+  const separator = value.indexOf(':');
+  if (separator < 0) return undefined;
+  const prefix = value.slice(0, separator);
+  if (prefix !== 'github' && prefix !== 'gitlab') return undefined;
+  const parsed = parseCanonicalProject(value);
+  return { platform: parsed.platform, projectId: parsed.projectId, host: parsed.host };
+}
+
 export function formatWorkItemId(parts: WorkItemIdentityParts): WorkItemId {
   const platform = parseWorkItemPlatform(parts.platform);
   const projectKey = parseProjectKey(parts.projectKey);

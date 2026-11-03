@@ -154,6 +154,7 @@ Emit one manifest entry per item with these provider-neutral fields:
   baseBacklogId: <provider backlog id used as the Git base, or null>
   dependsOn: [<provider backlog ids or manifest refs>]
   executionMode: afk | hitl
+  kind: prd
   tags: [<business tags>]
 ```
 

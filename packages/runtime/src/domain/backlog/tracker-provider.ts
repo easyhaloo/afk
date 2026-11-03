@@ -26,6 +26,7 @@ import {
   type BacklogRelationUpdate,
 } from './metadata-codec.js';
 import { projectBacklogItem } from './projection.js';
+import { idempotencyMarkerIn, legacyIdempotencyLabel } from './idempotency.js';
 import { findDependencyCycle, type BacklogGraphSource } from './graph.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
@@ -160,10 +161,15 @@ export class TrackerBacklogProvider implements BacklogProvider {
     // The dependency targets are resolved before anything is written, so a
     // reference that names nothing cannot leave a record behind.
     const dependencyTargets = plan.dependsOn.map(id => this.resolveTarget(id));
-    if (plan.idempotencyLabel) {
-      // ponytail: label lookup covers sequential retries; concurrent creators need a distributed lock.
-      const existing = (await this.tracker.listIssues({ state: 'all', labels: [plan.idempotencyLabel] }))
-        .filter(issue => issue.labels.includes(plan.idempotencyLabel!));
+    if (plan.idempotencyMarker) {
+      // The marker lives in the body of the record, not in a label, so a retry
+      // finds it by reading the bodies of the project's issues. A record
+      // created before the marker moved out of the labels still carries that
+      // label, and is found by it.
+      const legacyLabel = legacyIdempotencyLabel(plan.idempotencyMarker);
+      const existing = (await this.tracker.listIssues({ state: 'all', perPage: 100 }))
+        .filter(issue => idempotencyMarkerIn(issue.description) === plan.idempotencyMarker
+          || issue.labels.includes(legacyLabel));
       if (existing.length > 1) throw new Error('idempotency key matches multiple backlog items');
       if (existing.length) {
         const found = await this.get(String(existing[0].id));
@@ -185,6 +191,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
       labels: plan.labels,
     });
     await this.writeDependencyLinks(id, dependencyTargets);
+    await this.writeParentLink(this.tracker, id, plan.parentId);
     const created = await this.get(String(id));
     if (!created.webUrl) return created;
     await this.tracker.updateIssue(id, {
@@ -199,6 +206,21 @@ export class TrackerBacklogProvider implements BacklogProvider {
       if (target.tracker === this.tracker) await this.tracker.linkIssues(sourceId, target.issueId, 'blocked_by');
       else await this.tracker.linkIssues(sourceId, target.issueId, 'blocked_by', String(target.tracker.projectId));
     }
+  }
+
+  /**
+   * Write the relation that says a record belongs to a PRD anchor.
+   *
+   * The label is the edge AFK reads back; the provider-native link is the
+   * edge a person reads. A label chip filters the issue list and leads
+   * nowhere, so the relation that matters to a reader — this record's place
+   * under its anchor — is written as a link as well.
+   */
+  private async writeParentLink(source: TrackerProvider, sourceId: number, parentId: string | undefined): Promise<void> {
+    if (!parentId) return;
+    const target = this.resolveTarget(parentId);
+    if (target.tracker === source) await source.linkIssues(sourceId, target.issueId, 'related_to');
+    else await source.linkIssues(sourceId, target.issueId, 'related_to', String(target.tracker.projectId));
   }
 
   async claim(id: string, owner: string): Promise<BacklogClaim | null> {
@@ -379,6 +401,11 @@ export class TrackerBacklogProvider implements BacklogProvider {
       })));
     }
     await target.tracker.updateLabels(target.issueId, { add: delta.add, remove: delta.remove });
+    // The edge a person reads is written as a link as well: a label chip
+    // filters the issue list and leads nowhere.
+    if (update.parent !== undefined) {
+      await this.writeParentLink(target.tracker, target.issueId, canonicalizeBacklogReference(update.parent, scope));
+    }
   }
 
   /**

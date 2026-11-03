@@ -257,16 +257,22 @@ flowchart BT
 
 ```mermaid
 flowchart LR
-    subgraph 宿主
-        CLI["命令行产品"]
-        TUI["实时看板"]
-        DS["桌面工位"]
+    subgraph 客户端
+        CLI["CLI / TUI"]
+        RENDERER["Desktop Renderer"]
     end
 
-    subgraph 控制进程
-        ORCH["执行编排"]
-        QA["独立质量验证"]
-        LOOP["单项循环器"]
+    subgraph Desktop 主进程
+        IPC["Typed IPC"]
+        MAIN["Electron Main"]
+        WORKER["Detached Node Worker"]
+    end
+
+    subgraph 共享运行时
+        RUNTIME["Runtime 用例"]
+        ORCH["WorkflowRunner"]
+        QA["QARunner"]
+        LOOP["LoopRunner"]
     end
 
     subgraph 执行环境
@@ -279,23 +285,29 @@ flowchart LR
         EVT["审计事件流"]
         RT["运行时记录"]
         BGT["预算账本"]
+        BACKLOG["Provider Backlog"]
     end
 
-    CLI --> ORCH
-    LOOP --> ORCH
+    CLI --> RUNTIME
+    RENDERER --> IPC --> MAIN
+    MAIN -->|托管执行| WORKER
+    WORKER --> RUNTIME
+    MAIN -->|查询投影| EVT
+    MAIN -->|查询投影| RT
+    MAIN -->|业务查询| BACKLOG
+    RUNTIME --> ORCH
+    LOOP --> RUNTIME
     ORCH --> WT
     WT --> SBX
     SBX --> AG
-    AG --> RT
     ORCH --> EVT
     QA --> EVT
     ORCH --> BGT
     QA --> BGT
-    TUI --> EVT
-    DS --> EVT
+    QA --> BACKLOG
 ```
 
-控制进程与执行环境**跨进程分离**。这是硬约束 K3 的直接结果：跨进程边界使执行状态必须显式持久化，从而使崩溃恢复成为可能而非偶然。
+CLI 与 Desktop 共享 Runtime 用例。Desktop Renderer 只通过 Typed IPC 调用 Electron Main；backlog 和图查询由 Main 侧 Runtime 服务处理，托管工作项则通过独立 Detached Node Worker 调用共享的 `executeWorkItem`。Worker 与编码执行环境跨进程运行，使执行状态能够持久化并在窗口关闭后继续推进。
 
 ---
 
@@ -844,7 +856,7 @@ stateDiagram-v2
 
 ### 13.3 文档一致性
 
-文档与代码保持同步依赖自动化链接检查与人工语义审查。当前 `docs:check` / CI `Docs Link Check` 检查 Markdown 链接的目标文件是否存在（含大小写），但**不检查锚点是否存在，也不判断命令、状态和架构描述是否与源码一致**。陈旧表述与能力边界仍需对照源码、测试和专题文档主动维护；架构实现变化时，应同步更新对应文档及双语版本。
+文档与代码保持同步依赖自动化链接检查与人工语义审查。当前 `docs:check` / CI `Docs Link Check` 会检查本地 Markdown 链接的目标文件（含大小写）及 Markdown 标题锚点；但**不会判断命令、状态和架构描述是否与源码一致**。语义漂移仍需对照源码、测试和专题文档主动维护；架构实现变化时，应同步更新对应文档及双语版本。
 
 ---
 

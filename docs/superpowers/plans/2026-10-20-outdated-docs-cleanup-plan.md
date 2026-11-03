@@ -1,4 +1,7 @@
-# AFK 过时文档清理计划
+# AFK 过时文档清理计划（历史快照）
+
+> **历史计划，非当前执行基线。** 本文编制于 2026-10-20，包含当时的分支状态、文件数量、源码路径与迁移假设；这些信息可能已过期。不要将本文的统计、分支约束或处置状态当作当前事实。当前整理结果与后续核验项见 [Documentation Maintenance Audit](../../architecture/documentation-maintenance.md)，当前实现以源码、命令注册表和 [Architecture Overview](../../architecture/overview.md) 为准。
+
 
 > 编制日期：2026-10-20
 > 范围：`docs/`（40 篇在用 + 92 篇归档）、仓库根入口文档、`apps/desktop/architecture.md`、`skills/`

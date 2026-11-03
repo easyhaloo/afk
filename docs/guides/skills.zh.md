@@ -21,61 +21,61 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [afk-grill-me](./afk-grill-me/) | `/afk-grill-me` | 需求访谈 |
-| [afk-grill-me-context](./afk-grill-me-context/) | `/afk-grill-me-context` | 基于现有材料补充澄清 |
-| [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | 生成并发布已确认的 PRD |
-| [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | 将需求拆解为 Backlog 工作项 |
+| [afk-grill-me](../../skills/afk-grill-me/) | `/afk-grill-me` | 需求访谈 |
+| [afk-grill-me-context](../../skills/afk-grill-me-context/) | `/afk-grill-me-context` | 基于现有材料补充澄清 |
+| [afk-to-prd](../../skills/afk-to-prd/) | `/afk-to-prd` | 生成并发布已确认的 PRD |
+| [afk-to-issues](../../skills/afk-to-issues/) | `/afk-to-issues` | 将需求拆解为 Backlog 工作项 |
 
 ### 研发执行与技术探索
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [afk-do](./afk-do/) | `/afk-do` | 任务分析与研发流程编排入口 |
-| [afk-research](./afk-research/) | `/afk-research` | 调研现有实现与技术方案 |
-| [afk-prototype](./afk-prototype/) | `/afk-prototype` | 验证技术方案可行性 |
-| [afk-implement](./afk-implement/) | `/afk-implement` | 执行代码实现工作流 |
-| [afk-diagnose](./afk-diagnose/) | `/afk-diagnose` | 诊断可复现故障 |
-| [afk-branch-migrate](./afk-branch-migrate/) | `/afk-branch-migrate` | 跨分支迁移代码 |
-| [afk-llm-dev-guide](./afk-llm-dev-guide/) | `/afk-llm-dev-guide` | LLM 应用架构与上下文工程 |
+| [afk-do](../../skills/afk-do/) | `/afk-do` | 任务分析与研发流程编排入口 |
+| [afk-research](../../skills/afk-research/) | `/afk-research` | 调研现有实现与技术方案 |
+| [afk-prototype](../../skills/afk-prototype/) | `/afk-prototype` | 验证技术方案可行性 |
+| [afk-implement](../../skills/afk-implement/) | `/afk-implement` | 执行代码实现工作流 |
+| [afk-diagnose](../../skills/afk-diagnose/) | `/afk-diagnose` | 诊断可复现故障 |
+| [afk-branch-migrate](../../skills/afk-branch-migrate/) | `/afk-branch-migrate` | 跨分支迁移代码 |
+| [afk-llm-dev-guide](../../skills/afk-llm-dev-guide/) | `/afk-llm-dev-guide` | LLM 应用架构与上下文工程 |
 
 ### 测试与质量保障
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [afk-testing](./afk-testing/) | `/afk-testing` | 测试设计、执行、失败诊断与有效性审查 |
-| [afk-change-driven-testing](./afk-change-driven-testing/) | `/afk-change-driven-testing` | 为变更涉及的存量业务流程补充回归测试 |
-| [afk-qa](./afk-qa/) | `/afk-qa` | 独立验收与合并前验证 |
-| [api-workflow](./api-workflow/) | `/api-workflow` | 多步骤 API 与浏览器混合测试 |
+| [afk-testing](../../skills/afk-testing/) | `/afk-testing` | 测试设计、执行、失败诊断与有效性审查 |
+| [afk-change-driven-testing](../../skills/afk-change-driven-testing/) | `/afk-change-driven-testing` | 为变更涉及的存量业务流程补充回归测试 |
+| [afk-qa](../../skills/afk-qa/) | `/afk-qa` | 独立验收与合并前验证 |
+| [api-workflow](../../skills/api-workflow/) | `/api-workflow` | 多步骤 API 与浏览器混合测试 |
 
 ### 任务编排与会话连续性
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [afk-scheduler](./afk-scheduler/) | `/afk-scheduler` | 按依赖关系调度多个工作项 |
-| [afk-hand-off](./afk-hand-off/) | `/afk-hand-off` | 记录进度、决策、阻塞与下一步 |
-| [session-time-analysis](./session-time-analysis/) | `/session-time-analysis` | 分析会话耗时分布与瓶颈 |
+| [afk-scheduler](../../skills/afk-scheduler/) | `/afk-scheduler` | 按依赖关系调度多个工作项 |
+| [afk-hand-off](../../skills/afk-hand-off/) | `/afk-hand-off` | 记录进度、决策、阻塞与下一步 |
+| [session-time-analysis](../../skills/session-time-analysis/) | `/session-time-analysis` | 分析会话耗时分布与瓶颈 |
 
 ### Agent 能力与推理治理
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [afk-skill-craft](./afk-skill-craft/) | `/afk-skill-craft` | 创建、诊断与重构 Skills |
-| [reasoning-guard](./reasoning-guard/) | `/reasoning-guard` | 会话内识别推理退化 |
-| [reasoning-watchdog](./reasoning-watchdog/) | `/reasoning-watchdog` | 通过 Hooks 持续监控推理质量 |
-| [jev-agent-guard](./jev-agent-guard/) | `/jev-agent-guard` | 为编码 Agent 安装检查点 |
+| [afk-skill-craft](../../skills/afk-skill-craft/) | `/afk-skill-craft` | 创建、诊断与重构 Skills |
+| [reasoning-guard](../../skills/reasoning-guard/) | `/reasoning-guard` | 会话内识别推理退化 |
+| [reasoning-watchdog](../../skills/reasoning-watchdog/) | `/reasoning-watchdog` | 通过 Hooks 持续监控推理质量 |
+| [jev-agent-guard](../../skills/jev-agent-guard/) | `/jev-agent-guard` | 为编码 Agent 安装检查点 |
 
 ### 知识管理与工程治理
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [wiki](./wiki/) | `/wiki` | 检索、读取、沉淀与检查项目知识 |
-| [software-complexity-governance](./software-complexity-governance/) | `/software-complexity-governance` | 评估复杂度、耦合度与技术债 |
+| [wiki](../../skills/wiki/) | `/wiki` | 检索、读取、沉淀与检查项目知识 |
+| [software-complexity-governance](../../skills/software-complexity-governance/) | `/software-complexity-governance` | 评估复杂度、耦合度与技术债 |
 
 ### 文档与格式转换
 
 | Skill | Trigger | 说明 |
 |---|---|---|
-| [md-to-pdf](./md-to-pdf/) | `/md-to-pdf` | 将 Markdown 文档导出为 PDF |
+| [md-to-pdf](../../skills/md-to-pdf/) | `/md-to-pdf` | 将 Markdown 文档导出为 PDF |
 
 ### 易混淆职责边界
 

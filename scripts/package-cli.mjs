@@ -5,6 +5,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertNoBundledAgent } from './package-cli-validation.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(await readFile(join(root, 'apps/cli/package.json'), 'utf8'));
@@ -37,9 +38,7 @@ function run(command, arguments_, options = {}) {
  * never bundled. A packaged agent binary is both huge (~236MB) and a licensing problem,
  * so treat it as a hard release failure rather than a size warning.
  */
-const FORBIDDEN_BUNDLED_AGENT = /claude-code|codex/i;
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024;
-const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024;
 const DEVELOPMENT_ARTIFACT = [/\.d\.ts$/, /\.d\.mts$/, /\.d\.cts$/, /\.map$/];
 
 async function walk(directory) {
@@ -58,24 +57,6 @@ async function pruneDevelopmentArtifacts(directory) {
     removed += 1;
   }
   console.log(`Pruned ${removed} development artifacts (${(bytes / 1024 / 1024).toFixed(1)}MB).`);
-}
-
-async function assertNoBundledAgent(directory) {
-  const packages = [];
-  const oversized = [];
-  for (const { entry, path } of await walk(directory)) {
-    if (entry.isDirectory()) {
-      if (FORBIDDEN_BUNDLED_AGENT.test(entry.name)) packages.push(path);
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const { size } = await stat(path);
-    if (size > MAX_SINGLE_FILE_BYTES) oversized.push(`${(size / 1024 / 1024).toFixed(0)}MB ${path}`);
-  }
-  const offenders = [...packages, ...oversized];
-  if (offenders.length) {
-    throw new Error(`refusing to package agent binaries (resolve them from PATH at runtime instead):\n  ${offenders.join('\n  ')}`);
-  }
 }
 
 /**

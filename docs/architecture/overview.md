@@ -2,7 +2,7 @@
 
 AFK turns backlog work items already planned and decomposed by an external system into **traceable, independently verified code changes awaiting human merge**. It owns execution and pre-delivery control, not requirements planning, task decomposition, or the final merge decision.
 
-This page explains the system boundary, core components, sources of truth, and end-to-end flow. See [Execution architecture](./execution.zh.md) for execution details and [System architecture design](./system-architecture-design.md) for the deeper design rationale.
+This page explains the system boundary, core components, sources of truth, and end-to-end flow. See [Execution architecture](./execution.md) for execution details and [System architecture design](./system-architecture-design.md) for the deeper design rationale.
 
 ## System boundary
 
@@ -168,7 +168,7 @@ Run `pnpm architecture:check --check-packages` to check package dependencies and
 
 ## Related documentation
 
-- [Execution architecture](./execution.zh.md): execution lifecycle, run modes, and execution constraints.
+- [Execution architecture](./execution.md): execution lifecycle, run modes, and execution constraints.
 - [System architecture design](./system-architecture-design.md): deeper system boundaries, architecture decisions, and reliability analysis.
 - [Chinese architecture overview](./overview.zh.md): Chinese version of this overview.
 - [Documentation index](../index.md): documentation categories and entry points.

@@ -163,7 +163,7 @@ See [Full Workflow & E2E Architecture](docs/architecture/full-workflow-e2e-archi
 | `/md-to-pdf` | Markdown to PDF | Export Markdown with Mermaid diagrams |
 | `/reasoning-guard` | Reasoning guard | Detect multi-turn reasoning degradation |
 | `/reasoning-watchdog` | Reasoning monitor | Hooks-based reasoning degradation interception |
-| `/afk-ai-prd` | AI-friendly PRD | PRDs that agents can parse, decompose, and verify |
+| `/afk-to-prd` | AI-ready PRD | Clarify, approve, validate, and publish confirmed product requirements |
 | `/afk-llm-dev-guide` | LLM application guide | LLM architecture and context engineering |
 | `/jev-agent-guard` | Agent checkpoints | Install checkpoints across coding agents |
 | `/software-complexity-governance` | Complexity governance | Measure complexity, coupling, and technical debt |

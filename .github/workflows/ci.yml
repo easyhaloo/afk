@@ -93,7 +93,7 @@ jobs:
               skills/wiki/*)
                 wiki_python=true
                 ;;
-              skills/afk-ai-prd/*|skills/afk-to-prd/*)
+              skills/afk-to-prd/*)
                 prd_tests=true
                 ;;
             esac
@@ -259,9 +259,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Compile PRD validator
-        run: python -m py_compile skills/afk-ai-prd/scripts/validate_prd.py
+        run: python -m py_compile skills/afk-to-prd/scripts/validate_prd.py
       - name: Run PRD validator tests
-        run: python -B -m unittest discover -s skills/afk-ai-prd/tests -p 'test_*.py' -v
+        run: python -B -m unittest discover -s skills/afk-to-prd/tests -p 'test_*.py' -v
 
   cli:
     name: Shared Packages And CLI

@@ -262,4 +262,4 @@ sequenceDiagram
 - Stable IDs and traceability: PASS
 - Atomic Given/When/Then acceptance criteria: PASS
 - Unresolved risks labeled: PASS
-- Validator: `python3 skills/afk-ai-prd/scripts/validate_prd.py docs/product/PRD-work-items-reverse-sort-2026-10-15.md`
+- Validator: `python3 skills/afk-to-prd/scripts/validate_prd.py docs/product/PRD-work-items-reverse-sort-2026-10-15.md`

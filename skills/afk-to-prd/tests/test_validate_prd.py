@@ -1,4 +1,4 @@
-"""Tests for the AI-ready PRD validator."""
+"""Tests for the consolidated PRD validator."""
 
 from __future__ import annotations
 

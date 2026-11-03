@@ -32,7 +32,7 @@ docs/                # All documentation (see below)
 ```
 
 The root package is a private workspace coordinator. Package responsibilities
-and dependency rules are owned by [the architecture overview](docs/architecture/overview.md#workspace-organization).
+and dependency rules are owned by [the architecture overview](docs/architecture/overview.md#system-structure).
 `pnpm architecture:check` checks runtime layers, public workspace imports and
 dependency direction. Do not import another workspace's source by relative path.
 
@@ -57,14 +57,14 @@ documents ship as `name.md` + `name.zh.md`; update both.
 - **The command registry is the single source of truth for the CLI surface.**
   The supported commands, and the absence of aliases for removed groups, are
   documented in
-  [docs/architecture/overview.md](docs/architecture/overview.md). If you change
-  a signature, a flag, or remove a command, update that table in the same
-  commit — do not add a second command list here.
+  [docs/architecture/execution.md](docs/architecture/execution.md#execution-entry-points). If you change
+  a documented top-level entry point or its execution semantics, update that
+  summary in the same commit — do not add a second command catalog here.
 - **Work identity is a contract, not a convention you may redefine.** The
   `BacklogItem.id` / `Run.workItemId` / `runId` / `parentId` / `dependsOn` /
   `baseBacklogId` distinctions, and the rules for status ownership, are
   specified in
-  [docs/architecture/overview.md](docs/architecture/overview.md#work-item-and-execution-identity).
+  [docs/architecture/overview.md](docs/architecture/overview.md#work-item-identity-and-relationships).
   Read it before touching run, backlog, or runtime code.
 - **`skills/` is the source of truth.** Never edit skills under
   `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/` — those are
@@ -123,7 +123,7 @@ CLI and Desktop execute under `~/.loop-workspace/`, isolated by work-item ID.
 Configuration and system data live under `~/.afk/`: `config.yml`, `workflows/`,
 `tracker-projects.json`, runtime records, and per-workspace data in
 `workspaces/<sha256-of-absolute-workspace-path>/`. See
-[workspace paths](docs/architecture/overview.md#execution-and-system-paths).
+[workspace and data boundaries](docs/architecture/execution.md#data-and-workspace-boundaries).
 
 ## Related projects
 

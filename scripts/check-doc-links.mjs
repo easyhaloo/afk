@@ -37,7 +37,89 @@ if (mdFiles.length === 0) {
 }
 
 const linkPattern = /\[[^\]]*\]\(([^)\s]+)\)/g;
-const skipProtocols = ['http://', 'https://', 'mailto:', '#', '/'];
+const skipProtocols = ['http://', 'https://', 'mailto:', '/'];
+const anchorCache = new Map();
+
+/**
+ * Approximate GitHub's heading slug behavior for repository Markdown links.
+ * Explicit HTML id/name attributes are collected separately below. The
+ * duplicate suffix is important because GitHub numbers repeated headings.
+ */
+function headingSlug(value) {
+  const text = value
+    .replace(/<[^>]*>/g, '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
+    .replace(/\*\*|__|\*|_|~~|\x60/g, '')
+    .trim()
+    .toLowerCase();
+  const punctuation = new Set("!#$%&'()*+,./:;<=>?@[\\\\]^\x60{|}~");
+  let slug = '';
+  for (const character of text) {
+    if (punctuation.has(character)) continue;
+    slug += /\s/.test(character) ? '-' : character;
+  }
+  return slug.replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
+function markdownAnchors(filePath) {
+  if (anchorCache.has(filePath)) return anchorCache.get(filePath);
+
+  const anchors = new Set();
+  const occurrences = new Map();
+  const content = readFileSync(filePath, 'utf8');
+  const lines = content.split('\n');
+  let fenced = false;
+  let fenceMarker = '';
+  let previousLine = '';
+
+  const addHeading = (heading) => {
+    const base = headingSlug(heading);
+    if (!base) return;
+    const count = occurrences.get(base) ?? 0;
+    occurrences.set(base, count + 1);
+    anchors.add(count === 0 ? base : `${base}-${count}`);
+  };
+
+  for (const line of lines) {
+    const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fence) {
+      if (!fenced) {
+        fenced = true;
+        fenceMarker = fence[1][0];
+      } else if (fence[1][0] === fenceMarker) {
+        fenced = false;
+      }
+      previousLine = '';
+      continue;
+    }
+    if (fenced) continue;
+
+    for (const match of line.matchAll(/\b(?:id|name)\s*=\s*["']([^"']+)["']/gi)) {
+      anchors.add(match[1].toLowerCase());
+    }
+
+    const atx = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+    if (atx) {
+      addHeading(atx[1]);
+    } else if (previousLine.trim() && /^ {0,3}(?:=+|-+)\s*$/.test(line)) {
+      addHeading(previousLine.trim());
+    }
+    previousLine = line;
+  }
+
+  anchorCache.set(filePath, anchors);
+  return anchors;
+}
+
+function decodeFragment(fragment) {
+  try {
+    return decodeURIComponent(fragment).toLowerCase();
+  } catch {
+    return fragment.toLowerCase();
+  }
+}
 // Known placeholder link texts that are template artifacts, not real links.
 // Some are full paths (e.g. path/to/diagram.png), others are bare names.
 // Check both exact match and rawLink.endsWith to cover both forms.
@@ -79,7 +161,8 @@ for (const mdFile of mdFiles) {
     for (const match of line.matchAll(linkPattern)) {
       const rawLink = match[1];
 
-      // Skip external / protocol links
+      // Skip external / protocol links. A leading # is a same-page anchor
+      // and must be validated rather than skipped.
       if (skipProtocols.some(p => rawLink.startsWith(p))) continue;
 
       // Extract link text from the full match to check skip list
@@ -90,20 +173,29 @@ for (const mdFile of mdFiles) {
         if (skipLinkTexts.has(lt) || skipLinkTexts.has(rawLink)) continue;
       }
 
-      // Strip anchor suffix
-      const linkWithoutAnchor = rawLink.replace(/#.*$/, '');
+      const hashIndex = rawLink.indexOf('#');
+      const linkWithoutAnchor = hashIndex < 0 ? rawLink : rawLink.slice(0, hashIndex);
+      const fragment = hashIndex < 0 ? '' : decodeFragment(rawLink.slice(hashIndex + 1));
 
-      // Try resolving relative to the file's directory, then relative to repo root
+      // Try resolving relative to the file's directory, then relative to repo root.
+      // For a fragment-only link, the target is the current Markdown file.
       const fileDir = join(repoRoot, dirname(mdFile));
-      const candidates = [
-        join(fileDir, linkWithoutAnchor),
-        join(repoRoot, linkWithoutAnchor),
-      ];
+      const candidates = linkWithoutAnchor
+        ? [join(fileDir, linkWithoutAnchor), join(repoRoot, linkWithoutAnchor)]
+        : [join(repoRoot, mdFile)];
 
-      const found = candidates.some(candidate => fileExistsCaseSensitive(candidate));
+      const target = candidates.find(candidate => fileExistsCaseSensitive(candidate));
 
-      if (!found) {
+      if (!target) {
         broken.push(`${mdFile}:${lineNum}  ${rawLink}`);
+        continue;
+      }
+
+      if (fragment && target.toLowerCase().endsWith('.md')) {
+        const anchors = markdownAnchors(target);
+        if (!anchors.has(fragment)) {
+          broken.push(`${mdFile}:${lineNum}  ${rawLink} (missing anchor #${fragment})`);
+        }
       }
     }
   }

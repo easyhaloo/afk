@@ -1,0 +1,47 @@
+// AFK workspace package dependency view
+direction right
+colorMode pastel
+styleMode shadow
+typeface clean
+wrap on
+
+"应用入口" [color: "#DCEBFA"] {
+  CLI [label: "apps/cli", icon: terminal, color: "#3977C8"]
+  Desktop_Main [label: "apps/desktop · Electron Main", icon: monitor, color: "#27877A"]
+  Desktop_Renderer [label: "Desktop React Renderer", icon: monitor, color: "#27877A"]
+  Desktop_Worker [label: "Desktop Detached Worker", icon: cpu, color: "#27877A"]
+}
+
+"共享 Packages" [color: "#EAF0F8"] {
+  Core [label: "@afk/core", icon: boxes, color: "#27877A"]
+  Application [label: "@afk/application", icon: layers, color: "#3977C8"]
+  Runtime [label: "@afk/runtime", icon: server, color: "#245EAE"]
+  Workflow_Graph [label: "@afk/workflow-graph", icon: workflow, color: "#8060B5"]
+}
+
+"进程边界" [color: "#F2EDFA"] {
+  Preload [label: "Fixed Preload API", icon: shield-check, color: "#8060B5"]
+  IPC [label: "Typed IPC Contract", icon: workflow, color: "#8060B5"]
+}
+
+CLI > Core: workspace dependency
+CLI > Application: workspace dependency
+CLI > Runtime: workspace dependency
+
+Desktop_Renderer > Preload: Renderer API
+Preload > IPC: validated IPC surface
+IPC > Desktop_Main: Main process handler
+Desktop_Main > Core: workspace dependency
+Desktop_Main > Application: workspace dependency
+Desktop_Main > Runtime: Main-side services
+Desktop_Worker > Runtime: executeWorkItem
+
+Application > Core: dependency
+Runtime > Core: dependency
+Runtime > Application: dependency
+Runtime > Workflow_Graph: dependency
+
+legend [position: bottom] {
+  [connection: ">", label: "Compile-time / runtime package dependency"]
+  [color: "#8060B5", label: "Renderer process boundary"]
+}

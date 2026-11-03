@@ -220,7 +220,7 @@
 <rect x="300" y="588" width="1198" height="42" rx="16" fill="#edf3fb"/>
 <path d="M300 614 H1498 V630 H300 Z" fill="#edf3fb"/>
 <text x="324" y="615" class="card-title">@afk/runtime · 内部职责分层</text>
-<text x="1474" y="615" text-anchor="end" class="tiny">执行策略与业务流程由 Runtime 统筹，基础设施通过适配器接入</text>
+<text x="1474" y="615" text-anchor="end" class="tiny">依赖由基础设施指向应用与领域，业务策略保持在内层</text>
 
 <rect x="322" y="650" width="350" height="138" rx="12" fill="#f5f8fc" stroke="#d9e2ee"/>
 <rect x="322" y="650" width="350" height="5" rx="3" fill="#7891b2"/>
@@ -246,8 +246,8 @@
 <text x="1170" y="750" class="body">SQLite / Files / JSONL Events</text>
 <text x="1170" y="775" class="tiny">实现 Ports，隔离外部系统与运行环境差异</text>
 
-<path d="M672 720 H695" class="blue-line"/>
-<path d="M1125 720 H1148" class="blue-line"/>
+<path d="M695 720 H672" class="blue-line"/>
+<path d="M1148 720 H1125" class="blue-line"/>
 
 <!-- Adapter layer -->
 <text x="300" y="856" class="section">04 · 可替换 Provider 与执行能力</text>

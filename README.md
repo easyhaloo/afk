@@ -187,7 +187,6 @@ Skills 按使用目的进行逻辑分类，目录与触发命令保持原样。�
 |---|---|
 | [`/afk-skill-craft`](skills/afk-skill-craft/) | Create, diagnose, and refactor skills |
 | [`/reasoning-guard`](skills/reasoning-guard/) | Detect reasoning degradation in-session |
-| [`/reasoning-watchdog`](skills/reasoning-watchdog/) | Monitor reasoning quality persistently through hooks |
 | [`/jev-agent-guard`](skills/jev-agent-guard/) | Install checkpoints for coding agents |
 
 ### Knowledge & Engineering Governance

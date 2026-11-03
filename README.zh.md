@@ -141,35 +141,67 @@ afk signal goal-complete --summary "<summary>"
 
 ## Skills（Claude Code）
 
-| Skill | 用途 | 使用场景 |
-|-------|------|---------|
-| `/afk-grill-me` | 需求访谈 | 需求模糊或可能存在遗漏 |
-| `/afk-grill-me-context` | 补充访谈 | 现有草稿/文档需要验证 |
-| `/afk-to-prd` | 生成 PRD | 需求对齐后 |
-| `/afk-to-issues` | 分解为 Issues | PRD 批准后 |
-| `/afk-do` | 任务编排 | 清晰的功能或任务描述 |
-| `/afk-research` | 技术调研 | 编码前需要理解现有实现 |
-| `/afk-prototype` | 方案验证 | 承诺投入前验证技术方案 |
-| `/afk-implement` | 实现工作流 | 清晰实现目标 |
-| `/afk-testing` | 测试专家 | 测试设计、执行、失败诊断与有效性评估 |
-| `/afk-change-driven-testing` | 变更驱动测试 | 为本次修改涉及的业务流程补充回归测试 |
-| `/afk-qa` | 独立验证 | 合并前验证工作成果 |
-| `/afk-diagnose` | 故障诊断 | 具体、可复现的故障 |
-| `/afk-branch-migrate` | 跨分支迁移 | 在分歧分支间 cherry-pick |
-| `/afk-hand-off` | 工作交接 | 转移任务或会话上下文 |
-| `/afk-scheduler` | 调度辅助 | 协调多个 Issue 及其依赖 |
-| `/afk-skill-craft` | Skill 创作 | 创建、诊断或重构 Skills |
-| `/api-workflow` | API 测试 | 多步骤 API 链配合浏览器测试 |
-| `/md-to-pdf` | Markdown 转 PDF | 导出带 Mermaid 图表的文档 |
-| `/reasoning-guard` | 推理守卫 | 检测多轮推理降级 |
-| `/reasoning-watchdog` | 推理监控 | 基于 Hooks 的推理降级拦截 |
-| `/afk-to-prd` | AI 就绪 PRD | 澄清、确认、校验并发布已确认的产品需求 |
-| `/afk-llm-dev-guide` | LLM 应用指南 | LLM 架构与上下文工程 |
-| `/jev-agent-guard` | Agent 检查点 | 为不同编码 Agent 安装检查点 |
-| `/software-complexity-governance` | 复杂度治理 | 度量复杂度、耦合度与技术债 |
-| `/wiki` | 知识管理 | 检索、读取、沉淀和检查项目知识 |
+Skills 按使用目的进行逻辑分类，目录与触发命令保持原样。需要查看职责边界、工作流程和协作关系时，请阅读 [Skills 指南](docs/guides/skills.zh.md)。
 
-详细文档请查看 [Skills 指南](docs/guides/skills.zh.md)。
+### 需求与产品规划
+
+| Skill | 用途 |
+|---|---|
+| [`/afk-grill-me`](skills/afk-grill-me/) | 需求访谈 |
+| [`/afk-grill-me-context`](skills/afk-grill-me-context/) | 基于现有材料补充澄清 |
+| [`/afk-to-prd`](skills/afk-to-prd/) | 生成并发布已确认的 PRD |
+| [`/afk-to-issues`](skills/afk-to-issues/) | 将需求拆解为 Backlog 工作项 |
+
+### 研发执行与技术探索
+
+| Skill | 用途 |
+|---|---|
+| [`/afk-do`](skills/afk-do/) | 任务分析与研发流程编排入口 |
+| [`/afk-research`](skills/afk-research/) | 调研现有实现与技术方案 |
+| [`/afk-prototype`](skills/afk-prototype/) | 验证技术方案可行性 |
+| [`/afk-implement`](skills/afk-implement/) | 执行代码实现工作流 |
+| [`/afk-diagnose`](skills/afk-diagnose/) | 诊断可复现故障 |
+| [`/afk-branch-migrate`](skills/afk-branch-migrate/) | 跨分支迁移代码 |
+| [`/afk-llm-dev-guide`](skills/afk-llm-dev-guide/) | LLM 应用架构与上下文工程 |
+
+### 测试与质量保障
+
+| Skill | 用途 |
+|---|---|
+| [`/afk-testing`](skills/afk-testing/) | 测试设计、执行、失败诊断与有效性审查 |
+| [`/afk-change-driven-testing`](skills/afk-change-driven-testing/) | 为变更涉及的存量业务流程补充回归测试 |
+| [`/afk-qa`](skills/afk-qa/) | 独立验收与合并前验证 |
+| [`/api-workflow`](skills/api-workflow/) | 多步骤 API 与浏览器混合测试 |
+
+### 任务编排与会话连续性
+
+| Skill | 用途 |
+|---|---|
+| [`/afk-scheduler`](skills/afk-scheduler/) | 按依赖关系调度多个工作项 |
+| [`/afk-hand-off`](skills/afk-hand-off/) | 记录进度、决策、阻塞与下一步 |
+| [`/session-time-analysis`](skills/session-time-analysis/) | 分析会话耗时分布与瓶颈 |
+
+### Agent 能力与推理治理
+
+| Skill | 用途 |
+|---|---|
+| [`/afk-skill-craft`](skills/afk-skill-craft/) | 创建、诊断与重构 Skills |
+| [`/reasoning-guard`](skills/reasoning-guard/) | 会话内识别推理退化 |
+| [`/reasoning-watchdog`](skills/reasoning-watchdog/) | 通过 Hooks 持续监控推理质量 |
+| [`/jev-agent-guard`](skills/jev-agent-guard/) | 为编码 Agent 安装检查点 |
+
+### 知识管理与工程治理
+
+| Skill | 用途 |
+|---|---|
+| [`/wiki`](skills/wiki/) | 检索、读取、沉淀与检查项目知识 |
+| [`/software-complexity-governance`](skills/software-complexity-governance/) | 评估复杂度、耦合度与技术债 |
+
+### 文档与格式转换
+
+| Skill | 用途 |
+|---|---|
+| [`/md-to-pdf`](skills/md-to-pdf/) | 将 Markdown 文档导出为 PDF |
 
 ## 开发
 

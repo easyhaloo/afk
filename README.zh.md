@@ -1,30 +1,48 @@
 # AFK
 
-**AFK = Away From Keyboard** — 自主开发工作流 CLI + Skills 系统
+**AFK = Away From Keyboard** — 面向工单工作项的自治开发执行平台。
 
-跨平台 Issue 追踪自动化（GitLab/GitHub），由 Claude AI Agent 和 TypeScript 驱动。
+AFK 连接工单平台、代码仓库与编码 Agent 运行时，将已经拆分的工作项推进到隔离实现、独立验证和人工控制的合并门禁。
 
 [English](README.md)
 
-## 架构图
+## 整体架构
 
-![AFK 架构](assets/afk-architecture.jpg)
+![AFK 系统架构图](assets/afk-architecture.svg)
+
+AFK 当前采用 pnpm workspace，提供两个产品入口：**CLI/TUI** 和 **AFK Control Desktop**。两个入口共享 Core、Application 和 Runtime 包。Runtime 组合工单/分支/变更 Provider、Agent Provider、Sandbox、工作流执行、QA 和本地证据存储。
+
+架构图对应当前实际实现：
+
+| 模块 | 职责 |
+| --- | --- |
+| `@afk/core` | 纯工作项与执行模型、事件、Reducer、策略和 Ports |
+| `@afk/application` | 共享用例、Inventory、执行查询和观察契约 |
+| `@afk/runtime` | 工作流编排、Provider 适配、Agent 执行、Sandbox、QA、会话和持久化 |
+| `@afk/workflow-graph` | 工作流图 IR、投影、布局、路由和校验 |
+| CLI / Desktop | 基于共享包的独立产品入口；Desktop 通过类型化 IPC 和独立 Runtime Worker 执行 |
+| Skills | Agent 侧的研发工作手册与知识流程；Wiki Skill 使用独立 Python CLI |
+
+AFK 消费已经拆分、具备验收标准和关系信息的工作项。需求规划与任务拆分属于上游流程，不属于执行引擎。工单平台是 backlog 状态的权威来源；本地 Inventory 和执行记录用于运行、审计与观察，不取代外部权威状态。
 
 ## 功能特性
 
-- **跨平台** — 统一的 GitLab 和 GitHub CLI（issues、MRs/PRs）
-- **Skills 套件** — 25 个 Claude Code skills，覆盖完整开发周期
-- **TUI 仪表盘** — 交互式 Issue 追踪仪表盘
-- **后台自动化** — 基于 tmux 的工作流调度器
-- **TDD 集成** — 内置测试驱动开发方法论
+- **跨平台工单与变更管理** — 通过稳定契约接入 GitHub 和 GitLab
+- **CLI + TUI** — 命令行操作、交互式仪表盘、Kanban 和运行观察
+- **桌面控制端** — Backlog、Work Items、执行历史、工作流视图和运行控制
+- **多 Agent Runtime** — Claude Code、Codex、Cursor、OpenCode、Pi 和 GitHub Copilot 适配器
+- **可组合执行环境** — Local、Docker、Podman Sandbox，结合 Git Worktree 和进程控制
+- **独立 QA 与审计** — 独立验证、执行 Journal、追加式事件流和证据
+- **Skills 套件** — 覆盖调研、PRD、实现、测试、QA 和工程治理的可复用工作流
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/easyhaloo/afk.git
 cd afk
-npm install && npm run build
-npm link
+pnpm install
+pnpm build
+pnpm --dir apps/cli link --global
 afk --version
 ```
 
@@ -32,11 +50,9 @@ afk --version
 
 ## 安装 Claude Code 插件（可选）
 
-AFK 提供完整的 Claude Code skill 套件，可作为插件集成。
+AFK 提供完整的 Skill 套件，可作为 Claude Code 插件集成。
 
 ### 方式一：在 Claude Code 会话中（推荐）
-
-直接在 Claude Code 中使用斜杠命令：
 
 ```bash
 /plugin install afk@afk
@@ -84,7 +100,7 @@ ln -s /path/to/afk/skills/* ~/.claude/skills/
 
 ### 验证安装
 
-在 Claude Code 中运行 `/afk-grill-me` 确认 skills 已加载。
+在 Claude Code 中运行 `/afk-grill-me` 确认 Skills 已加载。
 
 ## CLI 命令
 
@@ -99,25 +115,29 @@ afk backlog tag remove --id <id> --tag bug
 # 执行与自动化
 afk                                  # 交互式 TUI 面板
 afk kanban                           # 看板
-afk execute --work-item-id github:owner/repo#123 --execution-manifest <path>  # 受管工作项：实现 → QA → PR
+afk execute --work-item-id github:owner/repo#123 --execution-manifest <path>
 afk observe executions --work-item-id github:owner/repo#123 --json
-afk run --backlog-id <id>            # 底层仅实现入口
-afk run --backlog-id <id> --project <repo>
+afk run --backlog-id <id>            # 仅执行实现阶段
 afk qa --backlog-id <id>             # 独立 QA
 afk loop start --daemon --backlog-id <id> --work-item-id github:owner/repo#123 --execution-manifest <path>
 
-# 基础设施
+# 基础设施与诊断
 afk tmux create-session --name <name> --dir <path>
 afk isolate up
-
-# 调试
 afk debug reproduce <cmd>
-
-# 信号管理
 afk signal goal-complete --summary "<summary>"
 ```
 
-完整命令参考：`afk --help`
+完整命令参考：`afk --help`。
+
+## 执行模型
+
+- **`afk run`** 执行实现阶段。成功后推送实现分支并将工作项推进到 `verification`；它本身不完成托管式 QA 和变更请求闭环。
+- **`afk execute`** 执行托管工作项生命周期：Manifest 与可执行性校验、实现、独立 QA、创建或校验变更请求，并进入 `merge_ready` 人工门禁。
+- **`afk loop`** 持续轮询且仅绑定一个 Manifest 工作项，每次尝试委托给 `executeWorkItem`。它不是面向全局队列的多工作项调度器。
+- **最终合并由人控制。** AFK 准备并验证 PR/MR；只有在人工完成合并且审计对账通过后，工作项才进入 `done`。
+
+完整生命周期、状态、证据和验证边界请查看[全流程执行与 E2E 架构](docs/architecture/full-workflow-e2e-architecture.md)。
 
 ## Skills（Claude Code）
 
@@ -130,66 +150,47 @@ afk signal goal-complete --summary "<summary>"
 | `/afk-do` | 任务编排 | 清晰的功能或任务描述 |
 | `/afk-research` | 技术调研 | 编码前需要理解现有实现 |
 | `/afk-prototype` | 方案验证 | 承诺投入前验证技术方案 |
-| `/afk-implement` | TDD 实现 | 清晰实现目标 |
-| `/afk-testing` | 独立测试工程 | 测试设计、执行、失败诊断与有效性评估 |
-| `/afk-change-driven-testing` | 变更驱动测试 | 为本次修改涉及的业务流程渐进式补充回归测试 |
-| `/afk-qa` | 独立验证 | MR/PR 准备合并 |
-| `/afk-diagnose` | 诊断 | 具体、可复现的故障 |
+| `/afk-implement` | 实现工作流 | 清晰实现目标 |
+| `/afk-testing` | 测试专家 | 测试设计、执行、失败诊断与有效性评估 |
+| `/afk-change-driven-testing` | 变更驱动测试 | 为本次修改涉及的业务流程补充回归测试 |
+| `/afk-qa` | 独立验证 | 合并前验证工作成果 |
+| `/afk-diagnose` | 故障诊断 | 具体、可复现的故障 |
 | `/afk-branch-migrate` | 跨分支迁移 | 在分歧分支间 cherry-pick |
-| `/afk-hand-off` | 工作交接 | 任务转移给其他开发者 |
-| `/afk-scheduler` | 后台调度 | 多 Issue 依赖感知执行 |
-| `/afk-skill-craft` | Skill 创作 | 创建、诊断或重构 skills |
+| `/afk-hand-off` | 工作交接 | 转移任务或会话上下文 |
+| `/afk-scheduler` | 调度辅助 | 协调多个 Issue 及其依赖 |
+| `/afk-skill-craft` | Skill 创作 | 创建、诊断或重构 Skills |
 | `/api-workflow` | API 测试 | 多步骤 API 链配合浏览器测试 |
 | `/md-to-pdf` | Markdown 转 PDF | 导出带 Mermaid 图表的文档 |
-| `/reasoning-guard` | 推理守卫 | 编码 Agent 多轮推理降级 |
-| `/reasoning-watchdog` | 自动推理监控 | 基于 Hooks 的推理降级拦截 |
-| `/afk-ai-prd` | AI 友好 PRD | AI 可解析、拆解并验收的 PRD |
-| `/afk-llm-dev-guide` | LLM 应用设计指南 | LLM 应用架构与上下文工程 |
-| `/jev-agent-guard` | Agent 检查点 | 为 Claude Code、Codex、OpenCode 安装 Jev 检查点 |
-| `/software-complexity-governance` | 复杂度治理 | 度量圈复杂度、耦合度与技术债 |
-| `/wiki` | 本地知识管理 | 检索、读取、沉淀和检查项目知识 |
+| `/reasoning-guard` | 推理守卫 | 检测多轮推理降级 |
+| `/reasoning-watchdog` | 推理监控 | 基于 Hooks 的推理降级拦截 |
+| `/afk-ai-prd` | AI 友好 PRD | Agent 可解析、拆解并验收的 PRD |
+| `/afk-llm-dev-guide` | LLM 应用指南 | LLM 架构与上下文工程 |
+| `/jev-agent-guard` | Agent 检查点 | 为不同编码 Agent 安装检查点 |
+| `/software-complexity-governance` | 复杂度治理 | 度量复杂度、耦合度与技术债 |
+| `/wiki` | 知识管理 | 检索、读取、沉淀和检查项目知识 |
 
 详细文档请查看 [Skills 指南](docs/guides/skills.zh.md)。
-
-## 架构设计
-
-AFK 使用 **TrackerProvider** 接口抽象 GitLab 和 GitHub 的差异：
-
-```typescript
-interface TrackerProvider {
-  getIssue(id: number): Promise<TrackedIssue>;
-  createMR(options: CreateMROptions): Promise<number>;
-  mergeMR(id: number, options?: MergeMROptions): Promise<void>;
-  // ... 更多操作
-}
-```
-
-平台自动检测，无需切换命令。查看[架构设计](docs/architecture/overview.zh.md)和[执行环境设计](docs/architecture/execution.zh.md)。
-
-## 工作流程
-
-三种核心工作流模式：
-
-1. **Issue → 实现 → MR 流程** — 从 Issue 发现到合并请求
-2. **调度器工作流** — 后台依赖感知执行
-3. **Skills 工作流** — TDD 方法论集成
-
-查看[工作流文档](docs/guides/workflows.zh.md)。
 
 ## 开发
 
 ```bash
-npm install
-npm run build    # 构建 TypeScript
-npm test         # 运行测试
-npm link         # 全局安装
+pnpm install
+pnpm build
+pnpm test
+pnpm --dir apps/desktop typecheck
+pnpm --dir apps/desktop build
+pnpm --dir apps/desktop test
+pnpm --dir apps/cli link --global
 ```
 
 ## 文档
 
-- **[快速开始](docs/getting-started.zh.md)** — 5 分钟 AFK 上手
-- **[架构设计](docs/architecture/overview.zh.md)** — 跨平台抽象 + CLI 命令映射
-- **[工作流程](docs/guides/workflows.zh.md)** — Issue → MR 流程、调度器、Skills 集成
+- **[快速开始](docs/getting-started.zh.md)** — AFK 上手
+- **[系统架构](docs/architecture/system-architecture-design.md)** — 系统边界、分层、控制平面、执行基座和信任模型
+- **[Workspace 架构](docs/architecture/overview.zh.md)** — 包边界、依赖方向、路径和 Provider 契约
+- **[执行环境](docs/architecture/execution.zh.md)** — Agent Provider、Sandbox Provider、会话和工作流模板
+- **[全流程与 E2E](docs/architecture/full-workflow-e2e-architecture.md)** — 生命周期、QA、状态流转和证据
+- **[工作流](docs/guides/workflows.zh.md)** — 工作流和 Skill 使用
 - **[Skills 指南](docs/guides/skills.zh.md)** — Skills 设计与使用
 
 ## License

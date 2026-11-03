@@ -29,10 +29,10 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | Skill | Trigger | Description |
 |-------|---------|-------------|
 | [afk-qa](./afk-qa/) | `/afk-qa` | Independent Acceptance Criteria verification for managed work items |
-| [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | Publish results to PRD document |
+| [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | Clarify, approve, validate, and publish one AI-ready PRD |
 | [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | Produce a provider-neutral backlog manifest from findings |
 | [md-to-pdf](./md-to-pdf/) | `/md-to-pdf` | Convert Markdown to PDF |
-| [afk-ai-prd](./afk-ai-prd/) | `/afk-ai-prd` | AI-friendly PRD — parseable, decomposable, verifiable |
+
 | [afk-llm-dev-guide](./afk-llm-dev-guide/) | `/afk-llm-dev-guide` | LLM app design guide — architecture and context engineering |
 | [afk-skill-craft](./afk-skill-craft/) | `/afk-skill-craft` | Skill authoring — create, diagnose, or refactor skills |
 

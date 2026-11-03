@@ -59,7 +59,7 @@ export function getBacklogPrimaryAction(item: BacklogItem, summary?: BacklogRunt
   const localAlive = localRunning && summary?.activeRun?.pid !== undefined;
   if ((item.state === "in_progress" || item.state === "verification") && localAlive) return "stop";
   if (localRunning || summary?.runtime?.status === "running") return "view-run";
-  if ((item.state === "ready" || item.state === "rework") && item.executionMode === "afk") return "start";
+  if ((item.state === "ready" || item.state === "rework") && item.executionMode === "afk" && item.executionEligible !== false) return "start";
   if (item.state === "blocked" && item.executionMode === "hitl") return "retry";
   if (!item.parentId && item.state === "merge_ready" && item.executionMode === "hitl") return "confirm-merge";
   if (item.state === "done") return "view-result";

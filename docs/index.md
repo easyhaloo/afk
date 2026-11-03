@@ -18,10 +18,10 @@
 
 | 文档 | 职责与权威范围 |
 |---|---|
-| [architecture/overview.md](architecture/overview.md) | 当前 workspace 包边界、系统数据路径、CLI 命令面、Provider、backlog 与执行生命周期；涉及当前事实时优先参考此文及源码 |
-| [architecture/full-workflow-e2e-architecture.md](architecture/full-workflow-e2e-architecture.md) | 单个工作项从执行到独立 QA、变更请求、证据和人工合并的端到端细节 |
-| [architecture/execution.md](architecture/execution.md) | 当前执行模型摘要；英文版本 |
-| [architecture/execution.zh.md](architecture/execution.zh.md) | 当前执行模型摘要；中文版 |
+| [architecture/overview.md](architecture/overview.md) | 系统边界、workspace 包职责、数据权威、工作项关系、生命周期与关键架构约束；不承担完整 CLI 参考或逐步执行手册 |
+| [architecture/full-workflow-e2e-architecture.md](architecture/full-workflow-e2e-architecture.md) | 当前实现中的 run / execute / loop、模板、QA、状态转换、证据和 E2E 验证细节 |
+| [architecture/execution.md](architecture/execution.md) | 执行入口、运行目录、托管生命周期和恢复原则摘要；英文版本 |
+| [architecture/execution.zh.md](architecture/execution.zh.md) | 执行入口、运行目录、托管生命周期和恢复原则摘要；中文版 |
 | [architecture/observability.md](architecture/observability.md) | 运行事件、审计链、证据与诊断 |
 | [architecture/design-system.md](architecture/design-system.md) | Desktop UI 设计标准 |
 | [architecture/glossary.md](architecture/glossary.md) | 领域术语 |

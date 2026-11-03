@@ -46,7 +46,6 @@ AFK skills are organized below by user goal. These are **documentation categorie
 |---|---|---|
 | [afk-skill-craft](./afk-skill-craft/) | `/afk-skill-craft` | Create, diagnose, and refactor skills |
 | [reasoning-guard](./reasoning-guard/) | `/reasoning-guard` | Detect reasoning degradation in-session |
-| [reasoning-watchdog](./reasoning-watchdog/) | `/reasoning-watchdog` | Monitor reasoning quality persistently through hooks |
 | [jev-agent-guard](./jev-agent-guard/) | `/jev-agent-guard` | Install checkpoints for coding agents |
 
 ### Knowledge & Engineering Governance

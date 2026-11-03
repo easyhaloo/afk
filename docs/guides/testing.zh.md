@@ -170,7 +170,7 @@ describeE2E('Notification E2E', () => {
   afterEach(() => { if (proc) proc.kill(); });
 
   it('renders with absolute positioning', async () => {
-    proc = spawn(process.execPath, [distPath, 'board'], {
+    proc = spawn(process.execPath, [distPath], {
       cols: 80, rows: 24,
       env: { ...process.env, NO_TMUX: '1' },
     });

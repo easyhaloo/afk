@@ -143,9 +143,19 @@ describe('Agent providers — fixture coverage', () => {
         'codex',
         '--dangerously-bypass-approvals-and-sandbox',
         '--no-alt-screen',
+        '--config',
+        'check_for_update_on_startup=false',
         '-C',
         '/tmp/worktree',
       ]);
+    });
+
+    it('disables the startup update check so no modal can swallow the goal', () => {
+      const interactive = p.buildCommand({ ...opts(), executionMode: 'interactive' });
+      expect(interactive.argv.some(arg => arg.includes('check_for_update_on_startup=false'))).toBe(true);
+
+      const batch = p.buildCommand({ ...opts(), executionMode: 'batch' });
+      expect(batch.argv.some(arg => arg.includes('check_for_update_on_startup'))).toBe(false);
     });
 
     it('applies the resolved Codex profile and explicit model provider', () => {

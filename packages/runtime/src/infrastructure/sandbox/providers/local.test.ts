@@ -1,5 +1,5 @@
 import { workspaceDataDirectory } from '../../workspace.js';
-import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -110,6 +110,87 @@ describe('LocalSandboxProvider', () => {
     expect(tmux.sendPrompt).not.toHaveBeenCalled();
   });
 
+  it('persists the Claude Code workspace trust before the agent process starts', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'afk-claude-config-'));
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      let trustedAtLaunch = false;
+      const tmux = {
+        createSession: vi.fn(async () => {
+          const config = JSON.parse(await readFile(join(configDir, '.claude.json'), 'utf8')) as {
+            projects?: { [key: string]: { hasTrustDialogAccepted?: boolean } };
+          };
+          trustedAtLaunch = config.projects?.[worktreePath]?.hasTrustDialogAccepted === true;
+          return {};
+        }),
+        sendPrompt: vi.fn(async () => {}),
+        killSession: vi.fn(async () => {}),
+        closeSession: vi.fn(),
+      };
+      const provider = new LocalSandboxProvider();
+      const sandbox = await provider.create({
+        worktreePath,
+        session: 'claude-trust-test',
+        executionMode: 'interactive',
+        metadata,
+        tmux: tmux as never,
+      });
+
+      await sandbox.startAgent({
+        command: { argv: ['claude', '--dangerously-skip-permissions'], cwd: worktreePath },
+        prompt: 'goal',
+        generation: 1,
+        signalType: 'goal_complete',
+        executionMode: 'interactive',
+        metadata,
+      });
+
+      expect(trustedAtLaunch).toBe(true);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
+  it('does not touch the Claude Code config for other agents', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'afk-claude-config-'));
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      const tmux = {
+        createSession: vi.fn(async () => ({})),
+        sendPrompt: vi.fn(async () => {}),
+        killSession: vi.fn(async () => {}),
+        closeSession: vi.fn(),
+      };
+      const provider = new LocalSandboxProvider();
+      const sandbox = await provider.create({
+        worktreePath,
+        session: 'codex-trust-test',
+        executionMode: 'interactive',
+        metadata: { provider: 'codex', transport: 'process' },
+        tmux: tmux as never,
+      });
+
+      await sandbox.startAgent({
+        command: { argv: ['codex', 'exec'], cwd: worktreePath },
+        prompt: 'goal',
+        generation: 1,
+        signalType: 'goal_complete',
+        executionMode: 'interactive',
+        metadata: { provider: 'codex', transport: 'process' },
+      });
+
+      await expect(readFile(join(configDir, '.claude.json'), 'utf8')).rejects.toThrow();
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
   it('clears a prior completion signal before starting the next interactive phase', async () => {
     const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
     await writeFile(
@@ -207,6 +288,140 @@ describe('LocalSandboxProvider', () => {
     await expect(execution.waitForResult()).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: signal,
+    });
+  });
+
+  describe('agent watchdogs', () => {
+    const localExecution = (worktreePath: string, tmux: unknown) => new LocalAgentExecution({
+      worktreePath,
+      sessionName: 'watchdog-session',
+      command: { argv: ['agent'], cwd: worktreePath },
+      generation: 1,
+      prompt: 'do the work',
+      signalType: 'goal_complete',
+      metadata: { provider: 'claude-code', transport: 'process' },
+      tmux: tmux as never,
+      paneIntervalMs: 1,
+      pollIntervalMs: 1,
+    });
+
+    it('fails as soon as the agent session is gone instead of waiting for the hard timeout', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-gone-'));
+      const tmux = {
+        hasSession: vi.fn(async () => false),
+        capturePane: vi.fn(async () => ''),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const result = await localExecution(worktreePath, tmux)
+        .waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toMatchObject({ code: 'AGENT_GONE' });
+    });
+
+    it('reports completion when the agent finished and then quit', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-quit-'));
+      await writeFile(
+        join(worktreePath, '.afk-signal.json'),
+        JSON.stringify({
+          type: 'goal_complete',
+          timestamp: new Date().toISOString(),
+          kind: 'task',
+          summary: 'the agent finished before it exited',
+        }),
+      );
+      const tmux = {
+        hasSession: vi.fn(async () => false),
+        capturePane: vi.fn(async () => ''),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const result = await localExecution(worktreePath, tmux)
+        .waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('completed');
+    });
+
+    it('gives up on an agent that has stopped talking', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-idle-'));
+      const tmux = {
+        hasSession: vi.fn(async () => true),
+        capturePane: vi.fn(async () => 'the same pane, forever'),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const result = await localExecution(worktreePath, tmux)
+        .waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 20 });
+
+      expect(result.status).toBe('timed_out');
+      expect(result.error).toMatchObject({ code: 'AGENT_IDLE' });
+    });
+
+    it('keeps waiting while the agent keeps talking', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-talking-'));
+      let pane = 0;
+      const tmux = {
+        hasSession: vi.fn(async () => true),
+        capturePane: vi.fn(async () => `pane ${pane++}`),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+
+      const execution = localExecution(worktreePath, tmux);
+      setTimeout(() => {
+        void writeFile(
+          join(worktreePath, '.afk-signal.json'),
+          JSON.stringify({
+            type: 'goal_complete',
+            timestamp: new Date().toISOString(),
+            kind: 'task',
+            summary: 'the agent kept going and finished',
+          }),
+        );
+      }, 60);
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 40 });
+
+      expect(result.status).toBe('completed');
+    });
+
+    it('ends the run when the agent reports that its turn died', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-turn-failed-'));
+      const tmux = {
+        hasSession: vi.fn(async () => true),
+        capturePane: vi.fn(async () => 'the terminal is still open'),
+        killSession: vi.fn(async () => {}),
+        sendKeys: vi.fn(async () => {}),
+      };
+      const turnWatcher = {
+        check: vi.fn(async () => ({ message: 'stream disconnected before completion: error sending request' })),
+      };
+
+      const execution = new LocalAgentExecution({
+        worktreePath,
+        sessionName: 'turn-failed-session',
+        command: { argv: ['codex'], cwd: worktreePath },
+        generation: 1,
+        prompt: 'do the work',
+        signalType: 'goal_complete',
+        metadata: { provider: 'codex', transport: 'process' },
+        tmux: tmux as never,
+        paneIntervalMs: 1,
+        pollIntervalMs: 1,
+        turnWatcher: turnWatcher as never,
+      });
+
+      const result = await execution.waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toMatchObject({
+        code: 'AGENT_TURN_FAILED',
+        message: 'stream disconnected before completion: error sending request',
+      });
     });
   });
 });

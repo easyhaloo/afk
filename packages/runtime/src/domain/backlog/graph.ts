@@ -14,6 +14,7 @@
 
 import type { BacklogItem } from './index.js';
 import { parseWorkItemId } from '../work-item/identity.js';
+import type { WorkItemId } from '../work-item/identity.js';
 
 /** Read-only view over the backlog relationships of a set of items. */
 export interface BacklogGraph {
@@ -77,4 +78,33 @@ export function buildBacklogGraph(items: readonly BacklogItem[]): BacklogGraph {
     childrenOf: id => children.get(graphKey(id)) ?? [],
     roots: () => items.filter(item => !item.parentId),
   };
+}
+
+/**
+ * Find the dependency that would close a cycle.
+ *
+ * The new edge runs from the item to the work item it waits for. A cycle
+ * exists when that dependency already reaches the item, so the walk follows
+ * the dependency chain of every added dependency and reports the first item
+ * that reaches the item being edited.
+ *
+ * A dependency that cannot be read is treated as a leaf: an unreadable item
+ * hides its own chain, and the walk must not invent an edge it did not see.
+ */
+export async function findDependencyCycle(
+  target: WorkItemId,
+  dependencies: readonly WorkItemId[],
+  read: (id: WorkItemId) => Promise<readonly WorkItemId[]>,
+): Promise<WorkItemId | undefined> {
+  const seen = new Set<string>();
+  const pending = [...dependencies];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current) break;
+    if (current === target) return current;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const next of await read(current)) pending.push(next);
+  }
+  return undefined;
 }

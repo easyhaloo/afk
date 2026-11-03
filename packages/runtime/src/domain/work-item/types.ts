@@ -1,4 +1,4 @@
-import type { BacklogExecutionMode, BacklogState } from '../backlog/index.js';
+import type { BacklogExecutionMode, BacklogState, Runnability } from '../backlog/index.js';
 import type { WorkItemId, WorkItemPlatform, WorkItemScope } from './identity.js';
 
 export type { ParsedWorkItemId, WorkItemId, WorkItemIdentityParts, WorkItemPlatform, WorkItemScope } from './identity.js';
@@ -33,4 +33,12 @@ export interface GlobalWorkItem {
   providerRef: string;
   webUrl?: string;
   updatedAt?: string;
+  /**
+   * Whether the item may start, and what holds it back.
+   *
+   * Filled in by the surfaces that can see the whole inventory: the answer
+   * depends on the dependencies and the children of the item, which a
+   * single item's own record does not carry.
+   */
+  runnability?: Runnability;
 }

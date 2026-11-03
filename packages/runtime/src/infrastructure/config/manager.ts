@@ -71,8 +71,14 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   agentDefault: 'claude-code',
   tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
-  qaTimeout: 30 * 60 * 1000,
-  workflowHardTimeout: 7200 * 1000,
+  qaTimeout: 60 * 60 * 1000,
+  // The hard timeout is a watchdog that really kills the agent session, and
+  // it covers the whole workflow — implementation *and* verification. It
+  // therefore has to exceed completionTimeout + qaTimeout, or it cuts the
+  // verification round short of the budget the verification round was
+  // given. The idle timeout is what keeps a longer budget honest: a dead
+  // agent is detected instead of waited out.
+  workflowHardTimeout: 14400 * 1000,
   completionPoll: 5,
   idleTimeout: 1800 * 1000,
   acCheckTimeout: 180 * 1000,
@@ -273,6 +279,18 @@ function configString(value: unknown): string | undefined {
 
 function configNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function configBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/** A boolean environment variable: only an explicit true or false counts. */
+function envBoolean(name: string, env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const value = env[name]?.trim().toLowerCase();
+  if (value === 'true' || value === '1' || value === 'yes') return true;
+  if (value === 'false' || value === '0' || value === 'no') return false;
+  return undefined;
 }
 
 function recordValue(value: unknown): ConfigObject {

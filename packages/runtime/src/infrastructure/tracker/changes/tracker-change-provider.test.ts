@@ -17,6 +17,32 @@ describe('TrackerChangeProvider', () => {
     expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/code', providerHost: 'gitlab.example.test' })).toBe('QA: PASS\nCloses team/issues#158');
   });
 
+  it('reads the issue number from a canonical backlog id', () => {
+    const backlog = {
+      id: 'gitlab:gitlab.example.test/team/issues#158',
+      issueNumber: 158,
+      title: 'Item',
+      workItemId: 'gitlab:gitlab.example.test/team/issues#158',
+    } as BacklogItem;
+    expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/code', providerHost: 'gitlab.example.test' }))
+      .toBe('QA: PASS\nCloses team/issues#158');
+  });
+
+  it('falls back to the work item identity when the item carries no issue number', () => {
+    const backlog = {
+      id: 'gitlab:gitlab.example.test/team/issues#158',
+      title: 'Item',
+      workItemId: 'gitlab:gitlab.example.test/team/issues#158',
+    } as BacklogItem;
+    expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/code', providerHost: 'gitlab.example.test' }))
+      .toBe('QA: PASS\nCloses team/issues#158');
+  });
+
+  it('rejects an item whose issue number cannot be resolved at all', () => {
+    const backlog = { id: 'not-a-number', title: 'Item' } as BacklogItem;
+    expect(() => renderChangeDescription(backlog)).toThrow(/issue number/i);
+  });
+
   it('publishes the qualified two-line reference without the PRD', async () => {
     const tracker = {
       platform: 'github', projectId: 'owner/code',
@@ -103,7 +129,7 @@ describe('TrackerChangeProvider', () => {
       isMRLinkedToIssue: vi.fn().mockResolvedValue(true),
     } as unknown as TrackerProvider;
     const change = { id: '9', state: 'open' as const, sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' };
-    const provider = new TrackerChangeProvider(tracker);
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
     await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).resolves.toBeUndefined();
     expect(tracker.isMRLinkedToIssue).toHaveBeenCalledWith(9, 'github:owner/issues#158');
     vi.mocked(tracker.isMRLinkedToIssue).mockResolvedValue(false);
@@ -111,6 +137,68 @@ describe('TrackerChangeProvider', () => {
     await expect(provider.verifyIssueAssociation({ ...change, url: 'https://github.com/owner/code/pull/8' }, 'github:owner/issues#158')).rejects.toThrow(/mismatch/i);
     vi.mocked(tracker.isMRLinkedToIssue).mockRejectedValue(new Error('API unavailable'));
     await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).rejects.toThrow('API unavailable');
+  });
+
+  it('waits for the platform to link the change request to its issue', async () => {
+    // The platform resolves the issue references in the description in a
+    // background job, so the association is not there the moment the change
+    // request is created.
+    const isMRLinkedToIssue = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const tracker = {
+      platform: 'github', projectId: 'owner/code',
+      getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
+      isMRLinkedToIssue,
+    } as unknown as TrackerProvider;
+    const change = { id: '9', state: 'open' as const, sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 5_000, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).resolves.toBeUndefined();
+    expect(isMRLinkedToIssue).toHaveBeenCalledTimes(3);
+  });
+
+  it('accepts a change request that names the issue it closes', async () => {
+    // A merge request that targets a branch other than the default one never
+    // gets the platform link, even though its description names the issue.
+    const tracker = {
+      platform: 'gitlab', projectId: 'fang/services/k-base', providerHost: 'w.src.corp.qihoo.net',
+      getMR: vi.fn().mockResolvedValue({
+        id: 47, state: 'opened', sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+        url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/47',
+        description: 'QA: PASS\nCloses #3',
+      }),
+      isMRLinkedToIssue: vi.fn().mockResolvedValue(false),
+    } as unknown as TrackerProvider;
+    const change = {
+      id: '47', state: 'open' as const, sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+      url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/47',
+    };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'gitlab:w.src.corp.qihoo.net/fang/services/k-base#3'))
+      .resolves.toBeUndefined();
+  });
+
+  it('still refuses a change request that names no issue', async () => {
+    const tracker = {
+      platform: 'gitlab', projectId: 'fang/services/k-base', providerHost: 'w.src.corp.qihoo.net',
+      getMR: vi.fn().mockResolvedValue({
+        id: 48, state: 'opened', sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+        url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/48',
+        description: 'QA: PASS\n## Verification Evidence',
+      }),
+      isMRLinkedToIssue: vi.fn().mockResolvedValue(false),
+    } as unknown as TrackerProvider;
+    const change = {
+      id: '48', state: 'open' as const, sourceBranch: 'afk/backlog-3-qa', targetBranch: '2025-11-8-show',
+      url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/48',
+    };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'gitlab:w.src.corp.qihoo.net/fang/services/k-base#3'))
+      .rejects.toThrow(/not linked/i);
   });
 
   it('uses only the QA result and issue closing reference, without repeating the PRD', () => {

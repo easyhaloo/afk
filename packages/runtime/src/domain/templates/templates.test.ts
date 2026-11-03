@@ -187,6 +187,7 @@ describe('Builtin templates', () => {
   it('all builtin templates are registered', () => {
     expect(listTemplates().sort()).toEqual([
       'issue-implementation',
+      'merge-conflict-resolution',
       'parallel-planner',
       'planner-with-review',
       'pre-merge-qa-verification',
@@ -338,7 +339,7 @@ steps:
   });
 
   it('builtinTemplates includes QA verification', () => {
-    expect(builtinTemplates().length).toBe(6);
+    expect(builtinTemplates().length).toBe(7);
     expect(builtinTemplates().some(template => template.name === 'pre-merge-qa-verification')).toBe(true);
   });
 });

@@ -95,7 +95,7 @@ async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> 
     targetBranch: configString(values, "targetBranch", process.env.AFK_TARGET_BRANCH || "main"),
     baseBranch: configString(values, "trackerTargetBranch", process.env.AFK_TRACKER_TARGET_BRANCH || process.env.AFK_TARGET_BRANCH || "main"),
     maxRetries: configNumber(values, "maxRetries", Number(process.env.AFK_MAX_RETRIES) || 2),
-    hardTimeoutMs: configNumber(values, "workflowHardTimeout", Number(process.env.AFK_WORKFLOW_HARD_TIMEOUT) || 7_200_000),
+    hardTimeoutMs: configNumber(values, "workflowHardTimeout", Number(process.env.AFK_WORKFLOW_HARD_TIMEOUT) || 14_400_000),
     completionTimeoutMs: configNumber(values, "completionTimeout", Number(process.env.AFK_COMPLETION_TIMEOUT) || 7_200_000),
     contextThreshold: configNumber(values, "contextThreshold", Number(process.env.AFK_CONTEXT_THRESHOLD) || 100_000),
     goalBudget: configNumber(values, "goalBudget", 10_000_000),

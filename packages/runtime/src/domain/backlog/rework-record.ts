@@ -1,4 +1,10 @@
-export type ReworkSource = 'qa' | 'operator';
+/**
+ * Who asked for the rework.
+ *
+ * 'conflict' is not a QA failure: the change request could not be merged
+ * because the target branch changed the same lines.
+ */
+export type ReworkSource = 'qa' | 'operator' | 'conflict';
 export type ReworkStatus = 'open' | 'resolved' | 'superseded';
 
 export interface ReworkCriterion {
@@ -70,5 +76,5 @@ export function latestOpenRework(comments: Array<{ id: string; body: string }>):
 }
 
 function nonEmpty(value: unknown): value is string { return typeof value === 'string' && value.trim().length > 0; }
-function isSource(value: unknown): value is ReworkSource { return value === 'qa' || value === 'operator'; }
+function isSource(value: unknown): value is ReworkSource { return value === 'qa' || value === 'operator' || value === 'conflict'; }
 function isStatus(value: unknown): value is ReworkStatus { return value === 'open' || value === 'resolved' || value === 'superseded'; }

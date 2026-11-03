@@ -44,6 +44,34 @@ describe('TrackerBacklogProvider', () => {
     expect(await plan(new ManagementBacklogProvider(new GitHubBacklogProvider(t)))).toEqual(expected);
   });
 
+  it('records the execution base in the body of the item', async () => {
+    const t = tracker({
+      id: 7, platform: 'github', projectId: 'org/repo', labels: ['stage::ready-for-issues', 'mode::afk'],
+      state: 'opened', description: '## Context\n\nThe change is cut from a release ref.',
+    });
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.applyExecutionBase('7', '2025-11-8-show');
+
+    expect(t.updateIssue).toHaveBeenCalledWith(7, expect.objectContaining({
+      description: expect.stringContaining('- Base Ref: 2025-11-8-show'),
+    }));
+    const item = await provider.get('7');
+    expect(item.executionBase).toBe('2025-11-8-show');
+  });
+
+  it('does not rewrite a body that already declares the base', async () => {
+    const t = tracker({
+      id: 8, platform: 'github', projectId: 'org/repo', labels: ['stage::ready-for-issues', 'mode::afk'],
+      state: 'opened', description: '## Base Version\n\n- Base Ref: main\n',
+    });
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.applyExecutionBase('8', 'main');
+
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
   it('recognizes PRD anchors without allowing claims or adoption', async () => {
     const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['kind::prd', 'mode::hitl'], state: 'opened' });
     const provider = new TrackerBacklogProvider(t);
@@ -489,6 +517,80 @@ describe('TrackerBacklogProvider', () => {
     expect(t.updateLabels).toHaveBeenCalledWith(7, { add: [], remove: ['team::api'] });
     expect(t.updateIssue).not.toHaveBeenCalled();
     await expect(provider.list({ tag: 'urgent' })).resolves.toHaveLength(1);
+  });
+
+  it('edits a relationship edge as the smallest label delta', async () => {
+    const issue = { id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::github:org/repo#1'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.applyRelationUpdate('42', { parent: '2' });
+
+    expect(t.updateLabels).toHaveBeenCalledWith(42, {
+      add: ['parent::github:org/repo#2'],
+      remove: ['parent::github:org/repo#1'],
+    });
+    expect(t.updateIssue).not.toHaveBeenCalled();
+    await expect(provider.get('42')).resolves.toMatchObject({ parentId: 'github:org/repo#2' });
+  });
+
+  it('withdraws a dependency edge without touching the other labels', async () => {
+    const issue = { id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'depends-on::github:org/repo#9', 'team::api'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.applyRelationUpdate('42', { removeDependsOn: ['9'] });
+
+    expect(t.updateLabels).toHaveBeenCalledWith(42, {
+      add: [],
+      remove: ['depends-on::github:org/repo#9'],
+    });
+    expect(issue.labels).toEqual(['stage::ready-for-issues', 'mode::afk', 'team::api']);
+  });
+
+  it('refuses a dependency edge that would close a cycle', async () => {
+    const issues: Record<number, any> = {
+      42: { id: 42, title: 'A', description: '', labels: [], state: 'opened', url: '', projectId: '' },
+      7: { id: 7, title: 'B', description: '', labels: ['depends-on::github:org/repo#42'], state: 'opened', url: '', projectId: '' },
+    };
+    const t = {
+      platform: 'github', projectId: 'org/repo',
+      getIssue: vi.fn(async (id: number) => ({ ...issues[id] })),
+      listIssues: vi.fn(async () => []),
+      updateLabels: vi.fn(async () => {}),
+      listMRs: vi.fn(async () => []),
+      getMR: vi.fn(),
+    } as unknown as TrackerProvider;
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.applyRelationUpdate('42', { addDependsOn: ['7'] })).rejects.toThrow(/dependency cycle/);
+    expect(t.updateLabels).not.toHaveBeenCalled();
+  });
+
+  it('gives an item the anchor role without disturbing its other labels', async () => {
+    const issue = { id: 24, title: 'PRD', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'billing'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.applyRole('24', 'prd');
+
+    expect(t.updateLabels).toHaveBeenCalledWith(24, {
+      add: ['kind::prd', 'mode::hitl'],
+      remove: ['stage::ready-for-issues', 'mode::afk'],
+    });
+    expect([...issue.labels].sort()).toEqual(['billing', 'kind::prd', 'mode::hitl']);
+    await expect(provider.get('24')).resolves.toMatchObject({ kind: 'prd', state: undefined, executionMode: 'hitl' });
+  });
+
+  it('keeps the role an item already carries', async () => {
+    const issue = { id: 24, title: 'PRD', description: '', labels: ['kind::prd', 'mode::hitl'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.applyRole('24', 'prd');
+
+    expect(t.updateLabels).not.toHaveBeenCalled();
+    await expect(provider.get('24')).resolves.toMatchObject({ kind: 'prd', state: undefined, executionMode: 'hitl' });
   });
 
   it('initializes provider metadata idempotently and reports capabilities', async () => {

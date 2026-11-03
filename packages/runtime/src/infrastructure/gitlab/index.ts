@@ -4,6 +4,7 @@ import type {
   TrackerProvider,
   TrackedIssue,
   TrackedMR,
+  ChangeMergeState,
   ListOptions,
   CreateIssueOptions,
   UpdateIssueOptions,
@@ -219,6 +220,10 @@ export class GitLabClient implements TrackerProvider {
     return issues.some(candidate => Number(candidate.project_id) === Number(project.id) && Number(candidate.iid) === issue.issueNumber);
   }
 
+  async updateMR(id: number, updates: { description?: string }): Promise<void> {
+    await this.client.MergeRequests.edit(this.projectId, id, { description: updates.description });
+  }
+
   async getMR(id: number): Promise<TrackedMR> {
     const mr = await this.client.MergeRequests.show(this.projectId, id) as any;
     const mergeStatus = mr.detailed_merge_status ?? mr.merge_status;
@@ -229,11 +234,13 @@ export class GitLabClient implements TrackerProvider {
       state: mr.state === 'merged' ? 'merged' : mr.state === 'opened' ? 'opened' : 'closed',
       sourceBranch: mr.source_branch,
       targetBranch: mr.target_branch,
+      ...(mr.description ? { description: mr.description } : {}),
       mergeable: mergeStatus === 'mergeable' || mergeStatus === 'can_be_merged'
         ? true
         : typeof mergeStatus === 'string' && !['checking', 'unchecked', 'preparing', 'approvals_syncing'].includes(mergeStatus)
           ? false
           : undefined,
+      mergeState: mergeStateOf(mergeStatus),
       url: mr.web_url,
       projectId: String(this.projectId),
       pipeline: mr.head_pipeline ? { status: mr.head_pipeline.status } : undefined,
@@ -492,4 +499,19 @@ export class GitLabClient implements TrackerProvider {
       committed_date: c.committed_date || '',
     }));
   }
+}
+
+/**
+ * Translate a GitLab merge status into the precise verdict AFK acts on.
+ *
+ * GitLab reports many reasons a change request cannot land — a failing
+ * check, a missing approval, a branch that is merely behind. Only the
+ * statuses that name a conflict mean the two branches changed the same
+ * lines, so only those become 'conflict'; everything else stays 'unknown'.
+ */
+function mergeStateOf(status: unknown): ChangeMergeState {
+  if (typeof status !== 'string') return 'unknown';
+  if (status === 'conflict' || status === 'cannot_be_merged') return 'conflict';
+  if (status === 'mergeable' || status === 'can_be_merged') return 'mergeable';
+  return 'unknown';
 }

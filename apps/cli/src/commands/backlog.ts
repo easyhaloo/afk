@@ -28,6 +28,8 @@ import {
   type WorkItemChildrenResult,
 } from '@afk/runtime/application/work-item/children';
 import { toGlobalWorkItems } from '@afk/runtime/application/work-item/inventory-items';
+import { explainRunnabilityInInventory } from '@afk/runtime/application/work-item/runnability';
+import { describeRunnability } from '@afk/runtime/domain/backlog/runnability';
 import {
   applyBacklogManifest,
   parseBacklogManifest,
@@ -39,12 +41,17 @@ import type { InventoryItem, InventoryProject, InventorySnapshot } from '@afk/ap
 import {
   addBacklogTag,
   adoptBacklog,
+  applyBacklogRelationUpdate,
+  applyBacklogRole,
+  applyBacklogExecutionBase,
+  applyBacklogMode,
   confirmBacklogMerge,
   createBacklog,
   initializeBacklog,
   interruptBacklog,
   listBacklogs,
   reconcileMergedBacklog,
+  resolveExpectedTargetBranch,
   removeBacklogTag,
   retryBacklog,
   showBacklog,
@@ -52,8 +59,9 @@ import {
   type BacklogManagementProvider,
   type BacklogMergeReconciliation,
 } from '@afk/runtime/domain/backlog/commands';
-import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
+import { applyExecutionBaseBranch } from '@afk/runtime/domain/backlog/index';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../output.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
@@ -143,6 +151,15 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
   if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
   if (item.tags.length) detail(`tags: ${item.tags.join(', ')}`);
   detail(`branch: ${item.branchName}`);
+  if (item.changeRequest) {
+    const change = item.changeRequest;
+    // A conflict is the one merge verdict a person has to act on, so it is
+    // spelled out rather than left in the state column.
+    const verdict = change.mergeState === 'conflict'
+      ? ' — CONFLICTS with the target branch, it cannot be merged as it stands'
+      : change.mergeState === 'mergeable' ? ' — can be merged' : '';
+    detail(`change: ${change.id} (${change.state}) ${change.sourceBranch} → ${change.targetBranch}${verdict}`);
+  }
 }
 
 export type JsonMode = { json?: boolean };
@@ -496,11 +513,21 @@ export async function runBacklogChildren(
       collect: dependencies.collect ?? collectWorkItems,
     });
     const result = await listWorkItemChildren(inventory, { parentId: identity });
+    // The state says where an item stands; the runnability says why it is not
+    // moving. A board of `ready` items cannot tell a queue from a deadlock
+    // without that second answer.
+    const runnability = explainRunnabilityInInventory(result.items);
+    const withRunnability = (item: GlobalWorkItem): GlobalWorkItem => {
+      const explanation = runnability.get(String(item.id));
+      return explanation ? { ...item, runnability: explanation } : item;
+    };
+    const parent = withRunnability(result.parent);
+    const children = result.children.map(withRunnability);
     if (options.json) {
-      emitSuccess(kind, { parent: result.parent, children: result.children, source: result.source });
+      emitSuccess(kind, { parent, children, source: result.source });
       return;
     }
-    printChildren(result);
+    printChildren({ ...result, parent, children });
   } catch (error) {
     if (options.json) {
       emitFailure(kind, classifyError(error), (error as Error).message);
@@ -637,6 +664,7 @@ function printChildren(result: WorkItemChildrenResult<GlobalWorkItem>): void {
   for (const child of result.children) {
     console.log(itemLine(child));
     detail(`state: ${child.state}  mode: ${child.executionMode}  managed: ${child.managed ? 'yes' : 'no'}`);
+    if (child.runnability) detail(`→ ${describeRunnability(child.runnability)}`);
   }
 }
 
@@ -665,7 +693,13 @@ async function openInventoryMirror(): Promise<SqliteInventoryStore | undefined> 
   return new SqliteInventoryStore({ namespaceKey });
 }
 
-/** The parent and its children as the local mirror holds them. */
+/**
+ * The parent, its children and the dependencies they wait on, as the local
+ * mirror holds them.
+ *
+ * A dependency may live in another repository, so it is read as well: without
+ * it a child looks blocked by work nobody can see.
+ */
 async function readChildrenFromMirror(
   parentId: string,
 ): Promise<{ items: readonly GlobalWorkItem[]; lastSuccessAt?: number } | undefined> {
@@ -674,8 +708,11 @@ async function readChildrenFromMirror(
   try {
     const page = await store.query({ parentId });
     const parent = await store.get(parentId);
-    const items = [...(parent ? [parent] : []), ...page.items];
-    return { items: toGlobalWorkItems(items), lastSuccessAt: page.lastSuccessAt };
+    const items = toGlobalWorkItems([...(parent ? [parent] : []), ...page.items]);
+    const dependencyIds = new Set(items.flatMap(item => item.dependsOn.map(String)));
+    const dependencies = await Promise.all([...dependencyIds].map(async id => store.get(id)));
+    const present = dependencies.filter((item): item is NonNullable<typeof item> => item !== undefined);
+    return { items: [...items, ...toGlobalWorkItems(present)], lastSuccessAt: page.lastSuccessAt };
   } finally {
     store.close();
   }
@@ -696,7 +733,7 @@ async function collectWorkItems(): Promise<{ items: readonly GlobalWorkItem[] } 
 
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
-  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; kind?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
+  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; baseBranch?: string; dependsOn?: string[]; mode?: string; kind?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
 ): Promise<void> {
   const kind = 'backlog.create';
   try {
@@ -707,8 +744,9 @@ export async function runBacklogCreate(
     if (options.kind !== undefined && !kinds.includes(options.kind as BacklogKind)) {
       throw new Error(`invalid backlog role: ${options.kind}`);
     }
-    const description = options.description ?? await readDescription(options.descriptionFile);
+    let description = options.description ?? await readDescription(options.descriptionFile);
     if (!description.trim()) throw new Error('empty backlog description. Provide --description-file or pipe Markdown through stdin.');
+    if (options.baseBranch) description = applyExecutionBaseBranch(description, options.baseBranch);
     const input: BacklogCreateInput = {
       title: options.title,
       description,
@@ -798,6 +836,173 @@ export async function runBacklogTagRemove(
   }
 }
 
+/** The relationship edges an add asks for. */
+export interface BacklogRelationAddOptions extends JsonMode {
+  parent?: string;
+  base?: string;
+  dependsOn?: string[];
+}
+
+/** The relationship edges a remove asks for. */
+export interface BacklogRelationRemoveOptions extends JsonMode {
+  parent?: boolean;
+  base?: boolean;
+  dependsOn?: string[];
+}
+
+export async function runBacklogRelationAdd(
+  provider: BacklogManagementProvider,
+  id: string,
+  options: BacklogRelationAddOptions,
+): Promise<void> {
+  const kind = 'backlog.relation.add';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    const update: BacklogRelationUpdate = {};
+    if (options.parent !== undefined) update.parent = options.parent;
+    if (options.base !== undefined) update.base = options.base;
+    if (options.dependsOn?.length) update.addDependsOn = options.dependsOn;
+    if (Object.keys(update).length === 0) {
+      throw new Error('nothing to add: pass --parent, --base or --depends-on');
+    }
+    await applyBacklogRelationUpdate(provider, id, update);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(kind, item);
+      return;
+    }
+    success(`Relationship added to backlog ${id}`);
+    detailRelations(item);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function runBacklogRelationRemove(
+  provider: BacklogManagementProvider,
+  id: string,
+  options: BacklogRelationRemoveOptions,
+): Promise<void> {
+  const kind = 'backlog.relation.remove';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    const update: BacklogRelationUpdate = {};
+    if (options.parent) update.clearParent = true;
+    if (options.base) update.clearBase = true;
+    if (options.dependsOn?.length) update.removeDependsOn = options.dependsOn;
+    if (Object.keys(update).length === 0) {
+      throw new Error('nothing to remove: pass --parent, --base or --depends-on');
+    }
+    await applyBacklogRelationUpdate(provider, id, update);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(kind, item);
+      return;
+    }
+    success(`Relationship removed from backlog ${id}`);
+    detailRelations(item);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+/** Report the relationship edges the item carries now. */
+function detailRelations(item: BacklogItem): void {
+  if (item.parentId) detail(`parent: ${item.parentId}`);
+  if (item.baseBacklogId) detail(`execution-base: ${item.baseBacklogId}`);
+  if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
+}
+
+export async function runBacklogRole(
+  provider: BacklogManagementProvider,
+  id: string,
+  kind: BacklogKind,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.role';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!kinds.includes(kind as BacklogKind)) {
+      throw new Error(`invalid backlog role: ${kind}. Supported roles: ${kinds.join(', ')}`);
+    }
+    await applyBacklogRole(provider, id, kind);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(command, item);
+      return;
+    }
+    success(`Backlog ${id} is now a ${kind} anchor`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function runBacklogMode(
+  provider: BacklogManagementProvider,
+  id: string,
+  mode: BacklogExecutionMode,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.mode';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!modes.includes(mode)) {
+      throw new Error(`invalid execution mode: ${mode}. Supported modes: ${modes.join(', ')}`);
+    }
+    await applyBacklogMode(provider, id, mode);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(command, item);
+      return;
+    }
+    success(`Backlog ${id} now runs in ${mode} mode`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function runBacklogExecutionBase(
+  provider: BacklogManagementProvider,
+  id: string,
+  baseBranch: string,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.base';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!baseBranch?.trim()) throw new Error('execution base branch is required');
+    await applyBacklogExecutionBase(provider, id, baseBranch);
+    const item = await showBacklog(provider, id);
+    if (options.json) {
+      emitSuccess<BacklogItem>(command, item);
+      return;
+    }
+    success(`Backlog ${id} now starts from ${baseBranch.trim()}`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function runBacklogInterrupt(
   provider: QABacklogProvider,
   id: string,
@@ -828,9 +1033,15 @@ export async function runBacklogConfirmMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,
   id: string,
-  expectedTargetBranch: string,
-  options: JsonMode = {},
+  fallbackTargetBranch: string,
+  options: JsonMode & { targetBranch?: string } = {},
 ): Promise<void> {
+  // The branch the change has to have targeted: the one the body declares,
+  // which is the branch the execution manifest was derived from — unless
+  // the operator names one.
+  const item = await provider.get(id);
+  const expectedTargetBranch = options.targetBranch
+    ?? await resolveExpectedTargetBranch(provider, item, fallbackTargetBranch);
   await runLifecycleAction('backlog.confirm-merge', options, () => confirmBacklogMerge(provider, changes, id, expectedTargetBranch), `Backlog ${id} merged and completed`);
 }
 
@@ -860,10 +1071,16 @@ export async function runBacklogReconcileMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,
   id: string,
-  expectedTargetBranch: string,
-  options: JsonMode = {},
+  fallbackTargetBranch: string,
+  options: JsonMode & { targetBranch?: string } = {},
 ): Promise<void> {
   try {
+    // The branch the change has to have targeted: the one the body declares,
+    // which is the branch the execution manifest was derived from — unless
+    // the operator names one.
+    const item = await provider.get(id);
+    const expectedTargetBranch = options.targetBranch
+      ?? await resolveExpectedTargetBranch(provider, item, fallbackTargetBranch);
     const outcome = await reconcileMergedBacklog(provider, changes, id, expectedTargetBranch);
     if (options.json) {
       emitSuccess<BacklogMergeReconciliation>('backlog.reconcile-merge', outcome);
@@ -1053,6 +1270,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--description-file <path>', 'Markdown description file (defaults to stdin)')
     .option('--parent <id>', 'Organizational parent backlog ID or platform:project#id (does not select a git base branch)')
     .option('--base-backlog <id>', 'Backlog ID or platform:project#id whose unmerged branch is the explicit execution base')
+    .option('--base-branch <branch>', 'Ref the work starts from, recorded in the body (Base Version)')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--mode <mode>', `Execution mode (${modes.join('|')}); defaults to afk, or hitl for a PRD anchor`)
     .option('--kind <kind>', `Organizational role (${kinds.join('|')}); a PRD anchor is never executed`)
@@ -1115,10 +1333,11 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   backlog.command('confirm-merge')
-    .description('Merge an approved root backlog change and mark it done')
+    .description('Merge an approved backlog change and mark it done')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1134,10 +1353,11 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   backlog.command('reconcile-merge')
-    .description('Complete a root backlog whose change is already merged on the provider')
+    .description('Complete a backlog whose change is already merged on the provider')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1191,6 +1411,49 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       }
     });
 
+  const relation = backlog.command('relation').description('Manage relationship edges on a backlog item');
+  relation.command('add')
+    .description('Add or replace a relationship edge on a backlog item')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .option('--parent <id>', 'Organizational parent backlog ID or platform:project#id')
+    .option('--base <id>', 'Execution base backlog ID or platform:project#id')
+    .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogRelationAdd(await backlogProviderFor(options.project, options.platform, options.id), options.id, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.relation.add', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  relation.command('remove')
+    .description('Remove a relationship edge from a backlog item')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .option('--parent', 'Drop the organizational parent edge')
+    .option('--base', 'Drop the execution base edge')
+    .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id to stop waiting for', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogRelationRemove(await backlogProviderFor(options.project, options.platform, options.id), options.id, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.relation.remove', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'init')!, 'backlog.init', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'adopt')!, 'backlog.adopt', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'inventory')!, 'backlog.inventory', argv);
@@ -1202,6 +1465,86 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'confirm-merge')!, 'backlog.confirm-merge', argv);
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'add')!, 'backlog.tag.add', argv);
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'remove')!, 'backlog.tag.remove', argv);
+  configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'add')!, 'backlog.relation.add', argv);
+  configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'remove')!, 'backlog.relation.remove', argv);
+
+  backlog.command('role')
+    .description('Give a backlog item the organizational role of a PRD anchor')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--kind <kind>', `Organizational role (${kinds.join('|')})`)
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogRole(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.kind as BacklogKind,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.role', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'role')!, 'backlog.role', argv);
+
+  backlog.command('mode')
+    .description('Switch who runs a backlog item')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--mode <mode>', `Execution mode (${modes.join('|')})`)
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogMode(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.mode as BacklogExecutionMode,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.mode', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'mode')!, 'backlog.mode', argv);
+
+  backlog.command('base')
+    .description('Record the ref a backlog item starts from')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--branch <branch>', 'Ref the work starts from')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogExecutionBase(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.branch,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.base', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'base')!, 'backlog.base', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

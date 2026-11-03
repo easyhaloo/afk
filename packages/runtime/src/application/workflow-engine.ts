@@ -6,6 +6,7 @@ import { WorktreeManager } from '../infrastructure/git/index.js';
 import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index.js';
 import { createSandboxProvider } from '../infrastructure/sandbox/index.js';
 import { createAgentProvider } from '../domain/agents/index.js';
+import { isRetryableAgentFailure } from '../domain/agents/failure.js';
 import type {
   Sandbox,
   SandboxProvider,
@@ -45,6 +46,7 @@ import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/type
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
 import { resolveBacklogExecutionBase } from '../domain/backlog/creation.js';
+import { blockBacklog } from '../domain/backlog/commands.js';
 import { parseWorkItemId } from '../domain/work-item/identity.js';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
@@ -102,6 +104,12 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
 }
 
 function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
+  if (rework.source === 'conflict') {
+    // The change request could not be merged because the target branch
+    // changed the same lines. Making the change compatible with the target
+    // here is what keeps the next merge conflict-free.
+    return `\n\nAn open merge-conflict rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
+  }
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
@@ -143,6 +151,8 @@ export interface RunnerOptions {
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs?: number;
   /** Max automatic context-handoff rounds before falling back to terminal handoff. */
   maxHandoffs?: number;
   /** Absolute token threshold that triggers context handoff (runner polls statusline). */
@@ -254,6 +264,8 @@ interface StepRunCtx {
   baseBranch: string;
   hardTimeoutMs: number;
   completionTimeoutMs: number;
+  /** How long the agent may stay silent before the run gives up on it. */
+  idleTimeoutMs: number;
   contextHighTokens: number;
   budget: BudgetManager;
   persistBudget: () => Promise<void>;
@@ -386,6 +398,7 @@ export class WorkflowRunner {
       targetBranch,
       hardTimeoutMs = this.config.workflowHardTimeout,
       completionTimeoutMs = this.config.completionTimeout,
+      idleTimeoutMs = this.config.idleTimeout,
       maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20),
       contextHighTokens = this.config.contextThreshold,
       maxTotalTokens = this.config.goalBudget,
@@ -536,7 +549,7 @@ export class WorkflowRunner {
 
     try {
       let result = await this.runBody({
-        iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs,
+        iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, maxHandoffs,
         contextHighTokens, maxTotalTokens, projectName: options.projectName, repoRoot: this.repoRoot,
         workspaceRoot: this.workspaceRoot,
         branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode,
@@ -547,7 +560,10 @@ export class WorkflowRunner {
         return { success: false };
       }
       if (result.success && this.preparedRepositories) {
-        for (const repository of this.preparedRepositories.repositories) await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
+        for (const repository of this.preparedRepositories.repositories) {
+          await this.commitImplementationWork(iid, repository.handle.path);
+          await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
+        }
         try {
           await this.finishPreparedRepositories({ status: 'success' });
         } catch (error) {
@@ -557,8 +573,11 @@ export class WorkflowRunner {
         }
       }
       if (this.providers && this.activeBacklog) {
-        await this.providers.backlog.transition(this.activeBacklog.id, result.success ? 'verification' : 'blocked', result.success ? undefined : { reason: this.runtimeErrorSummary ?? 'workflow execution failed' });
-        if (!result.success) await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
+        if (result.success) {
+          await this.providers.backlog.transition(this.activeBacklog.id, 'verification', undefined);
+        } else {
+          await blockBacklog(this.providers.backlog, this.activeBacklog.id, this.runtimeErrorSummary ?? 'workflow execution failed');
+        }
       }
       terminalOutcome = result.success ? 'success' : 'failed';
       if (result.success) await this.recordObservation({ kind: 'implementation.completed' });
@@ -740,6 +759,7 @@ export class WorkflowRunner {
         wtPath: branchHandle.path,
         hardTimeoutMs: effectiveTimeout,
         completionTimeoutMs: ctx.completionTimeoutMs,
+        idleTimeoutMs: ctx.idleTimeoutMs,
         contextHighTokens: ctx.contextHighTokens,
         budget: ctx.budget,
         persistBudget: ctx.persistBudget,
@@ -842,7 +862,7 @@ export class WorkflowRunner {
 
   private async runBody(ctx: {
     iid: number; session: string; targetBranch: string;
-    baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
+    baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number; idleTimeoutMs: number;
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
     projectName?: string;
     repoRoot: string;
@@ -851,7 +871,7 @@ export class WorkflowRunner {
     template: string;
     executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
     if (!this.activeBacklog) throw new Error('backlog is not active');
     const budgetStore = new BudgetStore(workspaceRoot, this.activeBacklog.workItemId ?? this.activeBacklog.providerRef);
     const savedBudget = await budgetStore.load();
@@ -970,7 +990,7 @@ export class WorkflowRunner {
       executeAgent: (step, results) => this.runStep(step, {
         iid, session: `${session}-${step.id}`, baseSession: session,
         primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, stepIndex: 0,
+        hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, stepIndex: 0,
         executionMode: step.executionMode ?? executionMode, persistBudget,
       }, results),
       executeSystem: async step => {
@@ -990,7 +1010,7 @@ export class WorkflowRunner {
     if (verification?.status === 'failed') {
       const recovered = await this.retryFailedAcVerification(loadedTemplate, {
         iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
+        hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
       }, verification, stepResults);
       if (recovered) {
         if (!this.preparedRepositories) {
@@ -1047,6 +1067,7 @@ export class WorkflowRunner {
       await this.markBacklogBlocked('claim heartbeat failed');
       return { success: false };
     }
+    await this.commitImplementationWork(iid, worktreePath);
     await this.recordImplementationCommit(worktreePath, targetBranch);
     if (!this.preparedRepositories) {
       // Push the implementation branch. QA creates the change request only
@@ -1066,6 +1087,28 @@ export class WorkflowRunner {
     logger.info({ iid, worktreePath }, 'worktree cleaned up');
 
     return { success: true };
+  }
+
+  /**
+   * Commit the agent's work.
+   *
+   * AFK publishes the implementation, so AFK owns the commit. An agent that
+   * leaves its changes uncommitted would otherwise publish an empty change,
+   * and the work would be lost when the workspace is restored.
+   */
+  private async commitImplementationWork(iid: number, worktreePath: string): Promise<string> {
+    const title = this.activeBacklog?.title?.trim();
+    const message = `feat: ${title ? `${title} ` : ''}(backlog ${iid})`;
+    const commit = await this.providers.branches.commit(worktreePath, message);
+    if (commit.skippedBinaryFiles.length > 0) {
+      // A binary leftover has no text to merge. Publishing it would make the
+      // change request unmergeable the moment the target branch touches the
+      // same file, so it stays in the worktree and is reported here.
+      logger.warn({ iid, worktreePath, skippedBinaryFiles: commit.skippedBinaryFiles },
+        'binary files left out of the implementation commit');
+    }
+    if (commit.sha) logger.info({ iid, worktreePath, commitSha: commit.sha }, 'implementation committed');
+    return commit.sha;
   }
 
   private async recordImplementationCommit(worktreePath: string, branch: string): Promise<void> {
@@ -1128,6 +1171,7 @@ export class WorkflowRunner {
     wtPath: string;
     hardTimeoutMs: number;
     completionTimeoutMs: number;
+    idleTimeoutMs: number;
     contextHighTokens: number;
     budget: BudgetManager;
     persistBudget: () => Promise<void>;
@@ -1141,6 +1185,7 @@ export class WorkflowRunner {
   }): Promise<PhaseResult> {
     const basePrompt = p.prompt ?? (p as unknown as { goalBase?: string }).goalBase ?? '';
     let resumedExecution: AgentExecution | undefined;
+    let agentFailures = 0;
     for (let round = 1; ; round++) {
       if (!resumedExecution && p.budget.isExhausted() && round === 1) {
         this.runtimeErrorSummary = `work item budget exhausted: ${p.budget.exhaustionReason()}`;
@@ -1175,6 +1220,7 @@ export class WorkflowRunner {
       const result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
+        idleTimeoutMs: p.idleTimeoutMs,
       });
       await this.writeRuntimeDiagnostics(result, execution);
 
@@ -1182,6 +1228,21 @@ export class WorkflowRunner {
       if (telemetry) {
         p.budget.recordSession(telemetry.sessionId, telemetry.totalTokens);
         await p.persistBudget();
+      }
+
+      // An agent that died on its own — a stream the upstream gateway cut,
+      // a process that went away — is not a verdict on the work. The attempt
+      // is repeated in the same worktree, where the work already done is
+      // still on disk. A handoff round is not consumed: this is a retry of
+      // the same step, not the next attempt.
+      if (result.status === 'failed' && isRetryableAgentFailure(result) && agentFailures < this.config.maxRetries) {
+        agentFailures++;
+        logger.warn(
+          { iid: p.iid, round, attempt: agentFailures, error: result.error?.code, message: result.error?.message },
+          'the agent failed in a way that can be retried; repeating the step',
+        );
+        round--;
+        continue;
       }
 
       switch (result.status) {
@@ -1364,8 +1425,7 @@ export class WorkflowRunner {
   private async markBacklogBlocked(reason: string): Promise<void> {
     if (!this.providers || !this.activeBacklog) return;
     try {
-      await this.providers.backlog.transition(this.activeBacklog.id, 'blocked', { reason });
-      await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
+      await blockBacklog(this.providers.backlog, this.activeBacklog.id, reason);
     } catch (error) {
       logger.warn({ backlogId: this.activeBacklog.id, error }, 'failed to mark backlog blocked');
     }

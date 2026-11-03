@@ -13,7 +13,12 @@ import {
   runBacklogInterrupt,
   runBacklogInventory,
   runBacklogList,
+  runBacklogRelationAdd,
+  runBacklogRelationRemove,
   runBacklogRetry,
+  runBacklogRole,
+  runBacklogExecutionBase,
+  runBacklogMode,
   runBacklogShow,
   runBacklogTagAdd,
   runBacklogTagRemove,
@@ -21,7 +26,7 @@ import {
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
-import type { BacklogCreateInput, BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
 import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
@@ -475,6 +480,32 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       if (!item) throw new Error(`backlog ${id} not found`);
       item.tags = item.tags.filter(existing => existing !== tag);
     },
+    async applyRelationUpdate(id: string, update: BacklogRelationUpdate) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      if (update.parent !== undefined) item.parentId = update.parent;
+      if (update.clearParent) item.parentId = undefined;
+      if (update.base !== undefined) item.baseBacklogId = update.base;
+      if (update.clearBase) item.baseBacklogId = undefined;
+      for (const dependency of update.addDependsOn ?? []) {
+        if (!item.dependsOn.includes(dependency)) item.dependsOn.push(dependency);
+      }
+      for (const dependency of update.removeDependsOn ?? []) {
+        item.dependsOn = item.dependsOn.filter(existing => existing !== dependency);
+      }
+    },
+    async applyRole(id: string, kind: BacklogKind) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.kind = kind;
+      delete item.state;
+      item.executionMode = 'hitl';
+    },
+    async applyMode(id: string, mode: BacklogExecutionMode) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.executionMode = mode;
+    },
     async initialize() { /* noop */ },
     async transition(id, state) {
       const item = items.find(candidate => candidate.id === id);
@@ -725,8 +756,198 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.data.tags).not.toContain('urgent');
   });
 
-  it('runBacklogInterrupt emits the blocked hitl backlog', async () => {
+  it('runBacklogRelationAdd emits the success envelope with the updated item', async () => {
     const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRelationAdd(stubProvider([{ ...stubItem }]), '42', { parent: 'github:org/repo#7', json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.relation.add');
+    expect(envelope.data.parentId).toBe('github:org/repo#7');
+  });
+
+  it('runBacklogRelationRemove drops the edge it was asked to drop', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRelationRemove(
+        stubProvider([{ ...stubItem, parentId: 'github:org/repo#7', dependsOn: ['github:org/repo#9'] }]),
+        '42',
+        { parent: true, json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.relation.remove');
+    expect(envelope.data.parentId).toBeUndefined();
+    expect(envelope.data.dependsOn).toEqual(['github:org/repo#9']);
+  });
+
+  it('runBacklogRelationAdd refuses an edit that names no edge', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRelationAdd(stubProvider([{ ...stubItem }]), '42', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.relation.add');
+    expect(envelope.error.message).toMatch(/nothing to add/);
+  });
+
+  it('runBacklogRole turns an item into an anchor', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRole(stubProvider([{ ...stubItem }]), '42', 'prd', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.role');
+    expect(envelope.data.kind).toBe('prd');
+    expect(envelope.data.state).toBeUndefined();
+    expect(envelope.data.executionMode).toBe('hitl');
+  });
+
+  it('runBacklogRole refuses a role the model does not have', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRole(stubProvider([{ ...stubItem }]), '42', 'nope' as BacklogKind, { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.role');
+    expect(envelope.error.message).toContain('invalid backlog role');
+  });
+
+  it('runBacklogExecutionBase records the ref the work starts from', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const applied: string[] = [];
+    const provider = stubProvider([stubItem], {
+      async applyExecutionBase(id: string, baseBranch: string) {
+        applied.push(`${id}=${baseBranch}`);
+      },
+    });
+    try {
+      await runBacklogExecutionBase(provider, '42', '2025-11-8-show', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(applied).toEqual(['42=2025-11-8-show']);
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.base');
+  });
+
+  it('runBacklogExecutionBase refuses an empty ref', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogExecutionBase(stubProvider([stubItem]), '42', '  ', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.message).toMatch(/branch is required/i);
+  });
+
+  it('runBacklogCreate declares the base ref in the body', async () => {
+    const created: BacklogCreateInput[] = [];
+    const provider = {
+      ...stubProvider([stubItem]),
+      async create(input: BacklogCreateInput): Promise<BacklogItem> {
+        created.push(input);
+        return { ...stubItem, id: 'new-1', title: input.title, description: input.description };
+      },
+    };
+    await runBacklogCreate(provider, { title: 'demo', description: '## Context\n\nbody', baseBranch: 'release-1' });
+
+    expect(created).toHaveLength(1);
+    expect(created[0].description).toContain('## Base Version');
+    expect(created[0].description).toContain('- Base Ref: release-1');
+  });
+
+  it('runBacklogMode switches who runs an item', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogMode(stubProvider([{ ...stubItem }]), '42', 'afk', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.mode');
+    expect(envelope.data.executionMode).toBe('afk');
+    expect(envelope.data.state).toBe('ready');
+  });
+
+  it('runBacklogMode refuses a mode the model does not have', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogMode(stubProvider([{ ...stubItem }]), '42', 'nope' as BacklogExecutionMode, { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.mode');
+    expect(envelope.error.message).toContain('invalid execution mode');
+  });
+
+  it('runBacklogInterrupt emits the blocked hitl backlog', async () => {    const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);
     process.stdout.write = (chunk: string | Uint8Array): boolean => {
       captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
@@ -953,8 +1174,28 @@ describe('backlog children', () => {
     });
   });
 
-  it('prints the provider URL of every item next to its title', async () => {
-    const output = await captureText(() => runBacklogChildren(parent.id, {}, {
+  it('says why a child is not moving, not only where it stands', async () => {
+    const waiting = workItem('gitlab:group/repo#10', {
+      parentId: parent.id, title: 'waiting', executionMode: 'afk', executionEligible: true,
+      dependsOn: ['gitlab:group/repo#11'],
+    });
+    const dependency = workItem('gitlab:group/repo#11', { state: 'blocked' });
+    const envelope = await capture(() => runBacklogChildren(parent.id, { json: true }, {
+      read: async () => ({ items: [parent, waiting, dependency], lastSuccessAt: Date.now() }),
+      collect: async () => undefined,
+    }));
+
+    const children = (envelope.data as { children: { id: string; runnability?: unknown }[] }).children;
+    // The state says where the item stands; the runnability says what holds
+    // it back. A board of states alone cannot tell a queue from a deadlock.
+    expect(children.find(candidate => candidate.id === waiting.id)?.runnability).toEqual({
+      runnable: false,
+      reason: 'dependency_not_done',
+      blockedBy: ['gitlab:group/repo#11'],
+    });
+  });
+
+  it('prints the provider URL of every item next to its title', async () => {    const output = await captureText(() => runBacklogChildren(parent.id, {}, {
       read: async () => ({ items: [parent, child], lastSuccessAt: Date.now() }),
       collect: async () => undefined,
     }));

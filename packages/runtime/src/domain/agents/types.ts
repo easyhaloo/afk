@@ -182,7 +182,19 @@ export interface AgentExecution {
   readonly sessionId?: string;
   readonly metadata: AgentExecutionMetadata;
   waitForEvent(): Promise<ExecutionEvent | null>;
-  waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
+  waitForResult(options?: {
+    completionTimeoutMs?: number;
+    contextHighTokens?: number;
+    /**
+     * How long the agent may stay silent before the wait gives up on it.
+     *
+     * The completion timeout bounds how long the agent may take; this
+     * bounds how long it may say nothing. An agent that dies is silent, so
+     * this is what turns a dead agent into a failed run instead of a wait
+     * that runs until the hard timeout.
+     */
+    idleTimeoutMs?: number;
+  }): Promise<ExecutionResult>;
   interrupt(reason: InterruptReason): Promise<void>;
   kill(): Promise<void>;
   captureOutput(options?: CaptureOptions): Promise<string>;

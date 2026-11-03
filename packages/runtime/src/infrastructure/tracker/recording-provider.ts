@@ -4,14 +4,17 @@ import type {
   BacklogCreatePlan,
   BacklogExecutionMode,
   BacklogItem,
+  BacklogKind,
   BacklogListOptions,
   BacklogProvider,
   BacklogProviderCapabilities,
   BacklogState,
+  Runnability,
   NewReworkRecord,
   ReworkRecord,
   ReworkResolution,
 } from '../../domain/backlog/index.js';
+import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
 import { recordTrackerActivity, type TrackerPlatform } from './store.js';
 
 /** The provider project a recording provider belongs to. */
@@ -106,12 +109,30 @@ export class RecordingBacklogProvider implements BacklogProvider {
     return this.provider.removeTag(id, tag);
   }
 
+  applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    return this.provider.applyRelationUpdate(id, update);
+  }
+
+  applyRole(id: string, kind: BacklogKind): Promise<void> {
+    return this.provider.applyRole(id, kind);
+  }
+
+  applyExecutionBase(id: string, baseBranch: string): Promise<void> {
+    return this.provider.applyExecutionBase(id, baseBranch);
+  }
+  applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    return this.provider.applyMode(id, mode);
+  }
+
   initialize(): Promise<void> {
     return this.provider.initialize();
   }
 
   isRunnable(item: BacklogItem): Promise<boolean> {
     return this.provider.isRunnable(item);
+  }
+  explainRunnability(item: BacklogItem): Promise<Runnability> {
+    return this.provider.explainRunnability(item);
   }
 
   private record(items: readonly BacklogItem[]): void {

@@ -17,6 +17,7 @@ export function builtinTemplates(): WorkflowTemplate[] {
   return [
     issueImplementation(),
     qaVerification(),
+    mergeConflictResolution(),
     simpleLoop(),
     sequentialReview(),
     parallelPlanner(),
@@ -75,6 +76,39 @@ function qaVerification(): WorkflowTemplate {
     steps: [{
       id: 'verify-ac', kind: 'agent', role: 'verifier', completion: 'goal_complete',
       prompt: '/goal 在已合并最新基线的 QA 工作树中验证 issue #{iid} 的 AC 和集成测试，并返回 PASS 或 FAIL。不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件；这些由 QA runner 在 PASS 后自动完成。',
+    }],
+  };
+}
+
+// ── merge-conflict-resolution ──────────────────────────────────────────────
+
+/**
+ * Resolve the conflicts between the target branch and the change branch.
+ *
+ * The worktree is the change request's own branch, so a resolution made here
+ * lands exactly where the change request is published from.
+ */
+function mergeConflictResolution(): WorkflowTemplate {
+  return {
+    name: 'merge-conflict-resolution',
+    version: 1,
+    description: 'Resolve the merge conflicts between the target branch and the change branch inside the QA worktree, before the change request is published.',
+    steps: [{
+      id: 'resolve-conflicts', kind: 'agent', role: 'implementer', completion: 'goal_complete',
+      prompt: [
+        '/goal 解决 QA 工作树中未完成的合并冲突。',
+        '',
+        '这个工作树正处在一次合并的中间状态：目标分支 {targetBranch} 已经被合入，冲突文件如下：',
+        '',
+        '{conflicts}',
+        '',
+        '逐个处理这些冲突文件：',
+        '- 与本次变更无关的文件（文档、生成产物、图标等）：采用目标分支的版本，用 `git checkout --ours -- <file>` 然后 `git add <file>`。合并时 ours 是目标分支，theirs 是变更分支。',
+        '- 与本次变更相关的文件：合并两侧的改动，保留双方都需要的内容，不要丢掉任何一侧的行为。',
+        '- 二进制文件无法按文本合并：如果它与本次变更无关，采用目标分支的版本；如果它与本次变更有关，不要猜测，把冲突留着并在结果中说明原因。',
+        '',
+        '每个文件处理完后用 `git add <file>` 标记为已解决。不要提交、不要推送、不要创建或合并变更请求，这些由 QA runner 负责。',
+      ].join('\n'),
     }],
   };
 }

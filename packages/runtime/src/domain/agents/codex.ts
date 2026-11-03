@@ -52,7 +52,14 @@ export class CodexProvider extends ProcessAgentProvider {
       argv.push('--config', `model_provider=${JSON.stringify(runtime.provider)}`);
     }
     argv.push('--dangerously-bypass-approvals-and-sandbox');
-    if (options.executionMode !== 'batch') argv.push('--no-alt-screen');
+    if (options.executionMode !== 'batch') {
+      argv.push('--no-alt-screen');
+      // Codex greets the user with an "Update available" modal as soon as a
+      // newer version is installed. The modal owns the keyboard, so the
+      // keystrokes that submit the goal are swallowed and the run waits for a
+      // signal that never arrives. AFK cannot ask anybody to dismiss it.
+      argv.push('--config', 'check_for_update_on_startup=false');
+    }
     argv.push('-C', options.worktreePath);
     return { argv, cwd: options.worktreePath };
   }

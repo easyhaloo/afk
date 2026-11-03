@@ -28,9 +28,9 @@ describe('WorkflowConfig env var loading', () => {
     const cfg = await freshConfig();
     expect(cfg.agentDefault).toBe('claude-code');
     expect(cfg.tmuxSession).toBe('afk');
-    expect(cfg.workflowHardTimeout).toBe(7200 * 1000);
+    expect(cfg.workflowHardTimeout).toBe(14400 * 1000);
     expect(cfg.completionTimeout).toBe(7200 * 1000);
-    expect(cfg.qaTimeout).toBe(30 * 60 * 1000);
+    expect(cfg.qaTimeout).toBe(60 * 60 * 1000);
     expect(cfg.contextThreshold).toBe(100_000);
     expect(cfg.promptTimeout).toBe(30_000);
     expect(cfg.handoffTimeout).toBe(60_000);
@@ -124,7 +124,7 @@ describe('WorkflowConfig env var loading', () => {
   it('falls back to defaults for unparseable env values', async () => {
     const cfg = await freshConfig({ AFK_CONTEXT_THRESHOLD: 'not-a-number', AFK_WORKFLOW_HARD_TIMEOUT: 'also-not' });
     expect(cfg.contextThreshold).toBe(100_000);
-    expect(cfg.workflowHardTimeout).toBe(7200 * 1000);
+    expect(cfg.workflowHardTimeout).toBe(14400 * 1000);
   });
 });
 

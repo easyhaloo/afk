@@ -36,6 +36,7 @@ import type {
 } from '../types.js';
 import type { ContainerProvider, ContainerExecResult } from './types.js';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
+import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { EnvVarAllowlist } from './env-allowlist.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 
@@ -306,9 +307,11 @@ export class ContainerAgentExecution implements AgentExecution {
     return null;
   }
 
-  async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
+  async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number; idleTimeoutMs?: number }): Promise<ExecutionResult> {
     const timeout = options?.completionTimeoutMs ?? 600_000;
+    const idleTimeoutMs = options?.idleTimeoutMs;
     const startedAt = Date.now();
+    const activity = new ActivityWatch();
     while (true) {
       if (this._interruptAcked) return this.result('aborted');
       if (Date.now() - startedAt >= timeout) {
@@ -340,6 +343,19 @@ export class ContainerAgentExecution implements AgentExecution {
           exitCode,
           error: { code: 'MISSING_RESULT', message: `container execution ended without ${this.signalType} result` },
         });
+      }
+
+      // The idle watchdog: a container that is alive but says nothing is not
+      // working, and its output file is what it says it with.
+      if (idleTimeoutMs !== undefined && idleTimeoutMs > 0) {
+        const stdout = await readOptional(this.outputPath).catch(() => undefined);
+        activity.observe(String(stdout?.length ?? 0));
+        if (activity.idleMs() >= idleTimeoutMs) {
+          await this.kill();
+          return this.result('timed_out', {
+            error: { code: 'AGENT_IDLE', message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s` },
+          });
+        }
       }
       await sleep(200);
     }

@@ -81,6 +81,10 @@
       "types": "./dist/domain/backlog/index.d.ts",
       "import": "./dist/domain/backlog/index.js"
     },
+    "./domain/backlog/runnability": {
+      "types": "./dist/domain/backlog/runnability.d.ts",
+      "import": "./dist/domain/backlog/runnability.js"
+    },
     "./domain/schemas": {
       "types": "./dist/domain/schemas.d.ts",
       "import": "./dist/domain/schemas.js"
@@ -112,6 +116,10 @@
     "./application/work-item/inventory-items": {
       "types": "./dist/application/work-item/inventory-items.d.ts",
       "import": "./dist/application/work-item/inventory-items.js"
+    },
+    "./application/work-item/runnability": {
+      "types": "./dist/application/work-item/runnability.d.ts",
+      "import": "./dist/application/work-item/runnability.js"
     },
     "./infrastructure/config/manager": {
       "types": "./dist/infrastructure/config/manager.d.ts",

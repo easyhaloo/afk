@@ -72,8 +72,76 @@ describe('TmuxClient provider readiness', () => {
     const client = new TmuxClient();
     vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
     vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client, 'capturePane').mockResolvedValue('› Ask Codex to do anything');
 
     await expect(client.waitForPrompt('/missing-status', 10, 'codex', 'codex-session')).resolves.toBe(true);
+  });
+
+  it('reports a missing session for an interactive provider', async () => {
+    const client = new TmuxClient();
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(false);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+
+    await expect(client.waitForPrompt('/missing-status', 10, 'codex', 'codex-session')).resolves.toBe(false);
+  });
+
+  it('waits for the Codex composer before treating the session as ready', async () => {
+    const client = new TmuxClient();
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    const capture = vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('› the goal is still typed into the composer')
+      .mockResolvedValue('› Ask Codex to do anything');
+
+    await expect(client.waitForPrompt('/w', 1000, 'codex', 'codex-session')).resolves.toBe(true);
+    expect(capture).toHaveBeenCalled();
+  });
+});
+
+describe('TmuxClient prompt submission', () => {
+  const countEnterPresses = (exec: { mock: { calls: unknown[][] } }): number =>
+    exec.mock.calls.filter(call => Array.isArray(call[0]) && (call[0] as string[]).includes('C-m')).length;
+
+  it('presses Enter again while the Codex composer still holds the goal', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
+    const capture = vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('› the goal is still typed into the composer')
+      .mockResolvedValue('› Ask Codex to do anything');
+
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'codex');
+
+    // Two Enter presses submit the goal; a third one is spent on the goal
+    // that a modal swallowed.
+    expect(countEnterPresses(exec as never)).toBe(3);
+    expect(capture).toHaveBeenCalled();
+  });
+
+  it('does not press Enter again once the composer is empty', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
+    vi.spyOn(client, 'capturePane').mockResolvedValue('› Ask Codex to do anything');
+
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'codex');
+
+    expect(countEnterPresses(exec as never)).toBe(2);
+  });
+
+  it('leaves providers without a readable composer untouched', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
+    const capture = vi.spyOn(client, 'capturePane').mockResolvedValue('› the goal is still typed');
+
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'claude-code');
+
+    expect(countEnterPresses(exec as never)).toBe(2);
+    expect(capture).not.toHaveBeenCalled();
   });
 });
 

@@ -24,6 +24,27 @@ vi.mock('simple-git', async importOriginal => ({
 }));
 
 describe('execution manifest request to runner boundary', () => {
+  it('carries the manifest baseline as the execution baseline of the request', async () => {
+    const request = await resolveWorkflowRunRequest({
+      backlogId: 'WI-2026-018',
+      executionManifestPath: '/workspace/.afk/execution-manifest.json',
+    }, {}, {
+      readFile: async () => JSON.stringify({
+        schemaVersion: 1,
+        workItemId: 'WI-2026-018',
+        providerBacklogId: '42',
+        tracker: { platform: 'github', projectKey: 'acme/api' },
+        workingBranch: 'afk/work-item-18',
+        repositories: [{
+          platform: 'github', projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+          baseBranch: '2025-11-8-show', workingBranch: 'afk/work-item-18', primary: true,
+        }],
+      }),
+    });
+
+    expect(request.executionBaseBranch).toBe('2025-11-8-show');
+  });
+
   it('claims the provider backlog id and keeps the manifest working branch', async () => {
     const request = await resolveWorkflowRunRequest({
       backlogId: 'WI-2026-018',
@@ -53,7 +74,7 @@ describe('execution manifest request to runner boundary', () => {
         claim: claimBacklog, transition: vi.fn(async () => undefined), setExecutionMode: vi.fn(async () => undefined),
         get: vi.fn(async () => claimedItem), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(),
       },
-      branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn() },
+      branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), cleanup: vi.fn() },
       changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
     } as unknown as ProviderBundle;
     const agent = { name: 'claude-code', capabilities: new Set() } as unknown as AgentProvider;
@@ -291,7 +312,7 @@ function providersForRun(): ProviderBundle {
       get: vi.fn(async () => item), list: vi.fn(), isRunnable: vi.fn(), getActiveRework: vi.fn(async () => undefined),
     },
     branches: {
-      createBranch: vi.fn(), createVerificationWorktree: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn(),
+      createBranch: vi.fn(), createVerificationWorktree: vi.fn(), push: vi.fn(), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), cleanup: vi.fn(),
     },
     changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
   } as unknown as ProviderBundle;

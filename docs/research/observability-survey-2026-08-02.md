@@ -1,4 +1,7 @@
-# AFK Observability Survey
+# AFK Observability Survey — Historical Snapshot
+
+> **Historical / non-authoritative.** This survey describes the repository as inspected on 2026-08-02. Its source paths and command examples include removed or renamed interfaces (for example, `packages/runtime/src/lib/`, `afk scheduler status`, and `afk board`). Do not use it to infer current behavior; consult [current Architecture Overview](../architecture/overview.md), [Observability](../architecture/observability.md), and the CLI command registry instead.
+
 
 **Date:** 2026-08-02
 **Scope:** `src/` only — runtime/logging/errors/workflow-state/metrics

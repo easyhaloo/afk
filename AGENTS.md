@@ -27,12 +27,12 @@ before touching `apps/desktop/`.
   run must not mask a broken package.
 - **The command registry is the CLI source of truth.** Changing a signature,
   flag, or command means updating
-  [docs/architecture/overview.md](docs/architecture/overview.md#scope-and-command-surface)
+  [docs/architecture/execution.md](docs/architecture/execution.md#execution-entry-points)
   in the same commit.
 - **Work identity is a contract.** `BacklogItem.id`, `Run.workItemId`,
   `runId`, `parentId`, `dependsOn`, and `baseBacklogId` have distinct,
   non-interchangeable meanings — see
-  [docs/architecture/overview.md](docs/architecture/overview.md#work-item-and-execution-identity).
+  [docs/architecture/overview.md](docs/architecture/overview.md#work-item-identity-and-relationships).
 - **UI work under `apps/desktop/`** must follow
   [docs/architecture/design-system.md](docs/architecture/design-system.md).
 

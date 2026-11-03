@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { BacklogPage, getBacklogPrimaryAction } from "../src/features/backlog/BacklogPage.js";
 import { evaluateRunnability, RUNNABLE_STATES } from "@afk/runtime/domain/backlog/runnability";
+import { BACKLOG_METADATA, projectBacklogItem } from "@afk/runtime/domain/backlog/index";
 import { workflowNodeDisplayLabel } from "../src/main.js";
 import {
   readBacklogCache,
@@ -478,6 +479,24 @@ describe("BacklogPage execution", () => {
 
       expect(getBacklogPrimaryAction(item) === "start").toBe(runnability.runnable);
     }
+  });
+
+  it("keeps Provider projection eligibility through the Desktop action boundary", () => {
+    const providerItem = projectBacklogItem({
+      issueNumber: 42,
+      title: "Unmanaged AFK issue",
+      description: "Issue has a mode label but no AFK lifecycle label.",
+      labels: [BACKLOG_METADATA.executionModeLabels.afk],
+      state: "opened",
+    }, { platform: "github", projectKey: "acme/api" });
+
+    expect(providerItem).toMatchObject({
+      state: "ready",
+      executionMode: "afk",
+      managed: false,
+      executionEligible: false,
+    });
+    expect(getBacklogPrimaryAction(providerItem as unknown as BacklogItem)).toBe("view");
   });
 
   it("does not offer start when the Provider marks a ready AFK item ineligible", () => {

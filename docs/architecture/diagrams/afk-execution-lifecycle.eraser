@@ -1,0 +1,74 @@
+// AFK managed work-item lifecycle
+direction right
+colorMode pastel
+styleMode shadow
+typeface clean
+wrap on
+
+"输入与执行权" [color: "#EAF5F2"] {
+  Provider_Backlog [label: "Provider Backlog\nReady / Rework", icon: github, color: "#27877A"]
+  Eligibility [label: "Eligibility + Dependency Checks", icon: list-checks, color: "#3977C8"]
+  Manifest [label: "Manifest / Project Validation", icon: file-check, color: "#3977C8"]
+  Claim [label: "Claim Lease + Execution ID", icon: lock, color: "#3977C8"]
+}
+
+"实现阶段" [color: "#EAF1FC"] {
+  Prepare_Workspace [label: "Branch / Worktree / Sandbox", icon: folders, color: "#64748B"]
+  Workflow_Runner [label: "WorkflowRunner + Template", icon: workflow, color: "#3977C8"]
+  Plan_Executor [label: "PlanExecutor", icon: list-tree, color: "#3977C8"]
+  Agent [label: "Agent Provider Process", icon: bot, color: "#8060B5"]
+  Verification [label: "Implementation Published\nState: verification", icon: git-branch, color: "#3977C8"]
+}
+
+"独立验证与发布" [color: "#FFF5E8"] {
+  QA [label: "Independent QARunner", icon: shield-check, color: "#C58A38"]
+  QA_Pass [label: "QA PASS", icon: check-circle, color: "#27877A"]
+  QA_Fail [label: "QA FAIL", icon: x-circle, color: "#C85C5C"]
+  Change_Request [label: "Create / Verify PR or MR", icon: git-pull-request, color: "#3977C8"]
+  Merge_Ready [label: "merge_ready + HITL", icon: user-check, color: "#C58A38"]
+  Human_Merge [label: "Human Review + Merge", icon: users, color: "#C58A38"]
+  Done [label: "Verified Merge → done", icon: check-check, color: "#27877A"]
+  Rework [label: "Bounded Rework", icon: repeat, color: "#C58A38"]
+  Blocked [label: "blocked + HITL", icon: alert-triangle, color: "#C85C5C"]
+}
+
+Provider_Backlog > Eligibility
+Eligibility > Manifest: runnable
+Eligibility > Blocked: not runnable
+Manifest > Claim: valid
+Manifest > Blocked: mismatch
+Claim > Prepare_Workspace: lease granted
+Prepare_Workspace > Workflow_Runner
+Workflow_Runner > Plan_Executor
+Plan_Executor > Agent
+Agent > Verification: branch pushed
+Agent > Blocked: failure / timeout
+Verification > QA: executeWorkItem continues
+QA > QA_Pass: independent checks pass
+QA > QA_Fail: checks fail
+QA_Pass > Change_Request
+Change_Request > Merge_Ready: change verified
+Merge_Ready > Human_Merge
+Human_Merge > Done: merge audited
+QA_Fail > Rework: attempts remain
+Rework > Prepare_Workspace: next bounded attempt
+QA_Fail > Blocked: retry limit reached
+
+"独立入口语义" [color: "#F1F4F8"] {
+  Run_Command [label: "afk run", icon: terminal, color: "#3977C8"]
+  Execute_Command [label: "afk execute", icon: terminal, color: "#27877A"]
+  Loop_Command [label: "afk loop", icon: repeat, color: "#8060B5"]
+  Loop_Scope [label: "Exactly one Manifest-bound Work Item", icon: file-check, color: "#64748B"]
+}
+
+Run_Command --> Workflow_Runner: implementation stage
+Execute_Command --> Claim: managed lifecycle
+Loop_Command > Loop_Scope
+Loop_Scope --> Eligibility: re-poll same item
+
+legend [position: bottom] {
+  [connection: ">", label: "Synchronous execution / control"]
+  [connection: "-->", label: "Entry point or supporting relationship"]
+  [color: "#C85C5C", label: "Blocked / failure"]
+  [color: "#C58A38", label: "Human gate / bounded retry"]
+}

@@ -10,9 +10,10 @@
 | `docs/product/PRD*.md` | Four product requirement documents were maintained as a parallel requirements corpus inside docs | Removed all four files; docs navigation no longer advertises a PRD library |
 | `architecture/execution.md` and `.zh.md` | Described a target/legacy layout including `packages/runtime/src/lib/` and the removed `afk workflow run` entry point | Replaced with a current implementation summary; linked canonical architecture and lifecycle docs |
 | `guides/workflows.md` and `.zh.md` | Mixed current managed execution guidance with older scheduler and skill-chain assumptions | Rewritten around the actual `run`, `execute`, `loop`, `qa`, and `observe` boundaries |
-| `research/observability-survey-2026-08-02.md` | Historical survey references a former source layout and commands such as `afk scheduler status` and `afk board` | Kept for historical traceability, explicitly marked non-authoritative |
+| `architecture/blueprints/` | Contained completed implementation blueprints, superseded directory proposals, and a naming changelog tied to a completed refactor | Removed the directory contents; current package structure and decisions belong in the canonical architecture overview, source, tests, and ADRs |
+| `research/` | Mixed AFK-relevant but dated CLI comparison with unrelated one-off investigations, speculative research, obsolete observability survey, and a duplicate HTML export | Retained only the bilingual Agent CLI comparison; removed unrelated/one-off material and duplicate formats |
+| `docs/index.md` | Navigation advertised obsolete blueprint and research links, removed PRDs, and omitted current entry points and ADR 0020 | Updated navigation to link only to retained, maintained material |
 | `superpowers/plans/2026-10-20-outdated-docs-cleanup-plan.md` | Its inventory and migration assumptions are tied to an older baseline | Marked as a historical plan; do not treat its counts or branch assumptions as current |
-| `docs/index.md` | Navigation advertised removed PRDs and omitted current entry points and ADR 0020 | Reorganized around current architecture, guides, ADRs, research, and archive |
 
 ## Canonical sources
 
@@ -30,6 +31,7 @@ These documents should be reviewed against current source before being treated a
 2. `architecture/afk-architecture-handbook.md` and its PDF — duplicate/derived architecture narrative; decide whether to keep one generated artifact or remove the redundant copy after link/reference checks.
 3. `architecture/full-workflow-e2e-architecture.md` — detailed and evidence-rich; periodically refresh dated test runs, artifact paths, and runtime examples.
 4. `guides/testing.md` and `.zh.md` — validate commands and test-tree examples against root scripts and current test configuration.
-5. `research/` and `_archive/` — historical by nature; do not use them as current architecture facts without source verification.
+5. `research/agent-cli-comparison.md` and `.zh.md` — dated tool-version snapshot; refresh claims and measurements before using it to make current tool-selection decisions.
+6. `_archive/` — historical material only; do not use it as current architecture facts without source verification.
 
 This audit is a maintenance index, not a substitute for tests or the architecture guard.

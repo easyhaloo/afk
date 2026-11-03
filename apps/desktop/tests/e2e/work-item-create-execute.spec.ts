@@ -3,10 +3,10 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-test("creates a PRD-backed work item and executes it through Desktop", async ({ page }) => {
+test("creates a manual work item and executes it through Desktop", async ({ page }) => {
   const title = "建立基于 Transcript 唯一事实源的 AFK Retro 反馈闭环";
   const description = [
-    "基于 docs/product/PRD-retro-feedback-loop.md 实现一次可追踪的 AFK 工作项执行。",
+    "通过 Desktop 创建一个可追踪的 AFK 工作项并启动执行。",
     "验收：Desktop 可创建工作项；可从工作项详情选择仓库与 main 分支启动执行；运行记录最终显示已完成。",
   ].join("\n\n");
 

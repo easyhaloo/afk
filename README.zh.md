@@ -187,7 +187,6 @@ Skills 按使用目的进行逻辑分类，目录与触发命令保持原样。�
 |---|---|
 | [`/afk-skill-craft`](skills/afk-skill-craft/) | 创建、诊断与重构 Skills |
 | [`/reasoning-guard`](skills/reasoning-guard/) | 会话内识别推理退化 |
-| [`/reasoning-watchdog`](skills/reasoning-watchdog/) | 通过 Hooks 持续监控推理质量 |
 | [`/jev-agent-guard`](skills/jev-agent-guard/) | 为编码 Agent 安装检查点 |
 
 ### 知识管理与工程治理

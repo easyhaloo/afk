@@ -325,53 +325,7 @@ GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` �
 5. 每个内置模板至少通过模板图验证；需要验证 Agent/Git/Provider 语义时，按模板矩阵单独运行隔离项，不能只运行 `issue-implementation` 代替全部模板。
 6. Desktop E2E 至少确认任务身份按完整 `workItemId` 关联，不能因不同仓库使用相同 issue number 而串项；执行历史应通过 verified JSONL query path 展示。
 
-### 8.1 首次验证记录（2026-10-12）
-
-下列结果来自既有本地证据；Issue/PR 的远端状态与关联已由 `gh` 核验，本次文档审阅未重复远端请求。时间统一为 CST（UTC+08:00，Asia/Shanghai）。
-
-| 验证层级 | 实际结果 | 证据与边界 |
-| --- | --- | --- |
-| 6 个 built-in templates | 全部通过 deterministic `PlanExecutor` 和 `LoopRunner` 驱动验证，覆盖依赖、review 失败后的 fix，以及 planner 并发 | `.afk/e2e-artifacts/20261011-234041-full-flow/all-templates-e2e.json`、`loop-full-flow.json`；Agent、system action、Provider 和闭环发布使用替身，不能外推为 6 个真实外部 E2E 全通过 |
-| 真实 GitHub Loop | `github:easyhaloo/afk#174` 完成实现（含一次 AC 纠正）、QA PASS、PR #175 发布与关联；Provider 为 `merge_ready` / `hitl`，PR 保持 OPEN | 执行 ID `ecd8081f-be43-401b-a3cf-70dc213f36fd`；`.afk/e2e-artifacts/20261012-0129-app-server-rerun/issue-174/verification.json`、`issue.json`、`pr.json`；此结果是 root 人工合并门前的通过，不是 `done` 或已合并 |
-| 驱动超时与实际完成 | E2E 驱动在 `600000ms` 超时后，实际 Loop 仍于 **2026-10-12 02:13:56 CST** 输出 `execution completed → merge_ready`；独立后验核验脚本退出码为 `0` | `.afk/e2e-artifacts/20261012-0129-app-server-rerun/codex-runtime.log`、`issue-174/verification.json`；必须区分驱动等待超时与 workflow/QA 自身超时，不能仅凭驱动超时判定本次闭环失败 |
-| runtime 与审计 | 实现和 QA 两份 runtime archive 均为 `codex` / `app-server`、`completed`；事件完整性核验通过（17 条），执行投影为 `awaiting_merge` | 同目录 `issue-174/projection.json`、`implementing-runtime.json`、`verifying-runtime.json`；阶段 `completed` 不代表 Provider `done` |
-| Desktop 全套 | **48 passed，2 failed**；失败为已有的 backlog 控件尺寸及 workflow select 菜单边框样式断言 | `.afk/e2e-artifacts/20261011-234041-full-flow/desktop-e2e.log`；不能声称全部 UI 绿色 |
-| Desktop 目标用例 | backlog Loop **1 passed**；context selection **6 passed** | 同目录 `desktop-backlog-loop.log`、`desktop-e2e.log` 中的 `context-selection.spec.ts` 结果；fixture Electron 验证不替代真实 Provider/Agent 链路 |
-
-上述两份 canonical runtime archive 分别为：
-
-```text
-~/.afk/runtime/tasks/archive/ZWNkODA4MWYtYmU0My00MDFiLWEzY2YtNzBkYzIxM2YzNmZk.json
-~/.afk/runtime/tasks/archive/cWEtMTc0LTE3OTE3NDIxNDczMDUtcnVudGltZQ.json
-```
-
-前者对应实现 `runId = executionId`，后者对应 QA `runId = qa-174-1791742147305-runtime`。QA 日志 `issue-174/verifying/output.log` 还记录了 pnpm 拒绝当前依赖目录符号链接、Agent 将工作树依赖恢复为本地目录后重新验证通过；该恢复只证明本次执行可继续，不能作为 pnpm 普遍支持 symlink `node_modules` 的结论。
-
-### 8.2 样式与驱动期限回归（2026-10-12）
-
-Backlog 局部控件高度原为 30px，与设计系统的共享 36px 控件不一致；现统一为 36px，并在 Electron E2E 中检查搜索、筛选、分段选择和添加控件的尺寸。工作流菜单的边框属于外层 popover，旧断言却检查内部 listbox；现检查 popover 四边的 1px 实线边框、浅色与石墨主题的不透明背景，以及菜单对下方控件的实际遮挡。
-
-修复后 Desktop 全套为 **50 passed，0 failed**；桌面包 typecheck、build 和 **768 项单测**通过。日志、8 张截图及复现失败到修复通过的记录位于 `.afk/e2e-artifacts/20261012-style-timeout-fix/`，精确结果见 `ui-summary.json`。
-
-首次真实运行的 `600000ms` 来自测试启动时的环境变量覆盖。后续 Issue #177 的实现阶段受网络重试影响，耗时约 27 分钟；旧驱动把实现和 QA 共用的 30 分钟作为全程期限，导致 QA 刚开始就超时。现将 `AFK_CODEX_E2E_TIMEOUT_MS`（默认 `1800000ms`）分别用于实现（含排队）和 QA；第一次进入 `verification` 时启动 QA 预算，之后的 rework 不再延长预算。驱动打印有效阶段期限及来源，九项回归测试覆盖阶段预算、停滞超时、rework、Loop 提前停止/异常及 blocked 终态。Loop 拒绝值即使为 `undefined` 也按原值传播，不会误判为阶段超时。复验应显式移除短期限覆盖：
-
-```sh
-env -u AFK_CODEX_E2E_TIMEOUT_MS pnpm exec tsx tests/e2e/codex-runtime.ts --transport=app-server
-```
-
-本轮第一次复验 Issue #176 因 GitHub clone 连接失败进入 `blocked` / `hitl`，驱动退出码为 1；Issue #177 的旧驱动在全程 `1800000ms` 超时。两个失败记录分别保留在 `attempt-176/`、`attempt-177/`，不计为修复通过。真实 E2E 成功必须同时满足原驱动退出码为 0、实现与 QA runtime 完成、Provider 为 `merge_ready` / `hitl`、PR 关联正确和事件完整性通过，不能用后验成功覆盖原驱动失败。
-
-本机 GitHub HTTPS Git 连接间歇不可达，现有 SSH 认证通道可用。修复后的真实复验通过进程级 `url.git@github.com:.insteadOf=https://github.com/` 将 Git 操作转到同一 GitHub 仓库的 SSH 通道；不修改全局 Git 配置或 Provider API 认证。该环境条件须随驱动退出码一起归档，不能外推为 HTTPS 网络恢复。
-
-Issue #178 的实现、验收检查、QA 和 PR #179 发布已完成，驱动命令于 **2026-10-12 12:33:15 CST** 退出 `0`；命令耗时 23 分 56 秒，Loop 执行耗时 23 分 1 秒。实现与 QA runtime 均为 `completed` / `codex` / `app-server`，13 条事件的 hash chain 校验通过，Provider 为 `merge_ready` / `hitl`。本次 QA 的类型检查在相同源码的临时镜像、真实依赖目录中完成；不能声称 pnpm 已兼容原工作树的依赖符号链接。
-
-独立范围核验另外发现 QA 自动提交带入了生成的 `node_modules` 符号链接：仅匹配目录的 `node_modules/` 规则不会忽略该链接。`GitBranchProvider` 现为自己创建的共享链接补充 Git 本地 `/node_modules` 排除规则，保留既有规则；native Git 回归测试覆盖共享链接与自动提交的真实路径。E2E 驱动同时校验远端分支只能改动指定 fixture。PR #179 中的多余链接已通过提交 `332c73a` 清理，最终 Git diff、PR 文件范围及 fixture 精确字节核验通过；该清理发生在真实运行之后，不属于最初自动发布的结果。完整记录见归档中的 `driver-result.json`、`issue-178/verification.json`、`verification.log` 及依赖链接的 red/green 日志。
-
-### 8.3 QA 工作树依赖共享修复（2026-10-22）
-
-Backlog 229 的 QA 在工作树内执行 `pnpm --filter @afk/runtime... build` 时命中 pnpm 12.5.1 的 `ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH`：拒绝把符号链接 `node_modules` 用作任务运行状态目录。Agent 自行把软链物化为真实目录后验证通过，那只是本次执行的临时恢复，不是可依赖的布局；8.1 记录的同源现象在此得到解释。
-
-`GitBranchProvider.shareNodeModules` 改为物化真实 `node_modules` 目录，并逐项链接主检出的条目；pnpm 可变状态留在工作树本地。修复后在一个由修复代码创建的 QA 工作树中，原失败命令 `pnpm --filter @afk/runtime... build` 通过，`pnpm exec playwright test --config=playwright.config.ts boot` 3 passed。native Git 回归测试覆盖真实目录、逐项链接、状态条目排除，以及自动提交不混入 `node_modules`。
+历史运行日志、截图、runtime archive 与 issue/PR 级核验结果属于单次执行证据，应保存在对应的 E2E artifact 或测试报告中，不在长期架构文档内维护带日期的运行流水。此处仅保留可复用的验证矩阵与当前已知限制。
 
 ## 9. 已知限制
 

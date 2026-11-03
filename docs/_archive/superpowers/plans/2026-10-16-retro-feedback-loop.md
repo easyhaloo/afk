@@ -1,3 +1,5 @@
+> **Archived on 2026-11-03.** This is a historical implementation plan, not a description of the current runtime. It proposed a separate retro task store, runner, and CLI surface; verify the current implementation in source and the [Observability Architecture](../../../architecture/observability.md) before reusing any assumptions.
+
 # Retro Feedback Loop Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

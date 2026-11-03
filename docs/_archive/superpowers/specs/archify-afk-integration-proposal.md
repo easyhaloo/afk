@@ -1,3 +1,5 @@
+> **Archived on 2026-11-03 — rejected direction.** The proposal's Archify runtime/IPC integration was not adopted as the product architecture. The native TypeScript graph engine is implemented in `@afk/workflow-graph`; consult [Architecture Overview](../../../architecture/overview.md) and the native graph blueprint for current behavior.
+
 # Archify × AFK 集成方案：将可验证技术地图纳入本地工作流体系
 
 **作者：Manus AI**  

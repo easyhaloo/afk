@@ -170,7 +170,7 @@ describeE2E('Notification E2E', () => {
   afterEach(() => { if (proc) proc.kill(); });
 
   it('renders with absolute positioning', async () => {
-    proc = spawn(process.execPath, [distPath, 'board'], {
+    proc = spawn(process.execPath, [distPath], {
       cols: 80, rows: 24,
       env: { ...process.env, NO_TMUX: '1' },
     });
@@ -271,7 +271,7 @@ adoption, tags, interruption, retry, merge confirmation, inventory, graph output
 audit replay and corruption, plus execution-manifest errors. Provider responses
 are simulated; command parsing, SDK calls and domain transitions remain real.
 Electron uses the typed Runtime fixtures described in
-[Desktop architecture](apps/desktop/architecture.md#end-to-end-testing).
+[Desktop architecture](../../apps/desktop/architecture.md#end-to-end-testing).
 These suites do not run a live coding agent or mutate a remote repository.
 
 ## Live Agent Tests

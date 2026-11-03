@@ -61,7 +61,6 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 |---|---|---|
 | [afk-skill-craft](../../skills/afk-skill-craft/) | `/afk-skill-craft` | 创建、诊断与重构 Skills |
 | [reasoning-guard](../../skills/reasoning-guard/) | `/reasoning-guard` | 会话内识别推理退化 |
-| [reasoning-watchdog](../../skills/reasoning-watchdog/) | `/reasoning-watchdog` | 通过 Hooks 持续监控推理质量 |
 | [jev-agent-guard](../../skills/jev-agent-guard/) | `/jev-agent-guard` | 为编码 Agent 安装检查点 |
 
 ### 知识管理与工程治理
@@ -82,7 +81,6 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 - **`afk-do` 与 `afk-implement`**：`afk-do` 是任务分析和方法选择入口；`afk-implement` 负责具体实现流程。
 - **`afk-testing`、`afk-change-driven-testing` 与 `afk-qa`**：前者负责测试专业工作；第二个专注于变更范围内的存量流程补测且不改生产行为；`afk-qa` 是独立验收门禁。
 - **`afk-grill-me` 与 `afk-grill-me-context`**：前者从模糊需求开始访谈；后者基于已有材料找缺口并验证。
-- **`reasoning-guard` 与 `reasoning-watchdog`**：前者用于当前会话内的推理自检；后者通过 Hooks 持续运行。
 - **`afk-scheduler` 与 `afk-hand-off`**：前者按依赖关系调度工作项；后者保存可交接的会话状态。
 
 分类是导航层，不是要求每个任务依次调用所有 Skill。
@@ -118,7 +116,6 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 /afk-branch-migrate ─→ 跨分支代码迁移
 /md-to-pdf ──────────→ Markdown 转 PDF
 /reasoning-guard ────→ 会话内推理路径看护
-/reasoning-watchdog ──→ hooks 自动推理监控
 /afk-skill-craft ───→ Skill 创建 / 诊断 / 重构
 ```
 
@@ -876,44 +873,6 @@ tests/api-workflow/
 - 适合临时性推理监控需求
 
 **与其他 skills 协作：**
-- **对立** → **reasoning-watchdog** — 基于 hooks 的自动化版本，适用于需要持久监控的场景
-
----
-
-### 18. reasoning-watchdog
-
-**作用：** 基于 hooks 的自动推理路径看护 — 安装 PostToolUse/PreToolUse/SessionEnd hooks 到 Claude Code，自动检测并拦截推理退化
-
-**触发场景：**
-- reasoning-watchdog 系统已安装，需要检查状态或调优阈值
-- 需要持久化、自动化的推理监控
-
-**工作流程：**
-1. **安装** — `npm run install` 注册 hooks 到 `~/.claude/settings.json`
-2. **自动检测** — PostToolUse hook 监控重复操作、token 燃烧等信号
-3. **拦截** — PreToolUse hook 注入纠正提示并阻止下一步操作
-4. **清理** — SessionEnd hook 清理会话状态文件
-
-**架构：**
-```
-Claude Code session
-  └── PostToolUse hook → 检测错误信号
-  └── PreToolUse hook  → 注入纠正提示 + 阻止下一步
-  └── SessionEnd hook  → 清理状态文件
-```
-
-**设计决策：**
-
-**为什么使用 hooks 而非会话内监控？**
-- 持久化安装，每次启动自动生效
-- 无需人工干预，适合长期使用
-
-**与 reasoning-guard 的区别：**
-- reasoning-guard：会话内，无背景进程，临时使用
-- reasoning-watchdog：hooks 安装，后台自动运行，持久化
-
-**与其他 skills 协作：**
-- **对立** → **reasoning-guard** — 会话内版本，适用于临时监控
 
 ---
 
@@ -933,7 +892,6 @@ Claude Code session
 - **afk-scheduler** — 后台调度
 - **md-to-pdf** — 文档转换
 - **reasoning-guard** — 推理路径看护
-- **reasoning-watchdog** — 自动推理监控
 - **afk-skill-craft** — Skill 创建/诊断/重构
 
 ### 2. 明确触发条件

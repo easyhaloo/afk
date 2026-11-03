@@ -1,0 +1,69 @@
+// AFK runtime and process topology
+direction right
+colorMode pastel
+styleMode shadow
+typeface clean
+wrap on
+
+"CLI 执行进程" [color: "#EAF1FC"] {
+  CLI_Command [label: "afk run / execute / qa / loop", icon: terminal, color: "#3977C8"]
+  CLI_Composition [label: "CLI Composition Root", icon: boxes, color: "#3977C8"]
+  CLI_Runtime [label: "Shared Runtime", icon: server, color: "#245EAE"]
+}
+
+"Desktop 应用进程" [color: "#EAF5F2"] {
+  Renderer [label: "React Renderer", icon: monitor, color: "#27877A"]
+  Preload [label: "Preload Fixed API", icon: shield-check, color: "#27877A"]
+  Main [label: "Electron Main + IPC Handlers", icon: server, color: "#27877A"]
+  Main_Services [label: "Backlog / Workspace / Runtime Services", icon: boxes, color: "#27877A"]
+  Detached_Worker [label: "Detached Node Worker", icon: cpu, color: "#3977C8"]
+}
+
+"共享执行运行时" [color: "#EAF0F8"] {
+  Execute_Work_Item [label: "executeWorkItem", icon: workflow, color: "#3977C8"]
+  Workflow_Runner [label: "WorkflowRunner / PlanExecutor", icon: workflow, color: "#3977C8"]
+  QA_Runner [label: "QARunner", icon: shield-check, color: "#C58A38"]
+  Agent_Runtime [label: "Agent Provider Registry", icon: bot, color: "#8060B5"]
+  Sandbox [label: "Sandbox Provider", icon: container, color: "#C58A38"]
+}
+
+"外部执行环境" [color: "#F2EDFA"] {
+  Agent_Process [label: "Claude / Codex / Cursor / OpenCode / Pi / Copilot", icon: terminal, color: "#8060B5"]
+  Local_Sandbox [label: "Local Worktree + tmux", icon: folders, color: "#64748B"]
+  Container_Sandbox [label: "Docker / Podman", icon: boxes, color: "#C58A38"]
+  Git_Provider [label: "GitHub / GitLab APIs", icon: github, color: "#64748B"]
+}
+
+"本地状态与证据" [color: "#F1F4F8"] {
+  User_Config [label: "~/.afk/config.yml + tracker index", icon: file-text, color: "#64748B"]
+  Runtime_Data [label: "~/.afk/workspaces/... runtime / budget / events", icon: database, color: "#64748B"]
+  Worktree_Data [label: "Worktree-local Manifest / Execution Journal", icon: folder, color: "#64748B"]
+  Observe [label: "afk observe / TUI / Desktop Timeline", icon: activity, color: "#3977C8"]
+}
+
+CLI_Command > CLI_Composition > CLI_Runtime
+CLI_Runtime > Execute_Work_Item
+Renderer > Preload > Main > Main_Services
+Main_Services > Runtime_Data
+Main_Services > Detached_Worker
+Detached_Worker > Execute_Work_Item
+Execute_Work_Item > Workflow_Runner
+Workflow_Runner > QA_Runner
+Workflow_Runner > Agent_Runtime
+Agent_Runtime > Agent_Process
+Workflow_Runner > Sandbox
+Sandbox > Local_Sandbox
+Sandbox > Container_Sandbox
+Workflow_Runner > Git_Provider
+CLI_Runtime > User_Config
+CLI_Runtime > Runtime_Data
+Execute_Work_Item > Worktree_Data
+QA_Runner > Runtime_Data
+Runtime_Data > Observe
+Worktree_Data > Observe
+
+legend [position: bottom] {
+  [connection: ">", label: "Direct call / controlled execution"]
+  [color: "#8060B5", label: "External Agent process"]
+  [color: "#64748B", label: "Local state / infrastructure"]
+}

@@ -13,7 +13,74 @@ Skills are reusable workflow templates for Claude Code. Each skill encapsulates 
 3. **Verifiable Workflows** — Quality assurance through Signal mechanisms and AC checks
 4. **Methodology Integration** — Built-in best practices like TDD and DDD
 
-### Skills Invocation Relationships
+### Skills Categories
+
+These categories help users discover skills by goal. They do not define a mandatory execution order or change directories, trigger commands, or permissions. The actual workflow depends on the task, each skill's trigger conditions, and the collaboration relationships below.
+
+### Requirements & Product Planning
+| Skill | Trigger | Description |
+|---|---|---|
+| [afk-grill-me](../../skills/afk-grill-me/) | `/afk-grill-me` | Requirements interview |
+| [afk-grill-me-context](../../skills/afk-grill-me-context/) | `/afk-grill-me-context` | Clarify gaps in existing context |
+| [afk-to-prd](../../skills/afk-to-prd/) | `/afk-to-prd` | Create and publish an approved PRD |
+| [afk-to-issues](../../skills/afk-to-issues/) | `/afk-to-issues` | Decompose requirements into backlog work items |
+
+### Development & Technical Exploration
+| Skill | Trigger | Description |
+|---|---|---|
+| [afk-do](../../skills/afk-do/) | `/afk-do` | Task analysis and development-workflow entry point |
+| [afk-research](../../skills/afk-research/) | `/afk-research` | Investigate existing implementation and approaches |
+| [afk-prototype](../../skills/afk-prototype/) | `/afk-prototype` | Validate technical feasibility |
+| [afk-implement](../../skills/afk-implement/) | `/afk-implement` | Execute implementation workflow |
+| [afk-diagnose](../../skills/afk-diagnose/) | `/afk-diagnose` | Diagnose reproducible failures |
+| [afk-branch-migrate](../../skills/afk-branch-migrate/) | `/afk-branch-migrate` | Migrate changes across divergent branches |
+| [afk-llm-dev-guide](../../skills/afk-llm-dev-guide/) | `/afk-llm-dev-guide` | LLM architecture and context engineering |
+
+### Testing & Quality Assurance
+| Skill | Trigger | Description |
+|---|---|---|
+| [afk-testing](../../skills/afk-testing/) | `/afk-testing` | Test design, execution, diagnosis, and effectiveness review |
+| [afk-change-driven-testing](../../skills/afk-change-driven-testing/) | `/afk-change-driven-testing` | Focused regression tests for changed legacy flows |
+| [afk-qa](../../skills/afk-qa/) | `/afk-qa` | Independent acceptance verification |
+| [api-workflow](../../skills/api-workflow/) | `/api-workflow` | Multi-step API and browser-hybrid testing |
+
+### Orchestration & Session Continuity
+| Skill | Trigger | Description |
+|---|---|---|
+| [afk-scheduler](../../skills/afk-scheduler/) | `/afk-scheduler` | Schedule work items by dependencies |
+| [afk-hand-off](../../skills/afk-hand-off/) | `/afk-hand-off` | Preserve progress, decisions, blockers, and next steps |
+| [session-time-analysis](../../skills/session-time-analysis/) | `/session-time-analysis` | Analyze session time distribution and bottlenecks |
+
+### Agent Engineering & Reasoning Governance
+| Skill | Trigger | Description |
+|---|---|---|
+| [afk-skill-craft](../../skills/afk-skill-craft/) | `/afk-skill-craft` | Create, diagnose, and refactor skills |
+| [reasoning-guard](../../skills/reasoning-guard/) | `/reasoning-guard` | Detect reasoning degradation in-session |
+| [reasoning-watchdog](../../skills/reasoning-watchdog/) | `/reasoning-watchdog` | Persistent reasoning monitoring through hooks |
+| [jev-agent-guard](../../skills/jev-agent-guard/) | `/jev-agent-guard` | Install checkpoints for coding agents |
+
+### Knowledge & Engineering Governance
+| Skill | Trigger | Description |
+|---|---|---|
+| [wiki](../../skills/wiki/) | `/wiki` | Search, read, ingest, and lint project knowledge |
+| [software-complexity-governance](../../skills/software-complexity-governance/) | `/software-complexity-governance` | Assess complexity, coupling, and technical debt |
+
+### Documentation & Format Conversion
+| Skill | Trigger | Description |
+|---|---|---|
+| [md-to-pdf](../../skills/md-to-pdf/) | `/md-to-pdf` | Export Markdown documents to PDF |
+
+### Important Responsibility Boundaries
+
+- **`afk-do` vs. `afk-implement`**: `afk-do` is the task-analysis and methodology-selection entry point; `afk-implement` executes the implementation workflow.
+- **`afk-testing`, `afk-change-driven-testing`, and `afk-qa`**: the first handles specialist testing work; the second adds focused tests for changed legacy flows without changing production behavior; `afk-qa` is the independent acceptance gate.
+- **`afk-grill-me` vs. `afk-grill-me-context`**: the first interviews from an ambiguous request; the second finds and validates gaps in existing materials.
+- **`reasoning-guard` vs. `reasoning-watchdog`**: the first checks reasoning within the current session; the second runs persistently through hooks.
+- **`afk-scheduler` vs. `afk-hand-off`**: the first schedules work items by dependencies; the second preserves state for a safe handoff.
+
+Categories are for navigation; they do not require every task to invoke every skill.
+
+## Skills Invocation Relationships
 
 ```
 User Request

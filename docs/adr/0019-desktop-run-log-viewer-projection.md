@@ -300,7 +300,7 @@ remain readable and cannot be retroactively turned into live interactive session
 
 ## Related
 
-- [Execution identity and lifecycle](../architecture/overview.md#work-item-and-execution-identity)
+- [Execution identity and lifecycle](../architecture/overview.md#work-item-identity-and-relationships)
 - [Execution environment design](../architecture/execution.md)
 - [Desktop architecture](apps/desktop/architecture.md)
 - [Desktop design system](../architecture/design-system.md)

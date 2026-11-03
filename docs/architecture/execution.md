@@ -1,6 +1,6 @@
 # AFK Execution Architecture
 
-This document describes the **current implementation**, not an aspirational multi-agent execution blueprint. For the complete state and evidence contract, see [Architecture Overview](overview.md) and [Full Workflow & E2E Architecture](full-workflow-e2e-architecture.md).
+This document describes the **current implementation**, not an aspirational multi-agent execution blueprint. For the system boundary and sources of truth, see [Architecture Overview](overview.md); for the complete execution and evidence path, see [Full Workflow & E2E Architecture](full-workflow-e2e-architecture.md).
 
 ## System boundary
 
@@ -38,7 +38,7 @@ The command registry in `apps/cli/src/command-registry.ts` is the source of trut
 - Repository checkouts live under the canonical execution workspace; the caller's current directory does not redefine the canonical execution root.
 - Agent completion signals and QA artifact manifests are execution-local protocol files, not general configuration or lifecycle-state stores.
 
-See [Architecture Overview — Execution and system paths](overview.md#execution-and-system-paths) for the exact path and resolution rules.
+These paths describe distinct storage responsibilities. Consult the current implementation and [Full Workflow & E2E Architecture](full-workflow-e2e-architecture.md) for detailed resolution behavior; do not infer exact runtime paths from this summary.
 
 ## Managed lifecycle
 

@@ -13,7 +13,6 @@
 | `architecture/blueprints/` | Contained completed implementation blueprints, superseded directory proposals, and a naming changelog tied to a completed refactor | Removed the directory contents; current package structure and decisions belong in the canonical architecture overview, source, tests, and ADRs |
 | `research/` | Mixed AFK-relevant but dated CLI comparison with unrelated one-off investigations, speculative research, obsolete observability survey, and a duplicate HTML export | Retained only the bilingual Agent CLI comparison; removed unrelated/one-off material and duplicate formats |
 | `docs/index.md` | Navigation advertised obsolete blueprint and research links, removed PRDs, and omitted current entry points and ADR 0020 | Updated navigation to link only to retained, maintained material |
-| `superpowers/plans/2026-10-20-outdated-docs-cleanup-plan.md` | Its inventory and migration assumptions are tied to an older baseline | Marked as a historical plan; do not treat its counts or branch assumptions as current |
 
 ## Canonical sources
 

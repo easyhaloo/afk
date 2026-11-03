@@ -147,7 +147,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 4. 调用 `QARunner`，写入 `qa.started`，根据 QA 结果写入 `qa.passed` 或 `qa.failed`。
 5. QA PASS 时提交 QA 分支、push、创建或复用 Change Request，并校验变更与 work item 的关联。
 6. backlog 留在 `merge_ready` 并打开人工 gate；AFK 不自行合并，`done` 由人合并后经审计验证产生。
-7. QA FAIL 持久化递增的 rework attempt，并 supersede 旧 active 记录；低于 `maxQaReworkAttempts`（默认 3）时回到 `rework` + `afk`，达到上限时进入 `blocked` + `hitl` 且不再返回 rework。后续 FAIL 保留到限记录，不会重新开启自动返工；不可恢复的错误也进入 `blocked`。边界及配置见 [Backlog 生命周期](overview.zh.md#backlog-生命周期)。
+7. QA FAIL 持久化递增的 rework attempt，并 supersede 旧 active 记录；低于 `maxQaReworkAttempts`（默认 3）时回到 `rework` + `afk`，达到上限时进入 `blocked` + `hitl` 且不再返回 rework。后续 FAIL 保留到限记录，不会重新开启自动返工；不可恢复的错误也进入 `blocked`。边界及配置见 [Backlog 生命周期](overview.zh.md#生命周期与人工关卡)。
 
 返回值的 `status` 是执行尝试的结果：`merge_ready`、`done`、`rework`、`blocked` 或 `not_claimed`。它不能直接替换 Provider 的 backlog ID 或生命周期状态。
 

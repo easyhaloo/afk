@@ -141,7 +141,7 @@ See [Full Workflow & E2E Architecture](docs/architecture/full-workflow-e2e-archi
 
 ## Skills（Claude Code）
 
-Skills 按使用目的进行逻辑分类，目录与触发命令保持原样。需要查看职责边界、工作流程和协作关系时，请阅读 [Skills Guide](docs/guides/skills.md)。
+Skills are grouped by purpose; their directories and trigger commands remain unchanged. For role boundaries, workflows, and collaboration patterns, see the [Skills Guide](docs/guides/skills.md).
 
 ### Requirements & Product Planning
 

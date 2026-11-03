@@ -1,8 +1,9 @@
 # AFK Native Graph Engine：以 TypeScript 内建 Archify 式可验证工作流图能力
 
 **作者：Manus AI**  
-**状态：架构蓝图，建议进入 RFC**  
-**目标：以 AFK 自有 TypeScript 代码实现工作流图的配置、布局、路由、验证与渲染，不把 Archify CLI 作为产品运行时依赖。**
+**状态：已采纳并实现**  
+**实现：`@afk/workflow-graph`（`packages/workflow-graph`）。本文保留设计背景与原始目标；当前实现行为、包边界和约束以 [Architecture Overview](../overview.md) 与源码为准。  
+**原始目标：以 AFK 自有 TypeScript 代码实现工作流图的配置、布局、路由、验证与渲染，不把 Archify CLI 作为产品运行时依赖。**
 
 ## 结论
 

@@ -1,0 +1,96 @@
+// AFK system architecture — high-level view
+// Source of truth: current repository implementation and architecture docs.
+direction right
+colorMode pastel
+styleMode shadow
+typeface clean
+wrap on
+
+"产品入口" [color: "#DCEBFA"] {
+  CLI [label: "AFK CLI + TUI", icon: terminal, color: "#3977C8"]
+  Desktop_Renderer [label: "Desktop Renderer", icon: monitor, color: "#27877A"]
+  Desktop_Main [label: "Electron Main + IPC", icon: server, color: "#27877A"]
+  Desktop_Worker [label: "Detached Runtime Worker", icon: cpu, color: "#27877A"]
+  Agent_Skills [label: "Agent Skills / Plugin", icon: puzzle, color: "#8060B5"]
+}
+
+"共享 TypeScript Workspace" [color: "#EAF0F8"] {
+  Core [label: "Core · @afk/core", icon: boxes, color: "#27877A"]
+  Application [label: "Application · @afk/application", icon: layers, color: "#3977C8"]
+  Runtime [label: "Runtime · @afk/runtime", icon: server, color: "#245EAE"]
+  Workflow_Graph [label: "Workflow Graph · @afk/workflow-graph", icon: workflow, color: "#8060B5"]
+}
+
+"Runtime 内部结构" [color: "#EAF0F8"] {
+  Domain [label: "Domain：Work Item / Backlog / Agent / Template", icon: network, color: "#27877A"]
+  Application_Services [label: "Application Services：Runner / Workflow / QA / Loop", icon: workflow, color: "#3977C8"]
+  Infrastructure [label: "Infrastructure：Provider / Git / Sandbox / Storage", icon: server, color: "#64748B"]
+}
+
+"可替换执行适配器" [color: "#F2EDFA"] {
+  Tracker_Providers [label: "Backlog / Branch / Change Provider", icon: git-branch, color: "#0B8291"]
+  Agent_Providers [label: "Claude Code / Codex / Cursor / OpenCode / Pi / Copilot", icon: bot, color: "#8060B5"]
+  Sandbox_Providers [label: "Local / Docker / Podman", icon: container, color: "#C58A38"]
+  Workspace [label: "Git Branch / Worktree / Multi-repository", icon: folders, color: "#64748B"]
+}
+
+"外部系统" [color: "#F1F4F8"] {
+  GitHub_GitLab [label: "GitHub / GitLab", icon: github, color: "#64748B"]
+  Git_Remotes [label: "Git Repositories", icon: git, color: "#64748B"]
+  Agent_CLIs [label: "External Coding Agent Processes", icon: terminal, color: "#8060B5"]
+  Container_Runtime [label: "Docker / Podman Runtime", icon: boxes, color: "#C58A38"]
+  Human [label: "Operator / Human Reviewer", icon: users, color: "#C58A38"]
+}
+
+"本地审计与观察" [color: "#EAF5F2"] {
+  Config_Inventory [label: "~/.afk Config / Inventory", icon: database, color: "#64748B"]
+  Runtime_State [label: "Runtime State / Budget / Locks", icon: database, color: "#64748B"]
+  Execution_Journal [label: "Workspace Execution Journal", icon: file-text, color: "#64748B"]
+  Audit_Events [label: "Append-only JSONL Events", icon: activity, color: "#27877A"]
+  Observe [label: "afk observe / TUI / Desktop Run Center", icon: chart-no-axes-combined, color: "#3977C8"]
+}
+
+CLI > Runtime: 命令与用例调用
+Desktop_Renderer > Desktop_Main: typed Preload IPC
+Desktop_Main > Application: 查询与管理用例
+Desktop_Main > Desktop_Worker: 启动独立执行 Worker
+Desktop_Worker > Runtime: 调用 executeWorkItem
+CLI > Application: 共享用例
+CLI > Core: 领域契约
+Desktop_Main > Core: 领域契约
+Runtime > Application: 共享应用用例
+Runtime > Core: 核心模型与策略
+Runtime > Workflow_Graph: 工作流图投影与校验
+
+Runtime > Domain: 领域规则
+Runtime > Application_Services: 执行编排
+Runtime > Infrastructure: 端口适配与副作用
+Infrastructure > Tracker_Providers: 工单与变更接口
+Infrastructure > Agent_Providers: Agent 执行接口
+Infrastructure > Sandbox_Providers: 环境隔离接口
+Infrastructure > Workspace: 工作区准备
+
+Tracker_Providers > GitHub_GitLab: API
+Workspace > Git_Remotes: Git 操作
+Agent_Providers > Agent_CLIs: 启动 / 控制 / 会话
+Sandbox_Providers > Container_Runtime: 容器执行
+Human <> GitHub_GitLab: 审核 / 合并
+
+Runtime > Config_Inventory: 配置与索引
+Runtime > Runtime_State: 状态 / 预算 / 锁
+Runtime > Execution_Journal: 执行记录
+Runtime > Audit_Events: 审计事件
+Audit_Events > Observe: 只读观察
+Runtime_State > Observe: 诊断投影
+Config_Inventory > Observe: 查询投影
+
+Agent_Skills --> Agent_CLIs: 指导 Agent 工作方式
+Agent_Skills --> CLI: 需求与研发工作流入口
+
+legend [position: bottom] {
+  [color: "#3977C8", label: "产品入口 / 应用服务"]
+  [color: "#27877A", label: "Core / 领域契约"]
+  [color: "#8060B5", label: "Agent / Skills"]
+  [color: "#C58A38", label: "Sandbox / 人工门禁"]
+  [connection: "-->", label: "事件或辅助关联"]
+}

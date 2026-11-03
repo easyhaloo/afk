@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { BacklogPage, getBacklogPrimaryAction } from "../src/features/backlog/BacklogPage.js";
+import { evaluateRunnability, RUNNABLE_STATES } from "@afk/runtime/domain/backlog/runnability";
 import { workflowNodeDisplayLabel } from "../src/main.js";
 import {
   readBacklogCache,
@@ -14,6 +15,7 @@ import {
   backlogStateLabel,
   filterBacklogItems,
 } from "../src/features/backlog/backlog-filter.js";
+import { BACKLOG_STATES } from "../shared/backlog-contract.js";
 import type { BacklogItem } from "../shared/backlog-contract.js";
 import type { BacklogRunSummary } from "../shared/backlog-contract.js";
 
@@ -452,6 +454,49 @@ describe("BacklogPage execution", () => {
     expect(getBacklogPrimaryAction({ ...ready, state: "merge_ready", executionMode: "hitl" })).toBe("confirm-merge");
     expect(getBacklogPrimaryAction({ ...ready, parentId: "parent-1", state: "merge_ready", executionMode: "hitl" })).toBe("view");
     expect(getBacklogPrimaryAction({ ...ready, state: "done", executionMode: "hitl" })).toBe("view-result");
+  });
+
+  it("keeps Desktop start actions aligned with Runtime's canonical runnable states", () => {
+    const ready = items[0];
+    expect(RUNNABLE_STATES).toEqual(["ready", "rework"]);
+
+    for (const state of BACKLOG_STATES) {
+      const item: BacklogItem = {
+        ...ready,
+        state,
+        executionMode: "afk",
+        executionEligible: true,
+      };
+      const runnability = evaluateRunnability({
+        container: item.kind === "prd",
+        state: item.state,
+        executionMode: item.executionMode,
+        executionEligible: item.executionEligible,
+        hasChildren: false,
+        dependencies: [],
+      });
+
+      expect(getBacklogPrimaryAction(item) === "start").toBe(runnability.runnable);
+    }
+  });
+
+  it("does not offer start when the Provider marks a ready AFK item ineligible", () => {
+    const item: BacklogItem = {
+      ...items[0],
+      managed: false,
+      executionEligible: false,
+    };
+    const runnability = evaluateRunnability({
+      container: false,
+      state: item.state,
+      executionMode: item.executionMode,
+      executionEligible: item.executionEligible,
+      hasChildren: false,
+      dependencies: [],
+    });
+
+    expect(runnability).toMatchObject({ runnable: false, reason: "not_managed" });
+    expect(getBacklogPrimaryAction(item)).toBe("view");
   });
 
   it("labels custom qa nodes as review agents without changing their type", () => {

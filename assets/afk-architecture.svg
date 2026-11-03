@@ -1,315 +1,77 @@
-<svg width="2400" height="1500" aria-label="AFK system architecture" viewBox="0 0 2400 1500" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1500" viewBox="0 0 2400 1500" role="img" aria-label="AFK system architecture">
 <defs>
-<linearGradient id="i" y2="1">
-<stop stop-color="#020713" offset="0"/>
-<stop stop-color="#04152A" offset=".48"/>
-<stop stop-color="#020916" offset="1"/>
-</linearGradient>
-<radialGradient id="h">
-<stop stop-color="#0B4480" stop-opacity=".55" offset="0"/>
-<stop stop-color="#07305D" stop-opacity=".2" offset=".62"/>
-<stop stop-color="#031326" stop-opacity="0" offset="1"/>
-</radialGradient>
-<linearGradient id="f" y2="1">
-<stop stop-color="#08284A" offset="0"/>
-<stop stop-color="#03152A" offset=".55"/>
-<stop stop-color="#061C35" offset="1"/>
-</linearGradient>
-<pattern id="g" width="42" height="42" patternUnits="userSpaceOnUse">
-<path d="m42 0h-42v42" fill="none" opacity=".14" stroke="#2C9DDA" stroke-width=".8"/>
-<circle cx="1" cy="1" r="1.2" fill="#45DFFF" opacity=".2"/>
-</pattern>
-<filter id="a" x="-250%" y="-250%" width="600%" height="600%">
-<feGaussianBlur result="b" stdDeviation="5"/>
-<feMerge>
-<feMergeNode in="b"/>
-<feMergeNode in="SourceGraphic"/>
-</feMerge>
-</filter>
-<filter id="c" x="-30%" y="-30%" width="160%" height="160%">
-<feGaussianBlur result="b" stdDeviation="4"/>
-<feMerge>
-<feMergeNode in="b"/>
-<feMergeNode in="SourceGraphic"/>
-</feMerge>
-</filter>
-<filter id="e" x="-15%" y="-20%" width="130%" height="140%">
-<feGaussianBlur in="SourceAlpha" result="b" stdDeviation="5"/>
-<feFlood flood-color="#168DFF" flood-opacity=".13"/>
-<feComposite in2="b" operator="in"/>
-<feMerge>
-<feMergeNode/>
-<feMergeNode in="SourceGraphic"/>
-</feMerge>
-</filter>
-<filter id="d" x="-15%" y="-20%" width="130%" height="140%">
-<feGaussianBlur in="SourceAlpha" result="b" stdDeviation="3"/>
-<feFlood flood-color="#148BFF" flood-opacity=".08"/>
-<feComposite in2="b" operator="in"/>
-<feMerge>
-<feMergeNode/>
-<feMergeNode in="SourceGraphic"/>
-</feMerge>
-</filter>
-<marker id="b" markerHeight="8" markerWidth="8" orient="auto" refX="9" refY="5" viewBox="0 0 10 10">
-<path d="m0 0 10 5-10 5z" fill="#42DFFF"/>
-</marker>
+<linearGradient id="bg" x2="0" y2="1"><stop stop-color="#020713"/><stop offset=".5" stop-color="#061A30"/><stop offset="1" stop-color="#020916"/></linearGradient>
+<radialGradient id="hub"><stop stop-color="#0A4D88" stop-opacity=".6"/><stop offset="1" stop-color="#031326" stop-opacity="0"/></radialGradient>
+<pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#2C9DDA" stroke-opacity=".16"/><circle cx="1" cy="1" r="1.2" fill="#45DFFF" opacity=".2"/></pattern>
+<filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#42DFFF"/></marker>
 </defs>
-<rect width="2400" height="1500" fill="url(#i)"/>
-<rect width="2400" height="1500" fill="url(#g)"/>
-<ellipse cx="1180" cy="780" rx="620" ry="520" fill="url(#h)"/>
-<text x="58" y="48" fill="#42DFFF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="16" font-weight="700" letter-spacing="2">AFK / AUTONOMOUS DEVELOPMENT PLATFORM</text>
-<text x="58" y="96" fill="#E9F5FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="36" font-weight="760">AFK Autonomous Development Platform · System Architecture</text>
-<text x="2340" y="53" fill="#45E5C7" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="15" font-weight="700" text-anchor="end">SOURCE VERIFIED / MAIN</text>
-<text x="2340" y="84" fill="#9CB8CF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="14" font-weight="500" text-anchor="end">REV 5c4cd7b · 2026-11-03</text>
-<path d="m58 118h2282" fill="none" opacity=".7" stroke="#1B5278" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"/>
-<path d="m380 490v25h440v140h184" fill="none" filter="url(#c)" marker-end="url(#b)" opacity=".95" stroke="#42DFFF" stroke-dasharray="10 8" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
-<rect x="570" y="497" width="245" height="34" rx="11" fill="#041326" stroke="#42DFFF" stroke-width="1.1"/>
-<text x="692.5" y="520" fill="#42DFFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="650" text-anchor="middle">CLI / Desktop → runtime</text>
-<path d="m705 850h299" fill="none" filter="url(#c)" marker-end="url(#b)" opacity=".95" stroke="#36A9FF" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
-<rect x="765" y="815" width="180" height="34" rx="11" fill="#041326" stroke="#36A9FF" stroke-width="1.1"/>
-<text x="855.0" y="838" fill="#36A9FF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="650" text-anchor="middle">@afk/runtime</text>
-<path d="m1355 650h150v-195h175" fill="none" filter="url(#c)" marker-end="url(#b)" opacity=".9" stroke="#45E5C7" stroke-dasharray="9 8" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
-<rect x="1395" y="500" width="185" height="34" rx="11" fill="#041326" stroke="#45E5C7" stroke-width="1.1"/>
-<text x="1487.5" y="523" fill="#45E5C7" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="650" text-anchor="middle">provider adapters</text>
-<path d="m1355 815h185" fill="none" filter="url(#c)" marker-end="url(#b)" opacity=".95" stroke="#42DFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
-<rect x="1370" y="790" width="160" height="34" rx="11" fill="#041326" stroke="#42DFFF" stroke-width="1.1"/>
-<text x="1450.0" y="813" fill="#42DFFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="650" text-anchor="middle">executeWorkItem</text>
-<path d="m1180 955v125" fill="none" filter="url(#c)" marker-end="url(#b)" opacity=".9" stroke="#45E5C7" stroke-dasharray="8 8" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
-<rect x="1205" y="1e3" width="215" height="34" rx="11" fill="#041326" stroke="#45E5C7" stroke-width="1.1"/>
-<text x="1312.5" y="1024" fill="#45E5C7" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="650" text-anchor="middle">execution evidence</text>
-<polygon points="75 150 677 150 705 174 705 468 683 490 79 490 55 466 55 172" fill="#041326" fill-opacity=".96" filter="url(#e)" stroke="#36A9FF" stroke-width="2.6"/>
-<polygon points="83 159 671 159 696 184 696 458 674 481 88 481 64 457 64 183" fill="none" opacity=".25" stroke="#36A9FF"/>
-<rect x="79" y="170" width="48" height="42" rx="10" fill="#36A9FF" filter="url(#a)" stroke-width="0"/>
-<text x="103" y="199" fill="#041426" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="22" font-weight="800" text-anchor="middle">01</text>
-<text x="146" y="201" fill="#36A9FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="27" font-weight="720">Product Entry</text>
-<circle cx="148" cy="228" r="3" fill="#36A9FF" filter="url(#a)"/>
-<circle cx="166" cy="228" r="3" fill="#36A9FF" filter="url(#a)"/>
-<circle cx="184" cy="228" r="3" fill="#36A9FF" filter="url(#a)"/>
-<path d="m215 228h95" fill="none" opacity=".48" stroke="#36A9FF" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-<rect x="82" y="255" width="190" height="202" rx="15" fill="#061A30" filter="url(#d)" stroke="#A98BFF" stroke-width="1.7"/>
-<rect x="98" y="271" width="46" height="44" rx="9" fill="#041426" stroke="#A98BFF" stroke-width="1.4"/>
-<path d="m107 282q9-5 14 2 6-7 14-2v25q-9-4-14 2-5-6-14-2zm14 2v25" fill="none" stroke="#A98BFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-<text x="152" y="298" fill="#A98BFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="700">Agent Skills</text>
-<text x="102" y="333" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">afk-implement → afk</text>
-<text x="102" y="354" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">run</text>
-<text x="102" y="379" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">afk-testing · PRD ·</text>
-<text x="102" y="400" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Wiki</text>
-<rect x="285" y="255" width="190" height="202" rx="15" fill="#061A30" filter="url(#d)" stroke="#42DFFF" stroke-width="1.7"/>
-<rect x="301" y="271" width="46" height="44" rx="9" fill="#041426" stroke="#42DFFF" stroke-width="1.4"/>
-<path d="m313 284 9 8-9 8m13 0h12" fill="none" stroke="#42DFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6"/>
-<text x="355" y="298" fill="#42DFFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="700">AFK CLI + TUI</text>
-<text x="305" y="333" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Command Registry</text>
-<text x="305" y="357" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">run · execute · loop</text>
-<text x="305" y="381" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">reconcile · status</text>
-<rect x="488" y="255" width="190" height="202" rx="15" fill="#061A30" filter="url(#d)" stroke="#45E5C7" stroke-width="1.7"/>
-<rect x="504" y="271" width="46" height="44" rx="9" fill="#041426" stroke="#45E5C7" stroke-width="1.4"/>
-<rect x="513" y="280" width="28" height="20" rx="3" fill="none" stroke="#45E5C7" stroke-width="2"/>
-<path d="m527 300v7m-9 0h18" fill="none" stroke="#45E5C7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-<text x="558" y="298" fill="#45E5C7" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="700">AFK Desktop</text>
-<text x="508" y="357" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Trusted IPC · schema</text>
-<text x="508" y="381" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Detached execution</text>
-<text x="508" y="402" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">worker</text>
-<polygon points="1700 150 2312 150 2340 174 2340 468 2318 490 1704 490 1680 466 1680 172" fill="#041326" fill-opacity=".96" filter="url(#e)" stroke="#45E5C7" stroke-width="2.6"/>
-<polygon points="1708 159 2306 159 2331 184 2331 458 2309 481 1713 481 1689 457 1689 183" fill="none" opacity=".25" stroke="#45E5C7"/>
-<rect x="1704" y="170" width="48" height="42" rx="10" fill="#45E5C7" filter="url(#a)" stroke-width="0"/>
-<text x="1728" y="199" fill="#041426" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="22" font-weight="800" text-anchor="middle">03</text>
-<text x="1771" y="201" fill="#45E5C7" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="24" font-weight="720">Runtime Adapters &amp; Integrations</text>
-<circle cx="1773" cy="228" r="3" fill="#45E5C7" filter="url(#a)"/>
-<circle cx="1791" cy="228" r="3" fill="#45E5C7" filter="url(#a)"/>
-<circle cx="1809" cy="228" r="3" fill="#45E5C7" filter="url(#a)"/>
-<path d="m1840 228h95" fill="none" opacity=".48" stroke="#45E5C7" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-<rect x="1710" y="255" width="600" height="66" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.5"/>
-<text x="1732" y="286" fill="#36A9FF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="19" font-weight="700">Agent Provider Registry</text>
-<rect x="1710" y="332" width="600" height="66" rx="13" fill="#061A30" stroke="#45E5C7" stroke-width="1.5"/>
-<text x="1732" y="363" fill="#45E5C7" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="19" font-weight="700">Sandbox Providers</text>
-<rect x="1710" y="409" width="600" height="66" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.5"/>
-<text x="1732" y="440" fill="#A98BFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="19" font-weight="700">Tracker · Branch · Change</text>
-<polygon points="75 550 677 550 705 574 705 1e3 683 1e3 79 1e3 55 1e3 55 572" fill="#041326" fill-opacity=".96" filter="url(#e)" stroke="#36A9FF" stroke-width="2.6"/>
-<polygon points="83 559 671 559 696 584 696 993 674 1e3 88 1e3 64 992 64 583" fill="none" opacity=".25" stroke="#36A9FF"/>
-<rect x="79" y="570" width="48" height="42" rx="10" fill="#36A9FF" filter="url(#a)" stroke-width="0"/>
-<text x="103" y="599" fill="#041426" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="22" font-weight="800" text-anchor="middle">02</text>
-<text x="146" y="601" fill="#36A9FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="25" font-weight="720">Shared Code Packages</text>
-<circle cx="148" cy="628" r="3" fill="#36A9FF" filter="url(#a)"/>
-<circle cx="166" cy="628" r="3" fill="#36A9FF" filter="url(#a)"/>
-<circle cx="184" cy="628" r="3" fill="#36A9FF" filter="url(#a)"/>
-<path d="m215 628h95" fill="none" opacity=".48" stroke="#36A9FF" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-<rect x="83" y="660" width="278" height="142" rx="15" fill="#061A30" filter="url(#d)" stroke="#42DFFF" stroke-width="1.7"/>
-<rect x="99" y="676" width="46" height="44" rx="9" fill="#041426" stroke="#42DFFF" stroke-width="1.4"/>
-<path d="m122 684 14 8v16l-14 8-14-8v-16zm-14 8 14 8 14-8m-14 8v16" fill="none" stroke="#42DFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-<text x="153" y="703" fill="#42DFFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="700">Core</text>
-<text x="103" y="738" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">@afk/core · Model · Events</text>
-<text x="103" y="762" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Policy · Ports</text>
-<rect x="383" y="660" width="278" height="142" rx="15" fill="#061A30" filter="url(#d)" stroke="#36A9FF" stroke-width="1.7"/>
-<rect x="399" y="676" width="46" height="44" rx="9" fill="#041426" stroke="#36A9FF" stroke-width="1.4"/>
-<path d="m412 712v-25m0 9q0-8 10-8h13m-13 0v20q0 6 13 6" fill="none" stroke="#36A9FF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/>
-<text x="453" y="703" fill="#36A9FF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="700">Application</text>
-<text x="403" y="738" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">@afk/application</text>
-<text x="403" y="762" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Use Cases · Inventory · Queries</text>
-<rect x="83" y="820" width="278" height="142" rx="15" fill="#061A30" filter="url(#d)" stroke="#45E5C7" stroke-width="1.7"/>
-<rect x="99" y="836" width="46" height="44" rx="9" fill="#041426" stroke="#45E5C7" stroke-width="1.4"/>
-<ellipse cx="122" cy="851" rx="14" ry="6" fill="none" stroke="#45E5C7" stroke-width="2"/>
-<path d="m108 851v20q14 10 28 0v-20m-28 10q14 9 28 0" fill="none" stroke="#45E5C7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-<text x="153" y="863" fill="#45E5C7" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="700">Runtime</text>
-<text x="103" y="898" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">@afk/runtime</text>
-<text x="103" y="922" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">Workflow · Providers · Agent ·</text>
-<text x="103" y="943" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">QA</text>
-<rect x="383" y="820" width="278" height="142" rx="15" fill="#061A30" filter="url(#d)" stroke="#A98BFF" stroke-width="1.7"/>
-<rect x="399" y="836" width="46" height="44" rx="9" fill="#041426" stroke="#A98BFF" stroke-width="1.4"/>
-<path d="m422 844 14 8v16l-14 8-14-8v-16zm-14 8 14 8 14-8m-14 8v16" fill="none" stroke="#A98BFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-<text x="453" y="863" fill="#A98BFF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="19" font-weight="700">Workflow Graph</text>
-<text x="403" y="898" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">@afk/workflow-graph</text>
-<text x="403" y="922" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="450">IR · Projection · Layout · Routing</text>
-<text x="86" y="984" fill="#9CB8CF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="800">DEPENDENCIES</text>
-<text x="225" y="984" fill="#E9F5FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="550">Application → Core</text>
-<text x="86" y="1008" fill="#E9F5FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="550">Runtime → Application + Core + Workflow Graph</text>
-<polygon points="1560 550 2312 550 2340 574 2340 1e3 2318 1e3 1564 1e3 1540 1e3 1540 572" fill="#041326" fill-opacity=".96" filter="url(#e)" stroke="#A98BFF" stroke-width="2.6"/>
-<polygon points="1568 559 2306 559 2331 584 2331 993 2309 1e3 1573 1e3 1549 992 1549 583" fill="none" opacity=".25" stroke="#A98BFF"/>
-<rect x="1564" y="570" width="48" height="42" rx="10" fill="#A98BFF" filter="url(#a)" stroke-width="0"/>
-<text x="1588" y="599" fill="#041426" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="22" font-weight="800" text-anchor="middle">04</text>
-<text x="1631" y="601" fill="#A98BFF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="24" font-weight="720">Work Item Delivery Lifecycle</text>
-<circle cx="1633" cy="628" r="3" fill="#A98BFF" filter="url(#a)"/>
-<circle cx="1651" cy="628" r="3" fill="#A98BFF" filter="url(#a)"/>
-<circle cx="1669" cy="628" r="3" fill="#A98BFF" filter="url(#a)"/>
-<path d="m1700 628h95" fill="none" opacity=".48" stroke="#A98BFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-<rect x="1572" y="650" width="736" height="76" rx="13" fill="#071A31" stroke="#36A9FF" stroke-width="1.6"/>
-<text x="1592" y="680" fill="#36A9FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="14" font-weight="800">RUN</text>
-<text x="1660" y="680" fill="#E9F5FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="18" font-weight="650">afk run → runWorkflowCli → WorkflowRunner</text>
-<text x="1660" y="707" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="12" font-weight="450">Single work-item implementation path; not the managed delivery lifecycle</text>
-<text x="1574" y="770" fill="#A98BFF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="14" font-weight="800">MANAGED EXECUTION</text>
-<text x="1800" y="770" fill="#E9F5FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="15" font-weight="600">afk execute → executeWorkItem</text>
-<rect x="1572" y="798" width="137" height="145" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.6"/>
-<text x="1588" y="824" fill="#36A9FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">01</text>
-<text x="1640.5" y="861" fill="#E9F5FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="13.5" font-weight="700" text-anchor="middle">Eligibility &amp; Manifest</text>
-<text x="1640.5" y="895" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="11.5" font-weight="450" text-anchor="middle">Dependency checks</text>
-<text x="1640.5" y="913" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="450" text-anchor="middle">Manifest</text>
-<path d="m1710 870h9" fill="none" marker-end="url(#b)" opacity=".9" stroke="#36A9FF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
-<rect x="1721" y="798" width="137" height="145" rx="13" fill="#061A30" stroke="#42DFFF" stroke-width="1.6"/>
-<text x="1737" y="824" fill="#42DFFF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">02</text>
-<text x="1789.5" y="861" fill="#E9F5FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">Implementation</text>
-<text x="1789.5" y="895" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="450" text-anchor="middle">WorkflowRunner</text>
-<text x="1789.5" y="913" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="12" font-weight="450" text-anchor="middle">Agent execution</text>
-<path d="m1859 870h9" fill="none" marker-end="url(#b)" opacity=".9" stroke="#42DFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
-<rect x="1870" y="798" width="137" height="145" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.6"/>
-<text x="1886" y="824" fill="#A98BFF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">03</text>
-<text x="1938.5" y="861" fill="#E9F5FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">Independent QA</text>
-<text x="1938.5" y="895" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="450" text-anchor="middle">QARunner</text>
-<text x="1938.5" y="913" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="10" font-weight="450" text-anchor="middle">Independent verification</text>
-<path d="m2e3 870h9" fill="none" marker-end="url(#b)" opacity=".9" stroke="#A98BFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
-<rect x="2e3" y="798" width="137" height="145" rx="13" fill="#061A30" stroke="#45E5C7" stroke-width="1.6"/>
-<text x="2035" y="824" fill="#45E5C7" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">04</text>
-<text x="2087.5" y="861" fill="#E9F5FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">Publish PR/MR</text>
-<text x="2087.5" y="895" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="12" font-weight="450" text-anchor="middle">Linked issue</text>
-<text x="2087.5" y="913" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="10" font-weight="450" text-anchor="middle">Publication evidence</text>
-<path d="m2157 870h9" fill="none" marker-end="url(#b)" opacity=".9" stroke="#45E5C7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
-<rect x="2168" y="798" width="137" height="145" rx="13" fill="#061A30" stroke="#FFC65C" stroke-width="1.6"/>
-<text x="2184" y="824" fill="#FFC65C" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">05</text>
-<text x="2236.5" y="861" fill="#E9F5FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">Human merge</text>
-<text x="2236.5" y="895" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="10" font-weight="450" text-anchor="middle">reconcile verification</text>
-<text x="2236.5" y="913" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="450" text-anchor="middle">→ done</text>
-<text x="1575" y="981" fill="#FFC65C" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="13" font-weight="600">QA + publication → merge_ready; only a verified provider merge via reconcile becomes done.</text>
-<circle cx="1180" cy="780" r="196" fill="none" opacity=".2" stroke="#0875C7" stroke-width="1.2"/>
-<circle cx="1180" cy="780" r="181" fill="none" filter="url(#a)" opacity=".5" stroke="#42DFFF" stroke-width="3"/>
-<circle cx="1180" cy="780" r="168" fill="url(#f)" filter="url(#c)" stroke="#36A9FF" stroke-width="5"/>
-<path transform="translate(0,-35)" d="m1142 726 25-25 25 25m-25 25 25 25m-50 9h76" fill="none" filter="url(#c)" stroke="#42DFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
-<text x="1180" y="802" fill="#E9F5FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="29" font-weight="800" letter-spacing=".3" text-anchor="middle">AFK RUNTIME</text>
-<text x="1180" y="831" fill="#42DFFF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="16" font-weight="700" text-anchor="middle">Execution &amp; Workflow Runtime</text>
-<text x="1180" y="853" fill="#8FB0C8" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="500" text-anchor="middle">WorkflowRunner · executeWorkItem</text>
-<circle cx="1e3" cy="655" r="5" fill="#42DFFF" filter="url(#a)"/>
-<circle cx="1e3" cy="850" r="5" fill="#36A9FF" filter="url(#a)"/>
-<circle cx="1355" cy="650" r="5" fill="#45E5C7" filter="url(#a)"/>
-<circle cx="1355" cy="815" r="5" fill="#42DFFF" filter="url(#a)"/>
-<circle cx="1180" cy="955" r="5" fill="#45E5C7" filter="url(#a)"/>
-<polygon points="75 1080 2312 1080 2340 1104 2340 1378 2318 1400 79 1400 55 1376 55 1102" fill="#041326" fill-opacity=".96" filter="url(#e)" stroke="#45E5C7" stroke-width="2.6"/>
-<polygon points="83 1089 2306 1089 2331 1114 2331 1368 2309 1391 88 1391 64 1367 64 1113" fill="none" opacity=".25" stroke="#45E5C7"/>
-<rect x="79" y="1100" width="48" height="42" rx="10" fill="#45E5C7" filter="url(#a)" stroke-width="0"/>
-<text x="103" y="1129" fill="#041426" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="22" font-weight="800" text-anchor="middle">05</text>
-<text x="146" y="1131" fill="#45E5C7" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="24" font-weight="720">Runtime Evidence &amp; State Ownership</text>
-<circle cx="148" cy="1158" r="3" fill="#45E5C7" filter="url(#a)"/>
-<circle cx="166" cy="1158" r="3" fill="#45E5C7" filter="url(#a)"/>
-<circle cx="184" cy="1158" r="3" fill="#45E5C7" filter="url(#a)"/>
-<path d="m215 1158h95" fill="none" opacity=".48" stroke="#45E5C7" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-<rect x="86" y="1180" width="530" height="104" rx="13" fill="#061A30" stroke="#6EE7C2" stroke-width="1.5"/>
-<text x="108" y="1211" fill="#6EE7C2" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700">External Business Truth</text>
-<rect x="638" y="1180" width="530" height="104" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.5"/>
-<text x="660" y="1211" fill="#36A9FF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700">Workspace Execution Context</text>
-<text x="660" y="1237" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="450">Manifest · Execution Journal · worktree / task workspace</text>
-<rect x="1190" y="1180" width="530" height="104" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.5"/>
-<text x="1212" y="1211" fill="#A98BFF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700">Local Event Stream</text>
-<text x="1212" y="1237" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="450">JsonlEventStore · /.afk/events · append + fsync · chain integrity</text>
-<rect x="1742" y="1180" width="560" height="104" rx="13" fill="#061A30" stroke="#FFC65C" stroke-width="1.5"/>
-<text x="1764" y="1211" fill="#FFC65C" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700">Encrypted Evidence</text>
-<text x="1764" y="1237" fill="#9CB8CF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="450">LocalEncryptedEvidenceStore · /.afk/evidence</text>
-<text x="90" y="1338" fill="#6EE7C2" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">TRUTH</text>
-<text x="154" y="1338" fill="#E9F5FF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="500">Provider owns backlog / merge truth</text>
-<text x="790" y="1338" fill="#A98BFF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="13" font-weight="800">EVIDENCE</text>
-<text x="884" y="1338" fill="#E9F5FF" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="500">AFK owns local manifests journals events and evidence</text>
-<text x="2300" y="1338" fill="#FFC65C" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="14" font-weight="700" text-anchor="end">merge_ready ≠ done</text>
-<path d="m58 1438h2282" fill="none" opacity=".65" stroke="#1B5278" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2"/>
-<text x="58" y="1470" fill="#9CB8CF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="450">AFK ARCHITECTURE · EVIDENCE: package manifests entry points execution and provider adapters</text>
-<text x="2340" y="1470" fill="#9CB8CF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="450" text-anchor="end">easyhaloo/afk · 5c4cd7b</text>
-<svg x="1720" y="293" width="18" height="18" overflow="visible" viewBox="0 0 20 20">
-<path d="m11 18q-0.82 0-1.6-0.31a4.3 4.3 0 0 1-1.3-0.87 4 4 0 0 1-1.3 0.21 4 4 0 0 1-2-0.54 4.3 4.3 0 0 1-1.5-1.5 4 4 0 0 1-0.56-2.1q0-0.48 0.13-1a4.4 4.4 0 0 1-1-1.4 4.1 4.1 0 0 1 0.017-3.4 4.2 4.2 0 0 1 1.1-1.4 3.8 3.8 0 0 1 1.6-0.84 3.9 3.9 0 0 1 0.76-1.7q0.59-0.76 1.5-1.2a4 4 0 0 1 1.8-0.43q0.82 0 1.6 0.31 0.74 0.31 1.3 0.88a4 4 0 0 1 1.3-0.22q1.1 0 2 0.54a4.1 4.1 0 0 1 1.5 1.5q0.58 0.94 0.58 2.1 0 0.48-0.13 1 0.66 0.61 1 1.4 0.36 0.79 0.36 1.7 0 0.89-0.38 1.7a4.3 4.3 0 0 1-1.1 1.4 3.8 3.8 0 0 1-1.6 0.82 3.8 3.8 0 0 1-0.78 1.7 4.1 4.1 0 0 1-1.4 1.2 4 4 0 0 1-1.8 0.43m-4.1-2.1q0.82 0 1.4-0.35l3.1-1.8a0.36 0.36 0 0 0 0.16-0.31v-1.4l-4 2.3a0.67 0.67 0 0 1-0.73 0l-3.1-1.8a0.5 0.5 0 0 1-0.017 0.12v0.2q0 0.84 0.4 1.6 0.41 0.69 1.1 1.1a3.2 3.2 0 0 0 1.6 0.41m0.16-2.7a0.4 0.4 0 0 0 0.18 0.05q0.083 0 0.16-0.05l1.2-0.71-4-2.3a0.7 0.7 0 0 1-0.36-0.64v-3.6q-0.82 0.36-1.3 1.1a2.9 2.9 0 0 0-0.5 1.6q0 0.81 0.41 1.6 0.41 0.74 1.1 1.1zm3.9 3.7q0.88 0 1.6-0.4a3 3 0 0 0 1.5-2.6v-3.6a0.32 0.32 0 0 0-0.16-0.3l-1.3-0.73v4.6a0.7 0.7 0 0 1-0.36 0.64l-3.1 1.8a3 3 0 0 0 1.8 0.58m0.63-6v-2.2l-1.9-1.1-1.9 1.1v2.2l1.9 1.1zm-4.8-5.3a0.7 0.7 0 0 1 0.36-0.64l3.1-1.8a3 3 0 0 0-1.8-0.58q-0.87 0-1.6 0.4a3 3 0 0 0-1.1 1.1 3.1 3.1 0 0 0-0.4 1.6v3.5q0 0.2 0.16 0.31l1.2 0.73zm8.4 7.9q0.82-0.36 1.3-1.1 0.5-0.76 0.5-1.6a3.2 3.2 0 0 0-0.41-1.6q-0.41-0.74-1.1-1.1l-3.1-1.8q-0.099-0.065-0.18-0.049a0.3 0.3 0 0 0-0.16 0.05l-1.2 0.69 4 2.3a0.6 0.6 0 0 1 0.26 0.26 0.64 0.64 0 0 1 0.1 0.36zm-3.3-8.4a0.63 0.63 0 0 1 0.73 0l3.1 1.8v-0.3q0-0.79-0.4-1.5a2.9 2.9 0 0 0-1.1-1.2q-0.71-0.43-1.6-0.43-0.82 0-1.4 0.35l-3.1 1.8a0.36 0.36 0 0 0-0.16 0.31v1.4z" fill="#E9F5FF"/>
-</svg>
-<text x="1743" y="310" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="600">Codex</text>
-<svg x="1817" y="293" width="18" height="18" overflow="visible" viewBox="0 0 24 24">
-<path d="m4.7 16 4.7-2.6 0.079-0.23-0.079-0.13h-0.23l-3.5-0.12-2.3-0.097-2.3-0.12-0.57-0.12-0.53-0.7 0.055-0.35 0.48-0.32 6.1 0.42 2.4 0.26h0.39l0.055-0.16-0.13-0.097-0.1-0.097-4.9-3.3-2.1-1.5-0.36-0.46-0.16-1 0.66-0.72 0.88 0.061 0.22 0.061 0.89 0.69 4.4 3.3 0.36 0.3 0.15-0.1 0.018-0.073-0.16-0.27-1.4-2.4-1.4-2.5-0.64-1-0.17-0.62c-0.061-0.26-0.1-0.47-0.1-0.73l0.75-1 0.41-0.13 1 0.13 0.42 0.36 0.62 1.4 1 2.2 1.6 3 0.46 0.9 0.24 0.83 0.091 0.26h0.16v-0.15l0.13-1.7 0.24-2.1 0.23-2.7 0.079-0.76 0.38-0.91 0.75-0.49 0.58 0.28 0.48 0.69-0.067 0.44-0.29 1.9-0.56 2.9-0.36 1.9h0.21l0.24-0.24 0.98-1.3 1.7-2.1 0.73-0.82 0.85-0.9 0.55-0.43h1l0.76 1.1-0.34 1.2-1.9 2.5-1.3 1.7-0.79 1.4 0.073 0.11 0.19-0.018 2.9-0.61 1.5-0.28 1.8-0.32 0.83 0.39 0.091 0.39-0.33 0.81-2 0.49-5.7 1.3-0.042 0.03 0.049 0.061 2.2 0.18h1.6l3 0.22 0.79 0.52 0.47 0.64-0.079 0.49-1.2 0.62-5.5-1.3-1.3-0.33h-0.18v0.11l1.11.1 2 1.8 2.5 2.3 0.13 0.58-0.32 0.46-0.34-0.049-2.2-1.7-2.8-2.4h-0.13v0.17l0.44 0.65 2.3 3.5 0.12 1.1-0.17 0.35-0.61 0.21-0.67-0.12-1.4-1.9-1.4-2.2-1.1-1.9-0.14 0.079-0.67 7.3-0.32 0.37-0.73 0.28-0.61-0.46-0.32-0.75 0.32-1.5 0.39-1.9 0.32-1.5 0.29-1.9 0.17-0.63-0.012-0.042-0.14 0.018-1.4 2-2.2 2.9-1.7 1.8-0.41 0.16-0.72-0.37 0.067-0.66 0.4-0.59 3.8-4.9 0.93-1.1-0.0062-0.16h-0.055l-6.3 4.1-1.1 0.15-0.49-0.46 0.061-0.75 0.23-0.24 1.9-1.3z" fill="#D97757"/>
-</svg>
-<text x="1840" y="310" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="600">Claude Code</text>
-<svg x="1914" y="293" width="18" height="18" overflow="visible" viewBox="0 0 24 24">
-<path d="m12 0.13-9.6 5.5a0.84 0.84 0 0 0-0.42 0.73v11c0 0.3 0.16 0.58 0.42 0.72l9.6 5.6a1 1 0 0 0 1 0l9.6-5.6a0.84 0.84 0 0 0 0.42-0.72v-11a0.84 0.84 0 0 0-0.42-0.73l-9.6-5.5a1 1 0 0 0-1 0m-8.8 6.2h19c0.26 0 0.43 0.29 0.3 0.52l-9.3 16c-0.062 0.11-0.23 0.064-0.23-0.06v-11a0.59 0.59 0 0 0-0.3-0.51l-9.1-5.3c-0.11-0.063-0.064-0.23 0.061-0.23" fill="#E9F5FF"/>
-</svg>
-<text x="1937" y="310" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="600">Cursor</text>
-<text x="2012" y="310" fill="#C8D9E8" font-family="'Noto Sans Mono CJK SC', monospace" font-size="18" font-weight="700">π</text>
-<text x="2034" y="310" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="600">Pi</text>
-<svg x="2108" y="293" width="18" height="18" overflow="visible" viewBox="0 0 24 24">
-<path d="M22 24H2V0h20zM17 4.8H7v14.4h10z" fill="#D6E8FF"/>
-</svg>
-<text x="2131" y="310" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="600">OpenCode</text>
-<svg x="2205" y="293" width="18" height="18" overflow="visible" viewBox="0 0 24 24">
-<path d="m24 17c-0.86 1.5-5.9 5-12 5s-11-3.5-12-5a0.64 0.64 0 0 1-0.078-0.26v-2.9a0.88 0.88 0 0 1 0.053-0.22c0.37-0.94 1.3-2.3 2.6-2.7 0.17-0.43 0.41-1.1 0.64-1.5a10 10 0 0 1-0.052-1.1c0-1.3 0.28-2.5 1.1-3.4 0.4-0.41 0.89-0.72 1.5-0.95 1.4-1.1 3.4-2.1 6.1-2.1 2.7 0 4.8 0.96 6.2 2.1 0.58 0.24 1.1 0.55 1.5 0.95 0.85 0.87 1.1 2 1.1 3.4 0 0.37-0.014 0.73-0.052 1.1 0.23 0.46 0.48 1.1 0.64 1.5 1.3 0.36 2.2 1.7 2.6 2.7a0.84 0.84 0 0 1 0.053 0.22v2.9a0.64 0.64 0 0 1-0.078 0.26zm-12-6h-0.34a4.4 4.4 0 0 1-0.36 0.51c-0.77 0.95-1.9 1.5-3.5 1.5-1.7 0-3-0.36-3.8-1.3a2.1 2.1 0 0 1-0.085-0.1l-0.098 0.1v6.6c1.4 0.78 4.5 2.2 8 2.2s6.6-1.4 8-2.2v-6.6l-0.098-0.1s-0.033 0.045-0.085 0.1c-0.79 0.9-2.1 1.3-3.8 1.3-1.6 0-2.7-0.54-3.5-1.5a4.4 4.4 0 0 1-0.36-0.51zm2.3 3.2c0.55 0 1 0.45 1 1v2c0 0.55-0.45 1-1 1s-1-0.45-1-1v-2c0-0.55 0.45-1 1-1zm-5 0c0.55 0 1 0.45 1 1v2c0 0.55-0.45 1-1 1s-1-0.45-1-1v-2c0-0.55 0.45-1 1-1zm3.3-6.2c0.14 1.1 0.4 1.9 0.88 2.5 0.44 0.54 1.1 0.94 2.3 0.94 1.6 0 2.3-0.34 2.7-0.75 0.38-0.44 0.56-1.2 0.56-2.4 0-1.1-0.24-1.8-0.7-2.3-0.48-0.49-1.3-0.86-2.8-1-1.5-0.16-2.2 0.14-2.5 0.53-0.27 0.31-0.44 0.81-0.44 1.6v0.021c0 0.26 0.021 0.56 0.063 0.89zm-1.6 0c0.042-0.33 0.063-0.63 0.063-0.89v-0.02c-1e-3 -0.77-0.17-1.3-0.44-1.6-0.34-0.39-1-0.69-2.5-0.53-1.5 0.16-2.3 0.54-2.8 1-0.46 0.47-0.7 1.2-0.7 2.3 0 1.2 0.18 1.9 0.56 2.4 0.36 0.41 1.1 0.75 2.7 0.75 1.2 0 1.9-0.39 2.3-0.94 0.48-0.58 0.74-1.4 0.88-2.5z" fill="#E9F5FF"/>
-</svg>
-<text x="2228" y="310" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="12" font-weight="600">Copilot</text>
-<svg x="1738" y="369" width="20" height="20" overflow="visible" viewBox="0 0 24 24">
-<path d="m13 24a1.5 1.5 0 0 1-2.2 0l-10-10a1.5 1.5 0 0 1 0-2.2l7.2-7.2 2.7 2.7a1.8 1.8 0 0 0 0.96 2.3v6.7a1.8 1.8 0 1 0 1.5 0v-6.5l2.5 2.5a1.8 1.8 0 1 0 1.1-1.1l-2.6-2.6a1.8 1.8 0 0 0-2.4-2.4l-2.7-2.7 2.2-2.2a1.5 1.5 0 0 1 2.2 0l10 10a1.5 1.5 0 0 1 0 2.2z" fill="#F05032"/>
-</svg>
-<text x="1763" y="388" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="600">Git Worktree</text>
-<svg x="1920" y="369" width="20" height="20" overflow="visible" viewBox="0 0 24 24">
-<path d="m14 11h2.1a0.19 0.19 0 0 0 0.19-0.18v-1.9a0.19 0.19 0 0 0-0.19-0.19h-2.1a0.18 0.18 0 0 0-0.18 0.18v1.9c0 0.1 0.083 0.18 0.18 0.18m-3-5.4h2.1a0.19 0.19 0 0 0 0.19-0.19v-1.9a0.19 0.19 0 0 0-0.19-0.18h-2.1a0.18 0.18 0 0 0-0.18 0.18v1.9c0 0.1 0.082 0.18 0.18 0.18m0 2.7h2.1a0.19 0.19 0 0 0 0.19-0.19v-1.9a0.19 0.19 0 0 0-0.19-0.18h-2.1a0.18 0.18 0 0 0-0.18 0.18v1.9c0 0.1 0.082 0.18 0.18 0.19m-2.9 0h2.1a0.19 0.19 0 0 0 0.18-0.19v-1.9a0.18 0.18 0 0 0-0.18-0.18h-2.1a0.18 0.18 0 0 0-0.18 0.18v1.9c0 0.1 0.083 0.18 0.18 0.19m-3 0h2.1a0.19 0.19 0 0 0 0.18-0.19v-1.9a0.19 0.19 0 0 0-0.18-0.18h-2.1a0.19 0.19 0 0 0-0.19 0.18v1.9c0 0.1 0.084 0.18 0.19 0.19m5.9 2.7h2.1a0.19 0.19 0 0 0 0.19-0.18v-1.9a0.19 0.19 0 0 0-0.19-0.19h-2.1a0.18 0.18 0 0 0-0.18 0.18v1.9c0 0.1 0.082 0.18 0.18 0.18m-2.9 0h2.1a0.18 0.18 0 0 0 0.18-0.18v-1.9a0.18 0.18 0 0 0-0.18-0.19h-2.1a0.18 0.18 0 0 0-0.18 0.18v1.9c0 0.1 0.083 0.18 0.18 0.18m-3 0h2.1a0.18 0.18 0 0 0 0.18-0.18v-1.9a0.18 0.18 0 0 0-0.18-0.19h-2.1a0.19 0.19 0 0 0-0.19 0.19v1.9c0 0.1 0.084 0.18 0.19 0.18m-2.9 0h2.1a0.18 0.18 0 0 0 0.18-0.18v-1.9a0.18 0.18 0 0 0-0.18-0.19h-2.1a0.19 0.19 0 0 0-0.18 0.18v1.9c0 0.1 0.082 0.18 0.18 0.18m22-1.2c-0.065-0.051-0.67-0.51-2-0.51-0.34 1e-3 -0.68 0.03-1 0.087-0.25-1.7-1.7-2.5-1.7-2.6l-0.34-0.2-0.23 0.33c-0.28 0.44-0.49 0.92-0.61 1.4-0.23 0.97-0.09 1.9 0.4 2.7-0.6 0.33-1.6 0.41-1.7 0.42h-16a0.75 0.75 0 0 0-0.75 0.75 11 11 0 0 0 0.69 4.1c0.54 1.4 1.4 2.5 2.4 3.1 1.2 0.72 3.1 1.1 5.3 1.1 0.98 3e-3 2-0.086 2.9-0.27a12 12 0 0 0 3.8-1.4c0.98-0.57 1.9-1.3 2.6-2.1 1.3-1.4 2-3 2.6-4.4h0.22c1.4 0 2.2-0.55 2.7-1 0.31-0.29 0.55-0.65 0.71-1l0.098-0.29z" fill="#2496ED"/>
-</svg>
-<text x="1945" y="388" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="600">Docker</text>
-<text x="2090" y="388" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="600">Podman</text>
-<svg x="1738" y="446" width="20" height="20" overflow="visible" viewBox="0 0 24 24">
-<path d="m12 0.3c-6.6 0-12 5.4-12 12 0 5.3 3.4 9.8 8.2 11 0.6 0.11 0.82-0.26 0.82-0.58 0-0.28-0.01-1-0.015-2-3.3 0.72-4-1.6-4-1.6-0.55-1.4-1.3-1.8-1.3-1.8-1.1-0.74 0.084-0.73 0.084-0.73 1.2 0.084 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 0.11-0.78 0.42-1.3 0.76-1.6-2.7-0.3-5.5-1.3-5.5-5.9 0-1.3 0.46-2.4 1.2-3.2-0.14-0.3-0.54-1.5 0.1-3.2 0 0 1-0.32 3.3 1.2 0.96-0.27 2-0.4 3-0.4 1 6e-3 2 0.14 3 0.4 2.3-1.6 3.3-1.2 3.3-1.2 0.64 1.7 0.24 2.9 0.12 3.2 0.76 0.84 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9 0.42 0.36 0.81 1.1 0.81 2.2 0 1.6-0.015 2.9-0.015 3.3 0 0.32 0.21 0.69 0.82 0.57 4.8-1.6 8.2-6.1 8.2-11-5.4-12-12-12" fill="#E9F5FF"/>
-</svg>
-<text x="1763" y="465" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="600">GitHub</text>
-<svg x="1920" y="446" width="20" height="20" overflow="visible" viewBox="0 0 24 24">
-<path d="m24 9.6-0.034-0.086-3.3-8.5a0.85 0.85 0 0 0-0.34-0.4 0.87 0.87 0 0 0-1 0.054 0.87 0.87 0 0 0-0.29 0.44l-2.2 6.7h-8.9l-2.2-6.7a0.86 0.86 0 0 0-0.29-0.44 0.87 0.87 0 0 0-1-0.054 0.86 0.86 0 0 0-0.34 0.4l-3.3 8.6a6.1 6.1 0 0 0 2 7l0.011 0.0087 0.03 0.021 5 3.7 4 3a1 1 0 0 0 1.2 0l4-3 5-3.7 0.012-0.01a6.1 6.1 0 0 0 2-7z" fill="#FC6D26"/>
-</svg>
-<text x="1945" y="465" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="600">GitLab</text>
-<svg x="2094" y="446" width="20" height="20" overflow="visible" viewBox="0 0 24 24">
-<path d="m13 24a1.5 1.5 0 0 1-2.2 0l-10-10a1.5 1.5 0 0 1 0-2.2l7.2-7.2 2.7 2.7a1.8 1.8 0 0 0 0.96 2.3v6.7a1.8 1.8 0 1 0 1.5 0v-6.5l2.5 2.5a1.8 1.8 0 1 0 1.1-1.1l-2.6-2.6a1.8 1.8 0 0 0-2.4-2.4l-2.7-2.7 2.2-2.2a1.5 1.5 0 0 1 2.2 0l10 10a1.5 1.5 0 0 1 0 2.2z" fill="#F05032"/>
-</svg>
-<text x="2119" y="465" fill="#C5D8E8" font-family="'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" font-weight="600">Git</text>
-<svg x="508" y="320" width="16" height="16" overflow="visible" viewBox="0 0 24 24">
-<path d="m14 12a2.2 2.2 0 0 1-2.2 2.2 2.2 2.2 0 0 1-2.2-2.2 2.2 2.2 0 0 1 2.2-2.2 2.2 2.2 0 0 1 2.2 2.2zm2.6-11c-1.3 0-3.1 0.96-4.9 2.6-1.8-1.7-3.5-2.6-4.9-2.6-0.41 0-0.78 0.093-1.1 0.28-1.4 0.79-1.7 3.3-0.97 6.4-3 0.94-5 2.4-5 4 0 1.6 2 3.1 5 4-0.7 3.1-0.39 5.6 0.99 6.4 0.32 0.19 0.69 0.28 1.1 0.28 1.3 0 3.1-0.96 4.9-2.6 1.8 1.7 3.5 2.6 4.9 2.6 0.41 0 0.78-0.09 1.1-0.28 1.4-0.79 1.7-3.3 0.97-6.4 3-0.93 5-2.4 5-4 0-1.6-2-3.1-5-4-0.7-3.1-0.39-5.6-0.99-6.4-0.32-0.18-0.69-0.28-1.1-0.28zm-5e-3 1.1v6e-3c0.22 0 0.41 0.044 0.56 0.13 0.67 0.38 0.96 1.8 0.73 3.7-0.054 0.46-0.14 0.94-0.25 1.4-0.96-0.24-2-0.42-3.1-0.53-0.66-0.9-1.3-1.7-2-2.4 1.6-1.5 3.1-2.3 4.1-2.3zm-9.8 0.02c1 0 2.5 0.81 4.1 2.3-0.69 0.72-1.4 1.5-2 2.4-1.1 0.12-2.2 0.3-3.1 0.54-0.11-0.49-0.2-0.96-0.25-1.4-0.23-1.9 0.054-3.3 0.71-3.7 0.19-0.09 0.4-0.13 0.56-0.13zm4.9 3c0.46 0.47 0.91 0.99 1.4 1.6-0.44-0.02-0.89-0.034-1.3-0.034-0.46 0-0.92 0.01-1.4 0.034 0.44-0.57 0.9-1.1 1.3-1.6zm0.015 2.6c0.74 0 1.5 0.034 2.2 0.093 0.41 0.58 0.8 1.2 1.2 1.9 0.37 0.64 0.71 1.3 1 1.9-0.31 0.66-0.65 1.3-1 2-0.38 0.66-0.77 1.3-1.2 1.9-0.73 0.063-1.5 0.098-2.2 0.098-0.74 0-1.5-0.035-2.2-0.093-0.41-0.58-0.8-1.2-1.2-1.9-0.37-0.64-0.71-1.3-1-1.9-0.31 0.66-0.65 1.3-1 2-0.38 0.66-0.77 1.3-1.2 1.9-0.73 0.063-1.5 0.098-2.2 0.098z" fill="#61DAFB"/>
-</svg>
-<text x="529" y="335" fill="#C5D8E8" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="12" font-weight="600">React</text>
-<svg x="589" y="320" width="16" height="16" overflow="visible" viewBox="0 0 24 24">
-<path d="m12 0c-0.85 0-1.5 0.69-1.5 1.5s0.69 1.5 1.5 1.5c0.6 0 1.1-0.34 1.4-0.83 2.2 1.3 3.8 5.5 3.8 10 0 2.1-0.29 4.1-0.82 5.8a0.32 0.32 0 0 0 0.21 0.4 0.32 0.32 0 0 0 0.4-0.21c0.56-1.8 0.85-3.8 0.85-6 0-5.2-1.8-9.7-4.3-11 1e-3 -0.022 0.0035-0.044 0.0035-0.067 0-0.85-0.69-1.5-1.5-1.5zm0 0.64a0.9 0.9 0 1 1 0 1.8 0.9 0.9 0 0 1 0-1.8zm-5.5 4.3c-2.1 0.0074-3.6 0.66-4.4 1.9-0.74 1.3-0.53 3 0.51 4.8a0.32 0.32 0 0 0 0.56-0.32c-0.93-1.6-1.1-3.1-0.51-4.1 0.82-1.4 3-2 5.9-1.4a0.32 0.32 0 0 0 0.12-0.63c-0.78-0.14-1.5-0.21-2.2-0.21zm11 0.018a0.32 0.32 0 0 0-0.0084 0.64c1.8 0.024 3.2 0.6 3.8 1.6 0.82 1.4 0.18 3.6-1.7 5.8a0.32 0.32 0 0 0 0.038 0.45 0.32 0.32 0 0 0 0.45-0.038c2.1-2.4 2.8-4.9 1.8-6.6-0.73-1.3-2.3-1.9-4.3-1.9zm-2.7 0.29a0.32 0.32 0 0 0-0.065 0.0072c-1.9 0.4-3.8 1.2-5.7 2.3-4.6 2.6-7.6 6.5-7.4 9.4-0.47 0.26-0.79 0.77-0.79 1.3 0 0.85 0.69 1.5 1.5 1.5 0.85 0 1.5-0.69 1.5-1.5s-0.69-1.5-1.5-1.5c-0.038 0-0.075 3e-3 -0.11 0.0057-0.1-2.6 2.7-6.1 7-8.6 1.8-1.1 3.8-1.8 5.5-2.2a0.32 0.32 0 0 0-0.07-0.64zm-2.9 6.2a1.1 1.1 0 0 0-0.22 0.026c-0.6 0.13-0.98 0.72-0.85 1.3 0.13 0.6 0.72 0.98 1.3 0.85 0.6-0.13 0.98-0.72 0.85-1.3-0.11-0.53-0.58-0.88-1.1-0.88zm-7.5 1.8a0.32 0.32 0 0 0-0.23 0.084 0.32 0.32 0 0 0-0.021 0.45c1.3 1.4 2.9 2.7 4.8 3.8 4.4 2.5 9.1 3.3 12 1.8a1.5 1.5 0 0 0 0.9 0.29c0.85 0 1.5-0.69 1.5-1.5 0-0.85-0.69-1.5-1.5-1.5-0.85 0-1.5 0.69-1.5 1.5 0 0.28 0.074 0.53 0.2 0.76-2.2 1.2-6.6 0.5-11-1.9-1.8-1.1-3.4-2.3-4.6-3.7a0.32 0.32 0 0 0-0.22-0.1zm-2.1 4a0.9 0.9 0 1 1 0 1.8 0.9 0.9 0 0 1 0-1.8zm19 0a0.9 0.9 0 1 1-0.59-0.22c-0.0025-4e-3 -0.0039-0.0083-0.0066-0.012a0.32 0.32 0 0 0-0.096-0.091 0.9 0.9 0 0 1 0.69-1.5zm-14 1.4a0.32 0.32 0 0 0-0.32 0.43c1.1 3 2.8 4.8 4.8 4.8 1.4 0 2.8-0.98 3.8-2.7a0.32 0.32 0 0 0-0.11-0.44 0.32 0.32 0 0 0-0.44 0.11c-0.93 1.6-2.1 2.4-3.3 2.4-1.6 0-3.2-1.6-4.2-4.4a0.32 0.32 0 0 0-0.28-0.21z" fill="#9FEAF9"/>
-</svg>
-<text x="610" y="335" fill="#C5D8E8" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="12" font-weight="600">Electron</text>
-<svg x="108" y="1220" width="18" height="18" overflow="visible" viewBox="0 0 24 24">
-<path d="m12 0.3c-6.6 0-12 5.4-12 12 0 5.3 3.4 9.8 8.2 11 0.6 0.11 0.82-0.26 0.82-0.58 0-0.28-0.01-1-0.015-2-3.3 0.72-4-1.6-4-1.6-0.55-1.4-1.3-1.8-1.3-1.8-1.1-0.74 0.084-0.73 0.084-0.73 1.2 0.084 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 0.11-0.78 0.42-1.3 0.76-1.6-2.7-0.3-5.5-1.3-5.5-5.9 0-1.3 0.46-2.4 1.2-3.2-0.14-0.3-0.54-1.5 0.1-3.2 0 0 1-0.32 3.3 1.2 0.96-0.27 2-0.4 3-0.4 1 6e-3 2 0.14 3 0.4 2.3-1.6 3.3-1.2 3.3-1.2 0.64 1.7 0.24 2.9 0.12 3.2 0.76 0.84 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9 0.42 0.36 0.81 1.1 0.81 2.2 0 1.6-0.015 2.9-0.015 3.3 0 0.32 0.21 0.69 0.82 0.57 4.8-1.6 8.2-6.1 8.2-11-5.4-12-12-12" fill="#E9F5FF"/>
-</svg>
-<svg x="134" y="1220" width="18" height="18" overflow="visible" viewBox="0 0 24 24">
-<path d="m24 9.6-0.034-0.086-3.3-8.5a0.85 0.85 0 0 0-0.34-0.4 0.87 0.87 0 0 0-1 0.054 0.87 0.87 0 0 0-0.29 0.44l-2.2 6.7h-8.9l-2.2-6.7a0.86 0.86 0 0 0-0.29-0.44 0.87 0.87 0 0 0-1-0.054 0.86 0.86 0 0 0-0.34 0.4l-3.3 8.6a6.1 6.1 0 0 0 2 7l0.011 0.0087 0.03 0.021 5 3.7 4 3a1 1 0 0 0 1.2 0l4-3 5-3.7 0.012-0.01a6.1 6.1 0 0 0 2-7z" fill="#FC6D26"/>
-</svg>
-<text x="157" y="1237" fill="#9CB8CF" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="500">Issue / PR / MR state and merge facts</text>
-<rect x="1060" y="868" width="52" height="28" rx="14" fill="#071A2E" stroke="#36A9FF" stroke-width="1.4"/>
-<text x="1086.0" y="887" fill="#36A9FF" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="700" text-anchor="middle">run</text>
-<rect x="1122" y="868" width="78" height="28" rx="14" fill="#071A2E" stroke="#45E5C7" stroke-width="1.4"/>
-<text x="1161.0" y="887" fill="#45E5C7" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="700" text-anchor="middle">execute</text>
-<rect x="1210" y="868" width="90" height="28" rx="14" fill="#071A2E" stroke="#FFC65C" stroke-width="1.4"/>
-<text x="1255.0" y="887" fill="#FFC65C" font-family="'Noto Sans Mono CJK SC', 'Consolas', monospace" font-size="12" font-weight="700" text-anchor="middle">reconcile</text>
+<rect width="2400" height="1500" fill="url(#bg)"/><rect width="2400" height="1500" fill="url(#grid)"/>
+<ellipse cx="1200" cy="770" rx="610" ry="540" fill="url(#hub)"/>
+<text x="58" y="48" fill="#42DFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="start">AFK / AUTONOMOUS DEVELOPMENT PLATFORM</text>
+<text x="58" y="96" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="36" font-weight="760" text-anchor="start">AFK Autonomous Development Platform · System Architecture</text>
+<text x="2340" y="52" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="700" text-anchor="end">SOURCE VERIFIED / MAIN</text>
+<text x="2340" y="82" fill="#9CB8CF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="end">REV 5c4cd7b · 2026-11-03</text>
+<path d="M58 118H2340" stroke="#1B5278" stroke-width="1.4"/>
+<!-- connections behind nodes -->
+<g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+<path d="M705 390H835V650H1015" stroke="#42DFFF" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow)"/>
+<path d="M705 785H1018" stroke="#36A9FF" stroke-width="4" marker-end="url(#arrow)"/>
+<path d="M1382 645H1510V390H1680" stroke="#45E5C7" stroke-width="4" stroke-dasharray="9 8" marker-end="url(#arrow)"/>
+<path d="M1382 790H1540" stroke="#42DFFF" stroke-width="4" marker-end="url(#arrow)"/>
+<path d="M1200 954V1080" stroke="#45E5C7" stroke-width="4" stroke-dasharray="8 8" marker-end="url(#arrow)"/>
+</g>
+<g>
+<path d="M73 150H679l18 18v304l-18 18H73l-18-18V168z" fill="#041326" fill-opacity=".97" stroke="#36A9FF" stroke-width="2.3"/><rect x="75" y="168" width="42" height="36" rx="9" fill="#36A9FF"/><text x="96" y="193" fill="#041426" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="800" text-anchor="middle">01</text><text x="133" y="195" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="750" text-anchor="start">Product Entry</text>
+<rect x="82" y="225" width="190" height="222" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.4"/><text x="100" y="255" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Agent Skills</text><text x="100" y="281" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">afk-implement → afk run</text><text x="100" y="302" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">afk-testing · PRD · Wiki</text>
+<rect x="285" y="225" width="190" height="222" rx="13" fill="#061A30" stroke="#42DFFF" stroke-width="1.4"/><text x="303" y="255" fill="#42DFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">AFK CLI + TUI</text><text x="303" y="281" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Command Registry</text><text x="303" y="302" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">run · execute · loop</text><text x="303" y="323" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">reconcile · status</text>
+<rect x="488" y="225" width="190" height="222" rx="13" fill="#061A30" stroke="#45E5C7" stroke-width="1.4"/><text x="506" y="255" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">AFK Desktop</text><text x="506" y="281" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Trusted IPC · schema</text><text x="506" y="302" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Detached execution worker</text>
+<path d="M1698 150H2314l18 18v304l-18 18H1698l-18-18V168z" fill="#041326" fill-opacity=".97" stroke="#45E5C7" stroke-width="2.3"/><rect x="1700" y="168" width="42" height="36" rx="9" fill="#45E5C7"/><text x="1721" y="193" fill="#041426" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="800" text-anchor="middle">03</text><text x="1758" y="195" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="750" text-anchor="start">Runtime Adapters &amp; Integrations</text>
+<rect x="1710" y="225" width="600" height="72" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.4"/><text x="1728" y="255" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Agent Provider Registry</text><text x="1728" y="281" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Codex · Claude Code · Cursor · Pi · OpenCode · Copilot</text>
+<rect x="1710" y="310" width="600" height="72" rx="13" fill="#061A30" stroke="#45E5C7" stroke-width="1.4"/><text x="1728" y="340" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Sandbox Providers</text><text x="1728" y="366" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Git Worktree · Docker · Podman</text>
+<rect x="1710" y="395" width="600" height="72" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.4"/><text x="1728" y="425" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Tracker · Branch · Change</text><text x="1728" y="451" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">GitHub · GitLab · Git</text>
+<path d="M73 550H679l18 18v414l-18 18H73l-18-18V568z" fill="#041326" fill-opacity=".97" stroke="#36A9FF" stroke-width="2.3"/><rect x="75" y="568" width="42" height="36" rx="9" fill="#36A9FF"/><text x="96" y="593" fill="#041426" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="800" text-anchor="middle">02</text><text x="133" y="595" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="750" text-anchor="start">Shared Code Packages</text>
+<rect x="83" y="635" width="278" height="138" rx="13" fill="#061A30" stroke="#42DFFF" stroke-width="1.4"/><text x="101" y="665" fill="#42DFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Core</text><text x="101" y="691" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">@afk/core · Model · Events</text><text x="101" y="712" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Policy · Ports</text>
+<rect x="383" y="635" width="278" height="138" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.4"/><text x="401" y="665" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Application</text><text x="401" y="691" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">@afk/application</text><text x="401" y="712" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Use Cases · Inventory · Queries</text>
+<rect x="83" y="790" width="278" height="138" rx="13" fill="#061A30" stroke="#45E5C7" stroke-width="1.4"/><text x="101" y="820" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Runtime</text><text x="101" y="846" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">@afk/runtime</text><text x="101" y="867" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Workflow · Providers · Agent · QA</text>
+<rect x="383" y="790" width="278" height="138" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.4"/><text x="401" y="820" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Workflow Graph</text><text x="401" y="846" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">@afk/workflow-graph</text><text x="401" y="867" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">IR · Projection · Layout · Routing</text>
+<text x="88" y="966" fill="#9CB8CF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start">DEPENDENCIES</text>
+<text x="222" y="966" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="550" text-anchor="start">Application → Core</text>
+<text x="88" y="989" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="550" text-anchor="start">Runtime → Application + Core + Workflow Graph</text>
+<path d="M1558 550H2314l18 18v414l-18 18H1558l-18-18V568z" fill="#041326" fill-opacity=".97" stroke="#A98BFF" stroke-width="2.3"/><rect x="1560" y="568" width="42" height="36" rx="9" fill="#A98BFF"/><text x="1581" y="593" fill="#041426" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="800" text-anchor="middle">04</text><text x="1618" y="595" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="750" text-anchor="start">Work Item Delivery Lifecycle</text>
+<rect x="1572" y="625" width="736" height="76" rx="13" fill="#071A31" stroke="#36A9FF" stroke-width="1.6"/>
+<text x="1592" y="655" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="800" text-anchor="start">RUN</text>
+<text x="1660" y="655" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" font-weight="650" text-anchor="start">afk run → runWorkflowCli → WorkflowRunner</text>
+<text x="1660" y="682" fill="#9CB8CF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="450" text-anchor="start">Single work-item implementation path; not the managed delivery lifecycle</text>
+<text x="1574" y="748" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="800" text-anchor="start">MANAGED EXECUTION</text>
+<text x="1800" y="748" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="600" text-anchor="start">afk execute → executeWorkItem</text>
+<rect x="1572" y="775" width="137" height="160" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.6"/><text x="1588" y="802" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">01</text><text x="1640.5" y="844" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle">Eligibility &amp; Manifest</text><text x="1640.5" y="882" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">Dependency checks</text><text x="1640.5" y="905" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">Manifest</text><rect x="1721" y="775" width="137" height="160" rx="13" fill="#061A30" stroke="#42DFFF" stroke-width="1.6"/><text x="1737" y="802" fill="#42DFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">02</text><text x="1789.5" y="844" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle">Implementation</text><text x="1789.5" y="882" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">WorkflowRunner</text><text x="1789.5" y="905" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">Agent execution</text><rect x="1870" y="775" width="137" height="160" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.6"/><text x="1886" y="802" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">03</text><text x="1938.5" y="844" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle">Independent QA</text><text x="1938.5" y="882" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">QARunner</text><text x="1938.5" y="905" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">Independent verify</text><rect x="2019" y="775" width="137" height="160" rx="13" fill="#061A30" stroke="#45E5C7" stroke-width="1.6"/><text x="2035" y="802" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">04</text><text x="2087.5" y="844" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle">Publish PR/MR</text><text x="2087.5" y="882" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">Linked issue</text><text x="2087.5" y="905" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">Publication proof</text><rect x="2168" y="775" width="137" height="160" rx="13" fill="#061A30" stroke="#FFC65C" stroke-width="1.6"/><text x="2184" y="802" fill="#FFC65C" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">05</text><text x="2236.5" y="844" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle">Human merge</text><text x="2236.5" y="882" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">reconcile</text><text x="2236.5" y="905" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" font-weight="500" text-anchor="middle">→ done</text>
+<text x="1575" y="972" fill="#FFC65C" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="600" text-anchor="start">QA + publication → merge_ready; only a verified provider merge via reconcile becomes done.</text>
+<path d="M73 1080H2314l18 18v284l-18 18H73l-18-18V1098z" fill="#041326" fill-opacity=".97" stroke="#45E5C7" stroke-width="2.3"/><rect x="75" y="1098" width="42" height="36" rx="9" fill="#45E5C7"/><text x="96" y="1123" fill="#041426" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="800" text-anchor="middle">05</text><text x="133" y="1125" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="750" text-anchor="start">Runtime Evidence &amp; State Ownership</text>
+<rect x="86" y="1160" width="530" height="116" rx="13" fill="#061A30" stroke="#6EE7C2" stroke-width="1.4"/><text x="104" y="1190" fill="#6EE7C2" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">External Business Truth</text><text x="104" y="1216" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Provider owns backlog / PR / MR / merge facts</text>
+<rect x="638" y="1160" width="530" height="116" rx="13" fill="#061A30" stroke="#36A9FF" stroke-width="1.4"/><text x="656" y="1190" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Workspace Execution Context</text><text x="656" y="1216" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">Manifest · Execution Journal · worktree / task workspace</text>
+<rect x="1190" y="1160" width="530" height="116" rx="13" fill="#061A30" stroke="#A98BFF" stroke-width="1.4"/><text x="1208" y="1190" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Local Event Stream</text><text x="1208" y="1216" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">JsonlEventStore · ~/.afk/events · append + fsync</text>
+<rect x="1742" y="1160" width="560" height="116" rx="13" fill="#061A30" stroke="#FFC65C" stroke-width="1.4"/><text x="1760" y="1190" fill="#FFC65C" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" text-anchor="start">Encrypted Evidence</text><text x="1760" y="1216" fill="#A9C0D3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500" text-anchor="start">LocalEncryptedEvidenceStore · ~/.afk/evidence</text>
+<text x="90" y="1335" fill="#6EE7C2" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">TRUTH</text>
+<text x="154" y="1335" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="500" text-anchor="start">Provider owns backlog / merge truth</text>
+<text x="790" y="1335" fill="#A98BFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="800" text-anchor="start">EVIDENCE</text>
+<text x="884" y="1335" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="500" text-anchor="start">AFK owns local manifests, journals, events and evidence</text>
+<text x="2300" y="1335" fill="#FFC65C" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="700" text-anchor="end">merge_ready ≠ done</text>
+</g>
+<!-- central runtime hub -->
+<g>
+<circle cx="1200" cy="780" r="196" fill="none" stroke="#0875C7" stroke-opacity=".25" stroke-width="2"/>
+<circle cx="1200" cy="780" r="181" fill="none" stroke="#42DFFF" stroke-width="3" opacity=".65" filter="url(#glow)"/>
+<circle cx="1200" cy="780" r="168" fill="#061A30" stroke="#36A9FF" stroke-width="5" filter="url(#glow)"/>
+<path d="M1162 690L1187 665L1212 690M1187 715L1212 740M1158 760H1234" fill="none" stroke="#42DFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+<text x="1200" y="802" fill="#E9F5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="29" font-weight="800" text-anchor="middle">AFK RUNTIME</text>
+<text x="1200" y="831" fill="#42DFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" font-weight="700" text-anchor="middle">Execution &amp; Workflow Runtime</text>
+<text x="1200" y="853" fill="#8FB0C8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="500" text-anchor="middle">WorkflowRunner · executeWorkItem</text>
+<rect x="1080" y="868" width="70" height="30" rx="15" fill="#071A2E" stroke="#36A9FF" stroke-width="1.4"/><text x="1115" y="888" fill="#36A9FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="middle">run</text>
+<rect x="1160" y="868" width="92" height="30" rx="15" fill="#071A2E" stroke="#45E5C7" stroke-width="1.4"/><text x="1206" y="888" fill="#45E5C7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="middle">execute</text>
+<rect x="1262" y="868" width="110" height="30" rx="15" fill="#071A2E" stroke="#FFC65C" stroke-width="1.4"/><text x="1317" y="888" fill="#FFC65C" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="middle">reconcile</text>
+</g>
+<path d="M58 1438H2340" stroke="#1B5278" stroke-width="1.2"/>
+<text x="58" y="1470" fill="#9CB8CF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="450" text-anchor="start">AFK ARCHITECTURE · EVIDENCE: package manifests, entry points, execution and provider adapters</text>
+<text x="2340" y="1470" fill="#9CB8CF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="450" text-anchor="end">easyhaloo/afk · 5c4cd7b</text>
 </svg>

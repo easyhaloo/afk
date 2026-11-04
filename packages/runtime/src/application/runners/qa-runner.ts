@@ -436,7 +436,12 @@ export class QARunner {
       }
       if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
       await this.providers.branches.push(verificationBranch, worktreePath);
-      const existing = this.beforeChange ? await this.providers.changes.findForBacklog(backlog) : null;
+      // A previous attempt may have left the change request behind (a re-run
+      // of an already-published item). Look it up unconditionally: `beforeChange`
+      // is an optional pre-publish hook, not a gate for the lookup. Without it
+      // a standalone `afk qa` re-run would try to create a second MR for the
+      // same source branch and the provider would reject it (409).
+      const existing = await this.providers.changes.findForBacklog(backlog);
       if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
         throw new Error(`existing change request ${existing.id} does not match QA branch and target`);
       }
@@ -451,8 +456,9 @@ export class QARunner {
       if (mr) {
         // A previous attempt left the review request behind. The evidence in
         // its body is the evidence of that attempt, so it is refreshed with
-        // the one this attempt gathered.
-        mr = await this.providers.changes.refresh?.(mr.id, backlog, evidence) ?? mr;
+        // the one this attempt gathered. The worktree is passed so the
+        // artifact manifest (.afk/artifacts.txt) is uploaded too.
+        mr = await this.providers.changes.refresh?.(mr.id, backlog, evidence, worktreePath) ?? mr;
       } else {
         mr = await this.providers.changes.create({
           backlog, sourceBranch: verificationBranch, targetBranch, draft: false,

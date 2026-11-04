@@ -44,7 +44,7 @@ export interface ChangeProvider {
    * business: which issue the change closes and how the provider spells it
    * differ per platform.
    */
-  refresh?(id: string, backlog: BacklogItem, evidence: Omit<VerificationEvidence, 'artifacts'>): Promise<ChangeRequest>;
+  refresh?(id: string, backlog: BacklogItem, evidence: Omit<VerificationEvidence, 'artifacts'>, worktreePath?: string): Promise<ChangeRequest>;
   merge(id: string): Promise<void>;
   close(id: string, reason?: string): Promise<void>;
 }

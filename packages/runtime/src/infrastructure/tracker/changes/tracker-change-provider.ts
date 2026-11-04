@@ -160,11 +160,12 @@ export class TrackerChangeProvider implements ChangeProvider {
     id: string,
     backlog: BacklogItem,
     evidence: Omit<VerificationEvidence, 'artifacts'>,
+    worktreePath?: string,
   ): Promise<ChangeRequest> {
     if (!this.tracker.updateMR) throw new Error('the provider cannot refresh a change request');
     const change = await this.get(id);
     const artifacts = await this.uploadArtifacts({
-      backlog, sourceBranch: change.sourceBranch, targetBranch: change.targetBranch,
+      backlog, sourceBranch: change.sourceBranch, targetBranch: change.targetBranch, worktreePath,
     });
     await this.tracker.updateMR(Number(id), {
       description: renderChangeDescription(backlog, this.tracker, { ...evidence, artifacts }),

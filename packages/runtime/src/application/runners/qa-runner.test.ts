@@ -187,7 +187,7 @@ describe('QARunner execution boundary', () => {
 
   it('runs batch QA through SandboxProvider without tmux readiness calls', async () => {
     const f = fixture();
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue(null);
     const tmux = { createSession: vi.fn(), waitForPrompt: vi.fn(), sendPrompt: vi.fn(), waitForSignal: vi.fn() };
     const runtime = {
       kind: 'codex',
@@ -284,7 +284,7 @@ describe('QARunner execution boundary', () => {
 
   it('passes tmux only to the sandbox for interactive QA', async () => {
     const f = fixture();
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue(null);
     const tmux = {};
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
@@ -321,7 +321,7 @@ describe('QARunner execution boundary', () => {
       provider: 'codex', transport: 'app-server', auth: 'chatgpt', modelProvider: 'openai',
       endpointKind: 'stdio', threadId: 'thread-60',
     };
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue(null);
     const runtime = {
       start: vi.fn(async () => {}),
       heartbeat: vi.fn(async () => ({})),
@@ -871,7 +871,7 @@ describe('QARunner execution boundary', () => {
     const f = fixture();
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
     f.providers.backlog.get.mockResolvedValue(child);
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue(null);
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
@@ -896,7 +896,7 @@ describe('QARunner execution boundary', () => {
     const f = fixture();
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
     f.providers.backlog.get.mockResolvedValue(child);
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue(null);
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,

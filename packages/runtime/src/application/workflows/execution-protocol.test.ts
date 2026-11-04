@@ -99,4 +99,22 @@ describe('batch execution prompt protocol', () => {
     expect(buildBatchPrompt('/goal verify issue #60', 'ac')).not.toContain('.afk/artifacts.txt');
     expect(buildExecutionPrompt('/goal implement issue #60', 'interactive')).not.toContain('.afk/artifacts.txt');
   });
+
+  it('drives the QA agent to run the project-owned E2E verification without prescribing a harness', () => {
+    const batch = buildBatchPrompt('/goal verify issue #60', 'qa');
+    const interactive = buildExecutionPrompt('/goal verify issue #60', 'interactive', 'qa');
+
+    for (const prompt of [batch, interactive]) {
+      expect(prompt).toContain('End-to-end verification');
+      expect(prompt).toContain('detect from the project itself');
+      expect(prompt).toContain('.afk/artifacts.txt');
+      expect(prompt).toContain('do not invent a parallel E2E harness');
+    }
+  });
+
+  it('keeps the E2E instruction out of prompts that are not QA verification', () => {
+    expect(buildBatchPrompt('/goal implement issue #60')).not.toContain('End-to-end verification');
+    expect(buildBatchPrompt('/goal verify issue #60', 'ac')).not.toContain('End-to-end verification');
+    expect(buildExecutionPrompt('/goal implement issue #60', 'interactive')).not.toContain('End-to-end verification');
+  });
 });

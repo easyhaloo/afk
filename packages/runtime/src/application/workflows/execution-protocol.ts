@@ -29,6 +29,19 @@ const QA_ARTIFACT_INSTRUCTION = 'If this run produced binary evidence (screensho
  */
 const QA_EVIDENCE_INSTRUCTION = 'Report the evidence in separated fields: "summary" is one sentence stating the verdict, without repeating the individual test results; "observations" holds one entry per behavioural acceptance criterion, each with the claim and how it was observed; "requiredChecks" holds the commands you re-ran, what each one was expected to show and what it actually showed; "notes" holds environment facts, tooling caveats and anything that is not acceptance evidence.';
 
+/**
+ * End-to-end verification instruction for the QA agent.
+ *
+ * The framework does not decide how E2E is implemented: the project owns its
+ * E2E suite, its environment setup and its verification approach. The agent
+ * detects whether the project has E2E, provides the environment the way the
+ * project expects, runs the project's own E2E verification, and registers the
+ * binary evidence (screenshots, logs, traces) through the artifact manifest.
+ * When the project has no E2E, or the environment cannot be provided here,
+ * the agent records the caveat in "notes" instead of inventing a pass.
+ */
+const QA_E2E_INSTRUCTION = 'End-to-end verification: detect from the project itself whether it has E2E (for example an e2e test suite, an e2e-setup script, or acceptance criteria that need a live service). If it does, provide the environment the way the project expects — start the backend, frontend and any middleware using the project\'s own scripts — then run the project\'s E2E verification and capture the browser or runtime evidence (screenshots, logs, traces) for the acceptance criteria it covers, registering every file in .afk/artifacts.txt. Use the project\'s own tooling and conventions; do not invent a parallel E2E harness. If the project has no E2E, or its environment cannot be provided on this machine, say so in "notes" and do not claim an E2E pass you did not produce.';
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -67,7 +80,7 @@ export function buildBatchPrompt(prompt: string, kind: CompletionKind = 'task'):
     : kind === 'ac'
       ? '{"type":"goal_complete","kind":"ac_verification","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]}'
       : '{"type":"goal_complete","kind":"task","summary":"..."}';
-  const evidence = kind === 'qa' ? `\n${QA_ARTIFACT_INSTRUCTION}\n${QA_EVIDENCE_INSTRUCTION}\n` : '';
+  const evidence = kind === 'qa' ? `\n${QA_ARTIFACT_INSTRUCTION}\n${QA_EVIDENCE_INSTRUCTION}\n${QA_E2E_INSTRUCTION}\n` : '';
   return `AFK batch goal:\n${batchGoal}\n\nAFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`;
 }
 
@@ -77,7 +90,7 @@ export function buildInteractivePrompt(prompt: string, kind: CompletionKind = 't
     : kind === 'ac'
       ? '{"type":"goal_complete","timestamp":"<current ISO-8601 time>","kind":"ac_verification","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]}'
       : '{"type":"goal_complete","timestamp":"<current ISO-8601 time>","kind":"task","summary":"..."}';
-  const evidence = kind === 'qa' ? ` ${QA_ARTIFACT_INSTRUCTION} ${QA_EVIDENCE_INSTRUCTION}` : '';
+  const evidence = kind === 'qa' ? ` ${QA_ARTIFACT_INSTRUCTION} ${QA_EVIDENCE_INSTRUCTION} ${QA_E2E_INSTRUCTION}` : '';
   return `${prompt.trim()} AFK interactive completion protocol: work only on the current checked-out branch. Do not switch branches or reset the branch.${evidence} When the task is complete, atomically write a valid JSON ${payload} to .afk-signal.json using a temporary file and rename. Construct the payload with JSON.stringify (or an equivalent JSON serializer); do not embed raw JSON in a shell printf command, because unescaped control characters make the signal invalid. After the rename, validate the exact file with JSON.parse before reporting completion. Use result PASS when QA passes, FAIL when QA fails, the actual current ISO-8601 timestamp, and a non-empty summary. Do not only print the completion marker.`;
 }
 

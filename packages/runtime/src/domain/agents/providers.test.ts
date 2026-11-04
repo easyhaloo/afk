@@ -36,12 +36,12 @@ describe('Agent providers — fixture coverage', () => {
   describe('ClaudeCodeProvider', () => {
     const p = new ClaudeCodeProvider();
 
-    it('exposes correct name and capabilities', () => {
+    it('exposes correct name and capabilities (NO resume)', () => {
       expect(p.name).toBe('claude-code');
       expect(p.capabilities.has('streaming')).toBe(true);
       expect(p.capabilities.has('structured-output')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
-      expect(p.capabilities.has('resume')).toBe(true);
+      expect(p.capabilities.has('resume')).toBe(false);
       expect(p.capabilities.has('interactive')).toBe(true);
     });
 
@@ -493,7 +493,7 @@ describe('Agent registry', () => {
 });
 
 describe('Resume capability gating', () => {
-  const resumeProvider = new ClaudeCodeProvider(); // HAS resume
+  const resumeProvider = new CursorProvider(); // HAS resume
   const noResumeProvider = new CodexProvider();   // NO resume
 
   it('guardedRestoreSession throws for non-resume provider', async () => {
@@ -510,7 +510,7 @@ describe('Resume capability gating', () => {
   });
 
   it('guardedRestoreSession succeeds for resume-capable provider', async () => {
-    // ClaudeCodeProvider.restoreSession is a no-op; should not throw.
+    // CursorProvider.restoreSession is a no-op; should not throw.
     await expect(guardedRestoreSession(resumeProvider, {
       snapshot: {
         sessionId: 'x',

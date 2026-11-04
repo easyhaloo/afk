@@ -21,12 +21,16 @@ import type {
 } from './types.js';
 import { ProcessAgentProvider } from './process-provider.js';
 
-/** Claude Code capabilities */
+/**
+ * Claude Code capabilities.
+ * Resume deliberately excluded: capture/restore are placeholders, and a
+ * provider that declares 'resume' is trusted by the runner to restore a
+ * real session. Handoff Markdown is the fallback.
+ */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'streaming',
   'structured-output',
   'usage',
-  'resume',
   'interactive',
 ]);
 

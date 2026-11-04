@@ -1,6 +1,6 @@
 {
   "name": "afk",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "description": "Away From Keyboard — autonomous development workflow CLI + Skills system",
   "type": "module",
   "bin": {

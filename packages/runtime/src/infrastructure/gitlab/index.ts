@@ -26,6 +26,7 @@ import type {
 import { extractAC } from '../../domain/tracker/ac.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { normalizeGitLabHost, resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
+import { resolveGitLabArtifactUrl } from './artifact-url.js';
 
 export interface GitLabConfig {
   url: string;
@@ -343,7 +344,10 @@ export class GitLabClient implements TrackerProvider {
           fileContent,
           { metadata: { filename } }
         ) as any;
-        const url = upload.full_path ?? upload.url ?? '';
+        // The upload path is relative; it has to be absolute before it reaches
+        // a description, otherwise the markdown renderer turns it into a
+        // repository path and the link stops resolving to the attachment.
+        const url = resolveGitLabArtifactUrl(upload.full_path ?? upload.url, this.config.url);
         if (url) artifacts.push({ name: filename, url });
       } catch {
         // best-effort: skip failed uploads

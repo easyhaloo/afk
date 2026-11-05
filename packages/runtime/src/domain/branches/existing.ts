@@ -23,7 +23,7 @@ import type {
 import { BranchStrategyError } from './types.js';
 import {
   defaultWorktreeBaseDir,
-  ensureWorktreeBaseDir,
+  prepareWorktreeBaseDir,
   gitWorktreeRemove,
   checkNotShared,
   isBranchCheckedOut,
@@ -58,7 +58,7 @@ export class ExistingBranchStrategy implements BranchStrategy {
 
     // 3. Resolve worktree path: explicit > default sibling.
     const baseDir = options.worktreeBaseDir ?? defaultWorktreeBaseDir(options.repoPath);
-    await ensureWorktreeBaseDir(baseDir);
+    await prepareWorktreeBaseDir(git, options.repoPath, baseDir);
     const path = config.worktreePath ?? join(baseDir, branch.replace(/\//g, '-'));
 
     checkNotShared(path, branch, this.kind);

@@ -18,7 +18,7 @@ import type {
 import { BranchStrategyError, RESERVED_BRANCH_PREFIXES } from './types.js';
 import {
   defaultWorktreeBaseDir,
-  ensureWorktreeBaseDir,
+  prepareWorktreeBaseDir,
   gitWorktreeAdd,
   gitWorktreeRemove,
   gitBranchDelete,
@@ -58,7 +58,7 @@ export class NamedBranchStrategy implements BranchStrategy {
     this.validate(config.branch);
     const branch = this.resolveBranch(config);
     const baseDir = options.worktreeBaseDir ?? defaultWorktreeBaseDir(options.repoPath);
-    await ensureWorktreeBaseDir(baseDir);
+    await prepareWorktreeBaseDir(git, options.repoPath, baseDir);
     // Mirror the branch name as a directory; '/' is path-illegal so use '-'.
     const dirName = branch.replace(/\//g, '-');
     const path = join(baseDir, dirName);

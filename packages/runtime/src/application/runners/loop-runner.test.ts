@@ -213,22 +213,16 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(internals.inFlight.has('42')).toBe(false);
   });
 
-  it('takes the default pid and status paths from the environment', () => {
-    const previousPid = process.env.AFK_LOOP_PID_FILE;
-    const previousStatus = process.env.AFK_LOOP_STATUS_FILE;
-    process.env.AFK_LOOP_PID_FILE = '/tmp/afk-loop-side-by-side/loop.pid';
-    process.env.AFK_LOOP_STATUS_FILE = '/tmp/afk-loop-side-by-side/status.json';
-    try {
-      const { providers } = providersFor();
-      const subject = new LoopRunner(providers, { ...selection, readManifest });
-      expect((subject as any).opts.pidFilePath).toBe('/tmp/afk-loop-side-by-side/loop.pid');
-      expect((subject as any).opts.statusFilePath).toBe('/tmp/afk-loop-side-by-side/status.json');
-    } finally {
-      if (previousPid === undefined) delete process.env.AFK_LOOP_PID_FILE;
-      else process.env.AFK_LOOP_PID_FILE = previousPid;
-      if (previousStatus === undefined) delete process.env.AFK_LOOP_STATUS_FILE;
-      else process.env.AFK_LOOP_STATUS_FILE = previousStatus;
-    }
+  it('files a run under its tag, and an untagged run under the default tag', () => {
+    const { providers } = providersFor();
+    const tagged = new LoopRunner(providers, { ...selection, readManifest, runTag: 'k-base-3' });
+    expect((tagged as any).opts.runTag).toBe('k-base-3');
+    expect((tagged as any).opts.statusFilePath).toMatch(/loop-runs[\\/]k-base-3[\\/]status\.json$/);
+    expect((tagged as any).opts.pidFilePath).toMatch(/loop-runs[\\/]k-base-3[\\/]loop\.pid$/);
+
+    const untagged = new LoopRunner(providers, { ...selection, readManifest });
+    expect((untagged as any).opts.runTag).toBe('default');
+    expect((untagged as any).opts.statusFilePath).toMatch(/loop-runs[\\/]default[\\/]status\.json$/);
   });
 
   it('makes duplicate stop calls idempotent', async () => {

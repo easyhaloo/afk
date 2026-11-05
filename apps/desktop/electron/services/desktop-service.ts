@@ -428,8 +428,42 @@ export function parseLoopLastError(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/**
+ * The most relevant loop status snapshot.
+ *
+ * A machine may run one loop per work item, each filed under its own tag. The
+ * card answers for the loop an operator would look at first: a live loop (the
+ * default run when it is one of them), then any run, then the previous
+ * single-loop layout. A snapshot is judged by its own `pid`, because a run
+ * never deletes its status file on exit — picking by file presence alone
+ * would show a stopped run while another loop is working.
+ *
+ * The CLI can relocate this directory for tests (`AFK_LOOP_RUNS_DIR`); the
+ * card deliberately follows the shipped layout.
+ */
+async function readLoopStatusSnapshot(): Promise<string> {
+  const runs = path.join(homedir(), ".afk", "loop-runs");
+  const entries = await fs.readdir(runs, { withFileTypes: true }).catch(() => []);
+  const tags = ["default", ...entries.filter(entry => entry.isDirectory() && entry.name !== "default").map(entry => entry.name).sort()];
+  const candidates = [
+    ...tags.map(tag => ({ tag, file: path.join(runs, tag, "status.json") })),
+    { tag: "legacy", file: path.join(homedir(), ".afk", "loop-status.json") },
+  ];
+  const snapshots = (await Promise.all(candidates.map(async candidate => {
+    const [raw, stat] = await Promise.all([fs.readFile(candidate.file, "utf8").catch(() => ""), fs.stat(candidate.file).catch(() => undefined)]);
+    return raw ? { ...candidate, raw, modifiedAt: stat?.mtimeMs ?? 0 } : undefined;
+  }))).filter((snapshot): snapshot is { tag: string; file: string; raw: string; modifiedAt: number } => snapshot !== undefined);
+  const newest = (pool: typeof snapshots) => [...pool].sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
+  const live = snapshots.filter(snapshot => {
+    const pid = jsonRecord(snapshot.raw).pid;
+    return typeof pid === "number" && processAlive(pid);
+  });
+  const chosen = live.find(snapshot => snapshot.tag === "default") ?? newest(live) ?? snapshots.find(snapshot => snapshot.tag === "default") ?? newest(snapshots);
+  return chosen?.raw ?? "";
+}
+
 async function readLoopStatus(): Promise<LoopStatus> {
-  const raw = await fs.readFile(path.join(homedir(), ".afk", "loop-status.json"), "utf8").catch(() => "");
+  const raw = await readLoopStatusSnapshot();
   const record = jsonRecord(raw);
   const pid = typeof record.pid === "number" ? record.pid : undefined;
   const execution = record.execution && typeof record.execution === "object" ? record.execution as Record<string, unknown> : {};

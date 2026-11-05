@@ -121,7 +121,7 @@ AFK_TMUX_SESSION=      # tmux session name (default: afk)
 
 CLI and Desktop execute under `~/.loop-workspace/`, isolated by work-item ID.
 Configuration and system data live under `~/.afk/`: `config.yml`, `workflows/`,
-`tracker-projects.json`, runtime records, and per-workspace data in
+the SQLite stores in `storage/`, runtime records, and per-workspace data in
 `workspaces/<sha256-of-absolute-workspace-path>/`. See
 [workspace and data boundaries](docs/architecture/execution.md#data-and-workspace-boundaries).
 

@@ -18,6 +18,29 @@ export type AgentProviderName =
   | 'opencode'
   | 'copilot';
 
+/**
+ * The limits a provider puts on the text AFK hands it.
+ *
+ * These are the provider's own constraints, not AFK's. A goal condition that
+ * is too long is refused by the agent's TUI, and the refusal is silent: the
+ * TUI prints one line, the agent never starts, and AFK waits out the whole
+ * idle timeout before it can report a timeout instead of a cause. AFK has to
+ * ask the provider what it accepts rather than guess a number here.
+ */
+export interface AgentPromptLimits {
+  /**
+   * The largest `/goal` condition the provider accepts, in characters.
+   *
+   * The limit belongs to the goal channel only: it applies to the condition
+   * that follows the `/goal` command, not to a prompt that is delivered as an
+   * ordinary message. A provider that accepts a 50,000-character message can
+   * still refuse a 4,001-character goal condition.
+   *
+   * Absent when the provider declares no limit of its own.
+   */
+  goalConditionMaxChars?: number;
+}
+
 /** Capabilities that a provider may support. */
 export type AgentCapability =
   | 'streaming'       // Provider emits structured event stream
@@ -234,6 +257,16 @@ export interface AgentExecution {
 export interface AgentProvider {
   readonly name: AgentProviderName;
   readonly capabilities: ReadonlySet<AgentCapability>;
+
+  /**
+   * The limits this provider puts on the text AFK hands it.
+   *
+   * Optional: a provider that declares none is treated as the strictest
+   * limit AFK knows of, so an over-long goal is caught before dispatch
+   * instead of after a silent refusal. `resolveGoalConditionLimit` in
+   * `prompt-budget.ts` holds that default and its reasoning.
+   */
+  readonly promptLimits?: AgentPromptLimits;
 
   createExecution(options: AgentExecutionOptions): Promise<AgentExecution>;
 

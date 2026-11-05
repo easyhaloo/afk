@@ -82,6 +82,18 @@ An environment assertion is an **environment declaration**, never a test conclus
 
 The audit stream carries the diagnosis: `failure.classified` events carry the code, the evidence and a snapshot of the preceding failure, and `run.finished` carries the root cause in `reason` plus its code in `reasonCode`. The CLI reads the root cause back out of the stream: `afk log <runId>` shows `Cause: …` on an event that has no reason of its own, and `afk observe executions --json` lists the root cause of every failed execution.
 
+### The goal condition budget
+
+A goal condition has a character budget, and the budget belongs to the **provider**, not to AFK. `AgentProvider` declares it (`promptLimits.goalConditionMaxChars`); Claude Code declares the 4,000 characters its TUI enforces. AFK asks the provider instead of guessing a number.
+
+The limit applies to the **goal channel only** — the text that follows the `/goal` command. A prompt delivered as an ordinary message (batch mode strips `/goal`) has no goal-condition limit and is not measured against one. A provider that declares no limit is measured against the strictest limit AFK knows of: refusing a goal that might have been accepted costs one message, dispatching a goal that is refused costs the whole idle timeout.
+
+**The content does not travel in the prompt.** The backlog description — the acceptance criteria list — is written into the worktree as `.afk/backlog-context.md`, and the goal keeps the template's task statement, the backlog title, and a pointer telling the agent to read that file first. The prompt length is therefore decoupled from the description length, and the criteria are still delivered verbatim. `.afk/` is AFK's own runtime-artifact directory: the file never enters a change request and never makes a worktree look dirty. Both the QA path and the implementation path do this.
+
+The prompt is assembled from **labelled pieces** (task statement, title, context pointer, rework context, completion protocol), so a prompt that is too long can name the piece responsible.
+
+**A problem found before dispatch is found before dispatch.** The final prompt is measured against the provider's declared limit before the agent is started. Over the limit, the run fails at once with the structured diagnosis above: `prompt_budget_exceeded`, the actual length, the limit, the piece that crossed it, and the suggested action — instead of dispatching a prompt that will be refused in silence and dying half an hour later on an idle timeout. See [ADR-0026](../adr/0026-goal-condition-budget-and-worktree-context.md).
+
 ### Execution refs and configuration
 
 The item's `## Base Version` section declares an immutable execution plan:

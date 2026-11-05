@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code.js';
 import { StreamingAgentExecution } from '../../infrastructure/sandbox/providers/streaming.js';
 
@@ -68,6 +68,56 @@ describe('ClaudeCodeProvider.parseLine — terminal result usage', () => {
   it('treats a result event without usage as having no usage', () => {
     const events = p.parseLine(JSON.stringify({ type: 'result', result: 'ok', is_error: false }));
     expect(events.some((e) => e.type === 'usage')).toBe(false);
+  });
+});
+
+/**
+ * The `/goal` condition of Claude Code's TUI is refused above 4,000
+ * characters, and the refusal is silent: the TUI prints one line, the agent
+ * never starts, and the runner only learns about it when the idle timeout
+ * expires. The provider declares the limit and refuses an over-long goal
+ * itself, before any agent is started.
+ */
+describe('ClaudeCodeProvider — goal condition limit', () => {
+  const p = new ClaudeCodeProvider();
+
+  function sandbox() {
+    const startAgent = vi.fn();
+    return { startAgent, host: { worktreePath: process.cwd(), workspacePath: process.cwd(), startAgent } as never };
+  }
+
+  it('declares the limit its TUI enforces', () => {
+    expect(p.promptLimits?.goalConditionMaxChars).toBe(4000);
+  });
+
+  it('refuses an over-long goal before the agent is started', async () => {
+    const s = sandbox();
+
+    await expect(p.createExecution({
+      sandbox: s.host,
+      worktreePath: process.cwd(),
+      sessionId: 'session-1',
+      prompt: `/goal ${'x'.repeat(4001)}`,
+      signalType: 'goal_complete',
+      generation: 1,
+      executionMode: 'interactive',
+    })).rejects.toThrow(/goal condition is 4001 characters/);
+    expect(s.startAgent).not.toHaveBeenCalled();
+  });
+
+  it('starts the agent for a goal within the limit', async () => {
+    const s = sandbox();
+
+    await p.createExecution({
+      sandbox: s.host,
+      worktreePath: process.cwd(),
+      sessionId: 'session-1',
+      prompt: `/goal ${'x'.repeat(4000)}`,
+      signalType: 'goal_complete',
+      generation: 1,
+      executionMode: 'interactive',
+    });
+    expect(s.startAgent).toHaveBeenCalled();
   });
 });
 

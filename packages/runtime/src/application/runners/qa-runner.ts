@@ -21,8 +21,10 @@ import type { ChangeRequest } from '../../infrastructure/tracker/changes/provide
 import type { ChangeMergeState } from '../../domain/tracker/types.js';
 import type { BaselineMergeResult } from '../../infrastructure/git/branches/provider.js';
 import { formatExecutionFailure, formatExecutionFailureReport } from '../workflow-engine.js';
-import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
-import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
+import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
+import { assemblePrompt, buildExecutionPromptSegments, type PromptSegment } from '../workflows/execution-protocol.js';
+import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from '../workflows/backlog-context.js';
+import { measurePromptBudget } from '../../domain/agents/prompt-budget.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
 import { BudgetManager } from '../workflows/budget.js';
@@ -217,7 +219,7 @@ export class QARunner {
         if (!resolution.resolved) {
           runtimeErrorSummary = resolution.summary;
           await this.markBlocked(id, resolution.summary);
-          return { success: false, summary: resolution.summary, failureCode: 'merge_conflict' };
+          return { success: false, summary: resolution.summary, failureCode: resolution.failureCode ?? 'merge_conflict' };
         }
       }
 
@@ -251,8 +253,31 @@ export class QARunner {
       if (preflight.inconclusive.length > 0) {
         logger.info({ backlogId: id, inconclusive: preflight.inconclusive }, 'QA environment probe was not conclusive; continuing');
       }
-      const goal = `${qaStep.prompt.replaceAll('{iid}', id)}\n\nBacklog title: ${backlog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
-      const prompt = buildExecutionPrompt(goal, this.executionMode, 'qa');
+      // The acceptance criteria go into the worktree, not into the goal. A
+      // goal condition has a character budget the provider enforces, and a
+      // description with a full criteria list outgrows it — the provider
+      // then refuses the goal in silence and the run dies on an idle
+      // timeout half an hour later.
+      const contextPath = description
+        ? await writeBacklogContext(worktreePath, { id, title: backlog.title, description })
+        : undefined;
+      const segments = buildExecutionPromptSegments(
+        buildGoalSegments({
+          taskStatement: qaStep.prompt.replaceAll('{iid}', id),
+          title: backlog.title,
+          ...(contextPath === undefined ? {} : { contextPath: BACKLOG_CONTEXT_PATH }),
+        }),
+        this.executionMode,
+        'qa',
+      );
+      const prompt = assemblePrompt(segments);
+      const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
+      if (overBudget) {
+        runtimeErrorSummary = overBudget.message;
+        logger.error({ backlogId: id, code: overBudget.code, message: overBudget.message }, 'QA prompt is over the provider budget');
+        await this.markBlocked(id, overBudget.message);
+        return { success: false, summary: overBudget.message, failureCode: 'prompt_budget_exceeded', evidence: overBudget.evidence };
+      }
       execution = await this.agentProvider.createExecution({
         sandbox,
         worktreePath,
@@ -410,7 +435,7 @@ export class QARunner {
     session: string,
     conflicts: string[],
     targetBranch: string,
-  ): Promise<{ resolved: boolean; summary: string }> {
+  ): Promise<{ resolved: boolean; summary: string; failureCode?: RunFailureReasonCode }> {
     logger.info({ backlogId, worktreePath, targetBranch, conflicts }, 'merge conflict detected; resolving it in the QA worktree');
     const template = await new TemplateLoader({ projectRoot: this.projectRoot }).load('merge-conflict-resolution');
     const step = compileTemplate(template).groups
@@ -424,7 +449,20 @@ export class QARunner {
       .replaceAll('{conflicts}', conflicts.map(file => `- ${file}`).join('\n'));
     // A task completion, not a QA one: this agent resolves conflicts, it
     // does not verify acceptance criteria and it produces no QA evidence.
-    const prompt = buildExecutionPrompt(goal, this.executionMode, 'task');
+    const segments = buildExecutionPromptSegments(
+      [{
+        label: 'goal task statement',
+        text: goal,
+      }],
+      this.executionMode,
+      'task',
+    );
+    const prompt = assemblePrompt(segments);
+    const overBudget = this.checkPromptBudget(prompt, segments, 'conflict resolution');
+    if (overBudget) {
+      logger.error({ backlogId, code: overBudget.code, message: overBudget.message }, 'conflict resolution prompt is over the provider budget');
+      return { resolved: false, summary: overBudget.message, failureCode: 'prompt_budget_exceeded' };
+    }
     // A sandbox of its own: in interactive mode the sandbox owns the tmux
     // session, and two agents cannot share one.
     const conflictSandbox = await this.sandboxProvider.create({
@@ -472,6 +510,50 @@ export class QARunner {
     } finally {
       await conflictSandbox.close().catch(error => logger.warn({ backlogId, error }, 'failed to close the conflict resolution sandbox'));
     }
+  }
+
+  /**
+   * The prompt budget check, run before the agent is dispatched.
+   *
+   * A goal the provider would refuse is refused here, where the length, the
+   * limit and the responsible part are still known. The failure is a
+   * structured one, so `afk log` shows the cause instead of an idle
+   * timeout that says nothing about why the agent never started.
+   */
+  private checkPromptBudget(
+    prompt: string,
+    segments: readonly PromptSegment[],
+    phase: string,
+  ): FailureDiagnostic | undefined {
+    const budget = measurePromptBudget({ prompt, parts: segments, limits: this.agentProvider.promptLimits });
+    if (!budget.exceeded) return undefined;
+    const provider = this.agentProvider.name;
+    const evidence: FailureEvidence[] = [
+      {
+        kind: 'context',
+        label: 'goal condition length',
+        expected: `at most ${budget.limit} characters`,
+        actual: `${budget.actual} characters (${budget.overBy} over)`,
+      },
+      ...(budget.exceededByPart === undefined
+        ? []
+        : [{ kind: 'context' as const, label: 'part over the limit', actual: budget.exceededByPart }]),
+      {
+        kind: 'context',
+        label: 'prompt parts',
+        detail: budget.parts.map(part => `${part.label}: ${part.chars} characters`).join('; '),
+      },
+      {
+        kind: 'context',
+        label: 'suggested action',
+        actual: `the backlog context is already written to ${BACKLOG_CONTEXT_PATH}; shorten the task statement or the completion protocol, or raise the goal limit the ${provider} provider declares`,
+      },
+    ];
+    return createFailureDiagnostic({
+      code: 'prompt_budget_exceeded',
+      message: `the ${phase} goal is ${budget.actual} characters, over the ${budget.limit}-character goal condition limit the ${provider} provider enforces`,
+      evidence,
+    });
   }
 
   private async handleExecutionFailure(

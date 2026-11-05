@@ -49,6 +49,11 @@ export type RunFailureReasonCode =
   | 'merge_conflict'
   /** The machine cannot run the acceptance criteria's own check commands. */
   | 'qa_environment_missing'
+  /**
+   * The prompt AFK built is longer than the provider accepts on its goal
+   * channel. Detected before the agent was dispatched.
+   */
+  | 'prompt_budget_exceeded'
   /** The agent died or stopped answering, and the attempt was retried. */
   | 'agent_turn_failed'
   /** The agent said nothing for longer than it was allowed to. */

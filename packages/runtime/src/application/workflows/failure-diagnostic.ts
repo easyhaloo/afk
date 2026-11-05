@@ -120,6 +120,7 @@ export const FAILURE_CODES = [
   'upstream_transport_closed',
   'upstream_transport_close_failed',
   'qa_environment_missing',
+  'prompt_budget_exceeded',
   'workflow_setup',
   'workflow_crash',
   'repository_publication',
@@ -176,6 +177,7 @@ const FAILURE_CLASSES: Readonly<Record<RunFailureReasonCode, FailureClass>> = {
   repository_publication: 'infrastructure',
   provider_change_unconfirmed: 'infrastructure',
   merge_conflict: 'infrastructure',
+  prompt_budget_exceeded: 'infrastructure',
 };
 
 /** The coarse class a failure code belongs to. */

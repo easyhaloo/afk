@@ -71,31 +71,105 @@ export function isAcVerificationPass(value: unknown): boolean {
   return result.type === 'goal_complete' && result.kind === 'ac_verification' && result.result === 'PASS' && isNonEmptyString(result.summary);
 }
 
-export function buildBatchPrompt(prompt: string, kind: CompletionKind = 'task'): string {
-  // `/goal` is an interactive Claude command. Batch execution receives the
-  // same AFK prompt syntax, but must pass the goal as ordinary prompt text.
-  const batchGoal = prompt.trim().replace(/^\/goal\s*/i, '').trim();
+/**
+ * One labelled piece of a prompt.
+ *
+ * The label is not decoration: when a prompt turns out to be too long for
+ * the provider, the label is what says which piece is responsible.
+ */
+export interface PromptSegment {
+  /** What the piece is, e.g. `goal task statement`. */
+  label: string;
+  /** The text of the piece. */
+  text: string;
+}
+
+/**
+ * Join prompt segments into the text AFK hands the provider.
+ *
+ * Segments are separated by a blank line, so the provider reads them as
+ * paragraphs rather than as one run-on sentence.
+ */
+export function assemblePrompt(segments: readonly PromptSegment[], separator = '\n\n'): string {
+  return segments
+    .map(segment => segment.text)
+    .filter(text => text.trim().length > 0)
+    .join(separator);
+}
+
+/**
+ * The batch prompt, as segments.
+ *
+ * Batch execution receives the same AFK prompt syntax, but must pass the goal
+ * as ordinary prompt text: `/goal` is an interactive Claude command, and the
+ * batch transport has no command channel.
+ */
+export function buildBatchPromptSegments(goalSegments: readonly PromptSegment[], kind: CompletionKind = 'task'): PromptSegment[] {
+  const batchGoal = assemblePrompt(goalSegments).trim().replace(/^\/goal\s*/i, '').trim();
   const payload = kind === 'qa'
     ? '{"type":"goal_complete","kind":"qa","result":"PASS|FAIL","summary":"...","observations":[{"claim":"...","evidence":"..."}],"notes":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}],"requiredChecks":[{"command":"...","expected":"...","actual":"..."}]}'
     : kind === 'ac'
       ? '{"type":"goal_complete","kind":"ac_verification","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]}'
       : '{"type":"goal_complete","kind":"task","summary":"..."}';
   const evidence = kind === 'qa' ? `\n${QA_ARTIFACT_INSTRUCTION}\n${QA_EVIDENCE_INSTRUCTION}\n${QA_E2E_INSTRUCTION}\n` : '';
-  return `AFK batch goal:\n${batchGoal}\n\nAFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`;
+  return [
+    { label: 'goal', text: `AFK batch goal:\n${batchGoal}` },
+    {
+      label: 'completion protocol',
+      text: `AFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`,
+    },
+  ];
 }
 
-export function buildInteractivePrompt(prompt: string, kind: CompletionKind = 'task'): string {
+/**
+ * The interactive prompt, as segments.
+ *
+ * The goal keeps its own segments, so the prompt that reaches the TUI says
+ * which piece of it is what — and the completion protocol stays one piece,
+ * because it is AFK's own fixed overhead.
+ */
+export function buildInteractivePromptSegments(goalSegments: readonly PromptSegment[], kind: CompletionKind = 'task'): PromptSegment[] {
   const payload = kind === 'qa'
     ? '{"type":"goal_complete","timestamp":"<current ISO-8601 time>","kind":"qa","result":"PASS|FAIL","summary":"...","observations":[{"claim":"...","evidence":"..."}],"notes":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}],"requiredChecks":[{"command":"...","expected":"...","actual":"..."}]}'
     : kind === 'ac'
       ? '{"type":"goal_complete","timestamp":"<current ISO-8601 time>","kind":"ac_verification","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]}'
       : '{"type":"goal_complete","timestamp":"<current ISO-8601 time>","kind":"task","summary":"..."}';
   const evidence = kind === 'qa' ? ` ${QA_ARTIFACT_INSTRUCTION} ${QA_EVIDENCE_INSTRUCTION} ${QA_E2E_INSTRUCTION}` : '';
-  return `${prompt.trim()} AFK interactive completion protocol: work only on the current checked-out branch. Do not switch branches or reset the branch.${evidence} When the task is complete, atomically write a valid JSON ${payload} to .afk-signal.json using a temporary file and rename. Construct the payload with JSON.stringify (or an equivalent JSON serializer); do not embed raw JSON in a shell printf command, because unescaped control characters make the signal invalid. After the rename, validate the exact file with JSON.parse before reporting completion. Use result PASS when QA passes, FAIL when QA fails, the actual current ISO-8601 timestamp, and a non-empty summary. Do not only print the completion marker.`;
+  return [
+    ...goalSegments,
+    {
+      label: 'completion protocol',
+      text: `AFK interactive completion protocol: work only on the current checked-out branch. Do not switch branches or reset the branch.${evidence} When the task is complete, atomically write a valid JSON ${payload} to .afk-signal.json using a temporary file and rename. Construct the payload with JSON.stringify (or an equivalent JSON serializer); do not embed raw JSON in a shell printf command, because unescaped control characters make the signal invalid. After the rename, validate the exact file with JSON.parse before reporting completion. Use result PASS when QA passes, FAIL when QA fails, the actual current ISO-8601 timestamp, and a non-empty summary. Do not only print the completion marker.`,
+    },
+  ];
+}
+
+/**
+ * The prompt AFK hands the provider, as segments.
+ *
+ * The goal segments come from the caller, because the caller knows what the
+ * goal is made of: the task statement, the backlog title and the pointer to
+ * the backlog context file.
+ */
+export function buildExecutionPromptSegments(
+  goalSegments: readonly PromptSegment[],
+  executionMode: ExecutionMode | undefined,
+  kind: CompletionKind = 'task',
+): PromptSegment[] {
+  if (executionMode === 'batch') return buildBatchPromptSegments(goalSegments, kind);
+  if (executionMode === 'interactive') return buildInteractivePromptSegments(goalSegments, kind);
+  return [...goalSegments];
+}
+
+export function buildBatchPrompt(prompt: string, kind: CompletionKind = 'task'): string {
+  return assemblePrompt(buildBatchPromptSegments([{ label: 'goal', text: prompt }], kind));
+}
+
+export function buildInteractivePrompt(prompt: string, kind: CompletionKind = 'task'): string {
+  return assemblePrompt(buildInteractivePromptSegments([{ label: 'goal', text: prompt.trim() }], kind));
 }
 
 export function buildExecutionPrompt(prompt: string, executionMode: ExecutionMode | undefined, kind: CompletionKind = 'task'): string {
-  if (executionMode === 'batch') return buildBatchPrompt(prompt, kind);
-  if (executionMode === 'interactive') return buildInteractivePrompt(prompt, kind);
-  return prompt;
+  if (executionMode === undefined) return prompt;
+  return assemblePrompt(buildExecutionPromptSegments([{ label: 'goal', text: prompt.trim() }], executionMode, kind));
 }

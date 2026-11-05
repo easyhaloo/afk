@@ -32,12 +32,16 @@ import { PlanExecutor } from './workflows/plan-executor.js';
 import { SystemActionExecutor } from './workflows/system-actions.js';
 import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope.js';
 import {
-  buildExecutionPrompt,
+  assemblePrompt,
+  buildExecutionPromptSegments,
   isAcVerificationPass,
   parseAcVerificationFailure,
   type AcVerificationFailure,
   type CompletionKind,
+  type PromptSegment,
 } from './workflows/execution-protocol.js';
+import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from './workflows/backlog-context.js';
+import { measurePromptBudget } from '../domain/agents/prompt-budget.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
 import type { Step, StepResult } from '../domain/templates/types.js';
@@ -749,29 +753,57 @@ export class WorkflowRunner {
 
   // ── Template execution helpers ─────────────────────────────────────────────
 
-  private async resolveStepPrompt(step: Step, ctx?: StepRunCtx): Promise<string> {
+  /**
+   * The goal of a step, as segments.
+   *
+   * The backlog description is written into the worktree instead of into the
+   * goal: a goal condition has a character budget the provider enforces, and
+   * a description carrying the full acceptance criteria outgrows it. The
+   * agent reads the file; the goal keeps the task, the title and a pointer.
+   */
+  private async resolveStepPrompt(step: Step, ctx: StepRunCtx | undefined, worktreePath: string): Promise<PromptSegment[]> {
     if (!step.prompt) throw new Error(`agent step '${step.id}' is missing prompt`);
-    let prompt = typeof step.prompt === 'string' ? step.prompt : await fs.readFile(step.prompt.file, 'utf-8');
+    let taskStatement = typeof step.prompt === 'string' ? step.prompt : await fs.readFile(step.prompt.file, 'utf-8');
     // Variable substitution: {iid} → issue number
     if (ctx?.iid) {
-      prompt = prompt.replaceAll('{iid}', String(ctx.iid));
+      taskStatement = taskStatement.replaceAll('{iid}', String(ctx.iid));
     }
+    const segments: PromptSegment[] = [];
     if (this.activeBacklog) {
       const description = this.activeBacklog.description?.trim();
-      prompt = `${prompt}\n\nBacklog title: ${this.activeBacklog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
+      let contextPath: string | undefined;
+      if (description) {
+        await writeBacklogContext(worktreePath, {
+          id: this.activeBacklog.id,
+          title: this.activeBacklog.title,
+          description,
+        });
+        contextPath = BACKLOG_CONTEXT_PATH;
+      }
+      segments.push(...buildGoalSegments({
+        taskStatement,
+        title: this.activeBacklog.title,
+        ...(contextPath === undefined ? {} : { contextPath }),
+      }));
+    } else {
+      segments.push({ label: 'goal task statement', text: taskStatement });
     }
     if (step.id === 'implement') {
       const rework = this.activeRework ? formatReworkContext(this.activeRework) : '';
       const acCorrection = this.acFeedback ? formatAcCorrection(this.acFeedback) : '';
-      prompt = `${prompt}${rework}${acCorrection}`;
+      if (rework) segments.push({ label: 'rework context', text: rework.trim() });
+      if (acCorrection) segments.push({ label: 'AC correction', text: acCorrection.trim() });
     }
     if (this.preparedRepositories) {
       const repositories = this.preparedRepositories.repositories.map((repository, index) =>
         `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${repository.targetBranch ?? repository.baseBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`,
       ).join('\n');
-      prompt = `${prompt}\n\nExecution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`;
+      segments.push({
+        label: 'execution repositories',
+        text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,
+      });
     }
-    return prompt;
+    return segments;
   }
 
   private resolveStepSignalType(_role: string): 'goal_complete' {
@@ -784,7 +816,6 @@ export class WorkflowRunner {
     stepResults: Record<string, StepResult>,
   ): Promise<StepResult> {
     const startedAt = new Date().toISOString();
-    const prompt = await this.resolveStepPrompt(step, ctx);
     const typedStep = step as Step & { completionSignal?: 'goal_complete' };
     const signalType = typedStep.completionSignal ?? this.resolveStepSignalType(step.role ?? 'agent');
     const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
@@ -807,6 +838,11 @@ export class WorkflowRunner {
       // Placeholder (iid:0) or no explicit branch: reuse primary worktree.
       branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
     }
+
+    // The goal is resolved after the worktree is known: the backlog context
+    // is written into the worktree the agent works in.
+    const segments = await this.resolveStepPrompt(step, ctx, branchHandle.path);
+    const prompt = assemblePrompt(segments);
 
     // A local interactive session must own one workflow phase. Reusing the
     // implementation TUI for AC verification can submit the next prompt while
@@ -836,6 +872,7 @@ export class WorkflowRunner {
         budget: ctx.budget,
         persistBudget: ctx.persistBudget,
         prompt,
+        segments,
         signalType,
         executionMode: ctx.executionMode ?? 'batch',
         agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
@@ -1259,6 +1296,8 @@ export class WorkflowRunner {
     budget: BudgetManager;
     persistBudget: () => Promise<void>;
     prompt: string;
+    /** The goal's pieces, so an over-long prompt can name the guilty one. */
+    segments?: PromptSegment[];
     signalType: 'goal_complete';
     executionMode?: ExecutionMode;
     agentProvider?: AgentProvider;
@@ -1281,13 +1320,48 @@ export class WorkflowRunner {
       const rawPrompt = round === 1
         ? basePrompt
         : this.continuePrompt(basePrompt, p.iid, p.wtPath, round - 1);
-      const prompt = buildExecutionPrompt(rawPrompt, p.executionMode, p.completionKind);
+      const goalSegments = round === 1 && p.segments ? p.segments : [{ label: 'goal', text: rawPrompt }];
+      const segments = buildExecutionPromptSegments(goalSegments, p.executionMode, p.completionKind);
+      const prompt = assemblePrompt(segments);
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
 
       const agentProvider = p.agentProvider ?? this.agentProvider;
       const sandbox = p.sandbox ?? this.sandbox!;
       if (this.leaseLost) throw new Error('claim lease lost before agent start');
+      // A goal the provider would refuse is refused here, where the length
+      // and the limit are still known. Dispatching it would cost the whole
+      // idle timeout and produce a timeout instead of a cause.
+      const budget = measurePromptBudget({ prompt, parts: segments, limits: agentProvider.promptLimits });
+      if (budget.exceeded) {
+        const failure = await this.classifyFailure(createFailureDiagnostic({
+          code: 'prompt_budget_exceeded',
+          message: `the agent goal is ${budget.actual} characters, over the ${budget.limit}-character goal condition limit the ${agentProvider.name} provider enforces`,
+          evidence: [
+            {
+              kind: 'context',
+              label: 'goal condition length',
+              expected: `at most ${budget.limit} characters`,
+              actual: `${budget.actual} characters (${budget.overBy} over)`,
+            },
+            ...(budget.exceededByPart === undefined
+              ? []
+              : [{ kind: 'context' as const, label: 'part over the limit', actual: budget.exceededByPart }]),
+            {
+              kind: 'context',
+              label: 'prompt parts',
+              detail: budget.parts.map(part => `${part.label}: ${part.chars} characters`).join('; '),
+            },
+            {
+              kind: 'context',
+              label: 'suggested action',
+              actual: `the backlog context is already written to ${BACKLOG_CONTEXT_PATH}; shorten the task statement or the completion protocol, or raise the goal limit the ${agentProvider.name} provider declares`,
+            },
+          ],
+        }));
+        await this.markBacklogBlocked(failure.message);
+        return { completed: false };
+      }
       const execution = resumedExecution ?? await agentProvider.createExecution({
         sandbox,
         worktreePath: p.wtPath,

@@ -13,6 +13,7 @@ import {
   loopRunTagForWorkItem,
   loopRunsDirectory,
   loopStatusFilePath,
+  removeLoopPidFiles,
   sanitizeLoopRunTag,
 } from './pid-file.js';
 
@@ -109,5 +110,47 @@ describe('loop run paths', () => {
       fs.writeFileSync(path.join(root, tag, 'loop.pid'), `${pid}\n`);
     }
     expect(liveLoopRunTags(env)).toEqual(['live']);
+  });
+});
+
+describe('removing pid files', () => {
+  it('keeps the legacy pid file of a loop that is still running', () => {
+    const pidFile = path.join(runsRoot(), 'default', 'loop.pid');
+    const legacyPidFile = path.join(runsRoot(), 'legacy-loop.pid');
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, '99999999\n');
+    fs.writeFileSync(legacyPidFile, `${process.pid}\n`);
+
+    const removed = removeLoopPidFiles({ pidFile, legacyPidFile });
+
+    // Cleaning a stale default run must not orphan a live pre-upgrade loop.
+    expect(removed).toEqual([pidFile]);
+    expect(fs.existsSync(pidFile)).toBe(false);
+    expect(fs.existsSync(legacyPidFile)).toBe(true);
+  });
+
+  it('removes the legacy pid file once its process is gone', () => {
+    const pidFile = path.join(runsRoot(), 'default', 'loop.pid');
+    const legacyPidFile = path.join(runsRoot(), 'legacy-loop.pid');
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(legacyPidFile, '99999999\n');
+
+    const removed = removeLoopPidFiles({ pidFile, legacyPidFile });
+
+    expect(removed).toEqual([legacyPidFile]);
+    expect(fs.existsSync(legacyPidFile)).toBe(false);
+  });
+
+  it('leaves the legacy pid file alone when the run is not the default', () => {
+    const pidFile = path.join(runsRoot(), 'k-base-3', 'loop.pid');
+    const legacyPidFile = path.join(runsRoot(), 'legacy-loop.pid');
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, '99999999\n');
+    fs.writeFileSync(legacyPidFile, '99999999\n');
+
+    const removed = removeLoopPidFiles({ pidFile });
+
+    expect(removed).toEqual([pidFile]);
+    expect(fs.existsSync(legacyPidFile)).toBe(true);
   });
 });

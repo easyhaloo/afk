@@ -25,8 +25,11 @@ export const DEFAULT_LOOP_RUN_TAG = 'default';
  * characters that survive a shell and a path segment. Rejecting `.` and `..`
  * is what keeps a tag inside the runs directory.
  */
+/** Longest tag a run directory may have. */
+export const MAX_LOOP_RUN_TAG_LENGTH = 64;
+
 export function sanitizeLoopRunTag(raw: string): string {
-  const tag = raw.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+  const tag = raw.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, MAX_LOOP_RUN_TAG_LENGTH);
   if (!tag || tag === '.' || tag === '..') throw new Error(`invalid loop run tag: ${JSON.stringify(raw)}`);
   return tag;
 }
@@ -40,14 +43,17 @@ export function sanitizeLoopRunTag(raw: string): string {
  * The hash is what makes the tag unique: the readable part alone would put
  * `git.corp/group/project#3` and `gitlab.com/group/project#3` in the same
  * directory, and the second loop would then be told it is already running.
+ * The suffix is reserved before the slug is shortened, so a long project name
+ * loses characters from its readable part, never from its identity.
  */
 export function loopRunTagForWorkItem(workItemId?: string): string {
   if (!workItemId) return DEFAULT_LOOP_RUN_TAG;
   const parts = workItemId.split(/[#/:]+/).filter(part => part.length > 0);
-  const suffix = createHash('sha256').update(workItemId).digest('hex').slice(0, 4);
+  const suffix = createHash('sha256').update(workItemId).digest('hex').slice(0, 6);
   try {
     const slug = sanitizeLoopRunTag(parts.slice(-2).join('-'));
-    return sanitizeLoopRunTag(`${slug}-${suffix}`);
+    const head = slug.slice(0, MAX_LOOP_RUN_TAG_LENGTH - suffix.length - 1).replace(/-+$/, '');
+    return head ? `${head}-${suffix}` : suffix;
   } catch {
     return DEFAULT_LOOP_RUN_TAG;
   }
@@ -118,21 +124,41 @@ export function ensurePidDirectory(tag: string = DEFAULT_LOOP_RUN_TAG, env: Node
 }
 
 export function readPid(tag: string = DEFAULT_LOOP_RUN_TAG, env: NodeJS.ProcessEnv = process.env): number | null {
-  try {
-    const value = Number(fs.readFileSync(loopPidFilePath(tag, env), 'utf-8').trim());
-    return Number.isInteger(value) && value > 0 ? value : null;
-  } catch {
-    return null;
-  }
+  return readPidFileAt(loopPidFilePath(tag, env));
 }
 
+/**
+ * Forget a run's pid file, and the retired single-loop file with it.
+ *
+ * The legacy file is only removed when its process is gone: a loop started by
+ * an older CLI is still writing it, and deleting it would leave that loop
+ * running with nothing pointing at it — alive but unstoppable.
+ */
 export function removePidFile(tag: string = DEFAULT_LOOP_RUN_TAG, env: NodeJS.ProcessEnv = process.env): void {
-  for (const file of [loopPidFilePath(tag, env), ...(tag === DEFAULT_LOOP_RUN_TAG ? [LEGACY_LOOP_PID_FILE] : [])]) {
+  const files = [loopPidFilePath(tag, env)];
+  if (tag === DEFAULT_LOOP_RUN_TAG && !isLegacyLoopAlive()) files.push(LEGACY_LOOP_PID_FILE);
+  for (const file of files) {
     try {
       fs.unlinkSync(file);
     } catch {
       // A missing pid file is already the desired state.
     }
+  }
+}
+
+/** Whether a loop started by an older CLI is still running under the legacy file. */
+export function isLegacyLoopAlive(): boolean {
+  const pid = readPidFileAt(LEGACY_LOOP_PID_FILE);
+  return pid !== null && isProcessAlive(pid);
+}
+
+/** The pid recorded in one pid file, or null when it is missing or unreadable. */
+export function readPidFileAt(file: string): number | null {
+  try {
+    const value = Number(fs.readFileSync(file, 'utf-8').trim());
+    return Number.isInteger(value) && value > 0 ? value : null;
+  } catch {
+    return null;
   }
 }
 

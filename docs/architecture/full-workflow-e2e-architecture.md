@@ -127,7 +127,7 @@ flowchart LR
 
 loop 的外部控制面是：
 
-- `afk loop start` 或兼容的 `afk loop`：前台运行；`-d` 通过 detached child 后台运行。`--run-tag <tag>` 指定运行目录；缺省时由 `--work-item-id` 派生（`gitlab:host/group/project#3` → `project-3-7e21`，后缀取自完整 ID，使不同实例上的同名项目不会共用一个目录），没有工作项时用 `default`。
+- `afk loop start` 或兼容的 `afk loop`：前台运行；`-d` 通过 detached child 后台运行。`--run-tag <tag>` 指定运行目录；缺省时由 `--work-item-id` 派生（`gitlab:host/group/project#3` → `project-3-7e21a4`，后缀取自完整 ID，使不同实例上的同名项目不会共用一个目录），没有工作项时用 `default`。
 - `afk loop status [--run-tag <tag>]`：读取该 run 的 `loop.pid`、`status.json` 和进程存活状态；`--all` 列出 `~/.afk/loop-runs/` 下的全部 run。
 - `afk loop stop [--run-tag <tag>]`：先发 `SIGTERM`，超时后发 `SIGKILL`。
 

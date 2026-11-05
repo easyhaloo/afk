@@ -18,14 +18,17 @@ import {
   LEGACY_LOOP_PID_FILE,
   LEGACY_LOOP_STATUS_FILE,
   ensurePidDirectory,
+  isLegacyLoopAlive,
   isProcessAlive,
   legacyLoopPathOverrides,
   liveLoopRunTags,
   loopPidFilePath,
+  loopRunDirectory,
   loopRunTagForWorkItem,
   loopRunsDirectory,
   loopStatusFilePath,
   readPid,
+  readPidFileAt,
   removePidFile,
   sanitizeLoopRunTag,
 } from '@afk/runtime/infrastructure/process/pid-file';
@@ -82,7 +85,7 @@ async function startLoop(options: LoopStartOptions): Promise<void> {
   const runTag = resolveStartRunTag(options, managedExecution.workItemId);
   warnLegacyPathOverrides();
   if (options.daemon && process.env.AFK_LOOP_CHILD !== '1') {
-    await startDaemon(runTag);
+    await startDaemon(runTag, Boolean(options.runTag));
     return;
   }
   await runLoop(options, runTag);
@@ -157,14 +160,24 @@ function printStartup(pollIntervalMs: number, statusIntervalMs: number, shutdown
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeoutMs / 1000}s`));
   if (maxIterations !== undefined) console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
   if (backlogIds?.length) console.log(chalk.gray(`    backlog-scope:     ${backlogIds.join(', ')}`));
-  console.log(chalk.gray(`    run:               ${loopPidFilePath(runTag).replace(/\/loop\.pid$/, '')}`));
+  console.log(chalk.gray(`    run:               ${loopRunDirectory(runTag)}`));
   console.log(chalk.dim('\nPress Ctrl+C to stop (will drain in-flight work)\n'));
 }
 
-async function startDaemon(runTag: string): Promise<void> {
+async function startDaemon(runTag: string, explicitTag = false): Promise<void> {
   const existingPid = readPid(runTag);
   if (existingPid !== null && isProcessAlive(existingPid)) {
     handleCommandError(new Error(`afk loop: already running (pid=${existingPid}, run=${runTag})`), 'use `afk loop stop` to stop it first');
+    return;
+  }
+  // A loop started by an older CLI is still running under the legacy pid file,
+  // and it is still working the same work items. Only an explicit tag says the
+  // operator means to run a second loop beside it.
+  if (!explicitTag && isLegacyLoopAlive()) {
+    handleCommandError(
+      new Error(`afk loop: already running (pid=${readPidFileAt(LEGACY_LOOP_PID_FILE)}, legacy layout)`),
+      'pass --run-tag <tag> to run a second loop, or `afk loop stop` to stop the running one',
+    );
     return;
   }
   if (existingPid !== null) removePidFile(runTag);
@@ -193,16 +206,19 @@ async function startDaemon(runTag: string): Promise<void> {
  * The run a command acts on when the operator names none.
  *
  * `default` when that run is alive, otherwise the only live run. With several
- * live runs there is no single answer, so the command says which ones exist
- * and falls back to `default` instead of guessing.
+ * live runs there is no single answer: guessing would report "not running"
+ * while loops are working, so the command refuses and names them instead.
  */
 function resolveCommandRunTag(explicit?: string): string {
   if (explicit) return sanitizeLoopRunTag(explicit);
   const live = liveLoopRunTags();
+  if (live.length === 0) return DEFAULT_LOOP_RUN_TAG;
   if (live.includes(DEFAULT_LOOP_RUN_TAG)) return DEFAULT_LOOP_RUN_TAG;
   if (live.length === 1) return live[0];
-  if (live.length > 1) detail(`multiple loops are running: ${live.join(', ')} — use --run-tag, or --all`);
-  return DEFAULT_LOOP_RUN_TAG;
+  return handleCommandError(
+    new Error(`afk loop: ${live.length} loops are running (${live.join(', ')})`),
+    'name one with --run-tag, or list them all with --all',
+  );
 }
 
 /**
@@ -296,7 +312,9 @@ function showAllLoopStatus(): void {
   }
   console.log();
   if (fs.existsSync(LEGACY_LOOP_PID_FILE)) {
-    console.log(chalk.gray(`legacy:     ${LEGACY_LOOP_STATUS_FILE} (kept for one release; restart the loop to move it under loop-runs/)`));
+    const legacyPid = readPidFileAt(LEGACY_LOOP_PID_FILE);
+    const legacyState = legacyPid !== null && isProcessAlive(legacyPid) ? `running, pid=${legacyPid}` : 'stopped';
+    console.log(chalk.gray(`legacy:     ${LEGACY_LOOP_STATUS_FILE} — ${legacyState} (restart the loop to move it under loop-runs/)`));
     console.log();
   }
 }

@@ -432,23 +432,34 @@ export function parseLoopLastError(value: unknown): Record<string, string> {
  * The most relevant loop status snapshot.
  *
  * A machine may run one loop per work item, each filed under its own tag. The
- * card answers for the loop an operator would look at first: the default run,
- * a run written by the previous single-loop layout, or the newest run.
+ * card answers for the loop an operator would look at first: a live loop (the
+ * default run when it is one of them), then any run, then the previous
+ * single-loop layout. A snapshot is judged by its own `pid`, because a run
+ * never deletes its status file on exit — picking by file presence alone
+ * would show a stopped run while another loop is working.
+ *
+ * The CLI can relocate this directory for tests (`AFK_LOOP_RUNS_DIR`); the
+ * card deliberately follows the shipped layout.
  */
 async function readLoopStatusSnapshot(): Promise<string> {
   const runs = path.join(homedir(), ".afk", "loop-runs");
-  for (const file of [path.join(runs, "default", "status.json"), path.join(homedir(), ".afk", "loop-status.json")]) {
-    const raw = await fs.readFile(file, "utf8").catch(() => "");
-    if (raw) return raw;
-  }
   const entries = await fs.readdir(runs, { withFileTypes: true }).catch(() => []);
-  const snapshots = await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
-    const file = path.join(runs, entry.name, "status.json");
-    const stat = await fs.stat(file).catch(() => undefined);
-    return stat ? { file, modifiedAt: stat.mtimeMs } : undefined;
-  }));
-  const newest = snapshots.filter(snapshot => snapshot !== undefined).sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
-  return newest ? await fs.readFile(newest.file, "utf8").catch(() => "") : "";
+  const tags = ["default", ...entries.filter(entry => entry.isDirectory() && entry.name !== "default").map(entry => entry.name).sort()];
+  const candidates = [
+    ...tags.map(tag => ({ tag, file: path.join(runs, tag, "status.json") })),
+    { tag: "legacy", file: path.join(homedir(), ".afk", "loop-status.json") },
+  ];
+  const snapshots = (await Promise.all(candidates.map(async candidate => {
+    const [raw, stat] = await Promise.all([fs.readFile(candidate.file, "utf8").catch(() => ""), fs.stat(candidate.file).catch(() => undefined)]);
+    return raw ? { ...candidate, raw, modifiedAt: stat?.mtimeMs ?? 0 } : undefined;
+  }))).filter((snapshot): snapshot is { tag: string; file: string; raw: string; modifiedAt: number } => snapshot !== undefined);
+  const newest = (pool: typeof snapshots) => [...pool].sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
+  const live = snapshots.filter(snapshot => {
+    const pid = jsonRecord(snapshot.raw).pid;
+    return typeof pid === "number" && processAlive(pid);
+  });
+  const chosen = live.find(snapshot => snapshot.tag === "default") ?? newest(live) ?? snapshots.find(snapshot => snapshot.tag === "default") ?? newest(snapshots);
+  return chosen?.raw ?? "";
 }
 
 async function readLoopStatus(): Promise<LoopStatus> {

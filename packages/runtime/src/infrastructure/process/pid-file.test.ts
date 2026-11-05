@@ -5,6 +5,7 @@ import { mkdtempSync } from 'fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_LOOP_RUN_TAG,
+  MAX_LOOP_RUN_TAG_LENGTH,
   legacyLoopPathOverrides,
   liveLoopRunTags,
   loopPidFilePath,
@@ -46,9 +47,20 @@ describe('loop run tags', () => {
 
   it('derives a short, stable tag from a work item id', () => {
     const tag = loopRunTagForWorkItem('gitlab:w.src.corp.qihoo.net/fang/services/k-base#3');
-    expect(tag).toMatch(/^k-base-3-[0-9a-f]{4}$/);
+    expect(tag).toMatch(/^k-base-3-[0-9a-f]{6}$/);
     expect(loopRunTagForWorkItem('gitlab:w.src.corp.qihoo.net/fang/services/k-base#3')).toBe(tag);
-    expect(loopRunTagForWorkItem('github:acme/api#42')).toMatch(/^api-42-[0-9a-f]{4}$/);
+    expect(loopRunTagForWorkItem('github:acme/api#42')).toMatch(/^api-42-[0-9a-f]{6}$/);
+  });
+
+  it('keeps the identity suffix when a long project name exhausts the tag', () => {
+    const long = 'a'.repeat(80);
+    const first = loopRunTagForWorkItem(`gitlab:host/group/${long}#1`);
+    const second = loopRunTagForWorkItem(`gitlab:host/group/${long}#12`);
+    expect(first).toHaveLength(MAX_LOOP_RUN_TAG_LENGTH);
+    expect(second).toHaveLength(MAX_LOOP_RUN_TAG_LENGTH);
+    expect(first).not.toBe(second);
+    expect(first).not.toMatch(/-$/);
+    expect(first.slice(-6)).toMatch(/^[0-9a-f]{6}$/);
   });
 
   it('keeps the same project path on two instances in different runs', () => {

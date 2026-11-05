@@ -131,6 +131,20 @@ GitLab 把「真冲突」和「没有东西可合」都报成 `cannot_be_merged`
 
 被上报的条目会被阻塞并置为 `executionMode=hitl`，失败码是 `baseline_advanced`。它绝不会被打回返工 —— 返工的答案就是造成这一切的那次 push。见 [ADR-0031](../adr/0031-publish-boundary.md)。
 
+### provider 与它的运行时
+
+AFK 跑一个 agent 需要两件事：**用哪个** agent，和**怎么**跑。第二件就是*运行时* —— 对 Codex 来说是模型 provider、profile、传输方式和端点。
+
+这两件事原本走两条互不相干的通道，而工作流的步骤可以只改第一件。请求跑 Claude Code、步骤跑 Codex 时，步骤继承的是 Claude Code 的运行时 —— 也就是根本没有运行时 —— 于是所有 Codex 专属设置被静默丢弃。Codex 不会报错：它读自己的宿主配置，连到了宿主的默认 provider 上。agent 照常启动、照常连上，却在第一轮就因为一个没人选过的端点而失败。
+
+**provider 与跑它的运行时是一个决定。** 工作流引擎在**每个步骤**上绑定运行时，位置就在步骤的 provider 已知之后，通过 `packages/runtime/src/domain/agents/runtime-binding.ts` 的 `resolveRuntimeForProvider()` 完成：
+
+- Codex 的运行时只会被 Codex 复用；
+- 非 Codex 的 provider 解析出「没有运行时」，与此前完全一致；
+- 请求里没有 Codex 运行时、而步骤要跑 Codex 时，从 AFK 的配置里解析出一个，于是运维配的 `agents.codex.*` 真正生效。
+
+在运行期解析出来的运行时，会在 agent 启动前先做一次探测，这样模型不可达时给出的是探测自己的诊断，而不是来自错误端点的传输错误。探测要花一次真实的模型往返，所以每个 provider 每次运行只探一次。见 [ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md)。
+
 ### 执行基线与配置
 
 条目的 `## Base Version` 段声明不可变的执行计划：

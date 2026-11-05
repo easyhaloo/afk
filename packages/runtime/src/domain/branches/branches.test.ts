@@ -207,6 +207,25 @@ describe('NamedBranchStrategy', () => {
     expect((await git.raw(['ls-files', '.worktrees'])).trim()).toBe('');
   });
 
+  it('ignores the worktree directory through the repository\'s own exclude file', async () => {
+    const s = new NamedBranchStrategy();
+    // The worktrees live inside the checkout — that is the shape the ignore
+    // rule exists for.
+    await s.prepareWorktree(git, { type: 'named', branch: 'feature/ignored' },
+      { repoPath, worktreeBaseDir: path.join(repoPath, '.worktrees') });
+
+    // Git answers `--git-path info/exclude` with a path relative to the
+    // repository — `.git/info/exclude` — unless the checkout is a linked
+    // worktree of a bare repository. A relative answer is relative to the
+    // repository, not to the process: resolved against the working directory
+    // it would write the rule into whatever directory AFK ran in, and the
+    // worktree directory would stay visible.
+    const excludePath = (await git.raw(['rev-parse', '--git-path', 'info/exclude'])).trim();
+    const absolute = path.isAbsolute(excludePath) ? excludePath : path.join(repoPath, excludePath);
+    expect(fs.readFileSync(absolute, 'utf8')).toContain('.worktrees/');
+    expect((await git.raw(['check-ignore', '-v', '.worktrees/feature-ignored']).catch(() => ''))).toContain('.worktrees/');
+  });
+
   it('gives the sharing guard back when a preparation fails', async () => {
     await git.checkoutLocalBranch('feature/taken', 'main');
     await git.checkout('main');

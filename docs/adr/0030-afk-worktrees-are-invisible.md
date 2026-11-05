@@ -49,10 +49,27 @@ learn about them:
    already tracked it. Tracked means it is part of the change request, so it
    is removed rather than carried.
 
+   The exclusion is done by unstaging the path after the add, not by naming
+   it in the add's pathspec. Git refuses to add a path that is ignored, and
+   this decision makes the checkout ignore exactly that path — so a
+   pathspec that names it fails the whole commit with "the following paths
+   are ignored by one of your .gitignore files", and the item publishes
+   nothing at all. Unstaging after the add has the same outcome and does not
+   depend on the path being addable in the first place.
+
 3. **The preparer does not read them as uncommitted work.** `.worktrees`
    joins `.afk` in the runtime-artifact list the preparer filters out. This is
    the belt to the ignore file's braces: the checkout may be one AFK did not
    prepare, and an item must not be locked out by AFK's own scratch space.
+
+   The ignore file is written where Git says the repository's own ignore
+   file is. Git answers `--git-path info/exclude` with a path relative to
+   the repository — `.git/info/exclude` — unless the checkout is a linked
+   worktree of a bare repository, where it answers with the common
+   directory's absolute path. A relative answer is relative to the
+   repository, not to the process: resolved against the working directory,
+   the rule would be written into whatever directory AFK happened to run in,
+   and the worktree directory would stay visible.
 
 ## Consequences
 
@@ -66,3 +83,8 @@ learn about them:
 - The worktrees stay where they are. Moving them out of the checkout would
   cost the shared object library the worktrees rely on, and the directory
   would still exist somewhere AFK has to keep out of the repository's view.
+- The two halves of this decision only work together. The ignore file makes
+  the worktree directory invisible to the repository's view, and the commit
+  path has to cope with a path it cannot add. The two were written apart
+  and met in production: the first item that published a change afterwards
+  failed with the commit error above, and nothing was published at all.

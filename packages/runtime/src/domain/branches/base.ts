@@ -62,10 +62,17 @@ export async function excludeWorktreeBaseDir(git: SimpleGit, repoPath: string, b
   const pattern = `${location.split('\\').join('/')}/`;
   const excludePath = (await git.raw(['rev-parse', '--git-path', 'info/exclude']).catch(() => '')).trim();
   if (!excludePath) return;
-  const existing = await fs.readFile(excludePath, 'utf8').catch(() => '');
+  // Git answers with a path relative to the repository — `.git/info/exclude`
+  // — unless the checkout is a linked worktree of a bare repository, where
+  // it answers with the common directory's absolute path. A relative path
+  // is relative to the repository, not to the process: resolving it against
+  // the working directory would write the ignore file into whatever
+  // directory AFK happened to run in.
+  const target = isAbsolute(excludePath) ? excludePath : join(repoPath, excludePath);
+  const existing = await fs.readFile(target, 'utf8').catch(() => '');
   if (existing.split('\n').some(line => line.trim() === pattern)) return;
   const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
-  await fs.appendFile(excludePath, `${prefix}# AFK's own worktrees\n${pattern}\n`, 'utf8').catch(() => undefined);
+  await fs.appendFile(target, `${prefix}# AFK's own worktrees\n${pattern}\n`, 'utf8').catch(() => undefined);
 }
 
 /**

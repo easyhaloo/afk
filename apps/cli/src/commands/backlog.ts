@@ -157,10 +157,15 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
   if (item.changeRequest) {
     const change = item.changeRequest;
     // A conflict is the one merge verdict a person has to act on, so it is
-    // spelled out rather than left in the state column.
+    // spelled out rather than left in the state column. A target branch
+    // that already carries the change is the other one: it needs a person
+    // too, but for a different reason — the baseline moved, so a person has
+    // to decide whether it keeps the commits.
     const verdict = change.mergeState === 'conflict'
       ? ' — CONFLICTS with the target branch, it cannot be merged as it stands'
-      : change.mergeState === 'mergeable' ? ' — can be merged' : '';
+      : change.mergeState === 'baseline_advanced'
+        ? ' — the target branch already carries this change, a person has to decide what to do with the baseline'
+        : change.mergeState === 'mergeable' ? ' — can be merged' : '';
     detail(`change: ${change.id} (${change.state}) ${change.sourceBranch} → ${change.targetBranch}${verdict}`);
   }
 }

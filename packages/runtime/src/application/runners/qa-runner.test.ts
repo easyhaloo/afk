@@ -740,8 +740,35 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
   });
 
-  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {
+  it('escalates a change request whose target branch already carries it instead of redoing the work', async () => {
     const f = fixture();
+    f.changes.get.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      mergeState: 'baseline_advanced', url: 'https://example.test/pr/60',
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: false, failureCode: 'baseline_advanced' });
+    // The loop this state was split out to break: a target branch that
+    // already carries the change is never answered with another round of
+    // work, because the next round would move the baseline again.
+    expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'rework', expect.anything());
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', expect.objectContaining({
+      reason: expect.stringContaining('already carries its commits'),
+    }));
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+  });
+
+  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {    const f = fixture();
     f.changes.get.mockResolvedValue({
       id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
       mergeState: 'unknown', url: 'https://example.test/pr/60',

@@ -104,6 +104,33 @@ QA 失败会把条目打回返工，`maxQaReworkAttempts` 限制的是**在没�
 
 当一轮的预算耗尽时，条目被阻塞，原因里写明这是第几轮、这一轮用了几次：`QA rework attempt limit reached (cycle 2, 3/3 attempts used): …`。见 [ADR-0028](../adr/0028-rework-attempt-budget-per-cycle.md)。
 
+### 发布边界
+
+agent 拿到的仓库里有好几个分支，AFK 会告诉它该在哪个分支上干活。但这从来不够，因为同一条指令里还写着变更请求要合入的那个分支—— 把「发布到 `prd/27`」读成「push 到 `prd/27`」的 agent，会用自己的提交把 PRD 基线往前推。变更请求因此没有东西可合，GitLab 判定它无法合并，AFK 的回应却是把条目打回返工 —— 而返工会再推一次基线。
+
+**目标分支属于 AFK 的变更请求。** agent 只拥有**工作分支**，别的一概没有：它在那里提交、也只在那里 push。**基线分支**、**目标分支**和**功能源分支**只读，不 push。
+
+这条规则写在每个 agent 都会读到的地方 —— completion protocol，两种传输方式、每个阶段都读 —— 并且在 `Execution repositories:` 段里带着分支名再说一遍，这样 agent 不必去推断四个名字里哪个能动。两段文字都来自 `packages/runtime/src/domain/branches/publish-boundary.ts` 的 `describePublishBoundary()`。
+
+规则在事后也会被执行，因为指令不是机制。`ChangeMergeState` 在 `mergeable`、`conflict`、`unknown` 之外多出第四个取值：
+
+- `mergeable` —— 变更请求可以落地。
+- `conflict` —— 内容冲突：目标分支改了同样的行。
+- `baseline_advanced` —— 目标分支已经带着这次变更，所以没有东西可合。基线动了，内容并没有冲突。
+- `unknown` —— 平台还没给出结论，或者给出的原因不是冲突。
+
+GitLab 把「真冲突」和「没有东西可合」都报成 `cannot_be_merged`；区分它们的是 diff —— diff 为空意味着两个分支的 merge base 就是源分支的头提交。GitHub 把同样的情形报成 `mergeable_state: behind`。
+
+`decideMergeVerdict()` 把结论转成动作，三个答案的差别是刻意的：
+
+| 结论 | 动作 | 原因 |
+|---|---|---|
+| `mergeable` | 接受 | 交给人合并 |
+| `conflict` | 返工 | 内容不一致，再来一轮能修好 |
+| `baseline_advanced` | **上报** | 活儿已经在基线里了，再来一轮只会再推一次基线 |
+
+被上报的条目会被阻塞并置为 `executionMode=hitl`，失败码是 `baseline_advanced`。它绝不会被打回返工 —— 返工的答案就是造成这一切的那次 push。见 [ADR-0031](../adr/0031-publish-boundary.md)。
+
 ### 执行基线与配置
 
 条目的 `## Base Version` 段声明不可变的执行计划：

@@ -120,6 +120,60 @@ Each rework record carries the cycle it belongs to and the attempt it spends ins
 
 When the budget of a cycle is spent, the item is blocked and the reason says which round and how much of it was used: `QA rework attempt limit reached (cycle 2, 3/3 attempts used): …`. See [ADR-0028](../adr/0028-rework-attempt-budget-per-cycle.md).
 
+### The publish boundary
+
+An agent is given a repository with several branches in it, and it is told
+which one to work on. That was never enough, because the same instruction
+also named the branch the change request merges into, and an agent that
+read "publish to `prd/27`" as "push to `prd/27`" advanced the PRD baseline
+with its own commit. The change request then had nothing left to merge,
+GitLab called it unmergeable, and AFK answered by sending the item back for
+another round — which pushed the baseline again.
+
+**The target branch belongs to AFK's change request.** The agent owns the
+**working branch** and nothing else: it commits there and pushes there.
+The **base branch**, the **target branch** and the **source branch** are
+read, never pushed.
+
+The rule is stated where every agent reads it — the completion protocol,
+in both transports and for every phase — and again with the branch names
+in the `Execution repositories:` segment, so the agent does not have to
+infer which of the four names it may move. Both texts come from
+`describePublishBoundary()` in
+`packages/runtime/src/domain/branches/publish-boundary.ts`.
+
+The rule is also enforced afterwards, because an instruction is not a
+mechanism. `ChangeMergeState` carries a fourth value beside `mergeable`,
+`conflict` and `unknown`:
+
+- `mergeable` — the change request can land.
+- `conflict` — the content disagrees. The target branch changed the same
+  lines.
+- `baseline_advanced` — the target branch already carries the change, so
+  there is nothing left to merge. The baseline moved; the content did not
+  conflict.
+- `unknown` — the platform has not settled on a verdict, or it named a
+  reason that is not a conflict.
+
+GitLab reports both a real conflict and a change request with nothing left
+to merge as `cannot_be_merged`; the diff separates them, because an empty
+diff means the merge base of the two branches is the source head itself.
+GitHub reports the same situation as `mergeable_state: behind`.
+
+`decideMergeVerdict()` turns a verdict into an action, and the three
+answers are deliberately different:
+
+| verdict | action | why |
+|---|---|---|
+| `mergeable` | accept | hand it to a person to merge |
+| `conflict` | rework | the content disagrees; another round can fix it |
+| `baseline_advanced` | **escalate** | the work is already in the baseline; another round would move the baseline again |
+
+An escalated item is blocked with `executionMode=hitl` and carries the
+failure code `baseline_advanced`. It is never sent back for rework: the
+rework would be answered by the same push that caused it. See
+[ADR-0031](../adr/0031-publish-boundary.md).
+
 ### Execution refs and configuration
 
 The item's `## Base Version` section declares an immutable execution plan:

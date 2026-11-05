@@ -51,6 +51,16 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0019](adr/0019-desktop-run-log-viewer-projection.md) | Desktop run log viewer projection | in progress |
 | [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop as singular change request | accepted |
 | [0021](adr/0021-backlog-relation-carrying.md) | Backlog 关系的承载方式与记录可读性 | accepted |
+| [0022](adr/0022-execution-plan-and-repository-leases.md) | Execution plans and repository leases | accepted |
+| [0023](adr/0023-repository-store-and-dependency-pool.md) | Repository store and dependency pool | accepted |
+| [0024](adr/0024-prd-baseline-branches.md) | PRD baseline branches | accepted |
+| [0025](adr/0025-structured-failure-diagnostics.md) | Structured failure diagnostics | proposed |
+| [0026](adr/0026-goal-condition-budget-and-worktree-context.md) | The goal condition budget, and context in the worktree | accepted |
+| [0027](adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md) | The scheduler re-evaluates on a timer, and says why it waits | accepted |
+| [0028](adr/0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted |
+| [0029](adr/0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted |
+| [0030](adr/0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted |
+| [0031](adr/0031-publish-boundary.md) | The target branch belongs to AFK's change request | accepted |
 
 ## 保留的研究材料（research/）
 

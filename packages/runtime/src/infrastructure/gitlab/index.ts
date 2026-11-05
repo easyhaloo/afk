@@ -241,7 +241,7 @@ export class GitLabClient implements TrackerProvider {
         : typeof mergeStatus === 'string' && !['checking', 'unchecked', 'preparing', 'approvals_syncing'].includes(mergeStatus)
           ? false
           : undefined,
-      mergeState: mergeStateOf(mergeStatus),
+      mergeState: mergeStateOf(mergeStatus, mr.diff_refs),
       url: mr.web_url,
       projectId: String(this.projectId),
       pipeline: mr.head_pipeline ? { status: mr.head_pipeline.status } : undefined,
@@ -512,10 +512,36 @@ export class GitLabClient implements TrackerProvider {
  * check, a missing approval, a branch that is merely behind. Only the
  * statuses that name a conflict mean the two branches changed the same
  * lines, so only those become 'conflict'; everything else stays 'unknown'.
+ *
+ * `cannot_be_merged` is the ambiguous one: GitLab uses it both for a real
+ * conflict and for a change request that has nothing left to merge, because
+ * the target branch already carries the source branch's commits. The two
+ * need different answers, so the diff decides. An empty diff — the merge
+ * base of the two branches is the source head itself — means the target
+ * branch moved and the content did not conflict; that is a baseline that
+ * advanced, not a conflict.
  */
-function mergeStateOf(status: unknown): ChangeMergeState {
+function mergeStateOf(status: unknown, diffRefs?: { base_sha?: string | null; head_sha?: string | null }): ChangeMergeState {
   if (typeof status !== 'string') return 'unknown';
-  if (status === 'conflict' || status === 'cannot_be_merged') return 'conflict';
+  if (status === 'conflict' || status === 'cannot_be_merged') {
+    if (hasEmptyDiff(diffRefs)) return 'baseline_advanced';
+    return 'conflict';
+  }
   if (status === 'mergeable' || status === 'can_be_merged') return 'mergeable';
   return 'unknown';
+}
+
+/**
+ * Whether the change request has nothing left to merge.
+ *
+ * GitLab computes the merge base of the target and source branches and
+ * reports it as `base_sha`. When that base is the source head itself, every
+ * commit of the source branch is already in the target branch: there is no
+ * diff, so whatever else GitLab says about the merge, the content cannot
+ * conflict.
+ */
+function hasEmptyDiff(diffRefs?: { base_sha?: string | null; head_sha?: string | null }): boolean {
+  const base = diffRefs?.base_sha;
+  const head = diffRefs?.head_sha;
+  return typeof base === 'string' && base.length > 0 && base === head;
 }

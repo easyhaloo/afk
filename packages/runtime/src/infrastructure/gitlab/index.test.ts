@@ -68,6 +68,42 @@ describe('GitLabClient listMRs', () => {
 
     await expect(client.getMR(9)).resolves.toMatchObject({ mergeable: false });
   });
+
+  it('reads an unmergeable change request with an empty diff as a baseline that advanced, not a conflict', async () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    const show = vi.fn().mockResolvedValue({
+      iid: 9,
+      title: 'Already merged into the target',
+      state: 'opened',
+      source_branch: 'afk/backlog-42',
+      target_branch: 'prd/27',
+      web_url: 'https://gitlab.example.test/group/project/-/merge_requests/9',
+      merge_status: 'cannot_be_merged',
+      // The target branch already carries the source branch's commits, so
+      // the merge base is the source head itself and there is no diff left.
+      diff_refs: { base_sha: '1ebf8851', head_sha: '1ebf8851', start_sha: '1ebf8851' },
+    });
+    (client as unknown as { client: { MergeRequests: { show: typeof show } } }).client = { MergeRequests: { show } };
+
+    await expect(client.getMR(9)).resolves.toMatchObject({ mergeState: 'baseline_advanced' });
+  });
+
+  it('reads an unmergeable change request with a real diff as a conflict', async () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    const show = vi.fn().mockResolvedValue({
+      iid: 9,
+      title: 'Both sides changed the same lines',
+      state: 'opened',
+      source_branch: 'afk/backlog-42',
+      target_branch: 'prd/27',
+      web_url: 'https://gitlab.example.test/group/project/-/merge_requests/9',
+      merge_status: 'cannot_be_merged',
+      diff_refs: { base_sha: '0c6eebe0', head_sha: '1ebf8851', start_sha: '0c6eebe0' },
+    });
+    (client as unknown as { client: { MergeRequests: { show: typeof show } } }).client = { MergeRequests: { show } };
+
+    await expect(client.getMR(9)).resolves.toMatchObject({ mergeState: 'conflict' });
+  });
 });
 
 describe('GitLabClient linkIssues', () => {

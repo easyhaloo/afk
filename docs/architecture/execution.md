@@ -109,6 +109,16 @@ The prompt is assembled from **labelled pieces** (task statement, title, context
 
 **A problem found before dispatch is found before dispatch.** The final prompt is measured against the provider's declared limit before the agent is started. Over the limit, the run fails at once with the structured diagnosis above: `prompt_budget_exceeded`, the actual length, the limit, the piece that crossed it, and the suggested action — instead of dispatching a prompt that will be refused in silence and dying half an hour later on an idle timeout. See [ADR-0026](../adr/0026-goal-condition-budget-and-worktree-context.md).
 
+### The rework cycle budget
+
+A QA failure routes the item back for rework, and `maxQaReworkAttempts` bounds how many times AFK may try again **without a person deciding**. The budget belongs to a **rework cycle** — one round of fix-and-verify — and not to the item's whole life.
+
+A cycle is opened by an operator intervention and by nothing else. `afk backlog retry` creates an operator rework record: the operator has answered the failure that ended the previous round and says that something changed, so the next round starts with a full budget. A QA failure or a merge conflict does not open a cycle — it is another try inside the round that is already running, and it spends that round's budget, so the automatic retries of one round share one budget.
+
+Each rework record carries the cycle it belongs to and the attempt it spends inside it (`cycle`, `attempt`), and its handle is `r<cycle>-<attempt>`. The attempt of a new record is derived from the records of the running cycle only; the records of the earlier cycles stay in the issue as the audit trail without spending the budget of the rounds that follow them. A record written before cycles existed reads as cycle 1 and keeps its attempt, so an item that already spent its budget stays over budget until an operator opens the next cycle.
+
+When the budget of a cycle is spent, the item is blocked and the reason says which round and how much of it was used: `QA rework attempt limit reached (cycle 2, 3/3 attempts used): …`. See [ADR-0028](../adr/0028-rework-attempt-budget-per-cycle.md).
+
 ### Execution refs and configuration
 
 The item's `## Base Version` section declares an immutable execution plan:
@@ -170,7 +180,7 @@ Interruption moves the item to `blocked + hitl` and invalidates its claim. Faile
 
 Generation checks protect AFK-controlled lifecycle operations. Agent writes remain direct filesystem operations; safe takeover depends on verified owner death and termination of registered resources. Unknown external writers require operator recovery.
 
-The scheduler reads the complete credential-scoped inventory, rejects dependency cycles, and reuses provider runnability rules. Default capacity is `min(repositoryCount, max(2, floor(availableCores / 3)))`, with a minimum of one. Overlapping multi-repository manifests serialize; disjoint repositories can run concurrently. A one-minute load above the configured limit pauses new launches. Dependencies unblock at `done`; `merge_ready` awaits human merge and reconciliation. Rework attempts are bounded by `maxQaReworkAttempts`. Scheduling neither adopts unmanaged issues nor changes dependency labels.
+The scheduler reads the complete credential-scoped inventory, rejects dependency cycles, and reuses provider runnability rules. Default capacity is `min(repositoryCount, max(2, floor(availableCores / 3)))`, with a minimum of one. Overlapping multi-repository manifests serialize; disjoint repositories can run concurrently. A one-minute load above the configured limit pauses new launches. Dependencies unblock at `done`; `merge_ready` awaits human merge and reconciliation. Rework attempts are bounded by `maxQaReworkAttempts` per rework cycle, so an operator retry gives the item a fresh budget. Scheduling neither adopts unmanaged issues nor changes dependency labels.
 
 The dispatch loop wakes on two events: an execution finishing, and the poll interval elapsing. The timer is what keeps idle capacity usable — a schedule with capacity four and one slice in flight has to fill the other three slots as soon as their slices become dispatchable, not when the running slice ends, because an idle slot is wasted capacity and wasted capacity is a PRD that ships late. The timer is cancelled as soon as the loop has a reason to look again, so it never keeps the process alive. Without `--watch` the schedule is one-shot: it ends once the current wave has dispatched everything it can. With `--watch` it runs until it is stopped, because the help promises it keeps watching for merged dependencies and operator retries. The waiting report names the binding constraint for every item the scheduler did not dispatch, so an operator can tell a full capacity from an unready dependency instead of reading "waiting" for both.
 

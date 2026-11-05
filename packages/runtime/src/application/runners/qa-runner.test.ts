@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js';
+import { retryBacklog } from '../../domain/backlog/commands.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -56,7 +57,7 @@ function fixture() {
     transition: vi.fn(async () => {}),
     setExecutionMode: vi.fn(async () => {}),
     getActiveRework: vi.fn(async () => undefined),
-    createRework: vi.fn(async () => ({ id: 'r1', attempt: 1 })),
+    createRework: vi.fn(async () => ({ id: 'r1-1', cycle: 1, attempt: 1 })),
     resolveRework: vi.fn(async () => {}),
   };
   const changes = {
@@ -486,7 +487,7 @@ describe('QARunner execution boundary', () => {
       expect(result.success).toBe(false);
       expect(result.summary).toContain('search shortcut failed');
       expect(result.failedCriteria).toEqual([{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }]);
-      await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ id: `r${attempt}`, attempt, status: 'open' });
+      await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ id: `r1-${attempt}`, cycle: 1, attempt, status: 'open' });
       expect(f.comments.map(comment => parseReworkRecord(comment)?.record.status)).toEqual([
         ...Array(attempt - 1).fill('superseded'), 'open',
       ]);
@@ -513,6 +514,58 @@ describe('QARunner execution boundary', () => {
     expect(subsequent.transition).not.toHaveBeenCalledWith('60', 'rework');
     expect(subsequent.setExecutionMode).not.toHaveBeenCalledWith('60', 'afk');
     expect(f.comments).toHaveLength(3);
+  });
+
+  it('keeps reworking after an operator retry when the QA budget of the cycle was spent', async () => {
+    const f = persistentReworkFixture('gitlab');
+    // The item fails QA until the budget of the first cycle is spent.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      f.resumeVerification();
+      const current = f.createRunner();
+      const result = await current.runner.process('60');
+      expect(result.rework === true).toBe(attempt < 3);
+    }
+    const exhausted = f.createRunner();
+    await expect(exhausted.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+    await expect(exhausted.backlog.getActiveRework('60')).resolves.toMatchObject({ cycle: 1, attempt: 3 });
+
+    // The operator fixed the defect and retries the item.
+    await expect(retryBacklog(exhausted.backlog, '60', 'the missing assets are added')).resolves.toMatchObject({
+      state: 'rework', executionMode: 'afk',
+    });
+
+    // The next QA failure is the first attempt of the new cycle, so it is a
+    // rework again instead of an immediate block.
+    f.resumeVerification();
+    const afterRetry = f.createRunner();
+    const result = await afterRetry.runner.process('60');
+    expect(result.success).toBe(false);
+    expect(result.rework).toBe(true);
+    expect(result.summary).toContain('search shortcut failed');
+    await expect(afterRetry.backlog.get('60')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
+    await expect(afterRetry.backlog.getActiveRework('60')).resolves.toMatchObject({ cycle: 2, attempt: 1, status: 'open' });
+  });
+
+  it('names the cycle and the used attempts when the QA rework budget is spent', async () => {
+    const f = persistentReworkFixture('github');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      f.resumeVerification();
+      const current = f.createRunner();
+      await current.runner.process('60');
+    }
+    const exhausted = f.createRunner();
+    await expect(exhausted.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+    const record = await exhausted.backlog.getActiveRework('60');
+    expect(record).toMatchObject({ cycle: 1, attempt: 3 });
+
+    // A failure that arrives while the budget is spent says which round of
+    // work it belongs to and how much of the budget that round used.
+    f.resumeVerification();
+    const blocked = f.createRunner();
+    const result = await blocked.runner.process('60');
+    expect(result.rework).not.toBe(true);
+    expect(result.summary).toContain('cycle 1');
+    expect(result.summary).toContain('3/3');
   });
 
   it.each([1, 4])('honors a configured QA failure limit of %s', async limit => {
@@ -561,13 +614,13 @@ describe('QARunner execution boundary', () => {
 
   it('resolves the active QA rework record only after QA passes', async () => {
     const f = fixture();
-    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1', summary: 'search shortcut failed' });
+    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1-1', cycle: 1, attempt: 1, summary: 'search shortcut failed' });
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
-    expect(f.providers.backlog.resolveRework).toHaveBeenCalledWith('60', 'r1', expect.objectContaining({ summary: expect.stringContaining('QA passed') }));
+    expect(f.providers.backlog.resolveRework).toHaveBeenCalledWith('60', 'r1-1', expect.objectContaining({ summary: expect.stringContaining('QA passed') }));
   });
 
   it('commits and creates a mergeable change after QA on the root backlog without merging', async () => {
@@ -715,7 +768,7 @@ describe('QARunner execution boundary', () => {
     });
     // The previous round is still open: a conflict means it did not do its
     // job, so the attempt count carries on.
-    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r3', attempt: 3, status: 'open', source: 'conflict' });
+    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1-3', cycle: 1, attempt: 3, status: 'open', source: 'conflict' });
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,

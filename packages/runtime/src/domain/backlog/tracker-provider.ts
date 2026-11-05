@@ -9,7 +9,7 @@ import {
 } from './claim-strategy.js';
 import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization.js';
 import { isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
-import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
+import { latestOpenRework, nextReworkAttempt, parseReworkRecord, renderReworkRecord, reworkRecordId, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
@@ -298,15 +298,19 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (active?.record.source === 'operator' && input.source === 'operator') {
       throw new Error(`backlog ${id} already has an open rework record`);
     }
-    const attempts = comments
+    // The count comes from the cycle that is running now, not from every
+    // record the issue ever carried: a closed record stays in the history for
+    // the audit trail without spending the budget of the rounds after it.
+    const history = comments
       .map(parseReworkRecord)
       .filter((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry !== undefined)
-      .map(entry => entry.record.attempt);
-    const attempt = (attempts.length ? Math.max(...attempts) : 0) + 1;
+      .map(entry => entry.record);
+    const { cycle, attempt } = nextReworkAttempt(history, input.source);
     const record: ReworkRecord = {
       ...input,
       version: 1,
-      id: `r${attempt}`,
+      id: reworkRecordId(cycle, attempt),
+      cycle,
       attempt,
       status: 'open',
       createdAt: new Date().toISOString(),

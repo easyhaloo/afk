@@ -50,6 +50,19 @@ The command registry in `apps/cli/src/command-registry.ts` is the source of trut
 
 These paths describe distinct storage responsibilities. Consult the current implementation and [Full Workflow & E2E Architecture](full-workflow-e2e-architecture.md) for detailed resolution behavior; do not infer exact runtime paths from this summary.
 
+### The hashed area is keyed by absolute path
+
+`workspaceDataDirectory(path)` is `~/.afk/workspaces/<sha256(resolve(path))>`; the path *is* the primary key. Each work item therefore occupies **two** hashed directories, because two different strings are hashed:
+
+| Key | Derived from | Holds |
+| --- | --- | --- |
+| workspace root | `executionWorkspacePath(workItemId)` | `execution-manifest.json`, `executions/<id>.jsonl`, execution locks, `budgets/`, `retro/` |
+| checkout | `<workspace root>/repositories/<name>` | `sessions/`, `handoff/`, `runs/`, `worktrees.json`, `claude-status.json`, archify cache |
+
+Renaming `~/.loop-workspace`, or changing the work-item directory layout, re-keys both halves and is **not** a rename: the old bytes stay where nothing looks for them any more. The failure is silent, which is what makes it dangerous: `existsSync(executionManifestPath(id))` turns false and the item is re-resolved as an unmanaged run, while `inspectWorkspaceDisk` skips manifests whose recomputed root no longer matches and reports zero reclaimable workspaces over unchanged disk usage; a lock taken under the old key no longer excludes a second execution; sessions and handoff documents fall back to their degraded path.
+
+Only the first half is recoverable — a manifest records its `workItemId`, so the new key can be recomputed. The second half carries no id inside it, so it cannot be re-keyed without a separate pass over `sessions/*.json` or a declared loss. A layout change is therefore a migration with two mechanisms, not a `mv`. Prefer an explicit design (ADR) over an in-place edit.
+
 ## Managed lifecycle
 
 The managed execution path validates the work item and its execution manifest, runs implementation, records branch and run evidence, performs independent QA, and prepares or verifies the provider-backed change request. A successful run does not merge code. The final merge is human-controlled; the work item reaches its terminal completed state only after merge and reconciliation.

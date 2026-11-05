@@ -14,6 +14,7 @@ import { asManagementProviders, type ProviderBundle, type ManagementProviderBund
 import { assembleProviders } from '../../infrastructure/provider/assembly.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
 import { createExecutionPlan, parseExecutionPlan } from '../../domain/backlog/execution-plan.js';
+import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { createAgentProvider, prepareAgentRuntime } from '../../domain/agents/index.js';
@@ -207,22 +208,45 @@ export interface ExecuteWorkItemDependencies {
   lockProbe?: LockProbe;
 }
 
-async function lookupWorkItem(id: string): Promise<GlobalWorkItem> {
-  const inventory = await collectGlobalWorkItemInventory(createGlobalWorkItemCatalogs(parseWorkItemId(id).platform));
+/**
+ * The work items of the item's platform, read once per attempt.
+ *
+ * The inventory enumerates every project the credentials reach, so reading it
+ * twice for one item — once for the item and once for its PRD parent — costs
+ * more than the lookup it saves.
+ */
+async function loadWorkItemInventory(id: string) {
+  return collectGlobalWorkItemInventory(createGlobalWorkItemCatalogs(parseWorkItemId(id).platform));
+}
+
+function workItemFromInventory(
+  inventory: Awaited<ReturnType<typeof loadWorkItemInventory>>,
+  id: string,
+): GlobalWorkItem {
   const item = inventory.items.find(candidate => candidate.id === id);
   if (!item) throw new Error(`work item ${id} is absent from global inventory${inventory.diagnostics.length ? ` (${inventory.diagnostics.map(diagnostic => diagnostic.message).join('; ')})` : ''}`);
   return item;
 }
 
+async function lookupWorkItem(id: string): Promise<GlobalWorkItem> {
+  return workItemFromInventory(await loadWorkItemInventory(id), id);
+}
+
 async function resolveManifest(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies, create = true): Promise<ResolvedExecutionManifest> {
-  const workItemId = parseWorkItemId(input.workItemId).id;
+  const identity = parseWorkItemId(input.workItemId);
+  const workItemId = identity.id;
   const manifestPath = input.manifestPath ?? executionManifestPath(workItemId);
   if (create && !input.manifestPath && !dependencies.readManifest) {
     try {
       await lstat(manifestPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      const item = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
+      // The inventory is read once and answers for the item and its parent:
+      // both live on the same platform.
+      const inventory = dependencies.lookupWorkItem ? undefined : await loadWorkItemInventory(workItemId);
+      const lookup = dependencies.lookupWorkItem
+        ?? (async (id: string) => workItemFromInventory(inventory!, id));
+      const item = await lookup(workItemId);
       if (item.id !== workItemId || !item.managed || !item.executionEligible) throw new Error(`work item ${workItemId} is not executable`);
       const project = item.project;
       const name = project.projectKey.split('/').at(-1)!;
@@ -233,10 +257,18 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
       const declaredPlan = parseExecutionPlan(item.description);
       const fallback = repositoryExecutionDefaults(getWorkflowConfig(), project.projectKey,
         join(executionWorkspacePath(workItemId), 'repositories', name), project.defaultBranch);
+      // A slice of a PRD is written on, and merges into, that PRD's own
+      // accumulation branch. Only a slice that declares its own plan keeps
+      // another base.
+      const prdBaseline = await resolveParentPrdBaseline(item.parentId, lookup);
       const explicitBase = input.runOptions?.baseBranch
         ?? (input.runOptions?.branchStrategy?.type === 'named' ? input.runOptions.branchStrategy.baseBranch : undefined);
-      const plan = declaredPlan ?? (explicitBase ? createExecutionPlan({ baseRef: explicitBase,
-        targetRef: fallback.targetRef === fallback.baseRef ? explicitBase : fallback.targetRef, sourceRef: fallback.sourceRef }) : fallback);
+      const plan = resolvePrdExecutionPlan({
+        plan: declaredPlan ?? (explicitBase ? createExecutionPlan({ baseRef: explicitBase,
+          targetRef: fallback.targetRef === fallback.baseRef ? explicitBase : fallback.targetRef, sourceRef: fallback.sourceRef }) : undefined),
+        prdBaseline,
+        fallback,
+      });
       if (input.runOptions?.baseBranch && input.runOptions.baseBranch !== plan.baseRef) throw new Error('--base-branch conflicts with work item execution refs');
       const baseBranch = plan.baseRef;
       const strategy = input.runOptions?.branchStrategy;
@@ -252,7 +284,12 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
           ...(project.providerHost ? { providerHost: project.providerHost } : {}),
           ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}),
           name, checkoutPath: `repositories/${name}`, baseBranch, targetBranch: plan.targetRef,
-          ...(plan.sourceRef ? { sourceBranch: plan.sourceRef } : {}), workingBranch, primary: true }],
+          ...(plan.sourceRef ? { sourceBranch: plan.sourceRef } : {}),
+          // A baseline branch that is the PRD's own may be created on demand:
+          // the PRD owns that branch, so it is AFK's to cut. A base branch
+          // somebody declared by hand is expected to exist already.
+          ...(prdBaseline && plan.baseRef === prdBaseline ? { prdBaseline: true } : {}),
+          workingBranch, primary: true }],
       }, { manifestPath, backlogId: workItemId });
       await mkdir(workspaceDataDirectory(executionWorkspacePath(workItemId)), { recursive: true });
       const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`;

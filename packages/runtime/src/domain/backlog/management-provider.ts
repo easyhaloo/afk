@@ -28,5 +28,6 @@ export class ManagementBacklogProvider implements QABacklogProvider {
   applyRole(id: string, kind: BacklogKind): Promise<void> { return this.provider.applyRole(id, kind); }
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.provider.applyMode(id, mode); }
   applyExecutionBase(id: string, baseBranch: string): Promise<void> { return this.provider.applyExecutionBase(id, baseBranch); }
+  applyPrdBaseline(id: string, branch: string): Promise<void> { return this.provider.applyPrdBaseline(id, branch); }
   initialize(): Promise<void> { return this.provider.initialize(); }
 }

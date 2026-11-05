@@ -143,6 +143,9 @@ export class InventoryBacklogProvider implements BacklogManagementProvider {
   async applyExecutionBase(): Promise<void> {
     throw new Error('inventory backlog provider does not support execution base edits');
   }
+  async applyPrdBaseline(): Promise<void> {
+    throw new Error('inventory backlog provider does not support PRD baseline edits');
+  }
   async applyMode(): Promise<void> {
     throw new Error('全局 Backlog 模式不能修改执行模式；请在 Git 仓库目录内或使用 --project 指定项目');
   }

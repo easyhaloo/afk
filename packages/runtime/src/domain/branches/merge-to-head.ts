@@ -29,6 +29,7 @@ import {
   gitBranchDelete,
   checkNotShared,
   releasePath,
+  releasingPathOnFailure,
 } from './base.js';
 
 export class MergeToHeadBranchStrategy implements BranchStrategy {
@@ -55,10 +56,11 @@ export class MergeToHeadBranchStrategy implements BranchStrategy {
     // is defined by "where HEAD points NOW"). We capture HEAD's sha at this
     // moment and use it as the fork point.
     const headSha = await git.revparse(['HEAD']);
-    await gitWorktreeAdd(git, branch, path, headSha, this.kind);
-
-    void config; // silence unused
-    return { branch, path, isNewBranch: true };
+    return releasingPathOnFailure(path, async () => {
+      await gitWorktreeAdd(git, branch, path, headSha, this.kind);
+      void config; // silence unused
+      return { branch, path, isNewBranch: true };
+    });
   }
 
   async finalize(git: SimpleGit, _config: BranchStrategyConfig, handle: BranchHandle, options?: FinalizeOptions): Promise<void> {

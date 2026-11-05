@@ -22,6 +22,7 @@ import {
   gitBranchDelete,
   checkNotShared,
   releasePath,
+  releasingPathOnFailure,
 } from './base.js';
 
 export class IssueBranchStrategy implements BranchStrategy {
@@ -41,9 +42,10 @@ export class IssueBranchStrategy implements BranchStrategy {
 
     checkNotShared(path, branch, this.kind);
     const baseBranch = options.baseBranch ?? 'main';
-    await gitWorktreeAdd(git, branch, path, baseBranch, this.kind);
-
-    return { branch, path, isNewBranch: true };
+    return releasingPathOnFailure(path, async () => {
+      await gitWorktreeAdd(git, branch, path, baseBranch, this.kind);
+      return { branch, path, isNewBranch: true };
+    });
   }
 
   async finalize(_git: SimpleGit, _config: BranchStrategyConfig, _handle: BranchHandle, _options?: FinalizeOptions): Promise<void> {

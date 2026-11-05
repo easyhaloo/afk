@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TrackerBacklogProvider } from './tracker-provider.js';
-import { planBacklogCreate, renderBacklogDescription, resolveBacklogExecutionBase } from './creation.js';
+import { planBacklogCreate, renderBacklogDescription, resolveBacklogExecutionBase, resolveItemExecutionBase } from './creation.js';
 import type { BacklogItem, BacklogProvider } from './index.js';
 import type { TrackerProvider, TrackedIssue } from '../tracker/types.js';
 
@@ -119,6 +119,39 @@ describe('backlog creation and execution base', () => {
     await expect(resolveBacklogExecutionBase({ get }, { ...item, baseBacklogId: 'prd-10' }, 'main')).resolves.toBe('prd/10');
     await expect(resolveBacklogExecutionBase({ get }, { ...item, parentId: 'github:org/repo#1', dependsOn: ['github:org/repo#2'] }, 'main')).resolves.toBe('main');
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it('gives a slice of a PRD the branch the PRD accumulates on', async () => {
+    const get = vi.fn(async () => ({ ...item, id: 'github:org/repo#27', issueNumber: 27, kind: 'prd' as const }));
+    await expect(resolveItemExecutionBase({ get }, { ...item, parentId: 'github:org/repo#27' }, 'main')).resolves.toBe('prd/27');
+  });
+
+  it('reads the baseline branch a PRD declares in its own body', async () => {
+    const get = vi.fn(async () => ({ ...item, id: 'github:org/repo#27', issueNumber: 27, kind: 'prd' as const,
+      description: '## Baseline Branch\n- Baseline Ref: feature/prd-27' }));
+    await expect(resolveItemExecutionBase({ get }, { ...item, parentId: 'github:org/repo#27' }, 'main'))
+      .resolves.toBe('feature/prd-27');
+  });
+
+  it('leaves a parent that is not a PRD anchor out of the base', async () => {
+    const get = vi.fn(async () => ({ ...item, id: 'github:org/repo#1', issueNumber: 1 }));
+    await expect(resolveItemExecutionBase({ get }, { ...item, parentId: 'github:org/repo#1' }, 'main')).resolves.toBe('main');
+  });
+
+  it('lets an explicit execution base win over the PRD baseline', async () => {
+    const get = vi.fn(async () => ({ ...item, id: 'github:org/repo#1', issueNumber: 1, state: 'in_progress' as const,
+      branchName: 'afk/backlog-1', providerRef: 'github:org/repo#1' }));
+    await expect(resolveItemExecutionBase({ get }, { ...item, parentId: 'github:org/repo#27', baseBacklogId: 'github:org/repo#1' }, 'main'))
+      .resolves.toBe('afk/backlog-1');
+  });
+
+  it('refuses to guess the baseline when the PRD cannot be read', async () => {
+    const get = vi.fn(async () => { throw new Error('404 not found'); });
+    await expect(resolveItemExecutionBase({ get }, { ...item, parentId: 'github:org/repo#27' }, 'main'))
+      .rejects.toThrow(/github:org\/repo#27 cannot be read/);
+    // A check that only reports what was published may not refuse the answer.
+    await expect(resolveItemExecutionBase({ get }, { ...item, parentId: 'github:org/repo#27' }, 'main', { prdParentRequired: false }))
+      .resolves.toBe('main');
   });
 
   it('accepts a cross-repository execution-base reference but uses the target repository base branch', async () => {

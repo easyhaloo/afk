@@ -49,10 +49,11 @@ export function requiredToolsForCommand(checkCommand: string): string[] {
   const tools: string[] = [];
   const seen = new Set<string>();
   for (const segment of splitCommand(checkCommand)) {
-    const tool = firstBinaryOf(segment);
-    if (!tool || seen.has(tool)) continue;
-    seen.add(tool);
-    tools.push(tool);
+    for (const tool of binariesOf(segment)) {
+      if (seen.has(tool)) continue;
+      seen.add(tool);
+      tools.push(tool);
+    }
   }
   return tools;
 }
@@ -62,11 +63,91 @@ export function toolRequirements(criterion: string, checkCommand: string): ToolR
   return requiredToolsForCommand(checkCommand).map(tool => ({ tool, criterion, checkCommand }));
 }
 
+/**
+ * Split a command where a shell runs one thing after another.
+ *
+ * A separator inside quotes is part of an argument, not a separator: the
+ * alternation in `grep -cE 'a|b'` is one argument, and splitting there would
+ * turn `b'` into what looks like a command.
+ */
 function splitCommand(command: string): string[] {
-  return command
-    .split(/\|\||&&|\||;|\n/)
-    .map(part => part.trim())
-    .filter(Boolean);
+  const segments: string[] = [];
+  let current = '';
+  let quote: string | undefined;
+  for (const char of command) {
+    if (quote) {
+      current += char;
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === '|' || char === ';' || char === '\n') {
+      // `||` is one separator, and a single `|` is a pipeline.
+      segments.push(current);
+      current = '';
+      continue;
+    }
+    if (char === '&') {
+      segments.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  segments.push(current);
+  return segments.map(part => part.trim()).filter(Boolean);
+}
+
+/**
+ * The binaries one segment runs.
+ *
+ * A builtin like `test` does not end the search: its arguments may run
+ * another command, as `test $(grep -c x f) -ge 1` does. A command
+ * substitution is a command of its own, so the binary inside it is a tool the
+ * check needs.
+ */
+function binariesOf(segment: string): string[] {
+  const tools: string[] = [];
+  const outer = firstBinaryOf(segment);
+  if (outer) tools.push(outer);
+  for (const substitution of commandSubstitutions(segment)) {
+    for (const tool of requiredToolsForCommand(substitution)) {
+      if (!tools.includes(tool)) tools.push(tool);
+    }
+  }
+  return tools;
+}
+
+/**
+ * The bodies of the command substitutions in a command.
+ *
+ * Both forms run another command: `$(...)` substitutes its output, and
+ * `<(...)` substitutes a file descriptor. A binary inside either one has to
+ * exist for the check to run.
+ */
+function commandSubstitutions(segment: string): string[] {
+  const bodies: string[] = [];
+  for (const opener of ['$(', '<(']) {
+    let index = 0;
+    while (index < segment.length) {
+      const start = segment.indexOf(opener, index);
+      if (start < 0) break;
+      let depth = 1;
+      let cursor = start + 2;
+      while (cursor < segment.length && depth > 0) {
+        if (segment[cursor] === '(') depth += 1;
+        else if (segment[cursor] === ')') depth -= 1;
+        cursor += 1;
+      }
+      if (depth === 0) bodies.push(segment.slice(start + 2, cursor - 1).trim());
+      index = cursor;
+    }
+  }
+  return bodies;
 }
 
 function firstBinaryOf(segment: string): string | undefined {

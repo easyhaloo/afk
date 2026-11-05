@@ -148,6 +148,46 @@ describe('NamedBranchStrategy', () => {
       .rejects.toThrow(/already exists|已经存在/);
     await expect(git.revparse(['feature/existing'])).resolves.toContain(commit);
   });
+
+  it('reuses an existing local branch when the caller asks for it', async () => {
+    await git.checkoutLocalBranch('feature/published', 'main');
+    await fs.writeFileSync(path.join(repoPath, 'published.txt'), 'published work\n');
+    await git.add('published.txt');
+    await git.commit('published work');
+    await git.checkout('main');
+
+    const s = new NamedBranchStrategy();
+    const handle = await s.prepareWorktree(git, { type: 'named', branch: 'feature/published' },
+      { repoPath, reuseExistingBranch: true });
+    expect(handle.isNewBranch).toBe(false);
+    const wtGit = simpleGit(handle.path);
+    expect((await wtGit.revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('feature/published');
+    expect(await fs.readFileSync(path.join(handle.path, 'published.txt'), 'utf8')).toBe('published work\n');
+  });
+
+  it('releases a stale worktree that holds the branch before reusing it', async () => {
+    const s = new NamedBranchStrategy();
+    const first = await s.prepareWorktree(git, { type: 'named', branch: 'feature/reuse' }, { repoPath });
+    _clearPreparedWorktreesForTest();
+
+    const second = await s.prepareWorktree(git, { type: 'named', branch: 'feature/reuse' },
+      { repoPath, reuseExistingBranch: true });
+    expect(second.path).toBe(first.path);
+    expect((await simpleGit(second.path).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('feature/reuse');
+  });
+
+  it('gives the sharing guard back when a preparation fails', async () => {
+    await git.checkoutLocalBranch('feature/taken', 'main');
+    await git.checkout('main');
+
+    const s = new NamedBranchStrategy();
+    await expect(s.prepareWorktree(git, { type: 'named', branch: 'feature/taken' }, { repoPath }))
+      .rejects.toThrow(/already exists|已经存在/);
+    // The refusal must not keep the guard: the next attempt has to reach the
+    // real failure instead of a double prepare.
+    await expect(s.prepareWorktree(git, { type: 'named', branch: 'feature/taken' }, { repoPath }))
+      .rejects.toThrow(/already exists|已经存在/);
+  });
 });
 
 describe('MergeToHeadBranchStrategy', () => {

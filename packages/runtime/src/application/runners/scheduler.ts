@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { evaluateRunnability, type Runnability } from '../../domain/backlog/runnability.js';
+import { prdBaselineForParent } from '../../domain/backlog/prd-baseline.js';
 import { findDependencyCycle } from '../../domain/backlog/graph.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
 import { createGlobalWorkItemCatalogs } from '../../infrastructure/provider/tracker-provider-factory.js';
@@ -26,6 +27,13 @@ export interface ScheduleOptions {
 
 export interface ScheduleResult {
   parent: string;
+  /**
+   * The branch the PRD accumulates its slices on.
+   *
+   * Every slice of a PRD is written on this branch and merges into it, so
+   * the schedule names the branch the whole PRD lands on.
+   */
+  baselineBranch?: string;
   capacity: number;
   executions: Array<ExecuteWorkItemResult & { error?: string }>;
   waiting: Array<{ workItemId: string; runnability: Runnability }>;
@@ -96,6 +104,8 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
   try {
     while (!options.signal?.aborted) {
       const items = await read();
+      const parentItem = items.find(item => item.id === parent);
+      if (parentItem) result.baselineBranch = prdBaselineForParent(parentItem);
       const selected = scheduledDescendants(items, parent);
       for (const item of selected) {
         if (terminal.has(item.id) && observed.has(item.id) && observed.get(item.id) !== item.state

@@ -47,7 +47,14 @@ export class GitBranchProvider implements BranchProvider {
     const verificationBase = await this.resolveVerificationBaseBranch(git, baseBranch);
     const config = { type: 'named' as const, branch: `${item.branchName}-qa`, baseBranch: verificationBase };
     const strategy = strategyForConfig(config);
-    const handle = await strategy.prepareWorktree(git, config, { repoPath: this.repoRoot, baseBranch: verificationBase });
+    // The verification branch is the branch an earlier attempt published its
+    // change request from. When it is still there, the verification reuses
+    // that change request and refreshes its evidence — the merge into the
+    // baseline rewrites the branch anyway — instead of failing to create a
+    // second branch with the same name.
+    const handle = await strategy.prepareWorktree(git, config, {
+      repoPath: this.repoRoot, baseBranch: verificationBase, reuseExistingBranch: true,
+    });
     await shareNodeModules(this.repoRoot, handle.path);
     this.handles.set(handle.path, handle);
     return { branchName: handle.branch, worktreePath: handle.path };

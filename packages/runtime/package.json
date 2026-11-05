@@ -78,9 +78,17 @@
       "types": "./dist/domain/backlog/commands.d.ts",
       "import": "./dist/domain/backlog/commands.js"
     },
+    "./domain/backlog/execution-plan": {
+      "types": "./dist/domain/backlog/execution-plan.d.ts",
+      "import": "./dist/domain/backlog/execution-plan.js"
+    },
     "./domain/backlog/index": {
       "types": "./dist/domain/backlog/index.d.ts",
       "import": "./dist/domain/backlog/index.js"
+    },
+    "./domain/backlog/prd-baseline": {
+      "types": "./dist/domain/backlog/prd-baseline.d.ts",
+      "import": "./dist/domain/backlog/prd-baseline.js"
     },
     "./domain/backlog/runnability": {
       "types": "./dist/domain/backlog/runnability.d.ts",

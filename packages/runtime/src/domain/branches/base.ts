@@ -57,6 +57,42 @@ export async function gitWorktreeAdd(
   }
 }
 
+/**
+ * Whether the local repository has the branch.
+ *
+ * The remote's branch is a different fact: a published change request has a
+ * remote branch even when the local checkout has never seen it.
+ */
+export async function localBranchExists(git: SimpleGit, branch: string): Promise<boolean> {
+  const ref = `refs/heads/${branch}`;
+  const listed = await git.raw(['for-each-ref', '--format=%(refname)', ref]).catch(() => '');
+  return listed.trim() === ref;
+}
+
+/**
+ * Remove the worktrees that have the branch checked out.
+ *
+ * Git refuses to check the same branch out twice, so a branch an earlier
+ * attempt left behind has to be released before it can be used again. The
+ * worktree is AFK's own scratch space for that branch, and the work in it is
+ * reproduced by the attempt that follows.
+ */
+export async function removeWorktreesHoldingBranch(git: SimpleGit, branch: string): Promise<void> {
+  const listing = await git.raw(['worktree', 'list', '--porcelain']).catch(() => '');
+  let path: string | undefined;
+  for (const line of listing.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      path = line.slice('worktree '.length).trim();
+      continue;
+    }
+    if (line.trim() === `branch refs/heads/${branch}`) {
+      if (path) await git.raw(['worktree', 'remove', path, '--force']).catch(() => undefined);
+      path = undefined;
+    }
+  }
+  await git.raw(['worktree', 'prune']).catch(() => undefined);
+}
+
 /** Remove a worktree. Idempotent — ENOENT and "not a working tree" are swallowed. */
 export async function gitWorktreeRemove(git: SimpleGit, path: string, force = false): Promise<void> {
   const args = ['worktree', 'remove'];
@@ -126,6 +162,24 @@ export function checkNotShared(path: string, branch: string, kind: string): void
 /** Release the guard when cleanup() runs. */
 export function releasePath(path: string): void {
   preparedWorktrees.delete(path);
+}
+
+/**
+ * Run a preparation, releasing the sharing guard when it fails.
+ *
+ * The guard is what keeps two concurrent steps off one branch, so it is taken
+ * before the worktree is created. A preparation that fails must give it back:
+ * the attempt that follows has to be able to try again, and a guard that
+ * outlived its attempt would refuse the retry with a message about a double
+ * prepare rather than about the failure that really happened.
+ */
+export async function releasingPathOnFailure<Result>(path: string, prepare: () => Promise<Result>): Promise<Result> {
+  try {
+    return await prepare();
+  } catch (error) {
+    releasePath(path);
+    throw error;
+  }
 }
 
 /** Clear ALL prepared-worktree guards — used by tests to isolate state

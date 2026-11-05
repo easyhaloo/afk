@@ -36,6 +36,27 @@ before touching `apps/desktop/`.
 - **UI work under `apps/desktop/`** must follow
   [docs/architecture/design-system.md](docs/architecture/design-system.md).
 
+## Workflow rules
+
+- **Work on a task branch.** Never modify an existing repository's integration
+  line in place. Cut `fix/*` or `feat/*` from the integration line, commit
+  there, push it, and open a pull request against the integration line. The
+  integration line's working tree stays clean — check `git status --porcelain`
+  is empty before handing the work over.
+- **The merge is a person's decision.** AFK publishes the change request and
+  stops there. An agent never merges a pull request or a merge request on a
+  human's behalf.
+- **A PRD accumulates on its own baseline branch.** A slice of a PRD is written
+  on `prd/<prd issue number>` and merges into it; the baseline branch merges
+  into the repository's integration line once the whole PRD is done. A slice
+  never lands on the integration line directly. See
+  [ADR-0024](docs/adr/0024-prd-baseline-branches.md) and the
+  [execution architecture](docs/architecture/execution.md#prd-baseline-branches).
+- **Provider data changes go through the AFK CLI.** Labels, relations, and
+  roles are written with the AFK CLI commands rather than by calling the
+  provider API directly. A provider edit the CLI does not support is a gap in
+  the CLI: extend the CLI first.
+
 ## Documentation
 
 [`docs/index.md`](docs/index.md) maps every document. Prefer extending an

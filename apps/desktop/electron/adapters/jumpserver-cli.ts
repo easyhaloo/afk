@@ -16,6 +16,8 @@ export type JumpserverServer = {
   isDefault: boolean;
 };
 
+export type JumpserverCommandResult = { ok: boolean; stdout: string; stderr: string };
+
 export type JumpserverCliOptions = {
   exec?: (command: string, args: string[], cwd?: string, input?: string, options?: { timeoutMs?: number; maxBuffer?: number }) => Promise<ExecResult>;
   resolveBinary?: () => Promise<string>;
@@ -58,6 +60,56 @@ function parseAssetLine(line: string): JumpserverAssetRow | null {
   };
 }
 
+// `jms config list` and `jms ls` pad columns with runs of spaces, and a long
+// value runs straight into the next column ("https://host.example.comuser").
+// Whitespace splitting cannot recover those rows, so column offsets are taken
+// from the header line and applied by position.
+const COLUMN_NAMES = ["Alias", "Host", "Username", "Default", "Name", "Address", "Platform", "Type"] as const;
+
+type Columns = Map<string, number>;
+
+function headerColumns(line: string): Columns | null {
+  if (!/\S {2,}\S/.test(line)) return null;
+  const columns: Columns = new Map();
+  for (const name of COLUMN_NAMES) {
+    const index = line.indexOf(name);
+    if (index !== -1) columns.set(name, index);
+  }
+  return columns.size >= 2 ? columns : null;
+}
+
+function sliceColumn(line: string, start: number, end: number | undefined) {
+  return (end === undefined ? line.slice(start) : line.slice(start, end)).trim();
+}
+
+function parsePaddedServerLine(line: string, columns: Columns): JumpserverServer | null {
+  const hostStart = columns.get("Host");
+  const usernameStart = columns.get("Username");
+  if (hostStart === undefined || usernameStart === undefined) return null;
+  if (!line.trim() || /^-+$/.test(line.trim()) || /^Total:/.test(line.trim())) return null;
+  const defaultStart = columns.get("Default");
+  const alias = sliceColumn(line, 0, hostStart);
+  const host = sliceColumn(line, hostStart, usernameStart);
+  const username = sliceColumn(line, usernameStart, defaultStart);
+  if (!alias || !host) return null;
+  return { alias, host, username, isDefault: defaultStart === undefined ? false : line.slice(defaultStart).includes("*") };
+}
+
+function parsePaddedAssetLine(line: string, columns: Columns): JumpserverAssetRow | null {
+  const addressStart = columns.get("Address");
+  const platformStart = columns.get("Platform");
+  const typeStart = columns.get("Type");
+  if (addressStart === undefined || platformStart === undefined) return null;
+  const trimmed = line.trim();
+  if (!trimmed || /^-+$/.test(trimmed) || trimmed.startsWith("[INFO]") || /^Total:/.test(trimmed)) return null;
+  const name = sliceColumn(line, 0, addressStart);
+  const address = sliceColumn(line, addressStart, platformStart);
+  const platform = sliceColumn(line, platformStart, typeStart);
+  const rawType = typeStart === undefined ? "" : sliceColumn(line, typeStart, undefined);
+  if (!name || !address || !platform) return null;
+  return { name, address, platform, rawType };
+}
+
 export function createJumpserverCli(options: JumpserverCliOptions = {}) {
   const execFn = options.exec ?? exec;
   const resolveBinaryFn = options.resolveBinary ?? (() => execFn("which", ["jms"]).then((r) => (r.ok ? r.stdout.trim() : "")));
@@ -67,10 +119,11 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
       const result = await execFn("jms", ["config", "list"]);
       if (!result.ok) return [];
       const lines = result.stdout.split(/\r?\n/);
+      const columns = lines.map(headerColumns).find(Boolean) ?? null;
       const servers: JumpserverServer[] = [];
       for (const line of lines) {
-        const server = parseServerLine(line);
-        if (server) servers.push(server);
+        const server = columns ? parsePaddedServerLine(line, columns) : parseServerLine(line);
+        if (server && server.alias !== "Alias") servers.push(server);
       }
       return servers;
     },
@@ -94,9 +147,10 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
       const result = await execFn("jms", ["ls", serverAlias]);
       if (!result.ok) return [];
       const lines = result.stdout.split(/\r?\n/);
+      const columns = lines.map(headerColumns).find((value) => value?.has("Address")) ?? null;
       const rows: JumpserverAssetRow[] = [];
       for (const line of lines) {
-        const row = parseAssetLine(line);
+        const row = columns ? parsePaddedAssetLine(line, columns) : parseAssetLine(line);
         if (!row) continue;
         if (opts?.linuxOnly !== false && !row.platform.startsWith("Linux")) continue;
         rows.push(row);
@@ -109,6 +163,22 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
       const result = await execFn("jms", ["exec", `${input.asset}@${input.serverAlias}`, `'${cmd}'`]);
       if (!result.ok) return false;
       return result.stdout === "true";
+    },
+
+    // Runs one command on an asset through the bastion. `target` is the jms
+    // `<asset>@<server>` pair; the command stays a single argv entry, so it is
+    // never interpreted by a shell.
+    async execCommand(target: string, command: string): Promise<JumpserverCommandResult> {
+      const result = await execFn("jms", ["exec", target, command]);
+      return { ok: result.ok, stdout: result.stdout.trim(), stderr: result.stderr };
+    },
+
+    // Uploads a local file into a remote directory. jms detects the direction
+    // from whichever side of the pair carries the `asset@server:` prefix.
+    async uploadFile(localPath: string, target: string, remoteDirectory: string): Promise<{ ok: boolean; stderr: string }> {
+      const directory = remoteDirectory.endsWith("/") ? remoteDirectory : `${remoteDirectory}/`;
+      const result = await execFn("jms", ["sftp", localPath, `${target}:${directory}`]);
+      return { ok: result.ok, stderr: result.stderr };
     },
 
     async resolveBinaryPath(): Promise<string> {

@@ -60,6 +60,18 @@ describe("SSH PTY adapter", () => {
     expect(session).toMatchObject({ alias: "kg演示", title: "SSH · kg演示" });
   });
 
+  it("launches the jms CLI for JumpServer assets", () => {
+    const calls: Array<[string, string[]]> = [];
+    const adapter = createSshPtyAdapter({
+      spawn: ((command, args) => { calls.push([command, args]); return fakeProcess(3); }) as never,
+    });
+
+    const session = adapter.connectJms("managed:llm-wiki", "/opt/homebrew/bin/jms", ["login", "llm-wiki@dev"], "llm-wiki");
+
+    expect(calls).toEqual([["/opt/homebrew/bin/jms", ["login", "llm-wiki@dev"]]]);
+    expect(session).toMatchObject({ alias: "llm-wiki", title: "JumpServer · llm-wiki" });
+  });
+
   it("chains ssh-add after successful key generation", () => {
     const calls: Array<[string, string[]]> = [];
     const first = fakeProcess(1);

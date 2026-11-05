@@ -133,10 +133,10 @@ directory is specified. Keep generated evidence outside the source tree.
 | `tmuxSend(session, line)` | 对指定会话执行 `tmux send-keys` | 前端需勾选确认；会话名、空字节与 4,000 字符上限均在主进程验证。 |
 | `ssh.list()` | 读取系统 `~/.ssh/config` Host 与 AFK `userData/ssh-hosts.yml` 主机，并分别执行解析和指纹诊断 | 只返回非敏感 DTO；系统通配符和无法形成目标的 Host 仅生成诊断，托管主机不依赖 OpenSSH alias。 |
 | `ssh.add(input)` | 原子写入 Electron `userData/ssh-hosts.yml`，不修改 OpenSSH 配置 | AFK 显示名称可使用中文；地址、端口、路径和跳板机引用在主进程校验；连接时使用结构化参数。 |
-| `ssh.trust(request)` | 二次扫描并写入 `~/.ssh/known_hosts` | 候选指纹与二次扫描不一致时拒绝写入。 |
-| `ssh.test(hostId)` | 以 `BatchMode=yes` 执行免密测试 | 未信任或指纹变化时阻断；不等待密码。 |
-| `ssh.upload(hostId)` | 使用原生文件选择器选择文件，并通过参数化 `scp` 上传到远程工作目录 | 仅允许可信且可连接主机；本地文件、远程目录和所有命令参数在主进程校验，不拼接 shell 命令。 |
-| `ssh.connect(hostId)` | 通过 PTY 启动 `/usr/bin/ssh` 并传入托管主机的真实地址参数 | 托管主机不依赖 OpenSSH `Host` alias；系统配置主机保留原有 alias 兼容路径；输入和输出不写入日志。 |
+| `ssh.trust(request)` | 二次扫描并写入 `~/.ssh/known_hosts` | 候选指纹与二次扫描不一致时拒绝写入；JumpServer 资产由跳板机认证，没有可固定的主机指纹，直接拒绝。 |
+| `ssh.test(hostId)` | 以 `BatchMode=yes` 执行免密测试；JumpServer 资产改用 `jms exec <asset>@<server> true` | 未信任或指纹变化时阻断；不等待密码。 |
+| `ssh.upload(hostId)` | 使用原生文件选择器选择文件，并通过参数化 `scp` 上传到远程工作目录；JumpServer 资产改用 `jms sftp` | 仅允许可信且可连接主机；本地文件、远程目录和所有命令参数在主进程校验，不拼接 shell 命令。 |
+| `ssh.connect(hostId)` | 通过 PTY 启动 `/usr/bin/ssh` 并传入托管主机的真实地址参数；JumpServer 资产启动 `jms login <asset>@<server>` | 托管主机不依赖 OpenSSH `Host` alias；系统配置主机保留原有 alias 兼容路径；JumpServer 的 Koko 端口只接受密码/MFA，不能作为 `ssh -J` 跳板（见 [ADR-0028](../../docs/adr/0028-jumpserver-assets-through-jms.md)）；输入和输出不写入日志。 |
 | `ssh.generateKey()` / `ssh.deployKey(hostId)` | 通过 PTY 调用 `ssh-keygen` 或结构化 OpenSSH 部署命令 | 私钥口令和远程密码由终端直接处理，AFK 不持久化。 |
 
 运行诊断遵循 AFK 的实际状态目录：`~/.afk/workspaces/<workspace-hash>/runs/<run-id>/events.jsonl`。该路径、增量事件流与诊断属性在 AFK 源码的 `packages/runtime/src/application/sessions/run-state.ts` 中定义；桌面客户端不把这类诊断文件作为控制平面。

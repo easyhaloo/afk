@@ -20,7 +20,8 @@ bash /tmp/afk-install.sh
 ```
 
 已有源码仓库也可以直接运行 `./install.sh`，同样下载发布包，不构建当前源码。
-常用参数：
+升级时会保留本次安装的版本和它替换掉的那个版本（留作手动回滚），更早的版本会被删除——
+每个版本都是 `~/.afk/cli/versions/` 下约 36 MB 的完整副本。常用参数：
 
 ```bash
 bash /tmp/afk-install.sh --version 0.1.0 --skip-completion

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { scheduleWorkItems } from '@afk/runtime/execution';
+import { describeScheduleWaitReason, scheduleWorkItems } from '@afk/runtime/execution';
 import { handleCommandError, detail, warning } from '../output.js';
 
 export function registerScheduleCommands(program: Command): void {
@@ -8,8 +8,8 @@ export function registerScheduleCommands(program: Command): void {
     .requiredOption('--parent <id>', 'Canonical PRD work item ID')
     .option('--max-concurrent <count>', 'Global execution limit', Number)
     .option('--load-limit <load>', 'Pause launches above this one-minute system load', Number)
-    .option('--poll-interval <milliseconds>', 'Refresh interval while paused or watching', Number)
-    .option('--watch', 'Keep watching for merged dependencies and operator retries')
+    .option('--poll-interval <milliseconds>', 'Refresh interval between dispatch evaluations', Number)
+    .option('--watch', 'Keep watching for merged dependencies and operator retries until stopped')
     .option('--dry-run', 'Preview dependency waves without claims, agents, or provider mutations')
     .option('--json', 'Emit the final scheduling report as JSON')
     .action(async options => {
@@ -34,7 +34,14 @@ export function registerScheduleCommands(program: Command): void {
           if (result.baselineBranch) detail(`Baseline branch: ${result.baselineBranch}`);
           for (const [index, wave] of (result.waves ?? []).entries()) detail(`Wave ${index + 1} (after prior merges): ${wave.join(', ')}`);
           for (const execution of result.executions) detail(`${execution.workItemId}: ${execution.status}${execution.error ? ` (${execution.error})` : ''}`);
-          for (const item of result.waiting) detail(`${item.workItemId}: ${item.runnability.reason ?? 'waiting for capacity'}`);
+          for (const item of result.waiting) {
+            // The wait reason names the constraint that binds — a missing
+            // dependency, a full capacity, an overloaded host — so an operator
+            // can tell "nothing to dispatch yet" from "no slot to dispatch
+            // into".
+            const reason = item.waitReason ? describeScheduleWaitReason(item.waitReason) : item.runnability.reason ?? 'waiting';
+            detail(`${item.workItemId}: ${reason}`);
+          }
         }
         if (result.executions.some(execution => execution.status === 'blocked')) process.exitCode = 1;
       } catch (error) { handleCommandError(error); }

@@ -25,6 +25,46 @@ export interface ScheduleOptions {
   onStatus?: (status: { active: number; capacity: number; overloaded: boolean }) => void;
 }
 
+/**
+ * Why the scheduler selected a work item and did not dispatch it.
+ *
+ * The runnability rules answer "may this item start"; they cannot answer
+ * "why is it still waiting", because that also depends on the host: the
+ * capacity, the machine load, and the repository leases other executions
+ * hold. An operator who sees four waiting items has to know which constraint
+ * binds, because "the capacity is full" and "the dependency is not merged"
+ * call for completely different actions — and the scheduler used to report
+ * both the same way.
+ */
+export type ScheduleWaitReason =
+  /** A dependency has not finished yet. */
+  | 'dependency_not_ready'
+  /** Every execution slot is taken. */
+  | 'capacity_full'
+  /** Another execution holds one of this item's repository leases. */
+  | 'repository_busy'
+  /** The host is above the load limit, so launches are paused. */
+  | 'system_overloaded'
+  /** A person has to act: a merge, a blocked item, or an operator retry. */
+  | 'awaiting_human'
+  /** The rework budget for this item is spent. */
+  | 'attempt_limit_reached'
+  /** AFK does not execute this item at all. */
+  | 'not_executable';
+
+/** One selected work item the scheduler did not dispatch. */
+export interface ScheduleWaitingItem {
+  workItemId: string;
+  runnability: Runnability;
+  /**
+   * Why the item is waiting.
+   *
+   * Optional on purpose: a report written before this field existed still
+   * parses, and a caller that does not know the field is unaffected by it.
+   */
+  waitReason?: ScheduleWaitReason;
+}
+
 export interface ScheduleResult {
   parent: string;
   /**
@@ -36,9 +76,77 @@ export interface ScheduleResult {
   baselineBranch?: string;
   capacity: number;
   executions: Array<ExecuteWorkItemResult & { error?: string }>;
-  waiting: Array<{ workItemId: string; runnability: Runnability }>;
+  /**
+   * The items the scheduler selected but did not dispatch.
+   *
+   * Each entry says why it is waiting, so an operator can tell a full
+   * capacity from an unready dependency.
+   */
+  waiting: ScheduleWaitingItem[];
   stopped: boolean;
   waves?: string[][];
+}
+
+/** The facts about the host that decide whether a runnable item can start. */
+export interface ScheduleWaitContext {
+  /** The machine load is above the configured limit. */
+  overloaded: boolean;
+  /** Every execution slot is taken. */
+  capacityFull: boolean;
+  /** Another execution holds one of this item's repository leases. */
+  repositoryBusy: boolean;
+  /** The item spent its rework budget. */
+  attemptsExhausted: boolean;
+}
+
+/** The runnability reasons a person has to act on. */
+const HUMAN_GATED_REASONS: ReadonlySet<string> = new Set([
+  'awaiting_merge',
+  'blocked_for_human',
+  'execution_mode_hitl',
+  'execution_in_progress',
+]);
+
+/**
+ * Name the constraint that keeps an item from running.
+ *
+ * The order is the order of how binding the constraint is: a missing
+ * dependency outranks everything, because no amount of free capacity starts an
+ * item whose dependency is not merged; a taken slot outranks the machine
+ * load, because a slot that is occupied is the reason this item waits even on
+ * an idle machine; the load comes last, because it is the one constraint that
+ * clears on its own.
+ */
+export function scheduleWaitReason(runnability: Runnability, context: ScheduleWaitContext): ScheduleWaitReason {
+  if (runnability.reason === 'dependency_not_done') return 'dependency_not_ready';
+  if (!runnability.runnable) {
+    if (runnability.reason && HUMAN_GATED_REASONS.has(runnability.reason)) return 'awaiting_human';
+    return 'not_executable';
+  }
+  if (context.attemptsExhausted) return 'attempt_limit_reached';
+  if (context.capacityFull) return 'capacity_full';
+  if (context.repositoryBusy) return 'repository_busy';
+  if (context.overloaded) return 'system_overloaded';
+  return 'awaiting_human';
+}
+
+/**
+ * Explain a wait reason in one line.
+ *
+ * The report is read by a person deciding what to do next, so the wording
+ * names the wait rather than the rule that produced it.
+ */
+export function describeScheduleWaitReason(reason: ScheduleWaitReason): string {
+  switch (reason) {
+    case 'dependency_not_ready': return 'waiting for a dependency to finish';
+    case 'capacity_full': return 'waiting for a free execution slot';
+    case 'repository_busy': return 'waiting for a repository lease';
+    case 'system_overloaded': return 'waiting for the system load to drop';
+    case 'attempt_limit_reached': return 'waiting for an operator retry (attempt budget spent)';
+    case 'awaiting_human': return 'waiting for a person';
+    case 'not_executable': return 'not executable by AFK';
+    default: return 'waiting';
+  }
 }
 
 export function scheduledDescendants(items: readonly GlobalWorkItem[], parent: string): GlobalWorkItem[] {
@@ -78,13 +186,70 @@ async function repositoryKeys(item: GlobalWorkItem): Promise<string[]> {
   }
 }
 
+/**
+ * How the scheduler waits between two evaluations.
+ *
+ * The same primitive serves the idle scheduler — nothing is running, so the
+ * world is polled — and the busy one: work is in flight, so the schedule is
+ * re-evaluated on the same interval.
+ */
+type SchedulerWait = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+
+/**
+ * Wait until the scheduler has a reason to look at the world again.
+ *
+ * Two things can change the dispatch decision: an execution finishes, which
+ * frees a slot and may satisfy a dependency, and the world changes outside
+ * AFK — a person merges a dependency, an operator marks an item rework. The
+ * scheduler therefore races the two: the first execution that ends, or the
+ * poll interval elapsing.
+ *
+ * Waiting for the execution alone left idle slots unused for the whole run.
+ * A schedule with capacity four and one slice in flight kept three slots
+ * empty until that slice finished, so the PRD moved at the speed of its
+ * slowest slice instead of at the speed of the capacity the operator asked
+ * for. The timer is also what makes `--watch` honest: a merge that lands
+ * while another slice runs stays invisible until the scheduler looks again.
+ *
+ * The timer is cancelled the moment the race is decided, so an abandoned
+ * timer neither keeps the process alive nor fires a poll nobody waits for.
+ */
+async function awaitDispatchDecision(
+  active: Map<string, { keys: string[]; promise: Promise<void> }>,
+  pollInterval: number,
+  signal: AbortSignal | undefined,
+  wait: SchedulerWait,
+): Promise<void> {
+  const timer = new AbortController();
+  const cancel = () => timer.abort();
+  if (signal?.aborted) timer.abort();
+  else signal?.addEventListener('abort', cancel, { once: true });
+  let failure: unknown;
+  const elapsed = (async () => {
+    try {
+      await wait(pollInterval, timer.signal);
+    } catch (error) {
+      // A cancelled timer is the ordinary way this wait ends; anything else
+      // is a real failure of the wait itself.
+      if (!timer.signal.aborted) failure = error;
+    }
+  })();
+  try {
+    await Promise.race([...[...active.values()].map(entry => entry.promise), elapsed]);
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    timer.abort();
+  }
+  if (failure !== undefined) throw failure;
+}
+
 export async function scheduleWorkItems(options: ScheduleOptions, dependencies: {
   inventory?: () => Promise<GlobalWorkItem[]>;
   execute?: (input: { workItemId: string }) => Promise<ExecuteWorkItemResult>;
   repositories?: (item: GlobalWorkItem) => Promise<string[]>;
   cores?: number;
   load?: () => number;
-  wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+  wait?: SchedulerWait;
   maxReworkAttempts?: number;
 } = {}): Promise<ScheduleResult> {
   const parent = parseWorkItemId(options.parent).id;
@@ -95,6 +260,7 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
   const read = dependencies.inventory ?? (() => inventory(parseWorkItemId(parent).platform));
   const execute = dependencies.execute ?? executeWorkItem;
   const repositories = dependencies.repositories ?? repositoryKeys;
+  const wait: SchedulerWait = dependencies.wait ?? ((milliseconds, signal) => delay(milliseconds, undefined, { signal }));
   const maxAttempts = dependencies.maxReworkAttempts ?? getWorkflowConfig().maxQaReworkAttempts;
   const attempts = new Map<string, number>();
   const terminal = new Map<string, ExecuteWorkItemResult['status']>();
@@ -144,13 +310,17 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
           result.waves.push(wave.map(item => item.id));
           for (const item of wave) completed.add(item.id);
         }
-        result.waiting = selected.filter(item => item.state !== 'done' && item.kind !== 'prd' && !completed.has(item.id)).map(item => ({
-          workItemId: item.id, runnability: evaluateRunnability({ container: false, state: item.state,
+        result.waiting = selected.filter(item => item.state !== 'done' && item.kind !== 'prd' && !completed.has(item.id)).map(item => {
+          const runnability = evaluateRunnability({ container: false, state: item.state,
             executionMode: item.executionMode, executionEligible: item.managed && item.executionEligible,
             hasChildren: items.some(child => child.parentId === item.id),
             dependencies: item.dependsOn.map(id => ({ id, state: completed.has(id) ? 'done' : byId.get(id)?.state })),
-          }),
-        }));
+          });
+          return {
+            workItemId: item.id, runnability,
+            waitReason: scheduleWaitReason(runnability, { overloaded: false, capacityFull: false, repositoryBusy: false, attemptsExhausted: false }),
+          };
+        });
         return result;
       }
       result.waiting = [];
@@ -161,13 +331,18 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
           hasChildren: items.some(child => child.parentId === item.id),
           dependencies: item.dependsOn.map(id => ({ id, state: byId.get(id)?.state })),
         });
-        if (!runnability.runnable || terminal.has(item.id) || (attempts.get(item.id) ?? 0) >= maxAttempts) {
-          result.waiting.push({ workItemId: item.id, runnability });
+        const attemptsExhausted = (attempts.get(item.id) ?? 0) >= maxAttempts;
+        if (!runnability.runnable || terminal.has(item.id) || attemptsExhausted) {
+          result.waiting.push({ workItemId: item.id, runnability,
+            waitReason: scheduleWaitReason(runnability, { overloaded, capacityFull: false, repositoryBusy: false, attemptsExhausted }) });
           continue;
         }
         const itemKeys = keys.get(item.id)!;
-        if (overloaded || active.size >= result.capacity || [...active.values()].some(entry => entry.keys.some(key => itemKeys.includes(key)))) {
-          result.waiting.push({ workItemId: item.id, runnability });
+        const capacityFull = active.size >= result.capacity;
+        const repositoryBusy = [...active.values()].some(entry => entry.keys.some(key => itemKeys.includes(key)));
+        if (overloaded || capacityFull || repositoryBusy) {
+          result.waiting.push({ workItemId: item.id, runnability,
+            waitReason: scheduleWaitReason(runnability, { overloaded, capacityFull, repositoryBusy, attemptsExhausted }) });
           continue;
         }
         attempts.set(item.id, (attempts.get(item.id) ?? 0) + 1);
@@ -181,13 +356,23 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
         active.set(item.id, { keys: itemKeys, promise });
       }
       if (active.size) {
-        await Promise.race([...active.values()].map(entry => entry.promise));
+        // Work is in flight. The scheduler waits for the next reason to
+        // re-evaluate — an execution that ends, or the poll interval — so an
+        // idle slot is filled as soon as something becomes dispatchable
+        // instead of at the end of the slowest slice. An idle slot is
+        // wasted capacity, and wasted capacity is a PRD that ships late.
+        await awaitDispatchDecision(active, pollInterval, options.signal, wait);
         continue;
       }
-      if (!result.waiting.length || (!options.watch && (!overloaded || !result.waiting.some(item => item.runnability.runnable)))) break;
+      // Nothing is in flight. Without `--watch` the schedule is one-shot: it
+      // ends once the current wave is done and nothing further can start.
+      // With `--watch` it stays up until it is stopped, because the help
+      // promises it keeps watching for merged dependencies and operator
+      // retries — a promise the old loop broke as soon as the waiting list
+      // ran empty.
+      if (!options.watch && (!result.waiting.length || !overloaded || !result.waiting.some(item => item.runnability.runnable))) break;
       try {
-        if (dependencies.wait) await dependencies.wait(pollInterval, options.signal);
-        else await delay(pollInterval, undefined, { signal: options.signal });
+        await wait(pollInterval, options.signal);
       } catch (error) { if (!options.signal?.aborted) throw error; }
     }
   } finally {

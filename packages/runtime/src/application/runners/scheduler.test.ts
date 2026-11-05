@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { scheduleWorkItems, scheduledDescendants, schedulerCapacity } from './scheduler.js';
+import { describeScheduleWaitReason, scheduleWaitReason, scheduleWorkItems, scheduledDescendants, schedulerCapacity } from './scheduler.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { executionManifestPath } from '../../infrastructure/workspace.js';
@@ -102,7 +102,9 @@ describe('scheduler', () => {
     const result = await scheduleWorkItems({ parent: parent.id, loadLimit: 4, signal: controller.signal }, {
       inventory: async () => [parent, child], repositories: async () => ['api'], load, wait, execute,
     });
-    expect(wait).toHaveBeenCalledTimes(1);
+    // One wait while the machine was overloaded, one re-evaluation timer while
+    // the attempt was in flight.
+    expect(wait).toHaveBeenCalledTimes(2);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(result.stopped).toBe(true);
     expect(result.executions).toHaveLength(1);
@@ -111,18 +113,133 @@ describe('scheduler', () => {
   it('watches a human gate and accepts an explicit operator retry', async () => {
     const parent = item('acme/prd', 1, { kind: 'prd' });
     const child = item('acme/api', 2, { parentId: parent.id });
+    const controller = new AbortController();
     const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => {
-      child.state = child.state === 'ready' ? 'merge_ready' : 'done';
-      return { workItemId, executionId: 'attempt', status: child.state };
+      const status = child.state === 'ready' ? 'merge_ready' as const : 'done' as const;
+      child.state = status;
+      if (status === 'done') controller.abort();
+      return { workItemId, executionId: 'attempt', status };
     });
-    const wait = vi.fn(async () => { child.state = 'rework'; });
-    const report = await scheduleWorkItems({ parent: parent.id, watch: true }, {
+    const wait = vi.fn(async () => { if (child.state === 'merge_ready') child.state = 'rework'; });
+    const report = await scheduleWorkItems({ parent: parent.id, watch: true, signal: controller.signal }, {
       inventory: async () => [parent, child], repositories: async () => ['api'], load: () => 0, execute, wait,
     });
-    expect(wait).toHaveBeenCalledTimes(1);
+    // A re-evaluation timer for each attempt, and one poll while the merge
+    // gate waited for a person.
+    expect(wait).toHaveBeenCalledTimes(3);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(report.executions.map(execution => execution.status)).toEqual(['merge_ready', 'done']);
     expect(report.waiting).toEqual([]);
+  });
+
+  it('fills idle capacity within the poll interval instead of waiting for the running slice to end', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const running = item('acme/base', 2, { parentId: parent.id });
+    const released = [
+      item('acme/api', 3, { parentId: parent.id, state: 'blocked' }),
+      item('acme/web', 4, { parentId: parent.id, state: 'blocked' }),
+      item('acme/docs', 5, { parentId: parent.id, state: 'blocked' }),
+    ];
+    const all = [parent, running, ...released];
+    const events: string[] = [];
+    let fillIdleSlots!: () => void;
+    const idleSlotsFilled = new Promise<void>(resolve => { fillIdleSlots = resolve; });
+    let reads = 0;
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => {
+      events.push(`start:${workItemId}`);
+      if (workItemId === running.id) {
+        // The running slice ends only after the idle slots are filled, or
+        // after a second — whichever comes first. The second branch is what
+        // the old scheduler relied on: it never looked at the schedule again
+        // while an execution was in flight.
+        let fallback!: NodeJS.Timeout;
+        const expires = new Promise<void>(resolve => { fallback = setTimeout(resolve, 1000); fallback.unref?.(); });
+        await Promise.race([idleSlotsFilled, expires]);
+      } else if (events.filter(event => event.startsWith('start:')).length === 4) {
+        fillIdleSlots();
+      }
+      events.push(`finish:${workItemId}`);
+      const subject = all.find(candidate => candidate.id === workItemId)!;
+      subject.state = 'done';
+      return { workItemId, executionId: 'attempt', status: 'done' as const };
+    });
+    const inventory = vi.fn(async () => {
+      reads += 1;
+      // An operator releases the three sibling slices while the first one runs.
+      if (reads > 1) for (const subject of released) subject.state = 'ready';
+      return all;
+    });
+    const startedAt = Date.now();
+    const report = await scheduleWorkItems({ parent: parent.id, maxConcurrent: 4, pollIntervalMs: 50 }, {
+      inventory, repositories: async subject => [subject.project.projectKey], cores: 12, load: () => 0, execute,
+    });
+    const elapsed = Date.now() - startedAt;
+    expect(report.capacity).toBe(4);
+    expect(execute).toHaveBeenCalledTimes(4);
+    // The three idle slots were filled while the first slice was still
+    // running — not after it ended.
+    expect(events.indexOf(`start:${released[0].id}`)).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf(`start:${released[0].id}`)).toBeLessThan(events.indexOf(`finish:${running.id}`));
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('keeps watching after the work is done, until the schedule is stopped', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const child = item('acme/api', 2, { parentId: parent.id });
+    const controller = new AbortController();
+    let reads = 0;
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => {
+      child.state = 'done';
+      return { workItemId, executionId: 'attempt', status: 'done' as const };
+    });
+    const inventory = vi.fn(async () => {
+      reads += 1;
+      if (reads >= 3) controller.abort();
+      return [parent, child];
+    });
+    const report = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal }, {
+      inventory, repositories: async () => ['api'], load: () => 0, execute,
+    });
+    // The watch did not end by itself when the waiting list ran empty.
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(report.stopped).toBe(true);
+  });
+
+  it('reports the constraint that keeps each waiting item waiting', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const base = item('acme/base', 2, { parentId: parent.id });
+    const sibling = item('acme/web', 3, { parentId: parent.id });
+    const dependent = item('acme/api', 4, { parentId: parent.id, dependsOn: [base.id] });
+    const human = item('acme/docs', 5, { parentId: parent.id, state: 'merge_ready' });
+    const controller = new AbortController();
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => {
+      controller.abort();
+      return { workItemId, executionId: 'attempt', status: 'merge_ready' as const };
+    });
+    const result = await scheduleWorkItems({ parent: parent.id, maxConcurrent: 1, signal: controller.signal }, {
+      inventory: async () => [parent, base, sibling, dependent, human],
+      repositories: async subject => [subject.project.projectKey], load: () => 0, execute,
+    });
+    const reason = (workItemId: string) => result.waiting.find(entry => entry.workItemId === workItemId)?.waitReason;
+    expect(reason(sibling.id)).toBe('capacity_full');
+    expect(reason(dependent.id)).toBe('dependency_not_ready');
+    expect(reason(human.id)).toBe('awaiting_human');
+    // The runnability rules are unchanged; the wait reason is an addition.
+    expect(result.waiting.find(entry => entry.workItemId === dependent.id)?.runnability.blockedBy).toEqual([base.id]);
+  });
+
+  it('reports an overloaded host as the reason nothing is dispatched', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const child = item('acme/api', 2, { parentId: parent.id });
+    const controller = new AbortController();
+    const execute = vi.fn();
+    const result = await scheduleWorkItems({ parent: parent.id, loadLimit: 4, signal: controller.signal }, {
+      inventory: async () => { controller.abort(); return [parent, child]; },
+      repositories: async () => ['api'], load: () => 8, execute,
+    });
+    expect(result.waiting.find(entry => entry.workItemId === child.id)?.waitReason).toBe('system_overloaded');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('rejects cycles and invalid budgets before execution', async () => {
@@ -136,5 +253,49 @@ describe('scheduler', () => {
     expect(schedulerCapacity(1, 12)).toBe(1);
     expect(() => schedulerCapacity(2, 4, 0)).toThrow('positive');
     expect(() => scheduledDescendants([], parent.id)).toThrow('absent');
+  });
+});
+
+describe('scheduleWaitReason', () => {
+  const idle = { overloaded: false, capacityFull: false, repositoryBusy: false, attemptsExhausted: false };
+
+  it('names the constraint that keeps a runnable item waiting', () => {
+    expect(scheduleWaitReason({ runnable: true, blockedBy: [] }, { ...idle, capacityFull: true })).toBe('capacity_full');
+    expect(scheduleWaitReason({ runnable: true, blockedBy: [] }, { ...idle, repositoryBusy: true })).toBe('repository_busy');
+    expect(scheduleWaitReason({ runnable: true, blockedBy: [] }, { ...idle, overloaded: true })).toBe('system_overloaded');
+    expect(scheduleWaitReason({ runnable: true, blockedBy: [] }, { ...idle, attemptsExhausted: true })).toBe('attempt_limit_reached');
+  });
+
+  it('names the gate that keeps an unrunnable item waiting', () => {
+    expect(scheduleWaitReason({ runnable: false, reason: 'dependency_not_done', blockedBy: ['a'] }, idle)).toBe('dependency_not_ready');
+    expect(scheduleWaitReason({ runnable: false, reason: 'awaiting_merge', blockedBy: [] }, idle)).toBe('awaiting_human');
+    expect(scheduleWaitReason({ runnable: false, reason: 'blocked_for_human', blockedBy: [] }, idle)).toBe('awaiting_human');
+    expect(scheduleWaitReason({ runnable: false, reason: 'execution_mode_hitl', blockedBy: [] }, idle)).toBe('awaiting_human');
+    expect(scheduleWaitReason({ runnable: false, reason: 'not_managed', blockedBy: [] }, idle)).toBe('not_executable');
+    expect(scheduleWaitReason({ runnable: false, reason: 'state_not_runnable', blockedBy: [] }, idle)).toBe('not_executable');
+  });
+
+  it('prefers the constraint that binds first', () => {
+    // No amount of free capacity starts an item whose dependency is not
+    // merged, so the dependency outranks the host.
+    expect(scheduleWaitReason({ runnable: false, reason: 'dependency_not_done', blockedBy: ['a'] },
+      { ...idle, capacityFull: true, overloaded: true })).toBe('dependency_not_ready');
+    // A taken slot is the reason the item waits even on an idle machine.
+    expect(scheduleWaitReason({ runnable: true, blockedBy: [] },
+      { ...idle, capacityFull: true, overloaded: true })).toBe('capacity_full');
+    expect(scheduleWaitReason({ runnable: true, blockedBy: [] },
+      { ...idle, repositoryBusy: true, overloaded: true })).toBe('repository_busy');
+  });
+});
+
+describe('describeScheduleWaitReason', () => {
+  it('describes every reason in one line', () => {
+    expect(describeScheduleWaitReason('dependency_not_ready')).toBe('waiting for a dependency to finish');
+    expect(describeScheduleWaitReason('capacity_full')).toBe('waiting for a free execution slot');
+    expect(describeScheduleWaitReason('repository_busy')).toBe('waiting for a repository lease');
+    expect(describeScheduleWaitReason('system_overloaded')).toBe('waiting for the system load to drop');
+    expect(describeScheduleWaitReason('attempt_limit_reached')).toBe('waiting for an operator retry (attempt budget spent)');
+    expect(describeScheduleWaitReason('awaiting_human')).toBe('waiting for a person');
+    expect(describeScheduleWaitReason('not_executable')).toBe('not executable by AFK');
   });
 });

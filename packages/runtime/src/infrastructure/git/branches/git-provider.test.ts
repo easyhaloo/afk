@@ -145,6 +145,37 @@ describe('GitBranchProvider', () => {
     await expect(simpleGit(handle.worktreePath).raw(['show', 'HEAD:parent-result.txt'])).resolves.toContain('parent baseline');
   });
 
+  it('lets the next verification take over the worktree a failed attempt kept for evidence', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const child: BacklogItem = { ...item(), id: '43', branchName: 'afk/backlog-43' };
+
+    const first = await provider.createVerificationWorktree(child, 'main');
+    // The attempt failed: the worktree stays for the evidence it holds.
+    await provider.cleanup(first.worktreePath, { preserve: true });
+    await writeFile(join(first.worktreePath, 'evidence.txt'), 'why it failed\n');
+
+    // The claim belongs to the attempt, so the next attempt of the same item
+    // takes the worktree over instead of refusing to prepare it.
+    const second = await provider.createVerificationWorktree(child, 'main');
+
+    expect(second.worktreePath).toBe(first.worktreePath);
+    expect(second.branchName).toBe('afk/backlog-43-qa');
+    await expect(simpleGit(second.worktreePath).revparse(['--abbrev-ref', 'HEAD']))
+      .resolves.toContain('afk/backlog-43-qa');
+  });
+
+  it('keeps a preserved worktree usable as the evidence it was kept for', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const child: BacklogItem = { ...item(), id: '43', branchName: 'afk/backlog-43' };
+
+    const handle = await provider.createVerificationWorktree(child, 'main');
+    await provider.cleanup(handle.worktreePath, { preserve: true });
+
+    await expect(readFile(join(handle.worktreePath, 'README.md'), 'utf8')).resolves.toContain('base');
+  });
+
   it('shares repository dependencies with QA worktrees', async () => {
     const { repoPath } = await repository();
     await writeFile(join(repoPath, '.git/info/exclude'), 'node_modules/\nkeep-local\n');

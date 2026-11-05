@@ -1,0 +1,42 @@
+import { Command } from 'commander';
+import { scheduleWorkItems } from '@afk/runtime/execution';
+import { handleCommandError, detail, warning } from '../output.js';
+
+export function registerScheduleCommands(program: Command): void {
+  program.command('schedule')
+    .description('Schedule a PRD tree across repositories with bounded concurrency')
+    .requiredOption('--parent <id>', 'Canonical PRD work item ID')
+    .option('--max-concurrent <count>', 'Global execution limit', Number)
+    .option('--load-limit <load>', 'Pause launches above this one-minute system load', Number)
+    .option('--poll-interval <milliseconds>', 'Refresh interval while paused or watching', Number)
+    .option('--watch', 'Keep watching for merged dependencies and operator retries')
+    .option('--dry-run', 'Preview dependency waves without claims, agents, or provider mutations')
+    .option('--json', 'Emit the final scheduling report as JSON')
+    .action(async options => {
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+      let paused = false;
+      try {
+        const result = await scheduleWorkItems({ parent: options.parent, maxConcurrent: options.maxConcurrent,
+          loadLimit: options.loadLimit, pollIntervalMs: options.pollInterval, watch: options.watch, dryRun: options.dryRun, signal: controller.signal,
+          onStatus: status => {
+            if (!options.json && status.overloaded !== paused) {
+              if (status.overloaded) warning('System overloaded; pausing new executions');
+              else detail('System load recovered; resuming scheduling');
+            }
+            paused = status.overloaded;
+          } });
+        if (options.json) console.log(JSON.stringify(result, null, 2));
+        else {
+          detail(`Capacity: ${result.capacity}; attempts: ${result.executions.length}; waiting: ${result.waiting.length}`);
+          for (const [index, wave] of (result.waves ?? []).entries()) detail(`Wave ${index + 1} (after prior merges): ${wave.join(', ')}`);
+          for (const execution of result.executions) detail(`${execution.workItemId}: ${execution.status}${execution.error ? ` (${execution.error})` : ''}`);
+          for (const item of result.waiting) detail(`${item.workItemId}: ${item.runnability.reason ?? 'waiting for capacity'}`);
+        }
+        if (result.executions.some(execution => execution.status === 'blocked')) process.exitCode = 1;
+      } catch (error) { handleCommandError(error); }
+      finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+    });
+}

@@ -22,10 +22,12 @@ Applications consume shared packages through declared exports. Shared packages m
 ## Execution entry points
 
 - `afk`: open the interactive TUI.
-- `afk run`: run the implementation stage for a work item.
+- `afk run`: resolve a work item and delegate to the complete managed implementation → independent QA → publication lifecycle. Existing runtime, timeout, budget, extension, and explicit execution-mode options apply to the managed attempt; `--target-branch` names its working branch, not the MR destination.
 - `afk execute --work-item-id <id>`: execute the managed lifecycle, including eligibility and manifest checks, implementation, independent QA, change-request handling, and the human-controlled merge gate.
 - `afk loop start`: repeatedly attempt one manifest-bound work item by delegating to the same managed execution path. It is not a global multi-item scheduler.
-- `afk qa`: run standalone QA where appropriate.
+- `afk qa`: retry an item in `verification`, using its managed manifest when present; `--execution-manifest <path>` selects an explicit manifest.
+- `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; `--watch` waits for external state changes, `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Each preview wave assumes prior waves have been merged and reconciled. SIGINT/SIGTERM stop dispatch and drain active attempts.
+- `afk doctor [--workspace-root <path>] [--json]`: inspect bare caches, dependency pools, managed workspaces, live repository leases, and conservative reclaimable-byte estimates. This is read-only; `afk observe doctor` continues to describe the event store.
 - `afk observe`: inspect executions and their audit/evidence projections.
 
 The command registry in `apps/cli/src/command-registry.ts` is the source of truth for the complete CLI surface. Do not infer supported commands from old examples or plans.
@@ -36,6 +38,11 @@ The command registry in `apps/cli/src/command-registry.ts` is the source of trut
 - Execution workspaces live under `~/.loop-workspace/`.
 - Per-workspace manifests, launch receipts, sessions, diagnostic runs, and execution journals are stored under the hashed workspace area in `~/.afk/workspaces/`.
 - Repository checkouts live under the canonical execution workspace; the caller's current directory does not redefine the canonical execution root.
+- New manifest-bound repository checkouts are linked worktrees backed by one cached bare repository per remote under `~/.loop-workspace/repos/<host>/<project>/bare.git`. Implementation and QA use the same store without changing manifest checkout paths. Existing independent clones remain supported.
+- Bare repository creation, fetches, branch preparation, publication, and worktree removal in the preparer reuse the filesystem operation gate to serialize shared Git metadata operations per repository. Active worktrees retain independent working directories and indexes; Git refuses to check out the same writable branch twice.
+- Successful implementation and borrowed QA workspaces release store-owned worktrees, including worktrees reused after a failed attempt. Failed attempts retain source and diagnostic evidence. A dirty store-owned retry saves tracked and untracked edits in a named `afk-recovery-*` Git stash, prepares the working branch, then reapplies the saved changes; the stash remains available if recovery conflicts. Independent clones still reject dirty preparation. Bare repositories, local branches, and recovery stashes survive worktree removal.
+- Node dependencies are cached under `~/.loop-workspace/deps/<hash>/layout/`. Keys cover lockfiles, all workspace package manifests, package-manager configuration and patches, platform, architecture, and Node ABI. Installed dependencies are captured after a managed phase; matching phases attach them without installing. Real `node_modules` directories contain per-entry links, workspace package links point into the current checkout, and pnpm mutable state remains local. External or unsupported nested source links keep the original install rather than creating a broken cache. Maven and Go continue using their native global caches.
+- Pools retain pins while checkouts reference them. Releasing a managed checkout drops its references; unpinned entries are evicted by least recent use above the default 8 GiB budget. Bare caches are retained. Existing independent clones remain supported without automatic migration; global package-manager store pruning is an explicit operator action after pool acceptance.
 - Agent completion signals and QA artifact manifests are execution-local protocol files, not general configuration or lifecycle-state stores.
 
 These paths describe distinct storage responsibilities. Consult the current implementation and [Full Workflow & E2E Architecture](full-workflow-e2e-architecture.md) for detailed resolution behavior; do not infer exact runtime paths from this summary.
@@ -52,6 +59,45 @@ The provider backlog, runtime state, run-event audit trail, and evidence are sep
 - Evidence references and classifications support QA, diagnostics, and redaction policy.
 
 ## Failure and recovery
+
+### Execution refs and configuration
+
+The item's `## Base Version` section declares an immutable execution plan:
+
+```markdown
+## Base Version
+
+- Base Ref: release
+- Target Ref: production
+- Source Ref: migration-source
+```
+
+`Target Ref` defaults to `Base Ref`; `Source Ref` is optional and is fetched as a migration source, never substituted for the baseline. The manifest persists these as `baseBranch`, `targetBranch`, and `sourceBranch` per repository. QA verifies against the base and publishes to the target. Disagreement between the body and manifest is rejected before agent execution. Working-branch selection and `baseBacklogId` relationships remain separate from the publication target. Unsafe or conflicting declarations fail closed.
+
+For undeclared refs, repository-local `.afk/project.yml` values override the matching `repositories.<projectKey>` entry in `~/.afk/config.yml`, followed by the provider repository's default branch and global `defaultBaseRef`. Legacy `trackerTargetBranch` / `targetBranch` settings and environment aliases remain global defaults. Each repository receives a new plan without mutating cached global configuration. A new run's explicit `--base-branch` can replace an undeclared default; it must agree with a declared plan or existing manifest.
+
+```yaml
+defaultBaseRef: main
+repositories:
+  group/api:
+    baseRef: release
+    targetRef: production
+    sourceRef: migration-source
+  group/web:
+    baseRef: staging
+```
+
+### Repository arbitration and dispatch
+
+Managed execution holds leases for every manifest repository across implementation and QA. Standalone preparation acquires the same leases; nested phases borrow the enclosing lease. Acquisition sorts and deduplicates repository keys, rolls back partial acquisition, and rejects contention before claiming a managed work item. Heartbeats and generation IDs reuse `FilesystemClaimLock`; expired generations cannot renew or release successors. Recovery requires an expired lease and a demonstrably dead local owner; unknown or remote owners remain protected.
+
+Interruption moves the item to `blocked + hitl` and invalidates its claim. Failed heartbeats or observed interruption kill owned agent executions and prevent publication. Terminal cleanup closes executions before releasing workspace resources. Failed QA retains its verification worktree. Managed local Claude tmux sessions register their repository claim generations before launch and carry the same ownership token in tmux. Dead-owner recovery verifies that token before stopping an orphan session; a reused session name, unknown ownership, or a non-tmux transport requires explicit operator recovery. No process is killed solely because its name resembles an AFK agent.
+
+Generation checks protect AFK-controlled lifecycle operations. Agent writes remain direct filesystem operations; safe takeover depends on verified owner death and termination of registered resources. Unknown external writers require operator recovery.
+
+The scheduler reads the complete credential-scoped inventory, rejects dependency cycles, and reuses provider runnability rules. Default capacity is `min(repositoryCount, max(2, floor(availableCores / 3)))`, with a minimum of one. Overlapping multi-repository manifests serialize; disjoint repositories can run concurrently. A one-minute load above the configured limit pauses new launches. Dependencies unblock at `done`; `merge_ready` awaits human merge and reconciliation. Rework attempts are bounded by `maxQaReworkAttempts`. Scheduling neither adopts unmanaged issues nor changes dependency labels.
+
+### Recovery policy
 
 Execution must fail closed when required identity, manifest, claim, or verification evidence is missing or invalid. Recovery and reconciliation use the existing work-item identity and recorded state; reconciliation is not a shortcut for creating a new execution manifest. If the agent stops responding or verification cannot run, the system must preserve evidence and surface a recoverable state rather than treating the task as complete.
 

@@ -2,6 +2,7 @@ import { readFile as readFileFromFs } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { isWorkItemProjectKey } from '@afk/core';
 import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { executionRef } from '../../domain/backlog/execution-plan.js';
 
 const MANIFEST_KEYS = new Set(['schemaVersion', 'workItemId', 'providerBacklogId', 'tracker', 'workingBranch', 'repositories']);
 const TRACKER_KEYS = new Set(['platform', 'projectKey', 'providerHost', 'providerProjectId']);
@@ -13,6 +14,8 @@ const REPOSITORY_KEYS = new Set([
   'name',
   'checkoutPath',
   'baseBranch',
+  'targetBranch',
+  'sourceBranch',
   'role',
   'workingBranch',
   'primary',
@@ -38,6 +41,8 @@ export interface ExecutionManifestRepository {
   name: string;
   checkoutPath: string;
   baseBranch: string;
+  targetBranch?: string;
+  sourceBranch?: string;
   role?: string;
   workingBranch: string;
   primary: boolean;
@@ -165,6 +170,8 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
     name: textValue(candidate.name, `${label}.name`),
     checkoutPath: checkoutPathValue(candidate.checkoutPath, `${label}.checkoutPath`),
     baseBranch: branchValue(candidate.baseBranch, `${label}.baseBranch`),
+    ...(candidate.targetBranch === undefined ? {} : { targetBranch: branchValue(candidate.targetBranch, `${label}.targetBranch`) }),
+    ...(candidate.sourceBranch === undefined ? {} : { sourceBranch: branchValue(candidate.sourceBranch, `${label}.sourceBranch`) }),
     ...(candidate.role === undefined ? {} : { role: textValue(candidate.role, `${label}.role`) }),
     workingBranch: repositoryWorkingBranch,
     primary: candidate.primary,
@@ -215,19 +222,7 @@ function checkoutPathValue(value: unknown, label: string): string {
 }
 
 function branchValue(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)) throw new Error(`${label} is invalid`);
-  const segments = value.split('/');
-  if (
-    value === '@'
-    || value.includes('..')
-    || value.includes('@{')
-    || value.includes('//')
-    || /[\\ ~^:?*[\x00-\x1f\x7f]/.test(value)
-    || segments.some(segment => !segment || segment.startsWith('.') || segment.endsWith('.') || segment.endsWith('.lock'))
-  ) {
-    throw new Error(`${label} is invalid`);
-  }
-  return value;
+  return executionRef(value, label);
 }
 
 function projectKeyValue(value: unknown, label: string): string {

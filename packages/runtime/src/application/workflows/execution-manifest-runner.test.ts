@@ -163,8 +163,8 @@ describe('execution manifest request to runner boundary', () => {
     expect(repositories[1].repoRoot.startsWith('/workspace/')).toBe(true);
     const prompt = vi.mocked(agent.createExecution).mock.calls[0][0].prompt;
     expect(prompt).toContain('Execution repositories');
-    expect(prompt).toContain('1. primary checkoutPath=repositories/api baseBranch=main workingBranch=afk/work-item-18');
-    expect(prompt).toContain('2. secondary checkoutPath=repositories/web baseBranch=develop workingBranch=afk/work-item-18');
+    expect(prompt).toContain('1. primary checkoutPath=repositories/api baseBranch=main targetBranch=main workingBranch=afk/work-item-18');
+    expect(prompt).toContain('2. secondary checkoutPath=repositories/web baseBranch=develop targetBranch=develop workingBranch=afk/work-item-18');
     expect(prompt).toContain('Paths are relative to the execution workspace root');
     expect(prompt).not.toContain('/workspace/repositories');
     expect(events.indexOf('prepared')).toBeLessThan(events.indexOf('sandbox'));

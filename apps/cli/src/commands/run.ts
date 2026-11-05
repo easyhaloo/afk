@@ -19,7 +19,7 @@ export function registerRunCommands(program: Command): void {
     .requiredOption('--backlog-id <id>', 'Backlog ID')
     .option('--session <name>', 'Execution session name (default: afk-<backlog-id>)')
     .option('--project <project>', 'Provider project/repository')
-    .option('--target-branch <branch>', 'Target branch for the change')
+    .option('--target-branch <branch>', 'Working branch (MR target comes from the work item execution refs)')
     .option('--base-branch <branch>', 'Base branch for the worktree')
     .option('--execution-manifest <path>', 'Execution manifest for a multi-repository workspace')
     .option('--max-retries <n>', 'Maximum retry attempts', positiveInt)

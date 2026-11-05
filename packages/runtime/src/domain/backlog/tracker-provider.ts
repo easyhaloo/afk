@@ -71,6 +71,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
   readonly capabilities: BacklogProviderCapabilities;
   private readonly atomicClaim?: TrackerBacklogAdapterOptions['atomicClaim'];
   private readonly claimStrategy: NativeOrLockedClaimStrategy;
+  private readonly claimLock: ClaimLock;
   private graphCache = new Map<string, { at: number; children: BacklogItem[] }>();
 
   constructor(private readonly tracker: TrackerProvider, options: TrackerBacklogAdapterOptions = {}) {
@@ -80,6 +81,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const claimLock = options.claimLock
       ?? options.claimLockFactory?.(onExpiredClaim)
       ?? new FilesystemClaimLock(undefined, { onExpiredClaim });
+    this.claimLock = claimLock;
     this.claimStrategy = new NativeOrLockedClaimStrategy({
       atomicClaim: this.atomicClaim,
       claimLock,
@@ -224,7 +226,16 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async claim(id: string, owner: string): Promise<BacklogClaim | null> {
-    return this.claimStrategy.claim(id, owner);
+    const claim = await this.claimStrategy.claim(id, owner);
+    if (!claim) return null;
+    return { ...claim, heartbeat: async () => {
+      const item = await this.get(id);
+      if (item.state !== 'in_progress' || item.executionMode !== 'afk') {
+        await claim.release();
+        throw new Error(`claim for ${id} was interrupted`);
+      }
+      await claim.heartbeat();
+    } };
   }
 
   async transition(id: string, state: BacklogState, _details?: { reason?: string; changeId?: string }): Promise<void> {
@@ -233,6 +244,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const currentMode = issue.labels.find(label => Object.values(MODE_LABELS).includes(label));
     const mode = state === 'blocked' ? MODE_LABELS.hitl : currentMode ?? MODE_LABELS.afk;
     await this.updateWorkflowLabels(target.tracker, target.issueId, issue.labels, [STATE_LABELS[state], mode]);
+    if (state === 'blocked') await this.claimLock.invalidate?.(this.claimKey(id));
     if (state === 'done') await target.tracker.updateIssue(target.issueId, { state: 'closed' });
   }
 
@@ -546,17 +558,21 @@ export class TrackerBacklogProvider implements BacklogProvider {
 
   private claimKey(id: string): string {
     const target = this.resolveTarget(id);
-    return `${target.tracker.platform}/${target.tracker.projectId}/${target.issueId}`;
+    return `${target.tracker.platform}/${this.scopeOf(target.tracker).projectKey}/${target.issueId}`;
   }
 
   private async recoverExpiredClaim(key: string, _claim: ExpiredClaim): Promise<boolean> {
-    const prefix = `${this.tracker.platform}/${this.tracker.projectId}/`;
+    const prefix = `${this.tracker.platform}/${this.scopeOf(this.tracker).projectKey}/`;
     if (!key.startsWith(prefix)) return false;
     const backlogId = key.slice(prefix.length);
     if (!backlogId || backlogId.includes('/')) return false;
     try {
       if (key !== this.claimKey(backlogId)) return false;
-      return this.blockAndRouteToHitl(backlogId, 'filesystem claim lease expired');
+      const target = this.resolveTarget(backlogId);
+      const issue = await target.tracker.getIssue(target.issueId);
+      await this.updateWorkflowLabels(target.tracker, target.issueId, issue.labels, [STATE_LABELS.blocked, MODE_LABELS.hitl]);
+      const blocked = await this.get(backlogId);
+      return blocked.state === 'blocked' && blocked.executionMode === 'hitl';
     } catch {
       return false;
     }

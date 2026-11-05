@@ -1,13 +1,16 @@
 import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import type { BranchHandle } from '../../domain/branches/types.js';
 import type { WorkflowRunRepository } from './run-request.js';
 import type { RunOutcomeStatus } from './resource-scope.js';
 import { gitLabCloneUrl } from '../../shared/gitlab-project.js';
 import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
+import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
+import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
+import { DependencyPool } from '../../infrastructure/git/dependency-pool.js';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 
@@ -28,13 +31,15 @@ export interface MultiRepositoryPreparerDependencies {
   lock: {
     acquire(workspaceRoot: string): Promise<{ release(): Promise<void> }>;
   };
-  clone: {
-    clone(url: string, repoRoot: string): Promise<void>;
-  };
+  repositoryStore: Pick<RepositoryStore, 'ensureCheckout' | 'ownsCheckout'>;
+  repositoryLeases?: Pick<RepositoryLeases, 'acquire'>;
+  dependencies?: Pick<DependencyPool, 'attach' | 'capture' | 'release'>;
   git: {
     isRepository(repoRoot: string): Promise<boolean>;
     originUrl(repoRoot: string): Promise<string>;
     capture(repoRoot: string, workingBranch: string): Promise<RepositoryGitSnapshot>;
+    recoverDirty?(repoRoot: string): Promise<string>;
+    restoreRecovery?(repoRoot: string, recovery: string): Promise<void>;
     fetchBase(repoRoot: string, baseBranch: string): Promise<void>;
     prepareWorkingBranch(repoRoot: string, baseBranch: string, workingBranch: string): Promise<void>;
     finalize(repoRoot: string, workingBranch: string): Promise<void>;
@@ -45,10 +50,12 @@ export interface MultiRepositoryPreparerDependencies {
 export interface PreparedRepository extends WorkflowRunRepository {
   handle: BranchHandle;
   createdByRun: boolean;
+  managedByStore?: boolean;
   original: RepositoryGitSnapshot;
 }
 
 export interface PreparedRepositorySet {
+  heartbeat?(): Promise<void>;
   repositories: PreparedRepository[];
   primary: PreparedRepository;
   finish(outcome: { status: RunOutcomeStatus }): Promise<void>;
@@ -92,15 +99,18 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     }
 
     const lock = await this.dependencies.lock.acquire(workspaceRoot);
+    let repositoryLeases: Awaited<ReturnType<RepositoryLeases['acquire']>> | undefined;
+    const release = async () => { try { await repositoryLeases?.release(); } finally { await lock.release(); } };
     const prepared: PreparedRepository[] = [];
     try {
+      repositoryLeases = await this.dependencies.repositoryLeases?.acquire(repositories.map(repository => `${repository.platform}:${repository.projectKey}`));
       for (const repository of repositories) {
         await this.dependencies.filesystem.validateRepositoryPath(workspaceRoot, repository.repoRoot);
       }
       for (const repository of repositories) prepared.push(await this.prepareOne(repository));
     } catch (error) {
       await this.cleanup(prepared, error);
-      try { await lock.release(); } catch { /* preserve the preparation error */ }
+      try { await release(); } catch { /* preserve the preparation error */ }
       throw error;
     }
 
@@ -110,11 +120,12 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     return {
       repositories: prepared,
       primary,
+      ...(repositoryLeases ? { heartbeat: repositoryLeases.heartbeat } : {}),
       finish: outcome => {
         finishPromise ??= this.finish(prepared, outcome.status).then(
-          () => lock.release(),
+          () => release(),
           async error => {
-            try { await lock.release(); } catch { /* preserve the terminal error */ }
+            try { await release(); } catch { /* preserve the terminal error */ }
             throw error;
           },
         );
@@ -122,9 +133,9 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
       },
       release: () => {
         releasePromise ??= this.cleanup(prepared).then(
-          () => lock.release(),
+          () => release(),
           async error => {
-            try { await lock.release(); } catch { /* preserve the terminal error */ }
+            try { await release(); } catch { /* preserve the terminal error */ }
             throw error;
           },
         );
@@ -138,28 +149,38 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     const createdByRun = targetState !== 'nonempty';
     let original: RepositoryGitSnapshot | undefined;
     let branchPreparationStarted = false;
+    let recovery: string | undefined;
     try {
       if (createdByRun) {
-        await this.dependencies.clone.clone(cloneUrl(repository), repository.repoRoot);
+        await this.dependencies.repositoryStore.ensureCheckout(cloneUrl(repository), repository.repoRoot, repository.baseBranch);
       } else if (!await this.dependencies.git.isRepository(repository.repoRoot)) {
         throw new Error(`repository target is not a git repository: ${repository.repoRoot}`);
       }
       if (!await this.dependencies.git.isRepository(repository.repoRoot)) {
-        throw new Error(`repository clone is not a git repository: ${repository.repoRoot}`);
+        throw new Error(`repository checkout is not a git repository: ${repository.repoRoot}`);
       }
       assertRepositoryOrigin(repository, await this.dependencies.git.originUrl(repository.repoRoot));
 
       original = await this.dependencies.git.capture(repository.repoRoot, repository.workingBranch);
       if (original.status) {
-        throw new Error(`repository has uncommitted changes: ${repository.repoRoot}`);
+        if (!await this.dependencies.repositoryStore.ownsCheckout(repository.repoRoot) || !this.dependencies.git.recoverDirty) {
+          throw new Error(`repository has uncommitted changes: ${repository.repoRoot}`);
+        }
+        recovery = await this.dependencies.git.recoverDirty(repository.repoRoot);
+        original = await this.dependencies.git.capture(repository.repoRoot, repository.workingBranch);
       }
       await this.dependencies.git.fetchBase(repository.repoRoot, repository.baseBranch);
+      if (repository.sourceBranch && repository.sourceBranch !== repository.baseBranch) {
+        await this.dependencies.git.fetchBase(repository.repoRoot, repository.sourceBranch);
+      }
       branchPreparationStarted = true;
       await this.dependencies.git.prepareWorkingBranch(
         repository.repoRoot,
         repository.baseBranch,
         repository.workingBranch,
       );
+      if (recovery) await this.dependencies.git.restoreRecovery!(repository.repoRoot, recovery);
+      await this.dependencies.dependencies?.attach(repository.repoRoot);
       return {
         ...repository,
         handle: {
@@ -168,12 +189,13 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
           isNewBranch: !original.workingBranchExisted,
         },
         createdByRun,
+        managedByStore: await this.dependencies.repositoryStore.ownsCheckout(repository.repoRoot),
         original,
       };
     } catch (error) {
       if (createdByRun) {
         await this.dependencies.filesystem.removeTarget(repository.repoRoot).catch(() => undefined);
-      } else if (original && branchPreparationStarted) {
+      } else if (original && branchPreparationStarted && !recovery) {
         await this.dependencies.git.restore(repository.repoRoot, original, repository.workingBranch).catch(() => undefined);
       }
       throw error;
@@ -181,11 +203,20 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
   }
 
   private async finish(repositories: PreparedRepository[], status: RunOutcomeStatus): Promise<void> {
-    if (status !== 'success') return;
+    if (status !== 'success') {
+      for (const repository of repositories) {
+        if (repository.managedByStore) {
+          await this.dependencies.dependencies?.capture(repository.repoRoot);
+          await this.dependencies.dependencies?.release(repository.repoRoot, true);
+        }
+      }
+      return;
+    }
     const errors: unknown[] = [];
     for (const repository of repositories) {
       try {
         await this.dependencies.git.finalize(repository.repoRoot, repository.workingBranch);
+        if (repository.managedByStore) await this.dependencies.dependencies?.capture(repository.repoRoot);
       } catch (error) {
         errors.push(error);
       }
@@ -199,7 +230,9 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     let firstError = initialError;
     for (const repository of [...repositories].reverse()) {
       try {
-        if (repository.createdByRun) await this.dependencies.filesystem.removeTarget(repository.repoRoot);
+        if (initialError !== undefined && repository.managedByStore && !repository.createdByRun) continue;
+        if (repository.managedByStore) await this.dependencies.dependencies?.release(repository.repoRoot);
+        if (repository.createdByRun || repository.managedByStore) await this.dependencies.filesystem.removeTarget(repository.repoRoot);
         else await this.dependencies.git.restore(repository.repoRoot, repository.original, repository.workingBranch);
       } catch (error) {
         firstError ??= error;
@@ -255,6 +288,7 @@ function remoteIdentity(host: string, rawPath: string): { host: string; path: st
  * by a mock that agrees with whatever the code does.
  */
 export function defaultDependencies(): MultiRepositoryPreparerDependencies {
+  const repositoryStore = new RepositoryStore();
   return {
     filesystem: {
       validateRepositoryPath,
@@ -268,17 +302,14 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
           throw error;
         }
       },
-      removeTarget: repoRoot => fs.rm(repoRoot, { recursive: true, force: true }),
+      removeTarget: repoRoot => repositoryStore.removeCheckout(repoRoot),
     },
     lock: {
       acquire: acquireWorkspaceLock,
     },
-    clone: {
-      clone: async (url, repoRoot) => {
-        await fs.mkdir(dirname(repoRoot), { recursive: true });
-        await simpleGit().clone(url, repoRoot);
-      },
-    },
+    repositoryStore,
+    repositoryLeases: new RepositoryLeases(),
+    dependencies: new DependencyPool(),
     git: {
       isRepository: async repoRoot => {
         try {
@@ -288,6 +319,14 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
         }
       },
       originUrl: repoRoot => simpleGit(repoRoot).raw(['config', '--get', 'remote.origin.url']),
+      recoverDirty: repoRoot => repositoryStore.withCheckoutLock(repoRoot, async () => {
+        const git = simpleGit(repoRoot);
+        await git.raw(['stash', 'push', '--include-untracked', '--message', `afk-recovery-${randomUUID()}`]);
+        return (await git.revparse(['refs/stash'])).trim();
+      }),
+      restoreRecovery: (repoRoot, recovery) => repositoryStore.withCheckoutLock(repoRoot, async () => {
+        await simpleGit(repoRoot).raw(['stash', 'apply', '--index', recovery]);
+      }),
       capture: async (repoRoot, workingBranch) => {
         const git = simpleGit(repoRoot);
         const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
@@ -302,12 +341,12 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
           ...(workingBranchHead ? { workingBranchHead } : {}),
         };
       },
-      fetchBase: async (repoRoot, baseBranch) => {
+      fetchBase: (repoRoot, baseBranch) => repositoryStore.withCheckoutLock(repoRoot, async () => {
         const git = simpleGit(repoRoot);
-        await git.fetch('origin', baseBranch);
+        await git.raw(['fetch', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
         await git.revparse([`origin/${baseBranch}`]);
-      },
-      prepareWorkingBranch: async (repoRoot, baseBranch, workingBranch) => {
+      }),
+      prepareWorkingBranch: (repoRoot, baseBranch, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, async () => {
         const git = simpleGit(repoRoot);
         // A published working branch is the previous attempt's work. A retry
         // has to continue it: starting from the base again would make the
@@ -335,13 +374,13 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
         } else {
           await git.raw(['checkout', '-b', workingBranch, `origin/${baseBranch}`]);
         }
-      },
-      finalize: async (repoRoot, workingBranch) => {
+      }),
+      finalize: (repoRoot, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, async () => {
         const git = simpleGit(repoRoot);
         await reconcilePublishedBranch(git, workingBranch);
         await git.push('origin', workingBranch, ['--set-upstream']);
-      },
-      restore: restoreRepository,
+      }),
+      restore: (repoRoot, snapshot, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, () => restoreRepository(repoRoot, snapshot, workingBranch)),
     },
   };
 }

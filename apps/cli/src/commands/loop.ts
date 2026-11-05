@@ -2,7 +2,9 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createWorkflowProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
+import { assembleProviders } from '@afk/runtime/infrastructure/provider/assembly';
+import { resolveWorkflowRunRequest } from '@afk/runtime/execution';
+import { executionManifestPath } from '@afk/runtime/infrastructure/workspace';
 import { LoopRunner } from '@afk/runtime/application/runners/loop-runner';
 import { installLoopSignalHandlers } from './loop-signals.js';
 import { getSchedulerConfig, getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
@@ -87,7 +89,12 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
   const statusIntervalMs = (options.statusInterval ?? 30) * 1000;
   const shutdownTimeoutMs = (options.shutdownTimeout ?? 300) * 1000;
 
-  const providers = await createWorkflowProviders(undefined, process.cwd());
+  const manifestPath = managedExecution.manifestPath ?? executionManifestPath(managedExecution.workItemId);
+  const request = managedExecution.manifestPath || fs.existsSync(manifestPath) ? await resolveWorkflowRunRequest({
+    backlogId: managedExecution.workItemId, executionManifestPath: manifestPath,
+  }, getWorkflowConfig()) : undefined;
+  const { providers } = await assembleProviders({ workItemId: managedExecution.workItemId, cwd: request?.repoRoot ?? process.cwd(),
+    ...(request ? { projectId: request.trackerProjectId, projectKey: request.trackerProjectKey, providerHost: request.trackerHost } : {}) });
   const runner = new LoopRunner(providers, {
     pollIntervalMs,
     statusIntervalMs,

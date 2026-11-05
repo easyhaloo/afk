@@ -132,7 +132,7 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     });
     return { runner, backlog, transition, setExecutionMode, createRework };
   };
-  return { comments, createRunner };
+  return { comments, createRunner, resumeVerification: () => { issue.labels = ['stage::qa', 'mode::afk']; } };
 }
 
 describe('QARunner execution boundary', () => {
@@ -397,6 +397,7 @@ describe('QARunner execution boundary', () => {
   it.each(['github', 'gitlab'] as const)('bounds repeated active QA FAIL using persisted %s comments across runners', async platform => {
     const f = persistentReworkFixture(platform);
     for (let attempt = 1; attempt <= 3; attempt++) {
+      f.resumeVerification();
       const current = f.createRunner();
       const result = await current.runner.process('60');
       expect(result.success).toBe(false);
@@ -434,6 +435,7 @@ describe('QARunner execution boundary', () => {
   it.each([1, 4])('honors a configured QA failure limit of %s', async limit => {
     const f = persistentReworkFixture('github', limit);
     for (let attempt = 1; attempt <= limit; attempt++) {
+      f.resumeVerification();
       const current = f.createRunner();
       const result = await current.runner.process('60');
       expect(result.rework === true).toBe(attempt < limit);
@@ -464,11 +466,8 @@ describe('QARunner execution boundary', () => {
     });
   });
 
-  it.each(['backlog', 'execution base'])('routes a failed %s lookup to blocked with a diagnostic summary', async lookup => {
+  it('routes a failed backlog lookup to blocked with a diagnostic summary', async () => {
     const f = fixture();
-    if (lookup === 'execution base') {
-      f.providers.backlog.get.mockResolvedValueOnce({ ...await f.providers.backlog.get('60'), baseBacklogId: '11' });
-    }
     f.providers.backlog.get.mockRejectedValueOnce(new Error('provider read unavailable'));
     const runner = new QARunner(f.providers, config, { sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider });
 
@@ -913,9 +912,9 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'done', expect.anything());
   });
 
-  it('uses an explicit unmerged execution base for QA verification and merge target', async () => {
+  it('keeps declared baseline and target independent of an unmerged base backlog', async () => {
     const f = fixture();
-    const child = { ...(await f.providers.backlog.get('60')), parentId: '10', baseBacklogId: '11' };
+    const child = { ...(await f.providers.backlog.get('60')), parentId: '10', baseBacklogId: '11', description: '## Base Version\n- Base Ref: release\n- Target Ref: production\n- Source Ref: migration' };
     const executionBase = { ...child, id: '11', title: 'stack base', parentId: undefined, baseBacklogId: undefined, state: 'verification', branchName: 'afk/backlog-11' };
     f.providers.backlog.get.mockImplementation(async (id: string) => id === '11' ? executionBase : child);
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
@@ -928,8 +927,9 @@ describe('QARunner execution boundary', () => {
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
-    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-11', 'afk/backlog-60');
-    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'afk/backlog-11' }));
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'release', 'afk/backlog-60');
+    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'production' }));
+    expect(f.providers.backlog.get).not.toHaveBeenCalledWith('11');
   });
 });
 

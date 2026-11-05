@@ -153,6 +153,10 @@ export class AfkResourceRegistry {
     return rows.map(rowToRecord);
   }
 
+  listAllActive(): AfkResourceRecord[] {
+    return (this.db.prepare("SELECT * FROM afk_resources WHERE status = 'active' ORDER BY updated_at DESC").all() as ResourceRow[]).map(rowToRecord);
+  }
+
   listByRun(runId: string): AfkResourceRecord[] {
     const rows = this.db.prepare(`
       SELECT * FROM afk_resources

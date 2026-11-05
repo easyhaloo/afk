@@ -15,13 +15,15 @@ import {
 } from './execution-manifest.js';
 import { resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
 import { parseWorkItemId, canonicalProjectKey } from '../../domain/work-item/identity.js';
-import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { executionWorkspacePath, executionManifestPath } from '../../infrastructure/workspace.js';
+import { existsSync } from 'node:fs';
 import { resolveTrackerTarget } from '../../infrastructure/tracker/target.js';
 import { join } from 'node:path';
+import { createExecutionPlan, type ExecutionPlan } from '../../domain/backlog/execution-plan.js';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 
-/** Canonical request for a single backlog implementation execution. */
+/** Canonical request for a single managed backlog execution. */
 export interface WorkflowRunRequest {
   backlogId: string;
   workItemId?: string;
@@ -41,11 +43,11 @@ export interface WorkflowRunRequest {
   targetBranch: string;
   baseBranch: string;
   /**
-   * The baseline a manifest-bound execution declared. It is the branch the
-   * change request has to land on, so it is kept apart from `baseBranch`,
-   * which is the branch a worktree is cut from.
+   * Legacy manifest baseline. The execution plan carries the separate
+   * baseline, publication target, and optional migration source.
    */
   executionBaseBranch?: string;
+  executionPlan?: ExecutionPlan;
   baseBranchExplicit?: boolean;
   maxRetries: number;
   hardTimeoutMs: number;
@@ -79,8 +81,9 @@ export interface WorkflowRunCliInput {
   workspaceRoot?: string;
   targetBranch?: string;
   baseBranch?: string;
-  /** The baseline a manifest-bound execution declared for its change request. */
+  /** Legacy manifest baseline; publication uses executionPlan.targetRef. */
   executionBaseBranch?: string;
+  executionPlan?: ExecutionPlan;
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
@@ -180,6 +183,7 @@ export function resolveWorkflowRequest(
     targetBranch: input.targetBranch ?? config.targetBranch ?? defaults.targetBranch,
     baseBranch: input.baseBranch ?? config.trackerTargetBranch ?? config.targetBranch ?? defaults.baseBranch,
     ...(input.executionBaseBranch ? { executionBaseBranch: input.executionBaseBranch } : {}),
+    ...(input.executionPlan ? { executionPlan: createExecutionPlan(input.executionPlan) } : {}),
     baseBranchExplicit: input.baseBranch !== undefined
       || ((input.branchStrategy?.type === 'named' || input.branchStrategy?.type === 'merge-to-head') && input.branchStrategy.baseBranch !== undefined),
     maxRetries: input.maxRetries ?? config.maxRetries ?? defaults.maxRetries,
@@ -227,6 +231,8 @@ export async function resolveWorkflowRunRequest(
     const platform = target?.platform ?? resolved!.platform;
     const projectKey = target?.projectKey ?? canonicalProjectKey(platform, resolved!.projectId, resolved?.host);
     const identity = target ?? parseWorkItemId(`${platform}:${projectKey}#${input.backlogId}`);
+    const managedManifest = executionManifestPath(identity.id);
+    if (existsSync(managedManifest)) return resolveWorkflowRunRequest({ ...input, executionManifestPath: managedManifest }, config, dependencies);
     const workspaceRoot = executionWorkspacePath(identity.id);
     const name = projectKey.split('/').at(-1)!;
     const checkoutPath = `repositories/${name}`;
@@ -283,6 +289,7 @@ function applyExecutionManifest(
     workspaceRoot: manifest.workspaceRoot,
     baseBranch: primary.baseBranch,
     executionBaseBranch: primary.baseBranch,
+    executionPlan: createExecutionPlan({ baseRef: primary.baseBranch, targetRef: primary.targetBranch, sourceRef: primary.sourceBranch }),
     targetBranch: manifest.workingBranch,
     branchStrategy,
     repositories: manifest.repositories,

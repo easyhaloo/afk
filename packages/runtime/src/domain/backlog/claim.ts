@@ -161,7 +161,7 @@ export class FilesystemClaimLock {
         await serial(async () => {
           await this.withOperationGate(keyPath, async () => {
             const stored = (await inspectClaimLock(lockPath))?.claim;
-            if (!stored || stored.claimId !== claimId) {
+            if (!stored || stored.claimId !== claimId || Date.parse(stored.expiresAt) <= Date.now()) {
               throw new Error(`claim lease ${claimId} is no longer held`);
             }
             await writeClaim(lockPath, createStoredClaim(claimId, stored.owner, stored.ttlMs, new Date(), stored.createdAt));
@@ -181,6 +181,27 @@ export class FilesystemClaimLock {
         });
       },
     };
+  }
+
+  async inspect(key: string): Promise<ExpiredClaim | null> {
+    const snapshot = await inspectClaimLock(join(this.keyPathFor(key), 'lock'));
+    if (snapshot && !snapshot.claim) throw new Error(`cannot verify lease for ${key}`);
+    return snapshot?.claim ?? null;
+  }
+
+  async invalidate(key: string): Promise<void> {
+    const path = this.keyPathFor(key);
+    await this.ensureTrustedStateDirectories(path);
+    await this.withOperationGate(path, async () => {
+      await rm(join(path, 'lock'), { recursive: true, force: true });
+      await syncDirectory(path);
+    });
+  }
+
+  async withExclusiveOperation<Result>(key: string, operation: () => Promise<Result>): Promise<Result> {
+    const keyPath = this.keyPathFor(key);
+    await this.ensureTrustedStateDirectories(keyPath);
+    return this.withOperationGate(keyPath, operation);
   }
 
   /**

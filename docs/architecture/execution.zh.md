@@ -22,10 +22,12 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 ## 执行入口
 
 - `afk`：打开交互式 TUI。
-- `afk run`：执行工作项的实现阶段。
+- `afk run`：解析工作项后委托给实现 → 独立 QA → 发布的完整受管流程。现有运行时、超时、预算、扩展及显式执行模式参数继续生效；`--target-branch` 指工作分支，MR 目标由条目基线计划声明。
 - `afk execute --work-item-id <id>`：执行受管生命周期，包括资格与 manifest 校验、实现、独立 QA、变更请求处理，以及由人控制的合并闸门。
 - `afk loop start`：针对一个绑定 manifest 的工作项持续尝试，并委托给同一受管执行路径；它不是全局多工作项调度器。
-- `afk qa`：在适用场景下独立运行 QA。
+- `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
+- `afk schedule --parent <规范身份>`：跨项目调度父项的可执行后代，重叠仓库集合串行，遵循依赖与人工合并闸门。`--max-concurrent`、`--load-limit`、`--poll-interval` 控制派发，`--watch` 等待外部状态变化，`--dry-run` 在不认领、不启动 Agent 的情况下预览批次，`--json` 输出最终报告；预览的后续批次以前序人工合并及 reconcile 完成为前提。SIGINT/SIGTERM 停止新派发并等待在途执行结束。
+- `afk doctor [--workspace-root <path>] [--json]`：只读统计裸库、依赖池、受管工作区、仓库租约及保守估算的可回收空间；`afk observe doctor` 仍用于查看事件存储。
 - `afk observe`：查看执行记录及其审计、证据投影。
 
 完整命令面以 `apps/cli/src/command-registry.ts` 为准，不应从旧示例或历史计划推断当前支持的命令。
@@ -36,6 +38,11 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - 执行工作区位于 `~/.loop-workspace/`。
 - 每个工作区的 manifest、启动回执、session、诊断运行和执行日志位于 `~/.afk/workspaces/` 下以工作区路径计算的哈希目录中。
 - 仓库 checkout 位于规范执行工作区内；调用者的当前目录不会改变规范执行根目录。
+- 新建的 manifest 绑定仓库 checkout 使用 linked worktree，每个远端共用 `~/.loop-workspace/repos/<host>/<project>/bare.git` 中的一份裸库。实现阶段与 QA 使用同一个存储，manifest 中的 checkout 路径保持不变；已有独立 clone 继续兼容。
+- Preparer 对裸库创建、fetch、分支准备、发布和工作树移除复用文件系统 operation gate，按仓库串行操作共享 Git 元数据。活跃工作树各自保有独立目录和索引，Git 会拒绝让两个工作树同时检出同一个可写分支。
+- 实现成功及 QA 借用结束后移除存储托管的工作树，包括失败后重试复用的工作树。失败时保留源码和诊断证据；存储托管的脏工作区重试会把已跟踪与未跟踪修改写入 `afk-recovery-*` Git stash，准备工作分支后重新应用，冲突时仍保留 stash。独立 clone 继续拒绝脏准备。裸库、本地分支与恢复 stash 不随工作树移除。
+- Node 依赖池位于 `~/.loop-workspace/deps/<hash>/layout/`，哈希涵盖锁文件、所有 workspace package manifest、包管理配置与补丁、平台、架构及 Node ABI。受管阶段结束时收集已安装依赖，匹配阶段直接挂载。`node_modules` 保持真实目录，内部逐项软链，工作区包链接指向当前 checkout，pnpm 可变状态保留本地。外部链接或不支持的嵌套源码链接保留原安装，避免生成不可用缓存。Maven、Go 沿用原生全局缓存。
+- checkout 引用依赖池时保留 pin；释放受管 checkout 时归还引用，默认超过 8 GiB 后按 LRU 淘汰无引用池。裸库继续缓存；已有独立 clone 不自动迁移。全局包管理器 store prune 由操作者在依赖池验收后显式执行。
 - Agent 完成信号和 QA artifact manifest 是执行期协议文件，不是通用配置或生命周期状态存储。
 
 以上是当前默认目录的职责摘要；具体路径解析以当前源码为准。数据权威边界见[架构概览：核心职责与边界](overview.zh.md#核心职责与边界)。
@@ -52,6 +59,45 @@ Provider backlog、Runtime 状态、run-event 审计轨迹和证据属于不同�
 - Evidence 引用及分类支持 QA、诊断和脱敏策略。
 
 ## 失败与恢复
+
+### 执行基线与配置
+
+条目的 `## Base Version` 段声明不可变的执行计划：
+
+```markdown
+## Base Version
+
+- Base Ref: release
+- Target Ref: production
+- Source Ref: migration-source
+```
+
+`Target Ref` 缺省等于 `Base Ref`，可选的 `Source Ref` 作为迁移来源 fetch，不替代基线。manifest 在每仓持久化 `baseBranch`、`targetBranch`、`sourceBranch`；QA 对 base 验证、向 target 发布，正文与 manifest 不一致时在启动 Agent 前拒绝执行。工作分支和 `baseBacklogId` 关系与发布目标保持独立；不安全或冲突的声明直接失败。
+
+缺少声明时，仓库本地 `.afk/project.yml` 优先于 `~/.afk/config.yml` 的 `repositories.<projectKey>` 覆盖，再依次使用 provider 仓库默认分支和全局 `defaultBaseRef`。旧 `trackerTargetBranch`、`targetBranch` 及环境变量别名继续作为全局缺省值。各仓创建独立计划，不改写缓存的全局配置。新 run 的显式 `--base-branch` 可以覆盖未声明的缺省值，但必须与正文声明或已有 manifest 一致。
+
+```yaml
+defaultBaseRef: main
+repositories:
+  group/api:
+    baseRef: release
+    targetRef: production
+    sourceRef: migration-source
+  group/web:
+    baseRef: staging
+```
+
+### 仓库仲裁与调度
+
+受管执行在实现与 QA 全程持有 manifest 所有仓库的租约；独立准备申请同样的租约，嵌套阶段借用外层租约。仓库键排序、去重后申请，失败时释放部分申请，并在条目认领前拒绝争用。心跳和代次 ID 复用 `FilesystemClaimLock`；过期代次不能续约，也不能释放后继租约。只有已过期且确认本机 owner 死亡的租约才能恢复，未知或远端 owner 继续受保护。
+
+中断将条目转为 `blocked + hitl` 并失效认领；心跳失败或发现中断时停止所属 Agent，阻止发布。终结清理先关闭执行，再释放工作区资源；失败 QA 保留验证工作树。受管的本地 Claude tmux 会话在启动前登记仓库认领代次，并在 tmux 中保存相同的所有权标记；owner 死亡后的恢复必须核对标记才可停止孤儿会话。会话名被复用、归属不明或非 tmux transport 的情况保留现场，由操作者显式恢复。不会仅凭进程名称相似就终止进程。
+
+代次校验保护 AFK 管理的生命周期操作。Agent 仍直接写文件；安全接管依赖于确认 owner 死亡及终止已登记资源，未知的外部写入者需要操作者恢复。
+
+Scheduler 读取凭证可见的完整清单，拒绝依赖环，复用 provider 的可执行性规则。默认并发为 `min(仓库数, max(2, floor(可用核数 / 3)))`，至少为一；重叠的多仓 manifest 串行，无交集仓库并行。一分钟负载超过阈值时停止新派发。依赖只在 `done` 后解锁，`merge_ready` 等待人工合并与 reconcile；返工次数受 `maxQaReworkAttempts` 限制。调度不会自动接管未托管 issue，也不改写依赖标签。
+
+### 恢复策略
 
 当身份、manifest、claim 或验证证据缺失或无效时，执行必须 fail closed。恢复和 reconcile 应基于已有工作项身份及记录状态；reconcile 不能代替创建新的执行 manifest。若 Agent 无响应或验证无法运行，系统应保留证据并暴露可恢复状态，而不是将任务误判为完成。
 

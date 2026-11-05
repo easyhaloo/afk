@@ -20,6 +20,8 @@
  * repository and not a statement about this piece of work.
  */
 
+import { parseExecutionPlan } from './execution-plan.js';
+
 /** The heading that opens the base version block. */
 export const BASE_VERSION_HEADING = '## Base Version';
 
@@ -44,19 +46,7 @@ export function renderBaseVersionSection(baseBranch: string): string {
  * work item talk about branches often.
  */
 export function parseExecutionBaseBranch(description?: string): string | undefined {
-  if (!description) return undefined;
-  let inBaseVersion = false;
-  for (const line of description.split(/\r?\n/)) {
-    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
-    if (heading) {
-      inBaseVersion = heading[2].trim().toLowerCase() === 'base version';
-      continue;
-    }
-    if (!inBaseVersion) continue;
-    const ref = /^[-*]\s*Base\s+Ref\s*:\s*(\S+)\s*$/i.exec(line.trim());
-    if (ref) return ref[1];
-  }
-  return undefined;
+  return parseExecutionPlan(description)?.baseRef;
 }
 
 /**
@@ -66,7 +56,10 @@ export function parseExecutionBaseBranch(description?: string): string | undefin
  * is rewritten in place, so the block never appears twice.
  */
 export function applyExecutionBaseBranch(description: string, baseBranch: string): string {
-  const section = renderBaseVersionSection(baseBranch);
+  const plan = parseExecutionPlan(description);
+  const section = renderBaseVersionSection(baseBranch)
+    + (plan && plan.targetRef !== plan.baseRef ? `- Target Ref: ${plan.targetRef}\n` : '')
+    + (plan?.sourceRef ? `- Source Ref: ${plan.sourceRef}\n` : '');
   const lines = description.split(/\r?\n/);
   const kept: string[] = [];
   let inBaseVersion = false;
@@ -79,7 +72,7 @@ export function applyExecutionBaseBranch(description: string, baseBranch: string
         replaced = true;
       }
       inBaseVersion = heading[2].trim().toLowerCase() === 'base version';
-      kept.push(line);
+      if (!inBaseVersion) kept.push(line);
       continue;
     }
     if (inBaseVersion) continue;

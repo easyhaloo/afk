@@ -13,7 +13,7 @@ AFK 消费已经存在、具有明确范围、验收标准和依赖关系的 Pro
 | 入口 | 适用场景 | 边界 |
 |---|---|---|
 | `afk` | 交互式 CLI/TUI 操作 | 打开终端界面 |
-| `afk run` | 执行实现阶段 | 本身不会完成完整的受管 QA/合并生命周期 |
+| `afk run` | 携带 CLI 运行参数执行完整受管流程 | 包含实现、独立 QA 和发布，停在人工合并闸门 |
 | `afk execute --work-item-id <id>` | 受管执行一个工作项 | 校验资格与 manifest，运行实现和独立 QA，准备/验证变更请求，并停在人工合并闸门 |
 | `afk loop start` | 对一个绑定 manifest 的工作项重复尝试 | 委托给 `executeWorkItem`；不是全局多工作项队列 |
 | `afk qa` | 独立验证 | 适用于需要单独运行 QA 的场景 |
@@ -30,7 +30,7 @@ AFK 消费已经存在、具有明确范围、验收标准和依赖关系的 Pro
 5. **准备或验证变更请求。** 按实际状态发布实现分支，并创建或 reconcile Provider-backed 变更请求。
 6. **停在人工合并闸门。** AFK 不会自动合并代码。只有人完成合并后，系统才 reconcile 外部 Provider 状态。
 
-`afk run` 成功仅表示实现阶段完成，不等于 `afk execute` 的受管生命周期成功，也不代表变更已经合并。
+`afk run` 与 `afk execute` 共享受管生命周期，成功包含独立 QA 与确认发布；条目到达 `done` 仍需人工合并与 reconcile。多条目编排使用 `afk schedule --parent <规范身份>`，磁盘画像使用只读的 `afk doctor --json`。
 
 ## CLI 与 Desktop
 

@@ -13,7 +13,6 @@ import {
 } from '../tracker/target.js';
 import { getGlabToken, listGlabTokens, type GlabTokenConfig } from '../gitlab/glab-config.js';
 import type { TrackerProvider } from '../../domain/tracker/types.js';
-import { createManagementProviderBundle, createProviderBundle } from './providers.js';
 import type { ManagementProviderBundle, ProviderBundle, ProviderBundleOptions } from './providers.js';
 import {
   GitHubProviderCatalog,
@@ -199,8 +198,8 @@ export async function createWorkflowProviders(
   platform?: TrackerPlatform,
   preferredHost?: string,
 ): Promise<ProviderBundle> {
-  const tracker = await createTracker(projectId, cwd, platform, preferredHost);
-  return createProviderBundle(tracker, cwd, options);
+  const { assembleProviders } = await import('./assembly.js');
+  return (await assembleProviders({ projectId, cwd, platform, providerHost: preferredHost, options })).providers;
 }
 
 export async function createManagementProviders(
@@ -209,8 +208,8 @@ export async function createManagementProviders(
   platform?: TrackerPlatform,
   preferredHost?: string,
 ): Promise<ManagementProviderBundle> {
-  const tracker = await createTracker(projectId, cwd, platform, preferredHost);
-  return createManagementProviderBundle(tracker, cwd);
+  const { assembleProviders } = await import('./assembly.js');
+  return (await assembleProviders({ projectId, cwd, platform, providerHost: preferredHost })).management;
 }
 
 function defaultCatalogDependencies(): GlobalWorkItemCatalogDependencies {

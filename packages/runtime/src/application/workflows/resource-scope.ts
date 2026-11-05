@@ -86,8 +86,15 @@ export class RunResourceScope {
   registerExecution(execution: Pick<AgentExecution, 'kill'>): void { this.executions.add(execution); }
   registerExternalResource(resource: ExternalResource): void { this.externalResources.push(resource); }
 
-  registerHeartbeat(heartbeat: () => Promise<void>, intervalMs: number, onError?: (error: unknown) => void | Promise<void>): void {
-    if (this.finishPromise) return;
+  async stopExecutions(): Promise<void> {
+    await Promise.all([...this.executions].map(async execution => {
+      await execution.kill();
+      this.executions.delete(execution);
+    }));
+  }
+
+  registerHeartbeat(heartbeat: () => Promise<void>, intervalMs: number, onError?: (error: unknown) => void | Promise<void>): () => void {
+    if (this.finishPromise) return () => {};
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error('heartbeat interval must be positive');
     const resource: HeartbeatResource = {
       timer: undefined as unknown as ReturnType<typeof setInterval>,
@@ -102,6 +109,7 @@ export class RunResourceScope {
       try {
         await resource.heartbeat();
       } catch (error) {
+        if (resource.stopped) return;
         resource.stopped = true;
         clearInterval(resource.timer);
         try { await resource.onError?.(error); } catch { /* best effort */ }
@@ -112,6 +120,7 @@ export class RunResourceScope {
     resource.timer = setInterval(() => { void tick(); }, intervalMs);
     (resource.timer as unknown as { unref?: () => void }).unref?.();
     this.heartbeats.add(resource);
+    return () => { resource.stopped = true; clearInterval(resource.timer); };
   }
 
   /** Idempotent terminal transition. Concurrent callers share the same promise. */

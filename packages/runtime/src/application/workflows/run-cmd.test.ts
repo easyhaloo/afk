@@ -1,78 +1,28 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  config: { maxRetries: 2 },
-  request: {
-    backlogId: '42',
-    workItemId: 'WI-2026-018',
-    projectName: 'acme/api',
-    trackerPlatform: 'github',
-    trackerProjectId: 'acme/api',
-    repoRoot: '/workspace/repositories/api',
-    originalCwd: '/invocation',
-    session: 'afk-42',
-    targetBranch: 'afk/work-item-42',
-    baseBranch: 'main',
-    maxRetries: 2,
-    hardTimeoutMs: 1000,
-    completionTimeoutMs: 1000,
-    maxHandoffs: 1,
-    contextHighTokens: 100,
-    maxTotalTokens: 1000,
-    provider: 'claude-code',
-    agentProvider: 'claude-code',
-    sandboxProvider: 'local',
-    executionMode: 'batch',
-    agentRuntime: { kind: 'default' },
-    branchStrategy: { type: 'named', branch: 'afk/work-item-42', baseBranch: 'main' },
-    repositories: [
-      {
-        platform: 'github', projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
-        repoRoot: '/workspace/repositories/api', baseBranch: 'main', workingBranch: 'afk/work-item-42', primary: true,
-      },
-      {
-        platform: 'gitlab', projectKey: 'acme/web', name: 'web', checkoutPath: 'repositories/web',
-        repoRoot: '/workspace/repositories/web', baseBranch: 'develop', workingBranch: 'afk/work-item-42', primary: false,
-      },
-    ],
-  },
-  runnerRun: vi.fn(async () => ({ success: true, url: 'https://example.test/change/42' })),
-  createTracker: vi.fn(async () => ({ platform: 'github' })),
-  createProviderBundle: vi.fn(() => ({ backlog: {}, branches: {}, changes: {} })),
+  execute: vi.fn(),
+  resolve: vi.fn(async () => ({ workItemId: 'github:acme/api#42' })),
 }));
-
-vi.mock('../workflow-engine.js', () => ({
-  WorkflowRunner: class {
-    run = mocks.runnerRun;
-  },
-}));
-vi.mock('../../infrastructure/provider/tracker-provider-factory.js', () => ({ createTracker: mocks.createTracker }));
-vi.mock('../../infrastructure/provider/providers.js', () => ({ createProviderBundle: mocks.createProviderBundle }));
-vi.mock('../../infrastructure/config/manager.js', () => ({ getWorkflowConfig: () => mocks.config }));
-vi.mock('../../domain/agents/codex-runtime.js', () => ({ prepareAgentRuntime: async (runtime: unknown) => runtime }));
-vi.mock('./run-request.js', () => ({ resolveWorkflowRunRequest: async () => mocks.request }));
-
+vi.mock('./execute-work-item.js', () => ({ executeWorkItem: mocks.execute }));
+vi.mock('./run-request.js', () => ({ resolveWorkflowRunRequest: mocks.resolve }));
+vi.mock('../../infrastructure/config/manager.js', () => ({ getWorkflowConfig: () => ({}) }));
 import { runWorkflowCli } from './run-cmd.js';
 
 describe('runWorkflowCli', () => {
-  it('passes the normalized repository collection to WorkflowRunner', async () => {
-    await expect(runWorkflowCli({
-      backlogId: 'WI-2026-018',
-      executionManifestPath: '/workspace/.afk/execution-manifest.json',
-    })).resolves.toEqual({ success: true, url: 'https://example.test/change/42' });
-
-    expect(mocks.createTracker).toHaveBeenCalledWith('acme/api', '/workspace/repositories/api', 'github', undefined);
-    expect(mocks.createProviderBundle).toHaveBeenCalledWith(expect.anything(), '/workspace/repositories/api', expect.objectContaining({
-      // The provider needs the cross-project backlog graph, because a child
-      // backlog may live in another repository than its parent.
-      graph: expect.objectContaining({ childrenOf: expect.any(Function) }),
+  beforeEach(() => mocks.execute.mockReset());
+  it('runs the managed implementation and QA chain with all explicit options', async () => {
+    mocks.execute.mockResolvedValue({ status: 'merge_ready', changeUrl: 'https://example.test/42' });
+    const options = { backlogId: '42', maxRetries: 4, hardTimeoutMs: 1000, executionMode: 'batch' as const,
+      executionManifestPath: '/workspace/manifest.json', session: 'attempt-42' };
+    await expect(runWorkflowCli(options)).resolves.toEqual({ success: true, url: 'https://example.test/42' });
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      workItemId: 'github:acme/api#42', manifestPath: options.executionManifestPath,
+      executionId: 'attempt-42', runOptions: options,
     }));
-    expect(mocks.runnerRun).toHaveBeenCalledWith(expect.objectContaining({
-      repositories: mocks.request.repositories,
-      backlogId: '42',
-      workItemId: 'WI-2026-018',
-      repoRoot: '/workspace/repositories/api',
-      targetBranch: 'afk/work-item-42',
-    }));
+  });
+  it.each(['blocked', 'rework', 'not_claimed'])('reports %s as unsuccessful', async status => {
+    mocks.execute.mockResolvedValue({ status });
+    expect((await runWorkflowCli({ backlogId: '42' })).success).toBe(false);
   });
 });

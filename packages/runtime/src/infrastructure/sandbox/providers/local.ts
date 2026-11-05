@@ -43,6 +43,7 @@ import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { CodexTurnWatcher } from '../../../infrastructure/codex/turn-failure.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
+import { repositoryClaimIds } from '../../git/repository-lease.js';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -147,7 +148,13 @@ export class LocalSandbox implements Sandbox {
           );
         }
       }
+      const repositoryClaims = repositoryClaimIds();
+      if (repositoryClaims.length) getAfkResourceRegistry().register({
+        workspacePath: this.workspaceRoot, runId: this.runtimeRunId, worktreePath: this.worktreePath,
+        kind: 'tmux', origin: 'local-sandbox', name: this.sessionName, metadata: { repositoryClaims },
+      });
       const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
+      if (repositoryClaims.length) await this.tmux.setSessionOwnership(this.sessionName, repositoryClaims.join(','));
       this.sessionCreated = true;
       const paneId = created.paneId
         ?? await this.tmux.firstPaneId?.(created.name, created.window).catch(() => undefined);
@@ -160,6 +167,7 @@ export class LocalSandbox implements Sandbox {
         name: this.sessionName,
         detail: 'interactive tmux session',
         metadata: {
+          repositoryClaims,
           branch: this.branch,
           generation: options.generation,
           ...(paneId

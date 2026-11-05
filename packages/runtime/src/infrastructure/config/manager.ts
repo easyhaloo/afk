@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { load as loadYaml } from 'js-yaml';
+import { createExecutionPlan, executionRef, type ExecutionPlan } from '../../domain/backlog/execution-plan.js';
 import {
   assertCodexEndpoint,
   DEFAULT_CODEX_CONFIG,
@@ -40,6 +41,8 @@ export interface WorkflowConfig {
   maxQaReworkAttempts: number;
   targetBranch: string;
   trackerTargetBranch: string;
+  defaultBaseRef?: string;
+  repositoryOverrides?: Record<string, Partial<ExecutionPlan>>;
   goalBudget: number;
   /** Optional named AFK workflow template selected for executions. */
   template?: string;
@@ -90,6 +93,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   maxQaReworkAttempts: 3,
   targetBranch: 'main',
   trackerTargetBranch: 'main',
+  defaultBaseRef: 'main',
   goalBudget: 10_000_000,
   agents: {
     codex: {
@@ -159,10 +163,44 @@ export function loadWorkflowConfig(
     maxQaReworkAttempts,
     targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW.trackerTargetBranch,
+    defaultBaseRef: executionRef(configString(file.defaultBaseRef) ?? env.AFK_DEFAULT_BASE_REF
+      ?? configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH
+      ?? configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? 'main', 'defaultBaseRef'),
+    repositoryOverrides: parseRepositoryOverrides(file.repositories ?? file.repositoryOverrides),
     goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget, env),
     template: configString(file.template),
     agents: { codex: loadCodexConfig(file, env) },
   };
+}
+
+function parseRepositoryOverrides(value: unknown): WorkflowConfig['repositoryOverrides'] {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('repositories must contain a project-keyed object');
+  return Object.fromEntries(Object.entries(value).map(([key, override]) => {
+    if (!isRecord(override)) throw new Error(`repository override ${key} must be an object`);
+    const refs: Partial<ExecutionPlan> = Object.fromEntries(['baseRef', 'targetRef', 'sourceRef']
+      .filter(name => override[name] !== undefined)
+      .map(name => [name, executionRef(override[name], `${key}.${name}`)]));
+    return [key, Object.freeze(refs)];
+  }));
+}
+
+export function repositoryExecutionDefaults(
+  config: Partial<WorkflowConfig>, projectKey?: string, repoRoot?: string, repositoryDefault?: string,
+): ExecutionPlan {
+  const override = projectKey ? config.repositoryOverrides?.[projectKey] : undefined;
+  let local: Partial<ExecutionPlan> | undefined;
+  const path = repoRoot && join(repoRoot, '.afk', 'project.yml');
+  if (path && existsSync(path)) {
+    const file: unknown = loadYaml(readFileSync(path, 'utf8'));
+    local = parseRepositoryOverrides({ project: file })?.project;
+  }
+  return createExecutionPlan({
+    baseRef: local?.baseRef ?? override?.baseRef ?? repositoryDefault ?? config.defaultBaseRef
+      ?? config.trackerTargetBranch ?? config.targetBranch ?? 'main',
+    targetRef: local?.targetRef ?? override?.targetRef,
+    sourceRef: local?.sourceRef ?? override?.sourceRef,
+  });
 }
 
 function loadSchedulerConfig(): SchedulerConfig {

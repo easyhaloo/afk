@@ -17,3 +17,5 @@ for the workflow.
 | [ADR-0019](0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress | 2026-10-14 |
 | [ADR-0020](0020-backlog-item-drop-singular-change-request.md) | Backlog item drop = singular change request | proposed | 2026-09-29 |
 | [ADR-0021](0021-backlog-relation-carrying.md) | Backlog 关系的承载方式与记录可读性 | accepted | 2026-11-03 |
+| [ADR-0022](0022-execution-plan-and-repository-leases.md) | Execution plans and repository leases | accepted | 2026-11-04 |
+| [ADR-0023](0023-repository-store-and-dependency-pool.md) | Repository store and dependency pool | accepted | 2026-11-04 |

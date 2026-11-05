@@ -327,6 +327,7 @@ export class WorkflowRunner {
   private observationContext?: ObservationContext;
   private readonly multiRepositoryPreparer: MultiRepositoryPreparationService;
   private preparedRepositories?: PreparedRepositorySet;
+  private stopRepositoryHeartbeat?: () => void;
   private preparedRepositoryFinish?: Promise<void>;
   private readonly implementationBaseShas = new Map<string, string>();
   private readonly implementationCommitShas = new Map<string, string>();
@@ -415,6 +416,7 @@ export class WorkflowRunner {
     this.runtimeRunId = undefined;
     this.runtimeErrorSummary = undefined;
     this.preparedRepositories = undefined;
+    this.stopRepositoryHeartbeat = undefined;
     this.preparedRepositoryFinish = undefined;
     this.implementationBaseShas.clear();
     this.implementationCommitShas.clear();
@@ -466,9 +468,10 @@ export class WorkflowRunner {
       try {
         this.resourceScope.registerHeartbeat(
           claimed.heartbeat,
-          options.claimHeartbeatIntervalMs ?? 30_000,
+          options.claimHeartbeatIntervalMs ?? 10_000,
           async error => {
             this.leaseLost = true;
+            await this.resourceScope?.stopExecutions().catch(stopError => logger.warn({ stopError }, 'failed to stop execution after lease loss'));
             try {
               await this.providers.backlog.transition(claimed.item.id, 'blocked', { reason: `claim heartbeat failed: ${(error as Error).message}` });
               await this.providers.backlog.setExecutionMode(claimed.item.id, 'hitl');
@@ -526,6 +529,11 @@ export class WorkflowRunner {
     this.workspaceRoot = options.workspaceRoot ?? this.repoRoot;
     if (options.repositories?.length) {
       this.preparedRepositories = await this.multiRepositoryPreparer.prepare(options.repositories, this.workspaceRoot);
+      if (this.preparedRepositories.heartbeat) this.stopRepositoryHeartbeat = this.resourceScope?.registerHeartbeat(this.preparedRepositories.heartbeat, 10_000, async error => {
+        this.leaseLost = true;
+        await this.resourceScope?.stopExecutions();
+        await this.markBacklogBlocked(`repository lease lost: ${String(error)}`);
+      });
       this.repoRoot = this.preparedRepositories.primary.repoRoot;
       this.resourceScope?.registerExternalResource({ finish: outcome => this.finishPreparedRepositories(outcome) });
     }
@@ -560,6 +568,9 @@ export class WorkflowRunner {
         return { success: false };
       }
       if (result.success && this.preparedRepositories) {
+        await this.resourceScope?.stopExecutions();
+        await this.preparedRepositories.heartbeat?.();
+        await this.activeClaim?.heartbeat();
         for (const repository of this.preparedRepositories.repositories) {
           await this.commitImplementationWork(iid, repository.handle.path);
           await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
@@ -695,7 +706,7 @@ export class WorkflowRunner {
     }
     if (this.preparedRepositories) {
       const repositories = this.preparedRepositories.repositories.map((repository, index) =>
-        `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} workingBranch=${repository.workingBranch}`,
+        `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${repository.targetBranch ?? repository.baseBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`,
       ).join('\n');
       prompt = `${prompt}\n\nExecution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`;
     }
@@ -1053,7 +1064,7 @@ export class WorkflowRunner {
     this.preparedRepositoryFinish ??= this.preparedRepositories.finish(outcome).catch(error => {
       if (outcome.status === 'success') this.runtimeErrorSummary = `repository publication failed: ${(error as Error).message}`;
       throw error;
-    });
+    }).finally(() => this.stopRepositoryHeartbeat?.());
     return this.preparedRepositoryFinish;
   }
 
@@ -1201,6 +1212,7 @@ export class WorkflowRunner {
 
       const agentProvider = p.agentProvider ?? this.agentProvider;
       const sandbox = p.sandbox ?? this.sandbox!;
+      if (this.leaseLost) throw new Error('claim lease lost before agent start');
       const execution = resumedExecution ?? await agentProvider.createExecution({
         sandbox,
         worktreePath: p.wtPath,
@@ -1212,8 +1224,12 @@ export class WorkflowRunner {
         runtime: p.runtime,
       });
       resumedExecution = undefined;
-      await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
       this.resourceScope?.registerExecution(execution);
+      if (this.leaseLost) {
+        await execution.kill();
+        throw new Error('claim lease lost during agent start');
+      }
+      await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
       await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 

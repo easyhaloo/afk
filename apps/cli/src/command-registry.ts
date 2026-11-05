@@ -29,6 +29,8 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['execute', 'reconcile'], loader: () => import('./commands/execute.js').then(m => m.registerExecuteCommands) },
   { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
   { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
+  { names: ['schedule'], loader: () => import('./commands/schedule.js').then(m => m.registerScheduleCommands) },
+  { names: ['doctor'], loader: () => import('./commands/doctor.js').then(m => m.registerDoctorCommands) },
   { names: ['observe', 'log'], loader: () => import('./commands/observe.js').then(m => m.registerObserveCommands) },
   { names: ['retro'], loader: () => import('./commands/retro.js').then(m => m.registerRetroCommands) },
   { names: ['graph'], loader: () => import('./commands/graph.js').then(m => m.registerGraphCommands) },

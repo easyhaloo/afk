@@ -13,9 +13,11 @@ The issue tracker is authoritative for backlog state. AFK's local manifests and 
 | Entry point | Use it for | Boundary |
 |---|---|---|
 | `afk` | Interactive CLI/TUI operations | Opens the terminal UI |
-| `afk run` | Implementation-stage execution | Does not complete the full managed QA/merge lifecycle by itself |
+| `afk run` | Managed execution with CLI runtime options | Runs implementation, independent QA, and publication; stops at human merge |
 | `afk execute --work-item-id <id>` | Managed execution of one work item | Validates eligibility and manifest, runs implementation and independent QA, prepares/verifies a change request, and stops at the human merge gate |
 | `afk loop start` | Repeated attempts for one manifest-bound work item | Delegates attempts to `executeWorkItem`; it is not a global multi-item queue |
+| `afk schedule --parent <id>` | Schedule an existing PRD tree | Serializes shared repositories, bounds concurrency, and waits for completed dependencies |
+| `afk doctor --json` | Inspect workspace disk use | Read-only cache sizes, lease checks, and conservative reclaimable-byte estimates |
 | `afk qa` | Standalone verification | Useful when QA needs to run independently |
 | `afk observe` | Inspect runs and evidence | Read-only observation surface for runtime/audit projections |
 
@@ -30,7 +32,7 @@ See [Getting Started](../getting-started.md) for setup and [Architecture Overvie
 5. **Prepare or verify the change request.** Publish the implementation branch and create or reconcile the provider-backed change request as applicable.
 6. **Stop at the human merge gate.** AFK does not merge code automatically. The provider state is reconciled after a human performs the merge.
 
-A successful `afk run` means the implementation stage completed; it is not equivalent to a successful `afk execute` lifecycle or a merged change.
+A successful `afk run` includes independent QA and confirmed publication through the same managed lifecycle as `afk execute`. Human merge and reconciliation still determine when the work item reaches `done`.
 
 ## CLI and Desktop
 

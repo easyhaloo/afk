@@ -16,6 +16,8 @@ describe('CLI command registry and dispatcher', () => {
       'execute',
       'qa',
       'loop',
+      'schedule',
+      'doctor',
       'observe',
       'log',
       'retro',
@@ -26,7 +28,7 @@ describe('CLI command registry and dispatcher', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it.each(['backlog', 'run', 'execute', 'loop', 'qa', 'observe', 'log', 'retro', 'graph', 'completion'])('loads the public %s command advertised by the registry', async name => {
+  it.each(['backlog', 'run', 'execute', 'loop', 'schedule', 'doctor', 'qa', 'observe', 'log', 'retro', 'graph', 'completion'])('loads the public %s command advertised by the registry', async name => {
     const entry = COMMANDS.find(candidate => candidate.names.includes(name));
     expect(entry).toBeDefined();
 

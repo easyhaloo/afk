@@ -4,7 +4,7 @@ import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
 import { configureStatusline, logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
-import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import { getWorkflowConfig, repositoryExecutionDefaults } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { blockBacklog } from '../../domain/backlog/commands.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
@@ -15,7 +15,7 @@ import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '
 import type { ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index.js';
-import { resolveBacklogExecutionBase } from '../../domain/backlog/creation.js';
+import { createExecutionPlan, parseExecutionPlan, type ExecutionPlan } from '../../domain/backlog/execution-plan.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 import type { ChangeMergeState } from '../../domain/tracker/types.js';
 import type { BaselineMergeResult } from '../../infrastructure/git/branches/provider.js';
@@ -27,6 +27,7 @@ import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
+import { RunResourceScope } from '../workflows/resource-scope.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import { runQaPreflight } from './qa-preflight.js';
 import type { RunEventData } from '@afk/core';
@@ -50,6 +51,7 @@ export interface QARunnerDependencies {
    * instead of the globally configured target branch.
    */
   executionBaseBranch?: string;
+  executionPlan?: ExecutionPlan;
   prepareRepositories?: MultiRepositoryPreparationService;
   /** Override the merge of the change branch into the target branch. */
   mergeFeatureIntoBaseline?: (
@@ -83,6 +85,7 @@ export class QARunner {
   private readonly projectRoot: string;
   private readonly repositories?: readonly WorkflowRunRepository[];
   private readonly executionBaseBranch?: string;
+  private readonly executionPlan?: ExecutionPlan;
   private readonly prepareRepositories: MultiRepositoryPreparationService;
   private readonly mergeFeatureIntoBaselineOverride?: QARunnerDependencies['mergeFeatureIntoBaseline'];
   private readonly runtimeManager: TaskRuntimeManager;
@@ -90,6 +93,8 @@ export class QARunner {
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
   private readonly onCommit?: QARunnerDependencies['onCommit'];
   private readonly onSession?: QARunnerDependencies['onSession'];
+  private activeConflictExecution?: AgentExecution;
+  private leaseFailure?: unknown;
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = resolveQaTimeoutSnapshotDir();
@@ -99,6 +104,7 @@ export class QARunner {
     this.projectRoot = deps.projectRoot ?? process.cwd();
     this.repositories = deps.repositories;
     this.executionBaseBranch = deps.executionBaseBranch;
+    this.executionPlan = deps.executionPlan;
     this.prepareRepositories = deps.prepareRepositories ?? new MultiRepositoryPreparer();
     this.mergeFeatureIntoBaselineOverride = deps.mergeFeatureIntoBaseline;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
@@ -127,9 +133,13 @@ export class QARunner {
     const runtimeRunId = `${session}-runtime`;
     let runtimeStarted = false;
     let runtimeErrorSummary: string | undefined;
+    let leaseError: unknown;
+    this.leaseFailure = undefined;
+    const leaseScope = new RunResourceScope({ repoRoot: this.projectRoot, baseBranch: 'main', managePrimary: false });
 
     try {
       const backlog = await this.providers.backlog.get(id);
+      if (backlog.state !== 'verification') throw new Error(`QA for ${id} requires verification state`);
       const budgetStore = new BudgetStore(this.projectRoot, backlog.workItemId ?? backlog.providerRef);
       const savedBudget = await budgetStore.load();
       const maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20);
@@ -145,6 +155,16 @@ export class QARunner {
       await this.startRuntime(runtimeRunId, backlog, session);
       runtimeStarted = true;
       workspace = await this.prepareWorkspace(id);
+      const heartbeat = async () => {
+        await workspace?.heartbeat?.();
+        const current = await this.providers.backlog.get(id);
+        if (current.state !== 'verification') throw new Error(`QA for ${id} was interrupted`);
+      };
+      leaseScope.registerHeartbeat(heartbeat, 10_000, async error => {
+        leaseError = error;
+        this.leaseFailure = error;
+        await Promise.all([execution?.kill(), this.activeConflictExecution?.kill()]);
+      });
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
@@ -228,6 +248,7 @@ export class QARunner {
         executionMode: this.executionMode,
         runtime: this.agentRuntime,
       });
+      if (leaseError) throw leaseError;
       await this.heartbeatRuntime(runtimeRunId, runtimeFieldsFromExecution(execution.metadata));
       await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
@@ -254,6 +275,8 @@ export class QARunner {
         await this.markBlocked(id, summary);
         return { success: false, summary, failureCode: 'qa_execution_failed' };
       }
+      if (leaseError) throw leaseError;
+      await heartbeat();
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName);
       if (!outcome.success) {
         runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
@@ -271,18 +294,20 @@ export class QARunner {
       logger.error({ backlogId: id, error }, 'QA execution failed');
       return { success: false, summary: message, failureCode: 'qa_execution_failed' };
     } finally {
+      await leaseScope.finish({ status: runtimeErrorSummary ? 'failed' : 'success' });
       if (execution) await execution.kill().catch(() => {});
       if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
       if (worktreePath) {
         try {
-          await this.providers.branches.cleanup(worktreePath, { preserve: false });
+          await this.providers.branches.cleanup(worktreePath, { preserve: !!runtimeErrorSummary });
         } catch (error) {
           logger.warn({ backlogId: id, error }, 'failed to clean QA worktree');
         }
       }
       if (workspace) {
         try {
-          await workspace.release();
+          if (runtimeErrorSummary) await workspace.finish({ status: 'failed' });
+          else await workspace.release();
         } catch (error) {
           logger.warn({ backlogId: id, error }, 'failed to release QA workspace');
         }
@@ -308,8 +333,19 @@ export class QARunner {
 
   /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
   private async resolveExecutionBranch(backlog: BacklogItem): Promise<string> {
-    const configured = this.executionBaseBranch ?? this.config.targetBranch ?? 'main';
-    return resolveBacklogExecutionBase(this.providers.backlog, backlog, configured);
+    return this.resolvePlan(backlog).baseRef;
+  }
+
+  private resolvePlan(backlog: BacklogItem): ExecutionPlan {
+    const primary = this.repositories?.find(repository => repository.primary);
+    const declared = parseExecutionPlan(backlog.description);
+    const manifest = this.executionPlan ?? (primary && createExecutionPlan({
+      baseRef: primary.baseBranch, targetRef: primary.targetBranch, sourceRef: primary.sourceBranch,
+    }));
+    if (manifest && declared && (manifest.baseRef !== declared.baseRef || manifest.targetRef !== declared.targetRef
+      || manifest.sourceRef !== declared.sourceRef)) throw new Error('work item execution refs conflict with the execution manifest');
+    return manifest ?? declared ?? (this.executionBaseBranch ? createExecutionPlan({ baseRef: this.executionBaseBranch }) : undefined)
+      ?? repositoryExecutionDefaults(this.config, backlog.project?.projectKey, primary?.repoRoot ?? this.projectRoot);
   }
 
   /**
@@ -377,6 +413,12 @@ export class QARunner {
         executionMode: this.executionMode,
         runtime: this.agentRuntime,
       });
+      this.activeConflictExecution = execution;
+      if (this.leaseFailure) {
+        await execution.kill();
+        this.activeConflictExecution = undefined;
+        throw this.leaseFailure;
+      }
       try {
         const result = await execution.waitForResult({
           completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout,
@@ -393,6 +435,7 @@ export class QARunner {
         return { resolved: true, summary: `resolved ${conflicts.length} merge conflict(s) with ${targetBranch}` };
       } finally {
         await execution.kill().catch(() => {});
+        this.activeConflictExecution = undefined;
       }
     } finally {
       await conflictSandbox.close().catch(error => logger.warn({ backlogId, error }, 'failed to close the conflict resolution sandbox'));
@@ -426,7 +469,7 @@ export class QARunner {
     try {
       const backlog = await this.providers.backlog.get(backlogId);
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
-      const targetBranch = await this.resolveExecutionBranch(backlog);
+      const targetBranch = this.resolvePlan(backlog).targetRef;
       await this.beforeChange?.('publish', backlog);
       const commit = await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
       const commitSha = commit.sha;

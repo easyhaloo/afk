@@ -56,6 +56,7 @@ describe('AfkResourceRegistry', () => {
     expect(registry.listActive('/repo-a')).toEqual([
       expect.objectContaining({ name: 'afk-42', runId: 'run-a', kind: 'tmux', status: 'active' }),
     ]);
+    expect(registry.listAllActive().map(resource => resource.name).sort()).toEqual(['afk-12345678', 'afk-42']);
     expect(registry.listActive('/repo-b')).toEqual([
       expect.objectContaining({ name: 'afk-12345678', engine: 'docker', externalId: 'container-id' }),
     ]);

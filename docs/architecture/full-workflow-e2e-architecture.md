@@ -92,11 +92,11 @@ flowchart LR
 - 所有 `dependsOn` 项必须为 `done`。
 - manifest、Provider 项和全局 work item 身份必须一致。
 
-`afk run` 通过 `WorkflowRunner` 在创建工作树前 claim；claim 失败会记录取消结果并返回 `not_claimed`。claim 成功后持续 heartbeat，租约丢失会把任务转为 `blocked` 并切到 `hitl`。
+`afk run` 委托给受管执行，在条目 claim 前获取 manifest 仓库集合的租约，再由 `WorkflowRunner` 在创建工作树前 claim；claim 失败返回 `not_claimed`。claim 成功后持续 heartbeat，租约丢失会停止所属 Agent，并把任务转为 `blocked` 和 `hitl`。
 
 ### 2.2 `afk run` 的单项执行路径
 
-`afk run --backlog-id <id>` 的入口只负责收集 CLI 参数并调用 `runWorkflowCli`。后者解析配置和 manifest、创建 tracker/provider bundle，再交给 `WorkflowRunner.run`。
+`afk run --backlog-id <id>` 收集 CLI 参数并调用 `runWorkflowCli`，解析规范身份后携带原有参数委托给 `executeWorkItem`，统一装配 tracker/provider 与跨仓图谱，再串联 `WorkflowRunner.run` 和 `QARunner.process`。
 
 `WorkflowRunner` 的关键顺序是：
 
@@ -111,7 +111,7 @@ flowchart LR
 
 实现模板明确要求 Agent 不创建或合并 MR；发布、提交 QA、创建变更请求和合并策略由后续系统动作或 `QARunner` 负责。
 
-`afk run` 本身只运行实现阶段，成功交付到 `verification`；随后需由 `executeWorkItem` 闭环或独立 `afk qa` 进入 QA。默认模板的 `publish-change` 动作在这里推送实现分支，`queue-qa` 迁移状态，并不创建 PR/MR。若 `verify-ac` 返回可解析的 AC FAIL，runner 会按 `maxSelfIterations` 上限重跑 `implement → verify-ac`；纠正成功后再发布并进入 `verification`。这属于同一次实现尝试，不是 QA FAIL 后的 backlog `rework`。
+`afk run` 的实现阶段交付到 `verification` 后由同一次受管执行继续独立 QA 和发布，成功停在 `merge_ready` 人工合并闸门。默认实现模板的 `publish-change` 推送实现分支，`queue-qa` 迁移状态，并不创建 PR/MR。若 `verify-ac` 返回可解析的 AC FAIL，runner 按 `maxSelfIterations` 上限重跑 `implement → verify-ac`，纠正后再发布并进入 `verification`。这属于同一次实现尝试，不是 QA FAIL 后的 backlog `rework`。
 
 ### 2.3 `afk loop` 的持续执行路径
 
@@ -234,7 +234,7 @@ stateDiagram-v2
     done --> [*]
 ```
 
-`QARunner` 使用管理 provider，不拥有 implementation claim 能力。进入 QA 的 `verification` 前置检查由 `executeWorkItem` 或独立 QA CLI 执行；`QARunner.process` 不重复该状态检查。Agent 必须返回满足以下结构的结构化结果：
+`QARunner` 使用管理 provider，不拥有 implementation claim 能力。`executeWorkItem`、独立 QA CLI 和 `QARunner.process` 均检查 `verification` 状态，运行中也持续检查中断与仓库租约。基线三元组、依赖池与目录生命周期见[执行架构](execution.zh.md)。Agent 必须返回满足以下结构的结构化结果：
 
 ```json
 {

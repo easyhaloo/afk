@@ -70,9 +70,9 @@ export function createManagementProviderBundle(
   tracker: TrackerProvider,
   repoRoot: string,
 ): ManagementProviderBundle {
-  return {
-    backlog: new ManagementBacklogProvider(createProviderBundle(tracker, repoRoot).backlog),
-    branches: new GitBranchProvider(repoRoot),
-    changes: new TrackerChangeProvider(tracker),
-  };
+  return asManagementProviders(createProviderBundle(tracker, repoRoot));
+}
+
+export function asManagementProviders(providers: ProviderBundle): ManagementProviderBundle {
+  return { ...providers, backlog: new ManagementBacklogProvider(providers.backlog) };
 }

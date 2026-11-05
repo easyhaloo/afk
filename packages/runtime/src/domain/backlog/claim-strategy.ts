@@ -19,6 +19,7 @@ export type AtomicClaim = (
 /** The minimal filesystem lease capability required by the locked strategy. */
 export interface ClaimLock {
   acquire(request: FilesystemClaimRequest): Promise<ClaimLease | null>;
+  invalidate?(key: string): Promise<void>;
 }
 
 export type ClaimLockFactory = (

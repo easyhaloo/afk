@@ -125,6 +125,24 @@ export class TmuxClient {
     }
   }
 
+  async sessionStatus(name: string): Promise<'present' | 'missing' | 'unknown'> {
+    try {
+      await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
+      return 'present';
+    } catch (error) {
+      return /can't find session|no server running|error connecting to .*No such file or directory/i.test(String(error)) ? 'missing' : 'unknown';
+    }
+  }
+
+  async setSessionOwnership(name: string, token: string): Promise<void> {
+    await this.exec(['set-option', '-t', normalizeTmuxSessionName(name), '@afk_repository_claims', token]);
+  }
+
+  async sessionOwnership(name: string): Promise<string | undefined> {
+    try { return await this.exec(['show-options', '-qv', '-t', normalizeTmuxSessionName(name), '@afk_repository_claims']); }
+    catch { return undefined; }
+  }
+
   /**
    * List all tmux sessions
    */

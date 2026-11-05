@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { simpleGit } from 'simple-git';
 import { MultiRepositoryPreparer } from './multi-repository-preparer.js';
 import { resolveWorkflowRunRequest } from './run-request.js';
@@ -42,6 +42,78 @@ async function branchExists(repository: string, branch: string): Promise<boolean
 }
 
 describe('multi-repository execution manifest integration', () => {
+  it('shares objects across items and preserves unpublished work through retry, publication, and QA borrowing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-store-lifecycle-'));
+    try {
+      const remote = await createRemote(root, 'shared', 'main');
+      const url = 'https://github.com/acme/store-lifecycle.git';
+      vi.stubEnv('GIT_CONFIG_COUNT', '1');
+      vi.stubEnv('GIT_CONFIG_KEY_0', `url.${remote.remote}.insteadOf`);
+      vi.stubEnv('GIT_CONFIG_VALUE_0', url);
+      const firstWorkspace = join(root, 'item-1');
+      const secondWorkspace = join(root, 'item-2');
+      const firstRoot = join(firstWorkspace, 'repositories', 'api');
+      const secondRoot = join(secondWorkspace, 'repositories', 'api');
+      const firstRepositories = [{
+        platform: 'github' as const, projectKey: 'acme/store-lifecycle', name: 'api', checkoutPath: 'repositories/api',
+        repoRoot: firstRoot, baseBranch: 'main', workingBranch: 'afk/store-item-1', primary: true,
+      }];
+      const secondRepositories = [{ ...firstRepositories[0], repoRoot: secondRoot, workingBranch: 'afk/store-item-2' }];
+      const preparer = new MultiRepositoryPreparer();
+      const first = await preparer.prepare(firstRepositories, firstWorkspace);
+      await expect(preparer.prepare(secondRepositories, secondWorkspace)).rejects.toThrow('leased');
+      const git = simpleGit(firstRoot);
+      const firstCommon = (await git.raw(['rev-parse', '--git-common-dir'])).trim();
+      await git.addConfig('user.name', 'AFK Integration');
+      await git.addConfig('user.email', 'afk-integration@example.test');
+      await writeFile(join(firstRoot, 'implementation.txt'), 'unpublished work\n');
+      await git.add('.');
+      await git.commit('implementation');
+      const implementation = (await git.revparse(['HEAD'])).trim();
+      const conflictingRoot = join(root, 'item-3', 'repositories', 'api');
+      await expect(preparer.prepare([{ ...firstRepositories[0], repoRoot: conflictingRoot }], join(root, 'item-3'))).rejects.toThrow();
+      expect((await git.revparse(['HEAD'])).trim()).toBe(implementation);
+      await expect(lstat(conflictingRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+      await writeFile(join(firstRoot, 'pending.txt'), 'uncommitted work\n');
+      await writeFile(join(firstRoot, 'package.json'), '{"private":true}');
+      await writeFile(join(firstRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+      await writeFile(join(firstRoot, '.gitignore'), 'node_modules/\n');
+      await mkdir(join(firstRoot, 'node_modules/lib'), { recursive: true });
+      await writeFile(join(firstRoot, 'node_modules/lib/index.js'), 'retained dependency');
+      await first.finish({ status: 'failed' });
+      await expect(lstat(join(firstRoot, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' });
+      const recovered = await preparer.prepare(firstRepositories, firstWorkspace);
+      expect(await readFile(join(firstRoot, 'pending.txt'), 'utf8')).toBe('uncommitted work\n');
+      expect(await readFile(join(firstRoot, 'node_modules/lib/index.js'), 'utf8')).toBe('retained dependency');
+      expect((await git.raw(['stash', 'list'])).trim()).toContain('afk-recovery-');
+      await git.add('.');
+      await git.commit('preserved pending work');
+      await recovered.finish({ status: 'failed' });
+      const published = (await git.revparse(['HEAD'])).trim();
+      const retry = await preparer.prepare(firstRepositories, firstWorkspace);
+      expect((await git.revparse(['HEAD'])).trim()).toBe(published);
+      await retry.finish({ status: 'success' });
+      await expect(lstat(firstRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await simpleGit(remote.remote).revparse(['refs/heads/afk/store-item-1'])).trim()).toBe(published);
+      expect(await isAncestorCommit(simpleGit(remote.remote), implementation, published)).toBe(true);
+      const second = await preparer.prepare(secondRepositories, secondWorkspace);
+      const secondCommon = (await simpleGit(secondRoot).raw(['rev-parse', '--git-common-dir'])).trim();
+      expect(await realpath(firstCommon)).toBe(await realpath(secondCommon));
+      expect(await readFile(join(secondRoot, 'shared.txt'), 'utf8')).toBe('main\n');
+      await second.release();
+      await expect(lstat(secondRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const borrowed = await preparer.prepare(firstRepositories, firstWorkspace);
+      expect((await simpleGit(firstRoot).revparse(['HEAD'])).trim()).toBe(published);
+      await borrowed.release();
+      await expect(lstat(firstRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await simpleGit(firstCommon).raw(['worktree', 'list', '--porcelain'])).match(/^worktree /gm)).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('preserves unpublished commits on existing and newly created working branches across failed retries', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-retry-'));
     try {

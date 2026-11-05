@@ -11,6 +11,21 @@ describe('FilesystemClaimLock', () => {
     await Promise.all(stateRoots.splice(0).map(stateRoot => rm(stateRoot, { recursive: true, force: true })));
   });
 
+  it('invalidates an interrupted generation without allowing its release to erase the next lease', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'afk-claim-interrupt-'));
+    stateRoots.push(stateRoot);
+    const store = new FilesystemClaimLock(stateRoot);
+    const key = 'github/acme/api/42';
+    const first = await store.acquire({ key, owner: 'first', ttlMs: 60_000 });
+    await store.invalidate(key);
+    await expect(first!.heartbeat()).rejects.toThrow('no longer held');
+    const second = await store.acquire({ key, owner: 'second', ttlMs: 60_000 });
+    await first!.release();
+    await second!.heartbeat();
+    expect((await store.inspect(key))?.claimId).toBe(second!.claimId);
+    await second!.release();
+  });
+
   it('creates one filesystem lease for competing claimers', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'afk-claim-lock-'));
     stateRoots.push(stateRoot);
@@ -24,6 +39,25 @@ describe('FilesystemClaimLock', () => {
     expect([first, second].filter(Boolean)).toHaveLength(1);
     await first?.release();
     await second?.release();
+  });
+
+  it('serializes repository operations and releases the gate after an error', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'afk-operation-gate-'));
+    stateRoots.push(stateRoot);
+    const first = new FilesystemClaimLock(stateRoot);
+    const second = new FilesystemClaimLock(stateRoot);
+    const key = 'repositories/project/git';
+    const order: string[] = [];
+    let pending: Promise<void> | undefined;
+    await first.withExclusiveOperation(key, async () => {
+      order.push('first');
+      pending = second.withExclusiveOperation(key, async () => { order.push('second'); });
+      order.push('first-complete');
+    });
+    await pending;
+    expect(order).toEqual(['first', 'first-complete', 'second']);
+    await expect(first.withExclusiveOperation(key, async () => { throw new Error('operation failed'); })).rejects.toThrow('operation failed');
+    await expect(second.withExclusiveOperation(key, async () => 'released')).resolves.toBe('released');
   });
 
   it('does not delete a replacement claim when a stale lease releases', async () => {

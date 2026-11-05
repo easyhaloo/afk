@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { registerBacklogCommands } from './backlog.js';
 import { registerQACommands } from './qa.js';
 import { createManagementProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
+import { assembleProviders } from '@afk/runtime/infrastructure/provider/assembly';
 import { QARunner } from '@afk/runtime/application/runners/qa-runner';
 import { executionWorkspacePath } from '@afk/runtime/infrastructure/workspace';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import { join } from 'node:path';
 vi.mock('@afk/runtime/infrastructure/provider/tracker-provider-factory', () => ({
   createManagementProviders: vi.fn(),
 }));
+vi.mock('@afk/runtime/infrastructure/provider/assembly', () => ({ assembleProviders: vi.fn() }));
 vi.mock('../output.js', () => ({
   handleCommandError: (error: unknown) => { throw error; },
   success: vi.fn(), info: vi.fn(), warning: vi.fn(), fail: vi.fn(), detail: vi.fn(),
@@ -17,6 +19,7 @@ vi.mock('../output.js', () => ({
 vi.mock('@afk/runtime/infrastructure/config/manager', () => ({
   getSchedulerConfig: () => ({ maxConcurrent: 3, pollInterval: 60 }),
   getWorkflowConfig: () => ({}),
+  repositoryExecutionDefaults: () => ({ baseRef: 'main', targetRef: 'main' }),
 }));
 vi.mock('@afk/runtime/domain/agents/index', () => ({
   createAgentProvider: vi.fn(),
@@ -53,13 +56,14 @@ describe('canonical command provider wiring', () => {
     const backlog = { get: vi.fn().mockResolvedValue({ id: '42', state: 'verification' }) };
     const providers = { backlog };
     const processItem = vi.fn().mockResolvedValue({ success: true, mrUrl: 'https://example.com/mr/1' });
-    vi.mocked(createManagementProviders).mockResolvedValue(providers as never);
+    vi.mocked(assembleProviders).mockResolvedValue({ management: providers } as never);
     vi.mocked(QARunner).mockImplementation(() => ({ process: processItem }) as never);
 
     await runCommand(registerQACommands, 'qa', '--backlog-id', 'github:group/repo#42', '--mode', 'interactive');
 
     const workspaceRoot = executionWorkspacePath('github:group/repo#42');
-    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', join(workspaceRoot, 'repositories/repo'), 'github', undefined);
+    expect(assembleProviders).toHaveBeenCalledWith(expect.objectContaining({ workItemId: 'github:group/repo#42',
+      projectId: 'group/repo', cwd: join(workspaceRoot, 'repositories/repo'), platform: 'github' }));
     expect(backlog.get).toHaveBeenCalledWith('42');
     expect(QARunner).toHaveBeenCalledWith(providers, expect.anything(), {
       executionMode: 'interactive',
@@ -67,6 +71,7 @@ describe('canonical command provider wiring', () => {
       agentRuntime: expect.anything(),
       projectRoot: workspaceRoot,
       repositories: expect.arrayContaining([expect.objectContaining({ repoRoot: join(workspaceRoot, 'repositories/repo'), primary: true })]),
+      executionPlan: { baseRef: 'main', targetRef: 'main' },
     });
     expect(processItem).toHaveBeenCalledWith('42');
   });

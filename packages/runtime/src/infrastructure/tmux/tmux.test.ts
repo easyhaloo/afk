@@ -28,10 +28,14 @@ describe('TmuxClient with special-character session names', () => {
       expect(session.name).toBe(normalized);
       // Raw and normalized names must both resolve to the same session.
       await expect(client.hasSession(raw)).resolves.toBe(true);
+      await expect(client.sessionStatus(raw)).resolves.toBe('present');
+      await client.setSessionOwnership(raw, 'generation-1');
+      await expect(client.sessionOwnership(raw)).resolves.toBe('generation-1');
       await expect(client.capturePane(raw, 'main', { lines: 1 })).resolves.not.toBe('(capture failed)');
       await client.sendKeys(normalized, 'main', 'q');
       await expect(client.killSession(raw)).resolves.toBeUndefined();
       await expect(client.hasSession(raw)).resolves.toBe(false);
+      await expect(client.sessionStatus(raw)).resolves.toBe('missing');
     } finally {
       await client.killSession(raw).catch(() => undefined);
     }

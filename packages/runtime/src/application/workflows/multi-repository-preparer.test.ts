@@ -49,8 +49,9 @@ function dependencies(): MultiRepositoryPreparerDependencies {
     lock: {
       acquire: vi.fn(async () => ({ release })),
     },
-    clone: {
-      clone: vi.fn(async () => undefined),
+    repositoryStore: {
+      ensureCheckout: vi.fn(async () => undefined),
+      ownsCheckout: vi.fn(async () => false),
     },
     git: {
       isRepository: vi.fn(async () => true),
@@ -461,7 +462,7 @@ describe('MultiRepositoryPreparer', () => {
 
     await prepared.finish({ status: 'failed' });
 
-    expect(deps.clone.clone).toHaveBeenCalledWith('https://github.com/acme/api.git', cloned.repoRoot);
+    expect(deps.repositoryStore.ensureCheckout).toHaveBeenCalledWith('https://github.com/acme/api.git', cloned.repoRoot, cloned.baseBranch);
     expect(deps.filesystem.removeTarget).not.toHaveBeenCalled();
     expect(deps.git.restore).not.toHaveBeenCalled();
   });
@@ -477,6 +478,18 @@ describe('MultiRepositoryPreparer', () => {
     expect(deps.git.finalize).toHaveBeenCalledTimes(1);
     expect(deps.git.finalize).toHaveBeenCalledWith(target.repoRoot, target.workingBranch);
     expect(deps.filesystem.removeTarget).toHaveBeenCalledTimes(1);
+    expect(deps.filesystem.removeTarget).toHaveBeenCalledWith(target.repoRoot);
+    expect(deps.git.restore).not.toHaveBeenCalled();
+  });
+
+  it('removes a reused store worktree after success without rewinding its branch', async () => {
+    const deps = dependencies();
+    vi.mocked(deps.repositoryStore.ownsCheckout).mockResolvedValue(true);
+    const target = repository();
+    const prepared = await new MultiRepositoryPreparer(deps).prepare([target], '/workspace');
+
+    await prepared.finish({ status: 'success' });
+
     expect(deps.filesystem.removeTarget).toHaveBeenCalledWith(target.repoRoot);
     expect(deps.git.restore).not.toHaveBeenCalled();
   });
@@ -637,9 +650,10 @@ describe('MultiRepositoryPreparer', () => {
       await fs.mkdir(join(repoRoot, '.afk'), { recursive: true });
       await fs.writeFile(join(repoRoot, '.afk', 'artifacts.txt'), '/tmp/evidence.log\n');
 
-      await expect(new MultiRepositoryPreparer().prepare([
+      const prepared = await new MultiRepositoryPreparer().prepare([
         repository({ repoRoot }),
-      ], root)).resolves.toBeDefined();
+      ], root);
+      await prepared.finish({ status: 'failed' });
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

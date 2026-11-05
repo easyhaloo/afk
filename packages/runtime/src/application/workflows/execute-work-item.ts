@@ -8,17 +8,16 @@ import { promisify } from 'node:util';
 import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { QARunner } from '../runners/qa-runner.js';
-import { createGlobalWorkItemCatalogs, createTracker } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { createGlobalWorkItemCatalogs } from '../../infrastructure/provider/tracker-provider-factory.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
-import { createProviderBundle, type ProviderBundle, type ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
-import { createCrossProjectBacklogGraphSource } from '../../infrastructure/provider/backlog-graph.js';
-import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
+import { asManagementProviders, type ProviderBundle, type ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
+import { assembleProviders } from '../../infrastructure/provider/assembly.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
-import { parseExecutionBaseBranch } from '../../domain/backlog/execution-base.js';
+import { createExecutionPlan, parseExecutionPlan } from '../../domain/backlog/execution-plan.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
-import { prepareAgentRuntime } from '../../domain/agents/index.js';
-import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
+import { createAgentProvider, prepareAgentRuntime } from '../../domain/agents/index.js';
+import { getWorkflowConfig, repositoryExecutionDefaults, type WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
@@ -26,8 +25,9 @@ import { RunObserver } from '../../observability/run-observer.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
 import { parseExecutionManifest, readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
 import { executionManifestPath, executionWorkspacePath } from '../../infrastructure/workspace.js';
-import { resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request.js';
+import { resolveWorkflowRunRequest, type WorkflowRunRequest, type WorkflowRunCliInput } from './run-request.js';
 import { withLogContext, logger } from '../../infrastructure/io/index.js';
+import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -35,6 +35,7 @@ export interface ExecuteWorkItemInput {
   manifestPath?: string;
   template?: string;
   project?: string;
+  runOptions?: WorkflowRunCliInput;
 }
 
 export type ExecuteWorkItemStatus = 'merge_ready' | 'done' | 'rework' | 'blocked' | 'not_claimed';
@@ -229,17 +230,29 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
       // repository's default branch is a setting of the repository and says
       // nothing about this piece of work — a repository can be developed on
       // `master` while the work starts from a release ref.
-      const baseBranch = parseExecutionBaseBranch(item.description) ?? project.defaultBranch ?? 'main';
+      const declaredPlan = parseExecutionPlan(item.description);
+      const fallback = repositoryExecutionDefaults(getWorkflowConfig(), project.projectKey,
+        join(executionWorkspacePath(workItemId), 'repositories', name), project.defaultBranch);
+      const explicitBase = input.runOptions?.baseBranch
+        ?? (input.runOptions?.branchStrategy?.type === 'named' ? input.runOptions.branchStrategy.baseBranch : undefined);
+      const plan = declaredPlan ?? (explicitBase ? createExecutionPlan({ baseRef: explicitBase,
+        targetRef: fallback.targetRef === fallback.baseRef ? explicitBase : fallback.targetRef, sourceRef: fallback.sourceRef }) : fallback);
+      if (input.runOptions?.baseBranch && input.runOptions.baseBranch !== plan.baseRef) throw new Error('--base-branch conflicts with work item execution refs');
+      const baseBranch = plan.baseRef;
+      const strategy = input.runOptions?.branchStrategy;
+      const workingBranch = input.runOptions?.targetBranch
+        ?? (strategy?.type === 'named' || strategy?.type === 'existing' ? strategy.branch : item.branchName);
       const manifest = parseExecutionManifest({
         schemaVersion: 1, workItemId, providerBacklogId: String(item.issueNumber),
         tracker: { platform: project.platform, projectKey: project.projectKey,
           ...(project.providerHost ? { providerHost: project.providerHost } : {}),
           ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}) },
-        workingBranch: item.branchName,
+        workingBranch,
         repositories: [{ platform: project.platform, projectKey: project.projectKey,
           ...(project.providerHost ? { providerHost: project.providerHost } : {}),
           ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}),
-          name, checkoutPath: `repositories/${name}`, baseBranch, workingBranch: item.branchName, primary: true }],
+          name, checkoutPath: `repositories/${name}`, baseBranch, targetBranch: plan.targetRef,
+          ...(plan.sourceRef ? { sourceBranch: plan.sourceRef } : {}), workingBranch, primary: true }],
       }, { manifestPath, backlogId: workItemId });
       await mkdir(workspaceDataDirectory(executionWorkspacePath(workItemId)), { recursive: true });
       const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`;
@@ -258,25 +271,19 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
 
 async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) {
   const request = await resolveWorkflowRunRequest({
+    ...input.runOptions,
     backlogId: input.workItemId,
     executionManifestPath: manifest.manifestPath,
     template: input.template,
     projectName: input.project,
     // ADR-0019 §4: managed executions are interactive tmux sessions, never
     // batch/exec. Do not "simplify" this back to 'batch'.
-    executionMode: 'interactive',
+    executionMode: input.runOptions?.executionMode ?? 'interactive',
   }, config);
-  const tracker = await createTracker(request.trackerProjectId ?? request.projectName, request.repoRoot, request.trackerPlatform, request.trackerHost);
-  return {
-    request,
-    providers: createProviderBundle(tracker, request.repoRoot, {
-      // A child backlog may live in another repository than its parent, so the
-      // provider needs the whole backlog graph before it claims an item.
-      graph: createCrossProjectBacklogGraphSource({ platform: request.trackerPlatform }),
-      onGraphError: error => logger.warn({ error }, 'cross-project backlog graph is unavailable; falling back to the local project'),
-      ...(request.trackerProjectKey ? { projectKey: request.trackerProjectKey } : {}),
-    }),
-  };
+  const { providers } = await assembleProviders({ workItemId: input.workItemId,
+    projectId: request.trackerProjectId ?? request.projectName, projectKey: request.trackerProjectKey,
+    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost });
+  return { request, providers };
 }
 
 function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest: ResolvedExecutionManifest, workItemId: string): void {
@@ -325,138 +332,148 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => { await recordAudit(context, data); };
   const manifest = await resolveManifest(input, dependencies);
-  const directory = join(workspaceDataDirectory(manifest.workspaceRoot), 'executions');
-  await mkdir(directory, { recursive: true });
-  const lockPath = join(directory, `${encodeWorkItemIdForPath(workItemId)}.lock`);
-  const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
-  try {
-    const journal = await open(join(directory, `${executionId}.jsonl`), 'wx');
+  return new RepositoryLeases().run((manifest.repositories ?? []).map(repository => `${repository.platform}:${repository.projectKey}`), async () => {
+    const directory = join(workspaceDataDirectory(manifest.workspaceRoot), 'executions');
+    await mkdir(directory, { recursive: true });
+    const lockPath = join(directory, `${encodeWorkItemIdForPath(workItemId)}.lock`);
+    const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
     try {
-      const record = async (phase: string, details: object = {}) => {
-        await journal.writeFile(`${JSON.stringify({ executionId, workItemId, phase, at: new Date().toISOString(), ...details })}\n`);
-        await journal.sync();
-      };
-      await record('requested');
-      let implementationCompleted = false;
-      let auditConcluded = false;
+      const journal = await open(join(directory, `${executionId}.jsonl`), 'wx');
       try {
-        const config = getWorkflowConfig();
-        const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, config);
-        if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
-        const item = await providers.backlog.get(request.backlogId);
-        const inventoryItem = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
-        validateItem(item, inventoryItem, manifest, workItemId);
-        for (const dependencyId of item.dependsOn) {
-          const dependency = await providers.backlog.get(dependencyId);
-          if (dependency.state !== 'done') throw new Error(`unmet dependency ${dependencyId}`);
-        }
-        if (!(await providers.backlog.isRunnable(item))) throw new Error(`work item ${workItemId} has unmet dependencies or is not runnable`);
-        const existing = await providers.changes.findForBacklog(item);
-        if (existing?.state === 'open') {
-          // A previous attempt can leave a review request behind. A work item
-          // that is being reworked is expected to have one: the verification
-          // reuses it and refreshes its evidence rather than asking the
-          // reviewer for a second one. A work item that never ran is not.
-          if (item.state !== 'rework') {
-            throw new Error(`work item already has an open change request: ${existing.url ?? existing.id}`);
+        const record = async (phase: string, details: object = {}) => {
+          await journal.writeFile(`${JSON.stringify({ executionId, workItemId, phase, at: new Date().toISOString(), ...details })}\n`);
+          await journal.sync();
+        };
+        await record('requested');
+        let implementationCompleted = false;
+        let auditConcluded = false;
+        try {
+          const config = getWorkflowConfig();
+          const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, config);
+          if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
+          const item = await providers.backlog.get(request.backlogId);
+          const inventoryItem = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
+          validateItem(item, inventoryItem, manifest, workItemId);
+          const declared = parseExecutionPlan(item.description);
+          if (declared && request.executionPlan && (declared.baseRef !== request.executionPlan.baseRef
+            || declared.targetRef !== request.executionPlan.targetRef || declared.sourceRef !== request.executionPlan.sourceRef)) {
+            throw new Error('work item execution refs conflict with the execution manifest');
           }
-          logger.info({ workItemId, changeId: existing.id }, 'reusing the change request of an earlier attempt');
-        }
-        request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
-        await record('implementing');
-        const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
-          new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime, observer: createRunObserver() })))(providers, config, request);
-        const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
-          executionMode: 'interactive', observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
-        if (!implementationResult.success) {
-          const status = implementationResult.skipped === 'not_claimed' ? 'not_claimed' : 'blocked';
-          await record(status);
-          return { executionId, workItemId, status };
-        }
-        implementationCompleted = true;
-        const verificationItem = await providers.backlog.get(request.backlogId);
-        if (verificationItem.state !== 'verification') throw new Error('implementation did not enter verification');
-        await record('verifying');
-        await audit({ kind: 'qa.started' });
-        let qaPassedRecorded = false;
-        const auditQAPass = async () => {
-          if (qaPassedRecorded) return;
-          await audit({ kind: 'qa.passed' });
-          qaPassedRecorded = true;
-        };
-        const management: ManagementProviderBundle = {
-          backlog: new ManagementBacklogProvider(providers.backlog), branches: providers.branches, changes: providers.changes,
-        };
-        const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
-          new QARunner(bundle, workflowConfig, {
-            agentRuntime: runRequest.agentRuntime, executionMode: 'interactive', projectRoot: runRequest.workspaceRoot,
-            repositories: runRequest.repositories,
-            executionBaseBranch: runRequest.executionBaseBranch,
-            beforeChange: async () => {
-              await auditQAPass();
-              await record('publication_requested', {});
-            },
-            afterPublication: async change => {
-              await providers.changes.verifyIssueAssociation(change, workItemId);
-              await record('published', { changeId: change.id, changeUrl: change.url });
-            },
-            onCommit: (commitSha, branch) => audit({ kind: 'commit.recorded', phase: 'qa', commitSha, branch }),
-            onSession: audit,
-          })))(management, config, request);
-        const qaResult = await qa.process(request.backlogId).catch(async error => {
-          await audit({
-            kind: 'qa.failed', reason: 'blocked',
-            summary: `QA execution failed: ${error instanceof Error ? error.message : String(error)}`,
-          }).catch(() => undefined);
+          for (const dependencyId of item.dependsOn) {
+            const dependency = await providers.backlog.get(dependencyId);
+            if (dependency.state !== 'done') throw new Error(`unmet dependency ${dependencyId}`);
+          }
+          if (!(await providers.backlog.isRunnable(item))) throw new Error(`work item ${workItemId} has unmet dependencies or is not runnable`);
+          const existing = await providers.changes.findForBacklog(item);
+          if (existing?.state === 'open') {
+            // A previous attempt can leave a review request behind. A work item
+            // that is being reworked is expected to have one: the verification
+            // reuses it and refreshes its evidence rather than asking the
+            // reviewer for a second one. A work item that never ran is not.
+            if (item.state !== 'rework') {
+              throw new Error(`work item already has an open change request: ${existing.url ?? existing.id}`);
+            }
+            logger.info({ workItemId, changeId: existing.id }, 'reusing the change request of an earlier attempt');
+          }
+          request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
+          await record('implementing');
+          const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
+            new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime, observer: createRunObserver() })))(providers, config, request);
+          const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
+            executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
+            observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
+          if (!implementationResult.success) {
+            const status = implementationResult.skipped === 'not_claimed' ? 'not_claimed' : 'blocked';
+            await record(status);
+            return { executionId, workItemId, status };
+          }
+          implementationCompleted = true;
+          const verificationItem = await providers.backlog.get(request.backlogId);
+          if (verificationItem.state !== 'verification') throw new Error('implementation did not enter verification');
+          await record('verifying');
+          await audit({ kind: 'qa.started' });
+          let qaPassedRecorded = false;
+          const auditQAPass = async () => {
+            if (qaPassedRecorded) return;
+            await audit({ kind: 'qa.passed' });
+            qaPassedRecorded = true;
+          };
+          const management = asManagementProviders(providers);
+          const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
+            new QARunner(bundle, workflowConfig, {
+              agentProvider: createAgentProvider(runRequest.agentProvider),
+              agentRuntime: runRequest.agentRuntime, executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : runRequest.executionMode, projectRoot: runRequest.workspaceRoot,
+              repositories: runRequest.repositories,
+              executionBaseBranch: runRequest.executionBaseBranch,
+              executionPlan: runRequest.executionPlan,
+              beforeChange: async () => {
+                await auditQAPass();
+                await record('publication_requested', {});
+              },
+              afterPublication: async change => {
+                await providers.changes.verifyIssueAssociation(change, workItemId);
+                await record('published', { changeId: change.id, changeUrl: change.url });
+              },
+              onCommit: (commitSha, branch) => audit({ kind: 'commit.recorded', phase: 'qa', commitSha, branch }),
+              onSession: audit,
+            })))(management, config, request);
+          const qaResult = await qa.process(request.backlogId).catch(async error => {
+            await audit({
+              kind: 'qa.failed', reason: 'blocked',
+              summary: `QA execution failed: ${error instanceof Error ? error.message : String(error)}`,
+            }).catch(() => undefined);
+            throw error;
+          });
+          if (qaResult.success) await auditQAPass();
+          else await audit({
+            kind: 'qa.failed',
+            reason: qaResult.rework ? 'rework' : 'blocked',
+            ...((qaResult.failureCode ?? (qaResult.rework ? 'qa_rework' : undefined))
+              ? { reasonCode: qaResult.failureCode ?? 'qa_rework' }
+              : {}),
+            ...(qaResult.summary ? { summary: qaResult.summary } : {}),
+            ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
+          });
+          const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
+          const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
+          const published = change && change.id && change.url && change.url === qaResult.mrUrl
+            && (change.state === 'open' || change.state === 'merged');
+          if (published) await providers.changes.verifyIssueAssociation(change, workItemId);
+          // The change is published and waits for a person to confirm the merge.
+          // A child waits exactly like a root does, so the shape of the
+          // outcome no longer depends on where the item sits in the tree.
+          const awaitingHumanMerge = change?.state === 'open' && finalItem?.state === 'merge_ready';
+          const status: ExecuteWorkItemStatus = qaResult.success && published && awaitingHumanMerge
+            ? 'merge_ready'
+            : qaResult.rework ? 'rework' : 'blocked';
+          if (status === 'merge_ready') {
+            await audit({ kind: 'change.published', changeId: String(change!.id), url: change!.url! });
+            await audit({ kind: 'human_gate.opened', gateId: `merge:${change!.id}`, reason: 'awaiting human merge' });
+          } else await audit({
+            kind: 'run.finished',
+            outcome: 'failed',
+            reason: status === 'rework' ? 'QA requested rework' : 'QA or provider change not confirmed',
+            reasonCode: qaResult.failureCode ?? (status === 'rework' ? 'qa_rework' : 'provider_change_unconfirmed'),
+          });
+          auditConcluded = true;
+          await record(status, published ? { changeId: change.id, changeUrl: change.url } : {});
+          return { executionId, workItemId, status, ...(published ? { changeUrl: change.url } : {}) };
+        } catch (error) {
+          if (implementationCompleted && !auditConcluded) {
+            await audit({ kind: 'run.finished', outcome: 'failed', reason: error instanceof Error ? error.message : String(error) }).catch(() => undefined);
+          }
+          await record('failed', { reason: error instanceof Error ? error.message : String(error) });
           throw error;
-        });
-        if (qaResult.success) await auditQAPass();
-        else await audit({
-          kind: 'qa.failed',
-          reason: qaResult.rework ? 'rework' : 'blocked',
-          ...((qaResult.failureCode ?? (qaResult.rework ? 'qa_rework' : undefined))
-            ? { reasonCode: qaResult.failureCode ?? 'qa_rework' }
-            : {}),
-          ...(qaResult.summary ? { summary: qaResult.summary } : {}),
-          ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
-        });
-        const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
-        const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
-        const published = change && change.id && change.url && change.url === qaResult.mrUrl
-          && (change.state === 'open' || change.state === 'merged');
-        if (published) await providers.changes.verifyIssueAssociation(change, workItemId);
-        // The change is published and waits for a person to confirm the merge.
-        // A child waits exactly like a root does, so the shape of the
-        // outcome no longer depends on where the item sits in the tree.
-        const awaitingHumanMerge = change?.state === 'open' && finalItem?.state === 'merge_ready';
-        const status: ExecuteWorkItemStatus = qaResult.success && published && awaitingHumanMerge
-          ? 'merge_ready'
-          : qaResult.rework ? 'rework' : 'blocked';
-        if (status === 'merge_ready') {
-          await audit({ kind: 'change.published', changeId: String(change!.id), url: change!.url! });
-          await audit({ kind: 'human_gate.opened', gateId: `merge:${change!.id}`, reason: 'awaiting human merge' });
-        } else await audit({
-          kind: 'run.finished',
-          outcome: 'failed',
-          reason: status === 'rework' ? 'QA requested rework' : 'QA or provider change not confirmed',
-          reasonCode: qaResult.failureCode ?? (status === 'rework' ? 'qa_rework' : 'provider_change_unconfirmed'),
-        });
-        auditConcluded = true;
-        await record(status, published ? { changeId: change.id, changeUrl: change.url } : {});
-        return { executionId, workItemId, status, ...(published ? { changeUrl: change.url } : {}) };
-      } catch (error) {
-        if (implementationCompleted && !auditConcluded) {
-          await audit({ kind: 'run.finished', outcome: 'failed', reason: error instanceof Error ? error.message : String(error) }).catch(() => undefined);
         }
-        await record('failed', { reason: error instanceof Error ? error.message : String(error) });
-        throw error;
+      } finally {
+        await journal.close();
       }
     } finally {
-      await journal.close();
+      await releaseLock(lock, lockPath);
     }
-  } finally {
-    await releaseLock(lock, lockPath);
-  }
+  }, (input.runOptions?.executionMode ?? 'interactive') === 'interactive'
+    && (input.runOptions?.agentProvider ?? getWorkflowConfig().agentDefault) === 'claude-code'
+    && (input.runOptions?.sandboxProvider ?? 'local') === 'local');
 }
 
 async function journalPublication(manifest: ResolvedExecutionManifest, executionId: string, workItemId: string): Promise<{ requested: boolean; published?: { id: string; url: string } }> {
@@ -537,7 +554,7 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
       || (publication && (change.id !== publication.id || change.url !== publication.url))
       || (item.changeRequest && item.changeRequest.id !== change.id)
       || (change.sourceBranch !== item.branchName && change.sourceBranch !== `${item.branchName}-qa`)
-      || change.targetBranch !== request.targetBranch) {
+      || change.targetBranch !== (request.executionPlan?.targetRef ?? request.executionBaseBranch ?? request.targetBranch)) {
       throw new Error('provider change request identity mismatch');
     }
     if (change.state !== 'open' && change.state !== 'merged') throw new Error('provider change request is closed without merge');

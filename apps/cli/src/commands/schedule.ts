@@ -31,6 +31,7 @@ export function registerScheduleCommands(program: Command): void {
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else {
           detail(`Capacity: ${result.capacity}; attempts: ${result.executions.length}; waiting: ${result.waiting.length}`);
+          if (result.baselineBranch) detail(`Baseline branch: ${result.baselineBranch}`);
           for (const [index, wave] of (result.waves ?? []).entries()) detail(`Wave ${index + 1} (after prior merges): ${wave.join(', ')}`);
           for (const execution of result.executions) detail(`${execution.workItemId}: ${execution.status}${execution.error ? ` (${execution.error})` : ''}`);
           for (const item of result.waiting) detail(`${item.workItemId}: ${item.runnability.reason ?? 'waiting for capacity'}`);

@@ -6,6 +6,7 @@ import { getWorkflowConfig, repositoryExecutionDefaults } from '@afk/runtime/inf
 import { createAgentProvider, prepareAgentRuntime, resolveAgentProviderName } from '@afk/runtime/domain/agents/index';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 import { resolveWorkflowRunRequest, parseExecutionPlan } from '@afk/runtime/execution';
+import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '@afk/runtime/domain/backlog/prd-baseline';
 
 /**
  * Run QA for one item already awaiting verification. Loop invokes the same
@@ -41,8 +42,16 @@ export function registerQACommands(program: Command): void {
         if (item.state !== 'verification') {
           throw new Error(`backlog ${item.id} is in ${item.state}; QA requires verification state`);
         }
-        const plan = request.executionPlan ?? parseExecutionPlan(item.description)
-          ?? repositoryExecutionDefaults(config, request.trackerProjectKey, request.repoRoot);
+        // The plan the item is verified against: the manifest record when a
+        // managed run left one, the body's own declaration otherwise. A slice
+        // of a PRD that says nothing itself inherits that PRD's baseline
+        // branch, which is where the PRD accumulates its slices.
+        const prdBaseline = await resolveParentPrdBaseline(item.parentId, id => providers.backlog.get(id));
+        const plan = resolvePrdExecutionPlan({
+          plan: request.executionPlan ?? parseExecutionPlan(item.description),
+          prdBaseline,
+          fallback: repositoryExecutionDefaults(config, request.trackerProjectKey, request.repoRoot),
+        });
         const runner = new QARunner(providers, config, { executionMode: options.mode, agentProvider, agentRuntime,
           projectRoot: request.workspaceRoot, repositories: request.repositories?.map(repository => repository.primary
             ? { ...repository, baseBranch: plan.baseRef, targetBranch: plan.targetRef, sourceBranch: plan.sourceRef } : repository), executionPlan: plan });

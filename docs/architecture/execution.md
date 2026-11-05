@@ -26,6 +26,7 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk execute --work-item-id <id>`: execute the managed lifecycle, including eligibility and manifest checks, implementation, independent QA, change-request handling, and the human-controlled merge gate.
 - `afk loop start`: repeatedly attempt one manifest-bound work item by delegating to the same managed execution path. It is not a global multi-item scheduler.
 - `afk qa`: retry an item in `verification`, using its managed manifest when present; `--execution-manifest <path>` selects an explicit manifest.
+- `afk backlog baseline --id <prd>`: report the branch a PRD accumulates its slices on and the slices that inherit it; `--branch <name>` records the branch in the PRD's body.
 - `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; `--watch` waits for external state changes, `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Each preview wave assumes prior waves have been merged and reconciled. SIGINT/SIGTERM stop dispatch and drain active attempts.
 - `afk doctor [--workspace-root <path>] [--json]`: inspect bare caches, dependency pools, managed workspaces, live repository leases, and conservative reclaimable-byte estimates. This is read-only; `afk observe doctor` continues to describe the event store.
 - `afk observe`: inspect executions and their audit/evidence projections.
@@ -108,6 +109,32 @@ repositories:
     baseRef: staging
 ```
 
+### PRD baseline branches
+
+A PRD accumulates its slices on a branch of its own. The repository's integration line is where that branch was cut from; it is not where the slices land. Every slice is written on the PRD's baseline branch and merges into it, and the baseline branch merges into the integration line once the whole PRD is done. A repository can therefore hold several PRDs at once, each with its own accumulation branch.
+
+The branch is named after the PRD's issue number, so the same PRD uses the same branch name in every repository it touches:
+
+```text
+prd/<issue number>
+```
+
+A PRD that needs a different name declares it in its own body:
+
+```markdown
+## Baseline Branch
+
+- Baseline Ref: prd/27
+```
+
+A slice inherits the PRD's baseline branch only when it declares no execution refs of its own. An explicit `## Base Version` declaration always wins: it is a statement about that one piece of work. The inherited branch is both where the slice starts and where it merges into — base and target are the same branch — while the functional `Source Ref` travels with the work and says nothing about the baseline.
+
+The inheritance crosses repositories. A slice of a PRD lives in another repository than the PRD itself, and the branch name is the same in both, so the PRD's issue number is the only thing the inheritance needs to carry.
+
+A baseline branch that does not exist yet is created from the remote's default branch when the repository is prepared; that is where the PRD's work started. A base branch somebody declared by hand is expected to exist, and a missing one is an error rather than a new branch. A PRD parent that cannot be read is an error where the answer decides where the work runs: silently using the integration line would put the slice exactly where the baseline model says it must not go. A question that only reports what was already published — which branch a change request targeted — ignores an unreadable parent instead, because a transient read must not block a human over a change that already exists.
+
+`afk backlog baseline --id <prd>` reports the branch a PRD accumulates on and the slices that inherit it; `--branch <name>` records the branch in the PRD's body. `afk schedule` names the baseline branch in its report.
+
 ### Repository arbitration and dispatch
 
 Managed execution holds leases for every manifest repository across implementation and QA. Standalone preparation acquires the same leases; nested phases borrow the enclosing lease. Acquisition sorts and deduplicates repository keys, rolls back partial acquisition, and rejects contention before claiming a managed work item. Heartbeats and generation IDs reuse `FilesystemClaimLock`; expired generations cannot renew or release successors. Recovery requires an expired lease and a demonstrably dead local owner; unknown or remote owners remain protected.
@@ -121,6 +148,8 @@ The scheduler reads the complete credential-scoped inventory, rejects dependency
 ### Recovery policy
 
 Execution must fail closed when required identity, manifest, claim, or verification evidence is missing or invalid. Recovery and reconciliation use the existing work-item identity and recorded state; reconciliation is not a shortcut for creating a new execution manifest. If the agent stops responding or verification cannot run, the system must preserve evidence and surface a recoverable state rather than treating the task as complete.
+
+The verification branch is the branch an earlier attempt published its change request from. When it is still there, the verification reuses that change request and refreshes its evidence instead of refusing to create a second branch with the same name — the merge into the baseline rewrites the branch anyway. The implementation branch is deliberately different: a branch that already exists may hold work that was never pushed, so a worktree for it is refused rather than reused. A preparation that fails gives its sharing guard back, so the attempt that follows reaches the real failure instead of a double prepare.
 
 ## Related documents
 

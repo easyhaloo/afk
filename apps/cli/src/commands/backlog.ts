@@ -44,6 +44,7 @@ import {
   applyBacklogRelationUpdate,
   applyBacklogRole,
   applyBacklogExecutionBase,
+  applyBacklogPrdBaseline,
   applyBacklogMode,
   confirmBacklogMerge,
   createBacklog,
@@ -62,6 +63,8 @@ import {
 import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { applyExecutionBaseBranch } from '@afk/runtime/domain/backlog/index';
+import { parsePrdBaselineBranch, prdBaselineBranchName, prdIssueNumber } from '@afk/runtime/domain/backlog/prd-baseline';
+import { parseExecutionPlan } from '@afk/runtime/domain/backlog/execution-plan';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../output.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
@@ -731,6 +734,24 @@ async function collectWorkItems(): Promise<{ items: readonly GlobalWorkItem[] } 
   return { items: collected.items };
 }
 
+/**
+ * The work items every project of one platform the credentials reach, when
+ * they can be collected completely.
+ *
+ * A PRD's slices live in the repositories the work touches, so a list that
+ * covers one repository cannot answer what a PRD accumulates. An incomplete
+ * collection is not an answer either: it would hide slices. A relationship
+ * never crosses platforms, so the PRD's own platform is the one to collect.
+ */
+async function collectGlobalSlices(platform: GlobalTrackerPlatform): Promise<{ items: readonly GlobalWorkItem[] } | undefined> {
+  try {
+    const collected = await collectGlobalWorkItemInventory(createGlobalWorkItemCatalogs(platform));
+    return collected.complete ? { items: collected.items } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
   options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; baseBranch?: string; dependsOn?: string[]; mode?: string; kind?: string; dryRun?: boolean; idempotencyKey?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
@@ -994,6 +1015,98 @@ export async function runBacklogExecutionBase(
       return;
     }
     success(`Backlog ${id} now starts from ${baseBranch.trim()}`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(command, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+export interface BacklogPrdBaselineSlice {
+  id: string;
+  title: string;
+  /** The base the slice declares, when it declares one. */
+  base?: string;
+  /** Whether the slice inherits the PRD's baseline branch. */
+  inherits: boolean;
+}
+
+export interface BacklogPrdBaselineReport {
+  id: string;
+  issueNumber?: number;
+  /** The branch the PRD accumulates its slices on. */
+  branch: string;
+  /** Whether the PRD declares the branch in its body or follows the convention. */
+  declared: boolean;
+  /** The slices that hang under the PRD, in every repository it touches. */
+  slices: BacklogPrdBaselineSlice[];
+  /** Whether the slice list spans repositories or covers this project only. */
+  scope: 'global' | 'project';
+}
+
+/**
+ * Report the branch a PRD accumulates its slices on, and record it when the
+ * operator names one.
+ *
+ * The branch belongs to the PRD rather than to one repository, so it is read
+ * from the PRD's body and used by every repository the PRD touches. The slices
+ * are collected the same way: a PRD's slices live in the repositories the work
+ * touches, not in the repository the PRD is filed in.
+ */
+export async function runBacklogPrdBaseline(
+  provider: BacklogManagementProvider,
+  id: string,
+  branch: string | undefined,
+  options: JsonMode = {},
+): Promise<void> {
+  const command = 'backlog.baseline';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    const item = await provider.get(id);
+    if (item.kind !== 'prd') throw new Error(`backlog ${id} is not a PRD anchor and has no baseline branch`);
+    if (branch !== undefined) {
+      if (!branch.trim()) throw new Error('PRD baseline branch is required');
+      await applyBacklogPrdBaseline(provider, id, branch.trim());
+    }
+    const current = await provider.get(id);
+    const issueNumber = current.issueNumber ?? prdIssueNumber(current.id);
+    if (issueNumber === undefined) throw new Error(`backlog ${id} has no issue number, so its baseline branch cannot be named`);
+    const declared = parsePrdBaselineBranch(current.description);
+    const collected = await collectGlobalSlices(parseWorkItemId(current.id).platform as GlobalTrackerPlatform);
+    const slices = collected?.items.filter(candidate => candidate.parentId === current.id) ?? [];
+    const report: BacklogPrdBaselineReport = {
+      id: current.id,
+      issueNumber,
+      branch: declared ?? prdBaselineBranchName(issueNumber),
+      declared: declared !== undefined,
+      scope: collected ? 'global' : 'project',
+      slices: slices.length
+        ? slices.map(slice => {
+          const base = parseExecutionPlan(slice.description)?.baseRef;
+          return { id: slice.id, title: slice.title, ...(base ? { base } : {}), inherits: !base };
+        })
+        : (await provider.list({ parentId: id })).map(child => ({
+          id: child.id,
+          title: child.title,
+          ...(child.executionBase ? { base: child.executionBase } : {}),
+          inherits: !child.executionBase,
+        })),
+    };
+    if (options.json) {
+      emitSuccess<BacklogPrdBaselineReport>(command, report);
+      return;
+    }
+    success(`PRD ${id} accumulates on ${report.branch}${report.declared ? '' : ' (conventional name)'}`);
+    if (!report.slices.length) {
+      detail('No slice hangs under this PRD yet');
+      return;
+    }
+    for (const slice of report.slices) {
+      detail(`${slice.id} ${slice.base ? `starts from ${slice.base}` : `inherits ${report.branch}`}`);
+    }
+    if (report.scope === 'project') detail('Slices cover this project only: the cross-project inventory is unavailable');
   } catch (error) {
     if (options.json) {
       emitFailure(command, classifyError(error), (error as Error).message);
@@ -1545,6 +1658,32 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'base')!, 'backlog.base', argv);
+
+  backlog.command('baseline')
+    .description('Report the branch a PRD accumulates its slices on, and record it when one is named')
+    .requiredOption('--id <id>', 'Backlog ID of the PRD')
+    .option('--branch <branch>', 'Record this branch as the baseline branch of the PRD')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogPrdBaseline(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          options.branch,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.baseline', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'baseline')!, 'backlog.baseline', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

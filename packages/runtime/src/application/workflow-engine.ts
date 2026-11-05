@@ -44,7 +44,7 @@ import type { Step, StepResult } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/types.js';
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
-import { resolveBacklogExecutionBase } from '../domain/backlog/creation.js';
+import { resolveItemExecutionBase } from '../domain/backlog/creation.js';
 import { blockBacklog } from '../domain/backlog/commands.js';
 import { parseWorkItemId } from '../domain/work-item/identity.js';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
@@ -444,7 +444,7 @@ export class WorkflowRunner {
       const backlog = await this.providers.backlog.get(backlogId);
       if (backlog.kind === 'prd') throw new Error(`backlog ${backlogId} is a PRD anchor and is not runnable`);
       if (!options.baseBranchExplicit) {
-        baseBranch = await resolveBacklogExecutionBase(this.providers.backlog, backlog, baseBranch);
+        baseBranch = await resolveItemExecutionBase(this.providers.backlog, backlog, baseBranch);
         options = { ...options, baseBranch,
           branchStrategy: options.branchStrategy?.type === 'named' ? { ...options.branchStrategy, baseBranch } : options.branchStrategy,
           repositories: options.repositories?.map(repository => repository.primary ? { ...repository, baseBranch } : repository) };

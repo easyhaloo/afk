@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { simpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import { FilesystemClaimLock } from '../../domain/backlog/claim.js';
 import { resolveWorkspaceRoot } from '../../shared/workspace-paths.js';
 
@@ -14,7 +14,7 @@ export class RepositoryStore {
     this.locks = new FilesystemClaimLock(join(this.root, '.locks'), { gateTimeoutMs: 120_000, gateRetryMs: 50 });
   }
 
-  async ensureCheckout(url: string, repoRoot: string, baseBranch: string): Promise<void> {
+  async ensureCheckout(url: string, repoRoot: string, baseBranch: string, options: { createBaseline?: boolean } = {}): Promise<void> {
     const remote = new URL(url);
     const project = remote.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
     if (!['http:', 'https:'].includes(remote.protocol) || remote.username || remote.password || remote.search || remote.hash || !project) {
@@ -50,6 +50,16 @@ export class RepositoryStore {
         throw new Error('repository store origin does not match requested remote');
       }
       await git.raw(['config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*']);
+      if (!(await this.remoteHasBranch(git, baseBranch))) {
+        // A PRD baseline branch belongs to the PRD, not to the repository, so it
+        // may not exist yet. It is cut from the repository's own default
+        // branch: that is where the PRD's work started.
+        if (!options.createBaseline) {
+          throw new Error(`base branch ${baseBranch} does not exist in ${url}`);
+        }
+        const source = await this.defaultBranch(git);
+        await git.raw(['push', 'origin', `refs/heads/${source}:refs/heads/${baseBranch}`]);
+      }
       await git.raw(['fetch', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
       await fs.mkdir(dirname(repoRoot), { recursive: true });
       await git.raw(['worktree', 'add', '--detach', repoRoot, `refs/remotes/origin/${baseBranch}`]);
@@ -59,6 +69,20 @@ export class RepositoryStore {
   async ownsCheckout(repoRoot: string): Promise<boolean> {
     const commonRoot = await this.commonDirectory(repoRoot);
     return commonRoot !== undefined && this.contains(commonRoot);
+  }
+
+  /** Whether the remote has the branch. The local clone may not know it yet. */
+  private async remoteHasBranch(git: SimpleGit, branch: string): Promise<boolean> {
+    const heads = await git.raw(['ls-remote', '--heads', 'origin', branch]);
+    return heads.trim().length > 0;
+  }
+
+  /** The branch the remote points its HEAD at. */
+  private async defaultBranch(git: SimpleGit): Promise<string> {
+    const symref = await git.raw(['ls-remote', '--symref', 'origin', 'HEAD']);
+    const match = /^ref:\s+refs\/heads\/(.+?)\s+HEAD$/m.exec(symref);
+    if (!match) throw new Error('remote does not advertise a default branch');
+    return match[1].trim();
   }
 
   async withCheckoutLock<Result>(repoRoot: string, operation: () => Promise<Result>): Promise<Result> {

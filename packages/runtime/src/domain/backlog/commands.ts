@@ -8,9 +8,9 @@ import type {
   QABacklogProvider,
 } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
-import { resolveBacklogExecutionBase } from './creation.js';
+import { resolveItemExecutionBase } from './creation.js';
 
-export { planBacklogCreate, resolveBacklogExecutionBase } from './creation.js';
+export { planBacklogCreate, resolveBacklogExecutionBase, resolveItemExecutionBase } from './creation.js';
 
 export type { BacklogManagementProvider } from './index.js';
 
@@ -106,6 +106,16 @@ export async function applyBacklogExecutionBase(
   if (!baseBranch?.trim()) throw new Error('execution base branch is required');
   if (!provider.applyExecutionBase) throw new Error('backlog provider does not support execution base edits');
   await provider.applyExecutionBase(id, baseBranch.trim());
+}
+
+export async function applyBacklogPrdBaseline(
+  provider: BacklogManagementProvider,
+  id: string,
+  branch: string,
+): Promise<void> {
+  if (!branch?.trim()) throw new Error('PRD baseline branch is required');
+  if (!provider.applyPrdBaseline) throw new Error('backlog provider does not support PRD baseline edits');
+  await provider.applyPrdBaseline(id, branch.trim());
 }
 
 export interface BacklogChangeProvider {
@@ -292,8 +302,13 @@ export async function reconcileMergedBacklog(
  *
  * The body declares the ref the work starts from, and the execution manifest
  * is derived from it — so the declaration is the branch the change request
- * lands on. An explicit base edge is the older way of saying the same thing,
- * and the configured branch is the last resort.
+ * lands on. A slice of a PRD inherits the branch that PRD accumulates on, and
+ * an explicit base edge is the older way of saying the same thing. The
+ * configured branch is the last resort.
+ *
+ * This answers a question about a change that was already published, so an
+ * unreadable parent only means there is nothing to inherit: it never refuses
+ * the answer.
  */
 export async function resolveExpectedTargetBranch(
   provider: Pick<QABacklogProvider, 'get'>,
@@ -301,7 +316,7 @@ export async function resolveExpectedTargetBranch(
   fallback: string,
 ): Promise<string> {
   if (item.executionBase) return item.executionBase;
-  return resolveBacklogExecutionBase(provider, item, fallback);
+  return resolveItemExecutionBase(provider, item, fallback, { prdParentRequired: false });
 }
 
 function requiredReason(reason: string): string {

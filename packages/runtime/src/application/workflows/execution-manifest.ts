@@ -16,6 +16,7 @@ const REPOSITORY_KEYS = new Set([
   'baseBranch',
   'targetBranch',
   'sourceBranch',
+  'prdBaseline',
   'role',
   'workingBranch',
   'primary',
@@ -43,6 +44,15 @@ export interface ExecutionManifestRepository {
   baseBranch: string;
   targetBranch?: string;
   sourceBranch?: string;
+  /**
+   * The base branch is a PRD baseline branch rather than a repository branch.
+   *
+   * A PRD accumulates its slices on a branch of its own, and that branch may
+   * not exist yet in the repository. Only a PRD baseline branch may be created
+   * on demand; a base branch somebody declared by hand is expected to exist,
+   * and a missing one is an error rather than a new branch.
+   */
+  prdBaseline?: boolean;
   role?: string;
   workingBranch: string;
   primary: boolean;
@@ -172,6 +182,7 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
     baseBranch: branchValue(candidate.baseBranch, `${label}.baseBranch`),
     ...(candidate.targetBranch === undefined ? {} : { targetBranch: branchValue(candidate.targetBranch, `${label}.targetBranch`) }),
     ...(candidate.sourceBranch === undefined ? {} : { sourceBranch: branchValue(candidate.sourceBranch, `${label}.sourceBranch`) }),
+    ...(candidate.prdBaseline === undefined ? {} : { prdBaseline: candidate.prdBaseline === true }),
     ...(candidate.role === undefined ? {} : { role: textValue(candidate.role, `${label}.role`) }),
     workingBranch: repositoryWorkingBranch,
     primary: candidate.primary,

@@ -24,6 +24,20 @@ describe('acceptance criterion tool requirements', () => {
     ]);
   });
 
+  it('does not read a quoted alternation as a command', () => {
+    // The alternation belongs to the grep pattern. Reading `knowledgebase/`
+    // as a binary would probe a directory as if it were a tool and block a
+    // criterion that can be checked here.
+    expect(requiredToolsForCommand("test $(grep -cE 'buildWikiBasePath|knowledgebase/' src/services/kbase-wiki.ts) -ge 12"))
+      .toEqual(['grep']);
+    expect(requiredToolsForCommand("curl -fsS 'http://host/a|b' | jq '.x'")).toEqual(['curl', 'jq']);
+  });
+
+  it('reads the binary a command substitution runs', () => {
+    expect(requiredToolsForCommand('test $(wc -l < file) -gt 0')).toEqual(['wc']);
+    expect(requiredToolsForCommand('diff <(sort a) <(sort b)')).toEqual(['diff', 'sort']);
+  });
+
   describe('probes', () => {
     it('collects a pytest suite instead of asking for its version', () => {
       const probe = probeForTool('pytest', 'pytest knowledge/tests/test_recall_headers.py');

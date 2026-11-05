@@ -130,4 +130,16 @@ describe('RepositoryStore', () => {
     await expect(store.ensureCheckout(url, join(root, 'item-2'), 'main')).rejects.toThrow('origin does not match');
     expect(await readFile(join(checkout, 'tracked.txt'), 'utf8')).toBe('baseline\n');
   });
+
+  it('cuts a PRD baseline branch from the remote default branch and refuses to invent any other', async () => {
+    const baseline = join(root, 'item-1', 'api');
+    await store.ensureCheckout(url, baseline, 'prd/27', { createBaseline: true });
+    const bare = join(storeRoot, 'github.com', 'acme', 'api', 'bare.git');
+    expect((await simpleGit(bare).raw(['branch', '-r', '--list', 'origin/prd/27'])).trim()).toContain('origin/prd/27');
+    expect(await readFile(join(baseline, 'tracked.txt'), 'utf8')).toBe('baseline\n');
+    expect((await simpleGit(remote).raw(['branch', '--list', 'prd/27'])).trim()).toContain('prd/27');
+
+    await expect(store.ensureCheckout(url, join(root, 'item-2', 'api'), 'release'))
+      .rejects.toThrow('base branch release does not exist');
+  });
 });

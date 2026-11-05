@@ -16,6 +16,7 @@ import type { ManagementProviderBundle } from '../../infrastructure/provider/pro
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index.js';
 import { createExecutionPlan, parseExecutionPlan, type ExecutionPlan } from '../../domain/backlog/execution-plan.js';
+import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 import type { ChangeMergeState } from '../../domain/tracker/types.js';
 import type { BaselineMergeResult } from '../../infrastructure/git/branches/provider.js';
@@ -350,10 +351,19 @@ export class QARunner {
 
   /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
   private async resolveExecutionBranch(backlog: BacklogItem): Promise<string> {
-    return this.resolvePlan(backlog).baseRef;
+    return (await this.resolvePlan(backlog)).baseRef;
   }
 
-  private resolvePlan(backlog: BacklogItem): ExecutionPlan {
+  /**
+   * The plan this item is verified against.
+   *
+   * The manifest records the plan the implementation actually ran on, and a
+   * body declaration records what the item says about itself; the two must
+   * agree. When neither exists, a slice of a PRD inherits that PRD's baseline
+   * branch — the branch the PRD accumulates its slices on — and the
+   * repository's own defaults are the last resort.
+   */
+  private async resolvePlan(backlog: BacklogItem): Promise<ExecutionPlan> {
     const primary = this.repositories?.find(repository => repository.primary);
     const declared = parseExecutionPlan(backlog.description);
     const manifest = this.executionPlan ?? (primary && createExecutionPlan({
@@ -361,8 +371,13 @@ export class QARunner {
     }));
     if (manifest && declared && (manifest.baseRef !== declared.baseRef || manifest.targetRef !== declared.targetRef
       || manifest.sourceRef !== declared.sourceRef)) throw new Error('work item execution refs conflict with the execution manifest');
-    return manifest ?? declared ?? (this.executionBaseBranch ? createExecutionPlan({ baseRef: this.executionBaseBranch }) : undefined)
-      ?? repositoryExecutionDefaults(this.config, backlog.project?.projectKey, primary?.repoRoot ?? this.projectRoot);
+    if (manifest) return manifest;
+    const prdBaseline = await resolveParentPrdBaseline(backlog.parentId, id => this.providers.backlog.get(id));
+    return resolvePrdExecutionPlan({
+      plan: declared ?? (this.executionBaseBranch ? createExecutionPlan({ baseRef: this.executionBaseBranch }) : undefined),
+      prdBaseline,
+      fallback: repositoryExecutionDefaults(this.config, backlog.project?.projectKey, primary?.repoRoot ?? this.projectRoot),
+    });
   }
 
   /**
@@ -489,7 +504,7 @@ export class QARunner {
     try {
       const backlog = await this.providers.backlog.get(backlogId);
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
-      const targetBranch = this.resolvePlan(backlog).targetRef;
+      const targetBranch = (await this.resolvePlan(backlog)).targetRef;
       await this.beforeChange?.('publish', backlog);
       const commit = await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
       const commitSha = commit.sha;

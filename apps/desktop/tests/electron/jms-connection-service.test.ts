@@ -111,8 +111,20 @@ describe("JMS connection service", () => {
   });
 
   it("builds the interactive login session from the resolved jms binary", async () => {
-    const runtime = service({ cli: cli({ resolveBinaryPath: async () => "/opt/homebrew/bin/jms" }) });
-    await expect(runtime.session("llm-wiki@dev")).resolves.toEqual({ binary: "/opt/homebrew/bin/jms", args: ["login", "llm-wiki@dev"] });
+    // `process.execPath` is the one executable path that exists on every
+    // runner: `binaryPath()` refuses a resolved path the filesystem lost, so a
+    // hard-coded Homebrew path made this test depend on the developer's Mac.
+    const runtime = service({ cli: cli({ resolveBinaryPath: async () => process.execPath }) });
+    await expect(runtime.session("llm-wiki@dev")).resolves.toEqual({ binary: process.execPath, args: ["login", "llm-wiki@dev"] });
+  });
+
+  it("falls back to a configured candidate when the resolved binary is gone", async () => {
+    const runtime = createJmsConnectionService({
+      cli: cli({ resolveBinaryPath: async () => "/nonexistent/jms" }),
+      listHosts: async () => ({ hosts: [bastionHost] as never, diagnostics: [] }),
+      binaryCandidates: [process.execPath],
+    });
+    await expect(runtime.session("llm-wiki@dev")).resolves.toEqual({ binary: process.execPath, args: ["login", "llm-wiki@dev"] });
   });
 
   it("explains how to install jms when no binary is found", async () => {

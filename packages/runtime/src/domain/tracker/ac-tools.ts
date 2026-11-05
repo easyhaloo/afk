@@ -122,22 +122,30 @@ function binariesOf(segment: string): string[] {
   return tools;
 }
 
-/** The bodies of the `$(...)` substitutions in a command. */
+/**
+ * The bodies of the command substitutions in a command.
+ *
+ * Both forms run another command: `$(...)` substitutes its output, and
+ * `<(...)` substitutes a file descriptor. A binary inside either one has to
+ * exist for the check to run.
+ */
 function commandSubstitutions(segment: string): string[] {
   const bodies: string[] = [];
-  let index = 0;
-  while (index < segment.length) {
-    const start = segment.indexOf('$(', index);
-    if (start < 0) break;
-    let depth = 1;
-    let cursor = start + 2;
-    while (cursor < segment.length && depth > 0) {
-      if (segment[cursor] === '(') depth += 1;
-      else if (segment[cursor] === ')') depth -= 1;
-      cursor += 1;
+  for (const opener of ['$(', '<(']) {
+    let index = 0;
+    while (index < segment.length) {
+      const start = segment.indexOf(opener, index);
+      if (start < 0) break;
+      let depth = 1;
+      let cursor = start + 2;
+      while (cursor < segment.length && depth > 0) {
+        if (segment[cursor] === '(') depth += 1;
+        else if (segment[cursor] === ')') depth -= 1;
+        cursor += 1;
+      }
+      if (depth === 0) bodies.push(segment.slice(start + 2, cursor - 1).trim());
+      index = cursor;
     }
-    if (depth === 0) bodies.push(segment.slice(start + 2, cursor - 1).trim());
-    index = cursor;
   }
   return bodies;
 }

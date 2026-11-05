@@ -85,7 +85,8 @@ describe('recording backlog provider', () => {
       project: 'owner/repo',
       paths: [repository],
     });
-    expect(store.projects['github::owner/repo'].issues['229']).toMatchObject({ title: 'Ship the thing' });
+    // The index remembers which issues were seen, not their provider titles.
+    expect(Object.keys(store.projects['github::owner/repo'].issues)).toEqual(['229']);
   });
 
   it('records every issue of a listing', async () => {

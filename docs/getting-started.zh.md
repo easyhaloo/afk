@@ -122,9 +122,11 @@ afk backlog show --id 123
 ### 本地 tracker 索引
 
 AFK 把接触过的 provider 项目记在跨工作区共享的本地索引
-`~/.afk/tracker-projects.json` 中。每次 backlog 列表、
+`~/.afk/storage/tracker.sqlite` 中。每次 backlog 列表、
 issue 查询、inventory 和执行都会写入它看到的内容：provider 项目、访问时
-所在的仓库、以及涉及的 issue。
+所在的仓库、以及涉及的 issue。用 SQLite 是为了让两个 loop 同时写入时都能
+落盘；旧的 `~/.afk/tracker-projects.json` 会在首次使用时导入，并保留为
+`tracker-projects.json.migrated-<日期>`。
 
 正是这个索引让"裸 issue id"在任何目录下都够用：
 

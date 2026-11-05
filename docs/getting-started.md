@@ -141,10 +141,12 @@ are configured.
 ### Local tracker index
 
 AFK keeps a local index of the provider projects it has worked with, in
-`~/.afk/tracker-projects.json`, shared across workspaces. Every backlog
+`~/.afk/storage/tracker.sqlite`, shared across workspaces. Every backlog
 listing, issue lookup, inventory and execution writes what it saw: the
 provider project, the repository it was reached from, and the issues it
-touched.
+touched. It is a SQLite database so two loops recording at once both land;
+the retired `~/.afk/tracker-projects.json` is imported on first use and kept
+as `tracker-projects.json.migrated-<date>`.
 
 That index is what makes a bare issue id enough, in any directory:
 

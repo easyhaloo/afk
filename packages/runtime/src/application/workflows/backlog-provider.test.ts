@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetManager } from './budget.js';
+import { assemblePrompt } from './execution-protocol.js';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
@@ -43,6 +47,18 @@ function claimed(itemToClaim = item): { claim: BacklogClaim; release: ReturnType
 function runner(bundle: ProviderBundle): WorkflowRunner {
   const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
   return new WorkflowRunner(bundle, { agentProvider: agent, observer });
+}
+
+/**
+ * The goal of a step, as the agent receives it.
+ *
+ * The step's worktree is a temporary directory: the backlog context is
+ * written into it, and the repository under test must not collect it.
+ */
+async function stepGoal(subject: unknown, step: unknown, ctx: unknown, worktreePath: string): Promise<string> {
+  const segments = await (subject as { resolveStepPrompt: (step: unknown, ctx: unknown, worktree: string) => Promise<{ label: string; text: string }[]> })
+    .resolveStepPrompt(step, ctx, worktreePath);
+  return assemblePrompt(segments);
 }
 
 describe('WorkflowRunner backlog provider mode', () => {
@@ -161,16 +177,18 @@ describe('WorkflowRunner backlog provider mode', () => {
       type: 'goal_complete', kind: 'ac_verification', result: 'FAIL', summary: 'search shortcut failed',
       failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
     };
+    const worktree = await mkdtemp(join(tmpdir(), 'afk-step-goal-'));
 
-    const implementation = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 });
-    const verifier = await subject.resolveStepPrompt({ id: 'verify-ac', prompt: '/goal verify #{iid}' }, { iid: 42 });
+    const implementation = await stepGoal(subject, { id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 }, worktree);
+    const verifier = await stepGoal(subject, { id: 'verify-ac', prompt: '/goal verify #{iid}' }, { iid: 42 }, worktree);
 
     expect(implementation).toContain('AC correction required');
     expect(implementation).toContain('/s enters search');
     expect(verifier).not.toContain('AC correction required');
+    await rm(worktree, { recursive: true, force: true });
   });
 
-  it('injects the claimed backlog title and description into implementation prompts', async () => {
+  it('writes the backlog description into the worktree and points the goal at it', async () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;
     subject.activeBacklog = {
@@ -178,11 +196,19 @@ describe('WorkflowRunner backlog provider mode', () => {
       title: 'Add interactive JSON proof',
       description: 'Create e2e-interactive-json-proof.txt with the exact required content.',
     };
+    const worktree = await mkdtemp(join(tmpdir(), 'afk-step-context-'));
 
-    const prompt = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement issue #{iid}' }, { iid: 42 });
+    const prompt = await stepGoal(subject, { id: 'implement', prompt: '/goal implement issue #{iid}' }, { iid: 42 }, worktree);
 
     expect(prompt).toContain('Add interactive JSON proof');
-    expect(prompt).toContain('Create e2e-interactive-json-proof.txt');
+    expect(prompt).toContain('.afk/backlog-context.md');
+    // The description itself is not in the goal: the goal condition has a
+    // character budget the provider enforces, and the description does not.
+    expect(prompt).not.toContain('Create e2e-interactive-json-proof.txt');
+    const context = await readFile(join(worktree, '.afk', 'backlog-context.md'), 'utf-8');
+    expect(context).toContain('Create e2e-interactive-json-proof.txt');
+    expect(context).toContain('Add interactive JSON proof');
+    await rm(worktree, { recursive: true, force: true });
   });
 
   it('injects the active QA rework record into the next implementation prompt', async () => {
@@ -194,12 +220,14 @@ describe('WorkflowRunner backlog provider mode', () => {
       failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
       requiredChecks: [{ command: 'pnpm vitest run', expected: 'passes' }],
     };
+    const worktree = await mkdtemp(join(tmpdir(), 'afk-step-rework-'));
 
-    const prompt = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 });
+    const prompt = await stepGoal(subject, { id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 }, worktree);
 
     expect(prompt).toContain('open QA rework record (r2, attempt 2)');
     expect(prompt).toContain('/s enters search');
     expect(prompt).toContain('pnpm vitest run');
+    await rm(worktree, { recursive: true, force: true });
   });
 
   it('closes an interactive phase sandbox before returning even when a resource scope owns it', async () => {

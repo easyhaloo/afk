@@ -13,6 +13,7 @@ import type {
   AgentCommand,
   AgentCommandOptions,
   AgentEvent,
+  AgentPromptLimits,
   AgentSession,
   TokenUsage,
   SessionSnapshot,
@@ -33,6 +34,18 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'usage',
   'interactive',
 ]);
+
+/**
+ * The prompt limits Claude Code's TUI enforces.
+ *
+ * Its `/goal` command refuses a condition longer than 4,000 characters, and
+ * the refusal is silent: the TUI prints one line, the agent never starts,
+ * and the runner only learns about it when the idle timeout expires. AFK
+ * measures the goal against this limit before dispatching it.
+ */
+const PROMPT_LIMITS: AgentPromptLimits = {
+  goalConditionMaxChars: 4000,
+};
 
 /**
  * Normalise Claude Code's usage block to `TokenUsage`.
@@ -59,6 +72,7 @@ function toTokenUsage(usage: ClaudeUsageBlock): TokenUsage {
 export class ClaudeCodeProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'claude-code';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
+  readonly promptLimits: AgentPromptLimits = PROMPT_LIMITS;
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const argv = ['claude', '--dangerously-skip-permissions'];

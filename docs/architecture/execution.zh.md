@@ -82,6 +82,18 @@ agent 自己报告的失败原因就是根因。provider 抓到的 stdout/stderr
 
 审计流携带这份诊断：`failure.classified` 事件带 code、evidence 和前一次失败的快照，`run.finished` 在 `reason` 里带根因、在 `reasonCode` 里带 code。CLI 把根因从事件流里读回来：`afk log <runId>` 在本身没有 reason 的事件上显示 `Cause: …`，`afk observe executions --json` 列出每个失败执行的根因。
 
+### goal condition 的长度预算
+
+goal condition 有字符预算，而这个预算属于 **provider**，不属于 AFK。`AgentProvider` 声明它（`promptLimits.goalConditionMaxChars`）；Claude Code 声明它的 TUI 强制的 4000 字符。AFK 去问 provider，而不是自己猜一个数。
+
+这个上限只适用于 **goal 通道** —— 即 `/goal` 命令之后的文本。作为普通消息送达的提示词（batch 模式会剥掉 `/goal`）没有 goal condition 上限，也不会被拿来比这个数。没有声明上限的 provider 按 AFK 已知的最严格上限来衡量：拒绝一个本可能被接受的 goal 只损失一条报错，而派发一个会被拒绝的 goal 损失的是整段 idle timeout。
+
+**内容不走提示词。** backlog description —— 也就是 AC 清单 —— 被写进工作树的 `.afk/backlog-context.md`，goal 里保留模板自身的任务陈述、backlog 标题，以及一句让 agent 先读这个文件的指针。提示词长度因此与 description 长度解耦，而 AC 仍然逐字送达。`.afk/` 是 AFK 自己的运行期产物目录：这个文件不会进入变更请求，也不会让工作树看起来是脏的。QA 路径与实现路径都这样做。
+
+提示词由**带标签的片段**拼装（任务陈述、标题、上下文指针、返工上下文、完成协议），因此当提示词过长时能指出是哪一片超了。
+
+**派发前就能发现的问题，派发前就发现。** 最终提示词会在 agent 启动前与 provider 声明的上限比对。超限时 run 立刻以上面的结构化诊断失败：`prompt_budget_exceeded`、实际长度、上限、越界的那一片、以及建议动作 —— 而不是派发一个必然被静默拒绝的提示词，然后半小时后死于 idle timeout。见 [ADR-0026](../adr/0026-goal-condition-budget-and-worktree-context.md)。
+
 ### 执行基线与配置
 
 条目的 `## Base Version` 段声明不可变的执行计划：

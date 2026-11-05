@@ -317,8 +317,14 @@ export class TmuxClient {
 
     const target = `${normalizeTmuxSessionName(session)}:${window}`;
     // Type the prompt text directly (which already contains `/goal ` prefix).
-    // The text is submitted as a single line
-    // (no embedded newlines which would cause premature submission in the TUI).
+    //
+    // The prompt may contain newlines: the goal is built from several
+    // pieces, and the backlog criteria live in a file the agent reads. tmux
+    // sends an embedded newline as a line feed (0x0A), not as a carriage
+    // return (0x0D) — verified against a raw-mode pane — and the composer
+    // submits on the carriage return that `C-m` sends below. A newline in
+    // the prompt therefore reaches the composer as text instead of
+    // submitting the goal half-way through.
     await this.exec(['send-keys', '-t', target, '--', prompt]);
     await this.sleep(500);
 

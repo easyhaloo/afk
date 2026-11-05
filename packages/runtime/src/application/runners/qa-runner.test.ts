@@ -1,11 +1,11 @@
 import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
@@ -16,6 +16,20 @@ vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../infrastructure/io/index.js')>(),
   configureStatusline: ioMocks.configureStatusline,
 }));
+
+/**
+ * The QA worktree.
+ *
+ * It is a temporary directory, because the runner writes the backlog
+ * context into it — the repository under test must not collect it.
+ */
+let worktreePath = '';
+beforeAll(async () => {
+  worktreePath = await mkdtemp(join(tmpdir(), 'afk-qa-worktree-'));
+});
+afterAll(async () => {
+  await rm(worktreePath, { recursive: true, force: true });
+});
 
 const config = {
   targetBranch: 'main',
@@ -52,7 +66,7 @@ function fixture() {
     merge: vi.fn(async () => {}),
   };
   const branches = {
-    createVerificationWorktree: vi.fn(async () => ({ branchName: 'qa-60', worktreePath: process.cwd() })),
+    createVerificationWorktree: vi.fn(async () => ({ branchName: 'qa-60', worktreePath: worktreePath })),
     commit: vi.fn(async () => ({ sha: 'commit-60', skippedBinaryFiles: [] })),
     mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     listUnresolvedConflicts: vi.fn(async () => []),
@@ -79,7 +93,7 @@ function fixture() {
   };
   const sandbox = {
     id: 'sandbox-60',
-    worktreePath: process.cwd(),
+    worktreePath: worktreePath,
     workspacePath: process.cwd(),
     startAgent: vi.fn(async () => execution),
     close: vi.fn(async () => {}),
@@ -212,7 +226,7 @@ describe('QARunner execution boundary', () => {
     const session = f.sandboxProvider.create.mock.calls[0][0].session;
     expect(f.agentProvider.createExecution).toHaveBeenCalledWith({
       sandbox: f.sandbox,
-      worktreePath: process.cwd(),
+      worktreePath: worktreePath,
       sessionId: session,
       executionMode: 'batch',
       signalType: 'goal_complete',
@@ -224,7 +238,13 @@ describe('QARunner execution boundary', () => {
     const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt;
     expect(qaPrompt).toContain('不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件');
     expect(qaPrompt).toContain('Backlog title: search mode');
-    expect(qaPrompt).toContain('Backlog description:\nsupport /s');
+    // The description is in the worktree, not in the goal: the goal
+    // condition has a character budget the provider enforces.
+    expect(qaPrompt).toContain('.afk/backlog-context.md');
+    expect(qaPrompt).not.toContain('support /s');
+    const context = await readFile(join(worktreePath, '.afk', 'backlog-context.md'), 'utf-8');
+    expect(context).toContain('support /s');
+    expect(context).toContain('search mode');
     expect(tmux.createSession).not.toHaveBeenCalled();
     expect(tmux.waitForPrompt).not.toHaveBeenCalled();
     expect(tmux.sendPrompt).not.toHaveBeenCalled();
@@ -243,6 +263,69 @@ describe('QARunner execution boundary', () => {
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(f.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: '2025-11-8-show' }));
+  });
+
+  /**
+   * The defect this guards: a description carrying the full acceptance
+   * criteria list grew the goal condition until Claude Code's TUI refused
+   * it. The refusal was silent, so the run died on an idle timeout half an
+   * hour later with no cause anywhere.
+   */
+  it('keeps a long acceptance criteria list out of the goal condition', async () => {
+    const f = fixture();
+    const criteria = Array.from({ length: 120 }, (_, index) =>
+      `- [ ] criterion ${index}: the entry hugs the bottom edge -- pnpm exec playwright test boot-${index}`,
+    ).join('\n');
+    expect(criteria.length).toBeGreaterThan(6000);
+    f.providers.backlog.get.mockResolvedValue({
+      ...(await f.providers.backlog.get()),
+      description: criteria,
+    } as never);
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'interactive',
+      tmux: {} as any,
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const outcome = await runner.process('60');
+
+    expect(outcome.success).toBe(true);
+    const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt as string;
+    // The goal condition is what the TUI measures, and it fits.
+    const goalCondition = qaPrompt.replace(/^\/goal\s*/i, '');
+    expect(goalCondition.length).toBeLessThan(4000);
+    expect(qaPrompt).not.toContain('criterion 119');
+    // The criteria are in the worktree, where the agent can read them.
+    const context = await readFile(join(worktreePath, '.afk', 'backlog-context.md'), 'utf-8');
+    expect(context).toContain('criterion 119');
+    expect(context.length).toBeGreaterThan(6000);
+  });
+
+  it('refuses a goal the provider would reject, before the agent is started', async () => {
+    const f = fixture();
+    f.agentProvider.promptLimits = { goalConditionMaxChars: 500 };
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'interactive',
+      tmux: {} as any,
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const outcome = await runner.process('60');
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.failureCode).toBe('prompt_budget_exceeded');
+    expect(outcome.summary).toContain('500-character');
+    expect(outcome.evidence?.some(entry => entry.label === 'goal condition length')).toBe(true);
+    // The agent never saw the goal: no half hour of waiting for a refusal.
+    expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
+    expect(f.sandbox.startAgent).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith(
+      '60', 'blocked', { reason: expect.stringContaining('500-character') },
+    );
   });
 
   it('classifies a QA execution timeout separately from a generic QA failure', async () => {
@@ -310,7 +393,7 @@ describe('QARunner execution boundary', () => {
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
     expect(mergeFeatureIntoBaseline).toHaveBeenCalled();
-    expect(ioMocks.configureStatusline).toHaveBeenCalledWith(process.cwd());
+    expect(ioMocks.configureStatusline).toHaveBeenCalledWith(worktreePath);
     expect(mergeFeatureIntoBaseline.mock.invocationCallOrder[0]).toBeLessThan(ioMocks.configureStatusline.mock.invocationCallOrder[0]);
   });
 
@@ -350,7 +433,7 @@ describe('QARunner execution boundary', () => {
     expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
       agentTransport: 'app-server', agentThreadId: 'thread-60',
     }));
-    expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ worktree: process.cwd() }));
+    expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ worktree: worktreePath }));
     expect(runtime.writeDiagnostics).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
       result: expect.objectContaining({ status: 'completed' }), output: expect.any(String),
     }));
@@ -502,9 +585,9 @@ describe('QARunner execution boundary', () => {
     const result = await runner.process('60');
 
     expect(result).toMatchObject({ success: true });
-    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
-    expect(f.providers.branches.commit).toHaveBeenCalledWith(process.cwd(), expect.stringContaining('QA'));
-    expect(f.providers.branches.push).toHaveBeenCalledWith('qa-60', process.cwd());
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(worktreePath, 'main', 'afk/backlog-60');
+    expect(f.providers.branches.commit).toHaveBeenCalledWith(worktreePath, expect.stringContaining('QA'));
+    expect(f.providers.branches.push).toHaveBeenCalledWith('qa-60', worktreePath);
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({
       sourceBranch: 'qa-60', targetBranch: 'main', draft: false,
     }));
@@ -549,7 +632,7 @@ describe('QARunner execution boundary', () => {
     expect(result).toMatchObject({ success: true });
     // The conflict is resolved in the worktree the change request is
     // published from, and the resolution is committed there.
-    expect(f.providers.branches.commit).toHaveBeenCalledWith(process.cwd(), 'Resolve merge conflict with main');
+    expect(f.providers.branches.commit).toHaveBeenCalledWith(worktreePath, 'Resolve merge conflict with main');
     expect(prompts[0]).toContain('shared.txt');
     expect(prompts[0]).toContain('notes.bin');
     expect(prompts[0]).toContain('main');
@@ -884,7 +967,7 @@ describe('QARunner execution boundary', () => {
     // Merging is a person's decision: the change is published into the
     // configured target branch and waits there.
     expect(result).toMatchObject({ success: true });
-    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(worktreePath, 'main', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'main' }));
     expect(f.providers.changes.merge).not.toHaveBeenCalled();
     expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
@@ -927,7 +1010,7 @@ describe('QARunner execution boundary', () => {
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
-    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(process.cwd(), 'release', 'afk/backlog-60');
+    expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(worktreePath, 'release', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'production' }));
     expect(f.providers.backlog.get).not.toHaveBeenCalledWith('11');
   });
@@ -949,7 +1032,7 @@ describe('QARunner workspace independence', () => {
     const prepareRepositories = { prepare: vi.fn(async () => { order.push('prepare'); return workspace; }) };
     f.branches.createVerificationWorktree.mockImplementation(async () => {
       order.push('createVerificationWorktree');
-      return { branchName: 'qa-60', worktreePath: process.cwd() };
+      return { branchName: 'qa-60', worktreePath: worktreePath };
     });
     f.branches.cleanup.mockImplementation(async () => { order.push('cleanup'); });
 

@@ -176,6 +176,26 @@ describe('NamedBranchStrategy', () => {
     expect((await simpleGit(second.path).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('feature/reuse');
   });
 
+  it('takes over a path that still holds the files of an earlier attempt', async () => {
+    const s = new NamedBranchStrategy();
+    const first = await s.prepareWorktree(git, { type: 'named', branch: 'feature/leftover' }, { repoPath });
+    _clearPreparedWorktreesForTest();
+    // The earlier attempt left its files behind, and Git does not know the
+    // worktree any more: the branch is checked out nowhere.
+    await git.raw(['worktree', 'remove', '--force', first.path]);
+    await fs.mkdirSync(first.path, { recursive: true });
+    await fs.writeFileSync(path.join(first.path, 'leftover.txt'), 'evidence\n');
+
+    const second = await s.prepareWorktree(git, { type: 'named', branch: 'feature/leftover' },
+      { repoPath, reuseExistingBranch: true });
+
+    expect(second.path).toBe(first.path);
+    expect((await simpleGit(second.path).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('feature/leftover');
+    // The leftover is replaced by the checkout: Git refuses a directory that
+    // still holds files.
+    expect(fs.existsSync(path.join(second.path, 'leftover.txt'))).toBe(false);
+  });
+
   it('gives the sharing guard back when a preparation fails', async () => {
     await git.checkoutLocalBranch('feature/taken', 'main');
     await git.checkout('main');

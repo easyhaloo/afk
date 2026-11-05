@@ -24,7 +24,9 @@ import {
   gitBranchDelete,
   checkNotShared,
   localBranchExists,
+  removeWorktreeAtPath,
   removeWorktreesHoldingBranch,
+  removeLeftoverDirectory,
   releasingPathOnFailure,
   releasePath,
 } from './base.js';
@@ -69,7 +71,17 @@ export class NamedBranchStrategy implements BranchStrategy {
         // request from. The verification reuses that change request and
         // refreshes its evidence, so it checks the branch out again instead
         // of creating a second one that Git would refuse.
+        //
+        // The takeover is deterministic. The earlier attempt may have left
+        // the path registered — for this branch or for another one — and Git
+        // refuses a path that already is a worktree. It may also have left
+        // the directory behind with the files it held, and Git refuses to
+        // check a branch out into a directory that still holds files.
+        // Whatever stands at the path is AFK's own scratch space for this
+        // branch.
+        await removeWorktreeAtPath(git, path);
         await removeWorktreesHoldingBranch(git, branch);
+        await removeLeftoverDirectory(path, baseDir);
         await git.raw(['worktree', 'add', path, branch]);
         return { branch, path, isNewBranch: false };
       }

@@ -10,10 +10,16 @@ import { join } from 'path';
 import type { SimpleGit } from 'simple-git';
 import { BranchStrategyError } from './types.js';
 import { resolveWorkspaceRoot, workspaceDataDirectory } from '../../shared/workspace-paths.js';
-import { basename, isAbsolute, relative } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 
-/** Track worktrees that have been prepared in the current process so that
- *  concurrent calls refuse to share a writable branch. */
+/** Track the worktrees the running attempts have prepared, so that two
+ *  concurrent attempts refuse to share a writable branch.
+ *
+ *  A claim belongs to the attempt that took it and ends with that attempt.
+ *  An attempt that keeps its worktree for evidence keeps the files, not the
+ *  claim: a claim that outlives its attempt refuses the next attempt of the
+ *  same item with a double-prepare error instead of the failure that really
+ *  happened — and the item can never be verified again in that process. */
 const preparedWorktrees = new Map<string, string>(); // path -> branch
 
 /** Default base dir for worktrees, relative to repoPath. */
@@ -70,6 +76,49 @@ export async function localBranchExists(git: SimpleGit, branch: string): Promise
 }
 
 /**
+ * The worktrees this repository knows about, with the branch each one holds.
+ *
+ * Git prints the resolved path of a worktree, which is not always the path
+ * AFK asked for: a link anywhere in the path is resolved before Git records
+ * it. Comparing the paths as they are therefore compares two different
+ * strings for the same worktree.
+ */
+export async function listWorktrees(git: SimpleGit): Promise<{ path: string; branch?: string }[]> {
+  const listing = await git.raw(['worktree', 'list', '--porcelain']).catch(() => '');
+  const entries: { path: string; branch?: string }[] = [];
+  let current: { path: string; branch?: string } | undefined;
+  for (const line of listing.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length).trim() };
+      entries.push(current);
+    } else if (line.startsWith('branch ') && current) {
+      current.branch = line.slice('branch '.length).trim();
+    }
+  }
+  return entries;
+}
+
+/** The path with every link in it resolved, the way Git records it. */
+async function resolvedPath(path: string): Promise<string> {
+  try {
+    return await fs.realpath(path);
+  } catch {
+    // The path itself may be gone already; the links in its parent are not.
+    const parent = await fs.realpath(dirname(path)).catch(() => undefined);
+    return parent ? join(parent, basename(path)) : resolve(path);
+  }
+}
+
+/** Whether the repository knows the path as one of its worktrees. */
+export async function isWorktreePath(git: SimpleGit, path: string): Promise<boolean> {
+  const target = await resolvedPath(path);
+  for (const entry of await listWorktrees(git)) {
+    if (await resolvedPath(entry.path) === target) return true;
+  }
+  return false;
+}
+
+/**
  * Remove the worktrees that have the branch checked out.
  *
  * Git refuses to check the same branch out twice, so a branch an earlier
@@ -78,34 +127,72 @@ export async function localBranchExists(git: SimpleGit, branch: string): Promise
  * reproduced by the attempt that follows.
  */
 export async function removeWorktreesHoldingBranch(git: SimpleGit, branch: string): Promise<void> {
-  const listing = await git.raw(['worktree', 'list', '--porcelain']).catch(() => '');
-  let path: string | undefined;
-  for (const line of listing.split('\n')) {
-    if (line.startsWith('worktree ')) {
-      path = line.slice('worktree '.length).trim();
-      continue;
-    }
-    if (line.trim() === `branch refs/heads/${branch}`) {
-      if (path) await git.raw(['worktree', 'remove', path, '--force']).catch(() => undefined);
-      path = undefined;
+  for (const entry of await listWorktrees(git)) {
+    if (entry.branch === `refs/heads/${branch}`) {
+      await git.raw(['worktree', 'remove', entry.path, '--force']).catch(() => undefined);
     }
   }
   await git.raw(['worktree', 'prune']).catch(() => undefined);
 }
 
-/** Remove a worktree. Idempotent — ENOENT and "not a working tree" are swallowed. */
-export async function gitWorktreeRemove(git: SimpleGit, path: string, force = false): Promise<void> {
-  const args = ['worktree', 'remove'];
-  if (force) args.push('--force');
-  args.push(path);
-  try {
-    await git.raw(args);
-  } catch (err: unknown) {
-    const msg = String(err);
-    if (!/not a working tree/i.test(msg) && !/No such file/i.test(msg)) {
-      throw err;
+/**
+ * Release the worktree registered at the path, whatever branch it holds.
+ *
+ * Git refuses to check a branch out into a path that already is a worktree,
+ * so the earlier attempt's worktree has to be released before the path can
+ * be used again.
+ */
+export async function removeWorktreeAtPath(git: SimpleGit, path: string): Promise<void> {
+  const target = await resolvedPath(path);
+  for (const entry of await listWorktrees(git)) {
+    if (await resolvedPath(entry.path) === target) {
+      await git.raw(['worktree', 'remove', entry.path, '--force']).catch(() => undefined);
     }
   }
+  await git.raw(['worktree', 'prune']).catch(() => undefined);
+}
+
+/**
+ * Remove a directory that Git does not know as a worktree.
+ *
+ * Git refuses to check a branch out into a directory that still holds files.
+ * Such a directory is the leftover of an earlier attempt — the worktree it
+ * prepared was released, the files it held stayed — and it is AFK's own
+ * scratch space for that branch. The evidence the attempt gathered was
+ * already reported by the attempt that kept it.
+ */
+export async function removeLeftoverDirectory(path: string, baseDir: string): Promise<void> {
+  const location = relative(baseDir, path);
+  if (location === '' || location.startsWith('..') || isAbsolute(location)) return;
+  const entries = await fs.readdir(path).catch(() => []);
+  // Git checks a branch out into an empty directory just fine.
+  if (entries.length === 0) return;
+  await fs.rm(path, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/**
+ * Remove a worktree. Idempotent — a path that is not a worktree is swallowed.
+ *
+ * Whether the path is a worktree is a question the repository answers, not
+ * something Git's exit code says: a localized Git reports "not a working
+ * tree" in its own words, and AFK does not parse Git's sentences.
+ */
+export async function gitWorktreeRemove(git: SimpleGit, path: string, force = false): Promise<void> {
+  const target = await resolvedPath(path);
+  let registered: string | undefined;
+  for (const entry of await listWorktrees(git)) {
+    if (await resolvedPath(entry.path) === target) {
+      registered = entry.path;
+      break;
+    }
+  }
+  if (!registered) return;
+  const args = ['worktree', 'remove'];
+  if (force) args.push('--force');
+  // Git is given the path it recorded, so it finds the worktree even when
+  // AFK reaches it through a link.
+  args.push(registered);
+  await git.raw(args);
 }
 
 /** Delete a local branch. Idempotent — ENOENT/merged is swallowed. */
@@ -159,7 +246,11 @@ export function checkNotShared(path: string, branch: string, kind: string): void
   preparedWorktrees.set(path, branch);
 }
 
-/** Release the guard when cleanup() runs. */
+/** Release the claim an attempt took on a worktree path.
+ *
+ *  Called when the attempt ends — whether it deletes the worktree or keeps
+ *  it for evidence. The claim is about the running attempt, not about the
+ *  files on disk. */
 export function releasePath(path: string): void {
   preparedWorktrees.delete(path);
 }

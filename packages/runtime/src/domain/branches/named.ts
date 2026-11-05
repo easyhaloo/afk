@@ -23,6 +23,9 @@ import {
   gitWorktreeRemove,
   gitBranchDelete,
   checkNotShared,
+  localBranchExists,
+  removeWorktreesHoldingBranch,
+  releasingPathOnFailure,
   releasePath,
 } from './base.js';
 
@@ -60,9 +63,19 @@ export class NamedBranchStrategy implements BranchStrategy {
 
     checkNotShared(path, branch, this.kind);
     const baseBranch = options.baseBranch ?? config.baseBranch ?? 'main';
-    await gitWorktreeAdd(git, branch, path, baseBranch, this.kind);
-
-    return { branch, path, isNewBranch: true };
+    return releasingPathOnFailure(path, async () => {
+      if (options.reuseExistingBranch && await localBranchExists(git, branch)) {
+        // The branch is the one an earlier attempt published its change
+        // request from. The verification reuses that change request and
+        // refreshes its evidence, so it checks the branch out again instead
+        // of creating a second one that Git would refuse.
+        await removeWorktreesHoldingBranch(git, branch);
+        await git.raw(['worktree', 'add', path, branch]);
+        return { branch, path, isNewBranch: false };
+      }
+      await gitWorktreeAdd(git, branch, path, baseBranch, this.kind);
+      return { branch, path, isNewBranch: true };
+    });
   }
 
   async finalize(_git: SimpleGit, _config: BranchStrategyConfig, _handle: BranchHandle, _options?: FinalizeOptions): Promise<void> {

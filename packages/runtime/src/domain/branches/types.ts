@@ -49,6 +49,16 @@ export interface PrepareOptions {
   baseBranch?: string;
   /** Directory under which worktrees are placed (default: <repoPath>/.worktrees). */
   worktreeBaseDir?: string;
+  /**
+   * Check the branch out when it already exists instead of refusing.
+   *
+   * A branch that already exists may hold work that was never pushed, so
+   * creating a worktree for it normally refuses. The verification branch is
+   * the exception: it is the branch of a change request that an earlier
+   * attempt already published, and the verification reuses that change
+   * request and refreshes its evidence.
+   */
+  reuseExistingBranch?: boolean;
 }
 
 /** Options for finalize(). */

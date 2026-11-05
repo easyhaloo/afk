@@ -128,6 +128,8 @@ The scheduler reads the complete credential-scoped inventory, rejects dependency
 
 Execution must fail closed when required identity, manifest, claim, or verification evidence is missing or invalid. Recovery and reconciliation use the existing work-item identity and recorded state; reconciliation is not a shortcut for creating a new execution manifest. If the agent stops responding or verification cannot run, the system must preserve evidence and surface a recoverable state rather than treating the task as complete.
 
+The verification branch is the branch an earlier attempt published its change request from. When it is still there, the verification reuses that change request and refreshes its evidence instead of refusing to create a second branch with the same name — the merge into the baseline rewrites the branch anyway. The implementation branch is deliberately different: a branch that already exists may hold work that was never pushed, so a worktree for it is refused rather than reused. A preparation that fails gives its sharing guard back, so the attempt that follows reaches the real failure instead of a double prepare.
+
 ## Related documents
 
 - [Full Workflow & E2E Architecture](full-workflow-e2e-architecture.md)

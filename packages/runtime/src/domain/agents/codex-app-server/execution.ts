@@ -42,6 +42,8 @@ export class CodexAppServerExecution implements AgentExecution {
   private turnId?: string;
   /** Re-arms the idle watchdog whenever the agent says something. */
   private onActivity?: () => void;
+  /** When the agent last said something. */
+  private lastActivityAt?: string;
 
   private constructor(
     private readonly options: AgentExecutionOptions,
@@ -98,7 +100,13 @@ export class CodexAppServerExecution implements AgentExecution {
     const timeoutMs = options?.completionTimeoutMs ?? 600_000;
     const idleTimeoutMs = options?.idleTimeoutMs;
     const timer = setTimeout(() => {
-      void this.finish(this.buildResult('timed_out'));
+      void this.finish(this.buildResult('timed_out', undefined, {
+        timeout: {
+          kind: 'completion',
+          budgetMs: timeoutMs,
+          lastActivityAt: this.lastActivityAt,
+        },
+      }));
     }, timeoutMs);
     // The idle watchdog: a turn that says nothing for too long is not
     // working. The app-server reports every turn event as a notification,
@@ -111,6 +119,13 @@ export class CodexAppServerExecution implements AgentExecution {
           void this.finish(this.buildResult('timed_out', {
             code: 'AGENT_IDLE',
             message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s`,
+          }, {
+            timeout: {
+              kind: 'idle',
+              budgetMs: idleTimeoutMs,
+              idleMs: idleTimeoutMs,
+              lastActivityAt: this.lastActivityAt,
+            },
           }));
         }, idleTimeoutMs);
       };
@@ -173,6 +188,7 @@ export class CodexAppServerExecution implements AgentExecution {
   private async consumeNotifications(): Promise<void> {
     for await (const notification of this.client.notifications()) {
       // The agent just said something, whatever it was.
+      this.lastActivityAt = new Date().toISOString();
       this.onActivity?.();
       collectAgentToolEvent('codex', notification, this.tools);
       for (const event of normalizeAppServerNotification(notification)) {
@@ -208,7 +224,7 @@ export class CodexAppServerExecution implements AgentExecution {
     }
   }
 
-  private buildResult(status: ExecutionResult['status'], error?: ExecutionResult['error']): ExecutionResult {
+  private buildResult(status: ExecutionResult['status'], error?: ExecutionResult['error'], diagnostics?: ExecutionResult['diagnostics']): ExecutionResult {
     return {
       version: 1,
       runId: this.id,
@@ -219,6 +235,7 @@ export class CodexAppServerExecution implements AgentExecution {
       ...(this.usage ? { usage: this.usage } : {}),
       ...(this.tools.size ? { tools: [...this.tools.values()] } : {}),
       ...(error ? { error } : {}),
+      ...(diagnostics ? { diagnostics } : {}),
       commits: [],
     };
   }

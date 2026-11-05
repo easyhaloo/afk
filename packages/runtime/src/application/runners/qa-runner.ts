@@ -20,7 +20,8 @@ import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 import type { ChangeMergeState } from '../../domain/tracker/types.js';
 import type { BaselineMergeResult } from '../../infrastructure/git/branches/provider.js';
-import { formatExecutionFailure } from '../workflow-engine.js';
+import { formatExecutionFailure, formatExecutionFailureReport } from '../workflow-engine.js';
+import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
 import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
@@ -31,11 +32,11 @@ import { BudgetStore } from '../workflows/budget-store.js';
 import { RunResourceScope } from '../workflows/resource-scope.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import { runQaPreflight } from './qa-preflight.js';
-import type { RunEventData } from '@afk/core';
+import type { RunEventData, RunFailureReasonCode } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
-type QAProcessResult = { success: boolean; mrUrl?: string; rework?: boolean; summary?: string; failureCode?: 'qa_timeout' | 'qa_execution_failed' | 'qa_rework' | 'provider_change_unconfirmed' | 'merge_conflict' | 'qa_environment_missing'; failedCriteria?: QAFailureCriterion[] };
+type QAProcessResult = { success: boolean; mrUrl?: string; rework?: boolean; summary?: string; failureCode?: RunFailureReasonCode; failedCriteria?: QAFailureCriterion[]; evidence?: FailureEvidence[] };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -231,8 +232,21 @@ export class QARunner {
       if (preflight.blocked) {
         runtimeErrorSummary = preflight.summary;
         logger.warn({ backlogId: id, blockers: preflight.blockers }, 'QA environment cannot run the acceptance criteria');
+        // An environment declaration, not a verdict on the criteria: the
+        // probes it ran travel with it so the reader can tell the two apart.
+        const declaration = createFailureDiagnostic({
+          code: 'qa_environment_missing',
+          message: preflight.summary!,
+          evidence: preflight.blockers.flatMap(blocker => blocker.probes.map(probe => ({
+            kind: 'probe' as const,
+            label: `probe for '${blocker.tool}' (criterion: ${blocker.criterion})`,
+            expected: `the check command '${blocker.checkCommand}' to be runnable on this machine`,
+            actual: probe.output.trim().length > 0 ? probe.output.trim().slice(0, 400) : 'the probe produced no output',
+            command: [probe.command, ...probe.args].join(' '),
+          }))),
+        });
         await this.markBlocked(id, preflight.summary!);
-        return { success: false, summary: preflight.summary, failureCode: 'qa_environment_missing' };
+        return { success: false, summary: preflight.summary, failureCode: 'qa_environment_missing', ...(declaration.evidence.length > 0 ? { evidence: declaration.evidence } : {}) };
       }
       if (preflight.inconclusive.length > 0) {
         logger.info({ backlogId: id, inconclusive: preflight.inconclusive }, 'QA environment probe was not conclusive; continuing');
@@ -263,10 +277,13 @@ export class QARunner {
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
-        const summary = `QA ${result.status}: ${formatExecutionFailure(result)}`;
+        // The root cause is the agent's own report or the specific reason the
+        // run ended; the provider's captured output is evidence, not the cause.
+        const diagnosis = diagnoseExecutionFailure(result);
+        const summary = `QA ${result.status}: ${diagnosis.message}`;
         runtimeErrorSummary = summary;
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
-        return { success: false, summary, failureCode: result.status === 'timed_out' ? 'qa_timeout' : 'qa_execution_failed' };
+        return { success: false, summary, failureCode: diagnosis.code };
       }
 
       const signal = asQAResult(result.structuredOutput);
@@ -469,8 +486,11 @@ export class QARunner {
       await fs.mkdir(this.logDir, { recursive: true });
       await fs.writeFile(join(this.logDir, `timeout-${backlogId}-${Date.now()}.log`), snapshot, 'utf-8');
     }
-    await this.markBlocked(backlogId, `QA ${result.status}: ${formatExecutionFailure(result)}`);
-    logger.warn({ backlogId, session, worktreePath, diagnostics: formatExecutionFailure(result) }, 'QA execution did not complete');
+    // The backlog comment carries the cause and the evidence: a blocked item
+    // that only says "QA timed_out" sends the operator back to the logs.
+    const diagnosis = diagnoseExecutionFailure(result);
+    await this.markBlocked(backlogId, `QA ${result.status}: ${formatExecutionFailureReport(result)}`);
+    logger.warn({ backlogId, session, worktreePath, code: diagnosis.code, providerCode: diagnosis.providerCode }, 'QA execution did not complete');
   }
 
   private async handleQAResult(

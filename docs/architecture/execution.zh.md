@@ -61,6 +61,27 @@ Provider backlog、Runtime 状态、run-event 审计轨迹和证据属于不同�
 
 ## 失败与恢复
 
+### 失败诊断
+
+失败的 run 携带的是**结构化失败诊断**，而不是一句自由文本的 reason。诊断把过去挤在一个字符串里的四件事分开：
+
+- `code` —— 稳定的机器可读失败码（`agent_idle_timeout`、`upstream_model_error`、`acceptance_criteria_failed`、`qa_environment_missing`、`workflow_setup` 等）。同一个 code 永远指同一种失败。
+- `class` —— 失败**关于**什么：`work`（对工作的判决）、`agent`（agent 运行的事实）、`upstream`（外部依赖的事实，例如模型服务）、`environment`（机器的事实）、`infrastructure`（AFK 自身的流水线）。读者必须能不看散文就分辨「我们的代码有问题」「我们的 agent 不说话了」「上游模型服务过载」。
+- `message` —— 一句人读的根本原因。它永远不是 provider 抓到的输出。
+- `evidence` —— 支撑它的证据：探测项及其命令、期望与实际观测；命令及其退出码；agent 输出的截断尾部；超时预算、最后已知活动，以及把这次超时判定为超时的依据。
+
+**第一次失败赢。** 失败只记录一次，落在一条链上。后来的失败不替换根因：它被追加，并指向它之前的那次失败。`run.finished`、被阻塞的 backlog 条目和 runtime 记录都携带根因，所以 run 失败的原因能活过之后到达的所有次生信息。
+
+agent 自己报告的失败原因就是根因。provider 抓到的 stdout/stderr 是证据：它以截断尾部（4 KiB，最后 40 行）保留，其中的错误行会被提到根因里，于是 pre-commit 钩子的拒绝不会被 `pnpm` 日志的尾巴顶替。
+
+超时是一等失败。静默超时、完成超时、硬超时各有自己的 code，并带上用尽的预算、最后已知活动与判定依据。
+
+「重试一次尝试是否有意义」从诊断里读，而不是从被拍平的字符串里重新推导。agent 错误码词汇保持原样：`AGENT_TURN_FAILED`、`AGENT_GONE`、`AGENT_IDLE` 是 agent 运行的事实而不是对工作的判决，而超时是关于工作的事实。
+
+环境断言是**环境声明**，永远不是测试结论。当 check 命令在本机跑不起来时，阻断理由会说明探测了哪个命令、期望什么、实际观测到什么，并归类为环境声明，读者因此能把它与「验收用例不通过」区分开。
+
+审计流携带这份诊断：`failure.classified` 事件带 code、evidence 和前一次失败的快照，`run.finished` 在 `reason` 里带根因、在 `reasonCode` 里带 code。CLI 把根因从事件流里读回来：`afk log <runId>` 在本身没有 reason 的事件上显示 `Cause: …`，`afk observe executions --json` 列出每个失败执行的根因。
+
 ### 执行基线与配置
 
 条目的 `## Base Version` 段声明不可变的执行计划：

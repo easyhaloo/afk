@@ -23,6 +23,10 @@ export type ExecutionSummary = {
   terminal: boolean;
   startedAt?: string;
   usage?: AgentUsage;
+  /** The root cause of the failure, when the run failed. */
+  failureSummary?: string;
+  /** The machine-readable failure code, when the run failed. */
+  failureCode?: string;
 };
 
 export type ExecutionQueryOptions = { workItemId?: WorkItemId; limit?: number; since?: string };
@@ -76,7 +80,7 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
 
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "usage"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "usage", "failureSummary", "failureCode"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
@@ -105,6 +109,8 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
       || usage.totalTokens !== (usage.inputTokens as number) + (usage.outputTokens as number)) throw new Error("execution usage is invalid");
     summary.usage = { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, totalTokens: usage.totalTokens as number };
   }
+  if (candidate.failureSummary !== undefined) summary.failureSummary = parseRequiredString(candidate.failureSummary, "execution summary: failureSummary");
+  if (candidate.failureCode !== undefined) summary.failureCode = parseRequiredString(candidate.failureCode, "execution summary: failureCode");
   return summary;
 }
 

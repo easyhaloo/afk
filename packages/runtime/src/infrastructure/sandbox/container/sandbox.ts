@@ -316,7 +316,16 @@ export class ContainerAgentExecution implements AgentExecution {
       if (this._interruptAcked) return this.result('aborted');
       if (Date.now() - startedAt >= timeout) {
         await this.kill();
-        return this.result('timed_out');
+        return this.result('timed_out', {
+          diagnostics: {
+            timeout: {
+              kind: 'completion',
+              budgetMs: timeout,
+              idleMs: activity.idleMs(),
+              lastActivityAt: activity.lastActivityAt(),
+            },
+          },
+        });
       }
 
       const signal = await readSignal(this.worktreePath).catch(() => undefined);
@@ -354,6 +363,14 @@ export class ContainerAgentExecution implements AgentExecution {
           await this.kill();
           return this.result('timed_out', {
             error: { code: 'AGENT_IDLE', message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s` },
+            diagnostics: {
+              timeout: {
+                kind: 'idle',
+                budgetMs: idleTimeoutMs,
+                idleMs: activity.idleMs(),
+                lastActivityAt: activity.lastActivityAt(),
+              },
+            },
           });
         }
       }

@@ -470,6 +470,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
               : {}),
             ...(qaResult.summary ? { summary: qaResult.summary } : {}),
             ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
+            ...(qaResult.evidence ? { evidence: qaResult.evidence } : {}),
           });
           const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
           const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
@@ -489,7 +490,9 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           } else await audit({
             kind: 'run.finished',
             outcome: 'failed',
-            reason: status === 'rework' ? 'QA requested rework' : 'QA or provider change not confirmed',
+            // The root cause, not a fixed phrase: the summary is what the QA
+            // runner diagnosed, and it is the only thing here that says why.
+            reason: qaResult.summary ?? (status === 'rework' ? 'QA requested rework' : 'QA or provider change not confirmed'),
             reasonCode: qaResult.failureCode ?? (status === 'rework' ? 'qa_rework' : 'provider_change_unconfirmed'),
           });
           auditConcluded = true;

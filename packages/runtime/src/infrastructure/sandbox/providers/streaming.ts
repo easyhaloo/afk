@@ -298,6 +298,14 @@ export class StreamingAgentExecution implements AgentExecution {
           sessionId: this.sessionId,
           tools: this.tools.size ? [...this.tools.values()] : undefined,
           commits: [],
+          diagnostics: {
+            timeout: {
+              kind: 'completion',
+              budgetMs: completionTimeoutMs,
+              idleMs: activity.idleMs(),
+              lastActivityAt: activity.lastActivityAt(),
+            },
+          },
         };
       }
       // The idle watchdog: a process that is alive but says nothing is not
@@ -317,6 +325,14 @@ export class StreamingAgentExecution implements AgentExecution {
             error: {
               code: 'AGENT_IDLE',
               message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s`,
+            },
+            diagnostics: {
+              timeout: {
+                kind: 'idle',
+                budgetMs: idleTimeoutMs,
+                idleMs: activity.idleMs(),
+                lastActivityAt: activity.lastActivityAt(),
+              },
             },
           };
         }

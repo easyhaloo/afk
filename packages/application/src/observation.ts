@@ -1,4 +1,4 @@
-import type { RunPhase, RunStatus } from '@afk/core';
+import type { RunEvent, RunPhase, RunStatus } from '@afk/core';
 import { loadRun } from './execution.js';
 import { projectAgentUsage, type AgentUsage } from './execution-query.js';
 import type { RunEventQueryPort } from './ports.js';
@@ -50,6 +50,40 @@ export interface ExecutionSummary {
   terminal: boolean;
   startedAt?: string;
   usage?: AgentUsage;
+  /** The root cause of the failure, when the run failed. */
+  failureSummary?: string;
+  /** The machine-readable failure code, when the run failed. */
+  failureCode?: string;
+}
+
+/**
+ * The root cause of a run, as its event stream recorded it.
+ *
+ * A failure is classified once, in a `failure.classified` event. Later events
+ * do not repeat it, so the summary has to look it up — otherwise a failed
+ * execution is listed without any reason at all.
+ */
+export function rootFailureOf(events: readonly RunEvent[]): { summary?: string; code?: string } {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const data = events[index].data;
+    if (data.kind === 'failure.classified') {
+      let root: { summary: string; code?: string } = {
+        summary: data.summary,
+        ...(data.code ? { code: data.code } : {}),
+      };
+      let node = data.cause;
+      while (node) {
+        root = { summary: node.message, code: node.code };
+        node = node.cause;
+      }
+      return root;
+    }
+    if (data.kind === 'qa.failed') {
+      const summary = data.summary ?? data.reason;
+      if (summary) return { summary, ...(data.reasonCode ? { code: data.reasonCode } : {}) };
+    }
+  }
+  return {};
 }
 
 export interface QueryExecutionHistoryResult {
@@ -82,6 +116,9 @@ export async function queryExecutionHistory(
       event.data.kind === 'run.started' && event.sequence <= observed.integrity.lastSequence
       && event.context.runId === runId && event.context.workItemId === observed.state.run!.workItemId
       && event.correlationId === observed.events[0]?.correlationId)?.occurredAt : undefined;
+    const failure = observed.state.run.status === 'failed'
+      ? rootFailureOf(observed.events.filter(event => event.sequence <= observed.integrity.lastSequence))
+      : {};
     matching.push({
       sortKey: observed.events[0]?.occurredAt ?? '',
       summary: {
@@ -95,6 +132,8 @@ export async function queryExecutionHistory(
         terminal: observed.state.terminal,
         ...(startedAt ? { startedAt } : {}),
         ...(usage ? { usage } : {}),
+        ...(failure.summary ? { failureSummary: failure.summary } : {}),
+        ...(failure.code ? { failureCode: failure.code } : {}),
       },
     });
   }

@@ -75,13 +75,41 @@ function timestamp(value: string): string {
   return Number.isFinite(date.getTime()) ? date.toLocaleString('sv-SE', { hour12: false }) : text(value);
 }
 
-export function formatEvent(event: RunEvent): string {
+/**
+ * The root cause of a failure, as the event stream recorded it.
+ *
+ * The reason for a failure is recorded once, in a `failure.classified` or
+ * `qa.failed` event. A later event that only says "this step failed" does not
+ * repeat it — but the stream still carries it, so the reader does not have to
+ * go and look for it.
+ */
+export function rootCauseMessage(events: readonly RunEvent[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const data = events[index].data;
+    if (data.kind === 'failure.classified') {
+      // Each failure points back at the one before it; the oldest link is the
+      // root cause.
+      let root = data.summary;
+      let node = data.cause;
+      while (node) {
+        root = node.message;
+        node = node.cause;
+      }
+      return root;
+    }
+    if (data.kind === 'qa.failed') return data.summary ?? data.reason;
+  }
+  return undefined;
+}
+
+export function formatEvent(event: RunEvent, priorEvents: readonly RunEvent[] = []): string {
   const { kind, ...details } = event.data;
   const severity = level(event.data);
   const lines = [`${timestamp(event.occurredAt)}  ${colored(severity.padEnd(5), severity)} #${event.sequence} ${titles[kind]}`];
   if (kind !== 'run.requested') lines.push(...fields(details));
   if (severity === 'ERROR' && !('reason' in details && details.reason) && !('summary' in details && details.summary) && !('failedCriteria' in details && details.failedCriteria?.length)) {
-    lines.push('                 No detailed failure reason recorded');
+    const cause = rootCauseMessage(priorEvents);
+    lines.push(cause ? `                 Cause: ${cause}` : '                 No detailed failure reason recorded');
   }
   if (event.evidence?.length) lines.push(...fields({ evidence: event.evidence }));
   return lines.join('\n');
@@ -125,15 +153,25 @@ export function formatRun(observed: ObserveRunResult, tail?: number): string {
     ...(last ? [`Latest     #${last.sequence} ${titles[last.data.kind]} at ${timestamp(last.occurredAt)}`] : []),
     '',
     `Timeline   Showing ${selected.length} of ${events.length} events`,
-    ...(events.length ? selected.map(formatEvent) : ['No events recorded for this run.']),
+    ...events.length ? selected.map(event => formatEvent(event, events.filter(prior => prior.sequence < event.sequence))) : ['No events recorded for this run.'],
   ].join('\n');
 }
 
 export function formatExecutionHistory(page: QueryExecutionHistoryResult): string {
   if (!page.executions.length) return 'No executions recorded.';
   return [
-    'RUN  |  WORK ITEM  |  STATE  |  PHASE  |  ATTEMPT  |  EVENTS',
-    ...page.executions.map(run => `${text(run.runId)}  |  ${text(run.workItemId)}  |  ${run.status.toUpperCase()}  |  ${text(run.phase ?? '-')}  |  ${run.attempt}  |  ${run.sequence}`),
+    'RUN  |  WORK ITEM  |  STATE  |  PHASE  |  ATTEMPT  |  EVENTS  |  FAILURE',
+    ...page.executions.map(run => [
+      text(run.runId),
+      text(run.workItemId),
+      run.status.toUpperCase(),
+      text(run.phase ?? '-'),
+      run.attempt,
+      run.sequence,
+      // A failed execution without a reason is the thing this whole chain
+      // exists to prevent.
+      text(run.failureSummary ?? (run.failureCode ?? '-')),
+    ].join('  |  ')),
     ...(page.nextCursor ? [`\nNext page: --since ${text(page.nextCursor)}`] : []),
   ].join('\n');
 }

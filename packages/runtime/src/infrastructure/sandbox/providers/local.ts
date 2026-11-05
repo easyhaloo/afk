@@ -332,6 +332,14 @@ export class LocalAgentExecution implements AgentExecution {
           sessionId: this.sessionId,
           commits: [],
           branch: this.sessionName,
+          diagnostics: {
+            timeout: {
+              kind: 'completion',
+              budgetMs: completionTimeoutMs,
+              idleMs: activity.idleMs(),
+              lastActivityAt: activity.lastActivityAt(),
+            },
+          },
         };
       }
 
@@ -448,6 +456,14 @@ export class LocalAgentExecution implements AgentExecution {
               error: {
                 code: 'AGENT_IDLE',
                 message: `the agent produced no output for ${Math.round(idleTimeoutMs / 1000)}s`,
+              },
+              diagnostics: {
+                timeout: {
+                  kind: 'idle',
+                  budgetMs: idleTimeoutMs,
+                  idleMs: activity.idleMs(),
+                  lastActivityAt: activity.lastActivityAt(),
+                },
               },
             };
           }

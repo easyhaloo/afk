@@ -26,6 +26,21 @@ export interface AgentToolCallSummary {
   durationMs?: number;
 }
 
+/**
+ * A machine-readable failure code.
+ *
+ * The code is the stable identity of a failure: the same code always names the
+ * same kind of failure, so a tool can branch on it without parsing prose. The
+ * human-readable reason stays in `summary` / `reason`.
+ *
+ * The vocabulary separates three kinds of fact, because "the work failed" and
+ * "the machine that runs the work failed" need different responses:
+ *
+ * - the work failed (a verdict the agent reached, a budget that ran out),
+ * - the agent run went wrong (silent, gone, no result),
+ * - an external dependency failed (the model service, the transport),
+ * - AFK's own execution plumbing failed (setup, crash, publication).
+ */
 export type RunFailureReasonCode =
   | 'qa_timeout'
   | 'qa_execution_failed'
@@ -35,7 +50,82 @@ export type RunFailureReasonCode =
   /** The machine cannot run the acceptance criteria's own check commands. */
   | 'qa_environment_missing'
   /** The agent died or stopped answering, and the attempt was retried. */
-  | 'agent_turn_failed';
+  | 'agent_turn_failed'
+  /** The agent said nothing for longer than it was allowed to. */
+  | 'agent_idle_timeout'
+  /** The agent did not finish within the completion budget. */
+  | 'agent_completion_timeout'
+  /** The agent did not finish within the hard budget; the session was killed. */
+  | 'agent_hard_timeout'
+  /** The agent session went away before it reported completion. */
+  | 'agent_session_ended'
+  /** The completion signal did not match the expected protocol. */
+  | 'agent_signal_mismatch'
+  /** The agent ended without producing the expected result. */
+  | 'agent_missing_result'
+  /** The agent process exited with a non-zero status. */
+  | 'agent_process_failed'
+  /** The agent process could not be started. */
+  | 'agent_spawn_failed'
+  /** The agent execution was interrupted before it reported completion. */
+  | 'agent_interrupted'
+  /** The agent execution failed for a reason the vocabulary does not name. */
+  | 'agent_execution_failed'
+  /** The model service reported an error (for example, an overload). */
+  | 'upstream_model_error'
+  /** The transport to the agent closed before the run completed. */
+  | 'upstream_transport_closed'
+  /** The transport to the agent could not be closed cleanly. */
+  | 'upstream_transport_close_failed'
+  /** The agent reported that it could not do the work. */
+  | 'work_reported_failure'
+  /** An acceptance criterion did not hold. */
+  | 'acceptance_criteria_failed'
+  /** The work item ran out of budget. */
+  | 'budget_exhausted'
+  /** The work item ran out of handoff budget. */
+  | 'handoff_budget_exhausted'
+  /** The workflow could not be set up. */
+  | 'workflow_setup'
+  /** The workflow threw unexpectedly. */
+  | 'workflow_crash'
+  /** The change request could not be published. */
+  | 'repository_publication';
+
+/**
+ * A snapshot of the failure that came before this one.
+ *
+ * The chain is what keeps the *first* failure from being lost: every later
+ * failure points back at the one before it, so the root cause stays
+ * reachable even after secondary information arrives.
+ */
+export interface FailureCauseSnapshot {
+  code: string;
+  class: string;
+  message: string;
+  at?: string;
+  cause?: FailureCauseSnapshot;
+}
+
+/** One piece of structured evidence behind a failure. */
+export interface FailureEvidenceEntry {
+  /** What kind of evidence this is: a probe, a command, a timeout, output. */
+  kind: string;
+  /** A short human label, e.g. `agent output (last 40 lines)`. */
+  label: string;
+  /** What was expected, when the evidence compares against a requirement. */
+  expected?: string;
+  /** What was actually seen. */
+  actual?: string;
+  /** The command that produced the evidence. */
+  command?: string;
+  /** The exit code of that command. */
+  exitCode?: number;
+  /** The evidence itself, truncated when it is long. */
+  detail?: string;
+  /** True when `detail` was cut to fit the size limit. */
+  truncated?: boolean;
+}
 
 export interface EvidenceRef {
   uri: string;
@@ -57,7 +147,7 @@ export type RunEventData =
   | { kind: 'commit.recorded'; phase: 'implementation' | 'qa'; commitSha: string; branch: string }
   | { kind: 'implementation.completed' }
   | { kind: 'qa.passed' }
-  | { kind: 'qa.failed'; reason?: string; reasonCode?: RunFailureReasonCode; summary?: string; failedCriteria?: Array<{ id: string; expected: string; actual: string }> }
+  | { kind: 'qa.failed'; reason?: string; reasonCode?: RunFailureReasonCode; summary?: string; failedCriteria?: Array<{ id: string; expected: string; actual: string }>; evidence?: FailureEvidenceEntry[] }
   | { kind: 'change.published'; changeId: string; url: string }
   | { kind: 'decision.made'; command: string; accepted: boolean; reason?: string }
   | { kind: 'effect.started'; effectKind: string; idempotencyKey: string }
@@ -67,7 +157,7 @@ export type RunEventData =
   | { kind: 'human_gate.opened'; gateId: string; reason: string }
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }
   | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string; reasonCode?: RunFailureReasonCode }
-  | { kind: 'failure.classified'; failureClass: string; summary: string }
+  | { kind: 'failure.classified'; failureClass: string; summary: string; code?: RunFailureReasonCode; cause?: FailureCauseSnapshot; evidence?: FailureEvidenceEntry[] }
   | { kind: 'agent.session_recorded'; sessionId: string; transcriptPath?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number }; tools?: AgentToolCallSummary[] };
 
 export type RunEventType = RunEventData['kind'];

@@ -19,4 +19,5 @@ for the workflow.
 | [ADR-0021](0021-backlog-relation-carrying.md) | Backlog 关系的承载方式与记录可读性 | accepted | 2026-11-03 |
 | [ADR-0022](0022-execution-plan-and-repository-leases.md) | Execution plans and repository leases | accepted | 2026-11-04 |
 | [ADR-0023](0023-repository-store-and-dependency-pool.md) | Repository store and dependency pool | accepted | 2026-11-04 |
+| [ADR-0025](0025-structured-failure-diagnostics.md) | Structured failure diagnostics | proposed | 2026-11-05 |
 | [ADR-0024](0024-prd-baseline-branches.md) | PRD baseline branches | accepted | 2026-11-05 |

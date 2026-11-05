@@ -9,6 +9,10 @@
  * The preflight asks first. It only blocks on what is clearly missing from
  * the machine — a missing tool, a missing dependency, a missing runtime — so
  * a criterion that fails for any other reason is still the agent's to settle.
+ *
+ * A block is an *environment declaration*: the machine could not satisfy the
+ * requirement. It is never a statement about the acceptance criteria, and
+ * the reason says so, with the probes it ran.
  */
 
 import { extractAC } from '../../domain/tracker/ac.js';
@@ -55,7 +59,7 @@ export async function runQaPreflight(
     .join('; ');
   return {
     blocked: true,
-    summary: `the verification environment cannot run this item's acceptance criteria: ${details}`,
+    summary: `environment declaration unsatisfied: this machine cannot run the acceptance criteria's own check commands (not a test result): ${details}`,
     blockers: probe.blockers,
     inconclusive: probe.inconclusive,
   };

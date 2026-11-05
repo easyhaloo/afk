@@ -52,6 +52,13 @@ describe("execution summary contract", () => {
     expect(() => parseExecutionSummary({ ...valid, token: "secret" })).toThrow();
   });
 
+  it("preserves the root cause of a failed execution", () => {
+    const failure = { failureSummary: "the agent produced no output for 1800s", failureCode: "agent_idle_timeout" };
+    expect(parseExecutionSummary({ ...valid, status: "failed", ...failure })).toEqual({ ...valid, status: "failed", ...failure });
+    expect(parseExecutionSummary(valid)).not.toHaveProperty("failureSummary");
+    expect(parseExecutionSummary(valid)).not.toHaveProperty("failureCode");
+  });
+
   it("does not invent fields not exposed by the application", () => {
     const { phase: _phase, ...withoutPhase } = valid;
     expect(parseExecutionSummary({ ...valid, phase: undefined })).toEqual(withoutPhase);

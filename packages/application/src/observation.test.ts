@@ -68,8 +68,29 @@ describe('run observation facade', () => {
     expect((await queryExecutionHistory({}, { ...deps, verify: async () => ({ valid: true, lastSequence: 1 }) })).executions[0]).not.toHaveProperty('startedAt');
   });
 
-  it('isolates invalid or non-replayable runs while returning healthy executions', async () => {
-    const healthy = port();
+  it('reports the root cause of a failed execution instead of an empty summary', async () => {
+    const classified = { ...event(3, 'run.started'), type: 'failure.classified', data: { kind: 'failure.classified' as const, failureClass: 'agent', summary: 'the agent produced no output for 1800s', code: 'agent_idle_timeout' as const } } as RunEvent;
+    const finished = { ...event(4, 'run.started'), type: 'run.finished', data: { kind: 'run.finished' as const, outcome: 'failed' as const, reason: 'the agent produced no output for 1800s', reasonCode: 'agent_idle_timeout' as const } } as RunEvent;
+
+    const execution = (await queryExecutionHistory({}, port([event(1, 'run.requested'), event(2, 'run.started'), classified, finished]))).executions[0];
+    expect(execution).toMatchObject({
+      status: 'failed',
+      failureSummary: 'the agent produced no output for 1800s',
+      failureCode: 'agent_idle_timeout',
+    });
+  });
+
+  it('reports the root cause of a chain, not the failure that came last', async () => {
+    const first = { ...event(3, 'run.started'), type: 'failure.classified', data: { kind: 'failure.classified' as const, failureClass: 'agent', summary: 'the agent produced no output for 1800s', code: 'agent_idle_timeout' as const } } as RunEvent;
+    const second = { ...event(4, 'run.started'), type: 'failure.classified', data: { kind: 'failure.classified' as const, failureClass: 'infrastructure', summary: 'workflow crashed: the step threw', code: 'workflow_crash' as const, cause: { code: 'agent_idle_timeout', class: 'agent', message: 'the agent produced no output for 1800s' } } } as RunEvent;
+    const finished = { ...event(5, 'run.started'), type: 'run.finished', data: { kind: 'run.finished' as const, outcome: 'failed' as const } } as RunEvent;
+
+    const execution = (await queryExecutionHistory({}, port([event(1, 'run.requested'), event(2, 'run.started'), first, second, finished]))).executions[0];
+    expect(execution.failureSummary).toBe('the agent produced no output for 1800s');
+    expect(execution.failureCode).toBe('agent_idle_timeout');
+  });
+
+  it('isolates invalid or non-replayable runs while returning healthy executions', async () => {    const healthy = port();
     const deps: RunEventQueryPort = {
       async *read(runId) {
         if (runId === 'broken-run') throw new Error("run 'broken-run' event integrity: integrity_mismatch");

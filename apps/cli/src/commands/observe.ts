@@ -67,7 +67,7 @@ async function showRun(runId: string, options: { root?: string; json?: boolean; 
         throw new Error('Audit history changed during observation; restart observe to read the new stream.');
       }
       const added = next.events.filter(event => event.sequence > sequence);
-      if (added.length) process.stdout.write(`${added.map(formatEvent).join('\n')}\n`);
+      if (added.length) process.stdout.write(`${added.map(event => formatEvent(event, next.events.filter(prior => prior.sequence < event.sequence))).join('\n')}\n`);
       if (formatRunStatus(next) !== formatRunStatus(observed)) process.stdout.write(`${formatRunStatus(next)}\n`);
       sequence = next.events.at(-1)?.sequence ?? 0;
       observed = next;

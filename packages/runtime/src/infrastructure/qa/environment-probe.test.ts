@@ -41,6 +41,33 @@ describe('QA environment probe', () => {
       expect(result.inconclusive).toHaveLength(0);
     });
 
+    it('states that the block is an environment declaration, not a test result', async () => {
+      const cwd = await mkdtemp(join(tmpdir(), 'afk-probe-'));
+      const result = await probeQaEnvironment(
+        [{ tool: 'afk-tool-that-does-not-exist', criterion: 'a criterion', checkCommand: 'afk-tool-that-does-not-exist run' }],
+        cwd,
+      );
+
+      expect(result.blockers[0].classification).toBe('environment_declaration_unsatisfied');
+    });
+
+    it('carries the probes it ran, so the reason can be checked', async () => {
+      const cwd = await mkdtemp(join(tmpdir(), 'afk-probe-'));
+      const result = await probeQaEnvironment(
+        [{ tool: 'afk-tool-that-does-not-exist', criterion: 'a criterion', checkCommand: 'afk-tool-that-does-not-exist run' }],
+        cwd,
+      );
+
+      const probes = result.blockers[0].probes;
+      expect(probes.length).toBeGreaterThan(0);
+      expect(probes[0].command).toBe('which');
+      expect(probes[0].args).toEqual(['afk-tool-that-does-not-exist']);
+      expect(probes[0].ok).toBe(false);
+      // The detail names what was probed and what was seen.
+      expect(result.blockers[0].detail).toContain('probed');
+      expect(result.blockers[0].detail).toContain('which');
+    });
+
     it('accepts a tool that works here', async () => {
       const cwd = await mkdtemp(join(tmpdir(), 'afk-probe-'));
       const result = await probeQaEnvironment(

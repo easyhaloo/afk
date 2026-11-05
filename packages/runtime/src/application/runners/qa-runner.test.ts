@@ -269,7 +269,7 @@ describe('QARunner execution boundary', () => {
 
       await expect(runner.process('60')).resolves.toMatchObject({
         success: false,
-        failureCode: 'qa_timeout',
+        failureCode: 'agent_completion_timeout',
       });
       expect(f.execution.waitForResult).toHaveBeenCalledWith({ completionTimeoutMs: 25 });
       // The snapshot belongs under the AFK log root — not a second root.

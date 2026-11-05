@@ -162,6 +162,27 @@ export type ExecutionEvent =
   | { type: 'interrupt-acked' }
   | { type: 'killed' };
 
+/**
+ * Facts about how an execution ended that the failure message cannot carry.
+ *
+ * A timeout is not "the agent failed": it is "the agent had this much time
+ * and this was the last time it did something". Those are the numbers an
+ * operator needs, and they only exist at the moment the provider gives up.
+ */
+export interface ExecutionDiagnostics {
+  /** Set when the execution ended because a time budget ran out. */
+  timeout?: {
+    /** Which budget ran out. */
+    kind: 'idle' | 'completion' | 'hard';
+    /** The budget that ran out, in milliseconds. */
+    budgetMs: number;
+    /** How long the agent had been silent, when that is what was measured. */
+    idleMs?: number;
+    /** When the agent last produced output, when that is known. */
+    lastActivityAt?: string;
+  };
+}
+
 export interface ExecutionResult {
   version: 1;
   runId: string;
@@ -175,6 +196,8 @@ export interface ExecutionResult {
   commits: string[];
   branch?: string;
   error?: { code: string; message: string };
+  /** Facts about how the execution ended that the error message cannot carry. */
+  diagnostics?: ExecutionDiagnostics;
 }
 
 export interface AgentExecution {

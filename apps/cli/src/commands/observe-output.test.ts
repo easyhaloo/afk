@@ -75,6 +75,41 @@ describe('observe text output', () => {
     expect(text).toContain('No detailed failure reason recorded');
   });
 
+  it('traces a failure with no reason of its own back to the cause in the stream', () => {
+    const classified = event({ kind: 'failure.classified', failureClass: 'agent', summary: 'the agent produced no output for 1800s', code: 'agent_idle_timeout' }, 1);
+    const finished = event({ kind: 'step.completed', stepId: 'step-1', outcome: 'failed' }, 2);
+
+    const text = formatEvent(finished, [classified]);
+    expect(text).toContain('Cause: the agent produced no output for 1800s');
+    expect(text).not.toContain('No detailed failure reason recorded');
+  });
+
+  it('shows the root cause of a chain, not the failure that came last', () => {
+    const first = event({ kind: 'failure.classified', failureClass: 'agent', summary: 'the agent produced no output for 1800s', code: 'agent_idle_timeout' }, 1);
+    const second = event({
+      kind: 'failure.classified',
+      failureClass: 'infrastructure',
+      summary: 'workflow crashed: the step threw',
+      code: 'workflow_crash',
+      cause: { code: 'agent_idle_timeout', class: 'agent', message: 'the agent produced no output for 1800s' },
+    }, 2);
+
+    const text = formatEvent(event({ kind: 'step.completed', stepId: 'step-1', outcome: 'failed' }, 3), [first, second]);
+    expect(text).toContain('Cause: the agent produced no output for 1800s');
+  });
+
+  it('lists the root cause of a failed execution', () => {
+    const text = formatExecutionHistory({
+      executions: [{
+        runId: 'run-1', workItemId: 'github:team/project#7', profileId: 'local', attempt: 1,
+        status: 'failed', phase: 'verification', sequence: 12, terminal: true,
+        failureSummary: 'the agent produced no output for 1800s', failureCode: 'agent_idle_timeout',
+      }],
+    });
+    expect(text).toContain('the agent produced no output for 1800s');
+    expect(text).toContain('FAILURE');
+  });
+
   it('shows human gates as waiting and cancellation as a warning', () => {
     expect(formatEvent(event({ kind: 'human_gate.opened', gateId: 'merge:1', reason: 'awaiting human merge' }))).toContain('WAIT');
     expect(formatEvent(event({ kind: 'run.finished', outcome: 'cancelled', reason: 'user request' }))).toContain('WARN');

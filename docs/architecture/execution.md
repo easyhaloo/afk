@@ -60,6 +60,27 @@ The provider backlog, runtime state, run-event audit trail, and evidence are sep
 
 ## Failure and recovery
 
+### Failure diagnosis
+
+A failed run carries a **structured failure diagnosis**, not a free-text reason. The diagnosis separates four things that used to be one string:
+
+- `code` — the stable, machine-readable failure code (`agent_idle_timeout`, `upstream_model_error`, `acceptance_criteria_failed`, `qa_environment_missing`, `workflow_setup`, …). The same code always names the same kind of failure.
+- `class` — what the failure is *about*: `work` (a verdict on the work), `agent` (a fact about the agent run), `upstream` (a fact about an external dependency such as the model service), `environment` (a fact about the machine), `infrastructure` (AFK's own plumbing). A reader must be able to tell "our code is wrong" from "our agent went quiet" from "the model service is overloaded" without reading prose.
+- `message` — one human-readable root cause. It is never the provider's captured output.
+- `evidence` — the facts behind it: probes with their command, expectation and observation; commands with their exit code; the truncated tail of the agent's output; the timeout budget, the last known activity and the basis on which a timeout was read as a timeout.
+
+**The first failure wins.** A failure is recorded once, in a chain. A later failure never replaces the root cause: it is appended, and points back at the failure before it. `run.finished`, the blocked backlog item and the runtime record all carry the root cause, so the reason a run failed survives every piece of secondary information that arrives after it.
+
+The agent's own report is the cause when there is one. The provider's captured stdout/stderr is evidence: it is kept as a truncated tail (4 KiB, last 40 lines) and its error lines are lifted into the cause, so a pre-commit hook's rejection is not replaced by the tail of a `pnpm` log.
+
+Timeouts are first-class failures. An idle timeout, a completion timeout and a hard timeout each have their own code, and carry the budget that ran out, the last known activity and the basis of the judgement.
+
+Whether repeating an attempt is meaningful is read from the diagnosis, not re-derived from a flattened string. The agent error-code vocabulary stays as it was: `AGENT_TURN_FAILED`, `AGENT_GONE` and `AGENT_IDLE` are facts about the agent run rather than verdicts on the work, and a timeout is a fact about the work.
+
+An environment assertion is an **environment declaration**, never a test conclusion. When a check command cannot run on this machine, the blocker states which command was probed, what was expected and what was actually observed, and it is classified as an environment declaration so a reader can tell it apart from an acceptance criterion that failed.
+
+The audit stream carries the diagnosis: `failure.classified` events carry the code, the evidence and a snapshot of the preceding failure, and `run.finished` carries the root cause in `reason` plus its code in `reasonCode`. The CLI reads the root cause back out of the stream: `afk log <runId>` shows `Cause: …` on an event that has no reason of its own, and `afk observe executions --json` lists the root cause of every failed execution.
+
 ### Execution refs and configuration
 
 The item's `## Base Version` section declares an immutable execution plan:

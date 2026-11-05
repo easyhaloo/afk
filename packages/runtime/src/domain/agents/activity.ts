@@ -13,22 +13,32 @@
  */
 export class ActivityWatch {
   private fingerprint = '';
-  private lastActivityAt: number;
+  private lastActivityAtMs: number;
 
   constructor(private readonly clock: () => number = Date.now) {
-    this.lastActivityAt = this.clock();
+    this.lastActivityAtMs = this.clock();
   }
 
   /** Record what the agent just produced; a change counts as activity. */
   observe(fingerprint: string): void {
     if (fingerprint !== this.fingerprint) {
       this.fingerprint = fingerprint;
-      this.lastActivityAt = this.clock();
+      this.lastActivityAtMs = this.clock();
     }
   }
 
   /** How long the agent has been silent, in milliseconds. */
   idleMs(): number {
-    return this.clock() - this.lastActivityAt;
+    return this.clock() - this.lastActivityAtMs;
+  }
+
+  /**
+   * When the agent last did something, as an ISO timestamp.
+   *
+   * A silent agent is a fact an operator needs the time of: "the agent said
+   * nothing after 14:32" locates the failure in the run.
+   */
+  lastActivityAt(): string | undefined {
+    return new Date(this.lastActivityAtMs).toISOString();
   }
 }

@@ -6,7 +6,6 @@ import { WorktreeManager } from '../infrastructure/git/index.js';
 import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index.js';
 import { createSandboxProvider } from '../infrastructure/sandbox/index.js';
 import { createAgentProvider } from '../domain/agents/index.js';
-import { isRetryableAgentFailure } from '../domain/agents/failure.js';
 import type {
   Sandbox,
   SandboxProvider,
@@ -59,6 +58,16 @@ import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtim
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
+import {
+  appendFailure,
+  createFailureDiagnostic,
+  diagnoseExecutionFailure,
+  diagnoseStepFailure,
+  renderFailureReport,
+  renderFailureSummary,
+  snapshotFailure,
+  type FailureDiagnostic,
+} from './workflows/failure-diagnostic.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -68,31 +77,24 @@ export class AuditPersistenceError extends Error {
 }
 
 /**
- * Preserve the provider boundary details when an agent execution fails.
- * The result may contain provider-native structured output, so keep it in the
- * message without assuming a particular provider schema.
+ * The root cause of a failed agent execution.
+ *
+ * The agent's own report is the cause when there is one. The provider's
+ * captured output is evidence and never the cause: mixing the two is how a
+ * pre-commit hook's rejection got replaced by the tail of a `pnpm` log.
  */
 export function formatExecutionFailure(result: ExecutionResult): string {
-  const details = [
-    `status=${result.status}`,
-    `provider=${result.provider}`,
-    `runId=${result.runId}`,
-    result.sessionId ? `sessionId=${result.sessionId}` : undefined,
-    result.exitCode === undefined ? undefined : `exitCode=${result.exitCode}`,
-    result.error ? `${result.error.code}: ${result.error.message}` : undefined,
-    result.structuredOutput === undefined
-      ? undefined
-      : `structuredOutput=${safeExecutionJson(result.structuredOutput)}`,
-  ].filter((value): value is string => value !== undefined);
-  return details.join('; ');
+  return diagnoseExecutionFailure(result).message;
 }
 
-function safeExecutionJson(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return '[unserializable]';
-  }
+/**
+ * The root cause of a failed agent execution, with the evidence behind it.
+ *
+ * For a report a person reads: the cause on the first line, the provider
+ * output and the structured payload below it.
+ */
+export function formatExecutionFailureReport(result: ExecutionResult): string {
+  return renderFailureReport([diagnoseExecutionFailure(result)]);
 }
 
 function formatCriteria(criteria: Array<{ id: string; expected: string; actual: string }>): string {
@@ -320,7 +322,14 @@ export class WorkflowRunner {
   private leaseLost = false;
   private readonly runtimeManager: TaskRuntimeManager;
   private runtimeRunId?: string;
-  private runtimeErrorSummary?: string;
+  /**
+   * The failures of this run, oldest first.
+   *
+   * The first entry is the root cause and is never replaced. Every later
+   * failure is appended to the chain, so secondary information cannot
+   * destroy the reason the run actually failed.
+   */
+  private failureChain: FailureDiagnostic[] = [];
   private acFeedback?: AcVerificationFailure;
   private activeRework?: import('../domain/backlog/index.js').ReworkRecord;
   private readonly observer: RunObserver;
@@ -414,7 +423,7 @@ export class WorkflowRunner {
     this.activeClaim = undefined;
     this.leaseLost = false;
     this.runtimeRunId = undefined;
-    this.runtimeErrorSummary = undefined;
+    this.failureChain = [];
     this.preparedRepositories = undefined;
     this.stopRepositoryHeartbeat = undefined;
     this.preparedRepositoryFinish = undefined;
@@ -546,12 +555,14 @@ export class WorkflowRunner {
         await this.resourceScope?.finish({ status: 'failed' });
         throw error;
       }
-      this.runtimeErrorSummary = `workflow setup failed: ${(error as Error).message}`;
-      await this.recordObservation({ kind: 'failure.classified', failureClass: 'workflow_setup', summary: this.runtimeErrorSummary });
-      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'workflow setup failed' });
-      await this.markBacklogBlocked(`workflow setup failed: ${(error as Error).message}`);
+      const setup = await this.classifyFailure(createFailureDiagnostic({
+        code: 'workflow_setup',
+        message: `workflow setup failed: ${(error as Error).message}`,
+      }));
+      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: setup.message, reasonCode: setup.code });
+      await this.markBacklogBlocked(setup.message);
       await this.resourceScope?.finish({ status: 'failed' });
-      await this.finishRuntime('blocked', 'workflow setup failed');
+      await this.finishRuntime('blocked', setup.message);
       throw error;
     }
 
@@ -578,8 +589,10 @@ export class WorkflowRunner {
         try {
           await this.finishPreparedRepositories({ status: 'success' });
         } catch (error) {
-          this.runtimeErrorSummary = `repository publication failed: ${(error as Error).message}`;
-          await this.recordObservation({ kind: 'failure.classified', failureClass: 'repository_publication', summary: this.runtimeErrorSummary });
+          await this.classifyFailure(createFailureDiagnostic({
+            code: 'repository_publication',
+            message: `repository publication failed: ${(error as Error).message}`,
+          }));
           result = { success: false };
         }
       }
@@ -596,6 +609,7 @@ export class WorkflowRunner {
         kind: 'run.finished',
         outcome: result.success ? 'succeeded' : 'failed',
         reason: result.success ? 'implementation handed to QA' : this.runtimeErrorSummary ?? 'workflow execution failed',
+        reasonCode: result.success ? undefined : this.failureChain[0]?.code,
       });
       return result;
     } catch (error) {
@@ -604,14 +618,14 @@ export class WorkflowRunner {
         throw error;
       }
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
-      const publicationFailure = this.runtimeErrorSummary?.startsWith('repository publication failed:');
-      const reason = publicationFailure ? this.runtimeErrorSummary! : `workflow crashed: ${(error as Error).message}`;
-      this.runtimeErrorSummary = reason;
-      await this.recordObservation({
-        kind: 'failure.classified', failureClass: publicationFailure ? 'repository_publication' : 'workflow_crash',
-        summary: reason,
-      });
-      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason });
+      // The crash is a consequence: whatever failed before it is still the
+      // root cause, and the chain keeps both.
+      const crash = await this.classifyFailure(createFailureDiagnostic({
+        code: 'workflow_crash',
+        message: `workflow crashed: ${(error as Error).message}`,
+      }));
+      const reason = this.runtimeErrorSummary ?? crash.message;
+      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason, reasonCode: this.failureChain[0]?.code });
       await this.cleanupOnFailure(iid, session, reason);
       await this.markBacklogBlocked(reason);
       throw error;
@@ -645,6 +659,53 @@ export class WorkflowRunner {
   /** Resolve sandbox provider name to a SandboxProvider instance. */
   private sandboxProviderByName(name: SandboxProviderName): SandboxProvider {
     return createSandboxProvider(name, { worktreeManager: this.worktree });
+  }
+
+  /**
+   * The root cause of this run, as one line.
+   *
+   * Derived from the failure chain, never stored on its own: the chain is the
+   * only place a failure fact lives.
+   */
+  private get runtimeErrorSummary(): string | undefined {
+    return renderFailureSummary(this.failureChain);
+  }
+
+  /**
+   * Record a failure.
+   *
+   * The first failure recorded is the root cause and stays the root cause. A
+   * later failure is appended to the chain and points back at the one before
+   * it, so the reason a run failed is never overwritten by what happened
+   * afterwards.
+   */
+  private recordFailure(failure: FailureDiagnostic): FailureDiagnostic {
+    this.failureChain = appendFailure(this.failureChain, failure);
+    return this.failureChain[this.failureChain.length - 1];
+  }
+
+  /**
+   * Record a failure and publish it to the audit stream.
+   *
+   * The event carries the failure's own code and evidence, plus a snapshot of
+   * the failure that came before it — the chain, so the first failure stays
+   * readable in the stream.
+   */
+  private async classifyFailure(failure: FailureDiagnostic): Promise<FailureDiagnostic> {
+    const recorded = this.recordFailure(failure);
+    // The audit event is a side effect of the classification. A run that has
+    // no observation context — a direct runBody call — still records the
+    // fact; only the published event is skipped.
+    if (!this.observationContext) return recorded;
+    await this.recordObservation({
+      kind: 'failure.classified',
+      failureClass: recorded.class,
+      summary: recorded.message,
+      code: recorded.code,
+      ...(recorded.cause ? { cause: snapshotFailure(recorded.cause) } : {}),
+      evidence: recorded.evidence,
+    });
+    return recorded;
   }
 
   /**
@@ -891,8 +952,11 @@ export class WorkflowRunner {
       : new BudgetManager(maxHandoffs, maxTotalTokens);
     const persistBudget = async (): Promise<void> => { await budgetStore.save(budget.snapshot()); };
     if (budget.isExhausted()) {
-      this.runtimeErrorSummary = `work item budget exhausted: ${budget.exhaustionReason()}`;
-      await this.markBacklogBlocked(this.runtimeErrorSummary);
+      const failure = await this.classifyFailure(createFailureDiagnostic({
+        code: 'budget_exhausted',
+        message: `work item budget exhausted: ${budget.exhaustionReason()}`,
+      }));
+      await this.markBacklogBlocked(failure.message);
       return { success: false };
     }
     await persistBudget();
@@ -1032,7 +1096,11 @@ export class WorkflowRunner {
         this.systemActionsRan = true;
       }
     }
-    if (Object.values(stepResults).some(result => result.status === 'failed' || result.status === 'timed_out' || result.status === 'aborted')) {
+    const failedStep = Object.values(stepResults).find(result => result.status === 'failed' || result.status === 'timed_out' || result.status === 'aborted');
+    if (failedStep) {
+      // A step that did not complete is the run's reason, not the run's
+      // summary: without it the run ends with 'workflow execution failed'.
+      await this.classifyFailure(diagnoseStepFailure(failedStep));
       return { success: false };
     }
 
@@ -1062,7 +1130,10 @@ export class WorkflowRunner {
   private finishPreparedRepositories(outcome: { status: RunOutcomeStatus }): Promise<void> {
     if (!this.preparedRepositories) return Promise.resolve();
     this.preparedRepositoryFinish ??= this.preparedRepositories.finish(outcome).catch(error => {
-      if (outcome.status === 'success') this.runtimeErrorSummary = `repository publication failed: ${(error as Error).message}`;
+      // The failure is classified by the caller that owns the audit event;
+      // recording it here as well would put the same failure into the chain
+      // twice.
+      logger.warn({ error }, 'prepared repository publication failed');
       throw error;
     }).finally(() => this.stopRepositoryHeartbeat?.());
     return this.preparedRepositoryFinish;
@@ -1140,7 +1211,8 @@ export class WorkflowRunner {
     iid: number,
     worktreePath: string,
     session: string,
-    timeoutMs: number
+    timeoutMs: number,
+    reason = 'workflow timeout'
   ): Promise<void> {
     const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 1000 });
     const logPath = join(this.timeoutSnapshotDir, `timeout-${iid}-${Date.now()}.log`);
@@ -1149,7 +1221,7 @@ export class WorkflowRunner {
     await fs.writeFile(logPath, snapshot, 'utf-8');
 
     try {
-      await this.transitionBacklog(iid, 'blocked', 'workflow timeout');
+      await this.transitionBacklog(iid, 'blocked', reason);
     } catch (err) {
       logger.error({ iid, err }, 'failed to update GitHub on timeout');
     }
@@ -1199,8 +1271,11 @@ export class WorkflowRunner {
     let agentFailures = 0;
     for (let round = 1; ; round++) {
       if (!resumedExecution && p.budget.isExhausted() && round === 1) {
-        this.runtimeErrorSummary = `work item budget exhausted: ${p.budget.exhaustionReason()}`;
-        await this.markBacklogBlocked(this.runtimeErrorSummary);
+        const failure = await this.classifyFailure(createFailureDiagnostic({
+          code: 'budget_exhausted',
+          message: `work item budget exhausted: ${p.budget.exhaustionReason()}`,
+        }));
+        await this.markBacklogBlocked(failure.message);
         return { completed: false };
       }
       const rawPrompt = round === 1
@@ -1246,15 +1321,20 @@ export class WorkflowRunner {
         await p.persistBudget();
       }
 
-      // An agent that died on its own — a stream the upstream gateway cut,
-      // a process that went away — is not a verdict on the work. The attempt
-      // is repeated in the same worktree, where the work already done is
-      // still on disk. A handoff round is not consumed: this is a retry of
-      // the same step, not the next attempt.
-      if (result.status === 'failed' && isRetryableAgentFailure(result) && agentFailures < this.config.maxRetries) {
+      // A failure that says nothing about the work is not a verdict on the
+      // work. The attempt is repeated in the same worktree, where the work
+      // already done is still on disk. A handoff round is not consumed: this
+      // is a retry of the same step, not the next attempt.
+      //
+      // The decision is read from the structured diagnosis, so the meaning of
+      // a provider code is decided in one place.
+      const diagnosis = result.status === 'completed' || result.status === 'context_high'
+        ? undefined
+        : diagnoseExecutionFailure(result);
+      if (diagnosis?.retryable && agentFailures < this.config.maxRetries) {
         agentFailures++;
         logger.warn(
-          { iid: p.iid, round, attempt: agentFailures, error: result.error?.code, message: result.error?.message },
+          { iid: p.iid, round, attempt: agentFailures, code: diagnosis.code, providerCode: diagnosis.providerCode },
           'the agent failed in a way that can be retried; repeating the step',
         );
         round--;
@@ -1265,9 +1345,14 @@ export class WorkflowRunner {
         case 'completed':
           return { completed: true, output: result.structuredOutput };
 
-        case 'timed_out':
-          await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
+        case 'timed_out': {
+          // A timeout is a first-class failure: it carries the budget that
+          // ran out, the last time the agent did something, and why it was
+          // read as a timeout rather than as a crash.
+          const timeout = await this.classifyFailure(diagnosis!);
+          await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs, timeout.message);
           return { completed: false };
+        }
 
         case 'context_high': {
           const hctx = {
@@ -1325,8 +1410,11 @@ export class WorkflowRunner {
           );
           if (resumedExecution) continue;
           if (!p.budget.canHandoff()) {
-            this.runtimeErrorSummary = 'work item handoff budget exhausted';
-            await this.markBacklogBlocked(this.runtimeErrorSummary);
+            const failure = await this.classifyFailure(createFailureDiagnostic({
+              code: 'handoff_budget_exhausted',
+              message: 'work item handoff budget exhausted',
+            }));
+            await this.markBacklogBlocked(failure.message);
             return { completed: false };
           }
 
@@ -1343,12 +1431,14 @@ export class WorkflowRunner {
 
         default:
           // 'failed', 'blocked', 'aborted' — treat as failure
-          const diagnostics = formatExecutionFailure(result);
-          this.runtimeErrorSummary = diagnostics;
-          logger.warn({ iid: p.iid, status: result.status, diagnostics }, 'execution returned non-success status');
+          const failure = await this.classifyFailure(diagnosis!);
+          logger.warn(
+            { iid: p.iid, status: result.status, code: failure.code, providerCode: failure.providerCode },
+            'execution returned non-success status',
+          );
           if (round === 1) {
             // Initial round failure: unchanged crash path
-            throw new Error(`execution failed: ${diagnostics}`);
+            throw new Error(`execution failed: ${failure.message}`);
           }
           await this.manualFlip(p.iid, p.session);
           return { completed: false };

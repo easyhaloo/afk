@@ -8,6 +8,12 @@
  * The probe only reports what is clearly environmental. A check command that
  * fails for any other reason is left to the agent: the preflight must not
  * block work that would have passed.
+ *
+ * A probe that says "this machine cannot run the check" is an *environment
+ * declaration*, not a verdict on the acceptance criteria. It says so
+ * explicitly, and it carries the probes it ran: which command was executed,
+ * what was expected, and what actually came back. A reader can tell "the
+ * tool is missing here" from "the test failed" without guessing.
  */
 
 import { execFile } from 'node:child_process';
@@ -17,6 +23,18 @@ import { probeForTool } from '../../domain/tracker/ac-tools.js';
 
 const execFileAsync = promisify(execFile);
 
+/** One probe attempt: what was run, and what came back. */
+export interface ProbeAttempt {
+  /** The command that was executed. */
+  command: string;
+  /** Its arguments. */
+  args: string[];
+  /** Whether it succeeded. */
+  ok: boolean;
+  /** What it printed, trimmed. */
+  output: string;
+}
+
 /** A check command that cannot run here, and why. */
 export interface EnvironmentBlocker {
   tool: string;
@@ -24,8 +42,17 @@ export interface EnvironmentBlocker {
   checkCommand: string;
   /** What kind of absence it is. */
   kind: 'tool_missing' | 'dependency_missing' | 'runtime_missing';
+  /**
+   * What this statement is about.
+   *
+   * Always an environment declaration: the machine could not satisfy the
+   * requirement. It is never a statement about the acceptance criteria.
+   */
+  classification: 'environment_declaration_unsatisfied';
   /** The probe's own words. */
   detail: string;
+  /** The probes that were run, with what they saw. */
+  probes: ProbeAttempt[];
 }
 
 export interface EnvironmentProbeResult {
@@ -95,14 +122,16 @@ export async function probeQaEnvironment(
     if (probed.has(requirement.tool)) continue;
     probed.add(requirement.tool);
 
-    const present = await commandExists(requirement.tool, worktreePath, timeoutMs);
-    if (!present) {
+    const presence = await commandExists(requirement.tool, worktreePath, timeoutMs);
+    if (!presence.found) {
       blockers.push({
         tool: requirement.tool,
         criterion: requirement.criterion,
         checkCommand: requirement.checkCommand,
         kind: 'tool_missing',
-        detail: 'not installed on this machine',
+        classification: 'environment_declaration_unsatisfied',
+        detail: `not installed on this machine (probed ${presence.probes.map(describeProbe).join(' then ')})`,
+        probes: presence.probes,
       });
       continue;
     }
@@ -112,12 +141,20 @@ export async function probeQaEnvironment(
     if (outcome.ok) continue;
 
     const classified = classifyProbeFailure(outcome.output);
+    const attempt: ProbeAttempt = {
+      command: probe.command,
+      args: probe.args,
+      ok: false,
+      output: outcome.output.slice(0, 400),
+    };
     const entry: EnvironmentBlocker = {
       tool: requirement.tool,
       criterion: requirement.criterion,
       checkCommand: requirement.checkCommand,
       kind: classified?.kind ?? 'tool_missing',
+      classification: 'environment_declaration_unsatisfied',
       detail: classified?.detail ?? outcome.output.slice(0, 400),
+      probes: [attempt],
     };
     if (classified) blockers.push(entry);
     else inconclusive.push(entry);
@@ -126,12 +163,31 @@ export async function probeQaEnvironment(
   return { blockers, inconclusive };
 }
 
-async function commandExists(tool: string, cwd: string, timeoutMs: number): Promise<boolean> {
-  const outcome = await runProbe('which', [tool], cwd, timeoutMs);
-  if (outcome.ok) return true;
+/** How a probe is named in a message. */
+function describeProbe(probe: ProbeAttempt): string {
+  const args = probe.args.length > 0 ? ` ${probe.args.join(' ')}` : '';
+  const seen = probe.output.trim();
+  return seen.length > 0 ? `'${probe.command}${args}' said: ${seen}` : `'${probe.command}${args}' said nothing`;
+}
+
+async function commandExists(
+  tool: string,
+  cwd: string,
+  timeoutMs: number,
+): Promise<{ found: boolean; probes: ProbeAttempt[] }> {
+  const probes: ProbeAttempt[] = [];
+  const which = await runProbe('which', [tool], cwd, timeoutMs);
+  probes.push({ command: 'which', args: [tool], ok: which.ok, output: which.output.trim().slice(0, 400) });
+  if (which.ok) return { found: true, probes };
   // `which` itself may be missing; fall back to asking the shell.
   const fallback = await runProbe('/bin/sh', ['-c', `command -v ${JSON.stringify(tool)}`], cwd, timeoutMs);
-  return fallback.ok;
+  probes.push({
+    command: '/bin/sh',
+    args: ['-c', `command -v ${JSON.stringify(tool)}`],
+    ok: fallback.ok,
+    output: fallback.output.trim().slice(0, 400),
+  });
+  return { found: fallback.ok, probes };
 }
 
 async function runProbe(

@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -33,14 +34,20 @@ export function sanitizeLoopRunTag(raw: string): string {
 /**
  * The tag for a loop bound to one work item.
  *
- * `gitlab:host/group/project#3` files under `project-3`, which keeps the
- * directory meaningful without repeating the instance host in every path.
+ * `gitlab:host/group/project#3` files under `project-3-<hash>`, which keeps
+ * the directory meaningful without repeating the instance host in every path.
+ *
+ * The hash is what makes the tag unique: the readable part alone would put
+ * `git.corp/group/project#3` and `gitlab.com/group/project#3` in the same
+ * directory, and the second loop would then be told it is already running.
  */
 export function loopRunTagForWorkItem(workItemId?: string): string {
   if (!workItemId) return DEFAULT_LOOP_RUN_TAG;
   const parts = workItemId.split(/[#/:]+/).filter(part => part.length > 0);
+  const suffix = createHash('sha256').update(workItemId).digest('hex').slice(0, 4);
   try {
-    return sanitizeLoopRunTag(parts.slice(-2).join('-'));
+    const slug = sanitizeLoopRunTag(parts.slice(-2).join('-'));
+    return sanitizeLoopRunTag(`${slug}-${suffix}`);
   } catch {
     return DEFAULT_LOOP_RUN_TAG;
   }

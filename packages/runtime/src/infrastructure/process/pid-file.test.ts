@@ -44,9 +44,19 @@ describe('loop run tags', () => {
     expect(() => sanitizeLoopRunTag('   ')).toThrow(/invalid loop run tag/);
   });
 
-  it('derives a short tag from a work item id', () => {
-    expect(loopRunTagForWorkItem('gitlab:w.src.corp.qihoo.net/fang/services/k-base#3')).toBe('k-base-3');
-    expect(loopRunTagForWorkItem('github:acme/api#42')).toBe('api-42');
+  it('derives a short, stable tag from a work item id', () => {
+    const tag = loopRunTagForWorkItem('gitlab:w.src.corp.qihoo.net/fang/services/k-base#3');
+    expect(tag).toMatch(/^k-base-3-[0-9a-f]{4}$/);
+    expect(loopRunTagForWorkItem('gitlab:w.src.corp.qihoo.net/fang/services/k-base#3')).toBe(tag);
+    expect(loopRunTagForWorkItem('github:acme/api#42')).toMatch(/^api-42-[0-9a-f]{4}$/);
+  });
+
+  it('keeps the same project path on two instances in different runs', () => {
+    const corporate = loopRunTagForWorkItem('gitlab:git.corp/group/project#3');
+    const hosted = loopRunTagForWorkItem('gitlab:gitlab.com/group/project#3');
+    expect(corporate).not.toBe(hosted);
+    expect(corporate.startsWith('project-3-')).toBe(true);
+    expect(hosted.startsWith('project-3-')).toBe(true);
   });
 
   it('falls back to the default tag when no work item is named', () => {

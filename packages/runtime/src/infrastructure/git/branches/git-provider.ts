@@ -10,6 +10,7 @@ import type {
   BaselineMergeResult,
 } from './provider.js';
 import { strategyForConfig } from '../../../domain/branches/registry.js';
+import { releasePath } from '../../../domain/branches/base.js';
 import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types.js';
 import { isAncestorCommit } from '../git-ancestry.js';
 import { linkNodeModules } from '../dependency-pool.js';
@@ -191,7 +192,14 @@ export class GitBranchProvider implements BranchProvider {
 
   async cleanup(worktreePath: string, options: { preserve?: boolean } = {}): Promise<void> {
     const handle = this.handles.get(worktreePath);
-    if (!handle || options.preserve) return;
+    if (!handle) return;
+    // The claim on this path belongs to the attempt that took it, and the
+    // attempt ends here. Keeping the worktree is a decision about the files,
+    // not about the claim: a claim that outlives its attempt refuses the
+    // next attempt of the same item with a double-prepare error instead of
+    // the failure that really happened.
+    releasePath(worktreePath);
+    if (options.preserve) return;
     const config = { type: 'named' as const, branch: handle.branch };
     await strategyForConfig(config).cleanup(simpleGit(this.repoRoot), config, handle, { force: true });
     this.handles.delete(worktreePath);

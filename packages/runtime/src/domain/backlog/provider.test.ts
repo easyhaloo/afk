@@ -84,9 +84,9 @@ describe('backlog provider', () => {
       failedCriteria: [{ id: 'second', expected: 'works', actual: 'fails' }], requiredChecks: [],
     });
 
-    expect(first).toMatchObject({ id: 'r1', status: 'open' });
-    expect(second).toMatchObject({ id: 'r2', attempt: 2, status: 'open' });
-    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r2', summary: 'new integration defect' });
+    expect(first).toMatchObject({ id: 'r1-1', cycle: 1, attempt: 1, status: 'open' });
+    expect(second).toMatchObject({ id: 'r1-2', cycle: 1, attempt: 2, status: 'open' });
+    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r1-2', summary: 'new integration defect' });
   });
 
   it('supersedes an active QA record on repeated failure without routing the backlog', async () => {
@@ -95,9 +95,9 @@ describe('backlog provider', () => {
     await provider.createRework('123', failure);
     const repeated = await provider.createRework('123', failure);
 
-    expect(repeated).toMatchObject({ id: 'r2', attempt: 2, status: 'open' });
-    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r2', attempt: 2 });
-    await expect(provider.resolveRework('123', 'r1', { summary: 'not passed' })).rejects.toThrow('open rework record not found');
+    expect(repeated).toMatchObject({ id: 'r1-2', cycle: 1, attempt: 2, status: 'open' });
+    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r1-2', attempt: 2 });
+    await expect(provider.resolveRework('123', 'r1-1', { summary: 'not passed' })).rejects.toThrow('open rework record not found');
     await expect(provider.get('123')).resolves.toMatchObject({ state: 'verification', executionMode: 'afk' });
   });
 
@@ -117,9 +117,25 @@ describe('backlog provider', () => {
       source: 'operator', summary: 'human approved retry', failedCriteria: [], requiredChecks: [],
     });
 
-    expect(retry).toMatchObject({ id: 'r2', status: 'open' });
-    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r2', source: 'operator' });
+    expect(retry).toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0, status: 'open' });
+    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r2-0', source: 'operator' });
     await expect(provider.get('123')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
+  });
+
+  it('opens a new cycle when an operator retries, so the exhausted budget of the previous cycle does not carry over', async () => {
+    const provider = new InMemoryBacklogProvider([item({ state: 'blocked', executionMode: 'hitl' })]);
+    const failure = { source: 'qa' as const, summary: 'still failing', failedCriteria: [], requiredChecks: [] };
+    await provider.createRework('123', failure);
+    await provider.createRework('123', failure);
+    await provider.createRework('123', failure);
+
+    const retry = await provider.createRework('123', {
+      source: 'operator', summary: 'the missing assets are added', failedCriteria: [], requiredChecks: [],
+    });
+    expect(retry).toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0 });
+
+    const afterRetry = await provider.createRework('123', failure);
+    expect(afterRetry).toMatchObject({ id: 'r2-1', cycle: 2, attempt: 1 });
   });
 
   it('supports provider-neutral business tags and tag filtering', async () => {

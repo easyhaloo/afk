@@ -1,4 +1,4 @@
-# ADR-0028: JumpServer assets are opened through the jms CLI
+# ADR-0029: JumpServer assets are opened through the jms CLI
 
 - Status: accepted
 - Date: 2026-11-05

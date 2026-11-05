@@ -629,8 +629,8 @@ describe('TrackerBacklogProvider', () => {
     });
     await provider.resolveRework('42', record.id, { summary: 'Verified by QA run qa-42-r2.' });
 
-    expect(record).toMatchObject({ id: 'r1', attempt: 1, status: 'open' });
-    expect(t.addComment).toHaveBeenCalledWith(42, expect.stringContaining('<!-- afk:rework:v1 id=r1 -->'));
+    expect(record).toMatchObject({ id: 'r1-1', cycle: 1, attempt: 1, status: 'open' });
+    expect(t.addComment).toHaveBeenCalledWith(42, expect.stringContaining('<!-- afk:rework:v1 id=r1-1 -->'));
     expect(t.updateIssueComment).toHaveBeenCalledWith(42, 'comment-1', expect.stringContaining('"status":"resolved"'));
     await expect(provider.get('42')).resolves.toMatchObject({ state: 'verification', executionMode: 'afk' });
   });
@@ -650,8 +650,8 @@ describe('TrackerBacklogProvider', () => {
     await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
     const retry = await provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] });
 
-    expect(retry).toMatchObject({ id: 'r2', source: 'operator', status: 'open' });
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', source: 'operator' });
+    expect(retry).toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0, source: 'operator', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2-0', source: 'operator' });
     await expect(provider.createRework('42', { source: 'operator', summary: 'duplicate retry', failedCriteria: [], requiredChecks: [] }))
       .rejects.toThrow('already has an open rework record');
     expect(comments.map(comment => comment.body)).toEqual([
@@ -678,7 +678,7 @@ describe('TrackerBacklogProvider', () => {
     await expect(provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] }))
       .rejects.toThrow('tracker write failed');
     expect(t.updateIssueComment).not.toHaveBeenCalled();
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', source: 'qa' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1-1', source: 'qa' });
   });
 
   it('supersedes the new record when superseding the old record fails, allowing a later operator retry', async () => {
@@ -697,12 +697,38 @@ describe('TrackerBacklogProvider', () => {
 
     await expect(provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] }))
       .rejects.toThrow('supersede failed');
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', source: 'qa' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1-1', source: 'qa' });
     expect(comments[1].body).toContain('"status":"superseded"');
 
     const retry = await provider.createRework('42', { source: 'operator', summary: 'manual retry again', failedCriteria: [], requiredChecks: [] });
-    expect(retry).toMatchObject({ id: 'r3', source: 'operator', status: 'open' });
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r3', source: 'operator' });
+    expect(retry).toMatchObject({ id: 'r3-0', cycle: 3, attempt: 0, source: 'operator', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r3-0', source: 'operator' });
+  });
+
+  it('opens a new cycle when an operator retries, so the exhausted budget of the previous cycle does not carry over', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: `comment-${comments.length + 1}`, body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+    const failure = { source: 'qa' as const, summary: 'QA failure', failedCriteria: [], requiredChecks: [] };
+
+    await provider.createRework('42', failure);
+    await provider.createRework('42', failure);
+    await provider.createRework('42', failure);
+
+    const retry = await provider.createRework('42', { source: 'operator', summary: 'the missing assets are added', failedCriteria: [], requiredChecks: [] });
+    expect(retry).toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0 });
+
+    // The first QA failure of the new cycle is attempt 1, so the round has a
+    // full budget again instead of continuing the exhausted one.
+    const afterRetry = await provider.createRework('42', failure);
+    expect(afterRetry).toMatchObject({ id: 'r2-1', cycle: 2, attempt: 1 });
   });
 
   it('uses a filesystem lease to serialize tracker claims without native CAS', async () => {

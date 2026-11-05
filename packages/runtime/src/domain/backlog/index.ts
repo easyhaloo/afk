@@ -69,7 +69,7 @@ export { describeRunnability, evaluateRunnability, RUNNABLE_STATES } from './run
 export type { Runnability, RunnabilityReason, RunnabilitySubject } from './runnability.js';
 import { evaluateRunnability, type Runnability } from './runnability.js';
 import type { BacklogClaim } from './claim.js';
-import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
+import { nextReworkAttempt, reworkRecordId, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
 import { parseWorkItemId } from '../work-item/identity.js';
 import { validateBusinessTag } from './tags.js';
@@ -370,11 +370,13 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     if (active?.source === 'operator' && input.source === 'operator') {
       throw new Error(`backlog ${id} already has an open rework record`);
     }
+    const { cycle, attempt } = nextReworkAttempt(records, input.source);
     const record: ReworkRecord = {
       ...input,
       version: 1,
-      id: `r${records.length + 1}`,
-      attempt: records.length + 1,
+      id: reworkRecordId(cycle, attempt),
+      cycle,
+      attempt,
       status: 'open',
       createdAt: new Date().toISOString(),
     };

@@ -215,7 +215,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;
     subject.activeRework = {
-      id: 'r2', attempt: 2, source: 'qa', status: 'open', createdAt: '2026-08-05T00:00:00.000Z',
+      id: 'r1-2', cycle: 1, attempt: 2, source: 'qa', status: 'open', createdAt: '2026-08-05T00:00:00.000Z',
       summary: 'integration QA found a shortcut regression',
       failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
       requiredChecks: [{ command: 'pnpm vitest run', expected: 'passes' }],
@@ -224,7 +224,7 @@ describe('WorkflowRunner backlog provider mode', () => {
 
     const prompt = await stepGoal(subject, { id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 }, worktree);
 
-    expect(prompt).toContain('open QA rework record (r2, attempt 2)');
+    expect(prompt).toContain('open QA rework record (r1-2, cycle 1, attempt 2)');
     expect(prompt).toContain('/s enters search');
     expect(prompt).toContain('pnpm vitest run');
     await rm(worktree, { recursive: true, force: true });

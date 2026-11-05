@@ -6,7 +6,7 @@ exec node --input-type=module - "$@" <<'NODE'
 import { createHash } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, stat, symlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -179,6 +179,23 @@ try {
   await rename(pendingLink, executable);
   pendingLink = undefined;
   console.log(`AFK ${manifest.version} installed at ${executable}`);
+
+  // A release is ~36 MB and nothing ever removed the one it replaced, so each
+  // update silently doubled the state directory. Keep this release and the
+  // newest other one — enough to roll back by hand — and drop the rest. A
+  // long-running daemon still executing an older release is why the newest
+  // other one is kept rather than only this one.
+  const siblings = (await readdir(versions, { withFileTypes: true }).catch(() => []))
+    .filter(entry => entry.isDirectory())
+    .map(entry => join(versions, entry.name))
+    .filter(path => path !== destination);
+  const aged = await Promise.all(siblings.map(async path => ({ path, at: (await stat(path).catch(() => undefined))?.mtimeMs ?? 0 })));
+  aged.sort((left, right) => right.at - left.at);
+  let removedReleases = 0;
+  for (const release of aged.slice(1)) {
+    if (await rm(release.path, { recursive: true, force: true }).then(() => true).catch(() => false)) removedReleases += 1;
+  }
+  if (removedReleases > 0) console.log(`Removed ${removedReleases} older release${removedReleases === 1 ? '' : 's'}.`);
 
   const shell = (process.env.SHELL ?? '').split('/').pop();
   if (options.completion && ['bash', 'zsh', 'fish'].includes(shell)) {

@@ -526,7 +526,8 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       return {
         ...input,
         version: 1,
-        id: 'r1',
+        id: 'r1-1',
+        cycle: 1,
         attempt: 1,
         status: 'open',
         createdAt: '2026-09-17T00:00:00.000Z',

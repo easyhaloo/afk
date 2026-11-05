@@ -156,6 +156,10 @@ export async function retryBacklog(
   // that failed before the record could be closed would otherwise block every
   // further retry.
   await closeOperatorRework(provider, id, `Superseded by a new operator retry: ${summary}`);
+  // An operator rework record opens a new rework cycle. The operator has
+  // answered the failure that ended the previous cycle and says that
+  // something changed, so the next cycle starts with a full QA attempt
+  // budget instead of inheriting the exhausted one.
   await provider.createRework(id, {
     source: 'operator',
     summary,

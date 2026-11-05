@@ -110,13 +110,14 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
 }
 
 function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
+  const round = `cycle ${rework.cycle}, attempt ${rework.attempt}`;
   if (rework.source === 'conflict') {
     // The change request could not be merged because the target branch
     // changed the same lines. Making the change compatible with the target
     // here is what keeps the next merge conflict-free.
-    return `\n\nAn open merge-conflict rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
+    return `\n\nAn open merge-conflict rework record (${rework.id}, ${round}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
   }
-  return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
+  return `\n\nAn open QA rework record (${rework.id}, ${round}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
 /**

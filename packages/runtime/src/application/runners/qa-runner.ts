@@ -706,15 +706,19 @@ export class QARunner {
       failedCriteria: signal.failedCriteria,
       requiredChecks: signal.requiredChecks ?? [],
     };
+    // The budget belongs to the cycle, not to the item: the attempt count is
+    // the number of retries this round of work has spent. An operator retry
+    // opened a fresh cycle with a fresh budget, so the first failure of that
+    // cycle is attempt 1 and is still a rework rather than a block.
     const rework = active && active.attempt >= limit ? active : await this.providers.backlog.createRework(backlogId, record);
     if (rework.attempt >= limit) {
-      const summary = `QA rework attempt limit reached (${rework.attempt}/${limit}): ${signal.summary}`;
+      const summary = `QA rework attempt limit reached (cycle ${rework.cycle}, ${rework.attempt}/${limit} attempts used): ${signal.summary}`;
       await this.markBlocked(backlogId, summary);
       return { success: false, summary, failureCode: 'qa_rework', failedCriteria: signal.failedCriteria };
     }
     await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${rework.id}: ${signal.summary}` });
     await this.providers.backlog.setExecutionMode(backlogId, 'afk');
-    logger.info({ backlogId, reworkId: rework.id, attempt: rework.attempt }, 'QA failure persisted rework record');
+    logger.info({ backlogId, reworkId: rework.id, cycle: rework.cycle, attempt: rework.attempt }, 'QA failure persisted rework record');
     return { success: false, rework: true, summary: signal.summary, failureCode: 'qa_rework', failedCriteria: signal.failedCriteria };
   }
 
@@ -753,7 +757,8 @@ export class QARunner {
    * has to make compatible. The previous rework record is still open when
    * this runs — a conflict means it did not do its job — so it is
    * superseded by this one and the attempt count carries on. A conflict that
-   * outlives the attempt limit goes to a person instead.
+   * outlives the attempt limit of the current cycle goes to a person
+   * instead; an operator retry opens a new cycle with a fresh limit.
    */
   private async openConflictRework(
     backlogId: string,

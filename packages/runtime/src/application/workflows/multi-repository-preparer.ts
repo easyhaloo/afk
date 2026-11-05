@@ -152,7 +152,8 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     let recovery: string | undefined;
     try {
       if (createdByRun) {
-        await this.dependencies.repositoryStore.ensureCheckout(cloneUrl(repository), repository.repoRoot, repository.baseBranch);
+        await this.dependencies.repositoryStore.ensureCheckout(cloneUrl(repository), repository.repoRoot, repository.baseBranch,
+          { createBaseline: repository.prdBaseline === true });
       } else if (!await this.dependencies.git.isRepository(repository.repoRoot)) {
         throw new Error(`repository target is not a git repository: ${repository.repoRoot}`);
       }

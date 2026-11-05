@@ -14,6 +14,7 @@ import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
 import { applyExecutionBaseBranch, parseExecutionBaseBranch } from './execution-base.js';
+import { applyPrdBaselineBranch, parsePrdBaselineBranch } from './prd-baseline.js';
 import { evaluateRunnability, type Runnability } from './runnability.js';
 import {
   BACKLOG_RELATION_PREFIX,
@@ -459,6 +460,23 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (parseExecutionBaseBranch(description) === baseBranch) return;
     await target.tracker.updateIssue(target.issueId, {
       description: applyExecutionBaseBranch(description, baseBranch),
+    });
+  }
+
+  /**
+   * Record the branch a PRD accumulates its slices on.
+   *
+   * The branch belongs to the PRD rather than to one repository, so it lives
+   * in the PRD's body: that is where the slices of every repository read it
+   * back from.
+   */
+  async applyPrdBaseline(id: string, branch: string): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    const description = issue.description ?? '';
+    if (parsePrdBaselineBranch(description) === branch) return;
+    await target.tracker.updateIssue(target.issueId, {
+      description: applyPrdBaselineBranch(description, branch),
     });
   }
 

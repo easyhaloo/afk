@@ -63,6 +63,7 @@ export { projectBacklogItem } from './projection.js';
 export type { BacklogIssueView } from './projection.js';
 export { deriveBacklogBranchName } from './branch-name.js';
 import { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection } from './execution-base.js';
+import { applyPrdBaselineBranch } from './prd-baseline.js';
 export { applyExecutionBaseBranch, parseExecutionBaseBranch, renderBaseVersionSection };
 export { describeRunnability, evaluateRunnability, RUNNABLE_STATES } from './runnability.js';
 export type { Runnability, RunnabilityReason, RunnabilitySubject } from './runnability.js';
@@ -206,6 +207,13 @@ export interface BacklogManagementProvider {
    * reads has nowhere to write the base to.
    */
   applyExecutionBase?(id: string, baseBranch: string): Promise<void>;
+  /**
+   * Record the branch a PRD accumulates its slices on.
+   *
+   * It is optional for the same reason as the execution base: a provider that
+   * only reads has nowhere to write the baseline to.
+   */
+  applyPrdBaseline?(id: string, branch: string): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -242,6 +250,8 @@ export interface BacklogProvider {
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void>;
   /** Record the ref the work starts from. */
   applyExecutionBase(id: string, baseBranch: string): Promise<void>;
+  /** Record the branch a PRD accumulates its slices on. */
+  applyPrdBaseline(id: string, branch: string): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
   /**
@@ -467,6 +477,15 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   async applyExecutionBase(id: string, baseBranch: string): Promise<void> {
     const item = await this.get(id);
     item.description = applyExecutionBaseBranch(item.description ?? '', baseBranch);
+    this.items.set(id, item);
+  }
+
+  /**
+   * Record the branch a PRD accumulates its slices on. Only the body changes.
+   */
+  async applyPrdBaseline(id: string, branch: string): Promise<void> {
+    const item = await this.get(id);
+    item.description = applyPrdBaselineBranch(item.description ?? '', branch);
     this.items.set(id, item);
   }
 

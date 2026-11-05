@@ -14,6 +14,7 @@ import {
   type BacklogMetadataScope,
 } from './metadata-codec.js';
 import { idempotencyMarker as idempotencyMarkerOf, withIdempotencyMarker } from './idempotency.js';
+import { resolveParentPrdBaseline } from './prd-baseline.js';
 import type { WorkItemId } from '../work-item/identity.js';
 
 export interface BacklogCreatePlan {
@@ -180,4 +181,30 @@ export async function resolveBacklogExecutionBase(
   const itemRepository = item.providerRef.slice(0, item.providerRef.lastIndexOf('#'));
   if (baseRepository !== itemRepository) return fallback;
   return base.state === 'done' || base.changeRequest?.state === 'merged' ? fallback : base.branchName;
+}
+
+/**
+ * The branch a work item's own execution starts from.
+ *
+ * An explicit execution base on the item is the most specific statement and
+ * wins. A slice of a PRD has no base of its own: it inherits the branch the
+ * PRD accumulates its slices on. The same branch name is used in every
+ * repository the PRD touches, so the inheritance crosses repositories without
+ * naming a repository.
+ *
+ * A parent that cannot be read is an error when the answer decides where the
+ * work runs, and is ignored when the answer only checks what was published.
+ * The distinction is deliberate: a check that fails on a transient read would
+ * block a human over something that does not change the published change.
+ */
+export async function resolveItemExecutionBase(
+  provider: Pick<BacklogManagementProvider, 'get'>,
+  item: BacklogItem,
+  fallback: string,
+  options: { prdParentRequired?: boolean } = {},
+): Promise<string> {
+  if (item.baseBacklogId) return resolveBacklogExecutionBase(provider, item, fallback);
+  const prdBaseline = await resolveParentPrdBaseline(item.parentId, id => provider.get(id),
+    { required: options.prdParentRequired ?? true });
+  return prdBaseline ?? fallback;
 }

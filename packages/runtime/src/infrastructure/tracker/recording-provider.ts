@@ -120,6 +120,9 @@ export class RecordingBacklogProvider implements BacklogProvider {
   applyExecutionBase(id: string, baseBranch: string): Promise<void> {
     return this.provider.applyExecutionBase(id, baseBranch);
   }
+  applyPrdBaseline(id: string, branch: string): Promise<void> {
+    return this.provider.applyPrdBaseline(id, branch);
+  }
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
     return this.provider.applyMode(id, mode);
   }

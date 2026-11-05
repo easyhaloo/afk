@@ -462,9 +462,21 @@ describe('MultiRepositoryPreparer', () => {
 
     await prepared.finish({ status: 'failed' });
 
-    expect(deps.repositoryStore.ensureCheckout).toHaveBeenCalledWith('https://github.com/acme/api.git', cloned.repoRoot, cloned.baseBranch);
+    expect(deps.repositoryStore.ensureCheckout).toHaveBeenCalledWith('https://github.com/acme/api.git', cloned.repoRoot, cloned.baseBranch, { createBaseline: false });
     expect(deps.filesystem.removeTarget).not.toHaveBeenCalled();
     expect(deps.git.restore).not.toHaveBeenCalled();
+  });
+
+  it('lets a PRD baseline branch be created on demand and keeps every other base strict', async () => {
+    const deps = dependencies();
+    vi.mocked(deps.filesystem.inspectTarget).mockResolvedValue('missing');
+    const baseline = repository({ baseBranch: 'prd/27', prdBaseline: true });
+    const plain = repository({ projectKey: 'acme/web', name: 'web', checkoutPath: 'repositories/web',
+      repoRoot: '/workspace/repositories/web', primary: false });
+    await new MultiRepositoryPreparer(deps).prepare([baseline, plain], '/workspace');
+
+    expect(deps.repositoryStore.ensureCheckout).toHaveBeenCalledWith('https://github.com/acme/api.git', baseline.repoRoot, 'prd/27', { createBaseline: true });
+    expect(deps.repositoryStore.ensureCheckout).toHaveBeenCalledWith('https://github.com/acme/web.git', plain.repoRoot, plain.baseBranch, { createBaseline: false });
   });
 
   it('removes newly cloned checkouts after successful finalization', async () => {

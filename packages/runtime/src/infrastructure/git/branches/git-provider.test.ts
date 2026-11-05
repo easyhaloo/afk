@@ -176,6 +176,37 @@ describe('GitBranchProvider', () => {
     await expect(readFile(join(handle.worktreePath, 'README.md'), 'utf8')).resolves.toContain('base');
   });
 
+  it('keeps AFK\'s own worktree directory out of the commit', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    // AFK keeps its worktrees inside the checkout. The agent stages whatever
+    // it finds, and Git stages a nested worktree as a submodule pointer — a
+    // change request that carries a submodule nobody can clone.
+    await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
+    await writeFile(join(repoPath, 'result.txt'), 'the work\n');
+    await simpleGit(repoPath).raw(['add', '-A']);
+
+    const { sha } = await provider.commit(repoPath, 'agent: staged everything');
+
+    expect(sha).not.toBe('');
+    const files = (await simpleGit(repoPath).raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toContain('result.txt');
+    expect(files.some(file => file.startsWith('.worktrees'))).toBe(false);
+  });
+
+  it('drops a worktree directory that an earlier attempt already tracked', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
+    await simpleGit(repoPath).raw(['add', '-A']);
+    await simpleGit(repoPath).commit('agent: staged everything');
+    expect((await simpleGit(repoPath).raw(['ls-files', '.worktrees'])).trim()).not.toBe('');
+
+    await provider.commit(repoPath, 'agent: staged everything again');
+
+    expect((await simpleGit(repoPath).raw(['ls-files', '.worktrees'])).trim()).toBe('');
+  });
+
   it('shares repository dependencies with QA worktrees', async () => {
     const { repoPath } = await repository();
     await writeFile(join(repoPath, '.git/info/exclude'), 'node_modules/\nkeep-local\n');

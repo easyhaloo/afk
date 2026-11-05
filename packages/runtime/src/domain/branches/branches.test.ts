@@ -196,6 +196,17 @@ describe('NamedBranchStrategy', () => {
     expect(fs.existsSync(path.join(second.path, 'leftover.txt'))).toBe(false);
   });
 
+  it('keeps AFK\'s own worktree directory out of the repository\'s view', async () => {
+    const s = new NamedBranchStrategy();
+    await s.prepareWorktree(git, { type: 'named', branch: 'feature/hidden' }, { repoPath });
+
+    // The worktrees live inside the checkout, so Git would report them as the
+    // user's uncommitted work — and `git add -A` would stage them as a
+    // submodule pointer.
+    expect((await git.raw(['status', '--porcelain'])).trim()).toBe('');
+    expect((await git.raw(['ls-files', '.worktrees'])).trim()).toBe('');
+  });
+
   it('gives the sharing guard back when a preparation fails', async () => {
     await git.checkoutLocalBranch('feature/taken', 'main');
     await git.checkout('main');

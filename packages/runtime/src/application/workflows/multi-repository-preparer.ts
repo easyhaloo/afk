@@ -623,9 +623,11 @@ function hasCode(error: unknown, code: string): boolean {
  * The completion signal the agent writes and the `.afk/` directory the QA
  * runner reads are process state. Counting them as uncommitted changes made
  * the preparer refuse a checkout that only carried them, which locked the
- * work item out of every later attempt.
+ * work item out of every later attempt. The `.worktrees/` directory is the
+ * same thing: AFK keeps its worktrees inside the checkout, and Git reports
+ * them as the user's uncommitted work.
  */
-const RUNTIME_ARTIFACTS = ['.afk-signal.json', '.afk-signal.json.tmp', '.afk'];
+const RUNTIME_ARTIFACTS = ['.afk-signal.json', '.afk-signal.json.tmp', '.afk', '.worktrees'];
 
 function withoutRuntimeArtifacts(status: string): string {
   if (!status) return '';

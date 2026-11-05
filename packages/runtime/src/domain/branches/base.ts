@@ -37,6 +37,38 @@ export async function ensureWorktreeBaseDir(path: string): Promise<void> {
 }
 
 /**
+ * Prepare the directory the worktrees live in, and keep it out of the
+ * repository's view.
+ */
+export async function prepareWorktreeBaseDir(git: SimpleGit, repoPath: string, baseDir: string): Promise<void> {
+  await ensureWorktreeBaseDir(baseDir);
+  await excludeWorktreeBaseDir(git, repoPath, baseDir);
+}
+
+/**
+ * Keep AFK's own worktree directory out of the repository's view.
+ *
+ * The worktrees live inside the checkout, so Git sees them as content of the
+ * user's repository: `git add -A` stages the nested worktree as a submodule
+ * pointer — a change request that carries a submodule nobody can clone — and
+ * `git status` reports it as the user's uncommitted work, which locks the
+ * item out of every later attempt. The checkout's own ignore file is the
+ * place for that: it is local to the machine and never travels into a change
+ * request.
+ */
+export async function excludeWorktreeBaseDir(git: SimpleGit, repoPath: string, baseDir: string): Promise<void> {
+  const location = relative(repoPath, baseDir);
+  if (!location || location.startsWith('..') || isAbsolute(location)) return;
+  const pattern = `${location.split('\\').join('/')}/`;
+  const excludePath = (await git.raw(['rev-parse', '--git-path', 'info/exclude']).catch(() => '')).trim();
+  if (!excludePath) return;
+  const existing = await fs.readFile(excludePath, 'utf8').catch(() => '');
+  if (existing.split('\n').some(line => line.trim() === pattern)) return;
+  const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+  await fs.appendFile(excludePath, `${prefix}# AFK's own worktrees\n${pattern}\n`, 'utf8').catch(() => undefined);
+}
+
+/**
  * Add a new worktree. Mirrors the retry-on-stale behavior in WorktreeManager
  * (a previous failed retry leaves a checked-out branch + worktree that must
  * be cleaned before re-adding).

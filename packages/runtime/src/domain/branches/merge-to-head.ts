@@ -23,7 +23,7 @@ import type {
 } from './types.js';
 import {
   defaultWorktreeBaseDir,
-  ensureWorktreeBaseDir,
+  prepareWorktreeBaseDir,
   gitWorktreeAdd,
   gitWorktreeRemove,
   gitBranchDelete,
@@ -47,7 +47,7 @@ export class MergeToHeadBranchStrategy implements BranchStrategy {
     const shortId = randomUUID().slice(0, 8);
     const branch = `afk-merge-${shortId}`;
     const baseDir = options.worktreeBaseDir ?? defaultWorktreeBaseDir(options.repoPath);
-    await ensureWorktreeBaseDir(baseDir);
+    await prepareWorktreeBaseDir(git, options.repoPath, baseDir);
     const path = join(baseDir, `merge-${shortId}`);
 
     checkNotShared(path, branch, this.kind);

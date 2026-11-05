@@ -5,16 +5,27 @@ import { readSignal, readSignalSync } from '../io/signal.js';
 import { TIMEOUTS } from '../../shared/constants.js';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
-import { composerIsEmpty, supportsComposerState } from './agent-composer.js';
+import { composerIsEmpty, codexModalInPane, supportsComposerState } from './agent-composer.js';
 import { logger } from '../io/logger.js';
 
 export { normalizeTmuxSessionName };
 
 /** How often AFK re-checks whether the agent accepted the goal. */
-const PROMPT_SUBMIT_POLL_MS = 1000;
+const PROMPT_SUBMIT_POLL_MS = 1500;
 
-/** How many extra Enter presses AFK may spend on a goal that was not accepted. */
-const PROMPT_SUBMIT_ATTEMPTS = 3;
+/**
+ * How many extra Enter presses AFK may spend on a goal that was not accepted.
+ *
+ * The window has to outlast a modal that *restarts* the agent TUI. Codex
+ * asks whether it may trust a directory it has not seen before, and that
+ * question appears exactly when AFK runs an agent in a fresh worktree. The
+ * Enter that accepts the question is swallowed by the modal, and the agent
+ * restarts — so the goal is still in the composer and needs another Enter.
+ * Three presses were enough for a modal that merely holds the keyboard, but
+ * not for one that restarts the TUI: the presses were spent on the modal and
+ * its aftermath, and the goal was never submitted.
+ */
+const PROMPT_SUBMIT_ATTEMPTS = 20;
 
 export interface TmuxSession {
   name: string;
@@ -356,16 +367,22 @@ export class TmuxClient {
     provider: string,
   ): Promise<void> {
     const target = `${normalizeTmuxSessionName(session)}:${window}`;
+    let modal: string | undefined;
     for (let attempt = 0; attempt < PROMPT_SUBMIT_ATTEMPTS; attempt += 1) {
       await this.sleep(PROMPT_SUBMIT_POLL_MS);
       const pane = await this.capturePane(session, window);
       if (composerIsEmpty(provider, pane)) return;
+      const open = codexModalInPane(provider, pane);
+      if (open && open !== modal) {
+        modal = open;
+        logger.info({ session, window, provider, modal: open }, 'agent TUI opened a modal; accepting it');
+      }
       await this.exec(['send-keys', '-t', target, 'C-m']);
     }
     const pane = await this.capturePane(session, window);
     if (composerIsEmpty(provider, pane)) return;
     logger.warn(
-      { session, window, provider },
+      { session, window, provider, modal },
       'agent composer still holds the goal after repeated submit attempts',
     );
   }

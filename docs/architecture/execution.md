@@ -204,6 +204,26 @@ transport error from the wrong endpoint. The probe costs a live model
 round-trip, so it runs once per provider per run. See
 [ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md).
 
+### Modals in the agent's TUI
+
+AFK drives an interactive TUI it does not own, and that TUI opens modals of
+its own. Codex asks whether it may trust a directory it has not seen
+before — and AFK runs the verification step in a **worktree**, whose path
+is never in Codex's trusted list, so the question appears on every fresh
+worktree.
+
+A modal takes the keyboard. The Enter presses that submit the goal are
+swallowed by it, and the folder-trust question restarts Codex behind it, so
+the goal comes back to the composer with no way to reach the agent. AFK
+already notices that the composer still holds the goal and presses Enter
+again; the budget for that is now a time window (30 seconds) instead of a
+few presses, because it has to outlast the restart.
+
+AFK names the modal it is answering and logs it, so the gap between "goal
+sent" and "goal never arrived" is visible in the run log rather than only
+in the pane scrollback. See
+[ADR-0033](../adr/0033-agent-tui-modals.md).
+
 ### Execution refs and configuration
 
 The item's `## Base Version` section declares an immutable execution plan:

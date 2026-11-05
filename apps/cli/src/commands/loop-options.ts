@@ -10,6 +10,7 @@ export interface LoopStartOptions {
   template?: string;
   workItemId?: string;
   executionManifest?: string;
+  runTag?: string;
 }
 
 interface LoopOptionDefinition {
@@ -29,6 +30,7 @@ export const LOOP_START_OPTIONS: readonly LoopOptionDefinition[] = [
   { flags: '--template <name>', description: 'Workflow template name' },
   { flags: '--work-item-id <id>', description: 'Canonical work item ID for a single managed backlog scope' },
   { flags: '--execution-manifest <path>', description: 'Execution manifest for that managed work item' },
+  { flags: '--run-tag <tag>', description: 'File this run under ~/.afk/loop-runs/<tag> (default: derived from --work-item-id, else "default")' },
 ];
 
 export function parsePositiveInt(value: string, _previous: number | undefined): number {

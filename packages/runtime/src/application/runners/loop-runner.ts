@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../../infrastructure/io/index.js';
-import { loopPidFilePath, loopStatusFilePath } from '../../infrastructure/process/pid-file.js';
+import { DEFAULT_LOOP_RUN_TAG, loopPidFilePath, loopStatusFilePath } from '../../infrastructure/process/pid-file.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import { parseWorkItemId, type BacklogItem } from '../../domain/backlog/index.js';
 import { describeRunnability } from '../../domain/backlog/runnability.js';
@@ -25,9 +25,16 @@ export interface LoopRunnerOptions {
   managedExecution: { workItemId: string; manifestPath?: string };
   readManifest?: typeof readExecutionManifest;
   executeManagedWorkItem?: typeof executeWorkItem;
-  /** Where to write this process's pid (so `afk loop stop` can find it). */
+  /**
+   * The run directory this loop is filed under: `~/.afk/loop-runs/<runTag>/`.
+   *
+   * One loop per work item is one tag per work item. The pid and status files
+   * follow from the tag; they are never configured as independent paths.
+   */
+  runTag?: string;
+  /** Explicit pid path, for a caller that keeps the run outside the runs directory. */
   pidFilePath?: string;
-  /** Where to write status JSON periodically (so `afk loop status` can read it). */
+  /** Explicit status path, for a caller that keeps the run outside the runs directory. */
   statusFilePath?: string;
   /** Target branch the merged change must have targeted. */
   targetBranch?: string;
@@ -59,6 +66,7 @@ interface InternalOptions {
   executeManagedWorkItem: typeof executeWorkItem;
   pidFilePath: string;
   statusFilePath: string;
+  runTag: string;
   targetBranch: string;
 }
 
@@ -123,8 +131,9 @@ export class LoopRunner {
       managedExecution,
       readManifest: options.readManifest ?? readExecutionManifest,
       executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
-      pidFilePath: options.pidFilePath ?? loopPidFilePath(),
-      statusFilePath: options.statusFilePath ?? loopStatusFilePath(),
+      pidFilePath: options.pidFilePath ?? loopPidFilePath(options.runTag),
+      statusFilePath: options.statusFilePath ?? loopStatusFilePath(options.runTag),
+      runTag: options.runTag ?? DEFAULT_LOOP_RUN_TAG,
       targetBranch: options.targetBranch ?? DEFAULTS.targetBranch,
     };
   }

@@ -24,7 +24,8 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk`: open the interactive TUI.
 - `afk run`: resolve a work item and delegate to the complete managed implementation → independent QA → publication lifecycle. Existing runtime, timeout, budget, extension, and explicit execution-mode options apply to the managed attempt; `--target-branch` names its working branch, not the MR destination.
 - `afk execute --work-item-id <id>`: execute the managed lifecycle, including eligibility and manifest checks, implementation, independent QA, change-request handling, and the human-controlled merge gate.
-- `afk loop start`: repeatedly attempt one manifest-bound work item by delegating to the same managed execution path. It is not a global multi-item scheduler.
+- `afk loop start`: repeatedly attempt one manifest-bound work item by delegating to the same managed execution path. It is not a global multi-item scheduler. `--run-tag <tag>` files the run under `~/.afk/loop-runs/<tag>/`; without it the tag is derived from `--work-item-id`, or is `default`.
+- `afk loop status [--run-tag <tag>] [--all]`: report one run from its pid file and status snapshot, or every run in the runs directory. `afk loop stop` signals the same run.
 - `afk qa`: retry an item in `verification`, using its managed manifest when present; `--execution-manifest <path>` selects an explicit manifest.
 - `afk backlog baseline --id <prd>`: report the branch a PRD accumulates its slices on and the slices that inherit it; `--branch <name>` records the branch in the PRD's body.
 - `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; the poll interval is the re-evaluation cadence, so the schedule is looked at again while executions are in flight and idle capacity is filled as soon as something becomes dispatchable. `--watch` keeps the schedule running until it is stopped, waiting for external state changes; `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Every waiting item in the report names the constraint that keeps it waiting — an unready dependency, a full capacity, a held repository lease, an overloaded host, a human gate, or a spent attempt budget. Each preview wave assumes prior waves have been merged and reconciled. SIGINT/SIGTERM stop dispatch and drain active attempts.
@@ -36,6 +37,7 @@ The command registry in `apps/cli/src/command-registry.ts` is the source of trut
 ## Data and workspace boundaries
 
 - AFK configuration and system data live under `~/.afk/`.
+- Runtime state belongs in a directory under `~/.afk/`, never in a separately configured file path. A loop run is `~/.afk/loop-runs/<tag>/`, holding its pid file and status snapshot; the state root keeps only singleton configuration such as `config.yml` and `workflows/`. Per-file path overrides are not part of the CLI: the retired `AFK_LOOP_PID_FILE` and `AFK_LOOP_STATUS_FILE` are why loop state used to appear in the state root itself.
 - Execution workspaces live under `~/.loop-workspace/`.
 - Per-workspace manifests, launch receipts, sessions, diagnostic runs, and execution journals are stored under the hashed workspace area in `~/.afk/workspaces/`.
 - Repository checkouts live under the canonical execution workspace; the caller's current directory does not redefine the canonical execution root.

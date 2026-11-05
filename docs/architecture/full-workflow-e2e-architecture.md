@@ -127,11 +127,11 @@ flowchart LR
 
 loop 的外部控制面是：
 
-- `afk loop start` 或兼容的 `afk loop`：前台运行；`-d` 通过 detached child 后台运行。
-- `afk loop status`：读取 `~/.afk/loop.pid`、`~/.afk/loop-status.json` 和进程存活状态。
-- `afk loop stop`：先发 `SIGTERM`，超时后发 `SIGKILL`。
+- `afk loop start` 或兼容的 `afk loop`：前台运行；`-d` 通过 detached child 后台运行。`--run-tag <tag>` 指定运行目录；缺省时由 `--work-item-id` 派生（`gitlab:host/group/project#3` → `project-3`），没有工作项时用 `default`。
+- `afk loop status [--run-tag <tag>]`：读取该 run 的 `loop.pid`、`status.json` 和进程存活状态；`--all` 列出 `~/.afk/loop-runs/` 下的全部 run。
+- `afk loop stop [--run-tag <tag>]`：先发 `SIGTERM`，超时后发 `SIGKILL`。
 
-`AFK_LOOP_PID_FILE` 与 `AFK_LOOP_STATUS_FILE` 可改写上面两个文件的路径。默认值保持单机单 loop；指定不同路径即可让多个 manifest 绑定的 loop 并行，各执行各的工作项。
+每个 loop run 是 `~/.afk/loop-runs/<tag>/` 下的一个目录，pid 和状态文件的路径都由 tag 派生。`AFK_LOOP_PID_FILE` 与 `AFK_LOOP_STATUS_FILE` 已移除：状态文件不再接受逐文件路径覆盖——那正是 loop 状态会散落到 `~/.afk` 根目录的原因。旧版单 loop 布局的 `~/.afk/loop.pid` 与 `~/.afk/loop-status.json` 只保留一个版本的只读回退，新版本不再写入。
 
 loop 输出状态行和 JSON 状态文件，包含 active execution、完成数、失败数、启动时间和最近错误。Provider 状态仍是事实源；`inFlight` 只用于当前进程内去重，重启后不会恢复之前的内存集合。
 
@@ -264,8 +264,8 @@ QA 工作树的依赖目录不是指向主检出的单个符号链接。pnpm 12 
 | 统一日志 | `~/.afk/logs/afk-YYYY-MM-DD.log` | 按天轮转的 pino JSONL 日志；watchdog、QA 超时快照同在此根目录下，可用 `AFK_LOG_DIR` 整体覆盖 |
 | 实现超时日志 | `~/.afk/logs/timeout/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
 | QA 超时日志 | `~/.afk/logs/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
-| loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态；可用 `AFK_LOOP_STATUS_FILE` 改写路径 |
-| loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查；可用 `AFK_LOOP_PID_FILE` 改写路径 |
+| loop 状态 | `~/.afk/loop-runs/<tag>/status.json` | 每个 loop run 一份：active execution、完成/失败计数、uptime、启动时间和最近状态；`<tag>` 缺省为 `default`，绑定工作项时由工作项 ID 派生 |
+| loop PID | `~/.afk/loop-runs/<tag>/loop.pid` | daemon 控制、单实例检查和 `afk loop status --all`，与 status 同目录 |
 
 `RunEvent` 的每条事件还携带 `ObservationContext`、`correlationId`、可选 `evidence` 和完整性字段。证据引用应填写 `uri`、`sha256`、`mediaType`、分类和脱敏状态；日志中出现凭据、token、私有输出时不得直接作为 public evidence 发布。
 

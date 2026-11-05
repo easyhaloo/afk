@@ -428,8 +428,31 @@ export function parseLoopLastError(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/**
+ * The most relevant loop status snapshot.
+ *
+ * A machine may run one loop per work item, each filed under its own tag. The
+ * card answers for the loop an operator would look at first: the default run,
+ * a run written by the previous single-loop layout, or the newest run.
+ */
+async function readLoopStatusSnapshot(): Promise<string> {
+  const runs = path.join(homedir(), ".afk", "loop-runs");
+  for (const file of [path.join(runs, "default", "status.json"), path.join(homedir(), ".afk", "loop-status.json")]) {
+    const raw = await fs.readFile(file, "utf8").catch(() => "");
+    if (raw) return raw;
+  }
+  const entries = await fs.readdir(runs, { withFileTypes: true }).catch(() => []);
+  const snapshots = await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
+    const file = path.join(runs, entry.name, "status.json");
+    const stat = await fs.stat(file).catch(() => undefined);
+    return stat ? { file, modifiedAt: stat.mtimeMs } : undefined;
+  }));
+  const newest = snapshots.filter(snapshot => snapshot !== undefined).sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
+  return newest ? await fs.readFile(newest.file, "utf8").catch(() => "") : "";
+}
+
 async function readLoopStatus(): Promise<LoopStatus> {
-  const raw = await fs.readFile(path.join(homedir(), ".afk", "loop-status.json"), "utf8").catch(() => "");
+  const raw = await readLoopStatusSnapshot();
   const record = jsonRecord(raw);
   const pid = typeof record.pid === "number" ? record.pid : undefined;
   const execution = record.execution && typeof record.execution === "object" ? record.execution as Record<string, unknown> : {};

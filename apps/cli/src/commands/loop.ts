@@ -14,17 +14,22 @@ import { logger, redirectStdioToLog, resolveLogPath } from '@afk/runtime/infrast
 import { handleCommandError, success, info, warning, fail, detail } from '../output.js';
 import { spawnDetached, waitForProcessPid } from '@afk/runtime/infrastructure/process/daemon';
 import {
+  DEFAULT_LOOP_RUN_TAG,
+  LEGACY_LOOP_PID_FILE,
+  LEGACY_LOOP_STATUS_FILE,
+  ensurePidDirectory,
+  isProcessAlive,
+  legacyLoopPathOverrides,
+  liveLoopRunTags,
   loopPidFilePath,
+  loopRunTagForWorkItem,
   loopRunsDirectory,
   loopStatusFilePath,
   readPid,
   removePidFile,
-  ensurePidDirectory,
-  isProcessAlive,
+  sanitizeLoopRunTag,
 } from '@afk/runtime/infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
-
-const STATUS_FILE = loopStatusFilePath();
 
 export function resolveManagedLoopExecution(
   options: LoopStartOptions,
@@ -59,27 +64,49 @@ export function registerLoopCommands(program: Command): void {
   loop.command('status')
     .description('Show status of the running loop daemon')
     .option('--all', 'Show every loop under the loop runs directory')
-    .action((options: { all?: boolean }) => {
-      try { options.all ? showAllLoopStatus() : showStatus(); } catch (error) { handleCommandError(error); }
+    .option('--run-tag <tag>', 'Show the loop filed under this run tag')
+    .action((options: { all?: boolean; runTag?: string }) => {
+      try { options.all ? showAllLoopStatus() : showStatus(options.runTag); } catch (error) { handleCommandError(error); }
     });
 
   loop.command('stop').description('Stop the running loop daemon (SIGTERM, then SIGKILL after timeout)')
     .option('-t, --timeout <seconds>', 'Max wait for graceful shutdown before SIGKILL', parsePositiveInt)
-    .action(async (options: { timeout?: number }) => {
-      try { await stopLoop(options.timeout ?? 30); } catch (error) { handleCommandError(error); }
+    .option('--run-tag <tag>', 'Stop the loop filed under this run tag')
+    .action(async (options: { timeout?: number; runTag?: string }) => {
+      try { await stopLoop(options.timeout ?? 30, options.runTag); } catch (error) { handleCommandError(error); }
     });
 }
 
 async function startLoop(options: LoopStartOptions): Promise<void> {
-  resolveManagedLoopExecution(options, loadLoopConfig().moduleTriggers);
+  const managedExecution = resolveManagedLoopExecution(options, loadLoopConfig().moduleTriggers);
+  const runTag = resolveStartRunTag(options, managedExecution.workItemId);
+  warnLegacyPathOverrides();
   if (options.daemon && process.env.AFK_LOOP_CHILD !== '1') {
-    await startDaemon(process.argv.slice(2));
+    await startDaemon(runTag);
     return;
   }
-  await runLoop(options);
+  await runLoop(options, runTag);
 }
 
-async function runLoop(options: LoopStartOptions): Promise<void> {
+/** The run directory a started loop is filed under: explicit tag, else the work item's. */
+function resolveStartRunTag(options: LoopStartOptions, workItemId?: string): string {
+  return options.runTag ? sanitizeLoopRunTag(options.runTag) : loopRunTagForWorkItem(workItemId);
+}
+
+/**
+ * Say once that a path override is ignored.
+ *
+ * A deployment that used to redirect the status file keeps exporting the
+ * variable; silence would leave it wondering why the file stopped changing.
+ */
+function warnLegacyPathOverrides(): void {
+  const ignored = legacyLoopPathOverrides();
+  if (ignored.length > 0) {
+    warning(`afk loop: ignoring ${ignored.join(', ')} — run state lives under ${loopRunsDirectory()}`);
+  }
+}
+
+async function runLoop(options: LoopStartOptions, runTag: string): Promise<void> {
   if (process.env.AFK_LOOP_CHILD === '1') redirectStdioToLog();
 
   const schedulerConfig = getSchedulerConfig();
@@ -104,9 +131,10 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     managedExecution,
     targetBranch: getWorkflowConfig().targetBranch,
     template: options.template,
+    runTag,
   });
 
-  printStartup(pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, options.backlogId);
+  printStartup(pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, options.backlogId, runTag);
   const removeSignals = installLoopSignalHandlers(
     () => runner.stop(),
     signal => warning(`Received ${signal}, draining in-flight work...`),
@@ -121,7 +149,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
   process.exit(0);
 }
 
-function printStartup(pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, backlogIds?: string[]): void {
+function printStartup(pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, backlogIds: string[] | undefined, runTag: string): void {
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));
   console.log(chalk.gray('  Configuration:'));
   console.log(chalk.gray(`    poll-interval:     ${pollIntervalMs / 1000}s`));
@@ -129,29 +157,31 @@ function printStartup(pollIntervalMs: number, statusIntervalMs: number, shutdown
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeoutMs / 1000}s`));
   if (maxIterations !== undefined) console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
   if (backlogIds?.length) console.log(chalk.gray(`    backlog-scope:     ${backlogIds.join(', ')}`));
+  console.log(chalk.gray(`    run:               ${loopPidFilePath(runTag).replace(/\/loop\.pid$/, '')}`));
   console.log(chalk.dim('\nPress Ctrl+C to stop (will drain in-flight work)\n'));
 }
 
-async function startDaemon(args: string[]): Promise<void> {
-  const existingPid = readPid();
+async function startDaemon(runTag: string): Promise<void> {
+  const existingPid = readPid(runTag);
   if (existingPid !== null && isProcessAlive(existingPid)) {
-    handleCommandError(new Error(`afk loop: already running (pid=${existingPid})`), 'use `afk loop stop` to stop it first');
+    handleCommandError(new Error(`afk loop: already running (pid=${existingPid}, run=${runTag})`), 'use `afk loop stop` to stop it first');
     return;
   }
-  if (existingPid !== null) removePidFile();
-  ensurePidDirectory();
+  if (existingPid !== null) removePidFile(runTag);
+  ensurePidDirectory(runTag);
   const child = spawnDetached({
     executable: process.execPath,
     script: process.argv[1],
-    args: args.filter(argument => argument !== '--daemon' && argument !== '-d'),
+    args: process.argv.slice(2).filter(argument => argument !== '--daemon' && argument !== '-d'),
     env: { ...process.env, AFK_LOOP_CHILD: '1' },
   });
-  const pid = await waitForProcessPid(readPid, isProcessAlive, 2_000);
+  const pid = await waitForProcessPid(() => readPid(runTag), isProcessAlive, 2_000);
   if (pid !== null) {
     success('afk loop daemonized');
     detail(`pid:        ${pid}`);
     detail(`log:        ${resolveLogPath()}`);
-    detail(`pid-file:   ${loopPidFilePath()}`);
+    detail(`pid-file:   ${loopPidFilePath(runTag)}`);
+    detail(`status:     ${loopStatusFilePath(runTag)}`);
   } else {
     warning(`afk loop: child spawned (pid=${child.pid}) but no pid file appeared`);
     detail(`check log: ${resolveLogPath()}`);
@@ -159,16 +189,50 @@ async function startDaemon(args: string[]): Promise<void> {
   process.exit(0);
 }
 
-function showStatus(): void {
-  const pid = readPid();
-  if (pid === null) { warning('afk loop: not running (no pid file)'); detail(`expected: ${loopPidFilePath()}`); return; }
-  if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(); return; }
-  success('afk loop: running');
+/**
+ * The run a command acts on when the operator names none.
+ *
+ * `default` when that run is alive, otherwise the only live run. With several
+ * live runs there is no single answer, so the command says which ones exist
+ * and falls back to `default` instead of guessing.
+ */
+function resolveCommandRunTag(explicit?: string): string {
+  if (explicit) return sanitizeLoopRunTag(explicit);
+  const live = liveLoopRunTags();
+  if (live.includes(DEFAULT_LOOP_RUN_TAG)) return DEFAULT_LOOP_RUN_TAG;
+  if (live.length === 1) return live[0];
+  if (live.length > 1) detail(`multiple loops are running: ${live.join(', ')} — use --run-tag, or --all`);
+  return DEFAULT_LOOP_RUN_TAG;
+}
+
+/**
+ * The pid and status files of one run, with the single-release legacy fallback.
+ *
+ * A loop started by an older CLI wrote `~/.afk/loop.pid` and
+ * `~/.afk/loop-status.json`. Reading them keeps `status` and `stop` working
+ * across an upgrade; nothing writes them any more.
+ */
+function loopRunFiles(runTag: string): { pid: string; status: string; legacy: boolean } {
+  if (runTag === DEFAULT_LOOP_RUN_TAG && !fs.existsSync(loopPidFilePath(runTag)) && fs.existsSync(LEGACY_LOOP_PID_FILE)) {
+    return { pid: LEGACY_LOOP_PID_FILE, status: LEGACY_LOOP_STATUS_FILE, legacy: true };
+  }
+  return { pid: loopPidFilePath(runTag), status: loopStatusFilePath(runTag), legacy: false };
+}
+
+function showStatus(explicitRunTag?: string): void {
+  warnLegacyPathOverrides();
+  const runTag = resolveCommandRunTag(explicitRunTag);
+  const files = loopRunFiles(runTag);
+  const pid = readPidFile(files.pid);
+  if (pid === null) { warning(`afk loop: not running (${runTag})`); detail(`expected: ${files.pid}`); return; }
+  if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(runTag); return; }
+  success(`afk loop: running (${runTag})`);
   detail(`pid:        ${pid}`);
   detail(`log:        ${resolveLogPath()}`);
-  detail(`status:     ${STATUS_FILE}`);
+  detail(`status:     ${files.status}`);
+  if (files.legacy) detail('(legacy single-loop layout — restart the loop to move it under loop-runs/)');
   try {
-    const status = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf-8')) as {
+    const status = JSON.parse(fs.readFileSync(files.status, 'utf-8')) as {
       execution: { active: number; ids: string[] };
       totals: { completed: number; failed: number };
       startedAt: number;
@@ -231,6 +295,10 @@ function showAllLoopStatus(): void {
     console.log();
   }
   console.log();
+  if (fs.existsSync(LEGACY_LOOP_PID_FILE)) {
+    console.log(chalk.gray(`legacy:     ${LEGACY_LOOP_STATUS_FILE} (kept for one release; restart the loop to move it under loop-runs/)`));
+    console.log();
+  }
 }
 
 /** The pid a loop run recorded, or null when it never started. */
@@ -256,11 +324,13 @@ function readLoopStatus(file: string): {
   }
 }
 
-async function stopLoop(timeoutSeconds: number): Promise<void> {
-  const pid = readPid();
-  if (pid === null) { warning('afk loop: not running (no pid file)'); return; }
-  if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(); return; }
-  info(`afk loop: sending SIGTERM to pid=${pid} (waiting up to ${timeoutSeconds}s)...`);
+async function stopLoop(timeoutSeconds: number, explicitRunTag?: string): Promise<void> {
+  const runTag = resolveCommandRunTag(explicitRunTag);
+  const files = loopRunFiles(runTag);
+  const pid = readPidFile(files.pid);
+  if (pid === null) { warning(`afk loop: not running (${runTag})`); return; }
+  if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(runTag); return; }
+  info(`afk loop: sending SIGTERM to pid=${pid} (run=${runTag}, waiting up to ${timeoutSeconds}s)...`);
   try { process.kill(pid, 'SIGTERM'); } catch (error) { handleCommandError(new Error(`failed to send signal: ${(error as Error).message}`)); return; }
   const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline && isProcessAlive(pid)) await new Promise(resolve => setTimeout(resolve, 200));

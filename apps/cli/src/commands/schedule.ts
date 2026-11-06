@@ -19,6 +19,10 @@ export function registerScheduleCommands(program: Command): void {
       process.on('SIGTERM', stop);
       let paused = false;
       let inventoryBlind = false;
+      // The last scope failure that was printed. A failure that does not
+      // change is not printed again: the schedule polls every thirty seconds
+      // and the operator reads the terminal, not a wall of the same line.
+      let scopeSignature = '';
       try {
         const result = await scheduleWorkItems({ parent: options.parent, maxConcurrent: options.maxConcurrent,
           loadLimit: options.loadLimit, pollIntervalMs: options.pollInterval, watch: options.watch, dryRun: options.dryRun, signal: controller.signal,
@@ -40,6 +44,22 @@ export function registerScheduleCommands(program: Command): void {
               inventoryBlind = false;
               detail('Work item inventory is available again');
             }
+            // A project outside this PRD's scope that cannot be read is named
+            // and nothing more: it does not stop the schedule. A project
+            // inside the scope does stop the work that depends on it, and
+            // the operator has to know that it did.
+            const scope = status.scope;
+            if (!scope || (!scope.reported.length && !scope.unreadable.length)) return;
+            const signature = [...scope.reported, ...scope.unreadable]
+              .map(diagnostic => `${diagnostic.platform}:${diagnostic.projectKey}:${diagnostic.code}`).join('|');
+            if (signature === scopeSignature) return;
+            scopeSignature = signature;
+            for (const diagnostic of scope.reported) {
+              warning(`Cannot read ${diagnostic.projectKey} (${diagnostic.message}); it is outside this PRD's scope, so the schedule continues`);
+            }
+            for (const diagnostic of scope.unreadable) {
+              warning(`Cannot read ${diagnostic.projectKey} (${diagnostic.message}); it is inside this PRD's scope, so the work that depends on it is held back`);
+            }
           } });
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else {
@@ -55,8 +75,13 @@ export function registerScheduleCommands(program: Command): void {
             const reason = item.waitReason ? describeScheduleWaitReason(item.waitReason) : item.runnability.reason ?? 'waiting';
             detail(`${item.workItemId}: ${reason}`);
           }
+          if (result.scope?.heldBack.length) {
+            detail(`Held back because a dependency could not be read: ${result.scope.heldBack.join(', ')}`);
+          }
         }
         if (result.executions.some(execution => execution.status === 'blocked')) process.exitCode = 1;
+        // A scope AFK cannot see is not a clean run: the report says so.
+        if (result.scope?.unreadable.length) process.exitCode = 1;
       } catch (error) { handleCommandError(error); }
       finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
     });

@@ -3,5 +3,6 @@ export { readExecutionManifest } from './application/workflows/execution-manifes
 export { resolveWorkflowRunRequest } from './application/workflows/run-request.js';
 export { parseExecutionPlan, createExecutionPlan, type ExecutionPlan } from './domain/backlog/execution-plan.js';
 export { scheduleWorkItems, scheduleWaitReason, describeScheduleWaitReason, inventoryBackoffMs, type ScheduleOptions, type ScheduleResult,
-  type ScheduleStatus, type ScheduleWaitContext, type ScheduleWaitReason, type ScheduleWaitingItem } from './application/runners/scheduler.js';
+  type ScheduleStatus, type ScheduleWaitContext, type ScheduleWaitReason, type ScheduleWaitingItem, type ScheduleInventory, type ScheduleScopeReport } from './application/runners/scheduler.js';
+export { assessScheduleScope, computeScheduleScope, type ScheduleScope, type ScheduleScopeAssessment } from './domain/backlog/schedule-scope.js';
 export { inspectWorkspaceDisk, type WorkspaceDiskReport } from './application/workflows/workspace-disk.js';

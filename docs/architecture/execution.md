@@ -131,6 +131,25 @@ Only the statement is corrected. The evidence a record carries — the failed cr
 
 A correction is a **fact, not an instruction**. The record is read by an agent, so a revision that names a branch as the destination of a push (`publish to prd/27`, `把 prd/27 合进当前分支`), carries a git command, or carries a command that merges or re-runs work is refused before it reaches the provider. The correction keeps its own trail in the record — when it was written, who wrote it, what the statement was before — so a correction is never a silent overwrite. See [ADR-0035](../adr/0035-rework-records-are-revisable.md).
 
+### The range a schedule depends on
+
+A scheduler reads the whole platform, and it has to: a PRD's slices live in the repositories the work touches. The credentials reach far more projects than any one PRD does — on the machine that drives PRD #27, 46 GitLab projects are visible and the PRD's slices live in 7 of them.
+
+Two ranges meet in the scheduler, and they used to be treated as one. The schedule *decides* about a PRD's subtree and the work that subtree waits for. The *read* covers every project the credentials reach. The completeness check was the platform-wide one — "not one diagnostic" — so a single unreadable repository out of forty-six made the whole platform "incomplete", and the scheduler backed off and dispatched nothing while looking perfectly alive.
+
+The scope is now the range the decision depends on: the parent PRD, its children transitively, and everything those wait for transitively. It is derived from the relationships AFK itself writes, and it crosses repositories.
+
+**An unreadable dependency still names its project.** A work item identity carries its project key, so a slice that waits for work in a repository AFK could not read still says which repository matters. That repository is inside the scope even though not one of its items was ever read. Without this rule the gap in the data would look like evidence that there is nothing there, and the slice would be dispatched on a view of the world that does not exist.
+
+- **Outside the scope**: the project is named — in the log, in the status and in the final report — and the schedule continues. A failure is only a failure of the thing it is about.
+- **Inside the scope**: the slices that depend on the unreadable project wait, with the reason `visibility_unknown`, and the rest of the tree is dispatched as usual. One broken repository does not paralyze the PRD; it paralyzes the slices that need it.
+- **A project list failure** is always inside the scope: AFK could not enumerate the candidates, so it cannot prove that any project is outside it.
+- **A failure that cannot be retried** (`retryable: false` — a repository that was deleted) is escalated rather than retried forever: the log says at error level that a person has to act, and the affected slices wait as `awaiting_human`. The scheduler does not write this to the provider; the escalation is a visible report.
+
+The parent PRD is the anchor of the scope. If the repository holding it cannot be read, the schedule knows nothing about that PRD, so the read failed *for this schedule*: it backs off and retries instead of dying. A parent that is missing while no project failed is a different answer — the PRD does not exist — and it is reported as an error.
+
+The guarantee is kept: AFK does not schedule work whose state it cannot see. What changed is the range the completeness is measured against. See [ADR-0036](../adr/0036-schedule-scope.md).
+
 ### The publish boundary
 
 An agent is given a repository with several branches in it, and it is told

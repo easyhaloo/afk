@@ -31,3 +31,4 @@ for the workflow.
 | [ADR-0033](0033-agent-tui-modals.md) | A modal in the agent's TUI belongs to AFK to dismiss | accepted | 2026-11-06 |
 | [ADR-0034](0034-transient-failure-is-not-permanent-failure.md) | A temporary failure is not a permanent failure | accepted | 2026-11-06 |
 | [ADR-0035](0035-rework-records-are-revisable.md) | A rework record is correctable | accepted | 2026-11-06 |
+| [ADR-0036](0036-schedule-scope.md) | A schedule is judged against the range it depends on | accepted | 2026-11-06 |

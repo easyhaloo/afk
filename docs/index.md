@@ -65,6 +65,7 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0033](adr/0033-agent-tui-modals.md) | A modal in the agent's TUI belongs to AFK to dismiss | accepted |
 | [0034](adr/0034-transient-failure-is-not-permanent-failure.md) | A temporary failure is not a permanent failure | accepted |
 | [0035](adr/0035-rework-records-are-revisable.md) | A rework record is correctable | accepted |
+| [0036](adr/0036-schedule-scope.md) | A schedule is judged against the range it depends on | accepted |
 
 ## 保留的研究材料（research/）
 

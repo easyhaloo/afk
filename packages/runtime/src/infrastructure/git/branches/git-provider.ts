@@ -10,6 +10,7 @@ import type {
   BaselineMergeResult,
 } from './provider.js';
 import { strategyForConfig } from '../../../domain/branches/registry.js';
+import { releasePath } from '../../../domain/branches/base.js';
 import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types.js';
 import { isAncestorCommit } from '../git-ancestry.js';
 import { linkNodeModules } from '../dependency-pool.js';
@@ -81,10 +82,16 @@ export class GitBranchProvider implements BranchProvider {
   async commit(worktreePath: string, message: string): Promise<BranchCommitResult> {
     const git = simpleGit(worktreePath);
     // AFK's own runtime artifacts live in the worktree: the completion signal
-    // the agent writes and the artifact manifest the QA runner reads. They are
-    // process state, not work — publishing them would put them in the change
-    // request.
-    await git.raw(['add', '-A', '--', '.', ':!.afk-signal.json', ':!.afk']);
+    // the agent writes, the artifact manifest the QA runner reads, and the
+    // worktrees AFK keeps inside the checkout. They are process state, not
+    // work — publishing them would put them in the change request. A nested
+    // worktree is worse than noise: Git stages it as a submodule pointer, so
+    // the change request would carry a submodule nobody can clone.
+    await git.raw(['add', '-A', '--', '.', ':!.afk-signal.json', ':!.afk', ':!.worktrees']);
+    // An earlier attempt may have staged the worktree directory before it was
+    // excluded. Tracked means it is part of the change request, so it is
+    // dropped from the index here.
+    await git.raw(['rm', '--cached', '-r', '-f', '--ignore-unmatch', '.worktrees']).catch(() => undefined);
     // This commit is a fallback for whatever the agent left behind, so it is
     // the one place where an unrelated leftover gets published. A binary
     // leftover cannot be merged by anyone, so it is kept out of the commit
@@ -191,7 +198,14 @@ export class GitBranchProvider implements BranchProvider {
 
   async cleanup(worktreePath: string, options: { preserve?: boolean } = {}): Promise<void> {
     const handle = this.handles.get(worktreePath);
-    if (!handle || options.preserve) return;
+    if (!handle) return;
+    // The claim on this path belongs to the attempt that took it, and the
+    // attempt ends here. Keeping the worktree is a decision about the files,
+    // not about the claim: a claim that outlives its attempt refuses the
+    // next attempt of the same item with a double-prepare error instead of
+    // the failure that really happened.
+    releasePath(worktreePath);
+    if (options.preserve) return;
     const config = { type: 'named' as const, branch: handle.branch };
     await strategyForConfig(config).cleanup(simpleGit(this.repoRoot), config, handle, { force: true });
     this.handles.delete(worktreePath);

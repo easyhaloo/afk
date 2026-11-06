@@ -9,6 +9,8 @@ import { TemplateLoader } from '../../domain/templates/loader.js';
 import { blockBacklog } from '../../domain/backlog/commands.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
 import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
+import { prepareAgentRuntime } from '../../domain/agents/codex-runtime.js';
+import { resolveRuntimeForProvider } from '../../domain/agents/runtime-binding.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../infrastructure/sandbox/types.js';
@@ -85,6 +87,12 @@ export interface QARunnerDependencies {
     featureBranch: string,
   ) => Promise<BaselineMergeResult>;
   runtimeManager?: TaskRuntimeManager;
+  /**
+   * Readiness probe for a runtime the runner resolved itself (tests).
+   * Defaults to AFK's Codex readiness probe, which spends a live model
+   * round-trip.
+   */
+  prepareRuntime?: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   beforeChange?: (action: 'publish', backlog: BacklogItem) => Promise<void>;
   afterPublication?: (change: ChangeRequest) => Promise<void>;
   onCommit?: (commitSha: string, branch: string) => Promise<void>;
@@ -104,7 +112,18 @@ export class QARunner {
   private readonly providers: ManagementProviderBundle;
   private readonly sandboxProvider: SandboxProvider;
   private readonly agentProvider: AgentProvider;
-  private readonly agentRuntime?: AgentRuntimeSelection;
+  private agentRuntime?: AgentRuntimeSelection;
+  /**
+   * A runtime the runner resolved itself has not been probed yet.
+   *
+   * The CLI and the work-item runner both probe the runtime before they
+   * hand it over, so an injected runtime is already probed. A runtime
+   * resolved here — because the reviewer runs a provider the caller did
+   * not name — is probed here, so an unreachable model fails with the
+   * probe's own diagnosis instead of a transport error from the wrong
+   * endpoint.
+   */
+  private runtimeNeedsProbe: boolean;
   private readonly tmux?: TmuxClient;
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
@@ -114,6 +133,7 @@ export class QARunner {
   private readonly prepareRepositories: MultiRepositoryPreparationService;
   private readonly mergeFeatureIntoBaselineOverride?: QARunnerDependencies['mergeFeatureIntoBaseline'];
   private readonly runtimeManager: TaskRuntimeManager;
+  private readonly prepareRuntime: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   private readonly beforeChange?: QARunnerDependencies['beforeChange'];
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
   private readonly onCommit?: QARunnerDependencies['onCommit'];
@@ -139,9 +159,20 @@ export class QARunner {
     this.onSession = deps.onSession;
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
-    // The reviewer runs the request-level provider with the request-level
-    // runtime: they are resolved together and never disagree.
-    this.agentRuntime = deps.agentRuntime;
+    // The reviewer runs a provider, and a provider runs with a runtime: the
+    // two are one decision. A reviewer that resolves its own provider —
+    // from AFK's configuration — must resolve the runtime that belongs to
+    // it as well. Without this, a Codex reviewer runs with no runtime at
+    // all: no profile, no provider, no transport, so Codex falls back to
+    // the host's own configuration and talks to an endpoint nobody chose.
+    const bound = resolveRuntimeForProvider({
+      provider: this.agentProvider.name,
+      runtime: deps.agentRuntime,
+      codex: this.config.agents?.codex,
+    });
+    this.agentRuntime = bound;
+    this.runtimeNeedsProbe = bound !== undefined && bound !== deps.agentRuntime;
+    this.prepareRuntime = deps.prepareRuntime ?? prepareAgentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 
@@ -149,6 +180,18 @@ export class QARunner {
     const id = String(backlogId);
     const session = `qa-${id}-${Date.now()}`;
     return withLogContext(getLogContext() ?? { runId: `${session}-runtime`, workItemId: id }, () => this.processObserved(id, session));
+  }
+
+  /**
+   * Probe a runtime the runner resolved itself, once, before the agent runs.
+   *
+   * An injected runtime was probed by the caller; probing it again would
+   * spend a second live model round-trip for an answer AFK already has.
+   */
+  private async probeOwnRuntime(): Promise<void> {
+    if (!this.runtimeNeedsProbe || this.agentRuntime?.kind !== 'codex') return;
+    this.agentRuntime = await this.prepareRuntime(this.agentRuntime);
+    this.runtimeNeedsProbe = false;
   }
 
   private async processObserved(id: string, session: string): Promise<QAProcessResult> {
@@ -233,6 +276,10 @@ export class QARunner {
       });
       logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
       await this.logWorktreeDiagnostics(id, 'before-agent-start', worktreePath);
+      // The reviewer is about to start. A runtime the runner resolved itself
+      // is probed first, so an unreachable model fails here — with the
+      // probe's own diagnosis — instead of halfway through the first turn.
+      await this.probeOwnRuntime();
 
       // A conflict is resolved here, in the QA worktree, which is the change
       // request's own branch — so the resolution lands exactly where the

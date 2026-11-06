@@ -105,6 +105,36 @@ describe('TmuxClient provider readiness', () => {
     await expect(client.waitForPrompt('/w', 1000, 'codex', 'codex-session')).resolves.toBe(true);
     expect(capture).toHaveBeenCalled();
   });
+
+  it('answers a modal that is up before the goal is typed', async () => {
+    // A modal covers the composer, so the placeholder stays hidden and the
+    // composer never looks ready. The modal holds the keyboard, so the goal
+    // would be typed into the modal and lost with it. AFK answers the modal
+    // instead of waiting the timeout out.
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('Trust this folder?\n  1. Trust and continue\n  2. Quit')
+      .mockResolvedValue('› Ask Codex to do anything');
+
+    await expect(client.waitForPrompt('/w', 1000, 'codex', 'codex-session')).resolves.toBe(true);
+
+    expect(exec).toHaveBeenCalledWith(['send-keys', '-t', 'codex-session:main', 'C-m']);
+  });
+
+  it('does not press Enter while the composer is simply not ready yet', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client, 'capturePane').mockResolvedValue('› the goal is still typed into the composer');
+
+    await expect(client.waitForPrompt('/w', 20, 'codex', 'codex-session')).resolves.toBe(true);
+
+    expect(exec).not.toHaveBeenCalled();
+  });
 });
 
 describe('TmuxClient prompt submission', () => {

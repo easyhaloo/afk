@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { describeScheduleWaitReason, scheduleWaitReason, scheduleWorkItems, scheduledDescendants, schedulerCapacity } from './scheduler.js';
+import { describeScheduleWaitReason, inventoryBackoffMs, scheduleWaitReason, scheduleWorkItems, scheduledDescendants, schedulerCapacity } from './scheduler.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { executionManifestPath } from '../../infrastructure/workspace.js';
@@ -253,6 +253,82 @@ describe('scheduler', () => {
     expect(schedulerCapacity(1, 12)).toBe(1);
     expect(() => schedulerCapacity(2, 4, 0)).toThrow('positive');
     expect(() => scheduledDescendants([], parent.id)).toThrow('absent');
+  });
+
+  it('keeps scheduling after one failed inventory read', async () => {
+    // One fetch that did not make it through the network is not a verdict
+    // on the provider. The old scheduler treated it as one and the whole
+    // process died with it.
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const child = item('acme/api', 2, { parentId: parent.id });
+    const controller = new AbortController();
+    let reads = 0;
+    const inventory = vi.fn(async () => {
+      reads += 1;
+      if (reads === 1) throw new Error('schedule inventory is incomplete: fetch failed');
+      return [parent, child];
+    });
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => {
+      controller.abort();
+      return { workItemId, executionId: 'attempt', status: 'merge_ready' as const };
+    });
+
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal }, {
+      inventory, repositories: async () => ['api'], load: () => 0, execute,
+    });
+
+    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.executions.map(execution => execution.status)).toEqual(['merge_ready']);
+  });
+
+  it('retries a failing inventory with a growing backoff instead of exiting', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const controller = new AbortController();
+    const failures: number[] = [];
+    const statuses: Array<{ failures: number; error: string; retryInMs: number } | undefined> = [];
+    const inventory = vi.fn(async () => {
+      failures.push(failures.length + 1);
+      if (failures.length === 4) controller.abort();
+      throw new Error('schedule inventory is incomplete: fetch failed');
+    });
+    const wait = vi.fn(async () => {});
+
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 100, signal: controller.signal,
+      onStatus: status => statuses.push(status.inventoryUnavailable) }, {
+      inventory, repositories: async () => ['api'], load: () => 0, wait,
+    });
+
+    // Four failed reads, and the scheduler is still alive: it never threw.
+    expect(failures).toHaveLength(4);
+    expect(result.stopped).toBe(true);
+    // The backoff grows with every failure, starting at the poll interval.
+    expect(wait.mock.calls.map(call => call[0])).toEqual([100, 200, 400, 800]);
+    // And it says so: the operator is told the scheduler is running but
+    // cannot see the work items.
+    expect(statuses).toHaveLength(4);
+    expect(statuses[0]).toMatchObject({ failures: 1, retryInMs: 100 });
+    expect(statuses[0]!.error).toContain('fetch failed');
+    expect(statuses[3]).toMatchObject({ failures: 4, retryInMs: 800 });
+  });
+});
+
+describe('inventoryBackoffMs', () => {
+  it('starts at the poll interval and doubles with every failure', () => {
+    expect(inventoryBackoffMs(1, 30_000)).toBe(30_000);
+    expect(inventoryBackoffMs(2, 30_000)).toBe(60_000);
+    expect(inventoryBackoffMs(3, 30_000)).toBe(120_000);
+  });
+
+  it('never waits longer than the ceiling', () => {
+    expect(inventoryBackoffMs(10, 30_000)).toBe(300_000);
+    expect(inventoryBackoffMs(100, 30_000)).toBe(300_000);
+    expect(inventoryBackoffMs(5, 1_000, 4_000)).toBe(4_000);
+  });
+
+  it('refuses a nonsensical interval', () => {
+    expect(() => inventoryBackoffMs(1, 0)).toThrow('poll interval must be positive');
+    expect(() => inventoryBackoffMs(1, 30_000, 0)).toThrow('maximum backoff must be positive');
   });
 });
 

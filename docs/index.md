@@ -63,6 +63,7 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0031](adr/0031-publish-boundary.md) | The target branch belongs to AFK's change request | accepted |
 | [0032](adr/0032-provider-and-runtime-are-one-decision.md) | A provider and the runtime that runs it are one decision | accepted |
 | [0033](adr/0033-agent-tui-modals.md) | A modal in the agent's TUI belongs to AFK to dismiss | accepted |
+| [0034](adr/0034-transient-failure-is-not-permanent-failure.md) | A temporary failure is not a permanent failure | accepted |
 
 ## 保留的研究材料（research/）
 

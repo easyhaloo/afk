@@ -28,7 +28,7 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk loop status [--run-tag <tag>] [--all]`: report one run from its pid file and status snapshot, or every run in the runs directory. `afk loop stop` signals the same run.
 - `afk qa`: retry an item in `verification`, using its managed manifest when present; `--execution-manifest <path>` selects an explicit manifest.
 - `afk backlog baseline --id <prd>`: report the branch a PRD accumulates its slices on and the slices that inherit it; `--branch <name>` records the branch in the PRD's body.
-- `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; the poll interval is the re-evaluation cadence, so the schedule is looked at again while executions are in flight and idle capacity is filled as soon as something becomes dispatchable. `--watch` keeps the schedule running until it is stopped, waiting for external state changes; `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Every waiting item in the report names the constraint that keeps it waiting — an unready dependency, a full capacity, a held repository lease, an overloaded host, a human gate, or a spent attempt budget. Each preview wave assumes prior waves have been merged and reconciled. SIGINT/SIGTERM stop dispatch and drain active attempts.
+- `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; the poll interval is the re-evaluation cadence, so the schedule is looked at again while executions are in flight and idle capacity is filled as soon as something becomes dispatchable. `--watch` keeps the schedule running until it is stopped, waiting for external state changes; `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Every waiting item in the report names the constraint that keeps it waiting — an unready dependency, a full capacity, a held repository lease, an overloaded host, a human gate, or a spent attempt budget. Each preview wave assumes prior waves have been merged and reconciled. A failed inventory read does not end the schedule: it backs off and retries, and says that the scheduler is running but cannot see the work items. SIGINT/SIGTERM stop dispatch and drain active attempts.
 - `afk doctor [--workspace-root <path>] [--json]`: inspect bare caches, dependency pools, managed workspaces, live repository leases, and conservative reclaimable-byte estimates. This is read-only; `afk observe doctor` continues to describe the event store.
 - `afk observe`: inspect executions and their audit/evidence projections.
 
@@ -204,6 +204,11 @@ transport error from the wrong endpoint. The probe costs a live model
 round-trip, so it runs once per provider per run. See
 [ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md).
 
+The verification branch binds the same way. The QA reviewer resolves its
+provider and its runtime together: a reviewer that names its own provider
+resolves the runtime that belongs to it, and a runtime the caller already
+probed is used as it is — the reviewer never probes the same runtime twice.
+
 ### Modals in the agent's TUI
 
 AFK drives an interactive TUI it does not own, and that TUI opens modals of
@@ -223,6 +228,13 @@ AFK names the modal it is answering and logs it, so the gap between "goal
 sent" and "goal never arrived" is visible in the run log rather than only
 in the pane scrollback. See
 [ADR-0033](../adr/0033-agent-tui-modals.md).
+
+A modal that is already up when AFK arrives is answered too. The modal
+covers the composer, so the placeholder stays hidden and the composer
+never looks ready; AFK would then wait out the whole timeout and type the
+goal *into* the modal, where it is lost with it. AFK recognises the modal
+in the pane, presses Enter to answer it, and waits for the composer to
+come back.
 
 ### Execution refs and configuration
 
@@ -288,6 +300,8 @@ Generation checks protect AFK-controlled lifecycle operations. Agent writes rema
 The scheduler reads the complete credential-scoped inventory, rejects dependency cycles, and reuses provider runnability rules. Default capacity is `min(repositoryCount, max(2, floor(availableCores / 3)))`, with a minimum of one. Overlapping multi-repository manifests serialize; disjoint repositories can run concurrently. A one-minute load above the configured limit pauses new launches. Dependencies unblock at `done`; `merge_ready` awaits human merge and reconciliation. Rework attempts are bounded by `maxQaReworkAttempts` per rework cycle, so an operator retry gives the item a fresh budget. Scheduling neither adopts unmanaged issues nor changes dependency labels.
 
 The dispatch loop wakes on two events: an execution finishing, and the poll interval elapsing. The timer is what keeps idle capacity usable — a schedule with capacity four and one slice in flight has to fill the other three slots as soon as their slices become dispatchable, not when the running slice ends, because an idle slot is wasted capacity and wasted capacity is a PRD that ships late. The timer is cancelled as soon as the loop has a reason to look again, so it never keeps the process alive. Without `--watch` the schedule is one-shot: it ends once the current wave has dispatched everything it can. With `--watch` it runs until it is stopped, because the help promises it keeps watching for merged dependencies and operator retries. The waiting report names the binding constraint for every item the scheduler did not dispatch, so an operator can tell a full capacity from an unready dependency instead of reading "waiting" for both.
+
+A temporary failure is not a permanent failure. A failed inventory read does not end the scheduler: it counts the failure, waits a backoff that starts at the poll interval and doubles up to a five-minute ceiling, and tries again. The counter resets with the first read that succeeds. The failure is never silent — the run log carries the diagnostic, the failure count and the delay before the next attempt, and the command line says that the scheduler is still running but cannot see the work items. A scheduler that is alive but blind must not look like a scheduler with nothing to do. See [ADR-0034](../adr/0034-transient-failure-is-not-permanent-failure.md).
 
 ### Recovery policy
 

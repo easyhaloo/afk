@@ -18,6 +18,7 @@ export function registerScheduleCommands(program: Command): void {
       process.on('SIGINT', stop);
       process.on('SIGTERM', stop);
       let paused = false;
+      let inventoryBlind = false;
       try {
         const result = await scheduleWorkItems({ parent: options.parent, maxConcurrent: options.maxConcurrent,
           loadLimit: options.loadLimit, pollIntervalMs: options.pollInterval, watch: options.watch, dryRun: options.dryRun, signal: controller.signal,
@@ -27,6 +28,18 @@ export function registerScheduleCommands(program: Command): void {
               else detail('System load recovered; resuming scheduling');
             }
             paused = status.overloaded;
+            // The scheduler is alive but it cannot see the work items. That
+            // is not the same as having nothing to do, and an operator who
+            // cannot tell them apart reads a quiet terminal as a stalled PRD.
+            if (status.inventoryUnavailable) {
+              if (inventoryBlind) return;
+              inventoryBlind = true;
+              const failure = status.inventoryUnavailable;
+              warning(`Cannot read the work item inventory (${failure.error}); the scheduler is still running and retries in ${Math.round(failure.retryInMs / 1000)}s`);
+            } else if (inventoryBlind) {
+              inventoryBlind = false;
+              detail('Work item inventory is available again');
+            }
           } });
         if (options.json) console.log(JSON.stringify(result, null, 2));
         else {

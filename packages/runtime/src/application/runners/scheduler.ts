@@ -8,6 +8,7 @@ import { findDependencyCycle } from '../../domain/backlog/graph.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
 import { createGlobalWorkItemCatalogs } from '../../infrastructure/provider/tracker-provider-factory.js';
 import { executionManifestPath } from '../../infrastructure/workspace.js';
+import { logger } from '../../infrastructure/io/logger.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem, type ExecuteWorkItemResult } from '../workflows/execute-work-item.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
@@ -22,7 +23,25 @@ export interface ScheduleOptions {
   watch?: boolean;
   dryRun?: boolean;
   signal?: AbortSignal;
-  onStatus?: (status: { active: number; capacity: number; overloaded: boolean }) => void;
+  onStatus?: (status: ScheduleStatus) => void;
+}
+
+/**
+ * What the scheduler knows about itself right now.
+ *
+ * The inventory is part of that: a scheduler that cannot read the work
+ * items is alive but blind, and an operator has to be able to tell those
+ * two apart from a scheduler that has nothing to do.
+ */
+export interface ScheduleStatus {
+  active: number;
+  capacity: number;
+  overloaded: boolean;
+  /**
+   * The inventory could not be read. The scheduler is still running and
+   * will retry; this says how often it has failed and when it tries next.
+   */
+  inventoryUnavailable?: { failures: number; error: string; retryInMs: number };
 }
 
 /**
@@ -176,6 +195,39 @@ async function inventory(platform: WorkItemPlatform): Promise<GlobalWorkItem[]> 
   return result.items;
 }
 
+/**
+ * The longest AFK waits between two attempts to read the inventory.
+ *
+ * A provider that is down for an hour must not turn into a request every
+ * second, and a provider that comes back must not have to wait an hour
+ * either. Five minutes is the ceiling: long enough to be polite to a
+ * struggling provider, short enough that a recovered one is noticed
+ * within the same working session.
+ */
+export const MAX_INVENTORY_BACKOFF_MS = 300_000;
+
+/**
+ * How long to wait before the next attempt to read the inventory.
+ *
+ * The first retry waits one poll interval — the same rhythm the scheduler
+ * already keeps — and every further failure doubles it, up to
+ * `MAX_INVENTORY_BACKOFF_MS`.
+ *
+ * A failed read is not a verdict on the provider: one fetch that did not
+ * make it through the network says nothing about the next one. The old
+ * scheduler treated it as one, and a single unlucky packet killed the
+ * process that was supposed to be watching the PRD.
+ */
+export function inventoryBackoffMs(failures: number, pollIntervalMs: number, maxMs: number = MAX_INVENTORY_BACKOFF_MS): number {
+  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) throw new Error('poll interval must be positive');
+  if (!Number.isFinite(maxMs) || maxMs <= 0) throw new Error('maximum backoff must be positive');
+  const attempt = Math.max(1, Math.floor(failures));
+  // The exponent is bounded so a long outage cannot overflow into Infinity
+  // and turn the backoff into a NaN delay.
+  const factor = 2 ** Math.min(attempt - 1, 30);
+  return Math.min(Math.max(1, Math.round(pollIntervalMs * factor)), maxMs);
+}
+
 async function repositoryKeys(item: GlobalWorkItem): Promise<string[]> {
   try {
     const manifest = await readExecutionManifest(executionManifestPath(item.id), item.id);
@@ -267,9 +319,36 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
   const observed = new Map<string, GlobalWorkItem['state']>();
   const active = new Map<string, { keys: string[]; promise: Promise<void> }>();
   const result: ScheduleResult = { parent, capacity: 1, executions: [], waiting: [], stopped: false };
+  // Consecutive failures to read the inventory. The counter decides the
+  // backoff and it is reset by the first read that succeeds.
+  let inventoryFailures = 0;
+  let lastOverloaded = false;
   try {
     while (!options.signal?.aborted) {
-      const items = await read();
+      let items: GlobalWorkItem[];
+      try {
+        items = await read();
+      } catch (error) {
+        // A failed read is not a verdict on the provider. The scheduler
+        // stays up, says that it is alive but blind, and tries again after
+        // a backoff — the same rhythm it keeps between two evaluations.
+        inventoryFailures += 1;
+        const retryInMs = inventoryBackoffMs(inventoryFailures, pollInterval);
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn({ parent, failures: inventoryFailures, retryInMs, error: message },
+          'schedule inventory is unavailable; the scheduler is still running and will retry');
+        options.onStatus?.({
+          active: active.size, capacity: result.capacity, overloaded: lastOverloaded,
+          inventoryUnavailable: { failures: inventoryFailures, error: message, retryInMs },
+        });
+        try {
+          await wait(retryInMs, options.signal);
+        } catch (waitError) {
+          if (!options.signal?.aborted) throw waitError;
+        }
+        continue;
+      }
+      inventoryFailures = 0;
       const parentItem = items.find(item => item.id === parent);
       if (parentItem) result.baselineBranch = prdBaselineForParent(parentItem);
       const selected = scheduledDescendants(items, parent);
@@ -288,6 +367,7 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
       const keys = new Map(await Promise.all(selected.map(async item => [item.id, (await repositories(item)).map(repositoryLeaseKey)] as const)));
       result.capacity = schedulerCapacity(new Set([...keys.values()].flat()).size, cores, options.maxConcurrent);
       const overloaded = (dependencies.load ?? (() => loadavg()[0]))() > loadLimit;
+      lastOverloaded = overloaded;
       options.onStatus?.({ active: active.size, capacity: result.capacity, overloaded });
       if (options.dryRun) {
         const completed = new Set(items.filter(item => item.state === 'done').map(item => item.id));

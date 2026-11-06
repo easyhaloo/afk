@@ -288,6 +288,15 @@ export class TmuxClient {
           // the goal before the composer exists loses the keystrokes.
           const pane = await this.capturePane(session, window);
           if (composerIsEmpty(provider, pane)) return true;
+          // A modal covers the composer, so the placeholder is hidden and the
+          // composer never looks ready. The modal holds the keyboard, so the
+          // goal would be typed into the modal and lost with it. Answer it:
+          // Enter dismisses it, and the composer comes back.
+          const open = codexModalInPane(provider, pane);
+          if (open) {
+            logger.info({ session, window, provider, modal: open }, 'agent TUI opened a modal before the goal was typed; answering it');
+            await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, 'C-m']);
+          }
         }
         await this.sleep(500);
       }

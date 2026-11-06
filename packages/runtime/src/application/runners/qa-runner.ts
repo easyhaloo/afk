@@ -19,6 +19,7 @@ import { createExecutionPlan, parseExecutionPlan, type ExecutionPlan } from '../
 import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 import type { ChangeMergeState } from '../../domain/tracker/types.js';
+import { decideMergeVerdict } from '../../domain/branches/publish-boundary.js';
 import type { BaselineMergeResult } from '../../infrastructure/git/branches/provider.js';
 import { formatExecutionFailure, formatExecutionFailureReport } from '../workflow-engine.js';
 import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
@@ -39,6 +40,26 @@ import type { RunEventData, RunFailureReasonCode } from '@afk/core';
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
 type QAProcessResult = { success: boolean; mrUrl?: string; rework?: boolean; summary?: string; failureCode?: RunFailureReasonCode; failedCriteria?: QAFailureCriterion[]; evidence?: FailureEvidence[] };
+
+/**
+ * What the platform said about a published change request.
+ *
+ * The three answers are not the same kind of news:
+ *
+ * - `accept` — the change request can land, or the platform has not
+ *   settled on a verdict yet. Either way AFK has nothing to act on.
+ * - `conflict` — the content conflicts. Another round of work can resolve
+ *   it.
+ * - `baseline_advanced` — the target branch already carries the change, so
+ *   there is nothing left to merge. The baseline moved; the content did
+ *   not conflict. Another round of work cannot resolve this, because the
+ *   work is already in the baseline and doing it again would move the
+ *   baseline again. A person decides.
+ */
+type PublicationVerdict =
+  | { kind: 'accept' }
+  | { kind: 'conflict'; detail: string }
+  | { kind: 'baseline_advanced'; detail: string };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -632,15 +653,28 @@ export class QARunner {
       // it can land. A conflict means the target branch moved under the
       // change, so the change goes back for another round instead of being
       // handed over as something a person can merge.
-      const conflict = await this.detectPublishedConflict(mr);
-      if (conflict) {
-        const summary = `change request ${mr.id} conflicts with ${targetBranch}: ${conflict}`;
+      const verdict = await this.detectPublishedVerdict(mr);
+      if (verdict.kind === 'baseline_advanced') {
+        // The target branch already carries this change. Nothing left to
+        // merge is not a conflict: the baseline moved, and the content did
+        // not. Sending the item back for another round would be answered
+        // by the same agent pushing the same baseline again — the loop
+        // this state was split out to break. A person has to decide whether
+        // the target branch keeps the commits or is rolled back.
+        const summary = `change request ${mr.id} has nothing left to merge: ${targetBranch} already carries its commits (${verdict.detail}). A person has to decide whether the target branch keeps them.`;
+        await this.markBlocked(backlogId, summary);
+        logger.warn({ backlogId, changeId: mr.id, targetBranch, detail: verdict.detail },
+          'published change request found the target branch advanced');
+        return { success: false, summary, failureCode: 'baseline_advanced' };
+      }
+      if (verdict.kind === 'conflict') {
+        const summary = `change request ${mr.id} conflicts with ${targetBranch}: ${verdict.detail}`;
         const rework = await this.openConflictRework(backlogId, summary);
         if (!rework) {
           await this.markBlocked(backlogId, summary);
           return { success: false, summary, failureCode: 'merge_conflict' };
         }
-        logger.warn({ backlogId, changeId: mr.id, reworkId: rework.id, conflict }, 'published change request conflicts with the target branch');
+        logger.warn({ backlogId, changeId: mr.id, reworkId: rework.id, detail: verdict.detail }, 'published change request conflicts with the target branch');
         return { success: false, rework: true, summary, failureCode: 'merge_conflict' };
       }
       if (activeRework) {
@@ -729,25 +763,33 @@ export class QARunner {
   /**
    * Ask the platform whether the published change request can land.
    *
-   * Only a real conflict counts. A verdict the platform has not computed yet,
-   * or a reason that is not a conflict — a failing check, a missing
-   * approval — leaves the change as it is.
+   * Only a real conflict counts as a conflict. A verdict the platform has
+   * not computed yet, or a reason that is not a conflict — a failing
+   * check, a missing approval — leaves the change as it is.
+   *
+   * A target branch that already carries the change is the third verdict,
+   * and it is not a conflict: there is nothing left to merge because the
+   * baseline moved, not because the content disagrees.
    */
-  private async detectPublishedConflict(mr: ChangeRequest): Promise<string | undefined> {
+  private async detectPublishedVerdict(mr: ChangeRequest): Promise<PublicationVerdict> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let state: ChangeMergeState | undefined;
       try {
         state = (await this.providers.changes.get(String(mr.id))).mergeState;
       } catch (error) {
         logger.warn({ changeId: mr.id, error }, 'could not read the merge state of the published change request');
-        return undefined;
+        return { kind: 'accept' };
       }
-      if (state === 'conflict') return 'the target branch changed the same lines';
-      if (state === 'mergeable') return undefined;
+      if (state === 'mergeable') return { kind: 'accept' };
+      if (state === 'conflict' || state === 'baseline_advanced') {
+        return decideMergeVerdict(state) === 'escalate'
+          ? { kind: 'baseline_advanced', detail: 'the target branch already carries this change' }
+          : { kind: 'conflict', detail: 'the target branch changed the same lines' };
+      }
       // The platform has not settled on a verdict yet. Give it a moment.
       await new Promise(resolve => setTimeout(resolve, 1_500));
     }
-    return undefined;
+    return { kind: 'accept' };
   }
 
   /**

@@ -127,6 +127,7 @@ export const FAILURE_CODES = [
   'provider_change_unconfirmed',
   'qa_rework',
   'merge_conflict',
+  'baseline_advanced',
 ] as const satisfies readonly RunFailureReasonCode[];
 
 /** How many bytes of provider output are kept as evidence. */
@@ -177,6 +178,7 @@ const FAILURE_CLASSES: Readonly<Record<RunFailureReasonCode, FailureClass>> = {
   repository_publication: 'infrastructure',
   provider_change_unconfirmed: 'infrastructure',
   merge_conflict: 'infrastructure',
+  baseline_advanced: 'infrastructure',
   prompt_budget_exceeded: 'infrastructure',
 };
 

@@ -41,6 +41,7 @@ import {
   type PromptSegment,
 } from './workflows/execution-protocol.js';
 import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from './workflows/backlog-context.js';
+import { describePublishBoundary } from '../domain/branches/publish-boundary.js';
 import { measurePromptBudget } from '../domain/agents/prompt-budget.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
@@ -796,9 +797,17 @@ export class WorkflowRunner {
       if (acCorrection) segments.push({ label: 'AC correction', text: acCorrection.trim() });
     }
     if (this.preparedRepositories) {
-      const repositories = this.preparedRepositories.repositories.map((repository, index) =>
-        `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${repository.targetBranch ?? repository.baseBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`,
-      ).join('\n');
+      const repositories = this.preparedRepositories.repositories.map((repository, index) => {
+        const targetBranch = repository.targetBranch ?? repository.baseBranch;
+        const boundary = describePublishBoundary({
+          workingBranch: repository.workingBranch,
+          targetBranch,
+          baseBranch: repository.baseBranch,
+          ...(repository.sourceBranch ? { sourceBranch: repository.sourceBranch } : {}),
+        });
+        const listing = `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${targetBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`;
+        return `${listing}\n   ${boundary}`;
+      }).join('\n');
       segments.push({
         label: 'execution repositories',
         text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,

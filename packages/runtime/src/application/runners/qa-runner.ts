@@ -139,6 +139,8 @@ export class QARunner {
     this.onSession = deps.onSession;
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
+    // The reviewer runs the request-level provider with the request-level
+    // runtime: they are resolved together and never disagree.
     this.agentRuntime = deps.agentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }

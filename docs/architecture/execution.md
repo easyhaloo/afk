@@ -174,6 +174,36 @@ failure code `baseline_advanced`. It is never sent back for rework: the
 rework would be answered by the same push that caused it. See
 [ADR-0031](../adr/0031-publish-boundary.md).
 
+### The provider and its runtime
+
+AFK runs an agent with two facts: **which** agent runs, and **how** it
+runs. The second one is the *runtime* — for Codex that is the model
+provider, the profile, the transport and the endpoint.
+
+They travelled in two independent channels, and a workflow step could
+change the first without changing the second. A step that ran Codex while
+the request ran Claude Code inherited Claude Code's runtime — which was no
+runtime at all — so every Codex setting was silently dropped. Codex did
+not object: it read its own host configuration and connected to the host's
+default provider instead. The agent started, connected, and failed on its
+first turn with a transport error from an endpoint nobody had chosen.
+
+**A provider and the runtime that runs it are one decision.** The workflow
+engine binds the runtime per step, at the point where the step's provider
+is known, through `resolveRuntimeForProvider()` in
+`packages/runtime/src/domain/agents/runtime-binding.ts`:
+
+- a Codex runtime is reused only for Codex;
+- a non-Codex provider resolves to no runtime, exactly as before;
+- a Codex step whose request carried no Codex runtime gets one resolved
+  from AFK's configuration, so the operator's `agents.codex.*` applies.
+
+A runtime resolved inside the run is probed before the agent starts, so an
+unreachable model fails with the probe's own diagnosis instead of a
+transport error from the wrong endpoint. The probe costs a live model
+round-trip, so it runs once per provider per run. See
+[ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md).
+
 ### Execution refs and configuration
 
 The item's `## Base Version` section declares an immutable execution plan:

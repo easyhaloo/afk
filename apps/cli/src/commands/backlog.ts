@@ -1,6 +1,7 @@
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { readFile } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import {
   createGlobalWorkItemCatalogs,
   createManagementProviders,
@@ -55,12 +56,13 @@ import {
   resolveExpectedTargetBranch,
   removeBacklogTag,
   retryBacklog,
+  reviseBacklogRework,
   showBacklog,
   type BacklogChangeProvider,
   type BacklogManagementProvider,
   type BacklogMergeReconciliation,
 } from '@afk/runtime/domain/backlog/commands';
-import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider, ReworkRecord } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { applyExecutionBaseBranch } from '@afk/runtime/domain/backlog/index';
 import { parsePrdBaselineBranch, prdBaselineBranchName, prdIssueNumber } from '@afk/runtime/domain/backlog/prd-baseline';
@@ -1147,6 +1149,59 @@ export async function runBacklogRetry(
   await runLifecycleAction('backlog.retry', options, () => retryBacklog(provider, id, reason), `Backlog ${id} queued for rework`);
 }
 
+/**
+ * Correct an open rework record to the current fact.
+ *
+ * The record keeps its identity and its evidence; the statement about the
+ * current situation is replaced, and the correction is kept in the record's
+ * own trail together with who wrote it.
+ */
+export async function runBacklogReworkRevise(
+  provider: QABacklogProvider,
+  id: string,
+  recordId: string,
+  summary: string,
+  reason: string | undefined,
+  actor: string,
+  options: JsonMode = {},
+): Promise<void> {
+  try {
+    const record = await reviseBacklogRework(provider, id, recordId, { summary, reason, actor });
+    if (options.json) {
+      emitSuccess<ReworkRecord>('backlog.rework.revise', record);
+      return;
+    }
+    success(`Backlog ${id} rework ${record.id} revised`);
+    detail(`summary: ${record.summary}`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure('backlog.rework.revise', classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Who is correcting a rework record.
+ *
+ * A correction that does not say who made it is a silent overwrite, so the
+ * trail names the local account and the provider host the correction was
+ * written against.
+ */
+function revisionActor(host?: string): string {
+  const account = process.env.USER || process.env.USERNAME || safeUserName();
+  return host ? `${account}@${host}` : account;
+}
+
+function safeUserName(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return 'unknown';
+  }
+}
+
 export async function runBacklogConfirmMerge(
   provider: QABacklogProvider,
   changes: BacklogChangeProvider,
@@ -1585,6 +1640,40 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'remove')!, 'backlog.tag.remove', argv);
   configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'add')!, 'backlog.relation.add', argv);
   configureBacklogJsonErrors(relation.commands.find(command => command.name() === 'remove')!, 'backlog.relation.remove', argv);
+
+  const rework = backlog.command('rework').description('Manage the rework records of a backlog item');
+  rework.command('revise')
+    .description('Correct an open rework record to the current fact')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--record <id>', 'Rework record handle (for example r2)')
+    .requiredOption('--summary <text>', 'The fact statement that replaces the record summary')
+    .option('--reason <text>', 'Why the statement is being corrected')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const target = await resolveBacklogTarget(options.project, options.platform, options.id);
+        const providers = await providersFor(target);
+        await runBacklogReworkRevise(
+          providers.backlog,
+          options.id,
+          options.record,
+          options.summary,
+          options.reason,
+          revisionActor(target.host),
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.rework.revise', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(rework.commands.find(command => command.name() === 'revise')!, 'backlog.rework.revise', argv);
 
   backlog.command('role')
     .description('Give a backlog item the organizational role of a PRD anchor')

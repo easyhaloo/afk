@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
+import { planReworkRevision } from '../../domain/backlog/rework-revision.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { RunObserver } from '../../observability/run-observer.js';
 
@@ -227,6 +228,32 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(prompt).toContain('open QA rework record (r1-2, cycle 1, attempt 2)');
     expect(prompt).toContain('/s enters search');
     expect(prompt).toContain('pnpm vitest run');
+    await rm(worktree, { recursive: true, force: true });
+  });
+
+  it('reads the corrected statement to the agent, not the frozen one', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    // The record as it reads after a correction: the statement about the
+    // current situation is the new one, the evidence is the old one.
+    subject.activeRework = planReworkRevision({
+      id: 'r1-2', cycle: 1, attempt: 2, source: 'qa', status: 'open', createdAt: '2026-08-05T00:00:00.000Z',
+      summary: 'integration QA found a shortcut regression',
+      failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
+      requiredChecks: [{ command: 'pnpm vitest run', expected: 'passes' }],
+    }, {
+      summary: 'The dependency produced its change request; it is ready and awaits a person.',
+      actor: 'shenggangshu@w.src.corp.qihoo.net',
+      at: '2026-11-06T03:00:00.000Z',
+    });
+    const worktree = await mkdtemp(join(tmpdir(), 'afk-step-rework-corrected-'));
+
+    const prompt = await stepGoal(subject, { id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 }, worktree);
+
+    expect(prompt).toContain('The dependency produced its change request; it is ready and awaits a person.');
+    expect(prompt).not.toContain('integration QA found a shortcut regression');
+    // The evidence the verification produced is still read to the agent.
+    expect(prompt).toContain('/s enters search');
     await rm(worktree, { recursive: true, force: true });
   });
 

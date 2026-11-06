@@ -26,3 +26,4 @@ for the workflow.
 | [ADR-0028](0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted | 2026-11-05 |
 | [ADR-0029](0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted | 2026-11-05 |
 | [ADR-0030](0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted | 2026-11-05 |
+| [ADR-0029](0029-jumpserver-assets-through-jms.md) | JumpServer assets are opened through the jms CLI | accepted | 2026-11-05 |

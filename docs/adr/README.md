@@ -26,6 +26,7 @@ for the workflow.
 | [ADR-0028](0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted | 2026-11-05 |
 | [ADR-0029](0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted | 2026-11-05 |
 | [ADR-0030](0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted | 2026-11-05 |
+| [ADR-0029](0029-jumpserver-assets-through-jms.md) | JumpServer assets are opened through the jms CLI | accepted | 2026-11-05 |
 | [ADR-0031](0031-publish-boundary.md) | The target branch belongs to AFK's change request | accepted | 2026-11-05 |
 | [ADR-0032](0032-provider-and-runtime-are-one-decision.md) | A provider and the runtime that runs it are one decision | accepted | 2026-11-06 |
 | [ADR-0033](0033-agent-tui-modals.md) | A modal in the agent's TUI belongs to AFK to dismiss | accepted | 2026-11-06 |

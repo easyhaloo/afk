@@ -144,7 +144,7 @@ The scope is now the range the decision depends on: the parent PRD, its children
 - **Outside the scope**: the project is named — in the log, in the status and in the final report — and the schedule continues. A failure is only a failure of the thing it is about.
 - **Inside the scope**: the slices that depend on the unreadable project wait, with the reason `visibility_unknown`, and the rest of the tree is dispatched as usual. One broken repository does not paralyze the PRD; it paralyzes the slices that need it.
 - **A project list failure** is always inside the scope: AFK could not enumerate the candidates, so it cannot prove that any project is outside it.
-- **A failure that cannot be retried** (`retryable: false` — a repository that was deleted) is escalated rather than retried forever: the log says at error level that a person has to act, and the affected slices wait as `awaiting_human`. The scheduler does not write this to the provider; the escalation is a visible report.
+- **A failure that cannot be retried** (`retryable: false` — a repository that was deleted) is escalated rather than retried forever: the log says at error level that a person has to act, and the affected slices wait as `awaiting_human`. The scheduler does not write this to the provider; the escalation is a visible report. A dropped connection is transient, and is read as transient: a network blip is not handed to a person.
 
 The parent PRD is the anchor of the scope. If the repository holding it cannot be read, the schedule knows nothing about that PRD, so the read failed *for this schedule*: it backs off and retries instead of dying. A parent that is missing while no project failed is a different answer — the PRD does not exist — and it is reported as an error.
 

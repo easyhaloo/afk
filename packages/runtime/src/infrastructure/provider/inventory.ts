@@ -118,8 +118,23 @@ function toDiagnostic(
     projectKey,
     code: fallbackCode,
     message,
-    retryable: /\b(408|425|429|5\d\d)\b|timeout|temporar/i.test(message),
+    retryable: isTransientFailure(message),
   };
+}
+
+/**
+ * Whether a failure is worth trying again.
+ *
+ * The verdict decides what the caller does with the failure: a transient one
+ * is retried, a permanent one is escalated to a person. Reading it off the
+ * message is a guess, so the guess has to cover the failures that actually
+ * happen — a dropped connection and a refused socket are as transient as a
+ * 503, and they are what a provider that is merely unreachable looks like.
+ */
+function isTransientFailure(message: string): boolean {
+  return /\b(408|425|429|5\d\d)\b|timeout|temporar/i.test(message)
+    || /\b(fetch failed|socket hang up|network error|getaddrinfo)\b/i.test(message)
+    || /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|EHOSTUNREACH|ENETUNREACH)\b/.test(message);
 }
 
 async function mapLimit<T, R>(

@@ -157,6 +157,13 @@ So an in-scope failure that is **not** retryable is escalated:
 - the scheduler does **not** go down the backoff path, because the read
   itself succeeded and the failure is not transient.
 
+The flag has to mean what it says, and the reading of it was too narrow: a
+dropped connection (`fetch failed`, a refused socket, a name that did not
+resolve) was read as permanent, so a network blip in the scope would have
+been escalated as "a person has to act". The reading now covers the network
+failures it was already trying to catch, and a transient failure stays
+transient — it is retried and reported, not handed to a person.
+
 AFK does not write this state to the provider. The items of an unreadable
 project cannot be read, so they cannot be marked; and marking the visible
 items `blocked` because a read failed would turn a provider-side fact into

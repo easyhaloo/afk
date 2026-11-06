@@ -32,6 +32,7 @@ function dependencies() {
     },
     pty: {
       connect: () => ({ id: "session-1", hostId: host.id, alias: host.alias, kind: "ssh" as const, title: host.alias, state: "opening" as const }),
+      connectJms: (_hostId: string, _binary: string, args: string[]) => ({ id: "session-jms", hostId: host.id, alias: host.alias, kind: "ssh" as const, title: args.join(" "), state: "opening" as const }),
       generateKey: () => ({ id: "session-key", hostId: "local", alias: "keygen", kind: "keygen" as const, title: "keygen", state: "opening" as const }),
       deployKey: (_hostId: string, _alias: string, _remoteCommand: string, _password?: string) => ({ id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy" as const, title: host.alias, state: "opening" as const }),
       input: () => true,
@@ -46,6 +47,13 @@ function dependencies() {
     },
     externalTerminal: {
       open: async () => "iTerm2" as const,
+      openCommand: async () => "iTerm2" as const,
+    },
+    jms: {
+      resolve: async (target: typeof host) => ({ server: "dev", asset: target.alias, target: `${target.alias}@dev` }),
+      test: async () => ({ ok: true, code: "ready" as const }),
+      session: async (target: string) => ({ binary: "/opt/homebrew/bin/jms", args: ["login", target] }),
+      upload: async () => undefined,
     },
     audit: () => undefined,
   } as const;
@@ -157,29 +165,96 @@ describe("SSH service", () => {
     await expect(service.updateHost("system:prod", { alias: "prod", hostname: "prod.example.test", port: 22 })).rejects.toThrow("只能编辑 AFK 管理的 SSH 主机");
   });
 
-  it("connects JumpServer hosts through the selected JumpServer alias", async () => {
+  it("connects JumpServer assets through the jms CLI instead of ssh -J", async () => {
     const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
     const deps = dependencies();
-    const resolvedAliases: string[] = [];
-    let connectedAlias = "";
     deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
-    deps.commands.resolve = async (alias) => {
-      resolvedAliases.push(alias);
-      return { hostname: "dev-jumpserver.fangcloud.net", port: 2222, user: "shenggangshu" };
-    };
-    deps.knownHosts.isTrusted = async () => true;
-    deps.commands.testBatch = async (alias) => { resolvedAliases.push(`test:${alias}`); return { ok: true, code: "ready" as const }; };
-    deps.pty.connect = (_hostId, alias) => {
-      connectedAlias = alias;
-      return { id: "session-1", hostId: jumpServerHost.id, alias, kind: "ssh", title: alias, state: "opening" };
-    };
+    const scanFingerprint = vi.fn(deps.commands.scanFingerprint);
+    const testBatch = vi.fn(deps.commands.testBatch);
+    const resolveAlias = vi.fn(deps.commands.resolve);
+    const connect = vi.fn(deps.pty.connect);
+    const connectJms = vi.fn(deps.pty.connectJms);
+    deps.commands.scanFingerprint = scanFingerprint;
+    deps.commands.testBatch = testBatch;
+    deps.commands.resolve = resolveAlias;
+    deps.pty.connect = connect;
+    deps.pty.connectJms = connectJms;
     const service = createSshService(deps);
 
     await expect(service.listHosts()).resolves.toMatchObject({ hosts: [expect.objectContaining({ status: "ready" })] });
     await service.connect(jumpServerHost.id);
 
-    expect(resolvedAliases).toEqual(["fangcloud-jumpserver", "test:fangcloud-jumpserver"]);
-    expect(connectedAlias).toBe("fangcloud-jumpserver");
+    expect(scanFingerprint).not.toHaveBeenCalled();
+    expect(resolveAlias).not.toHaveBeenCalled();
+    expect(testBatch).not.toHaveBeenCalled();
+    expect(connect).not.toHaveBeenCalled();
+    expect(connectJms).toHaveBeenCalledWith(jumpServerHost.id, "/opt/homebrew/bin/jms", ["login", `${host.alias}@dev`], host.alias);
+  });
+
+  it("uploads JumpServer assets through jms sftp instead of scp", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const deps = dependencies();
+    deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
+    const jmsUpload = vi.fn(deps.jms.upload);
+    const scpUpload = vi.fn(deps.commands.upload);
+    deps.jms.upload = jmsUpload;
+    deps.commands.upload = scpUpload;
+    const directory = await mkdtemp(path.join(tmpdir(), "afk-ssh-upload-"));
+    const localPath = path.join(directory, "release notes.txt");
+    await writeFile(localPath, "release");
+    const service = createSshService(deps);
+
+    await expect(service.uploadFile(jumpServerHost.id, localPath)).resolves.toEqual({ fileName: "release notes.txt", remoteDirectory: "~/" });
+
+    expect(jmsUpload).toHaveBeenCalledWith(localPath, `${host.alias}@dev`, "~/");
+    expect(scpUpload).not.toHaveBeenCalled();
+  });
+
+  it("opens JumpServer assets in the external terminal through jms", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const deps = dependencies();
+    deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
+    const openCommand = vi.fn(async () => "Terminal.app" as const);
+    deps.externalTerminal.openCommand = openCommand;
+    const service = createSshService(deps);
+
+    await expect(service.openExternal(jumpServerHost.id, "terminal")).resolves.toEqual({ terminal: "terminal" });
+    expect(openCommand).toHaveBeenCalledWith("'/opt/homebrew/bin/jms' 'login' 'build-box@dev'", "terminal");
+  });
+
+  it("refuses JumpServer assets when no jms port is wired", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const base = dependencies();
+    const deps = {
+      ...base,
+      jms: undefined,
+      config: { ...base.config, listHosts: async () => ({ hosts: [jumpServerHost], diagnostics: [] }) },
+    };
+    const service = createSshService(deps);
+
+    await expect(service.listHosts()).resolves.toMatchObject({ hosts: [expect.objectContaining({ status: "unreachable" })] });
+    await expect(service.connect(jumpServerHost.id)).rejects.toThrow("需要通过 jms CLI 连接");
+  });
+
+  it("marks a JumpServer asset unreachable when jms cannot resolve it", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const deps = dependencies();
+    deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
+    deps.jms.resolve = async () => { throw new Error("JumpServer dev 上未找到资产"); };
+    const service = createSshService(deps);
+
+    await expect(service.listHosts()).resolves.toMatchObject({ hosts: [expect.objectContaining({ status: "unreachable" })] });
+  });
+
+  it("rejects fingerprint trust and local credentials for JumpServer assets", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const deps = dependencies();
+    deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
+    const service = createSshService(deps);
+
+    await expect(service.trustFingerprint({ hostId: jumpServerHost.id, fingerprint: { algorithm: "ED25519", value: "SHA256:one", hostname: host.hostname, port: host.port } })).rejects.toThrow("无需信任主机指纹");
+    await expect(service.hasCredential(jumpServerHost.id)).resolves.toBe(false);
+    await expect(service.setCredential(jumpServerHost.id, "secret")).rejects.toThrow("由跳板机认证");
   });
 
   it("does not offer automatic key deployment through JumpServer", async () => {

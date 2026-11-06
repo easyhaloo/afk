@@ -18,6 +18,28 @@ export interface RequiredReworkCheck {
   expected: string;
 }
 
+/**
+ * One correction of a rework record's summary.
+ *
+ * A rework record states what was wrong when it was written. That statement
+ * can go stale: the dependency it waited for has since been produced, or the
+ * branch it complained about has since moved. A revision says what the
+ * statement is now — and keeps what it was, so the record is corrected rather
+ * than overwritten.
+ */
+export interface ReworkRevision {
+  /** When the correction was written. */
+  at: string;
+  /** Who wrote the correction. */
+  actor: string;
+  /** The summary before the correction. */
+  from: string;
+  /** The summary after the correction. */
+  to: string;
+  /** Why the statement was corrected. */
+  reason?: string;
+}
+
 export interface ReworkRecord {
   version: 1;
   /**
@@ -52,9 +74,18 @@ export interface ReworkRecord {
   createdAt: string;
   resolvedAt?: string;
   resolutionSummary?: string;
+  /**
+   * The corrections applied to `summary`, oldest first.
+   *
+   * They belong to the record: a record that has been corrected says what it
+   * said before, who corrected it, and when. The evidence the record carries
+   * — `failedCriteria` and `requiredChecks` — is never touched by a
+   * correction; only the statement about the current situation is.
+   */
+  revisions?: ReworkRevision[];
 }
 
-export type NewReworkRecord = Omit<ReworkRecord, 'version' | 'id' | 'cycle' | 'attempt' | 'status' | 'createdAt' | 'resolvedAt' | 'resolutionSummary'>;
+export type NewReworkRecord = Omit<ReworkRecord, 'version' | 'id' | 'cycle' | 'attempt' | 'status' | 'createdAt' | 'resolvedAt' | 'resolutionSummary' | 'revisions'>;
 export interface ReworkResolution { summary: string; }
 
 export interface ParsedReworkRecord { commentId: string; record: ReworkRecord; }
@@ -66,11 +97,32 @@ export function renderReworkRecord(record: ReworkRecord): string {
     `## AFK Rework ${record.id} · ${record.status}`,
     '',
     record.summary,
+    ...renderRevisionHistory(record.revisions),
     '',
     '```json',
     JSON.stringify(record),
     '```',
   ].join('\n');
+}
+
+/**
+ * The corrections of a record, as a person reads them.
+ *
+ * The JSON payload is the machine-readable truth; this is the same trail in
+ * prose, so a reader of the issue does not have to parse the payload to find
+ * out that the summary was corrected, by whom and when.
+ */
+function renderRevisionHistory(revisions: readonly ReworkRevision[] | undefined): string[] {
+  if (!revisions?.length) return [];
+  return [
+    '',
+    '### Revisions',
+    '',
+    ...revisions.map(revision => {
+      const reason = revision.reason ? ` — ${revision.reason}` : '';
+      return `- ${revision.at} by ${revision.actor}: ${revision.from} → ${revision.to}${reason}`;
+    }),
+  ];
 }
 
 export function parseReworkRecord(comment: { id: string; body: string }): ParsedReworkRecord | undefined {
@@ -89,10 +141,39 @@ export function parseReworkRecord(comment: { id: string; body: string }): Parsed
     // its budget stays over budget until an operator opens a new cycle.
     const cycle = value.cycle === undefined ? 1 : value.cycle;
     if (!Number.isInteger(cycle) || cycle < 1) return undefined;
-    return { commentId: comment.id, record: { ...(value as ReworkRecord), cycle } };
+    // A revision trail is the audit trail of a corrected statement, so a
+    // malformed entry makes the record unreadable rather than dropping the
+    // entry: a half-read trail would hide the correction.
+    const revisions = value.revisions === undefined ? undefined : parseRevisions(value.revisions);
+    if (value.revisions !== undefined && !revisions) return undefined;
+    return {
+      commentId: comment.id,
+      record: { ...(value as ReworkRecord), cycle, ...(revisions ? { revisions } : {}) },
+    };
   } catch {
     return undefined;
   }
+}
+
+/** The revision trail of a record, or undefined when it is malformed. */
+function parseRevisions(value: unknown): ReworkRevision[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const revisions: ReworkRevision[] = [];
+  for (const entry of value) {
+    const candidate = entry as Partial<ReworkRevision>;
+    if (!nonEmpty(candidate.at) || !nonEmpty(candidate.actor) || !nonEmpty(candidate.from) || !nonEmpty(candidate.to)) {
+      return undefined;
+    }
+    if (candidate.reason !== undefined && !nonEmpty(candidate.reason)) return undefined;
+    revisions.push({
+      at: candidate.at,
+      actor: candidate.actor,
+      from: candidate.from,
+      to: candidate.to,
+      ...(candidate.reason !== undefined ? { reason: candidate.reason } : {}),
+    });
+  }
+  return revisions;
 }
 
 export function latestOpenRework(comments: Array<{ id: string; body: string }>): ParsedReworkRecord | undefined {

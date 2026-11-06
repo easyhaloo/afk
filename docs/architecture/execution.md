@@ -28,6 +28,7 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk loop status [--run-tag <tag>] [--all]`: report one run from its pid file and status snapshot, or every run in the runs directory. `afk loop stop` signals the same run.
 - `afk qa`: retry an item in `verification`, using its managed manifest when present; `--execution-manifest <path>` selects an explicit manifest.
 - `afk backlog baseline --id <prd>`: report the branch a PRD accumulates its slices on and the slices that inherit it; `--branch <name>` records the branch in the PRD's body.
+- `afk backlog rework revise --id <backlog> --record <r2> --summary "<fact>"`: correct an open rework record to the current fact; the record keeps its id and its evidence, only the statement is replaced, and the correction keeps its own trail in the record.
 - `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; the poll interval is the re-evaluation cadence, so the schedule is looked at again while executions are in flight and idle capacity is filled as soon as something becomes dispatchable. `--watch` keeps the schedule running until it is stopped, waiting for external state changes; `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Every waiting item in the report names the constraint that keeps it waiting — an unready dependency, a full capacity, a held repository lease, an overloaded host, a human gate, or a spent attempt budget. Each preview wave assumes prior waves have been merged and reconciled. A failed inventory read does not end the schedule: it backs off and retries, and says that the scheduler is running but cannot see the work items. SIGINT/SIGTERM stop dispatch and drain active attempts.
 - `afk doctor [--workspace-root <path>] [--json]`: inspect bare caches, dependency pools, managed workspaces, live repository leases, and conservative reclaimable-byte estimates. This is read-only; `afk observe doctor` continues to describe the event store.
 - `afk observe`: inspect executions and their audit/evidence projections.
@@ -119,6 +120,16 @@ A cycle is opened by an operator intervention and by nothing else. `afk backlog 
 Each rework record carries the cycle it belongs to and the attempt it spends inside it (`cycle`, `attempt`), and its handle is `r<cycle>-<attempt>`. The attempt of a new record is derived from the records of the running cycle only; the records of the earlier cycles stay in the issue as the audit trail without spending the budget of the rounds that follow them. A record written before cycles existed reads as cycle 1 and keeps its attempt, so an item that already spent its budget stays over budget until an operator opens the next cycle.
 
 When the budget of a cycle is spent, the item is blocked and the reason says which round and how much of it was used: `QA rework attempt limit reached (cycle 2, 3/3 attempts used): …`. See [ADR-0028](../adr/0028-rework-attempt-budget-per-cycle.md).
+
+### A rework record is correctable
+
+A rework record states what was wrong when the round failed, and it is read back to the next agent as the context of that round. A statement can go stale: the dependency it waited for has since been produced, or the branch it complained about has since moved. AFK could create a record and supersede it with the next round, but it could not **correct** one — so a frozen statement was read as a present fact.
+
+`afk backlog rework revise --id <backlog> --record <r2> --summary "<fact>" [--reason "<why>"]` corrects an open record. The correction is written **in place**: the record keeps its id, its cycle, its attempt and its comment, so the round the agent is told about does not change — and a correction does not spend an attempt of the running cycle's rework budget, which is what opening a new generation of the record would have done.
+
+Only the statement is corrected. The evidence a record carries — the failed criteria and the required checks — is what the verification actually observed, and it is never rewritten and never dropped: a correction says "this is still true today", not "this was never true".
+
+A correction is a **fact, not an instruction**. The record is read by an agent, so a revision that names a branch as the destination of a push (`publish to prd/27`, `把 prd/27 合进当前分支`), carries a git command, or carries a command that merges or re-runs work is refused before it reaches the provider. The correction keeps its own trail in the record — when it was written, who wrote it, what the statement was before — so a correction is never a silent overwrite. See [ADR-0035](../adr/0035-rework-records-are-revisable.md).
 
 ### The publish boundary
 

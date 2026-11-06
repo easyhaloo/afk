@@ -8,6 +8,7 @@ import {
   reconcileMergedBacklog,
   resolveExpectedTargetBranch,
   retryBacklog,
+  reviseBacklogRework,
 } from './commands.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
 import { InMemoryBacklogProvider } from './index.js';
@@ -15,6 +16,21 @@ import { ManagementBacklogProvider } from './management-provider.js';
 import { parseReworkRecord, renderReworkRecord, type ReworkRecord } from './rework-record.js';
 
 describe('backlog commands', () => {
+  it('corrects a rework record through the provider, keeping the identity of the record', async () => {
+    const provider = lifecycleProvider(backlogItem({ state: 'rework' }));
+
+    const revised = await reviseBacklogRework(provider, '42', 'r1-1', {
+      summary: 'The dependency produced its change request; it is ready and awaits a person.',
+      actor: 'shenggangshu@w.src.corp.qihoo.net',
+    });
+
+    expect(provider.reviseRework).toHaveBeenCalledWith('42', 'r1-1', {
+      summary: 'The dependency produced its change request; it is ready and awaits a person.',
+      actor: 'shenggangshu@w.src.corp.qihoo.net',
+    });
+    expect(revised).toMatchObject({ id: 'r1-1', status: 'open' });
+  });
+
   it('rejects adoption when the provider has no optional adoption capability', async () => {
     const provider = new InMemoryBacklogProvider();
     await expect(adoptBacklog(provider, '42')).rejects.toThrow('does not support explicit issue adoption');
@@ -447,6 +463,7 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
   createRework: ReturnType<typeof vi.fn>;
   getActiveRework: ReturnType<typeof vi.fn>;
   resolveRework: ReturnType<typeof vi.fn>;
+  reviseRework: ReturnType<typeof vi.fn>;
 } {
   const current = { ...item };
   return {
@@ -478,5 +495,17 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
     }),
     getActiveRework: vi.fn(),
     resolveRework: vi.fn(),
+    reviseRework: vi.fn(async (_id: string, _reworkId: string, revision) => ({
+      version: 1 as const,
+      id: 'r1-1',
+      cycle: 1,
+      attempt: 1,
+      status: 'open' as const,
+      source: 'qa' as const,
+      summary: revision.summary,
+      failedCriteria: [],
+      requiredChecks: [],
+      createdAt: '2026-09-17T00:00:00.000Z',
+    })),
   };
 }

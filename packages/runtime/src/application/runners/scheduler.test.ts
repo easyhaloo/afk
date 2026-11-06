@@ -425,6 +425,26 @@ describe('the range a schedule depends on', () => {
     expect(statuses[0]?.inventoryUnavailable?.permanent).toBe(false);
   });
 
+  it('keeps the schedule alive when the project list cannot be read', async () => {
+    // The list of projects is how AFK finds the parent at all. A list that
+    // could not be read leaves the parent unknown — and the old scheduler
+    // read that as "the parent does not exist" and died on it.
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const controller = new AbortController();
+    const wait = vi.fn(async () => { controller.abort(); });
+    const statuses: Array<{ inventoryUnavailable?: { error: string } }> = [];
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal,
+      onStatus: status => statuses.push(status) }, {
+      inventory: async () => ({ items: [], diagnostics: [
+        { platform: 'gitlab', projectKey: 'gitlab.corp', code: 'project_list_failed', message: 'fetch failed', retryable: true },
+      ] }),
+      repositories: async () => ['api'], load: () => 0, wait,
+    });
+
+    expect(result.stopped).toBe(true);
+    expect(statuses[0]?.inventoryUnavailable?.error).toContain('the project list cannot be read');
+  });
+
   it('says that the parent does not exist when no project failed', async () => {
     const parent = item('acme/prd', 1, { kind: 'prd' });
     await expect(scheduleWorkItems({ parent: parent.id }, {

@@ -516,10 +516,15 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
         // The parent is the anchor of the scope. Without it AFK knows
         // nothing about this PRD, so the read failed for this schedule —
         // unless the parent simply does not exist, which is a different
-        // answer and a different remedy.
-        const failure = assessment.blocking.find(diagnostic => diagnostic.projectKey === anchor.projectKey);
+        // answer and a different remedy. A project list that could not be
+        // read is the same answer: the parent may well be in it.
+        const failure = assessment.blocking.find(diagnostic =>
+          diagnostic.projectKey === anchor.projectKey || diagnostic.code === 'project_list_failed');
         if (!failure) throw new Error(`schedule parent is absent from inventory: ${parent}`);
-        await reportUnavailable(`the project holding the schedule parent cannot be read: ${failure.message}`, !failure.retryable);
+        const reason = failure.code === 'project_list_failed'
+          ? 'the project list cannot be read, so the schedule parent is unknown'
+          : 'the project holding the schedule parent cannot be read';
+        await reportUnavailable(`${reason}: ${failure.message}`, !failure.retryable);
         continue;
       }
       result.baselineBranch = prdBaselineForParent(parentItem);

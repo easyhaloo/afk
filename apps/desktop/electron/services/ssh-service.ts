@@ -6,6 +6,18 @@ import type { ExternalTerminalName } from "../adapters/external-terminal-adapter
 import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId, validateSshUploadLocalPath, validateSshUploadRemoteDirectory } from "../security/ssh-validation.js";
 import type { SshCredentialTarget } from "./ssh-credential-service.js";
 
+/**
+ * JumpServer assets are reached through the `jms` CLI, not `ssh -J`: the
+ * bastion's SSH port is a Koko endpoint that only accepts an interactive
+ * password/MFA login, so OpenSSH ProxyJump cannot authenticate against it.
+ */
+type JmsPort = {
+  resolve: (host: SshHost) => Promise<{ server: string; asset: string; target: string }>;
+  test: (target: string) => Promise<{ ok: boolean; code: SshTestResult["code"] }>;
+  session: (target: string) => Promise<{ binary: string; args: string[] }>;
+  upload: (localPath: string, target: string, remoteDirectory: string) => Promise<void>;
+};
+
 type ServiceDependencies = {
   config: {
     listHosts: () => Promise<SshListResult>;
@@ -37,6 +49,7 @@ type ServiceDependencies = {
   };
     pty: {
     connect: (hostId: string, target: SshConnectionTarget | string, displayAlias?: string) => SshSession;
+    connectJms: (hostId: string, binary: string, args: string[], displayAlias?: string) => SshSession;
     generateKey: (identityFile: string) => SshSession;
     deployKey: (hostId: string, target: SshConnectionTarget | string, remoteCommand: string, password?: string, displayAlias?: string) => SshSession;
     input: (sessionId: string, data: string) => boolean;
@@ -45,7 +58,9 @@ type ServiceDependencies = {
   };
   externalTerminal: {
     open: (target: SshConnectionTarget | string, displayAliasOrTerminal: string | SshExternalTerminalId, terminal?: SshExternalTerminalId) => Promise<ExternalTerminalName>;
+    openCommand?: (command: string, terminal: SshExternalTerminalId) => Promise<ExternalTerminalName>;
   };
+  jms?: JmsPort;
   audit?: (event: { operation: string; hostId?: string; resultCode: string; startedAt: string; finishedAt: string }) => void;
   home?: string;
 };
@@ -84,6 +99,10 @@ type ListInFlight = {
 const hostStatusTtlMs = 10_000;
 
 function now() { return new Date().toISOString(); }
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
 
 function audit(deps: ServiceDependencies, operation: string, resultCode: string, hostId: string | undefined, startedAt: string) {
   deps.audit?.({ operation, hostId, resultCode, startedAt, finishedAt: now() });
@@ -124,6 +143,19 @@ export function createSshService(deps: ServiceDependencies) {
 
   function isDirectManagedHost(host: SshHost) {
     return host.source === "managed" && host.configPath !== "~/.ssh/afk_hosts";
+  }
+
+  // JumpServer assets carry no local OpenSSH target: authentication and host
+  // verification belong to the bastion, so status, connect, test and upload all
+  // go through the jms CLI instead of ssh/scp.
+  function requireJmsPort(host: SshHost) {
+    if (host.jumpHostType !== "jumpserver") return undefined;
+    if (!deps.jms) throw new Error("JumpServer 资产需要通过 jms CLI 连接，请先安装 jms");
+    return deps.jms;
+  }
+
+  function jmsStatusCacheKey(host: SshHost) {
+    return JSON.stringify(["jms", host.id, host.alias, host.hostname, host.jumpHost]);
   }
 
   async function resolveCredentialTarget(host: SshHost): Promise<SshCredentialTarget> {
@@ -259,6 +291,9 @@ export function createSshService(deps: ServiceDependencies) {
 
   async function loadHostStatus(host: SshHost, forceRefresh: boolean, generation: number) {
     const definitionKey = hostDefinitionCacheKey(host);
+    if (host.jumpHostType === "jumpserver") {
+      return deps.jms ? loadJmsHostStatus(host, deps.jms, forceRefresh, generation) : { ...host, status: "unreachable" as const };
+    }
     let target: ResolvedTarget | undefined;
     let value: SshHost;
     try {
@@ -289,6 +324,22 @@ export function createSshService(deps: ServiceDependencies) {
       value = { ...host, status: "unreachable" };
     }
     if (target && cacheGeneration === generation) hostStatusCache.set(hostStatusCacheKey(host, target), { value, expiresAt: Date.now() + hostStatusTtlMs });
+    return value;
+  }
+
+  async function loadJmsHostStatus(host: SshHost, jms: JmsPort, forceRefresh: boolean, generation: number) {
+    const statusKey = jmsStatusCacheKey(host);
+    const cached = hostStatusCache.get(statusKey);
+    if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+    let value: SshHost;
+    try {
+      const target = await jms.resolve(host);
+      const tested = await jms.test(target.target);
+      value = { ...host, status: tested.ok ? "ready" : tested.code };
+    } catch {
+      value = { ...host, status: "unreachable" };
+    }
+    if (cacheGeneration === generation) hostStatusCache.set(statusKey, { value, expiresAt: Date.now() + hostStatusTtlMs });
     return value;
   }
 
@@ -325,6 +376,7 @@ export function createSshService(deps: ServiceDependencies) {
   async function trustFingerprint(request: SshTrustRequest) {
     const startedAt = now();
     const host = await findHost(request.hostId);
+    if (host.jumpHostType === "jumpserver") throw new Error("JumpServer 资产由跳板机认证，无需信任主机指纹");
     const target = await resolveFingerprintTarget(host);
     if (target.hostname !== request.fingerprint.hostname || target.port !== request.fingerprint.port) throw new Error("SSH 指纹与主机目标不匹配");
     try {
@@ -341,6 +393,13 @@ export function createSshService(deps: ServiceDependencies) {
   async function testHost(hostId: string): Promise<SshTestResult> {
     const startedAt = now();
     const host = await findHost(hostId);
+    const jms = requireJmsPort(host);
+    if (jms) {
+      const target = await jms.resolve(host);
+      const result = await jms.test(target.target);
+      audit(deps, "test", result.code, host.id, startedAt);
+      return { ok: result.ok, code: result.code, checkedAt: now() };
+    }
     const target = await resolveFingerprintTarget(host);
     const fingerprint = await deps.commands.scanFingerprint(target);
     if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
@@ -429,6 +488,18 @@ export function createSshService(deps: ServiceDependencies) {
     const remoteDirectory = validateSshUploadRemoteDirectory(host.remoteWorkspace?.trim() || "~/");
     const stat = await fs.stat(selectedPath).catch(() => undefined);
     if (!stat?.isFile()) throw new Error("SSH 上传文件不存在或不是普通文件");
+    const jms = requireJmsPort(host);
+    if (jms) {
+      try {
+        const target = await jms.resolve(host);
+        await jms.upload(selectedPath, target.target, remoteDirectory);
+        audit(deps, "upload", "uploaded", host.id, startedAt);
+        return { fileName: path.basename(selectedPath), remoteDirectory };
+      } catch (error) {
+        audit(deps, "upload", "failed", host.id, startedAt);
+        throw error;
+      }
+    }
     const target = await resolveFingerprintTarget(host);
     const fingerprint = await deps.commands.scanFingerprint(target);
     if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
@@ -447,12 +518,14 @@ export function createSshService(deps: ServiceDependencies) {
 
   async function hasCredential(hostId: string) {
     const host = await findHost(hostId);
+    if (host.jumpHostType === "jumpserver") return false;
     if (!deps.credentialService) return false;
     return deps.credentialService.has(host.id, await resolveCredentialTarget(host));
   }
 
   async function setCredential(hostId: string, password: string) {
     const host = await findHost(hostId);
+    if (host.jumpHostType === "jumpserver") throw new Error("JumpServer 资产由跳板机认证，无需在 AFK 中保存密码");
     if (!deps.credentialService) throw new Error("SSH 凭据安全存储不可用");
     return deps.credentialService.set(host.id, password, await resolveCredentialTarget(host));
   }
@@ -465,6 +538,12 @@ export function createSshService(deps: ServiceDependencies) {
 
   async function connect(hostId: string) {
     const host = await findHost(hostId);
+    const jms = requireJmsPort(host);
+    if (jms) {
+      const target = await jms.resolve(host);
+      const session = await jms.session(target.target);
+      return deps.pty.connectJms(host.id, session.binary, session.args, host.alias);
+    }
     const target = await resolveFingerprintTarget(host);
     const fingerprint = await deps.commands.scanFingerprint(target);
     if (!await deps.knownHosts.isTrusted(target, fingerprint)) throw new Error("SSH 主机尚未信任，已阻止连接");
@@ -474,6 +553,21 @@ export function createSshService(deps: ServiceDependencies) {
   async function openExternal(hostId: string, terminalId: SshExternalTerminalId = "iterm2") {
     const startedAt = now();
     const host = await findHost(hostId);
+    const jms = requireJmsPort(host);
+    if (jms) {
+      if (!deps.externalTerminal.openCommand) throw new Error("当前外部终端不支持 jms 连接");
+      try {
+        const target = await jms.resolve(host);
+        const session = await jms.session(target.target);
+        const command = [session.binary, ...session.args].map(shellQuote).join(" ");
+        const terminal = await deps.externalTerminal.openCommand(command, terminalId);
+        audit(deps, "open-external", terminal, host.id, startedAt);
+        return { terminal: terminalId };
+      } catch (error) {
+        audit(deps, "open-external", "failed", host.id, startedAt);
+        throw error;
+      }
+    }
     const argument = connectionArgument(host);
     const resolvedTarget = host.source === "managed" && !isDirectManagedHost(host)
       ? await cachedResolve(String(argument))

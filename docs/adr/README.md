@@ -27,3 +27,4 @@ for the workflow.
 | [ADR-0029](0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted | 2026-11-05 |
 | [ADR-0030](0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted | 2026-11-05 |
 | [ADR-0031](0031-publish-boundary.md) | The target branch belongs to AFK's change request | accepted | 2026-11-05 |
+| [ADR-0029](0029-jumpserver-assets-through-jms.md) | JumpServer assets are opened through the jms CLI | accepted | 2026-11-05 |

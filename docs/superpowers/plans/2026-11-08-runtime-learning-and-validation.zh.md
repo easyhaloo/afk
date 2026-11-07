@@ -72,4 +72,7 @@ flowchart TD
 - Desktop：类型检查、921 项单测、3 项 Electron E2E 通过；真实 PTY 16 项通过，真实 Claude Code 本地集成 2 项通过。
 - Node 22.17.0 的 SQLite 警告回归通过；工作区构建、类型检查、架构和文档检查通过。
 - CLI 0.2.42：5.2 MiB 的 macOS arm64 发行包，仓库外离线安装及 23 个命令入口均已验证，并已通过标准安装器安装到本机。
-- 真实 wiki 条目 `gitlab:w.src.corp.qihoo.net/fang/services/llm-wiki#21` 的实现保留在 `afk/backlog-21`；CSV 定向测试 4 项、既有页面测试 6 项和类型检查在实现工作树及修复后的 QA 工作树均通过。受管独立 QA 的结果单独跟踪，不执行合并。
+- 真实 wiki 条目 `gitlab:w.src.corp.qihoo.net/fang/services/llm-wiki#21`：本地 Claude 受管运行 `plugin-matrix-wiki-claude-20261108-2` 通过独立 QA，已发布 [MR !198](https://w.src.corp.qihoo.net/fang/services/llm-wiki/-/merge_requests/198)。18 条事件的审计链完整，停在 `human_gate.opened`、闸门 `merge:198`，等待人工合并。
+- wiki 验收：CSV 定向测试 4 项、既有页面测试 6 项、类型检查和浏览器断言 8 项通过。浏览器使用实际构建产物，并模拟一次 operations-summary GET；后端缺少该接口，Docker 当时不可用。因此验收范围为客户端文件下载、SHA-256 脱敏和 5001 行确认与取消，不代表部署后的后端全链路。前端全量测试为 263 项通过、7 项既有失败，已在干净基线上复现相同失败。
+- 真实经验：前次 `qa.failed` 的 ENOSPC 故障已记录为 `15eb278e-6d24-4f36-9749-fdef1f03f4a7`，并以本次独立 QA 和发布证据完成验证。`experience recall` 与已安装的 `context.experience` 插件 `gather` 均返回了项目内的修复建议和来源。后续 Agent 注入与撤销另由经验 E2E 覆盖；本条真实经验保留供后续相关任务复用。
+- 交付：CLI `0.2.42` 已安装并可运行，实现提交 `a5485dd6` 已推送至 [PR #291](https://github.com/easyhaloo/afk/pull/291)，基于插件基线 [PR #290](https://github.com/easyhaloo/afk/pull/290)。两项变更请求均未合并。

@@ -86,7 +86,7 @@ flowchart TD
 - [x] Execute a suitable real wiki backlog item with local Claude through the supported CLI; inspect the selected item's acceptance criteria first and preserve the human merge gate.
 - [x] Record a failed attempt, validate a correction with evidence, then prove a later related run receives the verified experience. Revoke it and prove it disappears from recall.
 - [x] Update `docs/architecture/plugins.md` and its Chinese pair plus testing documentation with measured results, exact limits and any external prerequisites.
-- [ ] Commit and push the task branch and publish a reviewable change request against the appropriate plugin baseline. Do not merge it.
+- [x] Commit and push the task branch and publish a reviewable change request against the appropriate plugin baseline. Do not merge it.
 
 ## Acceptance boundaries
 
@@ -99,4 +99,7 @@ The local system is complete only when all local/mocked adapters run through the
 - Desktop: typecheck, 921 unit tests and three Electron E2E passed. Real PTY: 16 passed. Real Claude Code: two local integration tests passed.
 - Node 22.17.0 SQLite-warning regression passed. Workspace build/typecheck, architecture and documentation checks passed.
 - CLI 0.2.42: 5.2 MiB macOS arm64 archive, offline installation and all 23 command entry points verified; installed locally using the standard installer.
-- Real wiki work item `gitlab:w.src.corp.qihoo.net/fang/services/llm-wiki#21`: implementation retained on `afk/backlog-21`; targeted CSV tests (4), existing page tests (6) and typecheck passed in implementation and repaired QA worktrees. Independent managed QA remains separately tracked; no merge is performed.
+- Real wiki work item `gitlab:w.src.corp.qihoo.net/fang/services/llm-wiki#21`: managed local Claude execution `plugin-matrix-wiki-claude-20261108-2` passed independent QA and published [MR !198](https://w.src.corp.qihoo.net/fang/services/llm-wiki/-/merge_requests/198). Its intact 18-event audit ends at `human_gate.opened`, gate `merge:198`; the MR awaits human merge.
+- Wiki acceptance: targeted CSV tests (4), existing page tests (6), typecheck and 8 browser assertions passed. The browser exercised the built application with a stubbed operations-summary GET: the backend endpoint is absent and Docker was unreachable. This verifies client-side downloads, SHA-256 redaction and the 5001-row confirmation/cancellation behavior, not a deployed backend chain. The full frontend suite had 263 passes and 7 pre-existing failures, reproduced identically on a clean baseline.
+- Real learning: the earlier `qa.failed` ENOSPC incident is candidate `15eb278e-6d24-4f36-9749-fdef1f03f4a7`, now verified against the successful independent QA and publication evidence. Both `experience recall` and the installed `context.experience` provider's `gather` returned its scoped correction and provenance. Later-agent injection and revocation are separately covered by the learning E2E; the real incident remains available for future relevant runs.
+- Delivery: CLI `0.2.42` is installed and runnable. Implementation commit `a5485dd6` is pushed in [PR #291](https://github.com/easyhaloo/afk/pull/291), stacked on the plugin baseline [PR #290](https://github.com/easyhaloo/afk/pull/290). Neither change request has been merged.

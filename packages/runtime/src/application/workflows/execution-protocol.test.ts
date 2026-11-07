@@ -23,8 +23,19 @@ describe('batch execution prompt protocol', () => {
     expect(prompt).toContain('pnpm vitest run');
   });
 
-  it('extracts a typed completion payload from surrounding agent text', () => {
-    expect(extractGoalComplete('finished\n<goal_complete>{"type":"goal_complete","summary":"done"}</goal_complete>')).toEqual({
+  it('states the push boundary in both transports, so the agent knows where it may push', () => {
+    const batch = buildBatchPrompt('/goal implement issue #60');
+    const interactive = buildInteractivePromptSegments([{ label: 'goal', text: '/goal implement issue #60' }])
+      .map(segment => segment.text).join('\n');
+
+    for (const prompt of [batch, interactive]) {
+      expect(prompt).toContain('Push your commits only to the branch you are working on');
+      expect(prompt).toContain('never push to them');
+      expect(prompt).toContain('Publishing the change request is AFK');
+    }
+  });
+
+  it('extracts a typed completion payload from surrounding agent text', () => {    expect(extractGoalComplete('finished\n<goal_complete>{"type":"goal_complete","summary":"done"}</goal_complete>')).toEqual({
       type: 'goal_complete', summary: 'done',
     });
     expect(extractGoalComplete('<goal_complete>invalid-json</goal_complete>')).toBeUndefined();

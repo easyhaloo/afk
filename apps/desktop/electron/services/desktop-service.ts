@@ -10,6 +10,7 @@ import { configNumber, configString, parseConfig, type ConfigObject } from "../w
 import { detectAgentRuntimes, listRegisteredAgentProviders } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
 import { readEvents, resolveWorkspace } from "./workspace-service.js";
+import { selectLoopStatusCandidate, type LoopStatusCandidate } from "./loop-status-selection.js";
 
 type CliCapability = {
   id: string;
@@ -450,15 +451,9 @@ async function readLoopStatusSnapshot(): Promise<string> {
   ];
   const snapshots = (await Promise.all(candidates.map(async candidate => {
     const [raw, stat] = await Promise.all([fs.readFile(candidate.file, "utf8").catch(() => ""), fs.stat(candidate.file).catch(() => undefined)]);
-    return raw ? { ...candidate, raw, modifiedAt: stat?.mtimeMs ?? 0 } : undefined;
-  }))).filter((snapshot): snapshot is { tag: string; file: string; raw: string; modifiedAt: number } => snapshot !== undefined);
-  const newest = (pool: typeof snapshots) => [...pool].sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
-  const live = snapshots.filter(snapshot => {
-    const pid = jsonRecord(snapshot.raw).pid;
-    return typeof pid === "number" && processAlive(pid);
-  });
-  const chosen = live.find(snapshot => snapshot.tag === "default") ?? newest(live) ?? snapshots.find(snapshot => snapshot.tag === "default") ?? newest(snapshots);
-  return chosen?.raw ?? "";
+    return raw ? { tag: candidate.tag, raw, modifiedAt: stat?.mtimeMs ?? 0 } : undefined;
+  }))).filter((snapshot): snapshot is LoopStatusCandidate => snapshot !== undefined);
+  return selectLoopStatusCandidate(snapshots, processAlive)?.raw ?? "";
 }
 
 async function readLoopStatus(): Promise<LoopStatus> {

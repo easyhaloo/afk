@@ -176,6 +176,56 @@ describe('NamedBranchStrategy', () => {
     expect((await simpleGit(second.path).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('feature/reuse');
   });
 
+  it('takes over a path that still holds the files of an earlier attempt', async () => {
+    const s = new NamedBranchStrategy();
+    const first = await s.prepareWorktree(git, { type: 'named', branch: 'feature/leftover' }, { repoPath });
+    _clearPreparedWorktreesForTest();
+    // The earlier attempt left its files behind, and Git does not know the
+    // worktree any more: the branch is checked out nowhere.
+    await git.raw(['worktree', 'remove', '--force', first.path]);
+    await fs.mkdirSync(first.path, { recursive: true });
+    await fs.writeFileSync(path.join(first.path, 'leftover.txt'), 'evidence\n');
+
+    const second = await s.prepareWorktree(git, { type: 'named', branch: 'feature/leftover' },
+      { repoPath, reuseExistingBranch: true });
+
+    expect(second.path).toBe(first.path);
+    expect((await simpleGit(second.path).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('feature/leftover');
+    // The leftover is replaced by the checkout: Git refuses a directory that
+    // still holds files.
+    expect(fs.existsSync(path.join(second.path, 'leftover.txt'))).toBe(false);
+  });
+
+  it('keeps AFK\'s own worktree directory out of the repository\'s view', async () => {
+    const s = new NamedBranchStrategy();
+    await s.prepareWorktree(git, { type: 'named', branch: 'feature/hidden' }, { repoPath });
+
+    // The worktrees live inside the checkout, so Git would report them as the
+    // user's uncommitted work — and `git add -A` would stage them as a
+    // submodule pointer.
+    expect((await git.raw(['status', '--porcelain'])).trim()).toBe('');
+    expect((await git.raw(['ls-files', '.worktrees'])).trim()).toBe('');
+  });
+
+  it('ignores the worktree directory through the repository\'s own exclude file', async () => {
+    const s = new NamedBranchStrategy();
+    // The worktrees live inside the checkout — that is the shape the ignore
+    // rule exists for.
+    await s.prepareWorktree(git, { type: 'named', branch: 'feature/ignored' },
+      { repoPath, worktreeBaseDir: path.join(repoPath, '.worktrees') });
+
+    // Git answers `--git-path info/exclude` with a path relative to the
+    // repository — `.git/info/exclude` — unless the checkout is a linked
+    // worktree of a bare repository. A relative answer is relative to the
+    // repository, not to the process: resolved against the working directory
+    // it would write the rule into whatever directory AFK ran in, and the
+    // worktree directory would stay visible.
+    const excludePath = (await git.raw(['rev-parse', '--git-path', 'info/exclude'])).trim();
+    const absolute = path.isAbsolute(excludePath) ? excludePath : path.join(repoPath, excludePath);
+    expect(fs.readFileSync(absolute, 'utf8')).toContain('.worktrees/');
+    expect((await git.raw(['check-ignore', '-v', '.worktrees/feature-ignored']).catch(() => ''))).toContain('.worktrees/');
+  });
+
   it('gives the sharing guard back when a preparation fails', async () => {
     await git.checkoutLocalBranch('feature/taken', 'main');
     await git.checkout('main');

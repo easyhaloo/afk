@@ -1,0 +1,4 @@
+# npm pack / publish build artifacts — never commit
+*.tgz
+node_modules/
+package-lock.json

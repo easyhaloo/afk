@@ -35,6 +35,7 @@ import {
   sanitizeLoopRunTag,
 } from '@afk/runtime/infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
+import { chooseCommandRunTag } from './loop-run-tag.js';
 
 export function resolveManagedLoopExecution(
   options: LoopStartOptions,
@@ -214,20 +215,18 @@ async function startDaemon(runTag: string, explicitTag = false): Promise<void> {
 /**
  * The run a command acts on when the operator names none.
  *
- * `default` when that run is alive, otherwise the only live run. With several
- * live runs there is no single answer: guessing would report "not running"
- * while loops are working, so the command refuses and names them instead.
+ * The choice itself lives in `chooseCommandRunTag`; this only turns an
+ * ambiguous answer into the command error an operator can act on.
  */
 function resolveCommandRunTag(explicit?: string): string {
-  if (explicit) return sanitizeLoopRunTag(explicit);
-  const live = liveLoopRunTags();
-  if (live.length === 0) return DEFAULT_LOOP_RUN_TAG;
-  if (live.includes(DEFAULT_LOOP_RUN_TAG)) return DEFAULT_LOOP_RUN_TAG;
-  if (live.length === 1) return live[0];
-  return handleCommandError(
-    new Error(`afk loop: ${live.length} loops are running (${live.join(', ')})`),
-    'name one with --run-tag, or list them all with --all',
-  );
+  const choice = chooseCommandRunTag(explicit, liveLoopRunTags());
+  if ('ambiguous' in choice) {
+    return handleCommandError(
+      new Error(`afk loop: ${choice.ambiguous.length} loops are running (${choice.ambiguous.join(', ')})`),
+      'name one with --run-tag, or list them all with --all',
+    );
+  }
+  return choice.tag;
 }
 
 /**

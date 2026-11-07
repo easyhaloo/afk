@@ -102,6 +102,69 @@ ln -s /path/to/afk/skills/* ~/.claude/skills/
 
 在 Claude Code 中运行 `/afk-grill-me` 确认 Skills 已加载。
 
+## 在 OpenCode 2.x 上安装
+
+AFK 同时以 OpenCode 2.x 包的形式分发。OpenCode 将**插件**和 **Skills** 视为两个
+独立的机制，因此包含两部分：插件入口（可选）和 Skill 发现（这才是真正带来 AFK
+工作流的部分）。
+
+### 1. 添加插件（可选）
+
+插件入口是一个轻量加载器 —— AFK 的核心是它的 Skills，而 Skills 由 OpenCode 单独
+发现（见第 2 步）。可以从 npm、git 规格或本地检出注册插件：
+
+```bash
+# npm 包
+opencode plugin add afk
+
+# git
+opencode plugin add github:easyhaloo/afk
+```
+
+或在 `opencode.json(c)` 中引用（全局为 `~/.config/opencode/opencode.jsonc`，或项目级
+配置）。相对路径相对于所在配置文件解析：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    "afk",                          // npm
+    "github:easyhaloo/afk",         // git
+    "/path/to/afk"                  // 本地检出（目录）
+  ]
+}
+```
+
+### 2. 让 Skills 可被发现
+
+OpenCode 不会自动从已安装的 npm 包内部加载 `SKILL.md`，因此需要通过 `skills` 数组
+将其指向 AFK 的 `skills/` 目录（使用绝对路径或 `~/` 路径最为可靠）：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": [
+    "/path/to/afk/skills"
+  ]
+}
+```
+
+或者，将 Skills 链接到 OpenCode 自动扫描的全局 skills 目录：
+
+```bash
+mkdir -p ~/.config/opencode/skills
+ln -s /path/to/afk/skills/* ~/.config/opencode/skills/
+```
+
+每个 `skills/<name>/SKILL.md` 会成为一个 Skill，其 ID 即目录名（如 `afk-do`、
+`afk-qa`）。`jev-agent-guard` Skill 拥有自己独立的 OpenCode 宿主集成，与上面的轻量
+插件入口无关。
+
+### 验证安装
+
+运行 `opencode plugin list` 确认插件已加载，然后在 OpenCode 会话中调用某个 Skill
+（例如 `@afk-do`）。
+
 ## CLI 命令
 
 ```bash

@@ -6,6 +6,8 @@ import { WorktreeManager } from '../infrastructure/git/index.js';
 import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index.js';
 import { defaultSandboxProviderRegistry, SandboxProviderRegistry } from '../infrastructure/sandbox/registry.js';
 import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgentProviders } from '../domain/agents/index.js';
+import { prepareAgentRuntime } from '../domain/agents/codex-runtime.js';
+import { resolveRuntimeForProvider } from '../domain/agents/runtime-binding.js';
 import type {
   Sandbox,
   SandboxProvider,
@@ -41,6 +43,7 @@ import {
   type PromptSegment,
 } from './workflows/execution-protocol.js';
 import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from './workflows/backlog-context.js';
+import { describePublishBoundary } from '../domain/branches/publish-boundary.js';
 import { measurePromptBudget } from '../domain/agents/prompt-budget.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
@@ -110,13 +113,14 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
 }
 
 function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
+  const round = `cycle ${rework.cycle}, attempt ${rework.attempt}`;
   if (rework.source === 'conflict') {
     // The change request could not be merged because the target branch
     // changed the same lines. Making the change compatible with the target
     // here is what keeps the next merge conflict-free.
-    return `\n\nAn open merge-conflict rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
+    return `\n\nAn open merge-conflict rework record (${rework.id}, ${round}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
   }
-  return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
+  return `\n\nAn open QA rework record (${rework.id}, ${round}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
 /**
@@ -222,6 +226,11 @@ export interface RunnerDependencies {
   agentProviderRegistry?: AgentProviderRegistry;
   /** Immutable runtime selection resolved by the caller. */
   agentRuntime?: AgentRuntimeSelection;
+  /**
+   * Readiness probe for a runtime resolved inside the run (tests). Defaults
+   * to AFK's Codex readiness probe, which spends a live model round-trip.
+   */
+  prepareRuntime?: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
   sessionStoreChain?: (worktreePath: string) => import('./sessions/types.js').SessionStoreChain;
   /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
@@ -297,6 +306,14 @@ export class WorkflowRunner {
   private readonly sandboxProviderRegistry: SandboxProviderRegistry;
   private agentProvider: AgentProvider;
   private readonly agentRuntime?: AgentRuntimeSelection;
+  /**
+   * Runtimes already probed for this run, keyed by the provider that runs them.
+   *
+   * A live readiness probe costs a real model round-trip, so a provider is
+   * probed at most once per run even when several steps use it.
+   */
+  private readonly preparedRuntimes = new Map<AgentProviderName, AgentRuntimeSelection | undefined>();
+  private readonly prepareRuntime: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   /** Session store chain factory — defaults to defaultSessionStoreChain. */
   private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types.js').SessionStoreChain;
   /** Resolved sandbox provider name (set in run()). */
@@ -396,11 +413,37 @@ export class WorkflowRunner {
     this.agentProvider = deps?.agentProvider ?? this.agentProviderRegistry.get(this.agentProviderName) ?? this.agentProviderRegistry.list()[0] ?? this.agentProviderRegistry.require(this.agentProviderName);
     this.agentProviderName = this.agentProvider.name;
     this.agentRuntime = deps?.agentRuntime;
+    this.prepareRuntime = deps?.prepareRuntime ?? prepareAgentRuntime;
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
     this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
     this.observer = deps.observer;
     this.multiRepositoryPreparer = deps?.multiRepositoryPreparer ?? new MultiRepositoryPreparer();
+  }
+
+  /**
+   * The runtime a provider runs with, probed at most once per run.
+   *
+   * The request-level runtime was already probed by the caller, so it is
+   * reused as-is. A runtime resolved here — because the step runs a provider
+   * other than the request-level one — is probed here, which is what makes an
+   * unreachable model fail before the agent starts instead of halfway
+   * through its first turn.
+   */
+  private async runtimeForProvider(provider: AgentProviderName): Promise<AgentRuntimeSelection | undefined> {
+    if (this.preparedRuntimes.has(provider)) return this.preparedRuntimes.get(provider);
+    const bound = resolveRuntimeForProvider({
+      provider,
+      runtime: this.agentRuntime,
+      codex: this.config.agents?.codex,
+    });
+    if (!bound) {
+      this.preparedRuntimes.set(provider, undefined);
+      return undefined;
+    }
+    const prepared = bound === this.agentRuntime ? bound : await this.prepareRuntime(bound);
+    this.preparedRuntimes.set(provider, prepared);
+    return prepared;
   }
 
   /**
@@ -806,9 +849,17 @@ export class WorkflowRunner {
       if (acCorrection) segments.push({ label: 'AC correction', text: acCorrection.trim() });
     }
     if (this.preparedRepositories) {
-      const repositories = this.preparedRepositories.repositories.map((repository, index) =>
-        `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${repository.targetBranch ?? repository.baseBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`,
-      ).join('\n');
+      const repositories = this.preparedRepositories.repositories.map((repository, index) => {
+        const targetBranch = repository.targetBranch ?? repository.baseBranch;
+        const boundary = describePublishBoundary({
+          workingBranch: repository.workingBranch,
+          targetBranch,
+          baseBranch: repository.baseBranch,
+          ...(repository.sourceBranch ? { sourceBranch: repository.sourceBranch } : {}),
+        });
+        const listing = `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${targetBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`;
+        return `${listing}\n   ${boundary}`;
+      }).join('\n');
       segments.push({
         label: 'execution repositories',
         text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,
@@ -877,6 +928,12 @@ export class WorkflowRunner {
     const completionKind: CompletionKind = step.id === 'verify-ac' ? 'ac' : 'task';
     const observationPhase = completionKind === 'ac' ? 'verification' : 'implementation';
     await this.recordObservation({ kind: 'step.started', stepId: step.id, phase: observationPhase });
+    const stepProvider = step.provider ? this.agentProviderRegistry.require(step.provider) : this.agentProvider;
+    // The runtime belongs to the provider this step actually runs with. A step
+    // that overrides the provider must not inherit the request-level
+    // provider's runtime: that silently drops every provider-specific
+    // setting (for Codex: provider, profile and transport).
+    const runtime = await this.runtimeForProvider(stepProvider.name);
     let phase: PhaseResult;
     try {
       phase = await this.runPhase({
@@ -893,8 +950,8 @@ export class WorkflowRunner {
         segments,
         signalType,
         executionMode: ctx.executionMode ?? 'batch',
-        agentProvider: step.provider ? this.agentProviderRegistry.require(step.provider) : this.agentProvider,
-        runtime: this.agentRuntime,
+        agentProvider: stepProvider,
+        runtime,
         sandbox,
         completionKind,
       });

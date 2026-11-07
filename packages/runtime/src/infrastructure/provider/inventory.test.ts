@@ -161,4 +161,33 @@ describe('global work item inventory', () => {
     expect(result.diagnostics).toHaveLength(1);
     expect(result.complete).toBe(false);
   });
+
+  it('reads a dropped connection as a failure worth retrying', async () => {
+    // A provider that is merely unreachable is transient, and the caller
+    // decides what to do with a failure by this flag: a transient one is
+    // retried, a permanent one is escalated to a person. "fetch failed" is
+    // the shape a dropped connection takes, and reading it as permanent
+    // would ask a person to act about a network blip.
+    const source = catalog('gitlab', 'gitlab.example.com', [
+      { platform: 'gitlab', projectKey: 'gitlab.example.com/a/flaky', name: 'flaky' },
+    ], { 'gitlab.example.com/a/flaky': new Error('fetch failed') });
+
+    const result = await collectGlobalWorkItemInventory([source]);
+
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ projectKey: 'gitlab.example.com/a/flaky', message: 'fetch failed', retryable: true }),
+    ]);
+  });
+
+  it('reads a repository that is gone as a failure worth not retrying', async () => {
+    const source = catalog('gitlab', 'gitlab.example.com', [
+      { platform: 'gitlab', projectKey: 'gitlab.example.com/a/gone', name: 'gone' },
+    ], { 'gitlab.example.com/a/gone': new Error('404 Project Not Found') });
+
+    const result = await collectGlobalWorkItemInventory([source]);
+
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ projectKey: 'gitlab.example.com/a/gone', message: '404 Project Not Found', retryable: false }),
+    ]);
+  });
 });

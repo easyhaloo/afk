@@ -147,8 +147,13 @@ export interface TrackerIssueComment {
  * missing approval, a branch that is merely behind. Only 'conflict' means
  * the two branches changed the same lines, which is the one case a person
  * has to resolve by hand.
+ *
+ * 'baseline_advanced' is the other case that is not a conflict: the target
+ * branch already carries the change's commits, so there is nothing left to
+ * merge. The target branch moved — not the content. A person has to decide
+ * what that means; it must never be answered by redoing the work.
  */
-export type ChangeMergeState = 'mergeable' | 'conflict' | 'unknown';
+export type ChangeMergeState = 'mergeable' | 'conflict' | 'baseline_advanced' | 'unknown';
 
 export interface TrackedMR {
   id: number;
@@ -163,8 +168,7 @@ export interface TrackedMR {
   description?: string;
   mergeable?: boolean;
   /** The precise merge verdict; 'conflict' only for a real conflict. */
-  mergeState?: ChangeMergeState;
-  pipeline?: { status: string };  // GitLab only
+  mergeState?: ChangeMergeState;  pipeline?: { status: string };  // GitLab only
 }
 
 import type { ACItem, AcceptanceCriteria } from './ac-types.js';

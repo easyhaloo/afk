@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeHookConfig, opencodePluginSource, supportsOpenCodePlugin } from '../scripts/hosts.mjs';
+import { mergeHookConfig, opencodePluginSource, opencodePluginSourceV2, supportsOpenCodePlugin, supportsOpenCodeV2 } from '../scripts/hosts.mjs';
 
 const command = '"/tmp/node bin" "/tmp/data with spaces/jev-agent-guard/current/scripts/adapters/codex.mjs" before-action';
 
@@ -39,4 +39,21 @@ test('OpenCode plugin registration rejects unknown or incompatible versions', ()
   assert.equal(supportsOpenCodePlugin('1.18.28'), false);
   assert.equal(supportsOpenCodePlugin('2.0.0'), false);
   assert.equal(supportsOpenCodePlugin('unknown'), false);
+});
+
+test('OpenCode V2 plugin gate accepts 2.x and rejects older or unknown versions', () => {
+  assert.equal(supportsOpenCodeV2('2.0.0'), true);
+  assert.equal(supportsOpenCodeV2('2.2.2'), true);
+  assert.equal(supportsOpenCodeV2('opencode v2.2.2'), true);
+  assert.equal(supportsOpenCodeV2('1.18.29'), false);
+  assert.equal(supportsOpenCodeV2('1.19.0'), false);
+  assert.equal(supportsOpenCodeV2('1.18.28'), false);
+  assert.equal(supportsOpenCodeV2('0.4.0'), false);
+  assert.equal(supportsOpenCodeV2('unknown'), false);
+});
+
+test('OpenCode V2 shim re-exports a default plugin using a file URL and keeps the guard marker', () => {
+  const source = opencodePluginSourceV2('/tmp/runtime with spaces/scripts/adapters/opencode-v2.mjs');
+  assert.match(source, /export \{ default \} from "file:\/\/\/tmp\/runtime%20with%20spaces\/scripts\/adapters\/opencode-v2\.mjs";\n$/);
+  assert.match(source, /JevAgentGuard/);
 });

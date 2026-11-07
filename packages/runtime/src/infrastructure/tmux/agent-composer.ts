@@ -36,3 +36,30 @@ export function composerIsEmpty(provider: string, paneText: string): boolean {
   if (!supportsComposerState(provider)) return true;
   return paneText.includes(CODEX_EMPTY_COMPOSER_MARKER);
 }
+
+/**
+ * Modals Codex opens on its own, and the keys that dismiss them.
+ *
+ * A modal takes the keyboard. The Enter presses that submit the goal are
+ * swallowed by it, and some of them — the folder trust question in
+ * particular — restart the TUI afterwards, which leaves the goal in the
+ * composer with no way for the agent to receive it.
+ *
+ * Codex renders each modal as a numbered choice with the first one selected,
+ * so Enter is the key that accepts it.
+ */
+const CODEX_MODAL_MARKERS = [
+  'Trust this folder?',
+  'Update available',
+] as const;
+
+/**
+ * The modal Codex is showing, if any.
+ *
+ * Knowing which one it is lets AFK say so in the run log instead of leaving
+ * a silent gap between "goal sent" and "goal never arrived".
+ */
+export function codexModalInPane(provider: string, paneText: string): string | undefined {
+  if (!supportsComposerState(provider)) return undefined;
+  return CODEX_MODAL_MARKERS.find(marker => paneText.includes(marker));
+}

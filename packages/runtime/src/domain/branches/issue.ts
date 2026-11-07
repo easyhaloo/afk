@@ -16,7 +16,7 @@ import type {
 } from './types.js';
 import {
   defaultWorktreeBaseDir,
-  ensureWorktreeBaseDir,
+  prepareWorktreeBaseDir,
   gitWorktreeAdd,
   gitWorktreeRemove,
   gitBranchDelete,
@@ -37,7 +37,7 @@ export class IssueBranchStrategy implements BranchStrategy {
     if (config.type !== 'issue') throw new Error('IssueBranchStrategy requires config.type === "issue"');
     const branch = this.resolveBranch(config);
     const baseDir = options.worktreeBaseDir ?? defaultWorktreeBaseDir(options.repoPath);
-    await ensureWorktreeBaseDir(baseDir);
+    await prepareWorktreeBaseDir(git, options.repoPath, baseDir);
     const path = join(baseDir, `issue-${config.iid}`);
 
     checkNotShared(path, branch, this.kind);

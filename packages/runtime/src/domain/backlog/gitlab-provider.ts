@@ -1,5 +1,6 @@
 import type { BacklogClaim, BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution, Runnability } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
+import type { ReworkRevisionInput } from './rework-revision.js';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
 
@@ -25,6 +26,7 @@ export class GitLabBacklogProvider implements BacklogProvider {
   createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord> { return this.implementation.createRework(id, record); }
   getActiveRework(id: string): Promise<ReworkRecord | undefined> { return this.implementation.getActiveRework(id); }
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> { return this.implementation.resolveRework(id, reworkId, resolution); }
+  reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord> { return this.implementation.reviseRework(id, reworkId, revision); }
   addTag(id: string, tag: string): Promise<void> { return this.implementation.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.implementation.removeTag(id, tag); }
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.implementation.applyRelationUpdate(id, update); }

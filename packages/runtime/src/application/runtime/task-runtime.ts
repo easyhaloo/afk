@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
+import { pruneRuntimeState } from '../../infrastructure/runtime/state-retention.js';
+
+/** How often a finishing run may trigger another retention sweep. */
+const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
 
 export type TaskRuntimePhase = 'implementing' | 'verifying';
 export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
@@ -61,6 +65,7 @@ export interface TaskRuntimeDiagnostics {
 
 export class TaskRuntimeStore {
   private readonly mutations = new Map<string, Promise<void>>();
+  private lastRetentionAt = 0;
   readonly root: string;
   readonly activePath: string;
   readonly archivePath: string;
@@ -137,7 +142,7 @@ export class TaskRuntimeStore {
   }
 
   async finish(runId: string, changes: Pick<Partial<TaskRuntimeRecord>, 'status' | 'progress' | 'diagnosticPath' | 'errorSummary'>): Promise<TaskRuntimeRecord> {
-    return this.mutate(runId, async () => {
+    const terminal = await this.mutate(runId, async () => {
       const current = await this.getActive(runId);
       if (!current) throw new Error(`active task runtime '${runId}' was not found`);
       const status = changes.status ?? 'completed';
@@ -161,6 +166,27 @@ export class TaskRuntimeStore {
       await fs.rm(join(this.activePath, `${runtimeFileKey(runId)}.json`), { force: true });
       return terminal;
     });
+    await this.runRetention();
+    return terminal;
+  }
+
+  /**
+   * Sweep finished-run state once in a while.
+   *
+   * A finished run is the moment the store learns that state is now history,
+   * so it is the right place to enforce the retention window — and it needs no
+   * scheduler of its own. The throttle keeps a fast loop from rescanning the
+   * archive on every task.
+   */
+  private async runRetention(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastRetentionAt < RETENTION_INTERVAL_MS) return;
+    this.lastRetentionAt = now;
+    try {
+      await pruneRuntimeState({ tasksRoot: this.root });
+    } catch {
+      // Housekeeping must never fail the run that triggered it.
+    }
   }
 
   async listActive(): Promise<TaskRuntimeRecord[]> {

@@ -1,0 +1,51 @@
+name: Release OpenCode npm package
+
+on:
+  push:
+    tags:
+      - 'opencode-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-opencode-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Sync bundled skills into the package
+        shell: bash
+        run: node scripts/build-opencode-pkg.mjs
+
+      - name: Check package version matches tag (when triggered by tag)
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('.opencode-pkg/package.json', 'utf8')).version)")"
+          expected="opencode-v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${version} (expected tag ${expected})"
+            exit 1
+          fi
+
+      - name: Publish @easyhaloo/afk-opencode
+        shell: bash
+        working-directory: .opencode-pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --registry=https://registry.npmjs.org --access public

@@ -2,6 +2,7 @@ import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowStudioInspector } from "../src/main.js";
 import { DEMO_SNAPSHOT } from "../src/mock-data.js";
+import { SelectMenu } from "../src/components/SelectMenu.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -14,6 +15,34 @@ const props = {
 };
 
 describe("workflow studio inspector", () => {
+  it("offers registered plugin providers for node editing without accepting arbitrary names", () => {
+    let renderer!: ReturnType<typeof create>;
+    const onTemplatePatch = vi.fn();
+    const custom = { id: "implement", template: "agent" as const, label: "实现", description: "实现", prompt: "Implement", provider: "enterprise-agent", x: 0, y: 0 };
+    act(() => {
+      renderer = create(<WorkflowStudioInspector {...props} agentProviders={["claude-code", "codex", "enterprise-agent"]} onTemplatePatch={onTemplatePatch} node={{
+        id: "custom-implement", number: "01", title: "实现", caption: "enterprise-agent", state: "ready", x: 0, y: 0, custom,
+      }} />);
+    });
+    const selector = renderer.root.findByType(SelectMenu);
+    expect(selector.props.options.map((option: { value: string }) => option.value)).toEqual(["", "claude-code", "codex", "enterprise-agent"]);
+    act(() => selector.props.onChange("enterprise-agent"));
+    expect(onTemplatePatch).toHaveBeenCalledWith("implement", { provider: "enterprise-agent" });
+    expect(selector.props.options.some((option: { value: string }) => option.value === "unregistered-agent")).toBe(false);
+  });
+
+  it("uses the registry provider list for the workflow default selector", () => {
+    let renderer!: ReturnType<typeof create>;
+    const onPatch = vi.fn();
+    act(() => {
+      renderer = create(<WorkflowStudioInspector {...props} agentProviders={["claude-code", "codex", "enterprise-agent", "another-agent"]} onPatch={onPatch} node={{ id: "start", number: "00", title: "开始", caption: "Issue", state: "ready", x: 0, y: 0 }} />);
+    });
+    const selector = renderer.root.findAllByType(SelectMenu).find((candidate: { props: { label?: string } }) => candidate.props.label === "默认 Agent")!;
+    expect(selector.props.options.map((option: { value: string }) => option.value)).toContain("enterprise-agent");
+    act(() => selector.props.onChange("enterprise-agent"));
+    expect(onPatch).toHaveBeenCalledWith({ agentDefault: "enterprise-agent" });
+  });
+
   it("groups multiple dependencies and their execution rule without repeating the current step", () => {
     let renderer!: ReturnType<typeof create>;
     act(() => {

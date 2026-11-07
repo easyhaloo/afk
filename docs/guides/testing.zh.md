@@ -247,6 +247,9 @@ pnpm test:e2e
 # 只跑 CLI 流程（先构建可执行文件）
 pnpm test:e2e:cli
 
+# 本地插件安装/启停/卸载，以及真实本地 Provider 调用
+pnpm build && pnpm exec vitest run tests/e2e/plugin-local.test.ts
+
 # 监听模式（开发时）
 pnpm --filter afk exec vitest
 

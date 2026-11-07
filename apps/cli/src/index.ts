@@ -28,8 +28,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  const { createCliPluginRuntime } = await import('./composition-root.js');
   const { dispatchCommand } = await import('./command-registry.js');
-  await dispatchCommand(cmd, extraArgs);
+  const pluginRuntime = await createCliPluginRuntime();
+  try {
+    await dispatchCommand(cmd, extraArgs, { pluginRuntime });
+  } finally {
+    await pluginRuntime.dispose();
+  }
 }
 
 main().catch((error: unknown) => {

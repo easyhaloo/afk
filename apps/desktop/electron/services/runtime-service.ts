@@ -2,6 +2,18 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentRuntime } from "../../shared/ipc-contract.js";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
+import { createDefaultPluginRuntime } from "@afk/runtime/plugin-sdk";
+
+export async function listRegisteredAgentProviders(workspaceRoot: string): Promise<string[]> {
+  const plugins = await createDefaultPluginRuntime({ workspaceRoot });
+  try {
+    return plugins.getAgentProviderRegistry().list()
+      .filter(provider => typeof provider.name === "string" && provider.name.trim().length > 0 && typeof provider.createExecution === "function")
+      .map(provider => provider.name);
+  } finally {
+    await plugins.dispose();
+  }
+}
 
 type AgentRuntimeDefinition = Pick<AgentRuntime, "id" | "label" | "command"> & { versionArgs: string[] };
 

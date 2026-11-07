@@ -1,7 +1,9 @@
 import { Command } from 'commander';
+import type { PluginRuntime } from '@afk/runtime/plugin-sdk';
 
 export interface CommandRegistrationContext {
   argv?: readonly string[];
+  pluginRuntime?: PluginRuntime;
 }
 
 export type RegisterFn = (p: Command, context?: CommandRegistrationContext) => void;
@@ -19,6 +21,8 @@ export interface CommandEntry {
  * path cannot drift apart.
  */
 export const COMMANDS: CommandEntry[] = [
+  { names: ['host'], loader: () => import('./commands/host.js').then(m => m.registerHostCommands) },
+  { names: ['plugin'], loader: () => import('./commands/plugin.js').then(m => m.registerPluginCommands) },
   { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
   { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
   { names: ['kanban'], loader: () => import('./commands/kanban.js').then(m => m.registerKanbanCommands) },
@@ -46,7 +50,7 @@ export function buildCommandArgv(command: string, args: string[], subcommand?: s
 }
 
 /** Load and parse exactly one registered command; unknown commands fail directly. */
-export async function dispatchCommand(command: string, args: string[]): Promise<void> {
+export async function dispatchCommand(command: string, args: string[], context: CommandRegistrationContext = {}): Promise<void> {
   if (command === '--help' || command === '-h') {
     const program = new Command();
     program.name('afk').version('0.1.0').exitOverride();
@@ -64,7 +68,7 @@ export async function dispatchCommand(command: string, args: string[]): Promise<
   const register = await entry.loader();
   const program = new Command();
   program.name('afk').version('0.1.0').exitOverride();
-  register(program, { argv: ['node', 'afk', command, ...args] });
+  register(program, { ...context, argv: ['node', 'afk', command, ...args] });
 
   const matched = program.commands.find(candidate => candidate.name() === command || candidate.aliases().includes(command));
   if (!matched) {

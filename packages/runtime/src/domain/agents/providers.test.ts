@@ -14,7 +14,7 @@ import {
   guardedCaptureSession,
   _resetAgentRegistry,
 } from './registry.js';
-import { createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
+import { AgentProviderRegistry, createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
 import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
 import type { AgentProvider } from './types.js';
 
@@ -31,6 +31,14 @@ function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: str
 describe('Agent providers — fixture coverage', () => {
   beforeEach(() => {
     _resetAgentRegistry();
+  });
+
+  it('resolves an extension provider from an injected registry', () => {
+    const provider = { name: 'review-agent', capabilities: new Set(), createExecution: vi.fn() } as unknown as AgentProvider;
+    const registry = new AgentProviderRegistry([provider]);
+
+    expect(registry.require('review-agent')).toBe(provider);
+    expect(createAgentProvider('review-agent', registry)).toBe(provider);
   });
 
   describe('ClaudeCodeProvider', () => {

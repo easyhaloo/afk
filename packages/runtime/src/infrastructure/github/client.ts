@@ -622,9 +622,15 @@ export function artifactReleaseTag(options: UploadArtifactsOptions): string {
  * 'blocked' or 'behind' for reasons that a person does not have to resolve
  * by hand. Only 'dirty' is a conflict; a null verdict means GitHub has not
  * computed it yet.
+ *
+ * 'behind' is the base branch having moved on — the target advanced while
+ * the change sat there. It is not a conflict: the content still applies
+ * cleanly. That is the same situation GitLab reports as an empty diff, and
+ * it needs the same answer: a person decides, not another round of work.
  */
 function githubMergeState(mergeableState: string | null | undefined, mergeable: boolean | null | undefined): ChangeMergeState {
   if (mergeableState === 'dirty') return 'conflict';
+  if (mergeableState === 'behind') return 'baseline_advanced';
   if (mergeableState === 'clean') return 'mergeable';
   if (mergeable === true) return 'mergeable';
   return 'unknown';

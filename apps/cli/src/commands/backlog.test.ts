@@ -16,6 +16,7 @@ import {
   runBacklogRelationAdd,
   runBacklogRelationRemove,
   runBacklogRetry,
+  runBacklogReworkRevise,
   runBacklogRole,
   runBacklogExecutionBase,
   runBacklogMode,
@@ -27,6 +28,7 @@ import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
 import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogRelationUpdate, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import { planReworkRevision } from '@afk/runtime/domain/backlog/index';
 import { planBacklogCreate } from '@afk/runtime/domain/backlog/commands';
 import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
 import type { GlobalWorkItem } from '@afk/runtime/domain/work-item/types';
@@ -52,6 +54,23 @@ describe('hard-cutover command surface', () => {
     const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
     expect(tagNames).toEqual(expect.arrayContaining(['add', 'remove']));
     expect(new Set(tagNames).size).toBe(tagNames.length);
+  });
+
+  it('exposes the rework revision command with the record, the statement and the reason', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog')!;
+    const rework = backlog.commands.find(command => command.name() === 'rework')!;
+    const revise = rework.commands.find(command => command.name() === 'revise')!;
+
+    expect(rework.commands.map(command => command.name())).toEqual(['revise']);
+    expect(revise.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--id', '--record', '--summary', '--reason', '--project', '--platform', '--json',
+    ]));
+    // The statement and the record handle are the required inputs: a
+    // correction without them has nothing to correct.
+    expect(revise.options.find(option => option.long === '--summary')?.mandatory).toBe(true);
+    expect(revise.options.find(option => option.long === '--record')?.mandatory).toBe(true);
+    expect(revise.options.find(option => option.long === '--reason')?.mandatory).toBe(false);
   });
 
   it('exposes global inventory filters without changing backlog list options', () => {
@@ -526,7 +545,8 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       return {
         ...input,
         version: 1,
-        id: 'r1',
+        id: 'r1-1',
+        cycle: 1,
         attempt: 1,
         status: 'open',
         createdAt: '2026-09-17T00:00:00.000Z',
@@ -534,6 +554,24 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
     },
     async getActiveRework() { return undefined; },
     async resolveRework() { /* noop */ },
+    async reviseRework(id, reworkId, revision) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      // The stub plans the correction the way the provider does, so the
+      // command test sees the real behaviour of a correction.
+      return planReworkRevision({
+        version: 1,
+        id: reworkId,
+        cycle: 1,
+        attempt: 1,
+        status: 'open',
+        source: 'qa',
+        summary: 'the frozen statement',
+        failedCriteria: [],
+        requiredChecks: [],
+        createdAt: '2026-09-17T00:00:00.000Z',
+      }, revision);
+    },
     ...overrides,
   };
 }
@@ -991,6 +1029,64 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       ok: true,
       kind: 'backlog.retry',
       data: { id: '42', state: 'rework', executionMode: 'afk' },
+    });
+  });
+
+  it('runBacklogReworkRevise emits the corrected record', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogReworkRevise(
+        stubProvider([stubItem]),
+        '42',
+        'r2',
+        'The dependency produced its change request; it is ready and awaits a person.',
+        'the dependency’s merge request is ready but unmerged',
+        'shenggangshu@w.src.corp.qihoo.net',
+        { json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.rework.revise',
+      data: {
+        id: 'r2',
+        summary: 'The dependency produced its change request; it is ready and awaits a person.',
+        revisions: [expect.objectContaining({ actor: 'shenggangshu@w.src.corp.qihoo.net' })],
+      },
+    });
+  });
+
+  it('runBacklogReworkRevise refuses a statement that carries an instruction', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogReworkRevise(
+        stubProvider([stubItem]),
+        '42',
+        'r2',
+        'publish to prd/27',
+        undefined,
+        'shenggangshu@w.src.corp.qihoo.net',
+        { json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.rework.revise',
+      error: { message: expect.stringContaining('must state a fact, not an instruction') },
     });
   });
 

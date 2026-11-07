@@ -55,6 +55,21 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop as singular change request | accepted |
 | [0021](adr/0021-backlog-relation-carrying.md) | Backlog 关系的承载方式与记录可读性 | accepted |
 | [0030](adr/0030-host-capability-plugin.md) | Shared host and capability plugins | accepted |
+| [0022](adr/0022-execution-plan-and-repository-leases.md) | Execution plans and repository leases | accepted |
+| [0023](adr/0023-repository-store-and-dependency-pool.md) | Repository store and dependency pool | accepted |
+| [0024](adr/0024-prd-baseline-branches.md) | PRD baseline branches | accepted |
+| [0025](adr/0025-structured-failure-diagnostics.md) | Structured failure diagnostics | proposed |
+| [0026](adr/0026-goal-condition-budget-and-worktree-context.md) | The goal condition budget, and context in the worktree | accepted |
+| [0027](adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md) | The scheduler re-evaluates on a timer, and says why it waits | accepted |
+| [0028](adr/0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted |
+| [0029](adr/0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted |
+| [0030](adr/0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted |
+| [0031](adr/0031-publish-boundary.md) | The target branch belongs to AFK's change request | accepted |
+| [0032](adr/0032-provider-and-runtime-are-one-decision.md) | A provider and the runtime that runs it are one decision | accepted |
+| [0033](adr/0033-agent-tui-modals.md) | A modal in the agent's TUI belongs to AFK to dismiss | accepted |
+| [0034](adr/0034-transient-failure-is-not-permanent-failure.md) | A temporary failure is not a permanent failure | accepted |
+| [0035](adr/0035-rework-records-are-revisable.md) | A rework record is correctable | accepted |
+| [0036](adr/0036-schedule-scope.md) | A schedule is judged against the range it depends on | accepted |
 
 ## 保留的研究材料（research/）
 

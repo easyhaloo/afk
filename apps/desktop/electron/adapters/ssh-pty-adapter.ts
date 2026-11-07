@@ -129,6 +129,11 @@ export function createSshPtyAdapter(options: SshPtyAdapterOptions = {}) {
       const id = sessionId();
       return open("/usr/bin/ssh", target ? sshConnectionArgs(target) : [alias], { id, hostId, alias, kind: "ssh", title: `SSH · ${alias}`, state: "opening" });
     },
+    connectJms(hostId: string, binary: string, args: string[], displayAlias?: string) {
+      const alias = displayAlias || args.at(-1) || "jumpserver";
+      const id = sessionId();
+      return open(binary, args, { id, hostId, alias, kind: "ssh", title: `JumpServer · ${alias}`, state: "opening" });
+    },
     generateKey(identityFile: string) {
       const id = sessionId();
       return open("/usr/bin/ssh-keygen", ["-t", "ed25519", "-f", identityFile, "-C", "afk-managed"], { id, hostId: "local", alias: "ssh-keygen", kind: "keygen", title: "生成 AFK Ed25519 密钥", state: "opening" }, { command: "/usr/bin/ssh-add", args: ["--apple-use-keychain", identityFile] });

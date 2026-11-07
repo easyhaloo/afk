@@ -104,6 +104,52 @@ function parseAssetLine(line: string): JumpserverAssetRow | null {
   return { name: parts[0], address: parts[1], platform: parts[2], rawType: parts[3] };
 }
 
+const COLUMN_NAMES = ["Alias", "Host", "Username", "Default", "Name", "Address", "Platform", "Type"] as const;
+
+type Columns = Map<string, number>;
+
+function headerColumns(line: string): Columns | null {
+  if (!/\S {2,}\S/.test(line)) return null;
+  const columns: Columns = new Map();
+  for (const name of COLUMN_NAMES) {
+    const index = line.indexOf(name);
+    if (index !== -1) columns.set(name, index);
+  }
+  return columns.size >= 2 ? columns : null;
+}
+
+function sliceColumn(line: string, start: number, end: number | undefined) {
+  return (end === undefined ? line.slice(start) : line.slice(start, end)).trim();
+}
+
+function parsePaddedServerLine(line: string, columns: Columns): JumpserverServer | null {
+  const hostStart = columns.get("Host");
+  const usernameStart = columns.get("Username");
+  if (hostStart === undefined || usernameStart === undefined) return null;
+  if (!line.trim() || /^-+$/.test(line.trim()) || /^Total:/.test(line.trim())) return null;
+  const defaultStart = columns.get("Default");
+  const alias = sliceColumn(line, 0, hostStart);
+  const host = sliceColumn(line, hostStart, usernameStart);
+  const username = sliceColumn(line, usernameStart, defaultStart);
+  if (!alias || !host) return null;
+  return { alias, host, username, isDefault: defaultStart === undefined ? false : line.slice(defaultStart).includes("*") };
+}
+
+function parsePaddedAssetLine(line: string, columns: Columns): JumpserverAssetRow | null {
+  const addressStart = columns.get("Address");
+  const platformStart = columns.get("Platform");
+  const typeStart = columns.get("Type");
+  if (addressStart === undefined || platformStart === undefined) return null;
+  const trimmed = line.trim();
+  if (!trimmed || /^-+$/.test(trimmed) || trimmed.startsWith("[INFO]") || /^Total:/.test(trimmed)) return null;
+  const name = sliceColumn(line, 0, addressStart);
+  const address = sliceColumn(line, addressStart, platformStart);
+  const platform = sliceColumn(line, platformStart, typeStart);
+  const rawType = typeStart === undefined ? "" : sliceColumn(line, typeStart, undefined);
+  if (!name || !address || !platform) return null;
+  return { name, address, platform, rawType };
+}
+
 export function createJumpserverCli(options: JumpserverCliOptions = {}) {
   const execFn = options.exec ?? execute;
   const resolveBinaryFn = options.resolveBinary ?? (() => execFn('which', ['jms']).then(result => (result.ok ? result.stdout.trim() : '')));
@@ -111,10 +157,13 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
   return {
     async listServers(): Promise<JumpserverServer[]> {
       const result = await execFn('jms', ['config', 'list']);
-      return result.ok ? result.stdout.split(/\r?\n/).flatMap(line => {
-        const server = parseServerLine(line);
-        return server ? [server] : [];
-      }) : [];
+      if (!result.ok) return [];
+      const lines = result.stdout.split(/\r?\n/);
+      const columns = lines.map(headerColumns).find(Boolean) ?? null;
+      return lines.flatMap(line => {
+        const server = columns ? parsePaddedServerLine(line, columns) : parseServerLine(line);
+        return server && server.alias !== 'Alias' ? [server] : [];
+      });
     },
 
     async addServer(input: { alias: string; host: string; port?: number; username: string; password: string }): Promise<{ ok: boolean; alias: string }> {
@@ -131,8 +180,10 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
     async listAssets(serverAlias: string, opts?: { linuxOnly?: boolean }): Promise<JumpserverAssetRow[]> {
       const result = await execFn('jms', ['ls', serverAlias]);
       if (!result.ok) return [];
-      return result.stdout.split(/\r?\n/).flatMap(line => {
-        const row = parseAssetLine(line);
+      const lines = result.stdout.split(/\r?\n/);
+      const columns = lines.map(headerColumns).find(value => value?.has('Address')) ?? null;
+      return lines.flatMap(line => {
+        const row = columns ? parsePaddedAssetLine(line, columns) : parseAssetLine(line);
         return row && (opts?.linuxOnly === false || row.platform.startsWith('Linux')) ? [row] : [];
       });
     },

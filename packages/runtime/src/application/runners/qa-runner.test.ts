@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js';
+import { retryBacklog } from '../../domain/backlog/commands.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -58,7 +59,7 @@ function fixture() {
     transition: vi.fn(async () => {}),
     setExecutionMode: vi.fn(async () => {}),
     getActiveRework: vi.fn(async () => undefined),
-    createRework: vi.fn(async () => ({ id: 'r1', attempt: 1 })),
+    createRework: vi.fn(async () => ({ id: 'r1-1', cycle: 1, attempt: 1 })),
     resolveRework: vi.fn(async () => {}),
   };
   const changes = {
@@ -311,6 +312,103 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
   return { comments, createRunner, resumeVerification: () => { issue.labels = ['stage::qa', 'mode::afk']; } };
 }
 
+describe('QARunner runtime binding', () => {
+  it('resolves and probes the reviewer from an isolated plugin registry', async () => {
+    const plugins = new PluginRuntime();
+    const provider = { name: 'codex', capabilities: new Set(), createExecution: vi.fn() };
+    await plugins.activate({
+      manifest: { id: 'agent.codex', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['agent.provider'] },
+      activate(context) { context.registerAgentProvider('codex', provider); },
+    });
+    const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+    try {
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { plugins, sandboxProvider: fixture().sandboxProvider, prepareRuntime });
+      expect((runner as any).agentProvider).toBe(provider);
+      await (runner as any).probeOwnRuntime();
+      expect(prepareRuntime).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'codex', provider: 'afk-zyuncs', profile: 'afk', transport: 'exec',
+      }));
+    } finally { await plugins.dispose(); }
+  });
+
+  const codexConfig = {
+    transport: 'exec' as const,
+    auth: 'auto' as const,
+    provider: 'afk-zyuncs',
+    profile: 'afk',
+    appServer: { startupTimeoutMs: 30_000 },
+  };
+
+  /** Register a Codex provider AFK can resolve by name. */
+  function withCodexProvider<T>(body: (provider: { name: 'codex' }) => T): T {
+    const original = createAgentProvider('codex');
+    const codex = { name: 'codex' as const, capabilities: new Set(), createExecution: vi.fn() };
+    registerAgentProvider(codex);
+    try {
+      return body(codex);
+    } finally {
+      registerAgentProvider(original);
+    }
+  }
+
+  it('gives a Codex reviewer the runtime that belongs to it', () => {
+    // A reviewer that resolves its own provider from AFK's configuration
+    // used to run with no runtime at all: no profile, no provider, no
+    // transport. Codex then fell back to the host's own configuration and
+    // talked to an endpoint nobody chose.
+    withCodexProvider(() => {
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any);
+
+      expect((runner as any).agentRuntime).toMatchObject({
+        kind: 'codex', provider: 'afk-zyuncs', profile: 'afk', transport: 'exec',
+      });
+    });
+  });
+
+  it('probes a runtime the reviewer resolved itself before the agent starts', async () => {
+    await withCodexProvider(async () => {
+      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { prepareRuntime });
+
+      await (runner as any).probeOwnRuntime();
+
+      expect(prepareRuntime).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not probe a runtime the caller already probed', async () => {
+    await withCodexProvider(async () => {
+      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const injected = { kind: 'codex', transport: 'exec', auth: 'unknown', provider: 'afk-zyuncs', profile: 'afk', startupTimeoutMs: 30_000 };
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { agentRuntime: injected as any, prepareRuntime });
+
+      await (runner as any).probeOwnRuntime();
+
+      expect(prepareRuntime).not.toHaveBeenCalled();
+      expect((runner as any).agentRuntime).toBe(injected);
+    });
+  });
+
+  it('runs a Codex reviewer with the Codex runtime the caller handed over', async () => {
+    await withCodexProvider(async codex => {
+      const injected = { kind: 'codex', transport: 'exec', auth: 'unknown', provider: 'afk-zyuncs', profile: 'afk', startupTimeoutMs: 30_000 };
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { agentProvider: codex as any, agentRuntime: injected as any });
+
+      expect((runner as any).agentRuntime).toBe(injected);
+    });
+  });
+});
+
 describe('QARunner execution boundary', () => {
   it('resolves the configured agent provider when none is injected', () => {
     const original = createAgentProvider('codex');
@@ -394,7 +492,10 @@ describe('QARunner execution boundary', () => {
       signalType: 'goal_complete',
       prompt: expect.stringContaining('"kind":"qa"'),
       generation: 1,
-      runtime,
+      // The reviewer runs Claude Code, and a non-Codex provider never
+      // inherits a Codex runtime: the provider and its runtime are one
+      // decision (ADR-0032).
+      runtime: undefined,
     });
     expect(f.sandbox.startAgent).not.toHaveBeenCalled();
     const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt;
@@ -648,7 +749,7 @@ describe('QARunner execution boundary', () => {
       expect(result.success).toBe(false);
       expect(result.summary).toContain('search shortcut failed');
       expect(result.failedCriteria).toEqual([{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }]);
-      await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ id: `r${attempt}`, attempt, status: 'open' });
+      await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ id: `r1-${attempt}`, cycle: 1, attempt, status: 'open' });
       expect(f.comments.map(comment => parseReworkRecord(comment)?.record.status)).toEqual([
         ...Array(attempt - 1).fill('superseded'), 'open',
       ]);
@@ -675,6 +776,58 @@ describe('QARunner execution boundary', () => {
     expect(subsequent.transition).not.toHaveBeenCalledWith('60', 'rework');
     expect(subsequent.setExecutionMode).not.toHaveBeenCalledWith('60', 'afk');
     expect(f.comments).toHaveLength(3);
+  });
+
+  it('keeps reworking after an operator retry when the QA budget of the cycle was spent', async () => {
+    const f = persistentReworkFixture('gitlab');
+    // The item fails QA until the budget of the first cycle is spent.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      f.resumeVerification();
+      const current = f.createRunner();
+      const result = await current.runner.process('60');
+      expect(result.rework === true).toBe(attempt < 3);
+    }
+    const exhausted = f.createRunner();
+    await expect(exhausted.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+    await expect(exhausted.backlog.getActiveRework('60')).resolves.toMatchObject({ cycle: 1, attempt: 3 });
+
+    // The operator fixed the defect and retries the item.
+    await expect(retryBacklog(exhausted.backlog, '60', 'the missing assets are added')).resolves.toMatchObject({
+      state: 'rework', executionMode: 'afk',
+    });
+
+    // The next QA failure is the first attempt of the new cycle, so it is a
+    // rework again instead of an immediate block.
+    f.resumeVerification();
+    const afterRetry = f.createRunner();
+    const result = await afterRetry.runner.process('60');
+    expect(result.success).toBe(false);
+    expect(result.rework).toBe(true);
+    expect(result.summary).toContain('search shortcut failed');
+    await expect(afterRetry.backlog.get('60')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
+    await expect(afterRetry.backlog.getActiveRework('60')).resolves.toMatchObject({ cycle: 2, attempt: 1, status: 'open' });
+  });
+
+  it('names the cycle and the used attempts when the QA rework budget is spent', async () => {
+    const f = persistentReworkFixture('github');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      f.resumeVerification();
+      const current = f.createRunner();
+      await current.runner.process('60');
+    }
+    const exhausted = f.createRunner();
+    await expect(exhausted.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+    const record = await exhausted.backlog.getActiveRework('60');
+    expect(record).toMatchObject({ cycle: 1, attempt: 3 });
+
+    // A failure that arrives while the budget is spent says which round of
+    // work it belongs to and how much of the budget that round used.
+    f.resumeVerification();
+    const blocked = f.createRunner();
+    const result = await blocked.runner.process('60');
+    expect(result.rework).not.toBe(true);
+    expect(result.summary).toContain('cycle 1');
+    expect(result.summary).toContain('3/3');
   });
 
   it.each([1, 4])('honors a configured QA failure limit of %s', async limit => {
@@ -723,13 +876,13 @@ describe('QARunner execution boundary', () => {
 
   it('resolves the active QA rework record only after QA passes', async () => {
     const f = fixture();
-    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1', summary: 'search shortcut failed' });
+    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1-1', cycle: 1, attempt: 1, summary: 'search shortcut failed' });
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'batch', mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
-    expect(f.providers.backlog.resolveRework).toHaveBeenCalledWith('60', 'r1', expect.objectContaining({ summary: expect.stringContaining('QA passed') }));
+    expect(f.providers.backlog.resolveRework).toHaveBeenCalledWith('60', 'r1-1', expect.objectContaining({ summary: expect.stringContaining('QA passed') }));
   });
 
   it('commits and creates a mergeable change after QA on the root backlog without merging', async () => {
@@ -849,8 +1002,35 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
   });
 
-  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {
+  it('escalates a change request whose target branch already carries it instead of redoing the work', async () => {
     const f = fixture();
+    f.changes.get.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      mergeState: 'baseline_advanced', url: 'https://example.test/pr/60',
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: false, failureCode: 'baseline_advanced' });
+    // The loop this state was split out to break: a target branch that
+    // already carries the change is never answered with another round of
+    // work, because the next round would move the baseline again.
+    expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'rework', expect.anything());
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', expect.objectContaining({
+      reason: expect.stringContaining('already carries its commits'),
+    }));
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+  });
+
+  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {    const f = fixture();
     f.changes.get.mockResolvedValue({
       id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
       mergeState: 'unknown', url: 'https://example.test/pr/60',
@@ -877,7 +1057,7 @@ describe('QARunner execution boundary', () => {
     });
     // The previous round is still open: a conflict means it did not do its
     // job, so the attempt count carries on.
-    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r3', attempt: 3, status: 'open', source: 'conflict' });
+    f.providers.backlog.getActiveRework.mockResolvedValue({ id: 'r1-3', cycle: 1, attempt: 3, status: 'open', source: 'conflict' });
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,

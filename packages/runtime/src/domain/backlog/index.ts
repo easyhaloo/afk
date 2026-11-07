@@ -30,7 +30,9 @@ export type { BacklogClaim, ClaimLease } from './claim.js';
 export { FilesystemClaimLock } from './claim.js';
 export type { BacklogProviderCapabilities } from './initialization.js';
 export { BACKLOG_METADATA } from './initialization.js';
-export type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
+export type { NewReworkRecord, ReworkRecord, ReworkResolution, ReworkRevision } from './rework-record.js';
+export type { ReworkRevisionInput } from './rework-revision.js';
+export { assertFactStatement, findActionInstruction, planReworkRevision } from './rework-revision.js';
 export { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 export type { GlobalWorkItem, ProviderProjectRef, WorkItemId, WorkItemIdentityParts, WorkItemPlatform } from '../work-item/types.js';
 export { encodeWorkItemIdForPath, formatWorkItemId, parseWorkItemId, WORK_ITEM_PLATFORMS, canonicalProjectKey, gitLabProjectHost } from '../work-item/identity.js';
@@ -69,7 +71,8 @@ export { describeRunnability, evaluateRunnability, RUNNABLE_STATES } from './run
 export type { Runnability, RunnabilityReason, RunnabilitySubject } from './runnability.js';
 import { evaluateRunnability, type Runnability } from './runnability.js';
 import type { BacklogClaim } from './claim.js';
-import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
+import { nextReworkAttempt, reworkRecordId, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
+import { planReworkRevision, type ReworkRevisionInput } from './rework-revision.js';
 import type { ProviderProjectRef, WorkItemId, WorkItemScope } from '../work-item/types.js';
 import { parseWorkItemId } from '../work-item/identity.js';
 import { validateBusinessTag } from './tags.js';
@@ -224,6 +227,14 @@ export interface QABacklogProvider extends BacklogManagementProvider {
   createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
   getActiveRework(id: string): Promise<ReworkRecord | undefined>;
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
+  /**
+   * Correct an open rework record to the current fact.
+   *
+   * The record keeps its identity and its evidence; only its statement about
+   * the current situation is replaced, and the correction is kept in the
+   * record's own trail.
+   */
+  reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord>;
 }
 
 export interface BacklogProvider {
@@ -240,6 +251,8 @@ export interface BacklogProvider {
   createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
   getActiveRework(id: string): Promise<ReworkRecord | undefined>;
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
+  /** Correct an open rework record to the current fact. */
+  reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
   /** Edit the relationship edges of an item that already exists. */
@@ -370,11 +383,13 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     if (active?.source === 'operator' && input.source === 'operator') {
       throw new Error(`backlog ${id} already has an open rework record`);
     }
+    const { cycle, attempt } = nextReworkAttempt(records, input.source);
     const record: ReworkRecord = {
       ...input,
       version: 1,
-      id: `r${records.length + 1}`,
-      attempt: records.length + 1,
+      id: reworkRecordId(cycle, attempt),
+      cycle,
+      attempt,
       status: 'open',
       createdAt: new Date().toISOString(),
     };
@@ -400,6 +415,15 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     record.status = 'resolved';
     record.resolvedAt = new Date().toISOString();
     record.resolutionSummary = resolution.summary;
+  }
+
+  async reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord> {
+    const records = this.reworks.get(id) ?? [];
+    const record = records.find(candidate => candidate.id === reworkId);
+    if (!record || record.status !== 'open') throw new Error(`open rework record not found: ${reworkId}`);
+    const revised = planReworkRevision(record, revision);
+    Object.assign(record, revised);
+    return { ...revised, failedCriteria: [...revised.failedCriteria], requiredChecks: [...revised.requiredChecks] };
   }
 
   async addTag(id: string, tag: string): Promise<void> {

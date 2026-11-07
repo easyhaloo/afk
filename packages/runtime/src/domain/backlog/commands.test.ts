@@ -8,6 +8,7 @@ import {
   reconcileMergedBacklog,
   resolveExpectedTargetBranch,
   retryBacklog,
+  reviseBacklogRework,
 } from './commands.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
 import { InMemoryBacklogProvider } from './index.js';
@@ -15,6 +16,21 @@ import { ManagementBacklogProvider } from './management-provider.js';
 import { parseReworkRecord, renderReworkRecord, type ReworkRecord } from './rework-record.js';
 
 describe('backlog commands', () => {
+  it('corrects a rework record through the provider, keeping the identity of the record', async () => {
+    const provider = lifecycleProvider(backlogItem({ state: 'rework' }));
+
+    const revised = await reviseBacklogRework(provider, '42', 'r1-1', {
+      summary: 'The dependency produced its change request; it is ready and awaits a person.',
+      actor: 'shenggangshu@w.src.corp.qihoo.net',
+    });
+
+    expect(provider.reviseRework).toHaveBeenCalledWith('42', 'r1-1', {
+      summary: 'The dependency produced its change request; it is ready and awaits a person.',
+      actor: 'shenggangshu@w.src.corp.qihoo.net',
+    });
+    expect(revised).toMatchObject({ id: 'r1-1', status: 'open' });
+  });
+
   it('rejects adoption when the provider has no optional adoption capability', async () => {
     const provider = new InMemoryBacklogProvider();
     await expect(adoptBacklog(provider, '42')).rejects.toThrow('does not support explicit issue adoption');
@@ -40,7 +56,8 @@ describe('backlog commands', () => {
   it('accepts operator-authored rework records', () => {
     const record: ReworkRecord = {
       version: 1,
-      id: 'r1',
+      id: 'r1-1',
+      cycle: 1,
       attempt: 1,
       status: 'open',
       source: 'operator',
@@ -100,7 +117,8 @@ describe('backlog commands', () => {
     const provider = lifecycleProvider(backlogItem({ state: 'blocked', executionMode: 'hitl' }));
     provider.getActiveRework = vi.fn(async () => ({
       version: 1 as const,
-      id: 'r1',
+      id: 'r1-1',
+      cycle: 1,
       attempt: 1,
       status: 'open' as const,
       source: 'operator' as const,
@@ -112,8 +130,8 @@ describe('backlog commands', () => {
 
     await blockBacklog(provider, '42', 'QA timed out');
 
-    expect(provider.resolveRework).toHaveBeenCalledWith('42', 'r1', {
-      summary: 'Rework r1 did not pass: QA timed out',
+    expect(provider.resolveRework).toHaveBeenCalledWith('42', 'r1-1', {
+      summary: 'Rework r1-1 did not pass: QA timed out',
     });
     expect(provider.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'QA timed out' });
     expect(provider.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
@@ -132,13 +150,13 @@ describe('backlog commands', () => {
     // The attempt answered the rework request and failed.
     await provider.transition('42', 'blocked', { reason: 'QA timed out' });
     await provider.setExecutionMode('42', 'hitl');
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1-0', cycle: 1, attempt: 0, status: 'open' });
 
     await expect(retryBacklog(provider, '42', 'second attempt')).resolves.toMatchObject({
       state: 'rework',
       executionMode: 'afk',
     });
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0, status: 'open' });
   });
 
   it('lets an operator retry an item whose failed attempt left its request open', async () => {
@@ -159,7 +177,31 @@ describe('backlog commands', () => {
       state: 'rework',
       executionMode: 'afk',
     });
-    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0, status: 'open' });
+  });
+
+  it('opens a new rework cycle when an operator retries an item whose QA budget is spent', async () => {
+    const provider = new InMemoryBacklogProvider([
+      backlogItem({ id: '42', state: 'blocked', executionMode: 'hitl' }),
+    ]);
+    const failure = { source: 'qa' as const, summary: 'QA failure', failedCriteria: [], requiredChecks: [] };
+    // The item spent its budget: three QA failures in the first cycle.
+    await provider.createRework('42', failure);
+    await provider.createRework('42', failure);
+    await provider.createRework('42', failure);
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ cycle: 1, attempt: 3 });
+
+    await expect(retryBacklog(provider, '42', 'the missing assets are added')).resolves.toMatchObject({
+      state: 'rework',
+      executionMode: 'afk',
+    });
+
+    // The retry opens the second cycle with a full budget, so the next QA
+    // failure is attempt 1 of that cycle instead of a fourth failure of the
+    // exhausted first one.
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0, status: 'open' });
+    const afterRetry = await provider.createRework('42', failure);
+    expect(afterRetry).toMatchObject({ id: 'r2-1', cycle: 2, attempt: 1 });
   });
 
   it('merges the associated root change, confirms merged, then marks the backlog done', async () => {
@@ -421,6 +463,7 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
   createRework: ReturnType<typeof vi.fn>;
   getActiveRework: ReturnType<typeof vi.fn>;
   resolveRework: ReturnType<typeof vi.fn>;
+  reviseRework: ReturnType<typeof vi.fn>;
 } {
   const current = { ...item };
   return {
@@ -443,7 +486,8 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
       return {
         ...input,
         version: 1 as const,
-        id: 'r1',
+        id: 'r1-1',
+        cycle: 1,
         attempt: 1,
         status: 'open' as const,
         createdAt: '2026-09-17T00:00:00.000Z',
@@ -451,5 +495,17 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
     }),
     getActiveRework: vi.fn(),
     resolveRework: vi.fn(),
+    reviseRework: vi.fn(async (_id: string, _reworkId: string, revision) => ({
+      version: 1 as const,
+      id: 'r1-1',
+      cycle: 1,
+      attempt: 1,
+      status: 'open' as const,
+      source: 'qa' as const,
+      summary: revision.summary,
+      failedCriteria: [],
+      requiredChecks: [],
+      createdAt: '2026-09-17T00:00:00.000Z',
+    })),
   };
 }

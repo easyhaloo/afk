@@ -37,15 +37,20 @@ it('dispatches the default executor with a runnable plugin provider and runtime'
   try {
     const result = await scheduleWorkItems({ parent }, {
       plugins, agentProviderRegistry: registry,
-      inventory: async () => [
-        { ...base, id: parent, issueNumber: 1, kind: 'prd' },
-        { ...base, id: workItemId, issueNumber: 2, parentId: parent },
-      ] as GlobalWorkItem[],
+      inventory: async () => ({
+        items: [
+          { ...base, id: parent, issueNumber: 1, kind: 'prd' },
+          { ...base, id: workItemId, issueNumber: 2, parentId: parent },
+        ] as GlobalWorkItem[],
+        diagnostics: [{ platform: 'github', projectKey: 'other/repo', code: 'issue_list_failed', message: 'HTTP 503', retryable: true }],
+      }),
       repositories: async () => ['github:acme/scheduler'], cores: 1, load: () => 0,
     });
     expect(createExecution).toHaveBeenCalledOnce();
     expect(executeWorkItem).toHaveBeenCalledWith({ workItemId }, { plugins, agentProviderRegistry: registry });
     expect(result.executions[0].status).toBe('merge_ready');
+    expect(result.scope?.reported.map(diagnostic => diagnostic.projectKey)).toEqual(['other/repo']);
+    expect(result.scope?.unreadable).toEqual([]);
     expect(JSON.stringify(result)).not.toContain('getAgentProviderRegistry');
   } finally {
     await plugins.dispose();

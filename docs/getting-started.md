@@ -23,7 +23,9 @@ bash /tmp/afk-install.sh
 ```
 
 An existing checkout can also run `./install.sh`; it downloads the same release
-without building the checkout. Options:
+without building the checkout. An update keeps the release it installed and the
+one it replaced — enough to roll back by hand — and removes older ones, because
+each release is a full ~36 MB copy under `~/.afk/cli/versions/`. Options:
 
 ```bash
 bash /tmp/afk-install.sh --version 0.1.0 --skip-completion

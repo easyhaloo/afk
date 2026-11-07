@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { createJumpserverCli, execute } from './jms-cli.js';
 
 describe('shared JumpServer adapter', () => {
+  it('parses padded server columns even when the host and username touch', async () => {
+    const row = (alias: string, host: string, username: string, marker: string) =>
+      `${alias.padEnd(20)}${host.padEnd(36)}${username.padEnd(20)}${marker}`;
+    const exec = vi.fn(async () => ({ ok: true, stderr: '', stdout: [
+      row('Alias', 'Host', 'Username', 'Default'), '-'.repeat(78),
+      row('dev', 'https://dev-jumpserver.example.test', 'operator', '*'), 'Total: 1 server(s)',
+    ].join('\n') }));
+    await expect(createJumpserverCli({ exec }).listServers()).resolves.toEqual([
+      { alias: 'dev', host: 'https://dev-jumpserver.example.test', username: 'operator', isDefault: true },
+    ]);
+  });
+
+  it('preserves spaces in padded asset names and platforms', async () => {
+    const row = (name: string, address: string, platform: string, type: string) =>
+      `${name.padEnd(36)}${address.padEnd(21)}${platform.padEnd(16)}${type}`;
+    const exec = vi.fn(async () => ({ ok: true, stderr: '', stdout: [
+      row('Name', 'Address', 'Platform', 'Type'), '-'.repeat(80),
+      row('web server', '10.0.0.1', 'Linux Ubuntu', 'server'), 'Total: 1 asset(s)',
+    ].join('\n') }));
+    await expect(createJumpserverCli({ exec }).listAssets('dev')).resolves.toEqual([
+      { name: 'web server', address: '10.0.0.1', platform: 'Linux Ubuntu', rawType: 'server' },
+    ]);
+  });
+
   it('passes probe commands as argv values', async () => {
     const exec = vi.fn(async () => ({ ok: true, stdout: 'true', stderr: '' }));
     await createJumpserverCli({ exec }).probeAssetReachability({ asset: 'web-01', serverAlias: 'dev', command: 'true' });

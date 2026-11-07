@@ -25,6 +25,8 @@ import { createBacklogRuntimeService } from "../services/backlog-runtime-service
 import { createClipboardService } from "../services/clipboard-service.js";
 import { createSshCredentialService } from "../services/ssh-credential-service.js";
 import { createJumpserverService } from "../services/jumpserver-service.js";
+import { createJumpserverCli } from "../adapters/jumpserver-cli.js";
+import { createJmsConnectionService } from "../services/jms-connection-service.js";
 import { createJumpserverCredentialService } from "../services/jumpserver-credential-service.js";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service.js";
 import { createSshService } from "../services/ssh-service.js";
@@ -115,12 +117,20 @@ const sshManagedHostStore = createSqliteSshManagedHostStore(localConfigStore, lo
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
+const jumpserverCli = createJumpserverCli();
 const defaultJumpserverService = createJumpserverService({
   home,
   bastionStore: createSqliteJumpserverStore(localConfigStore, localConfigReady),
   credentialService: createJumpserverCredentialService({ home, safeStorage }),
+  cli: jumpserverCli,
   managedHostStore: sshManagedHostStore,
   listManagedHosts: async () => ({ hosts: await sshManagedHostStore.list() }),
+});
+const sshConfigAdapter = createSshConfigAdapter({ home, exec, managedStore: sshManagedHostStore });
+const jmsConnectionService = createJmsConnectionService({
+  cli: jumpserverCli,
+  listBastions: () => defaultJumpserverService.listBastions(),
+  listHosts: () => sshConfigAdapter.listHosts(),
 });
 const externalTerminal = createExternalTerminalAdapter();
 const commands = createSshCommandAdapter({ exec });
@@ -135,11 +145,12 @@ const knownHosts = createKnownHostsAdapter({
 });
 const sshService = createSshService({
   home,
-  config: createSshConfigAdapter({ home, exec, managedStore: sshManagedHostStore }),
+  config: sshConfigAdapter,
   commands,
   knownHosts,
   credentialService: sshCredentialService,
   externalTerminal,
+  jms: jmsConnectionService,
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
 const backlogService = createRuntimeBacklogService(resolveWorkspace);

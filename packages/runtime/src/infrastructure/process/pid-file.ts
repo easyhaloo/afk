@@ -135,15 +135,35 @@ export function readPid(tag: string = DEFAULT_LOOP_RUN_TAG, env: NodeJS.ProcessE
  * running with nothing pointing at it — alive but unstoppable.
  */
 export function removePidFile(tag: string = DEFAULT_LOOP_RUN_TAG, env: NodeJS.ProcessEnv = process.env): void {
-  const files = [loopPidFilePath(tag, env)];
-  if (tag === DEFAULT_LOOP_RUN_TAG && !isLegacyLoopAlive()) files.push(LEGACY_LOOP_PID_FILE);
-  for (const file of files) {
+  removeLoopPidFiles({
+    pidFile: loopPidFilePath(tag, env),
+    ...(tag === DEFAULT_LOOP_RUN_TAG ? { legacyPidFile: LEGACY_LOOP_PID_FILE } : {}),
+  });
+}
+
+/**
+ * Remove the pid files in `files`, keeping a legacy one whose process still runs.
+ *
+ * Split out from `removePidFile` so the rule that matters — never orphan a
+ * live pre-upgrade loop — can be exercised against real files in a test.
+ * Returns the paths that were removed.
+ */
+export function removeLoopPidFiles(files: { pidFile: string; legacyPidFile?: string }): string[] {
+  const removed: string[] = [];
+  const targets = files.legacyPidFile === undefined ? [files.pidFile] : [files.pidFile, files.legacyPidFile];
+  for (const file of targets) {
+    if (file === files.legacyPidFile) {
+      const pid = readPidFileAt(file);
+      if (pid !== null && isProcessAlive(pid)) continue;
+    }
     try {
       fs.unlinkSync(file);
+      removed.push(file);
     } catch {
       // A missing pid file is already the desired state.
     }
   }
+  return removed;
 }
 
 /** Whether a loop started by an older CLI is still running under the legacy file. */

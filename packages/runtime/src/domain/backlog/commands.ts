@@ -8,6 +8,9 @@ import type {
   QABacklogProvider,
 } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
+import type { ReworkRecord } from './rework-record.js';
+import type { ReworkRevisionInput } from './rework-revision.js';
+import { assertFactStatement } from './rework-revision.js';
 import { resolveItemExecutionBase } from './creation.js';
 
 export { planBacklogCreate, resolveBacklogExecutionBase, resolveItemExecutionBase } from './creation.js';
@@ -156,6 +159,10 @@ export async function retryBacklog(
   // that failed before the record could be closed would otherwise block every
   // further retry.
   await closeOperatorRework(provider, id, `Superseded by a new operator retry: ${summary}`);
+  // An operator rework record opens a new rework cycle. The operator has
+  // answered the failure that ended the previous cycle and says that
+  // something changed, so the next cycle starts with a full QA attempt
+  // budget instead of inheriting the exhausted one.
   await provider.createRework(id, {
     source: 'operator',
     summary,
@@ -163,6 +170,27 @@ export async function retryBacklog(
     requiredChecks: [],
   });
   return provider.get(id);
+}
+
+/**
+ * Correct an open rework record to the current fact.
+ *
+ * The record keeps its identity and its evidence: only the statement about
+ * the current situation is replaced, and the correction is kept in the
+ * record's own trail. The statement has to be a fact — the record is read
+ * back to an agent, and an instruction in it is an instruction the agent
+ * will follow.
+ */
+export async function reviseBacklogRework(
+  provider: QABacklogProvider,
+  id: string,
+  reworkId: string,
+  revision: ReworkRevisionInput,
+): Promise<ReworkRecord> {
+  // The statement is checked before the provider is touched, so a record
+  // that carries an instruction never reaches the provider at all.
+  const summary = assertFactStatement(revision.summary);
+  return provider.reviseRework(id, reworkId, { ...revision, summary });
 }
 
 /**

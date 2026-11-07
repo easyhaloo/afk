@@ -1,0 +1,344 @@
+version: 1
+description: >-
+  Extensible index of software behavior patterns and test-design techniques.
+  Select by observed architecture and risk; patterns are composable and are not
+  a mandatory checklist. References are relative to this skill directory.
+
+dimensions:
+  test_layers:
+    - unit
+    - integration
+    - contract
+    - acceptance
+    - e2e
+    - agent-scenario
+  test_approaches:
+    - black-box
+    - gray-box
+    - white-box
+    - behavior-driven
+    - contract-first
+    - test-driven-development
+    - characterization
+    - exploratory
+    - risk-based
+  quality_attributes:
+    - correctness
+    - reliability
+    - security
+    - performance
+    - scalability
+    - compatibility
+    - accessibility
+    - privacy
+    - observability
+  oracles:
+    - protocol-response
+    - business-error-code
+    - persisted-state
+    - emitted-event
+    - callback-receipt
+    - artifact-content
+    - schema-validation
+    - trace-or-tool-call
+    - semantic-rubric
+    - metric-or-slo
+
+patterns:
+  interaction:
+    - id: synchronous-request-response
+      reference: references/patterns/synchronous.md
+      signals: [direct-api, immediate-result]
+      validates: [status, schema, business-result, side-effects, validation]
+    - id: asynchronous-request-reply
+      reference: references/patterns/asynchronous.md
+      signals: [accepted-job, long-running-operation, operation-id]
+      validates: [accepted-vs-completed, terminal-state, deadline, cancellation]
+    - id: polling-and-long-polling
+      reference: references/patterns/asynchronous.md
+      signals: [status-endpoint, wait-for-result]
+      validates: [bounded-wait, poll-contract, retry-after, timeout]
+    - id: event-publish-subscribe
+      reference: references/patterns/event-driven.md
+      signals: [event-bus, pub-sub, domain-event]
+      validates: [event-schema, consumer-effect, duplicate-delivery, correlation]
+    - id: queue-consumer
+      reference: references/patterns/event-driven.md
+      signals: [queue, broker, background-worker]
+      validates: [acknowledgement, retry, poison-message, side-effects]
+    - id: competing-consumers
+      reference: references/patterns/concurrency-and-consistency.md
+      signals: [parallel-workers, shared-queue]
+      validates: [claim-exclusion, throughput-contract, duplicate-work, fairness]
+    - id: callback-and-webhook
+      reference: references/patterns/callbacks.md
+      signals: [inbound-webhook, outbound-callback]
+      validates: [payload, authentication, acknowledgement, timeout, retry, replay]
+    - id: streaming-and-sse
+      reference: references/patterns/streaming-ui-and-batch.md
+      signals: [sse, chunked-response, token-stream]
+      validates: [framing, ordering, completion, disconnect, cancellation]
+    - id: websocket-and-bidirectional
+      reference: references/patterns/streaming-ui-and-batch.md
+      signals: [websocket, bidirectional-session]
+      validates: [connection-lifecycle, authentication, reconnect, heartbeat, cleanup]
+    - id: scheduled-job
+      reference: references/patterns/streaming-ui-and-batch.md
+      signals: [cron, timer, scheduler, periodic-task]
+      validates: [schedule-boundary, timezone, duplicate-trigger, overlap, recovery]
+    - id: batch-and-bulk-processing
+      reference: references/patterns/streaming-ui-and-batch.md
+      signals: [batch-api, bulk-import, chunk-processing]
+      validates: [partial-success, chunk-boundary, item-errors, resume, resource-limits]
+    - id: file-upload-and-processing
+      reference: references/patterns/file-upload.md
+      signals: [multipart, object-storage, presigned-upload, document-processing]
+      validates: [content-validation, size-limit, permissions, storage, processing, cleanup]
+    - id: external-service-adapter
+      reference: references/patterns/api-contracts-and-data.md
+      signals: [third-party-api, provider-sdk, external-dependency]
+      validates: [contract, timeout, error-mapping, authentication-expiry, rate-limit]
+
+  state_and_workflow:
+    - id: business-rules-and-status-mapping
+      reference: references/patterns/business-rules-and-status.md
+      signals: [status-code, error-code, eligibility-rule, state-transition]
+      validates: [rule-traceability, allowed-transition, rejected-transition, protocol-vs-domain-status]
+    - id: state-machine-and-lifecycle
+      reference: references/patterns/workflows-and-state.md
+      signals: [state-machine, lifecycle, guarded-transition]
+      validates: [transition-table, guard, terminal-state, side-effects]
+    - id: long-running-workflow
+      reference: references/patterns/workflows-and-state.md
+      signals: [multi-step-job, checkpoint, resumable-process]
+      validates: [checkpoint, retry, timeout, cancellation, resume]
+    - id: orchestration-choreography-fan-out-fan-in
+      reference: references/patterns/workflows-and-state.md
+      signals: [workflow-coordinator, event-choreography, parallel-branches, aggregation]
+      validates: [step-order, correlation, partial-result-policy, deadline, branch-failure]
+    - id: saga-and-compensation
+      reference: references/patterns/workflows-and-state.md
+      signals: [distributed-transaction, multi-service-workflow]
+      validates: [partial-failure, compensation-order, compensation-failure, convergence]
+    - id: event-sourcing-and-replay
+      reference: references/patterns/workflows-and-state.md
+      signals: [event-store, replay, aggregate-event-stream]
+      validates: [replay-determinism, schema-version, duplicate-event, aggregate-state]
+    - id: cqrs-and-projections
+      reference: references/patterns/workflows-and-state.md
+      signals: [read-model, write-model, asynchronous-projection]
+      validates: [projection-convergence, consistency-window, rebuild]
+    - id: transactional-outbox-inbox
+      reference: references/patterns/workflows-and-state.md
+      signals: [outbox-table, inbox-dedup, state-plus-event]
+      validates: [commit-publish-consistency, restart, delivery, deduplication]
+
+  reliability_and_concurrency:
+    - id: timeout-deadline-and-cancellation
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [timeout, deadline, cancel-request]
+      validates: [bounded-work, propagated-cancellation, resource-cleanup, completion-race]
+    - id: retry-and-backoff
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [retry-policy, transient-error, backoff]
+      validates: [transient-vs-permanent, attempt-limit, final-error, side-effect-safety]
+    - id: idempotency-and-deduplication
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [idempotency-key, duplicate-request, at-least-once-delivery]
+      validates: [same-key-replay, lost-response, duplicate-effect, key-scope]
+    - id: circuit-breaker
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [breaker, dependency-health-state]
+      validates: [closed-open-half-open, fast-fail, recovery]
+    - id: bulkhead-and-failure-isolation
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [separate-pools, tenant-pools, concurrency-limits]
+      validates: [fault-containment, independent-progress, capacity-boundary]
+    - id: fallback-and-graceful-degradation
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [fallback, degraded-mode, backup-response]
+      validates: [fallback-contract, warning-signal, recovery]
+    - id: rate-limit-throttle-and-quota
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [429, quota, throttling, per-tenant-limit]
+      validates: [limit-boundary, principal-scope, reset-window, overload]
+    - id: dead-letter-and-replay
+      reference: references/patterns/reliability-and-delivery.md
+      signals: [dead-letter-queue, poison-message, redrive]
+      validates: [retry-limit, failure-metadata, replay-safety, deduplication]
+    - id: concurrent-update-and-race
+      reference: references/patterns/concurrency-and-consistency.md
+      signals: [shared-state, concurrent-write, race-condition]
+      validates: [lost-update, invariant-preservation, conflict-result]
+    - id: ordering-and-reordering
+      reference: references/patterns/concurrency-and-consistency.md
+      signals: [sequence-number, partition-order, delayed-event]
+      validates: [documented-order, stale-message, reordering-tolerance]
+    - id: eventual-consistency
+      reference: references/patterns/concurrency-and-consistency.md
+      signals: [replica, projection, cache, asynchronous-propagation]
+      validates: [bounded-convergence, stale-read, reconciliation]
+    - id: lease-lock-and-fencing
+      reference: references/patterns/concurrency-and-consistency.md
+      signals: [lease, distributed-lock, leader-election]
+      validates: [expiry, renewal, stale-owner, fencing-token]
+
+  api_data_and_identity:
+    - id: api-consumer-provider-contract
+      reference: references/patterns/api-contracts-and-data.md
+      signals: [public-api, microservice-contract, consumer-driven-contract]
+      validates: [request-response-schema, provider-compatibility, message-contract]
+    - id: serialization-and-schema-evolution
+      reference: references/patterns/api-contracts-and-data.md
+      signals: [json-schema, protobuf, database-schema, event-version]
+      validates: [nullability, defaults, unknown-fields, forward-backward-compatibility]
+    - id: database-transaction-and-isolation
+      reference: references/patterns/api-contracts-and-data.md
+      signals: [database-write, transaction, constraint, migration]
+      validates: [commit, rollback, uniqueness, isolation, migration]
+    - id: cache-aside-and-invalidation
+      reference: references/patterns/api-contracts-and-data.md
+      signals: [cache, cache-aside, invalidation]
+      validates: [hit-miss, staleness, invalidation, fallback, tenant-key-isolation]
+    - id: pagination-filtering-and-sorting
+      reference: references/patterns/api-contracts-and-data.md
+      signals: [cursor, page-size, sort, filter]
+      validates: [boundaries, stable-order, cursor-validity, concurrent-data-change]
+    - id: account-role-and-permission
+      reference: references/patterns/identity-and-data.md
+      signals: [account-factory, role, ownership, account-state]
+      validates: [identity-lifecycle, permission-matrix, ownership, denied-access]
+    - id: authentication-and-authorization
+      reference: references/patterns/security-and-identity.md
+      signals: [token, session, identity-provider, access-control]
+      validates: [invalid-credential, expiry, refresh, permission, error-disclosure]
+    - id: multi-tenant-isolation
+      reference: references/patterns/security-and-identity.md
+      signals: [tenant-id, organization-id, tenant-scoped-resource]
+      validates: [cross-tenant-read-write, search, cache, background-job, file-isolation]
+    - id: file-and-input-security
+      reference: references/patterns/security-and-identity.md
+      signals: [untrusted-input, filename, upload, parser]
+      validates: [path-safety, content-validation, size-limit, redaction]
+    - id: claim-check-and-large-payload
+      reference: references/patterns/file-upload.md
+      signals: [large-message, object-reference, external-payload-store]
+      validates: [payload-before-reference, authorization, integrity, expiry, orphan-cleanup, duplicate-reference]
+    - id: frontend-async-and-optimistic-state
+      reference: references/patterns/streaming-ui-and-batch.md
+      signals: [loading-state, optimistic-update, retry-button, stale-response]
+      validates: [loading-success-error, rollback, response-reordering, repeated-action]
+
+  integration_architecture:
+    - id: queue-based-load-leveling-and-backpressure
+      reference: references/patterns/messaging-pipeline-and-gateway.md
+      signals: [queue-depth, producer-burst, slow-consumer, backpressure]
+      validates: [buffer-limit, overload-policy, backlog-drain, bounded-resources]
+    - id: priority-queue-and-fair-scheduling
+      reference: references/patterns/messaging-pipeline-and-gateway.md
+      signals: [priority-class, scheduler, priority-queue]
+      validates: [priority-order, fairness, starvation, cancellation]
+    - id: pipes-filters-and-processing-pipeline
+      reference: references/patterns/messaging-pipeline-and-gateway.md
+      signals: [multi-stage-processing, filter-chain, transform-pipeline]
+      validates: [stage-contract, ordering, failure-routing, partial-result-policy]
+    - id: gateway-aggregation-bff-api-composition
+      reference: references/patterns/messaging-pipeline-and-gateway.md
+      signals: [api-gateway, backend-for-frontend, aggregate-response, fan-out]
+      validates: [route, auth-propagation, correlation, partial-downstream-failure, response-mapping]
+    - id: messaging-bridge-and-protocol-adapter
+      reference: references/patterns/messaging-pipeline-and-gateway.md
+      signals: [protocol-bridge, message-adapter, cross-broker]
+      validates: [schema-mapping, acknowledgement, correlation, duplicate-transfer, error-conversion]
+
+  llm_and_agents:
+    - id: llm-structured-output-and-fallback
+      reference: references/patterns/llm-calls.md
+      signals: [llm-client, structured-output, json-mode, schema-output]
+      validates: [schema, malformed-output, retry, fallback, refusal]
+    - id: agent-tool-use-and-trace
+      reference: references/patterns/llm-calls.md
+      signals: [tool-call, mcp, function-call, agent-runtime]
+      validates: [tool-name, argument-schema, required-trace, side-effect, bounded-steps]
+    - id: llm-semantic-evaluation
+      reference: references/patterns/llm-calls.md
+      signals: [eval-dataset, grader, model-output]
+      validates: [rubric, task-success, groundedness, variance, cost]
+    - id: rag-retrieval-and-grounding
+      reference: references/patterns/llm-calls.md
+      signals: [retriever, reranker, vector-search, citation]
+      validates: [retrieval-relevance, evidence-attribution, abstention, tenant-isolation]
+
+  deployment_and_migration:
+    - id: feature-flags-and-gradual-rollout
+      reference: references/patterns/deployment-and-migration.md
+      signals: [feature-flag, canary, rollout]
+      validates: [enabled-disabled-paths, targeting, flag-service-failure, rollback]
+    - id: schema-data-migration-and-rolling-upgrade
+      reference: references/patterns/deployment-and-migration.md
+      signals: [migration, rolling-upgrade, mixed-version]
+      validates: [old-new-compatibility, backfill, interruption, resume, rollback-constraints]
+    - id: strangler-and-incremental-migration
+      reference: references/patterns/deployment-and-migration.md
+      signals: [legacy-system, routing-switch, incremental-replacement]
+      validates: [old-new-parity, routing-boundary, rollback, data-consistency]
+    - id: configuration-and-secret-rotation
+      reference: references/patterns/deployment-and-migration.md
+      signals: [dynamic-config, secret-rotation, credential-expiry]
+      validates: [invalid-config, safe-default, reload, reconnection, redaction]
+
+quality_attribute_patterns:
+  - id: performance-load-stress-soak
+    reference: references/patterns/quality-attributes.md
+    validates: [latency-percentiles, throughput, resource-bound, endurance, capacity]
+  - id: fault-injection-and-recovery
+    reference: references/patterns/quality-attributes.md
+    validates: [partial-outage, recovery, integrity, resource-bound]
+  - id: accessibility-and-visual-behavior
+    reference: references/patterns/quality-attributes.md
+    validates: [keyboard, focus, semantic-accessibility, visible-errors, stable-visual-contract]
+  - id: observability-and-operability
+    reference: references/patterns/quality-attributes.md
+    validates: [correlation-propagation, actionable-telemetry, health-readiness, secret-redaction]
+  - id: compatibility-and-privacy
+    reference: references/patterns/quality-attributes.md
+    validates: [supported-version-matrix, data-protection, deployment-compatibility]
+
+test_design_techniques:
+  - id: behavior-driven-and-acceptance-examples
+    reference: references/patterns/testing-techniques.md
+  - id: equivalence-and-boundary-values
+    reference: references/patterns/testing-techniques.md
+  - id: decision-table-and-combinatorial
+    reference: references/patterns/testing-techniques.md
+  - id: property-based-and-metamorphic
+    reference: references/patterns/testing-techniques.md
+  - id: fuzz-testing
+    reference: references/patterns/testing-techniques.md
+  - id: model-based-and-stateful
+    reference: references/patterns/testing-techniques.md
+  - id: differential-testing
+    reference: references/patterns/testing-techniques.md
+  - id: golden-and-snapshot
+    reference: references/patterns/testing-techniques.md
+  - id: mutation-and-negative-control
+    reference: references/patterns/testing-techniques.md
+  - id: exploratory-and-risk-based
+    reference: references/patterns/testing-techniques.md
+  - id: isolation-and-flakiness-analysis
+    reference: references/patterns/testing-techniques.md
+
+behavioral_design_patterns:
+  reference: references/patterns/behavioral-design-patterns.md
+  patterns:
+    - strategy
+    - observer-publish-subscribe
+    - command
+    - state
+    - chain-of-responsibility
+    - mediator
+    - template-method
+    - iterator
+    - memento
+    - visitor
+    - interpreter

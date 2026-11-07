@@ -1,4 +1,5 @@
 import type { BacklogCreateInput, BacklogCreatePlan, BacklogExecutionMode, BacklogItem, BacklogKind, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
+import type { ReworkRevisionInput } from './rework-revision.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
 
 /**
@@ -22,6 +23,7 @@ export class ManagementBacklogProvider implements QABacklogProvider {
   createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord> { return this.provider.createRework(id, record); }
   getActiveRework(id: string): Promise<ReworkRecord | undefined> { return this.provider.getActiveRework(id); }
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> { return this.provider.resolveRework(id, reworkId, resolution); }
+  reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord> { return this.provider.reviseRework(id, reworkId, revision); }
   addTag(id: string, tag: string): Promise<void> { return this.provider.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.provider.removeTag(id, tag); }
   applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> { return this.provider.applyRelationUpdate(id, update); }

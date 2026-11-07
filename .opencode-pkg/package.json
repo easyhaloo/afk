@@ -1,0 +1,47 @@
+{
+  "name": "@easyhaloo/afk-opencode",
+  "version": "1.2.2",
+  "description": "AFK workflow skills for OpenCode 2.x — one-command install of the plugin + 24 skill suite (requirements, implementation, testing, research, QA, hand-off).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./plugin.mjs",
+  "exports": {
+    ".": "./plugin.mjs"
+  },
+  "files": [
+    "plugin.mjs",
+    "postinstall.mjs",
+    "README.md",
+    "skills"
+  ],
+  "scripts": {
+    "postinstall": "node postinstall.mjs"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "agent-skills",
+    "coding-agent",
+    "workflow",
+    "cli",
+    "qa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/easyhaloo/afk.git"
+  },
+  "homepage": "https://github.com/easyhaloo/afk",
+  "bugs": {
+    "url": "https://github.com/easyhaloo/afk/issues"
+  },
+  "author": {
+    "name": "easyhaloo",
+    "url": "https://github.com/easyhaloo"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "AFK CLI workflow skills for requirements, implementation, testing, research, QA, and hand-off.",
+  "license": "MIT",
+  "exports": {
+    ".": "./opencode/plugin.mjs"
+  },
   "scripts": {
     "release:cli": "node scripts/package-cli.mjs",
     "build": "pnpm -r --filter \"!afk-control-electron\" build",

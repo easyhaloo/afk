@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
-const mocks = vi.hoisted(() => ({ scheduleWorkItems: vi.fn(), detail: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scheduleWorkItems: vi.fn(), detail: vi.fn(), warning: vi.fn() }));
 vi.mock('@afk/runtime/execution', async importOriginal => ({
   ...(await importOriginal<typeof import('@afk/runtime/execution')>()),
   scheduleWorkItems: mocks.scheduleWorkItems,
 }));
 vi.mock('../output.js', () => ({
-  handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: vi.fn(), detail: mocks.detail,
+  handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: mocks.warning, detail: mocks.detail,
 }));
 
 import { registerScheduleCommands } from './schedule.js';
@@ -53,5 +53,32 @@ describe('schedule CLI', () => {
     expect(mocks.scheduleWorkItems).toHaveBeenCalledWith(expect.objectContaining({
       parent: 'github:acme/prd#1', maxConcurrent: 4, loadLimit: 16, pollIntervalMs: 30000, watch: true,
     }));
+  });
+
+  it('names the projects it cannot read, inside and outside the scope', async () => {
+    mocks.scheduleWorkItems.mockImplementation(async (options: { onStatus?: (status: unknown) => void }) => {
+      options.onStatus?.({
+        active: 0, capacity: 4, overloaded: false,
+        scope: {
+          reported: [{ platform: 'github', projectKey: 'other/repo', code: 'issue_list_failed', message: 'Repository access blocked', retryable: false }],
+          unreadable: [{ platform: 'github', projectKey: 'acme/base', code: 'issue_list_failed', message: 'HTTP 503', retryable: true }],
+          heldBack: ['github:acme/web#3'],
+        },
+      });
+      return {
+        parent: 'github:acme/prd#1', capacity: 4, executions: [], stopped: false, waiting: [],
+        scope: {
+          reported: [{ platform: 'github', projectKey: 'other/repo', code: 'issue_list_failed', message: 'Repository access blocked', retryable: false }],
+          unreadable: [{ platform: 'github', projectKey: 'acme/base', code: 'issue_list_failed', message: 'HTTP 503', retryable: true }],
+          heldBack: ['github:acme/web#3'],
+        },
+      };
+    });
+    await invoke(['--parent', 'github:acme/prd#1']);
+    const warnings = mocks.warning.mock.calls.map(call => String(call[0]));
+    expect(warnings).toContain('Cannot read other/repo (Repository access blocked); it is outside this PRD\'s scope, so the schedule continues');
+    expect(warnings).toContain('Cannot read acme/base (HTTP 503); it is inside this PRD\'s scope, so the work that depends on it is held back');
+    const printed = mocks.detail.mock.calls.map(call => String(call[0]));
+    expect(printed).toContain('Held back because a dependency could not be read: github:acme/web#3');
   });
 });

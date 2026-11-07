@@ -87,11 +87,21 @@ export class GitBranchProvider implements BranchProvider {
     // work — publishing them would put them in the change request. A nested
     // worktree is worse than noise: Git stages it as a submodule pointer, so
     // the change request would carry a submodule nobody can clone.
-    await git.raw(['add', '-A', '--', '.', ':!.afk-signal.json', ':!.afk', ':!.worktrees']);
-    // An earlier attempt may have staged the worktree directory before it was
-    // excluded. Tracked means it is part of the change request, so it is
-    // dropped from the index here.
-    await git.raw(['rm', '--cached', '-r', '-f', '--ignore-unmatch', '.worktrees']).catch(() => undefined);
+    //
+    // They are unstaged after the add rather than named in the add's
+    // pathspec. Git refuses to add a path that is ignored, and the checkout
+    // ignores its own worktree directory (ADR-0030) — so a pathspec that
+    // names it fails the whole commit with "the following paths are ignored
+    // by one of your .gitignore files", and nothing gets published at all.
+    await git.raw(['add', '-A', '--', '.']);
+    // Unstaging leaves a file that is already tracked exactly as it was, so
+    // the artifact stays out of the change request without being deleted
+    // from the user's repository.
+    await git.raw(['reset', '-q', '--', '.afk-signal.json', '.afk']).catch(() => undefined);
+    // The worktree directory is dropped from the index rather than unstaged:
+    // an earlier attempt may have tracked it before it was excluded, and a
+    // tracked submodule pointer is part of the change request.
+    await git.raw(['rm', '--cached', '-r', '-f', '--ignore-unmatch', '--', '.worktrees']).catch(() => undefined);
     // This commit is a fallback for whatever the agent left behind, so it is
     // the one place where an unrelated leftover gets published. A binary
     // leftover cannot be merged by anyone, so it is kept out of the commit

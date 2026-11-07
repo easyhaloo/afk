@@ -150,6 +150,83 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
   return { comments, createRunner, resumeVerification: () => { issue.labels = ['stage::qa', 'mode::afk']; } };
 }
 
+describe('QARunner runtime binding', () => {
+  const codexConfig = {
+    transport: 'exec' as const,
+    auth: 'auto' as const,
+    provider: 'afk-zyuncs',
+    profile: 'afk',
+    appServer: { startupTimeoutMs: 30_000 },
+  };
+
+  /** Register a Codex provider AFK can resolve by name. */
+  function withCodexProvider<T>(body: (provider: { name: 'codex' }) => T): T {
+    const original = createAgentProvider('codex');
+    const codex = { name: 'codex' as const, capabilities: new Set(), createExecution: vi.fn() };
+    registerAgentProvider(codex);
+    try {
+      return body(codex);
+    } finally {
+      registerAgentProvider(original);
+    }
+  }
+
+  it('gives a Codex reviewer the runtime that belongs to it', () => {
+    // A reviewer that resolves its own provider from AFK's configuration
+    // used to run with no runtime at all: no profile, no provider, no
+    // transport. Codex then fell back to the host's own configuration and
+    // talked to an endpoint nobody chose.
+    withCodexProvider(() => {
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any);
+
+      expect((runner as any).agentRuntime).toMatchObject({
+        kind: 'codex', provider: 'afk-zyuncs', profile: 'afk', transport: 'exec',
+      });
+    });
+  });
+
+  it('probes a runtime the reviewer resolved itself before the agent starts', async () => {
+    await withCodexProvider(async () => {
+      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { prepareRuntime });
+
+      await (runner as any).probeOwnRuntime();
+
+      expect(prepareRuntime).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not probe a runtime the caller already probed', async () => {
+    await withCodexProvider(async () => {
+      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const injected = { kind: 'codex', transport: 'exec', auth: 'unknown', provider: 'afk-zyuncs', profile: 'afk', startupTimeoutMs: 30_000 };
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { agentRuntime: injected as any, prepareRuntime });
+
+      await (runner as any).probeOwnRuntime();
+
+      expect(prepareRuntime).not.toHaveBeenCalled();
+      expect((runner as any).agentRuntime).toBe(injected);
+    });
+  });
+
+  it('runs a Codex reviewer with the Codex runtime the caller handed over', async () => {
+    await withCodexProvider(async codex => {
+      const injected = { kind: 'codex', transport: 'exec', auth: 'unknown', provider: 'afk-zyuncs', profile: 'afk', startupTimeoutMs: 30_000 };
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { agentProvider: codex as any, agentRuntime: injected as any });
+
+      expect((runner as any).agentRuntime).toBe(injected);
+    });
+  });
+});
+
 describe('QARunner execution boundary', () => {
   it('resolves the configured agent provider when none is injected', () => {
     const original = createAgentProvider('codex');
@@ -233,7 +310,10 @@ describe('QARunner execution boundary', () => {
       signalType: 'goal_complete',
       prompt: expect.stringContaining('"kind":"qa"'),
       generation: 1,
-      runtime,
+      // The reviewer runs Claude Code, and a non-Codex provider never
+      // inherits a Codex runtime: the provider and its runtime are one
+      // decision (ADR-0032).
+      runtime: undefined,
     });
     expect(f.sandbox.startAgent).not.toHaveBeenCalled();
     const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt;
@@ -740,8 +820,35 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
   });
 
-  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {
+  it('escalates a change request whose target branch already carries it instead of redoing the work', async () => {
     const f = fixture();
+    f.changes.get.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      mergeState: 'baseline_advanced', url: 'https://example.test/pr/60',
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
+    });
+
+    const result = await runner.process('60');
+
+    expect(result).toMatchObject({ success: false, failureCode: 'baseline_advanced' });
+    // The loop this state was split out to break: a target branch that
+    // already carries the change is never answered with another round of
+    // work, because the next round would move the baseline again.
+    expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'rework', expect.anything());
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', expect.objectContaining({
+      reason: expect.stringContaining('already carries its commits'),
+    }));
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+    expect(f.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+  });
+
+  it('keeps a change request the platform has not judged yet out of the conflict path', async () => {    const f = fixture();
     f.changes.get.mockResolvedValue({
       id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
       mergeState: 'unknown', url: 'https://example.test/pr/60',

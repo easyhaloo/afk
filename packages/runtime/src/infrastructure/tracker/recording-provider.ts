@@ -15,6 +15,7 @@ import type {
   ReworkResolution,
 } from '../../domain/backlog/index.js';
 import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
+import type { ReworkRevisionInput } from '../../domain/backlog/rework-revision.js';
 import { recordTrackerActivity, type TrackerPlatform } from './store.js';
 
 /** The provider project a recording provider belongs to. */
@@ -99,6 +100,10 @@ export class RecordingBacklogProvider implements BacklogProvider {
 
   resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> {
     return this.provider.resolveRework(id, reworkId, resolution);
+  }
+
+  reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord> {
+    return this.provider.reviseRework(id, reworkId, revision);
   }
 
   addTag(id: string, tag: string): Promise<void> {

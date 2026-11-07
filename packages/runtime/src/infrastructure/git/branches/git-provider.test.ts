@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { GitBranchProvider } from './git-provider.js';
 import type { BacklogItem } from '../../../domain/backlog/index.js';
@@ -185,6 +185,26 @@ describe('GitBranchProvider', () => {
     await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
     await writeFile(join(repoPath, 'result.txt'), 'the work\n');
     await simpleGit(repoPath).raw(['add', '-A']);
+
+    const { sha } = await provider.commit(repoPath, 'agent: staged everything');
+
+    expect(sha).not.toBe('');
+    const files = (await simpleGit(repoPath).raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toContain('result.txt');
+    expect(files.some(file => file.startsWith('.worktrees'))).toBe(false);
+  });
+
+  it('publishes the work when the checkout ignores its own worktree directory', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    // ADR-0030 keeps AFK's worktrees out of the repository's view by writing
+    // them into the checkout's local ignore file. Git refuses to add a path
+    // that is ignored, so naming that path in the add's pathspec fails the
+    // whole commit — and the item publishes nothing at all.
+    await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
+    const excludePath = (await simpleGit(repoPath).raw(['rev-parse', '--git-path', 'info/exclude'])).trim();
+    await writeFile(isAbsolute(excludePath) ? excludePath : join(repoPath, excludePath), '# AFK\'s own worktrees\n.worktrees/\n');
+    await writeFile(join(repoPath, 'result.txt'), 'the work\n');
 
     const { sha } = await provider.commit(repoPath, 'agent: staged everything');
 

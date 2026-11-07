@@ -42,6 +42,22 @@ const QA_EVIDENCE_INSTRUCTION = 'Report the evidence in separated fields: "summa
  */
 const QA_E2E_INSTRUCTION = 'End-to-end verification: detect from the project itself whether it has E2E (for example an e2e test suite, an e2e-setup script, or acceptance criteria that need a live service). If it does, provide the environment the way the project expects — start the backend, frontend and any middleware using the project\'s own scripts — then run the project\'s E2E verification and capture the browser or runtime evidence (screenshots, logs, traces) for the acceptance criteria it covers, registering every file in .afk/artifacts.txt. Use the project\'s own tooling and conventions; do not invent a parallel E2E harness. If the project has no E2E, or its environment cannot be provided on this machine, say so in "notes" and do not claim an E2E pass you did not produce.';
 
+/**
+ * The push boundary, stated in the completion protocol.
+ *
+ * The protocol already said "work only on the current checked-out branch",
+ * which forbids switching branches but says nothing about where the commits
+ * may be pushed to. An agent told to publish into a PRD baseline branch
+ * could satisfy that sentence and still push the baseline forward, because
+ * the branch it was told to publish into was named in the same paragraph
+ * as the branch it was told to work on.
+ *
+ * The protocol is the one instruction every agent reads, in both transports
+ * and for every phase, so the boundary belongs here as well as in the
+ * repository listing: this sentence names no branch, it states the rule.
+ */
+const PUSH_BOUNDARY_INSTRUCTION = 'Push your commits only to the branch you are working on. The base branch and the target branch of the change request belong to AFK: read them, never push to them. Publishing the change request is AFK\'s job, and AFK stops the run when it finds the target branch moved.';
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -116,7 +132,7 @@ export function buildBatchPromptSegments(goalSegments: readonly PromptSegment[],
     { label: 'goal', text: `AFK batch goal:\n${batchGoal}` },
     {
       label: 'completion protocol',
-      text: `AFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`,
+      text: `AFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. ${PUSH_BOUNDARY_INSTRUCTION} When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`,
     },
   ];
 }
@@ -139,7 +155,7 @@ export function buildInteractivePromptSegments(goalSegments: readonly PromptSegm
     ...goalSegments,
     {
       label: 'completion protocol',
-      text: `AFK interactive completion protocol: work only on the current checked-out branch. Do not switch branches or reset the branch.${evidence} When the task is complete, atomically write a valid JSON ${payload} to .afk-signal.json using a temporary file and rename. Construct the payload with JSON.stringify (or an equivalent JSON serializer); do not embed raw JSON in a shell printf command, because unescaped control characters make the signal invalid. After the rename, validate the exact file with JSON.parse before reporting completion. Use result PASS when QA passes, FAIL when QA fails, the actual current ISO-8601 timestamp, and a non-empty summary. Do not only print the completion marker.`,
+      text: `AFK interactive completion protocol: work only on the current checked-out branch. Do not switch branches or reset the branch. ${PUSH_BOUNDARY_INSTRUCTION}${evidence} When the task is complete, atomically write a valid JSON ${payload} to .afk-signal.json using a temporary file and rename. Construct the payload with JSON.stringify (or an equivalent JSON serializer); do not embed raw JSON in a shell printf command, because unescaped control characters make the signal invalid. After the rename, validate the exact file with JSON.parse before reporting completion. Use result PASS when QA passes, FAIL when QA fails, the actual current ISO-8601 timestamp, and a non-empty summary. Do not only print the completion marker.`,
     },
   ];
 }

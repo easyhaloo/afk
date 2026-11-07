@@ -131,4 +131,47 @@ describe('rework record codec', () => {
 
     expect(latestOpenRework(comments)?.record).toMatchObject({ id: 'r2-0', cycle: 2, source: 'operator' });
   });
+
+  it('reads the revision trail of a corrected record back', () => {
+    const corrected = record({
+      cycle: 1,
+      attempt: 2,
+      summary: 'The dependency produced its change request; it is ready and awaits a person.',
+      revisions: [{
+        at: '2026-11-06T03:00:00.000Z',
+        actor: 'shenggangshu@w.src.corp.qihoo.net',
+        from: 'QA failure',
+        to: 'The dependency produced its change request; it is ready and awaits a person.',
+        reason: 'the dependency’s merge request is ready but unmerged',
+      }],
+    });
+
+    const parsed = parseReworkRecord({ id: 'comment-1', body: renderReworkRecord(corrected) });
+
+    expect(parsed?.record.revisions).toEqual([corrected.revisions![0]]);
+    expect(parsed?.record.summary).toBe('The dependency produced its change request; it is ready and awaits a person.');
+  });
+
+  it('shows the revision trail to a reader of the issue', () => {
+    const body = renderReworkRecord(record({
+      cycle: 1,
+      attempt: 2,
+      revisions: [{
+        at: '2026-11-06T03:00:00.000Z',
+        actor: 'shenggangshu@w.src.corp.qihoo.net',
+        from: 'QA failure',
+        to: 'The dependency produced its change request.',
+      }],
+    }));
+
+    expect(body).toContain('### Revisions');
+    expect(body).toContain('2026-11-06T03:00:00.000Z by shenggangshu@w.src.corp.qihoo.net: QA failure → The dependency produced its change request.');
+  });
+
+  it('rejects a record whose revision trail is malformed', () => {
+    const body = renderReworkRecord(record({ cycle: 1, attempt: 2 }))
+      .replace('"createdAt"', '"revisions":[{"at":"2026-11-06T03:00:00.000Z"}],"createdAt"');
+
+    expect(parseReworkRecord({ id: 'comment-1', body })).toBeUndefined();
+  });
 });

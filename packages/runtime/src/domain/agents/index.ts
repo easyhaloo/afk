@@ -12,6 +12,8 @@ import { CopilotProvider } from './copilot.js';
 export { registerAgentProvider, getAgentProvider, requireAgentProvider } from './registry.js';
 export { ProcessAgentProvider } from './process-provider.js';
 export { DEFAULT_CODEX_CONFIG, prepareAgentRuntime, probeCodexReadiness, resolveCodexRuntime } from './codex-runtime.js';
+export { resolveRuntimeForProvider } from './runtime-binding.js';
+export type { RuntimeForProviderInput } from './runtime-binding.js';
 export type { CodexAuth, CodexConfig, CodexDoctorRunner, CodexEndpointProbe, CodexHostDiagnostics, CodexReadiness, CodexReadinessProbe, CodexRuntimeOverrides, CodexTransport } from './codex-runtime.js';
 export type { AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, AgentExecutionMetadata, AgentExecutionOptions, AgentRuntimeSelection, CodexRuntimeSelection, CaptureSessionOptions, RestoreSessionOptions } from './types.js';
 

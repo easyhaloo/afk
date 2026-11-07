@@ -17,7 +17,7 @@ import { createExecutionPlan, parseExecutionPlan } from '../../domain/backlog/ex
 import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
-import { createAgentProvider, prepareAgentRuntime } from '../../domain/agents/index.js';
+import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgentProviders, prepareAgentRuntime } from '../../domain/agents/index.js';
 import { getWorkflowConfig, repositoryExecutionDefaults, type WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
@@ -29,6 +29,8 @@ import { executionManifestPath, executionWorkspacePath } from '../../infrastruct
 import { resolveWorkflowRunRequest, type WorkflowRunRequest, type WorkflowRunCliInput } from './run-request.js';
 import { withLogContext, logger } from '../../infrastructure/io/index.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
+import { WorktreeManager } from '../../infrastructure/git/worktree.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -36,7 +38,7 @@ export interface ExecuteWorkItemInput {
   manifestPath?: string;
   template?: string;
   project?: string;
-  runOptions?: WorkflowRunCliInput;
+  runOptions?: Omit<WorkflowRunCliInput, 'backlogId'> & { backlogId?: string };
 }
 
 export type ExecuteWorkItemStatus = 'merge_ready' | 'done' | 'rework' | 'blocked' | 'not_claimed';
@@ -195,6 +197,8 @@ async function acquireLock(lockPath: string, workItemId: string, executionId: st
 }
 
 export interface ExecuteWorkItemDependencies {
+  plugins?: PluginRuntime;
+  agentProviderRegistry?: AgentProviderRegistry;
   readManifest?: typeof readExecutionManifest;
   lookupWorkItem?: (id: string) => Promise<GlobalWorkItem>;
   createContext?: (manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) => Promise<{
@@ -306,7 +310,15 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
   return (dependencies.readManifest ?? readExecutionManifest)(manifestPath, workItemId);
 }
 
-async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) {
+function resolveAgentRegistry(dependencies: ExecuteWorkItemDependencies): AgentProviderRegistry {
+  if (dependencies.agentProviderRegistry) return dependencies.agentProviderRegistry;
+  if (dependencies.plugins) return dependencies.plugins.getAgentProviderRegistry();
+  ensureBuiltinAgentProviders(defaultAgentProviderRegistry);
+  return defaultAgentProviderRegistry;
+}
+
+async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig,
+  agentProviderRegistry: AgentProviderRegistry, plugins?: PluginRuntime) {
   const request = await resolveWorkflowRunRequest({
     ...input.runOptions,
     backlogId: input.workItemId,
@@ -316,10 +328,10 @@ async function createContext(manifest: ResolvedExecutionManifest, input: Execute
     // ADR-0019 §4: managed executions are interactive tmux sessions, never
     // batch/exec. Do not "simplify" this back to 'batch'.
     executionMode: input.runOptions?.executionMode ?? 'interactive',
-  }, config);
+  }, config, { agentProviderRegistry });
   const { providers } = await assembleProviders({ workItemId: input.workItemId,
     projectId: request.trackerProjectId ?? request.projectName, projectKey: request.trackerProjectKey,
-    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost });
+    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost, plugins });
   return { request, providers };
 }
 
@@ -386,7 +398,10 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         let auditConcluded = false;
         try {
           const config = getWorkflowConfig();
-          const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, config);
+          const agentProviderRegistry = resolveAgentRegistry(dependencies);
+          const { request, providers } = await (dependencies.createContext
+            ? dependencies.createContext(manifest, input, config)
+            : createContext(manifest, input, config, agentProviderRegistry, dependencies.plugins));
           if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
           const item = await providers.backlog.get(request.backlogId);
           const inventoryItem = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
@@ -415,7 +430,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
           await record('implementing');
           const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
-            new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime, observer: createRunObserver() })))(providers, config, request);
+            new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createRunObserver() })))(providers, config, request);
           const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
             executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
             observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
@@ -438,7 +453,12 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           const management = asManagementProviders(providers);
           const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
             new QARunner(bundle, workflowConfig, {
-              agentProvider: createAgentProvider(runRequest.agentProvider),
+              plugins: dependencies.plugins,
+              agentProviderRegistry,
+              agentProvider: agentProviderRegistry.require(runRequest.agentProvider ?? workflowConfig.agentDefault ?? 'claude-code'),
+              sandboxProvider: dependencies.plugins?.getSandboxProviderRegistry().create(runRequest.sandboxProvider ?? 'local', {
+                worktreeManager: new WorktreeManager(),
+              }),
               agentRuntime: runRequest.agentRuntime, executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : runRequest.executionMode, projectRoot: runRequest.workspaceRoot,
               repositories: runRequest.repositories,
               executionBaseBranch: runRequest.executionBaseBranch,
@@ -578,7 +598,10 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
           && event.data.changeId === summary.pr?.id && event.data.url === summary.pr.url)))) {
       throw new Error('execution is not awaiting a verified root PR merge');
     }
-    const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, getWorkflowConfig());
+    const config = getWorkflowConfig();
+    const { request, providers } = await (dependencies.createContext
+      ? dependencies.createContext(manifest, input, config)
+      : createContext(manifest, input, config, resolveAgentRegistry(dependencies), dependencies.plugins));
     if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
     const item = await providers.backlog.get(request.backlogId);
     if (item.parentId || item.id !== workItemId

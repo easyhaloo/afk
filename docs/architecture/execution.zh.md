@@ -26,6 +26,15 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk execute --work-item-id <id>`：执行受管生命周期，包括资格与 manifest 校验、实现、独立 QA、变更请求处理，以及由人控制的合并闸门。
 - `afk loop start`：针对一个绑定 manifest 的工作项持续尝试，并委托给同一受管执行路径；它不是全局多工作项调度器。
 - `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
+- `afk plugin install <source>`：在暂存目录安装可信本地目录或 npm package spec，校验 `plugin.json` 的 manifest/entry，记录入口摘要并启用；普通升级失败保留旧安装，禁用 npm lifecycle scripts，包需要自带构建后的入口。
+- `afk plugin configure <id> --file <path> [--builtin] [--action <name>]`：保存 JSON 配置对象；已安装插件按 manifest schema 校验，`--builtin` 校验并构造已知的配置化 Provider。`--action` 写入插件条目的顶层 trigger action，省略时保留已有 action。
+- `afk plugin enable <id>` / `afk plugin disable <id>`：修改下次构造 Runtime 时的启用状态，不热更新正在执行的 Worker。
+- `afk plugin remove <id>`：禁用并删除已安装包，保留配置。
+- `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`：派发 43 项显式白名单操作之一，校验 JSON 输入和输出；无论是否带 `--json` 都输出 JSON。验证/策略/投递否定结果或远程非零 code 使 exit status 为 `1`；不开放凭据读取或 merge。CLI 验证输入必须显式提供 `target`。
+- `afk plugin listen --token-env <name> [--host <address>] [--port <number>]`：激活配置 trigger，保持认证 HTTP 宿主和 Runtime 常驻，SIGINT/SIGTERM 后关闭并 dispose；默认 `127.0.0.1:8374`，环境 token 必需且至少 16 字符、无 CR/LF。启动拒绝 error diagnostic，未注册的 action 会 dispose 对应 trigger；普通 Runtime 构造不启动 timer。见[能力插件架构](plugins.zh.md)。
+- `afk plugin serve-container --repository <path> --workspace-root <path> --sandbox <provider> --agent <providers...> --token-env <name> [--host <address>] [--port <number>] [--allow-remote]`：显式通过共享 registry 提供 remote-container sandbox/agent 操作；五个未加方括号的 flag 全部必需，workspace root 必须已存在并限定执行 worktree，Agent 使用显式白名单，环境 token 至少 32 bytes。默认 `127.0.0.1:8375`，非 loopback 绑定/客户端需 `--allow-remote`；SIGINT/SIGTERM 后关闭服务并 dispose Runtime。后端组合与信任边界见[能力插件架构](plugins.zh.md)。
+- `afk plugin list [--json]`：列出已加载插件、声明能力与已注册 Provider 名称，不等于列出磁盘上的全部安装包。
+- `afk plugin doctor [--plugin <id>] [--json]`：检查 health 与 diagnostics，包括加载/配置错误；不健康 Provider 或 error 诊断返回失败，可选插件加载失败不阻止 Core 命令处理。API v1、Provider 矩阵及组合根/操作派发接入状态见[能力插件架构](plugins.zh.md)。
 - `afk backlog baseline --id <prd>`：报告 PRD 积累切片的分支以及继承它的切片；`--branch <name>` 把分支写进 PRD 正文。
 - `afk schedule --parent <规范身份>`：跨项目调度父项的可执行后代，重叠仓库集合串行，遵循依赖与人工合并闸门。`--max-concurrent`、`--load-limit`、`--poll-interval` 控制派发；poll 间隔即重评估节奏——有执行在跑时仍会按间隔重新看一眼，一旦有空出的槽位和可派发的条目就立刻补派。`--watch` 让调度持续运行直到被停止，等待外部状态变化；`--dry-run` 在不认领、不启动 Agent 的情况下预览批次，`--json` 输出最终报告。报告里每条等待项都会写明卡住它的约束——依赖未就绪、容量已满、仓库租约被占、系统过载、等待人工、或重试预算耗尽。预览的后续批次以前序人工合并及 reconcile 完成为前提。SIGINT/SIGTERM 停止新派发并等待在途执行结束。
 - `afk doctor [--workspace-root <path>] [--json]`：只读统计裸库、依赖池、受管工作区、仓库租约及保守估算的可回收空间；`afk observe doctor` 仍用于查看事件存储。

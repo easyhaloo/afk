@@ -23,3 +23,4 @@ for the workflow.
 | [ADR-0026](0026-goal-condition-budget-and-worktree-context.md) | The goal condition budget, and context in the worktree | accepted | 2026-11-05 |
 | [ADR-0024](0024-prd-baseline-branches.md) | PRD baseline branches | accepted | 2026-11-05 |
 | [ADR-0027](0027-scheduler-timer-re-evaluation-and-wait-reasons.md) | The scheduler re-evaluates on a timer, and says why it waits | accepted | 2026-11-05 |
+| [ADR-0030](0030-host-capability-plugin.md) | Shared host and capability plugins | accepted | 2026-11-06 |

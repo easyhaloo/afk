@@ -8,6 +8,15 @@ import { QARunner } from '@afk/runtime/application/runners/qa-runner';
 import { executionWorkspacePath } from '@afk/runtime/infrastructure/workspace';
 import { join } from 'node:path';
 
+const plugins = vi.hoisted(() => {
+  const agent = { name: 'claude-code' };
+  const sandbox = {};
+  const registry = { require: vi.fn(() => agent) };
+  return { agent, sandbox, registry, getAgentProviderRegistry: () => registry,
+    getSandboxProviderRegistry: () => ({ create: () => sandbox }), dispose: vi.fn() };
+});
+vi.mock('@afk/runtime/plugin-sdk', () => ({ createDefaultPluginRuntime: async () => plugins }));
+
 vi.mock('@afk/runtime/infrastructure/provider/tracker-provider-factory', () => ({
   createManagementProviders: vi.fn(),
 }));
@@ -22,7 +31,7 @@ vi.mock('@afk/runtime/infrastructure/config/manager', () => ({
   repositoryExecutionDefaults: () => ({ baseRef: 'main', targetRef: 'main' }),
 }));
 vi.mock('@afk/runtime/domain/agents/index', () => ({
-  createAgentProvider: vi.fn(),
+  defaultAgentProviderRegistry: {},
   prepareAgentRuntime: vi.fn(() => ({})),
   resolveAgentProviderName: vi.fn(() => 'claude-code'),
 }));
@@ -39,8 +48,8 @@ async function runCommand(register: (program: Command) => void, ...args: string[
 }
 
 describe('canonical command provider wiring', () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); });
 
   it('uses the canonical management bundle for backlog administration', async () => {
     const initialize = vi.fn().mockResolvedValue(undefined);
@@ -63,16 +72,20 @@ describe('canonical command provider wiring', () => {
 
     const workspaceRoot = executionWorkspacePath('github:group/repo#42');
     expect(assembleProviders).toHaveBeenCalledWith(expect.objectContaining({ workItemId: 'github:group/repo#42',
-      projectId: 'group/repo', cwd: join(workspaceRoot, 'repositories/repo'), platform: 'github' }));
+      projectId: 'group/repo', cwd: join(workspaceRoot, 'repositories/repo'), platform: 'github', plugins }));
     expect(backlog.get).toHaveBeenCalledWith('42');
     expect(QARunner).toHaveBeenCalledWith(providers, expect.anything(), {
       executionMode: 'interactive',
-      agentProvider: undefined,
+      plugins,
+      agentProviderRegistry: plugins.registry,
+      agentProvider: plugins.agent,
+      sandboxProvider: plugins.sandbox,
       agentRuntime: expect.anything(),
       projectRoot: workspaceRoot,
       repositories: expect.arrayContaining([expect.objectContaining({ repoRoot: join(workspaceRoot, 'repositories/repo'), primary: true })]),
       executionPlan: { baseRef: 'main', targetRef: 'main' },
     });
     expect(processItem).toHaveBeenCalledWith('42');
+    expect(plugins.dispose).toHaveBeenCalledOnce();
   });
 });

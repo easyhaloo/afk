@@ -23,7 +23,11 @@ export type {
   ResumeOptions,
 } from '../../domain/agents/types.js';
 
-export type SandboxProviderName = 'local' | 'docker' | 'podman';
+/** Extensible sandbox provider id used by built-ins and plugins. */
+export type SandboxProviderId = string;
+
+/** Compatibility name for the extensible provider id. */
+export type SandboxProviderName = SandboxProviderId;
 
 export type IsolationLevel = 'workspace' | 'process' | 'filesystem' | 'vm';
 
@@ -88,7 +92,7 @@ export interface WorktreeInfo {
 
 /** Sandbox provider interface — factory for Sandboxes. */
 export interface SandboxProvider {
-  readonly name: SandboxProviderName;
+  readonly name: SandboxProviderId;
   readonly isolation: IsolationLevel;
   readonly capabilities: ReadonlySet<SandboxCapability>;
 

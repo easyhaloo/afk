@@ -9,7 +9,7 @@ electron/main.ts                 Electron lifecycle/bootstrap only
 electron/window/                  BrowserWindow and navigation policy
 electron/ipc/                     typed ipcMain registration
 electron/services/                workspace, runtime, appearance, snapshot/workflow, SSH services
-electron/adapters/                execFile, tmux/container/resource, OpenSSH, known_hosts, PTY adapters
+electron/adapters/                execFile, tmux/container/resource, OpenSSH, known_hosts, PTY adapters; the JumpServer CLI adapter is shared from `@afk/runtime`
 electron/workflow/                schema-aware config parsing and validation
 electron/security/                sender-origin and navigation guards
 electron/preload.cts              fixed contextBridge whitelist (CJS: sandboxed preloads must be)

@@ -11,16 +11,59 @@
  * singletons thereafter. Tests can register throwaway providers.
  */
 
-import type { AgentProvider, AgentProviderName, RestoreSessionOptions } from './types.js';
+import type { AgentProvider, AgentProviderName, CaptureSessionOptions, RestoreSessionOptions } from './types.js';
 
-const providers = new Map<AgentProviderName, AgentProvider>();
+export class AgentProviderRegistry {
+  private readonly providers = new Map<AgentProviderName, AgentProvider>();
+
+  constructor(providers: Iterable<AgentProvider> = []) {
+    for (const provider of providers) this.register(provider);
+  }
+
+  register(provider: AgentProvider): this {
+    this.providers.set(provider.name, provider);
+    return this;
+  }
+
+  get(name: AgentProviderName): AgentProvider | undefined {
+    return this.providers.get(name);
+  }
+
+  require(name: AgentProviderName): AgentProvider {
+    const provider = this.get(name);
+    if (!provider) {
+      const available = this.listNames();
+      throw new Error(`agent provider not registered: ${name}${available.length ? `; available: ${available.join(', ')}` : ''}`);
+    }
+    return provider;
+  }
+
+  has(name: AgentProviderName): boolean {
+    return this.providers.has(name);
+  }
+
+  list(): AgentProvider[] {
+    return [...this.providers.values()];
+  }
+
+  listNames(): AgentProviderName[] {
+    return [...this.providers.keys()];
+  }
+
+  clear(): void {
+    this.providers.clear();
+  }
+}
+
+/** Default registry used by the legacy free-function wrappers. */
+export const defaultAgentProviderRegistry = new AgentProviderRegistry();
 
 /**
  * Register an AgentProvider. Overwrites any existing provider with the same
  * name. Intended for module-load registration; tests use it to inject fakes.
  */
 export function registerAgentProvider(provider: AgentProvider): void {
-  providers.set(provider.name, provider);
+  defaultAgentProviderRegistry.register(provider);
 }
 
 /**
@@ -28,30 +71,26 @@ export function registerAgentProvider(provider: AgentProvider): void {
  * callers should `requireAgentProvider` when they need a guaranteed instance.
  */
 export function getAgentProvider(name: AgentProviderName): AgentProvider | undefined {
-  return providers.get(name);
+  return defaultAgentProviderRegistry.get(name);
 }
 
 /**
  * Same as getAgentProvider but throws if missing — used by the runner.
  */
 export function requireAgentProvider(name: AgentProviderName): AgentProvider {
-  const p = providers.get(name);
-  if (!p) {
-    throw new Error(`agent provider not registered: ${name}`);
-  }
-  return p;
+  return defaultAgentProviderRegistry.require(name);
 }
 
 /**
  * List all registered provider names. Stable order = registration order.
  */
 export function listAgentProviders(): AgentProviderName[] {
-  return [...providers.keys()];
+  return defaultAgentProviderRegistry.listNames();
 }
 
 /** Clear the registry — used by tests to isolate state. */
 export function _resetAgentRegistry(): void {
-  providers.clear();
+  defaultAgentProviderRegistry.clear();
 }
 
 /**
@@ -84,7 +123,7 @@ export async function guardedRestoreSession(
  */
 export async function guardedCaptureSession(
   provider: AgentProvider,
-  options: import('./types.js').CaptureSessionOptions,
+  options: CaptureSessionOptions,
 ): Promise<import('./types.js').SessionSnapshot> {
   if (!provider.capabilities.has('resume')) {
     throw new Error(

@@ -8,13 +8,13 @@ import { getWorkflowConfig, repositoryExecutionDefaults } from '../../infrastruc
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { blockBacklog } from '../../domain/backlog/commands.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
-import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
+import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgentProviders } from '../../domain/agents/index.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../infrastructure/sandbox/types.js';
 import type { ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
-import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index.js';
+import { parseWorkItemId, type BacklogItem, type NewReworkRecord } from '../../domain/backlog/index.js';
 import { createExecutionPlan, parseExecutionPlan, type ExecutionPlan } from '../../domain/backlog/execution-plan.js';
 import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
@@ -34,6 +34,8 @@ import { BudgetStore } from '../workflows/budget-store.js';
 import { RunResourceScope } from '../workflows/resource-scope.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import { runQaPreflight } from './qa-preflight.js';
+import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecycle.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
 import type { RunEventData, RunFailureReasonCode } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
@@ -43,6 +45,8 @@ type QAProcessResult = { success: boolean; mrUrl?: string; rework?: boolean; sum
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
   agentProvider?: AgentProvider;
+  agentProviderRegistry?: AgentProviderRegistry;
+  plugins?: PluginRuntime;
   agentRuntime?: AgentRuntimeSelection;
   tmux?: TmuxClient;
   executionMode?: ExecutionMode;
@@ -97,6 +101,8 @@ export class QARunner {
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
   private readonly onCommit?: QARunnerDependencies['onCommit'];
   private readonly onSession?: QARunnerDependencies['onSession'];
+  private readonly agentProviderRegistry: AgentProviderRegistry;
+  private readonly plugins?: PluginRuntime;
   private activeConflictExecution?: AgentExecution;
   private leaseFailure?: unknown;
 
@@ -116,8 +122,13 @@ export class QARunner {
     this.afterPublication = deps.afterPublication;
     this.onCommit = deps.onCommit;
     this.onSession = deps.onSession;
-    this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
-    this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
+    this.plugins = deps.plugins;
+    this.agentProviderRegistry = deps.agentProviderRegistry ?? deps.plugins?.getAgentProviderRegistry() ?? defaultAgentProviderRegistry;
+    if (!deps.agentProviderRegistry && !deps.plugins) ensureBuiltinAgentProviders(this.agentProviderRegistry);
+    this.sandboxProvider = deps.sandboxProvider ?? (deps.plugins
+      ? deps.plugins.getSandboxProviderRegistry().create('local', { worktreeManager: new WorktreeManager() })
+      : createSandboxProvider('local', { worktreeManager: new WorktreeManager() }));
+    this.agentProvider = deps.agentProvider ?? this.agentProviderRegistry.require(this.config.agentDefault ?? 'claude-code');
     this.agentRuntime = deps.agentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
@@ -134,6 +145,8 @@ export class QARunner {
     let sandbox: Sandbox | undefined;
     let execution: AgentExecution | undefined;
     let workspace: PreparedRepositorySet | undefined;
+    let lifecycle: LifecycleDispatcher | undefined;
+    let lifecycleContext: LifecycleContext | undefined;
     const runtimeRunId = `${session}-runtime`;
     let runtimeStarted = false;
     let runtimeErrorSummary: string | undefined;
@@ -159,6 +172,18 @@ export class QARunner {
       await this.startRuntime(runtimeRunId, backlog, session);
       runtimeStarted = true;
       workspace = await this.prepareWorkspace(id);
+      const dispatcher = new LifecycleDispatcher(this.plugins?.getLifecycleModules());
+      lifecycle = dispatcher;
+      const lifecycleBase = {
+        iid: backlog.issueNumber ?? (/^[1-9]\d*$/.test(backlog.id)
+          ? Number(backlog.id) : parseWorkItemId(backlog.workItemId ?? backlog.id).issueNumber),
+        baseBranch: baselineBranch,
+        params: {},
+        originalCwd: this.projectRoot,
+        repoRoot: workspace?.primary.repoRoot ?? this.projectRoot,
+        repositories: workspace?.repositories,
+      };
+      await dispatcher.run('init', { ...lifecycleBase, projectName: undefined });
       const heartbeat = async () => {
         await workspace?.heartbeat?.();
         const current = await this.providers.backlog.get(id);
@@ -171,6 +196,9 @@ export class QARunner {
       });
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
+      const context = { ...lifecycleBase, worktreePath, sessionName: session };
+      lifecycleContext = context;
+      await dispatcher.run('before-agent', context);
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
       await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
@@ -270,6 +298,11 @@ export class QARunner {
         this.executionMode,
         'qa',
       );
+      try {
+        const metadata = await fs.lstat(join(worktreePath, '.afk', 'plugin-context.md'));
+        if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Plugin context must be a regular file');
+        segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
       if (overBudget) {
@@ -320,7 +353,9 @@ export class QARunner {
       }
       if (leaseError) throw leaseError;
       await heartbeat();
-      const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName);
+      if (signal.result === 'PASS') await dispatcher.run('after-agent', context);
+      const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName,
+        () => dispatcher.run('before-publish', context));
       if (!outcome.success) {
         runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
       }
@@ -340,6 +375,7 @@ export class QARunner {
       await leaseScope.finish({ status: runtimeErrorSummary ? 'failed' : 'success' });
       if (execution) await execution.kill().catch(() => {});
       if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
+      if (lifecycleContext) await lifecycle?.run('cleanup', lifecycleContext);
       if (worktreePath) {
         try {
           await this.providers.branches.cleanup(worktreePath, { preserve: !!runtimeErrorSummary });
@@ -580,6 +616,7 @@ export class QARunner {
     signal: QAResult,
     worktreePath: string,
     verificationBranch: string,
+    beforePublish: () => Promise<void>,
   ): Promise<QAProcessResult> {
     if (signal.result === 'FAIL') return this.routeQARework(backlogId, signal as QAFailure);
 
@@ -595,6 +632,7 @@ export class QARunner {
           'binary files left out of the QA commit');
       }
       if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
+      await beforePublish();
       await this.providers.branches.push(verificationBranch, worktreePath);
       // A previous attempt may have left the change request behind (a re-run
       // of an already-published item). Look it up unconditionally: `beforeChange`
@@ -613,6 +651,7 @@ export class QARunner {
         notes: signal.notes,
       };
       let mr = existing;
+      await beforePublish();
       if (mr) {
         // A previous attempt left the review request behind. The evidence in
         // its body is the evidence of that attempt, so it is refreshed with

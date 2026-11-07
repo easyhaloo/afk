@@ -41,7 +41,7 @@ export type CanvasTemplateNode = {
   label: string;
   description: string;
   prompt: string;
-  provider?: "claude-code" | "codex" | "cursor" | "pi" | "opencode" | "copilot";
+  provider?: string;
   x: number;
   y: number;
 };
@@ -161,6 +161,7 @@ export type Snapshot = {
   workflowRuns: WorkflowRunSummary[];
   loop: LoopStatus;
   agentRuntimes: AgentRuntime[];
+  registeredAgentProviders?: string[];
   events: RuntimeEvent[];
   workItemRuns: ProjectRun[];
   containers: Array<{ engine: string; name: string; image: string; status: string }>;

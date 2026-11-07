@@ -13,6 +13,8 @@ import { executeWorkItem, type ExecuteWorkItemResult } from '../workflows/execut
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import { repositoryLeaseKey } from '../../infrastructure/git/repository-lease.js';
 import type { WorkItemPlatform } from '../../domain/work-item/identity.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
+import type { AgentProviderRegistry } from '../../domain/agents/index.js';
 
 export interface ScheduleOptions {
   parent: string;
@@ -244,6 +246,8 @@ async function awaitDispatchDecision(
 }
 
 export async function scheduleWorkItems(options: ScheduleOptions, dependencies: {
+  plugins?: PluginRuntime;
+  agentProviderRegistry?: AgentProviderRegistry;
   inventory?: () => Promise<GlobalWorkItem[]>;
   execute?: (input: { workItemId: string }) => Promise<ExecuteWorkItemResult>;
   repositories?: (item: GlobalWorkItem) => Promise<string[]>;
@@ -258,7 +262,9 @@ export async function scheduleWorkItems(options: ScheduleOptions, dependencies: 
   const pollInterval = options.pollIntervalMs ?? 5000;
   if (!Number.isFinite(loadLimit) || loadLimit <= 0 || !Number.isFinite(pollInterval) || pollInterval <= 0) throw new Error('scheduler load limit and poll interval must be positive');
   const read = dependencies.inventory ?? (() => inventory(parseWorkItemId(parent).platform));
-  const execute = dependencies.execute ?? executeWorkItem;
+  const execute = dependencies.execute ?? ((input: { workItemId: string }) => executeWorkItem(input, {
+    plugins: dependencies.plugins, agentProviderRegistry: dependencies.agentProviderRegistry,
+  }));
   const repositories = dependencies.repositories ?? repositoryKeys;
   const wait: SchedulerWait = dependencies.wait ?? ((milliseconds, signal) => delay(milliseconds, undefined, { signal }));
   const maxAttempts = dependencies.maxReworkAttempts ?? getWorkflowConfig().maxQaReworkAttempts;

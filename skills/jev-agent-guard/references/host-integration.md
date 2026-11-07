@@ -36,8 +36,13 @@ is present. Review and trust the installed command through the host's normal
 flow; `--dangerously-bypass-hook-trust` is only suitable for a controlled probe
 after checking the hook source, not as a default installation option.
 Remote/cloud agents require installation in their own execution environment.
-OpenCode V1 plugin loading is supported for versions 1.18.29 and later;
-unknown and V2 plugin APIs are rejected rather than silently misconfigured.
+OpenCode plugin loading is supported for the V1 plugin API (versions 1.18.29
+and later) and the V2 plugin API (2.x). The installer runs `opencode --version`
+and picks the matching shape: V2 installs a default-export plugin
+(`adapters/opencode-v2.mjs`, which registers its handlers through the
+`ctx.session`/`ctx.tool` hook helpers), while V1 installs the named-export
+`adapters/opencode.mjs`. Older or unrecognized versions are rejected rather
+than silently misconfigured.
 
 Jev does not return an `ask` decision to any host; moderate risk leaves native
 permissions unchanged. Host-native approvals can still apply independently.

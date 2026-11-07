@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { toCodexResponse } from '../scripts/adapters/codex.mjs';
 import { JevAgentGuard } from '../scripts/adapters/opencode.mjs';
+import { jevAgentGuardV2 } from '../scripts/adapters/opencode-v2.mjs';
 import { loadLedger } from '../scripts/skill-ledger.mjs';
 
 test('Codex maps local denial to supported native PreToolUse output', () => {
@@ -97,4 +99,109 @@ test('OpenCode records a successful Skill invocation even without an exit code',
     const ledger = loadLedger({ host: 'opencode', sessionId: 'session', projectRoot: home }, env);
     assert.equal(ledger.skill.name, 'debug');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+// --- OpenCode V2 plugin (opencode-v2.mjs) ---
+
+const RUNTIME_STUB = `export const calls = [];
+export const behavior = {};
+export async function runAdapter(input) {
+  calls.push(input);
+  const decision = behavior[input.event];
+  if (decision instanceof Error) throw decision;
+  return decision ?? { decision: 'allow', reason: 'ok' };
+}`;
+
+function makeScriptsRoot({ withRuntime = true } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev v2 scripts '));
+  if (withRuntime) {
+    fs.mkdirSync(path.join(root, 'adapters'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'adapters', 'runtime-adapter.mjs'), RUNTIME_STUB);
+    fs.writeFileSync(path.join(root, 'context-filter.mjs'),
+      `export function compactToolOutput({ output }) { return \`compact:\${output}\`; }\n`);
+  }
+  return root;
+}
+
+async function loadRuntimeStub(root) {
+  return import(`${pathToFileURL(path.join(root, 'adapters', 'runtime-adapter.mjs')).href}`);
+}
+
+function fakeCtx(directory) {
+  const registered = {};
+  return {
+    location: { directory },
+    session: { hook: async (name, fn) => { registered[`session:${name}`] = fn; } },
+    tool: { hook: async (name, fn) => { registered[`tool:${name}`] = fn; } },
+    registered,
+  };
+}
+
+test('OpenCode V2 setup registers the four domain hooks', async () => {
+  const root = makeScriptsRoot();
+  const ctx = fakeCtx('/project');
+  await jevAgentGuardV2({ scriptsRoot: root, env: {} }).setup(ctx);
+  assert.equal(typeof ctx.registered['session:prompt'], 'function');
+  assert.equal(typeof ctx.registered['session:context'], 'function');
+  assert.equal(typeof ctx.registered['tool:execute.before'], 'function');
+  assert.equal(typeof ctx.registered['tool:execute.after'], 'function');
+});
+
+test('OpenCode V2 prompt stashes a recommendation that the next context injects once', async () => {
+  const root = makeScriptsRoot();
+  const runtime = await loadRuntimeStub(root);
+  runtime.behavior.prompt = { decision: 'advise', reason: 'routing', nextStep: 'Suggested Skill: debug' };
+  const ctx = fakeCtx('/project');
+  await jevAgentGuardV2({ scriptsRoot: root, env: {} }).setup(ctx);
+  await ctx.registered['session:prompt']({ sessionID: 's1', prompt: { text: 'diagnose the failing test' } });
+  const system = [];
+  await ctx.registered['session:context']({ sessionID: 's1', system });
+  assert.deepEqual(system, [{ type: 'text', text: 'Suggested Skill: debug' }]);
+  const second = [];
+  await ctx.registered['session:context']({ sessionID: 's1', system: second });
+  assert.deepEqual(second, []);
+});
+
+test('OpenCode V2 before-action throws only on a deny decision', async () => {
+  const root = makeScriptsRoot();
+  const runtime = await loadRuntimeStub(root);
+  runtime.behavior['before-action'] = { decision: 'deny', reason: 'Destructive action' };
+  const ctx = fakeCtx('/project');
+  await jevAgentGuardV2({ scriptsRoot: root, env: {} }).setup(ctx);
+  await assert.rejects(() => ctx.registered['tool:execute.before']({
+    tool: 'bash', sessionID: 's1', input: { command: 'git reset --hard HEAD' },
+  }), /Destructive action/);
+});
+
+test('OpenCode V2 swallows non-deny adapter errors so legit tool calls proceed', async () => {
+  const root = makeScriptsRoot();
+  const runtime = await loadRuntimeStub(root);
+  runtime.behavior['before-action'] = new Error('adapter offline');
+  const ctx = fakeCtx('/project');
+  await jevAgentGuardV2({ scriptsRoot: root, env: {} }).setup(ctx);
+  await ctx.registered['tool:execute.before']({ tool: 'read', sessionID: 's1', input: {} });
+  const call = runtime.calls.at(-1);
+  assert.equal(call.payload.tool_name, 'read');
+  assert.equal(call.payload.cwd, '/project');
+});
+
+test('OpenCode V2 after-action records outcome and compacts successful output', async () => {
+  const root = makeScriptsRoot();
+  const runtime = await loadRuntimeStub(root);
+  const ctx = fakeCtx('/project');
+  await jevAgentGuardV2({ scriptsRoot: root, env: {} }).setup(ctx);
+  const event = { tool: 'bash', sessionID: 's1', status: 'success', input: { command: 'npm ci' },
+    result: { content: 'a'.repeat(3000) } };
+  await ctx.registered['tool:execute.after'](event);
+  assert.match(event.result.content, /^compact:aaaa/);
+  const call = runtime.calls.at(-1);
+  assert.equal(call.event, 'after-action');
+  assert.deepEqual(call.payload.outcome, { success: true });
+});
+
+test('OpenCode V2 skips hook registration when the adapter cannot load', async () => {
+  const root = makeScriptsRoot({ withRuntime: false });
+  const ctx = fakeCtx('/project');
+  await jevAgentGuardV2({ scriptsRoot: root, env: {} }).setup(ctx);
+  assert.deepEqual(Object.keys(ctx.registered), []);
 });

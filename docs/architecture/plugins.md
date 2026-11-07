@@ -113,11 +113,70 @@ they are selected by project rather than treated as independent issue adapters.
 
 Observability is an additional extension surface, not a thirteenth family in
 this matrix. `observability.provider`, `observe.event-store`, `observe.evidence`,
-`observe.tracing`, and `observe.metrics` coexist with event/evidence/tracer/metrics
-contracts. Registering an adapter does not replace the managed audit store.
+`observe.tracing`, and `observe.metrics` expose event/evidence/tracer/metrics
+contracts. Enabled generic and specialized tracing, metrics and event-store
+providers are discovered automatically; registrations of the same object are
+deduplicated. Local JSONL remains the authoritative audit store.
 Workflow and presentation extension points are `workflow.lifecycle`,
 `workflow.template`, `workflow.action`, `surface.cli`, `surface.tui`, and
 `surface.desktop`; a surface registration alone does not mount a UI.
+
+## Observability export
+
+The configurable builtin plugin `observability.otlp` registers provider `otlp`.
+It sends OTLP/HTTP JSON to a collector's base `endpoint` plus `/v1/traces` and
+`/v1/metrics`. It implements generic OTLP export, without a vendor-specific
+Prometheus exporter or Langfuse API integration. A compatible collector is an
+optional external service; AFK does not start one. See the
+[local collector example](observability.md#optional-local-otlp-collector).
+
+Save the configuration object as `observability.json`:
+
+```json
+{
+  "endpoint": "http://127.0.0.1:4318",
+  "serviceName": "runtime",
+  "headers": {"Authorization": {"env": "OTLP_AUTHORIZATION"}},
+  "resourceAttributes": {"deployment.environment": "local"},
+  "timeoutMs": 2000
+}
+```
+
+```sh
+afk plugin configure observability.otlp --builtin --file observability.json
+```
+
+`serviceName` is optional; `resourceAttributes` maps keys to string, number or
+boolean values. Each header value must be an environment reference such as
+`{"env":"OTLP_AUTHORIZATION"}` or a credential reference such as
+`{"provider":"credential.enterprise","name":"otlp-authorization"}`.
+Set the referenced secret to the full header value; raw string values are
+rejected. Omit `headers` for an unauthenticated local collector.
+`timeoutMs` defaults to 2000 and accepts at most 300000. The host's shared
+5000 ms deadline bounds all exports for one audit record.
+
+The host mirrors events only after a successful durable local append. An
+`EventStoreProvider` receives these persisted events; it cannot
+replace local audit authority. Each audit record has its own span, with run
+and work-item trace attributes. Tracing uses `startSpan`, `addEvent` and
+`endSpan`; `endSpan` remains optional for legacy providers. `TraceSpanOptions`
+accepts scalar attributes and `TraceContext` accepts optional `parentSpanId`.
+`MetricSample.kind` optionally selects `counter`, `gauge` or `histogram`.
+Event counts use low-cardinality attributes, and `run.event_persistence_ms`
+records persistence latency as a histogram. Run/work-item identifiers belong
+on traces, not metric labels; secrets and evidence bodies must not be exported
+as attributes.
+
+Before returning from recording an audit event, the host drains its export
+operations under this shared deadline, aborting in-flight work and skipping
+remaining exports when it expires. Specialized registrations enable only their
+registered signal. Existing plugin runtime disposal
+owns cleanup, so CLI exit does not abandon fire-and-forget exports. Export
+errors and timeouts are isolated from execution; diagnostics exclude secret
+values and remote error bodies. Local audit failures remain fatal. This is
+best-effort export, not a cloud-account end-to-end delivery claim.
+`EvidenceStoreProvider` / `observe.evidence` is available as an interface;
+external evidence upload is not automatically hooked into audit recording.
 
 ## Standard manifest and API v1
 

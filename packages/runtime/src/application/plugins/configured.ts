@@ -33,6 +33,7 @@ import {
   executeCommand,
 } from '../../infrastructure/providers/index.js';
 import type { CommandExecutor, FetchTransport } from '../../infrastructure/providers/dependencies.js';
+import { OtlpObservabilityProvider } from '../../infrastructure/observability/otlp-provider.js';
 
 export interface ConfiguredTriggerEvent {
   readonly pluginId: string;
@@ -199,6 +200,19 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
   const hostFields = { id: text.optional(), alias: text, address: text };
   const commandConfig = z.object({ command: strings, timeoutMs: milliseconds.optional() }).strict();
   const definitions: Record<string, Definition> = {
+    'observability.otlp': define(secret => z.object({
+      endpoint: baseUrl.refine(value => !/[?#]/.test(value), 'must not contain a query or fragment'),
+      serviceName: text.optional(),
+      timeoutMs: milliseconds.max(300_000).default(2000),
+      resourceAttributes: filters.optional(),
+      headers: z.record(z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/).refine(
+        name => !/^(?:host|content-.*|transfer-encoding|connection|keep-alive|te|trailer|upgrade|expect|forwarded|x-forwarded-.*|x-original-url|x-rewrite-url)$/i.test(name),
+        'must not override transport or payload headers',
+      ), secret).optional(),
+    }).strict(), config => {
+      const provider = new OtlpObservabilityProvider({ ...config, fetch });
+      return capability(provider, { observability: [provider] });
+    }),
     'host.jumpserver': define(z.object({ serverAlias: text.optional() }).strict(), config => ({ provider: {}, plugin: createJumpserverPlugin(config) })),
     'host.ssh': define(z.object({
       hosts: z.array(z.object({ ...hostFields, username: text.optional(), port: port.optional(), identityFile: text.optional() }).strict()).min(1),

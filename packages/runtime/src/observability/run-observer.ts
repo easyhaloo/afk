@@ -61,6 +61,7 @@ export class RunObserver {
     idempotencyKey?: string;
     evidence?: RunEventDraft<T>['evidence'];
   } = {}): Promise<AppendReceipt> {
+    const started = performance.now();
     return this.tracer.within(`afk.${data.kind}`, context, async () => {
       const occurredAt = this.clock.now().toISOString();
       const draft: RunEventDraft<T> = {
@@ -84,6 +85,7 @@ export class RunObserver {
         actor_kind: context.actor.kind,
       });
       this.tracer.addEvent(context, data.kind, { event_sequence: receipt.lastSequence });
+      this.metrics.histogram('run.event_persistence_ms', performance.now() - started, { event_type: data.kind });
       return receipt;
     });
   }

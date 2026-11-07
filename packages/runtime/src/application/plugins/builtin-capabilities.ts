@@ -3,10 +3,14 @@ import type {
   ArtifactSink,
   ContextSource,
   CredentialProvider,
+  EventStoreProvider,
+  EvidenceStoreProvider,
+  MetricsProvider,
   NotificationProvider,
   PolicyCheckProvider,
   RepositoryProvider,
   TriggerProvider,
+  TracerProvider,
   VerificationProvider,
   ProviderHealth,
   ProviderDiagnostic,
@@ -23,6 +27,7 @@ export interface BuiltinCapabilityPluginOptions {
   readonly artifacts?: readonly ArtifactSink[];
   readonly repositories?: readonly RepositoryProvider[];
   readonly policies?: readonly PolicyCheckProvider[];
+  readonly observability?: readonly (EventStoreProvider | EvidenceStoreProvider | TracerProvider | MetricsProvider)[];
 }
 
 function pluginsFor<T extends { readonly id: string; health?: () => Promise<ProviderHealth>; doctor?: () => Promise<readonly ProviderDiagnostic[]>; dispose?: () => void | Promise<void> }>(
@@ -61,5 +66,6 @@ export function createBuiltinCapabilityPlugins(options: BuiltinCapabilityPluginO
     ...pluginsFor('artifact.provider', 'artifact', options.artifacts ?? [], (context, name, provider) => context.registerArtifactProvider(name, provider)),
     ...pluginsFor('repository.provider', 'repository', options.repositories ?? [], (context, name, provider) => context.registerRepositoryProvider(name, provider)),
     ...pluginsFor('policy.provider', 'policy', options.policies ?? [], (context, name, provider) => context.registerPolicyProvider(name, provider)),
+    ...pluginsFor('observability.provider', 'observability', options.observability ?? [], (context, name, provider) => context.registerObservabilityProvider(name, provider)),
   ];
 }

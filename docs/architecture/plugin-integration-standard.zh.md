@@ -143,6 +143,8 @@ interface PluginSetupContext {
   registerArtifactProvider(name: string, provider: ArtifactProvider): void;
   registerRepositoryProvider(name: string, provider: RepositoryProvider): void;
   registerPolicyProvider(name: string, provider: PolicyProvider): void;
+  registerObservabilityProvider(name: string, provider: EventStoreProvider | EvidenceStoreProvider | TracerProvider | MetricsProvider): void;
+  registerCapability(capability: string, name: string, provider: Provider): void;
   onDispose(dispose: () => void | Promise<void>): void;
   getProvider<T>(capability: string, name: string): T | undefined;
   getCredentialProvider(name: string): CredentialProvider | undefined;
@@ -301,6 +303,74 @@ interface PolicyProvider extends Provider {
 ```
 
 拒绝、评估失败或结果不完整时，受管执行默认阻止发布。策略结果必须包含规则标识和原因。
+
+### Observability
+
+通过 `registerObservabilityProvider` 注册通用 `observability.provider`，或通过
+`registerCapability` 注册专用能力。宿主自动发现已启用的 tracing、metrics 和
+event-store Provider，并按对象身份去重；同一对象注册多个能力时不会重复导出。
+
+| 接口 / 专用能力 | 操作与消费边界 |
+|---|---|
+| `EventStoreProvider` / `observe.event-store` | `append`、`read`；仅在本地持久追加成功后镜像事件，本地 JSONL 始终是审计权威。 |
+| `TracerProvider` / `observe.tracing` | `startSpan`、`addEvent`、可选 `endSpan`；每条审计记录使用独立 span，trace 属性携带运行及工作项标识；兼容没有 `endSpan` 的旧 Provider。 |
+| `MetricsProvider` / `observe.metrics` | `record`；事件计数使用低基数属性，`run.event_persistence_ms` 是持久化延迟 histogram，不以运行或工作项标识作 label。 |
+| `EvidenceStoreProvider` / `observe.evidence` | `put`、`get`；接口可用，外部证据上传尚未自动接入审计流程。 |
+
+```ts
+interface TraceContext {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly parentSpanId?: string;
+}
+
+interface TraceSpanOptions extends OperationOptions {
+  readonly attributes?: Readonly<Record<string, string | number | boolean>>;
+}
+
+interface MetricSample {
+  readonly name: string;
+  readonly value: number;
+  readonly kind?: 'counter' | 'gauge' | 'histogram';
+  readonly attributes?: Readonly<Record<string, string | number | boolean>>;
+}
+
+interface TracerProvider extends Provider {
+  startSpan(name: string, context: TraceContext, options?: TraceSpanOptions): Promise<void>;
+  addEvent(context: TraceContext, name: string, options?: TraceSpanOptions): Promise<void>;
+  endSpan?(context: TraceContext, options?: TraceSpanOptions & { readonly error?: boolean }): Promise<void>;
+}
+
+interface MetricsProvider extends Provider {
+  record(sample: MetricSample, options?: OperationOptions): Promise<void>;
+}
+
+interface EventRecord {
+  readonly runId: string;
+  readonly sequence: number;
+  readonly type: string;
+  readonly payload?: Readonly<{ readonly [key: string]: unknown }>;
+}
+
+interface EventStoreProvider extends Provider {
+  append(events: readonly EventRecord[], options?: OperationOptions): Promise<void>;
+  read(runId: string, options?: OperationOptions): Promise<readonly EventRecord[]>;
+}
+```
+
+宿主在审计记录方法返回前等待本次导出操作完成，每条记录共用 5000 ms 导出期限；
+到期中止在途请求并跳过剩余导出；专用注册只启用对应信号，通用注册启用全部已声明信号。
+不得依赖 CLI 退出后仍有 fire-and-forget 任务运行。资源通过现有 `onDispose` /
+Runtime 销毁流程清理。导出错误或超时与执行隔离，日志不得包含秘密或远端错误正文；
+本地审计追加失败仍阻止执行，未持久化的事件不作镜像。
+
+内置 `observability.otlp` / Provider `otlp` 发送 OTLP/HTTP JSON 到基础 endpoint
+加 `/v1/traces`、`/v1/metrics`；`serviceName` 默认 `runtime`，`resourceAttributes` 仅接受
+string、number、boolean 标量值。`headers` 每个值只接受环境或 Credential 引用，
+禁止原始字符串。`timeoutMs` 默认 2000、上限 300000，不能突破每条记录共用的宿主导出期限。
+配置及可选外部 collector 示例见[可观测性导出](plugins.zh.md#可观测性导出)；
+不包含厂商专用 Prometheus exporter、Langfuse API，也不宣称云账户端到端验证。
+OTLP Provider 将缺省 `MetricSample.kind` 解释为 `gauge`；取消信号必须中止在途网络请求。
 
 ## 6. 生命周期
 

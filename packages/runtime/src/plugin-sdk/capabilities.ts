@@ -247,11 +247,17 @@ export type TracerCapability = 'span' | 'event' | 'baggage';
 export interface TraceContext {
   readonly traceId: string;
   readonly spanId: string;
+  readonly parentSpanId?: string;
+}
+
+export interface TraceSpanOptions extends ProviderOperationOptions {
+  readonly attributes?: Readonly<Record<string, string | number | boolean>>;
 }
 
 export interface TracerProvider extends CapabilityProvider<TracerCapability> {
-  startSpan(name: string, context: TraceContext, options?: ProviderOperationOptions): Promise<void>;
-  addEvent(context: TraceContext, name: string, options?: ProviderOperationOptions): Promise<void>;
+  startSpan(name: string, context: TraceContext, options?: TraceSpanOptions): Promise<void>;
+  addEvent(context: TraceContext, name: string, options?: TraceSpanOptions): Promise<void>;
+  endSpan?(context: TraceContext, options?: TraceSpanOptions & { readonly error?: boolean }): Promise<void>;
 }
 
 // --- Metrics ---
@@ -261,6 +267,7 @@ export type MetricsCapability = 'counter' | 'gauge' | 'histogram';
 export interface MetricSample {
   readonly name: string;
   readonly value: number;
+  readonly kind?: MetricsCapability;
   readonly attributes?: Readonly<Record<string, string | number | boolean>>;
 }
 

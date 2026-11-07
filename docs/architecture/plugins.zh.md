@@ -100,9 +100,56 @@ assembly，按项目匹配采用，与独立 issue 适配器区分。
 
 Observability 是额外扩展面，不计入上表十二类：`observability.provider`、
 `observe.event-store`、`observe.evidence`、`observe.tracing`、`observe.metrics`
-与 event/evidence/tracer/metrics 契约并存；注册它们不自动替换受管审计存储。
+提供 event/evidence/tracer/metrics 契约。已启用的通用及专用 tracing、metrics、
+event-store Provider 自动发现；同一对象的重复注册会去重。本地 JSONL 始终是审计权威。
 工作流及界面扩展点包括 `workflow.lifecycle`、`workflow.template`、`workflow.action`、
 `surface.cli`、`surface.tui`、`surface.desktop`；仅注册 surface 不会自动挂载 UI。
+
+## 可观测性导出
+
+可配置内置插件 `observability.otlp` 注册名为 `otlp` 的 Provider，向 collector 的
+基础 `endpoint` 加 `/v1/traces` 和 `/v1/metrics` 发送 OTLP/HTTP JSON。
+它提供通用 OTLP 导出，不包含厂商专用 Prometheus exporter 或 Langfuse API 接入。
+兼容 collector 是可选的外部服务，由用户独立启动；参见
+[本地 collector 示例](observability.md#optional-local-otlp-collector)。
+
+将配置对象保存为 `observability.json`：
+
+```json
+{
+  "endpoint": "http://127.0.0.1:4318",
+  "serviceName": "runtime",
+  "headers": {"Authorization": {"env": "OTLP_AUTHORIZATION"}},
+  "resourceAttributes": {"deployment.environment": "local"},
+  "timeoutMs": 2000
+}
+```
+
+```sh
+afk plugin configure observability.otlp --builtin --file observability.json
+```
+
+`serviceName` 可省略；`resourceAttributes` 的值只能是 string、number 或 boolean。
+每个 header 值必须使用 `{"env":"OTLP_AUTHORIZATION"}` 这样的环境引用，
+或 `{"provider":"credential.enterprise","name":"otlp-authorization"}`
+这样的凭据引用。引用的 secret 应是完整 header 值，禁止直接配置原始字符串。
+无认证的本地 collector 可省略 `headers`。`timeoutMs` 默认 2000，上限 300000，
+但每条审计记录的全部导出共用宿主 5000 ms 期限。
+
+事件镜像仅在本地持久追加成功后导出；`EventStoreProvider` 接收已持久化事件，
+不能替代本地审计权威。每条审计记录使用独立 span，并带运行和工作项 trace 属性。
+Tracing 使用 `startSpan`、`addEvent`、`endSpan`，为兼容旧 Provider，`endSpan` 可选。
+`TraceSpanOptions` 支持标量 attributes，`TraceContext` 支持可选 `parentSpanId`。
+`MetricSample.kind` 可选 `counter`、`gauge` 或 `histogram`；事件计数使用低基数属性，
+`run.event_persistence_ms` 以 histogram 记录持久化延迟。运行和工作项标识只放在
+trace 中，不作 metric label；属性不得携带秘密或证据正文。
+
+记录审计事件的方法返回前，宿主在共用期限内等待导出完成，到期中止在途请求并跳过
+剩余导出；专用注册只启用对应信号。资源清理由现有
+插件 Runtime dispose 负责，避免 CLI 退出遗失 fire-and-forget 导出。导出异常和超时
+与执行隔离，诊断不记录 secret 值或远端错误响应正文；本地审计失败仍是致命错误。
+导出为尽力交付，不代表已通过云账户端到端验证。`EvidenceStoreProvider` /
+`observe.evidence` 接口已存在，但外部证据上传尚未自动接入审计记录流程。
 
 ## 标准 manifest 与 API v1
 

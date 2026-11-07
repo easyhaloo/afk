@@ -21,8 +21,7 @@ import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgent
 import { getWorkflowConfig, repositoryExecutionDefaults, type WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
-import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
-import { RunObserver } from '../../observability/run-observer.js';
+import { createPluginRunObserver } from '../plugins/observability.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
 import { parseExecutionManifest, readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
 import { executionManifestPath, executionWorkspacePath } from '../../infrastructure/workspace.js';
@@ -377,7 +376,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
 async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies, context: ObservationContext): Promise<ExecuteWorkItemResult> {
   const workItemId = parseWorkItemId(context.workItemId).id;
   const executionId = context.runId;
-  const observer = dependencies.recordAudit ? undefined : new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) });
+  const observer = dependencies.recordAudit ? undefined : createPluginRunObserver(dependencies.plugins);
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => { await recordAudit(context, data); };
   const manifest = await resolveManifest(input, dependencies);
@@ -430,7 +429,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
           await record('implementing');
           const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
-            new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createRunObserver() })))(providers, config, request);
+            new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createPluginRunObserver(dependencies.plugins) })))(providers, config, request);
           const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
             executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
             observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
@@ -623,7 +622,8 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     if (change.state !== 'open' && change.state !== 'merged') throw new Error('provider change request is closed without merge');
     if (item.state === 'done' && change.state !== 'merged') throw new Error('backlog is done without a merged provider change request');
     await providers.changes.verifyIssueAssociation(change, workItemId);
-    const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => new RunObserver({ events: store }).record(context, data));
+    const observer = dependencies.recordAudit ? undefined : createPluginRunObserver(dependencies.plugins);
+    const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => observer!.record(context, data));
     const context: ObservationContext = {
       traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
       attempt: 1, actor: { kind: 'system', id: 'merge-reconciliation' },

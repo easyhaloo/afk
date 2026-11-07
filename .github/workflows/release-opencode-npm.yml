@@ -2,8 +2,13 @@ name: Release OpenCode npm package
 
 on:
   push:
-    tags:
-      - 'opencode-v*'
+    branches: [main]
+    paths:
+      - 'plugin.json'
+      - '.opencode-pkg/**'
+      - 'skills/**'
+      - 'scripts/build-opencode-pkg.mjs'
+      - '.github/workflows/release-opencode-npm.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,30 +25,47 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22.16.0
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Sync bundled skills into the package
+      # plugin.json is the single version source of truth. This step syncs it
+      # into .opencode-pkg/package.json (and refreshes the bundled skills), so
+      # the version check below always reads the freshly-aligned candidate.
+      - name: Build package (sync skills + version from plugin.json)
         shell: bash
         run: node scripts/build-opencode-pkg.mjs
 
-      - name: Check package version matches tag (when triggered by tag)
-        if: github.ref_type == 'tag'
+      - name: Decide whether to publish
+        id: version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('.opencode-pkg/package.json', 'utf8')).version)")"
-          expected="opencode-v${version}"
-          if [[ "${GITHUB_REF_NAME}" != "${expected}" ]]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${version} (expected tag ${expected})"
-            exit 1
+          candidate="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('.opencode-pkg/package.json', 'utf8')).version)")"
+          # Ask npm what's already published. No result (package or version
+          # missing) means "never published" -> publish. Auth comes from the
+          # setup-node registry-url + NODE_AUTH_TOKEN above.
+          published="$(npm view '@easyhaloo/afk-opencode' version --registry=https://registry.npmjs.org 2>/dev/null || true)"
+          if [[ -z "${published}" ]]; then
+            echo "No published version on npm -> will publish ${candidate}"
+            publish=true
+          elif [[ "${published}" == "${candidate}" ]]; then
+            echo "Version ${candidate} already on npm -> nothing to publish"
+            publish=false
+          else
+            echo "plugin.json ${candidate} != published ${published} -> will publish ${candidate}"
+            publish=true
           fi
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "published=${published}" >> "${GITHUB_OUTPUT}"
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
 
       - name: Publish @easyhaloo/afk-opencode
+        if: steps.version.outputs.publish == 'true'
         shell: bash
         working-directory: .opencode-pkg
         env:

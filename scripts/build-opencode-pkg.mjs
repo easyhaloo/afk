@@ -13,7 +13,7 @@
  * - Pure Node, zero dependencies.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,22 @@ const SKILL_MANIFEST = "SKILL.md";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const srcSkills = join(repoRoot, "skills");
 const destSkills = join(repoRoot, ".opencode-pkg", "skills");
+const pkgManifest = join(repoRoot, ".opencode-pkg", "package.json");
+const pluginManifest = join(repoRoot, "plugin.json");
+
+// `plugin.json` is the single source of truth for the published version. Keep
+// the standalone npm package's version in lockstep so a maintainer only ever
+// bumps one place. Publishing is still gated on "is this version already on
+// npm?" in the release workflow, so an unchanged version is a no-op.
+if (existsSync(pkgManifest) && existsSync(pluginManifest)) {
+  const pluginVersion = JSON.parse(readFileSync(pluginManifest, "utf8")).version;
+  const pkg = JSON.parse(readFileSync(pkgManifest, "utf8"));
+  if (pluginVersion && pkg.version !== pluginVersion) {
+    pkg.version = pluginVersion;
+    writeFileSync(pkgManifest, JSON.stringify(pkg, null, 2) + "\n");
+    console.log(`[build-opencode-pkg] version -> ${pluginVersion} (from plugin.json)`);
+  }
+}
 
 if (!existsSync(srcSkills)) {
   console.error(`[build-opencode-pkg] source skills dir not found: ${srcSkills}`);

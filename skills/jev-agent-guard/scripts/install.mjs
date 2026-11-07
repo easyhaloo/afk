@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { hasOwnHook, mergeHookConfig, opencodePluginSource, removeHookConfig, supportsOpenCodePlugin } from './hosts.mjs';
+import { hasOwnHook, mergeHookConfig, opencodePluginSource, opencodePluginSourceV2, removeHookConfig, supportsOpenCodePlugin, supportsOpenCodeV2 } from './hosts.mjs';
 import { resolveHostPaths, resolveRuntimeRoot } from './paths.mjs';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -53,13 +53,16 @@ function hostChanges() {
     const file = locations[host];
     if (host === 'opencode') {
       const version = spawnSync('opencode', ['--version'], { encoding: 'utf8', timeout: 4000 });
-      if (!version.error && (version.status !== 0 || !supportsOpenCodePlugin(version.stdout))) {
+      const v2 = !version.error && supportsOpenCodeV2(version.stdout);
+      const supported = v2 || supportsOpenCodePlugin(version.stdout);
+      if (!version.error && !supported) {
         throw new Error(`Unsupported OpenCode plugin API version: ${version.stdout.trim() || version.stderr.trim()}`);
       }
       if (fs.existsSync(file) && !fs.readFileSync(file, 'utf8').includes('JevAgentGuard')) {
         throw new Error(`Refusing to replace an unrelated plugin: ${file}`);
       }
-      return { file, content: opencodePluginSource(path.join(runtime, 'scripts', 'adapters', 'opencode.mjs')) };
+      const adapter = path.join(runtime, 'scripts', 'adapters', v2 ? 'opencode-v2.mjs' : 'opencode.mjs');
+      return { file, content: v2 ? opencodePluginSourceV2(adapter) : opencodePluginSource(adapter) };
     }
     const config = mergeHookConfig(readJson(file), host, event => commandFor(host, event));
     return { file, content: `${JSON.stringify(config, null, 2)}\n` };

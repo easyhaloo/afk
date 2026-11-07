@@ -10,6 +10,7 @@
   },
   "files": [
     "plugin.mjs",
+    "install-skills.mjs",
     "postinstall.mjs",
     "README.md",
     "skills"

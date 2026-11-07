@@ -1,6 +1,7 @@
 import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSummary } from "./execution-contract.js";
 import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
+import type { DesktopPluginApi } from "./plugin-contract.js";
 
 export type DesktopUpdateStatus = { state: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; message?: string; };
 
@@ -188,6 +189,7 @@ export type ExecutionAttachInput = {
 };
 
 export type DesktopApi = {
+  plugins: DesktopPluginApi;
   update: { getStatus: () => Promise<DesktopUpdateStatus>; check: () => Promise<DesktopUpdateStatus>; download: () => Promise<DesktopUpdateStatus>; install: () => Promise<boolean>; onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void; };
   copyText: (text: string) => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
@@ -259,6 +261,11 @@ export type DesktopApi = {
 };
 
 export const IPC_CHANNELS = {
+  pluginsList: "afk:plugins-list",
+  pluginsInstall: "afk:plugins-install",
+  pluginsSetEnabled: "afk:plugins-set-enabled",
+  pluginsRemove: "afk:plugins-remove",
+  pluginsConfigure: "afk:plugins-configure",
   updateStatus: "afk:update-status",
   updateGetStatus: "afk:update-get-status",
   updateCheck: "afk:update-check",

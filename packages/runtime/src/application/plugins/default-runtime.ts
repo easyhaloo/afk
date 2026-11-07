@@ -3,16 +3,7 @@ import { constants, promises as fs } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { WorktreeManager } from '../../infrastructure/git/worktree.js';
-import {
-  CodeContextProvider, CompliancePolicyProvider, DesktopNotificationProvider,
-  LicensePolicyProvider, MultiRepositoryProvider, ProjectMemoryProvider,
-  RetrievalProvider, SecretScanPolicyProvider, SystemKeychainProvider, TestReportProvider,
-} from '../../infrastructure/providers/index.js';
-import { createHostPlugins } from './builtins-host.js';
-import { createJumpserverPlugin } from './builtins.js';
-import { createBuiltinAgentPlugins, createBuiltinSandboxPlugins, createBuiltinVerificationPlugins } from './builtin-providers.js';
-import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
+import { capabilitySelectionSchema as selectionSchema, createDefaultBuiltinProviderPlugins } from './builtin-manifests.js';
 import { loadInstalledPlugins } from './loader.js';
 import { PluginRuntime } from './runtime.js';
 import { invokeCapability } from './operations.js';
@@ -23,12 +14,6 @@ import type { ContextFragment } from '../../plugin-sdk/capabilities.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 
 const identifier = z.string().min(1);
-const selectionSchema = z.object({
-  policies: z.array(z.object({ provider: identifier, input: z.object({ action: identifier, context: z.record(z.union([z.string(), z.number(), z.boolean()])).optional() }).strict() }).strict()).default([]),
-  contexts: z.array(z.object({ provider: identifier, query: z.object({ scope: identifier, prompt: z.string(), limit: z.number().int().positive().optional() }).strict() }).strict()).default([]),
-  artifacts: z.array(z.object({ provider: identifier, path: identifier, name: identifier, mediaType: identifier }).strict()).default([]),
-  notifications: z.array(z.object({ provider: identifier, message: z.object({ title: identifier, body: z.string(), channel: z.string().optional(), urgency: z.enum(['low', 'normal', 'high']).optional() }).strict() }).strict()).default([]),
-}).strict();
 
 export interface DefaultPluginRuntimeOptions {
   readonly homeDir?: string;
@@ -79,47 +64,39 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
         });
       },
     },
-    createJumpserverPlugin(), ...createHostPlugins(), ...createBuiltinAgentPlugins(),
-    ...createBuiltinSandboxPlugins({ worktreeManager: new WorktreeManager(workspaceRoot) }),
-    ...createBuiltinVerificationPlugins(),
-    ...createBuiltinCapabilityPlugins({
-      notifications: [new DesktopNotificationProvider()],
-      contexts: [
-        new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
-        new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') }),
-      ],
-      credentials: [new SystemKeychainProvider()],
-      artifacts: [new TestReportProvider({ root: join(homeDir, '.afk', 'artifacts') })],
-      repositories: [new MultiRepositoryProvider({ repositories: [] })],
-      policies: [
-        new SecretScanPolicyProvider({ root: workspaceRoot }),
-        new LicensePolicyProvider({ allowlist: ['mit', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', 'isc'] }),
-        new CompliancePolicyProvider({ rules: [] }),
-      ],
-    }),
+    ...createDefaultBuiltinProviderPlugins(homeDir, workspaceRoot),
   ];
   const overrides = new Set(configuration.plugins.filter(entry => entry.builtin && entry.config !== undefined).map(entry => entry.id));
   const plugins = builtins.filter(plugin => !overrides.has(plugin.manifest.id));
+  const configured: PluginConfiguration['plugins'] = [];
   for (const entry of configuration.plugins) {
     if (!entry.builtin || entry.enabled === false || entry.config === undefined) continue;
     try {
       if (entry.id.startsWith('trigger.') && options.activateTriggers && (typeof entry.action !== 'string' || !entry.action.trim())) throw new Error('Trigger action must be configured before activating triggers');
-      plugins.push(...await createConfiguredPlugins({
-        configurations: [entry], homeDir, workspaceRoot, activateTriggers: options.activateTriggers,
-        onTrigger: async event => {
-          if (typeof entry.action !== 'string') throw new Error('Trigger action is not configured');
-          try { await runtime.dispatchSystemAction(entry.action, event.trigger.input ?? event.payload ?? event.trigger.payload ?? {}); }
-          catch {
-            runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'trigger.action-failed', message: 'Configured trigger action failed' });
-            options.warn?.(`Trigger action failed for ${entry.id}`);
-            throw new Error('Configured trigger action failed');
-          }
-        },
-      }));
+      await createConfiguredPlugins({ configurations: [entry], homeDir, workspaceRoot, onTrigger: async () => {} });
+      configured.push(entry);
     } catch (error) {
       invalidSettings.push(`Plugin ${entry.id} could not be configured`);
       runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'config.provider-invalid', message: error instanceof Error ? error.message : 'Invalid provider settings' });
     }
+  }
+  try {
+    plugins.push(...await createConfiguredPlugins({
+      configurations: configured, homeDir, workspaceRoot, activateTriggers: options.activateTriggers,
+      onTrigger: async event => {
+        const entry = configured.find(candidate => candidate.id === event.pluginId);
+        if (typeof entry?.action !== 'string') throw new Error('Trigger action is not configured');
+        try { await runtime.dispatchSystemAction(entry.action, event.trigger.input ?? event.payload ?? event.trigger.payload ?? {}); }
+        catch {
+          runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'trigger.action-failed', message: 'Configured trigger action failed' });
+          options.warn?.(`Trigger action failed for ${entry.id}`);
+          throw new Error('Configured trigger action failed');
+        }
+      },
+    }));
+  } catch (error) {
+    invalidSettings.push('Configured plugin dependencies could not be resolved');
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.provider-invalid', message: error instanceof Error ? error.message : 'Invalid provider dependencies' });
   }
   if (configuration.integrations !== undefined) {
     const parsed = selectionSchema.safeParse(configuration.integrations);

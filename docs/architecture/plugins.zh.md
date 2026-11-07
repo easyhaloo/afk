@@ -81,10 +81,10 @@ dispose 自己的 fallback。
 | Tracker / backlog · `tracker.provider`、`tracker.issue`、`backlog.provider` | GitHub/GitLab 源码托管 tracker/backlog；独立 Linear、Jira issue 适配器 | GitHub/GitLab token 与仓库/项目；Linear token + team ID + API URL；Jira token + project key + API URL，可选 email | Configured GitHub/GitLab 注册 tracker 与 backlog；shared assembly 按 platform、project 和适用的 host 匹配 tracker，再构造受管 Provider bundle。多项匹配报错，无匹配沿用既有 tracker 工厂。Linear/Jira 仍是独立 `tracker.issue` 适配器，不提供仓库型 backlog/变更请求身份。 |
 | Host · `host.connection` | JumpServer、SSH、AWS SSM、Kubernetes Exec | `jms` 登录；SSH key/agent/config；AWS CLI 凭据/profile + SSM 权限；`kubectl` context/kubeconfig + exec RBAC | `HostConnectionPort` → Application 主机用例 → `afk host ls/exec`；Desktop 可复用共享适配器。需要真实目标才能发现或远程执行。 |
 | Verification · `verification.provider` | Test runner、静态扫描、浏览器检查 | 已安装的 test/lint/browser 工具，项目需要时另供服务凭据 | `verify` 在目标工作区执行 argv；默认 `npm test`、`npm run lint`、`playwright test`，是命令适配器，不内置分析引擎。 |
-| Notification · `notification.provider` | 飞书、Slack、邮件、桌面通知 | 飞书/Slack webhook URL；邮件需要已配置的 `sendmail` 和邮件传输；桌面需要 OS 通知工具 | `notify`；HTTP 适配器默认使用 global fetch，可选注入 transport；receipt 报告真实投递结果，桌面依赖具体平台工具。 |
+| Notification · `notification.provider` | 飞书、Slack、邮件、Gmail、桌面通知 | 飞书/Slack webhook URL；邮件需要已配置的 `sendmail` 和邮件传输；Gmail 需要 Gmail API 和 Google 用户 OAuth；桌面需要 OS 通知工具 | `notify`；HTTP 适配器默认使用 global fetch，可选注入 transport；Gmail 默认收件人为授权账号自身；receipt 报告真实投递结果，桌面依赖具体平台工具。 |
 | Trigger · `trigger.provider` | HMAC webhook、Git push、issue event、间隔定时器 | Webhook 共享 secret；负责接收并投递事件的宿主；本地 timer 无需外部账户 | `register/unregister`；`plugin listen` 提供常驻 HTTP 宿主并激活配置 timer/action。适配器自身不启动 listener、Git watcher 或持久 cron；schedule 是正整数毫秒。 |
 | Context / memory · `context.provider` | 代码上下文、知识库、检索、项目记忆 | 可读的工作区/文件；知识库 HTTP endpoint，认证由其 transport 提供 | `gather`；代码读取本地内容，检索使用传入文档，记忆读取本地文件，知识库要求兼容 JSON fragment 协议；不自动建立 embedding/index 服务。 |
-| Credential / auth · `credential.provider` | 系统钥匙串、OAuth client credentials、OIDC assertion/exchange、企业环境凭据 | Keychain 权限；OAuth endpoint/client ID/secret；OIDC issuer/client/assertion；环境变量或显式值 | `resolve`；scope 依能力声明；企业适配器读取配置值/环境变量，不是企业 vault SDK。HTTP 默认使用 global fetch，可选注入 transport；凭据解析仅供 SDK 消费者私下使用。 |
+| Credential / auth · `credential.provider` | 系统钥匙串、Google 用户 OAuth、OAuth client credentials、OIDC assertion/exchange、企业环境凭据 | Keychain 权限；Google Desktop app 客户端 JSON 和浏览器授权；OAuth endpoint/client ID/secret；OIDC issuer/client/assertion；环境变量或显式值 | `resolve`；scope 依能力声明；企业适配器读取配置值/环境变量，不是企业 vault SDK。HTTP 默认使用 global fetch，可选注入 transport；凭据解析仅供 SDK 消费者私下使用。 |
 | Artifact / report · `artifact.provider` | 本地测试报告、证据包 builder、对象存储上传、报告平台上传 | 本地可写路径；预签名/upload URL 或报告 endpoint，可选 bearer token | `put`；上传适配器只声明 write；configured 工厂把证据包 builder 包装为 `ArtifactSink`；对象存储不生成 AWS 签名。 |
 | Repository / workspace · `repository.provider` | 多本地仓库、远程工作区快照、特殊 Git backend | Git 与已配置本地路径；兼容远程 endpoint/token；已安装的特殊 backend 可执行文件 | `snapshot`；当前适配器声明 read/snapshot，不提供 clone/push；远程工作区和特殊 backend 分别要求其 HTTP/JSON 协议。 |
 | Security / policy · `policy.provider` | Secret scan、license policy、compliance policy | 工作区文件、显式许可证白名单和合规规则；本地检查无需账户 | 已选策略是 required 受管 lifecycle 闸门，覆盖引擎 `before-publish` 与 QA 发布检查；拒绝或评估异常阻止发布。直接调用 SDK 时由调用方接入 lifecycle 或自行评估并执行策略决定。本地模式、许可证与规则检查不等于外部合规服务。 |
@@ -199,6 +199,19 @@ afk plugin remove context.project-note
 `remove` 禁用并删除已安装包，保留配置。Enable/disable/configure 在下次构造 Runtime 时
 生效，不会热更新正在执行的 Worker。
 
+发布安装或保存启用、禁用、配置、卸载操作前，管理器根据内置与已安装插件的静态
+manifest 元数据检查变更后的启用集合，校验适用配置，并判断变更是否移除了其他启用
+插件必需的能力。此守卫不 import 或执行已安装插件，不运行其 factory、activate、
+health 或凭据操作；仍校验安装入口的路径边界和摘要。配置 envelope 或安装元数据损坏
+时阻止修改；拒绝升级时保留旧安装。未配置完成的已安装插件不会阻塞无关插件的配置
+或修复；经完整校验的 replacement 可以修复目标入口摘要损坏。
+
+守卫比较变更前后可用的依赖插件，考虑冲突以及配置中精确的凭据引用；其他
+`credential.provider` 不能替代已知的具体注册名。外部插件的注册名无法在不执行代码
+的前提下确认；启用的 configured 消费者引用此类名称时，保守阻止修改潜在的凭据
+所有者。先禁用消费者，再修改该 Provider。激活时仍检查真实 registry；静态守卫
+不证明 Provider 健康、已授权或能够成功激活。
+
 `PluginManager` 用 `~/.afk/plugins/.manager.lock` 串行化修改；本地目录复制时排除
 `.git` 和 `node_modules`，npm spec 则在新的 `.install-*` 暂存目录解析。
 依赖使用 `npm install --ignore-scripts --omit=dev --no-audit --no-fund --legacy-peer-deps`
@@ -239,12 +252,98 @@ Loader 不统一展开环境变量引用：变量名只是普通字符串，只�
 不能实例化未知 Provider。fetch、回调、command executor 等函数不能保存在 YAML，
 必须由工厂创建；支持哪些 ID 和 schema，以该工厂实现为准。
 
+### Desktop 设置
+
+设置页支持选择本地目录或 npm 包安装、启用/禁用、卸载已安装包，以及从本地 JSON
+对象文件替换配置（上限 1 MiB）。安装和配置导入需原生确认，卸载有确认对话框。
+内置插件可禁用、不可卸载；卸载保留配置，仅有配置记录的条目须安装后才能重新启用。
+
+主进程经校验后的 IPC 调用共享管理器。Renderer 只收到插件元数据和固定诊断提示，
+不接收已存配置、秘密或插件原始错误。首次 Runtime 检查快照缓存到 Desktop 重启；
+刷新只重读安装/配置状态，不代表各 Worker 的实时状态。检查会创建真实 Runtime 并
+调用诊断，可能执行受信插件及配置的凭据解析，和静态修改守卫是两个边界。
+
+修改在后续 Runtime 构造和新 Worker 中生效，现有 Worker 保留原 Runtime。
+有跟踪中的 Worker 或仍存活的 starting/running Worker 记录时阻止安装和卸载；
+无法读取或核实 Worker 状态也会阻止这两类文件修改。文件修改期间阻止启动 Worker。
+此入口不挂载 `surface.desktop`，不提供 OAuth 登录 UI，也不代装 Provider 所需工具。
+
+### Gmail OAuth
+
+在 Google Cloud 项目启用 Gmail API、配置 OAuth consent screen，并下载应用类型为
+**Desktop app** 的 OAuth 客户端 JSON。External 应用处于 **Testing** 时，将授权的
+Google 账号加入 test users。私密保存客户端文件；命令只传文件路径，不传文件内容：
+
+```sh
+afk plugin auth login google --client ./google-desktop-client.json
+afk plugin auth status google
+afk plugin auth logout google
+```
+
+登录自动打开浏览器，通过本机 loopback 回调接收授权结果。保持 CLI 进程运行，
+在 10 分钟内完成授权；超时后重新执行登录并使用新打开的页面，旧回调地址不再有效。
+在浏览器选择 Google
+账号，CLI 不要求输入邮箱。请求 scope 为 `https://www.googleapis.com/auth/gmail.send`、
+`openid` 和 `email`：发信加账户身份识别，不包含读取邮箱权限。SIGINT/SIGTERM 取消
+登录并关闭回调服务器。OAuth 与凭据保存属于 Runtime 的公开
+`GoogleOAuthCredentialProvider` SDK API；CLI 只解析参数、传递取消信号、配置 Provider
+和输出安全结果。
+
+登录成功后，`PluginManager.configure` 以 `{}` 保存 builtin `credential.google-oauth`，
+仅在尚无 Gmail 条目时以 `{}` 添加 builtin `notification.gmail`。已有 Gmail 配置、
+收件人与启用状态保持原样。认证失败不写入配置，登录本身不发送测试邮件。
+
+凭据使用 macOS Keychain 或 Linux keychain 服务保存。Windows 明确不支持，不提供
+令牌文件兜底。CLI 和后续通知进程需要能够访问 Keychain。
+账户变更共用进程内队列与跨进程排他锁，锁覆盖完整的浏览器登录流程；另一进程
+会收到繁忙错误，不会覆盖进行中的登录、刷新或退出。锁文件只记录所属进程 PID；
+进程异常退出后，确认所属进程已停止再清理残留的 `~/.afk/auth/google-oauth.lock`。
+构建后运行 `node scripts/check-google-oauth-keychain.mjs`，可用独立合成记录验证
+真实原生 Keychain 的创建、更新、读取和删除。
+Google OAuth 与 Gmail HTTP 请求遵循 `HTTP_PROXY`/`HTTPS_PROXY`、`NO_PROXY`
+及对应的小写变量；macOS 未显式配置代理环境变量时使用系统 HTTP/HTTPS 代理。
+回环地址直连；代理发现按进程缓存，修改代理后需重启客户端。仅 PAC 或 SOCKS
+的环境需要显式设置 HTTP 代理。认证失败输出 `token.network`、`token.scope`、
+`account.storage` 等安全阶段码，不打印 Google 响应正文或凭据。
+
+Gmail 默认收件人为授权账号自身。要覆盖默认收件人，将
+`{"to":"alerts@example.com"}` 写入 `gmail.settings.json`，再执行：
+
+```sh
+afk plugin configure notification.gmail --builtin --file ./gmail.settings.json
+```
+
+显式配置的 `to` 会覆盖后续通知的默认收件人，可选的 `channel` 用于选择通知通道。
+`status` 不需要客户端文件，只输出本地 Keychain 记录的 `connected` 及可选的
+`email`、`expiresAt`，不输出令牌，不联系 Google 检查会话或令牌有效性；
+`connected: true` 本身不证明能成功发信。`logout` 同样不需要客户端文件：Runtime
+先撤销 Google 授权，撤销成功后才移除 Keychain 记录；撤销失败保留记录供重试。
+退出保留插件配置，不会禁用其他已配置 Provider。
+
+External OAuth 应用保持 Testing 时，包含此 Gmail scope 的 refresh token 会在
+**7 天**后过期，需要重新授权。发布到 Production 及 Google 要求的验证属于独立配置
+步骤。参考 Google 的 [Desktop OAuth 流程](https://developers.google.com/identity/protocols/oauth2/native-app)
+和 [refresh token 过期规则](https://developers.google.com/identity/protocols/oauth2#expiration)。
+CLI 测试使用注入的认证对象及隔离配置，不授权真实 Google 账户，也未发送真实 Gmail 邮件。
+2026 年 11 月 7 日另行完成了真实人工验收：浏览器授权、自动识别账号、原生 Keychain
+保存、CLI 通知调用、Gmail API 接受以及用户确认实际收件。本次系统代理关闭，
+发信通过显式 HTTP 代理完成。另行通过注入时钟触发首次过期检查，完成真实 Google
+令牌刷新并用真实时钟保存新有效期；账号保持一致，未再次发信。撤销授权尚未实测，
+桌面 Google 认证按钮尚未接入。
+连接 Gmail 不会自动配置工作流通知；需要在工作流 integrations 中另行选择通知 Provider。
+
+Gmail 失败区分网络/代理不可用、HTTP 401 认证失效、HTTP 403 API/权限拒绝、
+HTTP 429 限流，使用固定安全提示；未知错误保留通用提示，不输出响应正文、令牌或
+原生错误。失败或结果不确定的投递不会自动重试。
+
 ### Configured builtin 字段
 
 `createConfiguredPlugins` 识别下列 ID，严格 schema 拒绝未知 ID 和字段。
 `?` 表示可选；注明非空的数组必须有条目。相对路径基于 `workspaceRoot`，
-`~/` 基于所传 home directory。所有 secret 字段使用 `{env: VARIABLE_NAME}`；
-工厂拒绝缺失、空值和含控制字符的值，并在自身错误、health 和诊断中脱敏已解析的 secret。
+`~/` 基于所传 home directory。所有 secret 字段接受 `{env: VARIABLE_NAME}` 或
+`{provider: REGISTERED_NAME, name: CREDENTIAL_NAME, scope?: REQUESTED_SCOPE}`。
+Provider 使用精确 registry 名，例如 `credential.enterprise`，注册本身不选择凭据来源。
+工厂拒绝缺失、空值和含控制字符的 secret，在自身错误、health 和诊断中脱敏已解析值。
 Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的函数。
 
 | 插件 ID | 接受的配置字段 |
@@ -263,6 +362,7 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `verification.test-runner`、`verification.static-scan`、`verification.browser-check` | 非空 argv `command`、`timeoutMs?` |
 | `notification.feishu`、`notification.slack` | 解析为 HTTP URL 的 secret `webhook`、`channel?` |
 | `notification.email` | 邮箱 `from`、`to`；`sendmailPath?`、`channel?` |
+| `notification.gmail` | `{}` 默认发给授权 Google 账号自身；邮箱 `to?` 可覆盖收件人，另可选 `channel?` |
 | `notification.desktop` | `platform?`（`darwin`、`linux`、`win32`）、`channel?` |
 | `trigger.webhook` | Secret `secret`、非空 `triggers[{id,kind: webhook,payload?,input?}]`；`payload` 过滤事件，`input` 为静态 action 入参 |
 | `trigger.git-push`、`trigger.issue-event` | 同样的 webhook-kind `triggers`；Git push 另接受 `includeDeleted?` |
@@ -270,6 +370,7 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `context.code`、`context.knowledge-base`、`context.project-memory` | 分别为 `root`、`endpoint`、`file` |
 | `context.retrieval` | 非空 `documents[{origin,content}]` |
 | `credential.system-keychain` | `service`、`command?` |
+| `credential.google-oauth` | `{}` 使用 `afk plugin auth login google --client <path>` 保存的 Google 凭据 |
 | `credential.oauth` | HTTPS `tokenEndpoint`、`clientId`、secret `clientSecret`、`authMethod?`（`client_secret_basic`/`client_secret_post`）、`timeoutMs?` |
 | `credential.oidc` | HTTPS `issuer`、`clientId`、secret `assertion`、`tokenEndpoint?`、`timeoutMs?`；可选 `exchange:{subjectToken,subjectTokenType,audience?,resource?}`，其中 `subjectToken` 是 secret |
 | `credential.enterprise` | 非空 `values` 映射，每个值为 secret 引用 |
@@ -281,9 +382,21 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `policy.license-policy` | 非空 `allowlist`、非空 `licenses?` |
 | `policy.compliance-policy` | 非空 `rules[{id,effect,actions?,when?,reason?}]`、`defaultEffect?`；effect 为 `allow`/`deny`，actions 非空，`when` 为 scalar 相等条件映射 |
 
-显式配置会替换同 ID 默认插件。`--builtin` 保存前校验真实工厂，不启动 timer。
-Secret 在构造时解析，环境值变更后需重启进程。注册 credential Provider 不会自动
-把它绑定到其他工厂的 `{env: ...}` 字段。
+显式配置会替换同 ID 默认插件。`--builtin` 保存前校验配置，不解析 credential
+Provider 引用，不进行认证/网络调用，也不启动 timer；环境引用在构造时校验并取值。
+
+Credential 引用先校验形状。激活时从现有 Runtime registry 查找精确 Provider，
+对每个引用字段 await 一次 `resolve({name, scope?})`，校验真实值后才注册消费者。
+Webhook URL 校验在异步解析完成后执行。Provider 缺失、返回值无效或解析异常会使
+激活失败，不发布消费者，不暴露认证原始错误。通用引用注入的值保留于本次激活，
+普通操作不会重新解析或自动刷新；重新激活会重新取值。Gmail 保留自身 OAuth 刷新行为。
+
+共享组合根批量构造有效的 configured builtin，按具体凭据引用将 Provider 排在
+消费者前，支持凭据 Provider 之间的引用链；自引用与循环引用在解析前拒绝。
+凭据 Provider 自身不会为其引用增加同能力的 `requires` 边。共享 loader 同时等待
+configured 消费者引用的精确凭据 Provider，包括已安装插件注册的 Provider。
+缺失或循环依赖报告 `load.dependencies`；实际解析失败不重试。
+环境值或凭据来源变化后需新建 Runtime，现有消费者不会自动刷新。
 
 ## 加载、依赖与 dispose
 
@@ -313,9 +426,10 @@ Runtime 允许同一能力下存在多个具名 Provider，但拒绝重复的 `(
 具体 Provider 健康。
 
 依赖插件在 `activate` 中可用 `context.getProvider<T>(capability, name)` 或
-`context.getCredentialProvider(name)` 取得已激活的 Provider。需要凭据时声明
-`requires: ['credential.provider']`，检查具名 Provider 存在，再私下调用其 `resolve`。
-返回的 secret 不应进入 action 结果、诊断或日志。SDK getter 不会把凭据读取加入
+`context.getCredentialProvider(name)` 取得已激活的 Provider。消费者可声明
+`requires: ['credential.provider']` 检查能力存在，但仍须检查精确具名 Provider，
+私下 await 其 `resolve`。能力要求本身不能排序凭据 Provider 之间的引用；configured
+builtin 使用上文的具体引用排序。返回的 secret 不应进入 action 结果、诊断或日志。SDK getter 不会把凭据读取加入
 CLI 操作白名单；具体 Provider 仍由消费者显式选择。
 
 事务边界从 `activate` 开始，早于它的 import 和 factory 不在其中。
@@ -363,6 +477,7 @@ modules，命令或 Worker 结束时 dispose 自己拥有的实例。整体图�
 | System step input、`capability.invoke`、required 策略 hook | 已实现；负结果使 step 失败，策略在 Agent 前、Agent 后及发布前检查 |
 | Managed 执行、QA、loop、schedule、run 和 Desktop Worker | 已实现；Runtime 与 registry 传入实现阶段和 QA，由拥有者 dispose |
 | QA lifecycle 与发布策略 | 验证前运行 required init 和 before-agent，context 使用文件指针；QA 通过后运行 after-agent 制品/通知 hook；branch push 与变更请求发布前单独执行 `before-publish` 检查 |
+| Desktop 插件管理 | 设置页调用共享管理器完成本地/npm 安装、启用/禁用、卸载及 JSON 配置导入；缓存检查快照、未来 Worker 状态与静态依赖守卫分别处理。 |
 | Desktop 外部 Agent 选择 | 已实现；菜单使用已注册 Provider，保存时拒绝未知默认/节点 Provider |
 | Trigger 到受管 workflow | 已实现；descriptor 静态 `input` 派发 `work-item.execute`，使用相同 Runtime、正常资格与 lease 检查，不自动 merge |
 
@@ -549,8 +664,9 @@ limit 或固定指针描述成已有总预算限制。该文件是执行上下�
 
 ### Secret 引用和 Trigger 生命周期
 
-配置中的 secret 使用环境引用对象，例如 `{"env":"PROVIDER_TOKEN"}`。
-裸变量名字符串或 `${VAR}` 表达式不是该引用语法。
+配置中的 secret 使用环境引用对象，例如 `{"env":"PROVIDER_TOKEN"}`，或 credential
+引用 `{"provider":"credential.enterprise","name":"deployment"}`，后者可带 `scope`。
+裸变量名、明文 secret 或 `${VAR}` 表达式不是该引用语法。
 真实 secret 字段名和 Provider 配置范围由 `configured.ts` 定义，完整示例应逐项对照该
 实现，不能猜测 constructor 到 YAML 的映射。
 

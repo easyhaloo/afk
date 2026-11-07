@@ -26,6 +26,7 @@ import {
   WebhookTriggerProvider, ScheduleTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider,
   CodeContextProvider, KnowledgeBaseProvider, RetrievalProvider, ProjectMemoryProvider,
   SystemKeychainProvider, OAuthCredentialProvider, OidcCredentialProvider, EnterpriseCredentialProvider,
+  GoogleOAuthCredentialProvider, GmailNotificationProvider, OAuthKeychainStore,
   TestReportProvider, EvidenceBundleProvider, ObjectStorageProvider, ReportPlatformProvider,
   MultiRepositoryProvider, RemoteWorkspaceProvider, SpecialGitBackendProvider,
   SecretScanPolicyProvider, LicensePolicyProvider, CompliancePolicyProvider,
@@ -62,10 +63,23 @@ type ManagedProvider = object & {
   dispose?(): void | Promise<void>;
 };
 
-type PreparedPlugin = { readonly plugin: Plugin; readonly provider: ManagedProvider; readonly triggers?: readonly TriggerDescriptor[] };
+type PreparedPlugin = {
+  readonly plugin: Plugin;
+  readonly provider: ManagedProvider;
+  readonly triggers?: readonly TriggerDescriptor[];
+  readonly dependencies?: readonly string[];
+  readonly prepare?: (context: PluginSetupContext) => Promise<PreparedPlugin>;
+};
 type Definition = (config: unknown) => PreparedPlugin;
 
+const configuredCredentialDependencies = new WeakMap<object, readonly string[]>();
+
+export function getConfiguredCredentialDependencies(plugin: object): readonly string[] {
+  return configuredCredentialDependencies.get(plugin) ?? [];
+}
+
 const text = z.string().trim().min(1).refine(value => !/[\0\r\n]/.test(value), 'must not contain control characters');
+const credentialReference = z.object({ provider: z.string().regex(/^[a-z][a-z0-9.-]*$/), name: text, scope: text.optional() }).strict();
 const strings = z.array(text).min(1);
 const httpUrl = text.refine(value => {
   try {
@@ -93,35 +107,71 @@ const scheduleDescriptors = z.array(z.object({
 export async function createConfiguredPlugins(options: ConfiguredPluginsOptions): Promise<Plugin[]> {
   const environment = options.environment ?? process.env;
   const secrets = new Set<string>();
-  const secret = z.object({ env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }).strict().transform((ref, context) => {
+  const environmentSecret = z.object({ env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }).strict().transform((ref, context) => {
     const value = environment[ref.env];
     if (!value?.trim() || /[\0\r\n]/.test(value)) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'secret environment reference is missing, empty or invalid' });
       return z.NEVER;
     }
     secrets.add(value);
+    secrets.add(value.trim());
     return value;
   });
+  const secret = (context?: PluginSetupContext, dependencies?: Set<string>) => z.union([
+    environmentSecret,
+    credentialReference.transform((ref, validation) => {
+      dependencies?.add(ref.provider);
+      if (!context) return 'https://credential.invalid/validation-only';
+      return (async () => {
+        const provider = context.getCredentialProvider(ref.provider);
+        if (!provider) throw new Error('credential provider is not active');
+        let value: string;
+        try { value = (await provider.resolve({ name: ref.name, ...(ref.scope ? { scope: ref.scope } : {}) })).secret; }
+        catch { throw new Error('credential resolution failed'); }
+        if (typeof value === 'string' && value) {
+          secrets.add(value);
+          if (value.trim()) secrets.add(value.trim());
+        }
+        if (typeof value !== 'string' || !value.trim() || /[\0\r\n]/.test(value)) {
+          validation.addIssue({ code: z.ZodIssueCode.custom, message: 'resolved credential is empty or invalid' });
+          return z.NEVER;
+        }
+        return value;
+      })();
+    }),
+  ]);
   const fetch: FetchTransport = (input, init) => (options.fetch ?? globalThis.fetch)(input, init);
   const execute = options.execute ?? executeCommand;
+  const googleCredentials = new GoogleOAuthCredentialProvider({ fetch: options.fetch, store: new OAuthKeychainStore(execute), homeDir: options.homeDir });
   const path = (value: string): string => {
     if (value === '~' || value.startsWith('~/')) return resolve(options.homeDir ?? homedir(), value.slice(2));
     return resolve(options.workspaceRoot ?? process.cwd(), value);
   };
   const redact = (message: string): string => {
-    for (const value of secrets) message = message.split(value).join('[redacted]');
+    for (const value of [...secrets].sort((left, right) => right.length - left.length)) message = message.split(value).join('[redacted]');
     return message;
   };
-  const define = <Schema extends z.ZodTypeAny>(schema: Schema, create: (config: z.output<Schema>) => PreparedPlugin): Definition => config => {
-    const parsed = schema.safeParse(config);
-    if (!parsed.success) {
-      const fields = parsed.error.issues.map(issue => {
-        const reason = issue.code === 'invalid_type' && issue.received === 'undefined' ? 'required' : issue.code === 'custom' ? issue.message : issue.code;
-        return `${issue.path.join('.') || 'config'} (${reason})`;
-      }).join(', ');
-      throw new Error(`invalid configuration fields: ${fields}`);
-    }
-    return create(parsed.data);
+  const define = <Schema extends z.ZodTypeAny>(schema: Schema | ((value: ReturnType<typeof secret>) => Schema), create: (config: z.output<Schema>) => PreparedPlugin): Definition => config => {
+    const dependencies = new Set<string>();
+    const parse = (parsed: z.SafeParseReturnType<unknown, z.output<Schema>>): z.output<Schema> => {
+      if (!parsed.success) {
+        const fields = parsed.error.issues.map(issue => {
+          const reason = issue.code === 'invalid_type' && issue.received === 'undefined' ? 'required' : issue.code === 'custom' ? issue.message : issue.code;
+          return `${issue.path.join('.') || 'config'} (${reason})`;
+        }).join(', ');
+        throw new Error(`invalid configuration fields: ${fields}`);
+      }
+      return parsed.data;
+    };
+    const validationSchema = typeof schema === 'function' ? schema(secret(undefined, dependencies)) : schema;
+    const prepared = create(parse(validationSchema.safeParse(config)));
+    return {
+      ...prepared,
+      dependencies: [...dependencies],
+      prepare: dependencies.size && typeof schema === 'function'
+        ? async context => create(parse(await schema(secret(context)).safeParseAsync(config)))
+        : undefined,
+    };
   };
   const capability = (provider: ManagedProvider, selection: Parameters<typeof createBuiltinCapabilityPlugins>[0]): PreparedPlugin => ({
     provider, plugin: createBuiltinCapabilityPlugins(selection)[0],
@@ -162,7 +212,7 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       hosts: z.array(z.object({ id: text.optional(), alias: text, pod: text, namespace: text.optional(), container: text.optional(), address: text.optional() }).strict()).min(1),
       namespace: text.optional(), context: text.optional(), kubeconfig: text.optional(), binary: text.optional(),
     }).strict(), config => host(createKubernetesExecHostConnection({ ...config, kubeconfig: config.kubeconfig && path(config.kubeconfig), exec: options.hostExec }), 'kubernetes-exec')),
-    'sandbox.remote-container': define(z.discriminatedUnion('transport', [
+    'sandbox.remote-container': define(secret => z.discriminatedUnion('transport', [
       z.object({ transport: z.literal('cli'), command: text, timeoutMs: milliseconds.optional() }).strict(),
       z.object({ transport: z.literal('http'), endpoint: baseUrl, token: secret.optional(), timeoutMs: milliseconds.optional() }).strict(),
     ]), config => {
@@ -172,21 +222,21 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       const provider = new RemoteContainerSandboxProvider(transport);
       return direct(provider, 'sandbox.provider', context => context.registerSandboxProvider(provider.name, provider));
     }),
-    'tracker.github': define(z.object({ repo: text.refine(value => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value), 'must use owner/repository format'), token: secret }).strict(), config => tracker(new GitHubClient({ auth: config.token, repo: config.repo }))),
-    'tracker.gitlab': define(z.object({ url: baseUrl, token: secret, projectId: z.union([text, z.number().int().positive()]) }).strict(), config => tracker(new GitLabClient(config))),
-    'tracker.linear': define(z.object({ baseUrl, token: secret, teamId: text }).strict(), config => {
+    'tracker.github': define(secret => z.object({ repo: text.refine(value => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value), 'must use owner/repository format'), token: secret }).strict(), config => tracker(new GitHubClient({ auth: config.token, repo: config.repo }))),
+    'tracker.gitlab': define(secret => z.object({ url: baseUrl, token: secret, projectId: z.union([text, z.number().int().positive()]) }).strict(), config => tracker(new GitLabClient(config))),
+    'tracker.linear': define(secret => z.object({ baseUrl, token: secret, teamId: text }).strict(), config => {
       const provider = new LinearTrackerProvider({ ...config, fetch });
       return capability(provider, { issueTrackers: [provider] });
     }),
-    'tracker.jira': define(z.object({ baseUrl, token: secret, projectKey: text, email: z.string().email().optional(), issueType: text.optional() }).strict(), config => {
+    'tracker.jira': define(secret => z.object({ baseUrl, token: secret, projectKey: text, email: z.string().email().optional(), issueType: text.optional() }).strict(), config => {
       const provider = new JiraTrackerProvider({ ...config, fetch });
       return capability(provider, { issueTrackers: [provider] });
     }),
-    'notification.feishu': define(z.object({ webhook: secret.pipe(httpUrl), channel: text.optional() }).strict(), config => {
+    'notification.feishu': define(secret => z.object({ webhook: secret.pipe(httpUrl), channel: text.optional() }).strict(), config => {
       const provider = new FeishuNotificationProvider({ ...config, fetch });
       return capability(provider, { notifications: [provider] });
     }),
-    'notification.slack': define(z.object({ webhook: secret.pipe(httpUrl), channel: text.optional() }).strict(), config => {
+    'notification.slack': define(secret => z.object({ webhook: secret.pipe(httpUrl), channel: text.optional() }).strict(), config => {
       const provider = new SlackNotificationProvider({ ...config, fetch });
       return capability(provider, { notifications: [provider] });
     }),
@@ -194,11 +244,15 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       const provider = new EmailNotificationProvider({ ...config, executor: execute });
       return capability(provider, { notifications: [provider] });
     }),
+    'notification.gmail': define(z.object({ to: z.string().email().optional(), channel: text.optional() }).strict(), config => {
+      const provider = new GmailNotificationProvider({ ...config, credentials: googleCredentials, fetch: options.fetch });
+      return capability(provider, { notifications: [provider] });
+    }),
     'notification.desktop': define(z.object({ platform: z.enum(['darwin', 'linux', 'win32']).optional(), channel: text.optional() }).strict(), config => {
       const provider = new DesktopNotificationProvider({ ...config, executor: execute });
       return capability(provider, { notifications: [provider] });
     }),
-    'trigger.webhook': define(z.object({ secret, triggers: webhookDescriptors }).strict(), config => trigger(new WebhookTriggerProvider({ secret: config.secret, onEvent: (event, descriptor) => fire('trigger.webhook', descriptor, event) }), config.triggers)),
+    'trigger.webhook': define(secret => z.object({ secret, triggers: webhookDescriptors }).strict(), config => trigger(new WebhookTriggerProvider({ secret: config.secret, onEvent: (event, descriptor) => fire('trigger.webhook', descriptor, event) }), config.triggers)),
     'trigger.schedule': define(z.object({ triggers: scheduleDescriptors }).strict(), config => trigger(new ScheduleTriggerProvider({ onFire: descriptor => fire('trigger.schedule', descriptor) }), config.triggers)),
     'trigger.git-push': define(z.object({ includeDeleted: z.boolean().optional(), triggers: webhookDescriptors }).strict(), config => trigger(new GitPushTriggerProvider({ includeDeleted: config.includeDeleted, onPush: (payload, descriptor) => fire('trigger.git-push', descriptor, payload) }), config.triggers)),
     'trigger.issue-event': define(z.object({ triggers: webhookDescriptors }).strict(), config => trigger(new IssueEventTriggerProvider({ onIssue: (payload, descriptor) => fire('trigger.issue-event', descriptor, payload) }), config.triggers)),
@@ -222,18 +276,19 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       const provider = new SystemKeychainProvider({ ...config, execute });
       return capability(provider, { credentials: [provider] });
     }),
-    'credential.oauth': define(z.object({ tokenEndpoint: httpsUrl, clientId: text, clientSecret: secret, authMethod: z.enum(['client_secret_basic', 'client_secret_post']).optional(), timeoutMs: milliseconds.optional() }).strict(), config => {
+    'credential.google-oauth': define(z.object({}).strict(), () => capability(googleCredentials, { credentials: [googleCredentials] })),
+    'credential.oauth': define(secret => z.object({ tokenEndpoint: httpsUrl, clientId: text, clientSecret: secret, authMethod: z.enum(['client_secret_basic', 'client_secret_post']).optional(), timeoutMs: milliseconds.optional() }).strict(), config => {
       const provider = new OAuthCredentialProvider({ ...config, fetch });
       return capability(provider, { credentials: [provider] });
     }),
-    'credential.oidc': define(z.object({
+    'credential.oidc': define(secret => z.object({
       issuer: baseUrl.refine(value => new URL(value).protocol === 'https:', 'must use HTTPS'), clientId: text, assertion: secret, tokenEndpoint: httpsUrl.optional(), timeoutMs: milliseconds.optional(),
       exchange: z.object({ subjectToken: secret, subjectTokenType: text, audience: text.optional(), resource: text.optional() }).strict().optional(),
     }).strict(), config => {
       const provider = new OidcCredentialProvider({ ...config, fetch });
       return capability(provider, { credentials: [provider] });
     }),
-    'credential.enterprise': define(z.object({ values: z.record(secret).refine(values => Object.keys(values).length > 0, 'must contain credential references') }).strict(), config => {
+    'credential.enterprise': define(secret => z.object({ values: z.record(secret).refine(values => Object.keys(values).length > 0, 'must contain credential references') }).strict(), config => {
       const provider = new EnterpriseCredentialProvider({ values: config.values, environment: {} });
       return capability(provider, { credentials: [provider] });
     }),
@@ -253,7 +308,7 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       const provider = new ObjectStorageProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),
-    'artifact.report-platform': define(z.object({ endpoint: httpUrl, token: secret.optional() }).strict(), config => {
+    'artifact.report-platform': define(secret => z.object({ endpoint: httpUrl, token: secret.optional() }).strict(), config => {
       const provider = new ReportPlatformProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),
@@ -261,7 +316,7 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       const provider = new MultiRepositoryProvider({ repositories: config.repositories.map(item => ({ ...item, path: path(item.path) })), git: execute });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.remote-workspace': define(z.object({ baseUrl, token: secret.optional() }).strict(), config => {
+    'repository.remote-workspace': define(secret => z.object({ baseUrl, token: secret.optional() }).strict(), config => {
       const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch });
       return capability(provider, { repositories: [provider] });
     }),
@@ -308,7 +363,8 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
     definitions[`agent.${provider.name}`] = define(z.object({}).strict(), () => direct(provider, 'agent.provider', context => context.registerAgentProvider(provider.name, provider)));
   }
   const seen = new Set<string>();
-  return options.configurations.map(configuration => {
+  const dependencies = new Map<string, readonly string[]>();
+  const plugins = options.configurations.map(configuration => {
     const { id } = configuration;
     if (seen.has(id)) throw new Error(`duplicate configured plugin '${id}'`);
     seen.add(id);
@@ -316,21 +372,28 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
     let prepared: PreparedPlugin;
     try { prepared = definitions[id](configuration.config ?? {}); }
     catch (error) { throw new Error(`plugin '${id}': ${redact(error instanceof Error ? error.message : 'invalid configuration')}`); }
-    const { plugin, provider, triggers } = prepared;
+    const { plugin, triggers } = prepared;
+    const prepare = prepared.prepare;
+    dependencies.set(id, prepared.dependencies ?? []);
     if (triggers) {
       if (!options.onTrigger) throw new Error(`plugin '${id}': onTrigger callback is required`);
       if (new Set(triggers.map(item => item.id)).size !== triggers.length) throw new Error(`plugin '${id}': trigger ids must be unique`);
     }
-    return {
+    const configured = {
       ...plugin,
-      manifest: { ...plugin.manifest, id },
+      manifest: { ...plugin.manifest, id, ...(prepared.dependencies?.length && !plugin.manifest.provides.includes('credential.provider') ? { requires: [...new Set([...plugin.manifest.requires ?? [], 'credential.provider'])] } : {}) },
       async activate(context) {
-        await plugin.activate(context);
-        if (options.activateTriggers === true) {
-          for (const descriptor of triggers ?? []) await (provider as TriggerProvider).register(descriptor);
-        }
+        try {
+          if (prepare) prepared = await prepare(context);
+          await prepared.plugin.activate(context);
+          if (options.activateTriggers === true) {
+            for (const descriptor of prepared.triggers ?? []) await (prepared.provider as TriggerProvider).register(descriptor);
+          }
+        } catch (error) { throw new Error(`plugin '${id}': ${redact(error instanceof Error ? error.message : 'activation failed')}`); }
       },
       async health() {
+        if (prepared.prepare) return { status: 'unknown', message: 'Provider is not activated' };
+        const { plugin, provider } = prepared;
         try {
           const health = plugin.health ? await plugin.health() : provider.health ? await provider.health().then(result => ({
             status: result.status === 'ok' ? 'healthy' as const : result.status === 'unavailable' ? 'unhealthy' as const : 'degraded' as const,
@@ -340,6 +403,8 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
         } catch { return { status: 'unhealthy', message: 'Provider health check failed' }; }
       },
       async diagnostics() {
+        if (prepared.prepare) return [];
+        const { plugin, provider } = prepared;
         try {
           const findings = plugin.diagnostics ? await plugin.diagnostics() : (await provider.doctor?.() ?? []).filter(result => !result.ok).map(result => ({
             severity: 'warning' as const, code: `provider.${result.check}`, message: result.detail ?? `Provider check '${result.check}' failed`,
@@ -348,5 +413,24 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
         } catch { return [{ severity: 'error', code: 'doctor.failed', message: 'Provider diagnostic check failed' }]; }
       },
     } satisfies Plugin;
+    configuredCredentialDependencies.set(configured, prepared.dependencies ?? []);
+    return configured;
   });
+  const byId = new Map(plugins.map(plugin => [plugin.manifest.id, plugin]));
+  const ordered: Plugin[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) throw new Error('cyclic configured credential dependencies');
+    visiting.add(id);
+    for (const name of dependencies.get(id) ?? []) {
+      if (byId.get(name)?.manifest.provides.includes('credential.provider')) visit(name);
+    }
+    visiting.delete(id);
+    visited.add(id);
+    ordered.push(byId.get(id)!);
+  };
+  for (const plugin of plugins) visit(plugin.manifest.id);
+  return ordered;
 }

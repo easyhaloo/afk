@@ -1,9 +1,15 @@
 import { createHmac } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createConfiguredPlugins, type ConfiguredPluginsOptions } from './configured.js';
+import { createConfiguredPlugins, getConfiguredCredentialDependencies, type ConfiguredPluginsOptions } from './configured.js';
 import { PluginRuntime } from './runtime.js';
+import { PluginManager } from './manager.js';
+import { readPluginConfiguration } from './configuration.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
-import { WebhookTriggerProvider, ScheduleTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider, TestReportProvider, ObjectStorageProvider } from '../../infrastructure/providers/index.js';
+import type { CredentialRef } from '../../plugin-sdk/capabilities.js';
+import { WebhookTriggerProvider, ScheduleTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider, TestReportProvider, ObjectStorageProvider, GoogleOAuthCredentialProvider } from '../../infrastructure/providers/index.js';
 import type { CommandRequest } from '../../infrastructure/providers/dependencies.js';
 import { GitHubClient } from '../../infrastructure/github/client.js';
 import { GitLabClient } from '../../infrastructure/gitlab/index.js';
@@ -33,6 +39,7 @@ const configurations: readonly Configuration[] = [
   { id: 'notification.feishu', config: { webhook: { env: 'HOOK' } } },
   { id: 'notification.slack', config: { webhook: { env: 'HOOK' } } },
   { id: 'notification.email', config: { from: 'build@example.test', to: 'dev@example.test' } },
+  { id: 'notification.gmail', config: {} },
   { id: 'notification.desktop', config: {} },
   { id: 'trigger.webhook', config: { secret: secretRef, triggers: [subscription] } },
   { id: 'trigger.schedule', config: { triggers: [{ id: 'interval', kind: 'schedule', schedule: '1000' }] } },
@@ -43,6 +50,7 @@ const configurations: readonly Configuration[] = [
   { id: 'context.retrieval', config: { documents: [{ origin: 'guide', content: 'build instructions' }] } },
   { id: 'context.project-memory', config: { file: 'memory.json' } },
   { id: 'credential.system-keychain', config: { service: 'development' } },
+  { id: 'credential.google-oauth', config: {} },
   { id: 'credential.oauth', config: { tokenEndpoint: 'https://auth.example.test/token', clientId: 'client', clientSecret: secretRef } },
   { id: 'credential.oidc', config: { issuer: 'https://auth.example.test', clientId: 'client', assertion: secretRef } },
   { id: 'credential.enterprise', config: { values: { deployment: secretRef } } },
@@ -80,6 +88,197 @@ async function load(selected: readonly Configuration[], options: Partial<Configu
 function config(id: string): Configuration { return configurations.find(item => item.id === id)!; }
 
 describe('configured plugin composition', () => {
+  it('exposes only schema-validated named credential dependencies without scanning ordinary user data', async () => {
+    const network = vi.fn();
+    const execute = vi.fn();
+    const plugins = await createConfiguredPlugins({ configurations: [
+      { id: 'credential.oidc', config: { issuer: 'https://auth.example.test', clientId: 'client', assertion: { provider: 'fixture', name: 'assertion' }, exchange: { subjectToken: { provider: 'fixture', name: 'subject' }, subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' } } },
+      { id: 'trigger.schedule', config: { triggers: [{ id: 'ordinary', kind: 'schedule', schedule: '1000', input: { provider: 'missing', name: 'ordinary-data', nested: { env: 'MISSING_ENV' } } }] } },
+    ], environment: {}, fetch: network, execute, onTrigger: vi.fn() });
+    expect(plugins.map(getConfiguredCredentialDependencies)).toEqual([['fixture'], []]);
+    expect(getConfiguredCredentialDependencies({})).toEqual([]);
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('persists credential references through configure without authentication or network access', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'afk-credential-config-'));
+    const resolve = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolve').mockRejectedValue(new Error('authentication must not run'));
+    const network = vi.fn();
+    vi.stubGlobal('fetch', network);
+    const settings = { webhook: { provider: 'credential.google-oauth', name: 'account@example.test', scope: 'notify:write' } };
+    try {
+      await new PluginManager({ homeDir }).configure('notification.slack', settings, true);
+      expect(readPluginConfiguration(homeDir).plugins).toMatchObject([{ id: 'notification.slack', config: settings }]);
+      expect(resolve).not.toHaveBeenCalled();
+      expect(network).not.toHaveBeenCalled();
+    } finally { await rm(homeDir, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    ...configurations,
+    { id: 'credential.oidc', config: { ...config('credential.oidc').config, exchange: { subjectToken: secretRef, subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' } } },
+  ].filter(configuration => JSON.stringify(configuration.config ?? {}).includes('"env"')))('supports credential references in every existing secret field for $id', async configuration => {
+    const references = JSON.parse(JSON.stringify(configuration.config), (_key, value) => value && typeof value === 'object' && 'env' in value ? { provider: 'fixture', name: value.env } : value);
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    const resolve = vi.fn(async (ref: CredentialRef) => ({ secret: environment[ref.name as keyof typeof environment] }));
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve }); },
+    });
+    const network = vi.fn();
+    const execute = vi.fn();
+    const [plugin] = await createConfiguredPlugins({ configurations: [{ ...configuration, config: references }], environment: {}, fetch: network, execute, onTrigger: vi.fn() });
+    expect(resolve).not.toHaveBeenCalled();
+    await runtime.activate(plugin);
+    expect(resolve).toHaveBeenCalled();
+    expect(runtime.listProvidersForPlugin(configuration.id)).not.toHaveLength(0);
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('validates credential references without resolving, probing or subscribing', async () => {
+    const network = vi.fn();
+    const execute = vi.fn();
+    const plugins = await createConfiguredPlugins({
+      configurations: [
+        { id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'webhook', scope: 'notify:write' } } },
+        { id: 'credential.oauth', config: { ...config('credential.oauth').config, clientSecret: { provider: 'fixture', name: 'client' } } },
+        { id: 'trigger.webhook', config: { secret: { provider: 'fixture', name: 'trigger' }, triggers: [subscription] } },
+      ],
+      environment: {}, fetch: network, execute, activateTriggers: true, onTrigger: vi.fn(),
+    });
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    await expect(plugins[0].health!()).resolves.toMatchObject({ status: 'unknown' });
+    await expect(plugins[0].diagnostics!()).resolves.toEqual([]);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it.each<PluginConfigValue>([
+    {}, { provider: 'fixture' }, { provider: 'fixture', name: '' },
+    { provider: 'fixture', name: 'api', scope: '' },
+    { provider: 'fixture', name: 'api', extra: true },
+    { provider: 'fixture', name: 'api', env: 'TOKEN' },
+    { provider: 'fixture', name: 'api\nheader' },
+  ])('rejects malformed credential reference %j', async token => {
+    await expect(createConfiguredPlugins({
+      configurations: [{ id: 'tracker.linear', config: { ...config('tracker.linear').config, token } }],
+      environment,
+    })).rejects.toThrow('invalid configuration fields');
+  });
+
+  it('awaits scoped credential resolution through the runtime registry before registering the consumer', async () => {
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    let complete!: (value: { secret: string }) => void;
+    const resolve = vi.fn((_ref: CredentialRef) => new Promise<{ secret: string }>(done => { complete = done; }));
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': true }, resolve }); },
+    });
+    const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(new Response('ok'));
+    const [plugin] = await createConfiguredPlugins({
+      configurations: [{ id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'hook', scope: 'notify:write' } } }], fetch: network,
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    const activation = runtime.activate(plugin);
+    await vi.waitFor(() => expect(resolve).toHaveBeenCalledWith({ name: 'hook', scope: 'notify:write' }));
+    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    expect(network).not.toHaveBeenCalled();
+    complete({ secret: environment.HOOK });
+    await activation;
+    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' })).resolves.toMatchObject({ delivered: true });
+    expect(String(network.mock.calls[0][0])).toBe(environment.HOOK);
+  });
+
+  it('orders named credential dependencies before consumers, including nested credential chains', async () => {
+    const { runtime, plugins } = await load([
+      { id: 'tracker.linear', config: { ...config('tracker.linear').config, token: { provider: 'credential.oauth', name: 'api', scope: 'issues:read' } } },
+      { id: 'credential.oauth', config: { ...config('credential.oauth').config, clientSecret: { provider: 'credential.enterprise', name: 'deployment' } } },
+      config('credential.enterprise'),
+    ], { fetch: vi.fn(async () => Response.json({ access_token: 'resolved-access-token', token_type: 'Bearer', expires_in: 60, scope: 'issues:read' })) });
+    expect(plugins.map(plugin => plugin.manifest.id)).toEqual(['credential.enterprise', 'credential.oauth', 'tracker.linear']);
+    expect(plugins[1].manifest.requires ?? []).not.toContain('credential.provider');
+    expect(runtime.getIssueTrackerProvider('linear')).toBeDefined();
+  });
+
+  it.each<Configuration[]>([
+    [{ id: 'credential.enterprise', config: { values: { deployment: { provider: 'credential.enterprise', name: 'deployment' } } } }],
+    [
+      { id: 'credential.enterprise', config: { values: { deployment: { provider: 'credential.oauth', name: 'api' } } } },
+      { id: 'credential.oauth', config: { ...config('credential.oauth').config, clientSecret: { provider: 'credential.enterprise', name: 'deployment' } } },
+    ],
+  ])('rejects cyclic credential dependencies before external work', async (...selected) => {
+    const network = vi.fn();
+    await expect(createConfiguredPlugins({ configurations: selected, fetch: network })).rejects.toThrow(/cyclic.*credential/);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '   ', 'bad\nsecret', 'bad\rsecret', 'bad\0secret', 'file:///private/hook', 'https://user:password@example.test', undefined, null, 42])('rejects invalid resolved webhook %j without leaking it', async value => {
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve: async () => ({ secret: value as string }) }); },
+    });
+    const [plugin] = await createConfiguredPlugins({ configurations: [{ id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'hook' } } }] });
+    const activation = runtime.activate(plugin);
+    await expect(activation).rejects.toThrow();
+    if (typeof value === 'string' && value.trim()) await expect(activation).rejects.not.toThrow(value);
+    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    if (typeof value === 'string' && value.trim()) expect(JSON.stringify(await runtime.diagnostics())).not.toContain(value);
+  });
+
+  it('redacts resolved credentials from health and doctor and resolves again after reactivation', async () => {
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    const resolve = vi.fn(async (_ref: CredentialRef) => ({ secret: ' first-private-token ' }));
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve }); },
+    });
+    const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(Response.json({ data: { viewer: { id: 'viewer' } } }));
+    const [plugin] = await createConfiguredPlugins({ configurations: [{ id: 'tracker.linear', config: { ...config('tracker.linear').config, token: { provider: 'fixture', name: 'api' } } }], fetch: network });
+    await runtime.activate(plugin);
+    const provider = runtime.getIssueTrackerProvider('linear')!;
+    vi.spyOn(provider, 'health').mockResolvedValue({ status: 'unavailable', message: 'first-private-token' });
+    vi.spyOn(provider, 'doctor').mockResolvedValue([{ check: 'first-private-token', ok: false, detail: 'first-private-token' }]);
+    await expect(runtime.health('tracker.linear')).resolves.toMatchObject([{ message: '[redacted]' }]);
+    await expect(runtime.diagnostics('tracker.linear')).resolves.toMatchObject([{ code: 'provider.[redacted]', message: '[redacted]' }]);
+    await runtime.dispose('tracker.linear');
+    resolve.mockResolvedValue({ secret: 'second-private-token' });
+    await runtime.activate(plugin);
+    await runtime.getIssueTrackerProvider('linear')!.health!();
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(network.mock.calls[0][1]?.headers).toMatchObject({ authorization: 'second-private-token' });
+  });
+
+  it('masks credential provider failures in activation errors and runtime diagnostics', async () => {
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    const privateValue = 'unreturned-private-credential';
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve: async () => { throw new Error(privateValue); } }); },
+    });
+    const [plugin] = await createConfiguredPlugins({ configurations: [{ id: 'tracker.linear', config: { ...config('tracker.linear').config, token: { provider: 'fixture', name: 'api' } } }] });
+    const activation = runtime.activate(plugin);
+    await expect(activation).rejects.toThrow(/credential.*resolution/i);
+    await expect(activation).rejects.not.toThrow(privateValue);
+    expect(JSON.stringify(await runtime.diagnostics())).not.toContain(privateValue);
+  });
+
+  it('fails safely for a missing named provider even when another credential provider is active', async () => {
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    const plugins = await createConfiguredPlugins({ configurations: [config('credential.enterprise'), { id: 'tracker.linear', config: { ...config('tracker.linear').config, token: { provider: 'missing', name: 'api' } } }], environment });
+    await runtime.activate(plugins[0]);
+    await expect(runtime.activate(plugins[1])).rejects.toThrow(/credential provider.*not active/);
+    expect(runtime.getIssueTrackerProvider('linear')).toBeUndefined();
+  });
+
   it.each(configurations)('constructs and registers $id with its declared capability', async configuration => {
     vi.useFakeTimers();
     const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
@@ -174,7 +373,7 @@ describe('configured plugin composition', () => {
     }
   });
 
-  it.each(configurations.filter(item => !item.id.startsWith('agent.') && !['host.jumpserver', 'sandbox.local', 'sandbox.docker', 'sandbox.podman', 'notification.desktop'].includes(item.id)))('rejects missing configuration for $id', async ({ id }) => {
+  it.each(configurations.filter(item => !item.id.startsWith('agent.') && !['host.jumpserver', 'sandbox.local', 'sandbox.docker', 'sandbox.podman', 'notification.desktop', 'notification.gmail', 'credential.google-oauth'].includes(item.id)))('rejects missing configuration for $id', async ({ id }) => {
     await expect(createConfiguredPlugins({ configurations: [{ id }], environment })).rejects.toThrow(`plugin '${id}'`);
     await expect(createConfiguredPlugins({ configurations: [{ id, config: {} }], environment })).rejects.toThrow('invalid configuration fields');
   });

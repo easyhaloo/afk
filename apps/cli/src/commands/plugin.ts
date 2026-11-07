@@ -1,11 +1,13 @@
-import { Command } from 'commander';
+import { Argument, Command } from 'commander';
 import { readFile } from 'node:fs/promises';
-import { PluginManager, createDefaultPluginRuntime, startPluginListener, startRemoteContainerService, invokeCapability, type PluginRuntime, type PluginConfigValue } from '@afk/runtime/plugin-sdk';
+import { GoogleOAuthCredentialProvider, GoogleOAuthError, PluginManager, readPluginConfiguration, createDefaultPluginRuntime, startPluginListener, startRemoteContainerService, invokeCapability, type PluginRuntime, type PluginConfigValue } from '@afk/runtime/plugin-sdk';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
 export interface PluginCommandComposition extends CommandRegistrationContext {
   createRuntime?: () => Promise<PluginRuntime>;
   pluginManager?: PluginManager;
+  googleAuth?: Pick<GoogleOAuthCredentialProvider, 'login' | 'status' | 'logout'>;
+  readConfiguration?: typeof readPluginConfiguration;
 }
 
 async function readJsonInput(path: string): Promise<unknown> {
@@ -24,6 +26,43 @@ export function registerPluginCommands(program: Command, composition: PluginComm
 
   const manager = composition.pluginManager ?? new PluginManager();
   const plugin = program.command('plugin').description('Install, configure, and inspect capability plugins');
+  const auth = plugin.command('auth').description('Manage provider authentication');
+  for (const operation of ['login', 'status', 'logout'] as const) {
+    const command = auth.command(operation)
+      .description(`${operation} Google OAuth authentication`)
+      .addArgument(new Argument('<provider>', 'Authentication provider').choices(['google']));
+    if (operation === 'login') command.requiredOption('--client <path>', 'Google Desktop app OAuth client JSON file');
+    command.action(async (_provider, options) => {
+      const stop = new AbortController();
+      const abort = () => stop.abort();
+      process.once('SIGINT', abort);
+      process.once('SIGTERM', abort);
+      try {
+        const credentials = composition.googleAuth ?? new GoogleOAuthCredentialProvider();
+        if (operation === 'login') {
+          process.stdout.write('Opening Google sign-in. Complete authorization within 10 minutes; keep this process running.\n');
+          const account = await credentials.login(options.client, { signal: stop.signal });
+          stop.signal.throwIfAborted();
+          const configured = (composition.readConfiguration ?? readPluginConfiguration)().plugins;
+          await manager.configure('credential.google-oauth', {}, true);
+          if (!configured.some(entry => entry.id === 'notification.gmail')) await manager.configure('notification.gmail', {}, true);
+          process.stdout.write(`Google connected: ${account.email}\nGmail notifications configured; no email sent.\n`);
+        } else if (operation === 'status') {
+          const status = await credentials.status();
+          process.stdout.write(`${JSON.stringify({ connected: status.connected, email: status.email, expiresAt: status.expiresAt }, null, 2)}\n`);
+        } else {
+          await credentials.logout({ signal: stop.signal });
+          process.stdout.write('Google disconnected.\n');
+        }
+      } catch (error) {
+        const detail = error instanceof GoogleOAuthError ? ` (${error.code}): ${error.message}` : '';
+        throw new Error(stop.signal.aborted ? 'Google authentication cancelled' : `Google ${operation} failed${detail}`);
+      } finally {
+        process.off('SIGINT', abort);
+        process.off('SIGTERM', abort);
+      }
+    });
+  }
   plugin.command('serve-container')
     .description('Serve sandbox and agent operations to authenticated remote-container clients')
     .requiredOption('--repository <path>', 'Git repository used to create execution worktrees')

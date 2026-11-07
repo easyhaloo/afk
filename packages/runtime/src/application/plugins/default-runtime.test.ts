@@ -1,18 +1,21 @@
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultPluginRuntime, type DefaultPluginRuntimeOptions } from './default-runtime.js';
 import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecycle.js';
 import type { PluginRuntime } from './runtime.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
-import { GitPushTriggerProvider } from '../../infrastructure/providers/triggers.js';
+import { GitPushTriggerProvider, IssueEventTriggerProvider } from '../../infrastructure/providers/triggers.js';
 
 vi.mock('../workflows/execute-work-item.js', () => ({ executeWorkItem: vi.fn() }));
 
 const directories: string[] = [];
 const runtimes: PluginRuntime[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await Promise.all(runtimes.splice(0).map(runtime => runtime.dispose()));
   await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
@@ -31,7 +34,110 @@ async function fixture(configuration?: unknown, options: DefaultPluginRuntimeOpt
   return { runtime, context, homeDir, workspaceRoot, lifecycle: new LifecycleDispatcher(runtime.getLifecycleModules()) };
 }
 
+async function installedCredentialFixture(plugins: unknown[], requires = ['context.provider'], fail = false) {
+  const { homeDir, workspaceRoot } = await fixture();
+  const directory = join(homeDir, '.afk', 'plugins', 'credential.fixture', 'dist');
+  await mkdir(directory, { recursive: true });
+  const entry = join(directory, 'index.js');
+  await writeFile(entry, `export let resolutions = 0;
+    export default {
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], requires: ${JSON.stringify(requires)}, trusted: true },
+      activate(context) {
+        context.registerCredentialProvider('fixture', {
+          id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false },
+          async resolve() { resolutions++; ${fail ? "throw new Error('synthetic resolution failure');" : "return { secret: 'https://webhook.example.test/fixture' };"} }
+        });
+      }
+    };`);
+  await writeFile(join(homeDir, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [{ id: 'credential.fixture' }, ...plugins] }));
+  const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+  runtimes.push(runtime);
+  return { runtime, credential: await import(pathToFileURL(entry).href) };
+}
+
 describe('createDefaultPluginRuntime', () => {
+  it.each([false, true])('waits for an installed named credential provider across builtin activation (nested: %s)', async nested => {
+    const network = vi.fn();
+    vi.stubGlobal('fetch', network);
+    const { runtime, credential } = await installedCredentialFixture([
+      { id: 'notification.slack', builtin: true, config: { webhook: { provider: nested ? 'credential.enterprise' : 'fixture', name: 'webhook' } } },
+      ...nested ? [{ id: 'credential.enterprise', builtin: true, config: { values: { webhook: { provider: 'fixture', name: 'webhook' } } } }] : [],
+    ]);
+    expect(runtime.getCredentialProvider('credential.system-keychain')).toBeDefined();
+    expect(runtime.getCredentialProvider('fixture')).toBeDefined();
+    expect(runtime.getNotificationProvider('notification.slack')).toBeDefined();
+    expect(credential.resolutions).toBe(1);
+    expect((await runtime.diagnostics()).filter(item => item.severity === 'error')).toEqual([]);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('reports unresolved named credential dependencies without attempting activation (cycle: %s)', async cycle => {
+    const { runtime, credential } = await installedCredentialFixture([
+      { id: 'tracker.linear', builtin: true, config: { baseUrl: 'https://linear.example.test', teamId: 'team', token: { provider: cycle ? 'fixture' : 'missing', name: 'api' } } },
+    ], cycle ? ['tracker.issue'] : ['context.provider']);
+    expect(runtime.getCredentialProvider('credential.system-keychain')).toBeDefined();
+    expect(runtime.getIssueTrackerProvider('linear')).toBeUndefined();
+    expect(credential.resolutions).toBe(0);
+    const errors = (await runtime.diagnostics()).filter(item => item.pluginId === 'tracker.linear');
+    expect(errors.map(item => item.code)).toEqual(['load.dependencies']);
+    if (cycle) expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ pluginId: 'credential.fixture', code: 'load.dependencies' }));
+  });
+
+  it('does not retry a named provider resolution that actually fails', async () => {
+    const { runtime, credential } = await installedCredentialFixture([
+      { id: 'notification.slack', builtin: true, config: { webhook: { provider: 'fixture', name: 'webhook' } } },
+    ], ['context.provider'], true);
+    expect(runtime.getCredentialProvider('fixture')).toBeDefined();
+    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    expect(credential.resolutions).toBe(1);
+    const errors = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.slack');
+    expect(errors.map(item => item.code)).toEqual(['activation.failed', 'load.failed']);
+    expect(errors.every(item => item.message.includes('credential resolution failed'))).toBe(true);
+  });
+
+  it('activates configured credential references before their consumers regardless of input order', async () => {
+    vi.stubEnv('PLUGIN_E2E_WEBHOOK', 'https://webhook.example.test/fixture');
+    const { runtime } = await fixture({ plugins: [
+      { id: 'notification.slack', builtin: true, config: { webhook: { provider: 'credential.enterprise', name: 'webhook' } } },
+      { id: 'credential.enterprise', builtin: true, config: { values: { webhook: { env: 'PLUGIN_E2E_WEBHOOK' } } } },
+    ] });
+    expect(runtime.getNotificationProvider('notification.slack')).toBeDefined();
+    expect((await runtime.diagnostics()).filter(item => item.severity === 'error')).toEqual([]);
+  });
+
+  it('routes batched configured triggers using each originating plugin action', async () => {
+    const { runtime } = await fixture({ plugins: [
+      { id: 'trigger.git-push', builtin: true, action: 'work-item.execute', config: { triggers: [{ id: 'push', kind: 'webhook', input: { workItemId: 'github:acme/api#42' } }] } },
+      { id: 'trigger.issue-event', builtin: true, action: 'capability.invoke', config: { triggers: [{ id: 'issue', kind: 'webhook', input: { capability: 'policy.provider', provider: 'compliance-policy', operation: 'evaluate', input: { action: 'inspect' } } }] } },
+    ] }, { activateTriggers: true });
+    const dispatch = vi.spyOn(runtime, 'dispatchSystemAction').mockResolvedValue(undefined);
+    await (runtime.getTriggerProvider('trigger.git-push') as GitPushTriggerProvider).handlePush({ ref: 'refs/heads/main' });
+    await (runtime.getTriggerProvider('trigger.issue-event') as IssueEventTriggerProvider).handleIssue({ action: 'opened' });
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual(['work-item.execute', 'capability.invoke']);
+  });
+
+  it('honors disabled builtin entries without requiring a configuration object', async () => {
+    const { runtime } = await fixture({ plugins: [{ id: 'context.code', builtin: true, enabled: false }] });
+    expect(runtime.getContextProvider('context.code')).toBeUndefined();
+    expect(runtime.getContextProvider('context.retrieval')).toBeDefined();
+  });
+
+  it('lets an installed plugin replace a builtin with the same ID', async () => {
+    const { homeDir, workspaceRoot } = await fixture({ plugins: [{ id: 'context.code', enabled: false }] });
+    const directory = join(homeDir, '.afk', 'plugins', 'context.code', 'dist');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'index.js'), `export default {
+      manifest: { id: 'context.code', version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) { context.registerContextProvider('replacement', { id: 'replacement', capabilities: { 'read-only': true, summarize: false, search: false }, async gather() { return []; } }); }
+    };`);
+    await writeFile(join(homeDir, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [{ id: 'context.code', enabled: true }] }));
+    const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+    runtimes.push(runtime);
+    expect(runtime.getContextProvider('context.code')).toBeUndefined();
+    expect(runtime.getContextProvider('replacement')).toBeDefined();
+    expect((await runtime.diagnostics()).filter(item => item.severity === 'error')).toEqual([]);
+  });
+
   it('maps a standard Git push event to configured managed work input', async () => {
     const input = { workItemId: 'github:acme/api#42', runOptions: { executionMode: 'batch' } };
     vi.mocked(executeWorkItem).mockResolvedValueOnce({ executionId: 'push-execution', workItemId: input.workItemId, status: 'merge_ready' });

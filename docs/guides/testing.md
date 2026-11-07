@@ -248,6 +248,9 @@ pnpm test:e2e
 # CLI workflows only (builds the executable first)
 pnpm test:e2e:cli
 
+# Local plugin install/enable/disable/remove and real local provider operations
+pnpm build && pnpm exec vitest run tests/e2e/plugin-local.test.ts
+
 # Watch mode (development)
 pnpm --filter afk exec vitest
 

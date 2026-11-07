@@ -331,7 +331,7 @@ interface PolicyProvider extends Provider {
 - 激活按依赖拓扑排序执行。
 - 任一插件激活失败，当前激活批次整体回滚。
 - 已完成注册的 Provider 必须撤销。
-- 被其他已激活插件依赖的 Provider 不得单独卸载。
+- Runtime 在卸载会丢失其他插件必需能力时拒绝操作；这不等于保护所有具名 Provider 引用。
 - 健康检查无实现时返回 `unknown`，不得伪造 `healthy`。
 
 运行规则：
@@ -371,14 +371,19 @@ interface PluginError {
 
 错误消息必须可供用户理解，不得包含秘密、完整响应、命令凭据或内部绝对路径。
 
-## 8. 配置与凭据
+## 8. 配置、凭据与管理
 
-- 配置是 JSON 可序列化对象，必须通过 Manifest Schema 校验。
-- 未声明字段默认拒绝。
-- Secret 使用 Credential Provider、系统 Keychain、环境变量或 OAuth/OIDC 机制获取。
-- 不把 Secret 写入插件配置、工作流事件、普通日志或 Artifact。
-- Provider 自己解析其配置，宿主不猜测第三方字段含义。
-- 配置变更在下一次 Runtime 构造时生效；运行中的 Worker 不热更新。
+- 配置为 JSON 可序列化对象，须通过插件 Schema；内置配置拒绝未知字段，外部插件应显式限制额外字段。
+- 内置 secret 字段接受 `{"env":"TOKEN"}` 或 `{"provider":"credential.enterprise","name":"deployment","scope":"read"}`；`scope` 可省略，`provider` 必须是精确注册名。不要保存明文 secret。
+- 保存配置只校验 credential 引用形状，不调用 `resolve`、外部认证或网络；环境引用在构造时校验并取值。外部插件的 Schema 不会自动获得引用解析能力。
+- 激活时复用现有 Credential Provider，await 每个字段的一次 `resolve`，校验真实值后注册消费者；webhook URL 在解析完成后校验。通用引用注入值不随普通操作重取或刷新，重新激活会重取；Gmail 保留自身 OAuth 刷新行为。
+- 同批内置配置按具体 credential 引用排序，支持凭据链，拒绝自引用和循环；loader 等待批次外插件注册精确具名 Provider。缺失或循环报告 `load.dependencies`，实际解析失败不重试。
+- 凭据解析异常使用安全提示，已解析秘密不得进入事件、日志、诊断、普通结果或 Artifact。
+- 管理守卫只检查静态 manifest、入口元数据及配置，不执行插件或凭据操作。检查能力、冲突和精确的内置凭据引用；外部注册名不透明时，先禁用相关消费者再修改潜在凭据所有者。
+- Desktop 设置支持本地目录/npm 安装、启用/禁用、卸载及不超过 1 MiB 的本地 JSON 对象配置导入。内置插件只能禁用，卸载保留配置。
+- 修改影响后续 Runtime 与新 Worker，不热更新现有 Worker。Runtime 检查快照缓存到 Desktop 重启，刷新安装状态不表示 Worker 实时状态；检查本身可执行受信插件及凭据解析。
+- 活动 Worker 或无法核实的运行记录阻止安装/卸载；文件修改期间阻止启动 Worker。Renderer 不接收已存配置或秘密，不挂载动态 Desktop surface，也没有 OAuth 登录 UI。
+- 安装插件不会自动安装第三方 CLI、引擎或服务；本仓库已有适配器不代表已发布独立插件包，也不表示 Linear/Jira 已接入受管 backlog 全流程。
 
 ## 9. 生命周期接入点
 
@@ -389,7 +394,7 @@ interface PluginError {
 - `before-publish`：创建或更新发布对象前。
 - `cleanup`：执行结束后的资源清理。
 - `workflow.action`：受白名单约束的系统动作。
-- `surface.cli`、`surface.tui`、`surface.desktop`：界面注册信息。
+- `surface.cli`、`surface.tui`、`surface.desktop`：界面注册信息，注册本身不挂载 UI；Desktop 设置的插件管理不加载动态 surface。
 
 策略、验证和上下文属于受管执行的一部分；插件只能返回结果，最终是否继续由 Core 和工作流状态机决定。
 
@@ -424,7 +429,9 @@ interface PluginError {
 - [ ] Provider 注册名稳定且唯一。
 - [ ] 输入、输出、错误和取消行为有测试。
 - [ ] 网络、进程、文件、响应和输出均有边界。
-- [ ] 凭据不进入日志、事件、Artifact 和普通返回值。
+- [ ] 凭据不进入日志、事件、Artifact 和普通返回值；配置校验不认证，异步解析后校验真实值。
+- [ ] 具体凭据依赖顺序、自环/互引环、缺失 Provider、重新激活取值均有测试。
+- [ ] 管理守卫不执行插件；能力可达性与精确具名引用的保护范围分别说明。
 - [ ] `health`、`doctor` 和缺失依赖诊断可用。
 - [ ] 激活失败可回滚，dispose 幂等。
 - [ ] 能完成安装、配置、激活、调用、禁用、启用和卸载。

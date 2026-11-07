@@ -94,6 +94,57 @@ saved definition. Selecting a built-in template retains the managed canvas
 layout, returned as `WorkflowTemplateSummary.canvasNodes` when rediscovered,
 so the managed definition can be reopened and selected again.
 
+## Plugin Settings and Runtime Ownership
+
+Settings provides local-directory/npm plugin installation, enable/disable,
+removal, and configuration replacement from a local JSON object file up to
+1 MiB. Main owns file selection, confirmation and calls to the shared
+`PluginManager`; validated IPC carries only operation inputs, metadata and safe
+diagnostics. The renderer receives neither saved configuration values nor raw
+plugin errors. Builtins can be disabled, not removed; removal retains settings.
+A configuration-only entry must be installed before it can be re-enabled.
+
+The manager's mutation guard reads static builtin/installed manifests, checks
+entry metadata and applicable configuration, and protects required capability
+availability. It does not import or execute installed plugins, call factories,
+activate providers, run health checks or resolve credentials. It also protects
+exact configured credential names. External registration names remain opaque;
+changes to potential credential owners are conservatively refused while an
+enabled configured consumer references an external name. Disable that consumer
+before modifying its provider. The guard does not prove activation, authorization
+or health, and unconfigured plugins do not block unrelated setup or repair.
+
+Settings caches its initial Runtime inspection until Desktop restarts. Refresh
+rereads install/configuration state; the inspection is not a live Worker view.
+Unlike the static guard, inspection constructs a Runtime and invokes diagnostics,
+so trusted plugins and configured credential resolution may execute. Each new
+Worker constructs its own Runtime from saved configuration; enable/disable and
+configuration changes affect future construction, not existing Workers. Install
+and remove refuse while tracked Workers or live starting/running Worker records
+exist, and fail closed when that state cannot be verified. File mutations also
+block new Worker launches.
+
+Builtin secret fields accept `{env: "TOKEN"}` or
+`{provider: "credential.enterprise", name: "deployment", scope?: "read"}`.
+Configuration validation checks reference shape without credential resolution,
+authentication or network calls; environment references are checked and captured
+during construction. Activation awaits credential resolution once per referenced
+field, validates the result (including webhook URLs), and then registers the
+consumer. Configured builtins sort specific credential dependencies and reject
+self/cyclic references; the shared loader also waits for exact named providers
+from installed plugins. Missing/cyclic dependencies fail without activation;
+actual credential resolution failures are not retried.
+Values injected through these generic references are not automatically
+refreshed; Gmail retains its own OAuth refresh behavior. Secret values and raw
+authentication errors must not enter renderer DTOs or diagnostics.
+
+Plugin Settings does not mount `surface.desktop`, provide OAuth login controls,
+or install external provider tools. Google authorization remains a CLI flow;
+the manager can import Gmail configuration without supplying an OAuth UI. See
+the paired [plugin architecture](../../docs/architecture/plugins.md) /
+[中文说明](../../docs/architecture/plugins.zh.md) for configuration and lifecycle
+boundaries.
+
 ## End-to-End Testing
 
 Run `pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts`

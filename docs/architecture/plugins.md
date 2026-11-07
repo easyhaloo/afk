@@ -90,10 +90,10 @@ Capability IDs are the values in `packages/runtime/src/plugin-sdk/profile.ts`.
 | Tracker / backlog · `tracker.provider`, `tracker.issue`, `backlog.provider` | GitHub/GitLab source-host tracker/backlog integrations; independent Linear and Jira issue adapters | GitHub/GitLab tokens and repository/project; Linear token + team ID + API URL; Jira token + project key + API URL, optionally email | Configured GitHub/GitLab register tracker and backlog providers; shared assembly selects a tracker matching platform, project and applicable host, then builds its managed provider bundle. Multiple matches fail; no match uses the existing tracker factory. Linear/Jira remain independent `tracker.issue` adapters and do not supply repository-backed backlog/change-request identity. |
 | Host · `host.connection` | JumpServer, SSH, AWS SSM, Kubernetes Exec | `jms` login; SSH keys/agent/config; AWS CLI credentials/profile + SSM permission; `kubectl` context/kubeconfig + exec RBAC | `HostConnectionPort` → Application host use cases → `afk host ls/exec`; Desktop can reuse the shared adapter. Discovery and remote execution require a real target. |
 | Verification · `verification.provider` | Test runner, static scan, browser check | Installed test/lint/browser tools; optional project-specific service credentials | `verify` runs an argv command in the target workspace. Defaults are `npm test`, `npm run lint`, `playwright test`; these are command wrappers, not embedded analyzers. |
-| Notification · `notification.provider` | Feishu, Slack, email, desktop | Feishu/Slack webhook URL; configured `sendmail` and mail transport for email; native desktop notification tool | `notify`; HTTP adapters default to global fetch with optional transport injection. A delivery receipt reports actual success/failure. Desktop delivery depends on the OS tool. |
+| Notification · `notification.provider` | Feishu, Slack, email, Gmail, desktop | Feishu/Slack webhook URL; configured `sendmail` and mail transport for email; Gmail API and Google user OAuth; native desktop notification tool | `notify`; HTTP adapters default to global fetch with optional transport injection. Gmail defaults to the authenticated account as recipient. A delivery receipt reports actual success/failure. Desktop delivery depends on the OS tool. |
 | Trigger · `trigger.provider` | HMAC webhook, Git push, issue event, interval schedule | Webhook shared secret; a host that delivers incoming events; no external account for local interval timers | `register/unregister`; `plugin listen` supplies the resident HTTP host and activates configured timers/actions. The adapters themselves do not start a listener, Git watcher or durable cron service. Schedule text is positive integer milliseconds. |
 | Context / memory · `context.provider` | Code context, knowledge base, retrieval, project memory | Readable workspace/files; knowledge-base HTTP endpoint and any authentication supplied by its transport | `gather`; code reads local content, retrieval uses supplied documents, memory reads a local file, knowledge base expects protocol-compatible JSON fragments. No automatic embedding or indexing service. |
-| Credential / auth · `credential.provider` | System keychain, OAuth client credentials, OIDC assertion/exchange, enterprise environment credentials | Keychain access; OAuth endpoint/client ID/secret; OIDC issuer/client/assertion; supplied environment/value entries | `resolve`; scopes only where advertised. Enterprise adapter reads configured values/environment; it is not an enterprise vault SDK. HTTP adapters default to global fetch with optional transport injection. Credential resolution remains private to SDK consumers. |
+| Credential / auth · `credential.provider` | System keychain, Google user OAuth, OAuth client credentials, OIDC assertion/exchange, enterprise environment credentials | Keychain access; Google Desktop app client JSON and browser consent; OAuth endpoint/client ID/secret; OIDC issuer/client/assertion; supplied environment/value entries | `resolve`; scopes only where advertised. Enterprise adapter reads configured values/environment; it is not an enterprise vault SDK. HTTP adapters default to global fetch with optional transport injection. Credential resolution remains private to SDK consumers. |
 | Artifact / report · `artifact.provider` | Local test reports, evidence bundle builder, object storage upload, report platform upload | Writable local path; presigned/upload URL or report endpoint, optionally bearer token | `put`; upload adapters advertise write only. The configured evidence-bundle factory wraps its builder as an `ArtifactSink`. Object storage does not implement AWS request signing. |
 | Repository / workspace · `repository.provider` | Multiple local repositories, remote workspace snapshot, special Git backend | Git and configured local paths; compatible remote endpoint/token; installed special backend executable | `snapshot`; current adapters advertise read/snapshot, not clone or push. Remote workspace expects its specific HTTP protocol; special backend must return snapshot JSON. |
 | Security / policy · `policy.provider` | Secret scan, license policy, compliance policy | Workspace files, explicit license allowlist and compliance rules; no account required for local checks | Selected policies are required managed lifecycle gates, including engine `before-publish` and QA publication checks; denial or evaluation failure blocks publication. Direct SDK callers must invoke the lifecycle or evaluate/enforce policy themselves. Local pattern, license and rule checks do not constitute an external compliance service. |
@@ -223,6 +223,26 @@ new runtime. `remove` disables and deletes an installed package while retaining
 its settings. Enable/disable/configure affect subsequent runtime construction;
 they do not hot-reload a running Worker.
 
+Before publishing an installation or saving enable/disable/configure/remove,
+the manager checks the proposed enabled set against static builtin and installed
+manifest metadata, validates applicable configuration, and checks whether the
+change would remove a capability required by another enabled plugin. It does
+not import or execute installed plugin modules, run their factories, activate
+them, or call health/credential operations for this guard. Installed entry
+containment and digest checks still apply. Malformed configuration envelopes or
+installation metadata block the mutation; a rejected replacement preserves the
+previous installation. Unconfigured installed plugins do not block unrelated
+setup or repair. A validated replacement can repair a damaged target entry digest.
+
+The guard compares previously available dependents with the proposed manifest
+set, including conflicts and exact configured credential references. Another
+`credential.provider` cannot substitute for a known configured registry name.
+Installed plugins' registration names are opaque without executing their code;
+when an enabled configured consumer references such a name, changes to a
+potential credential owner are conservatively refused. Disable the consumer
+first to modify that provider. Activation still checks the actual registry;
+this guard does not prove provider health, authorization or successful activation.
+
 `PluginManager` serializes mutations with `~/.afk/plugins/.manager.lock`. It
 copies a local directory without `.git` or `node_modules`, or resolves an npm
 package specification in a new `.install-*` staging directory. Dependencies
@@ -274,15 +294,131 @@ such as injected fetch, callbacks or command executors cannot be serialized in
 YAML; the factory creates them. Schema coverage and available configured IDs are
 defined by that factory, not by the flag.
 
+### Desktop Settings
+
+Settings provides local-directory or npm package installation, enable/disable,
+removal of installed packages, and configuration replacement from a local JSON
+object file (at most 1 MiB). Installation and configuration import require native
+confirmation; removal has a confirmation dialog. Builtins can be disabled but
+not removed. Removal retains settings, and a configuration-only entry cannot be
+re-enabled until its package is installed.
+
+The main process calls the shared manager through validated IPC. Renderer DTOs
+contain plugin metadata and fixed diagnostic messages, not saved configuration,
+secret values or raw plugin errors. The initial Runtime inspection is cached
+until Desktop restarts; refreshing rereads install/configuration state, not a
+live view of Worker runtimes. Inspection constructs a real Runtime and calls
+diagnostics, so it can execute trusted plugin code and configured credential
+resolution; this is separate from the static mutation guard.
+
+Changes affect subsequent runtime construction and future Workers. Existing
+Workers keep their runtime. Install/remove are blocked while tracked Workers or
+live starting/running Worker records exist; unreadable Worker state also blocks
+those file mutations. Worker launches are blocked during a file mutation. The
+Settings manager does not mount `surface.desktop`, add an OAuth login UI, or
+install the external tools required by providers.
+
+### Gmail OAuth
+
+Enable the Gmail API in a Google Cloud project, configure its OAuth consent
+screen, and download an OAuth client JSON file with application type **Desktop
+app**. For an External app in **Testing**, add the authorizing Google account
+as a test user. Keep the client file private; pass its path, not its contents:
+
+```sh
+afk plugin auth login google --client ./google-desktop-client.json
+afk plugin auth status google
+afk plugin auth logout google
+```
+
+Login opens the browser and receives the authorization response on a local
+loopback callback. Keep the CLI process running and complete authorization within
+10 minutes. After timeout, start login again and use the new browser page;
+the previous callback URL is no longer valid. Choose the Google account in the browser; the CLI does not
+ask for an email address. The requested scopes are
+`https://www.googleapis.com/auth/gmail.send`, `openid`, and `email`: mail sending
+plus account identification, without mailbox reading. SIGINT/SIGTERM cancels
+the login and closes the callback server. OAuth and credential storage belong
+to the runtime's public `GoogleOAuthCredentialProvider` SDK API; the CLI only
+parses arguments, forwards cancellation, configures providers and prints safe
+results.
+
+After successful login, `PluginManager.configure` saves builtin
+`credential.google-oauth` with `{}` and adds builtin `notification.gmail` with
+`{}` if no Gmail entry exists. Existing Gmail settings, recipients and
+enablement remain intact. No configuration is written when authentication
+fails. Login does not send a test email.
+
+Credentials are stored through the macOS Keychain or Linux keychain service.
+Windows is explicitly unsupported; there is no token-file fallback. Keep
+Keychain access available to the CLI and subsequent notification processes.
+Account mutations share a process queue and an exclusive cross-process lock,
+including the entire browser login. Another process fails as busy instead of
+overwriting an in-flight login, refresh or logout. The lock contains only its
+owner PID; after an unclean process termination, remove a stale
+`~/.afk/auth/google-oauth.lock` only after confirming its owner is no longer running.
+Run `node scripts/check-google-oauth-keychain.mjs` after building to verify real
+native Keychain create/update/read/delete with an isolated synthetic record.
+Google OAuth and Gmail HTTP requests respect `HTTP_PROXY`/`HTTPS_PROXY` and
+`NO_PROXY` (including lowercase forms). Without explicit proxy variables on
+macOS, they use the system HTTP/HTTPS proxy. Loopback bypasses the proxy;
+proxy discovery is cached for the process, so restart after changing it.
+PAC or SOCKS-only setups need an explicit HTTP proxy. Authentication failures
+report safe stage codes such as `token.network`, `token.scope` and
+`account.storage`; Google response bodies and credentials are never printed.
+
+Gmail's default recipient is the authenticated account itself. To override it,
+save `{"to":"alerts@example.com"}` in `gmail.settings.json` and run:
+
+```sh
+afk plugin configure notification.gmail --builtin --file ./gmail.settings.json
+```
+
+This explicitly configured `to` replaces the default recipient for subsequent
+notifications. The optional `channel` field selects the notification channel.
+`status` needs no client file and prints only the local Keychain record's
+`connected`, optional `email` and `expiresAt`, never tokens. It does not contact
+Google to verify the session or token validity; `connected: true` alone does
+not prove that sending will succeed. `logout` also needs no client file. The
+runtime first revokes Google authorization, then removes the Keychain record
+only after successful revocation. A failed revocation retains the record for
+retry. Logout retains plugin settings and does not disable other providers.
+
+For an External OAuth app left in Testing, refresh tokens for this Gmail scope
+expire after **7 days**; authorize again when needed. Production publishing and
+any required Google verification are separate setup steps. See Google's
+[Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app)
+and [refresh token expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+The CLI tests inject an authentication object and use isolated configuration;
+they do not authorize a real Google account or send real Gmail messages.
+Separately, a manual run on November 7, 2026 completed browser consent, automatic
+account identification, native Keychain persistence, CLI notification dispatch,
+Gmail API acceptance and recipient-confirmed delivery. The run required an
+explicit HTTP proxy because the system proxy was disabled. A separate real
+refresh request also succeeded: the injected clock forced only the initial
+expiry check, then the real clock determined the refreshed token's persisted
+expiry. The account remained unchanged and no email was sent. Revocation
+remains unverified. Desktop Google authentication buttons are
+not included. Connecting Gmail does not configure workflow notifications;
+select the notification provider in the workflow integrations separately.
+
+Gmail failures distinguish unavailable network/proxy, HTTP 401 authentication,
+HTTP 403 API/permission denial and HTTP 429 rate limits using static messages.
+Unknown failures remain generic; response bodies, tokens and native errors are
+not printed. Failed or uncertain deliveries are never retried automatically.
+
 ### Configured builtin fields
 
 `createConfiguredPlugins` recognizes the IDs below. Its strict schemas reject
 unknown IDs and fields. `?` marks optional fields; arrays described as nonempty
 must contain at least one item. Paths resolve against `workspaceRoot`; `~/`
-resolves against the supplied home directory. Every secret field uses
-`{env: VARIABLE_NAME}`; the factory rejects missing, empty or control-character
-values and redacts resolved secrets from its own errors, health and diagnostics.
-It supplies fetch/executors/callbacks rather than serializing functions in YAML.
+resolves against the supplied home directory. Every secret field accepts either
+`{env: VARIABLE_NAME}` or `{provider: REGISTERED_NAME, name: CREDENTIAL_NAME,
+scope?: REQUESTED_SCOPE}`. Provider names are exact registry keys, for example
+`credential.enterprise`; registration alone does not select a credential source.
+The factory rejects missing, empty or control-character secret values and
+redacts resolved secrets from its own errors, health and diagnostics. It supplies
+fetch/executors/callbacks rather than serializing functions in YAML.
 
 | Plugin ID | Accepted configuration fields |
 |---|---|
@@ -300,6 +436,7 @@ It supplies fetch/executors/callbacks rather than serializing functions in YAML.
 | `verification.test-runner`, `verification.static-scan`, `verification.browser-check` | Nonempty argv `command`, `timeoutMs?` |
 | `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?` |
 | `notification.email` | `from`, `to` email addresses; `sendmailPath?`, `channel?` |
+| `notification.gmail` | `{}` sends to the authenticated Google account; optional email `to` overrides the recipient; `channel?` |
 | `notification.desktop` | `platform?` (`darwin`, `linux`, `win32`), `channel?` |
 | `trigger.webhook` | Secret `secret`, nonempty `triggers[{id,kind: webhook,payload?,input?}]`; `payload` is event filtering and `input` is static action input |
 | `trigger.git-push`, `trigger.issue-event` | Same webhook-kind `triggers`; Git push also accepts `includeDeleted?` |
@@ -307,6 +444,7 @@ It supplies fetch/executors/callbacks rather than serializing functions in YAML.
 | `context.code`, `context.knowledge-base`, `context.project-memory` | Respectively `root`, `endpoint`, `file` |
 | `context.retrieval` | Nonempty `documents[{origin,content}]` |
 | `credential.system-keychain` | `service`, `command?` |
+| `credential.google-oauth` | `{}` uses the Google credentials saved by `afk plugin auth login google --client <path>` |
 | `credential.oauth` | HTTPS `tokenEndpoint`, `clientId`, secret `clientSecret`, `authMethod?` (`client_secret_basic`/`client_secret_post`), `timeoutMs?` |
 | `credential.oidc` | HTTPS `issuer`, `clientId`, secret `assertion`, `tokenEndpoint?`, `timeoutMs?`; optional `exchange:{subjectToken,subjectTokenType,audience?,resource?}` with secret `subjectToken` |
 | `credential.enterprise` | Nonempty `values` map of secret references |
@@ -319,10 +457,30 @@ It supplies fetch/executors/callbacks rather than serializing functions in YAML.
 | `policy.compliance-policy` | Nonempty `rules[{id,effect,actions?,when?,reason?}]`, `defaultEffect?`; effect is `allow`/`deny`, actions are nonempty, `when` is a scalar equality map |
 
 Explicit configured entries replace defaults with the same ID. `--builtin`
-validates the actual factory before saving settings; it does not start timers.
-Secrets are resolved at construction, so restart the process after changing an
-environment value. Credential-provider registration does not automatically bind
-it to other factories' `{env: ...}` fields.
+validates configuration before saving; validation neither resolves credential
+provider references nor performs authentication/network calls or starts timers.
+Environment references are checked and captured during construction.
+
+Credential references are shape-checked first. At activation the factory looks
+up the exact credential provider in the existing Runtime registry, awaits
+`resolve({name, scope?})` once per referenced field, validates the actual value,
+then registers the consumer. Webhook URL validation runs after the asynchronous
+resolution. Missing providers, invalid results and resolution errors fail
+activation without publishing the consumer or exposing credential errors.
+Values injected through these generic references are captured for that
+activation; operations do not automatically resolve or refresh them.
+Reactivation resolves again. Gmail retains its own OAuth refresh behavior.
+
+The shared composition root batches valid configured builtins. Within that
+batch, specific credential references order credential providers before their
+consumers, including credential-to-credential chains; self-references and cycles
+are rejected before credential resolution. Credential providers do not add a
+same-capability `requires` edge for their own references. The shared loader also
+defers configured consumers until their exact named credential providers are
+registered, including providers from installed plugins. Missing or cyclic
+dependencies produce `load.dependencies`; actual resolution failures are not retried.
+Change an environment value or credential source by constructing a new Runtime;
+there is no automatic refresh of an existing consumer.
 
 ## Loading, dependencies and disposal
 
@@ -364,9 +522,11 @@ or a selected provider's health.
 
 During `activate`, dependent plugins can obtain an already activated provider
 through `context.getProvider<T>(capability, name)` or
-`context.getCredentialProvider(name)`. Declare `requires: ['credential.provider']`
-for a credential dependency, check the named provider exists, and call its
-`resolve` privately. Do not expose returned secrets through action results,
+`context.getCredentialProvider(name)`. A consumer can declare
+`requires: ['credential.provider']` for capability availability, but must still
+check the exact named provider and await its `resolve` privately. Capability
+requirements alone cannot order credential-to-credential references; configured
+builtins use the specific-reference ordering described above. Do not expose returned secrets through action results,
 diagnostics or logs. These SDK methods do not add credential reads to the CLI
 operation whitelist; named-provider selection remains the consumer's job.
 
@@ -423,6 +583,7 @@ owns. The diagram shows these implemented composition and invocation paths.
 | System-step input, `capability.invoke`, required policy hooks | Implemented; negative operation results fail the step; checks run before Agent, after Agent and before publication |
 | Managed execution, QA, loop, schedule, run and Desktop Worker | Implemented; Runtime and registries are propagated into implementation/QA and disposed by their owner |
 | QA lifecycle and publication policy | Required init and before-agent hooks run before verification; context uses a file pointer; successful QA runs after-agent artifact/notification hooks; separate `before-publish` checks precede branch push and change-request publication |
+| Desktop plugin management | Settings calls the shared manager for local/npm install, enable/disable, removal and JSON configuration import; cached inspection is distinct from future Worker state and the static dependency guard. |
 | Desktop external Agent selection | Implemented; menu uses registered providers and save rejects an unknown default/node provider |
 | Trigger to managed workflow | Implemented; static descriptor `input` dispatches `work-item.execute` with the same Runtime, normal eligibility/lease checks and no automatic merge |
 
@@ -640,9 +801,11 @@ replacement for evidence classification and redaction.
 
 ### Secret references and trigger lifetime
 
-Configured secret values use an environment reference object, for example
-`{"env":"PROVIDER_TOKEN"}`. A variable name supplied as a bare string or a
-`${VAR}` expression is not the secret-reference syntax. The actual secret field
+Configured secret values use either an environment reference, for example
+`{"env":"PROVIDER_TOKEN"}`, or a credential reference such as
+`{"provider":"credential.enterprise","name":"deployment"}` with optional
+`scope`. A bare environment-variable name string, literal secret or `${VAR}`
+expression is not the secret-reference syntax. The actual secret field
 names and supported provider settings belong to `configured.ts`; complete
 provider configuration examples must follow that implementation rather than
 guessing constructor-to-YAML mappings.

@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dump } from 'js-yaml';
 import { validateManifest, validatePluginId, type PluginManifest } from '../../plugin-sdk/profile.js';
-import { pluginConfigurationPath, readPluginConfiguration, validatePluginConfig } from './configuration.js';
+import { pluginConfigurationPath, readPluginConfiguration, validatePluginConfig, type PluginConfiguration } from './configuration.js';
 
 export interface InstalledPluginRecord {
   readonly id: string;
@@ -21,6 +21,13 @@ export interface InstalledPluginRecord {
 export interface PluginManagerOptions {
   readonly homeDir?: string;
   readonly runNpm?: (args: readonly string[], cwd: string) => Promise<void>;
+}
+
+interface PluginDependencyState {
+  readonly manifests: ReadonlyMap<string, PluginManifest>;
+  readonly credentials: ReadonlySet<string>;
+  readonly opaqueCredentials: ReadonlySet<string>;
+  readonly dependencies: ReadonlyMap<string, readonly string[]>;
 }
 
 async function atomicWrite(path: string, value: string): Promise<void> {
@@ -86,8 +93,116 @@ export class PluginManager {
     finally { await lock.close(); await fs.rm(lockPath, { force: true }); }
   }
 
+  private configuration(): PluginConfiguration {
+    try {
+      const configuration = readPluginConfiguration(this.homeDir);
+      if (new Set(configuration.plugins.map(entry => entry.id)).size !== configuration.plugins.length) throw new Error();
+      return configuration;
+    } catch { throw new Error('Invalid plugin configuration'); }
+  }
+
+  private async installed(id: string, verifyEntry = true): Promise<InstalledPluginRecord | undefined> {
+    try {
+      const directory = join(this.directory, id);
+      const record = await readInstalledPlugin(directory);
+      if (!record) return undefined;
+      validateManifest(record.manifest);
+      if (record.id !== id || record.version !== record.manifest.version) throw new Error();
+      if (verifyEntry) await resolveInstalledPluginEntry(directory, record);
+      return record;
+    } catch { throw new Error(`Invalid installed plugin metadata for '${id}'; reinstall the plugin`); }
+  }
+
+  private validateSettings(manifest: PluginManifest, config: unknown): void {
+    try { validatePluginConfig(manifest.configSchema, config); }
+    catch { throw new Error(`Invalid plugin settings for '${manifest.id}'`); }
+  }
+
+  private async manifests(configuration: PluginConfiguration, replacement?: PluginManifest, repairId?: string): Promise<PluginDependencyState> {
+    const { builtinPluginManifests } = await import('./builtin-manifests.js');
+    const defaults = new Map(builtinPluginManifests(this.homeDir, configuration.integrations).map(manifest => [manifest.id, manifest]));
+    const manifests = new Map<string, PluginManifest>();
+    const credentials = new Set([...defaults.values()].filter(manifest => manifest.provides.includes('credential.provider')).map(manifest => manifest.id));
+    const opaqueCredentials = new Set<string>();
+    const dependencies = new Map<string, readonly string[]>();
+    for (const entry of configuration.plugins) {
+      const builtin = defaults.get(entry.id);
+      defaults.delete(entry.id);
+      credentials.delete(entry.id);
+      if (entry.enabled === false) continue;
+      let manifest: PluginManifest | undefined;
+      if (entry.builtin) {
+        try {
+          if (entry.config === undefined) manifest = builtin;
+          else {
+            const { createConfiguredPlugins, getConfiguredCredentialDependencies } = await import('./configured.js');
+            const [plugin] = await createConfiguredPlugins({ configurations: [entry], homeDir: this.homeDir, onTrigger: async () => {} });
+            manifest = plugin.manifest;
+            dependencies.set(entry.id, getConfiguredCredentialDependencies(plugin));
+          }
+        } catch { throw new Error(`Invalid builtin plugin configuration for '${entry.id}'`); }
+      } else {
+        manifest = replacement?.id === entry.id ? replacement : (await this.installed(entry.id, entry.id !== repairId))?.manifest;
+        if (manifest) {
+          try { validatePluginConfig(manifest.configSchema, entry.config ?? {}); }
+          catch (error) {
+            if (error instanceof Error && error.message.startsWith('Invalid plugin settings:')) continue;
+            throw new Error(`Invalid installed plugin metadata for '${entry.id}'`);
+          }
+        }
+      }
+      if (!manifest) throw new Error(`Plugin metadata is unavailable for '${entry.id}'`);
+      if (entry.builtin) {
+        defaults.set(entry.id, manifest);
+        if (manifest.provides.includes('credential.provider')) credentials.add(entry.id);
+      } else {
+        manifests.set(entry.id, manifest);
+        if (manifest.provides.includes('credential.provider')) opaqueCredentials.add(entry.id);
+      }
+    }
+    return { manifests: new Map([...manifests, ...defaults]), credentials, opaqueCredentials, dependencies };
+  }
+
+  private availablePlugins(state: PluginDependencyState, knownCredentials: ReadonlySet<string>): Set<string> {
+    const loaded: PluginManifest[] = [];
+    const capabilities = new Set<string>();
+    const credentials = new Set<string>();
+    let pending = [...state.manifests.values()];
+    while (pending.length) {
+      const deferred: PluginManifest[] = [];
+      for (const manifest of pending) {
+        if (manifest.requires?.some(capability => !capabilities.has(capability))) { deferred.push(manifest); continue; }
+        if (state.dependencies.get(manifest.id)?.some(name => !credentials.has(name) &&
+          (knownCredentials.has(name) || !loaded.some(provider => state.opaqueCredentials.has(provider.id))))) { deferred.push(manifest); continue; }
+        if (loaded.some(other => manifest.conflicts?.some(conflict => conflict === other.id || other.provides.includes(conflict)) ||
+          other.conflicts?.some(conflict => conflict === manifest.id || manifest.provides.includes(conflict)))) continue;
+        loaded.push(manifest);
+        if (state.credentials.has(manifest.id)) credentials.add(manifest.id);
+        for (const capability of manifest.provides) capabilities.add(capability);
+      }
+      if (deferred.length === pending.length) break;
+      pending = deferred;
+    }
+    return new Set(loaded.map(manifest => manifest.id));
+  }
+
+  private async protectDependencies(id: string, configuration: PluginConfiguration, next: PluginConfiguration, replacement?: PluginManifest): Promise<void> {
+    const previous = await this.manifests(configuration, undefined, replacement?.id);
+    const manifests = await this.manifests(next, replacement);
+    const knownCredentials = new Set([...previous.credentials, ...manifests.credentials]);
+    const before = this.availablePlugins(previous, knownCredentials);
+    const after = this.availablePlugins(manifests, knownCredentials);
+    const opaqueChanged = previous.opaqueCredentials.has(id) && (!manifests.opaqueCredentials.has(id) || replacement !== undefined ||
+      JSON.stringify(configuration.plugins.find(entry => entry.id === id)?.config) !== JSON.stringify(next.plugins.find(entry => entry.id === id)?.config));
+    const dependent = [...previous.manifests.values()].find(manifest => manifest.id !== id &&
+      (manifest.requires?.length || previous.dependencies.get(manifest.id)?.length) && before.has(manifest.id) && manifests.manifests.has(manifest.id) &&
+      (!after.has(manifest.id) || (opaqueChanged && previous.dependencies.get(manifest.id)?.some(name => !knownCredentials.has(name)))));
+    if (dependent) throw new Error(`Plugin '${id}' is required by '${dependent.id}'`);
+  }
+
   async install(source: string): Promise<InstalledPluginRecord> {
     return this.locked(async () => {
+      const configuration = this.configuration();
       const stage = await fs.mkdtemp(join(this.directory, '.install-'));
       let destination: string | undefined;
       let backup: string | undefined;
@@ -114,8 +229,11 @@ export class PluginManager {
           if (names.length !== 1) throw new Error('The package manager did not resolve exactly one plugin package');
           packageRoot = join(stage, 'node_modules', names[0]);
         }
-        const metadata = JSON.parse(await fs.readFile(join(packageRoot, 'plugin.json'), 'utf8')) as PluginManifest & { entry?: string };
-        validateManifest(metadata);
+        let metadata: PluginManifest & { entry?: string };
+        try {
+          metadata = JSON.parse(await fs.readFile(join(packageRoot, 'plugin.json'), 'utf8')) as typeof metadata;
+          validateManifest(metadata);
+        } catch { throw new Error('Invalid plugin manifest'); }
         const entryPath = metadata.entry ?? 'dist/index.js';
         if (isAbsolute(entryPath)) throw new Error('Plugin entry must be a relative path');
         const root = await fs.realpath(packageRoot);
@@ -132,6 +250,11 @@ export class PluginManager {
           installedAt: new Date().toISOString(),
         };
         await fs.writeFile(join(stage, 'install.json'), JSON.stringify(record, null, 2), { mode: 0o600 });
+        const existing = configuration.plugins.find(entry => entry.id === metadata.id);
+        if (existing?.config !== undefined) this.validateSettings(metadata, existing.config);
+        const setting = { ...existing, id: metadata.id, enabled: true, builtin: false };
+        const next = { ...configuration, plugins: existing ? configuration.plugins.map(entry => entry.id === metadata.id ? setting : entry) : [...configuration.plugins, setting] };
+        await this.protectDependencies(metadata.id, configuration, next, metadata);
         destination = join(this.directory, metadata.id);
         if (await fs.stat(destination).then(() => true, () => false)) {
           backup = join(this.directory, `.backup-${randomUUID()}`);
@@ -139,7 +262,7 @@ export class PluginManager {
         }
         await fs.rename(stage, destination);
         published = true;
-        await this.setEnabledUnlocked(metadata.id, true);
+        await atomicWrite(pluginConfigurationPath(this.homeDir), dump(next));
         if (backup) await fs.rm(backup, { recursive: true, force: true });
         return record;
       } catch (error) {
@@ -156,32 +279,36 @@ export class PluginManager {
   }
 
   private async setEnabledUnlocked(id: string, enabled: boolean, builtin = false): Promise<void> {
-    const configuration = readPluginConfiguration(this.homeDir);
+    const configuration = this.configuration();
     const existing = configuration.plugins.find(entry => entry.id === id);
-    const installed = await readInstalledPlugin(join(this.directory, id));
+    const installed = await this.installed(id);
     if (enabled && !existing?.builtin && !builtin && !installed) throw new Error(`Plugin '${id}' is not installed`);
-    const setting = { ...existing, id, enabled, ...(installed ? { builtin: false } : builtin ? { builtin: true } : {}) };
-    if (existing) configuration.plugins = configuration.plugins.map(entry => entry.id === id ? setting : entry);
-    else configuration.plugins.push(setting);
-    await atomicWrite(pluginConfigurationPath(this.homeDir), dump(configuration));
+    const setting = { ...existing, id, enabled, builtin: existing?.builtin ?? (installed ? false : builtin) };
+    if (enabled && !setting.builtin && installed) this.validateSettings(installed.manifest, existing?.config ?? {});
+    const next = { ...configuration, plugins: existing ? configuration.plugins.map(entry => entry.id === id ? setting : entry) : [...configuration.plugins, setting] };
+    await this.protectDependencies(id, configuration, next);
+    await atomicWrite(pluginConfigurationPath(this.homeDir), dump(next));
   }
 
   async configure(id: string, config: { readonly [key: string]: import('../../plugin-sdk/profile.js').PluginConfigValue }, builtin = false, action?: string): Promise<void> {
     validatePluginId(id);
     if (action !== undefined && (!action.trim() || action.includes('\0'))) throw new Error('Invalid trigger action name');
     await this.locked(async () => {
-      const installed = await readInstalledPlugin(join(this.directory, id));
+      const configuration = this.configuration();
+      const installed = builtin ? undefined : await this.installed(id);
       if (!builtin && !installed) throw new Error(`Plugin '${id}' is not installed`);
       if (builtin) {
-        const { createConfiguredPlugins } = await import('./configured.js');
-        await createConfiguredPlugins({ configurations: [{ id, config }], homeDir: this.homeDir, onTrigger: async () => {} });
+        try {
+          const { createConfiguredPlugins } = await import('./configured.js');
+          await createConfiguredPlugins({ configurations: [{ id, config }], homeDir: this.homeDir, onTrigger: async () => {} });
+        } catch { throw new Error(`Invalid plugin settings for '${id}'`); }
       }
-      validatePluginConfig(installed?.manifest.configSchema, config);
-      const configuration = readPluginConfiguration(this.homeDir);
+      if (installed) this.validateSettings(installed.manifest, config);
       const existing = configuration.plugins.find(entry => entry.id === id);
       const entry = { ...existing, id, enabled: existing?.enabled ?? true, builtin, config, ...(action === undefined ? {} : { action }) };
-      configuration.plugins = [...configuration.plugins.filter(candidate => candidate.id !== id), entry];
-      await atomicWrite(pluginConfigurationPath(this.homeDir), dump(configuration));
+      const next = { ...configuration, plugins: [...configuration.plugins.filter(candidate => candidate.id !== id), entry] };
+      await this.protectDependencies(id, configuration, next);
+      await atomicWrite(pluginConfigurationPath(this.homeDir), dump(next));
     });
   }
 
@@ -189,7 +316,7 @@ export class PluginManager {
     validatePluginId(id);
     await this.locked(async () => {
       const directory = join(this.directory, id);
-      if (!await readInstalledPlugin(directory)) throw new Error(`Plugin '${id}' is not installed`);
+      if (!await this.installed(id)) throw new Error(`Plugin '${id}' is not installed`);
       await this.setEnabledUnlocked(id, false);
       await fs.rm(directory, { recursive: true, force: true });
     });

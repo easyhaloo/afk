@@ -4,8 +4,42 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { PluginRuntime } from './runtime.js';
 import { loadInstalledPlugins } from './loader.js';
+import { createConfiguredPlugins } from './configured.js';
 
 describe('loadInstalledPlugins', () => {
+  it.each(['resolution', 'activation'])('does not retry a configured consumer after an actual %s failure while other plugins progress', async failure => {
+    const runtime = new PluginRuntime();
+    const resolve = vi.fn(async () => {
+      if (failure === 'resolution') throw new Error('synthetic resolution failure');
+      return { secret: 'https://webhook.example.test/fixture' };
+    });
+    const [consumer] = await createConfiguredPlugins({ configurations: [
+      { id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'webhook' } } },
+    ] });
+    const activate = vi.spyOn(consumer, 'activate');
+    try {
+      const loaded = await loadInstalledPlugins(runtime, { entries: [], plugins: [
+        consumer,
+        { manifest: { id: 'test.final', version: '1.0.0', apiVersion: 1, trusted: true, provides: [], requires: ['test.progress'] }, activate() {} },
+        { manifest: { id: 'test.progress', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['test.progress'], requires: ['credential.provider'] }, activate() {} },
+        {
+          manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['credential.provider', 'notification.provider'] },
+          activate(context) {
+            context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve });
+            if (failure === 'activation') context.registerNotificationProvider('notification.slack', { id: 'notification.slack', capabilities: { 'direct-message': false, 'channel-post': true, mention: false }, async notify() { return { delivered: true, channel: 'fixture' }; } });
+          },
+        },
+      ] });
+      expect(loaded).toEqual(['credential.fixture', 'test.progress', 'test.final']);
+      expect(activate).toHaveBeenCalledTimes(1);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(runtime.getPlugin('notification.slack')).toBeUndefined();
+      const errors = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.slack');
+      expect(errors.map(item => item.code)).toEqual(['activation.failed', 'load.failed']);
+      expect(errors[0].message).toContain(failure === 'resolution' ? 'credential resolution failed' : 'duplicate notification.provider');
+    } finally { await runtime.dispose(); }
+  });
+
   it('never falls back to a builtin when an explicitly selected installed override is missing', async () => {
     const runtime = new PluginRuntime();
     const activate = vi.fn();

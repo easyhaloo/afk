@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Plugin, WorkflowPlugin } from './runtime.js';
 import { PluginRuntime } from './runtime.js';
+import { getConfiguredCredentialDependencies } from './configured.js';
 import { readPluginConfiguration, validatePluginConfig, type InstalledPluginEntry } from './configuration.js';
 import { readInstalledPlugin, resolveInstalledPluginEntry } from './manager.js';
 import { validateManifest, type PluginConfigValue } from '../../plugin-sdk/profile.js';
@@ -122,7 +123,8 @@ export async function loadInstalledPlugins(
     let progressed = false;
     for (const plugin of pending) {
       const requirements = 'manifest' in plugin ? plugin.manifest.requires ?? [] : [];
-      if (requirements.some(capability => !runtime.listCapabilities().includes(capability))) { deferred.push(plugin); continue; }
+      if (requirements.some(capability => !runtime.listCapabilities().includes(capability))
+        || getConfiguredCredentialDependencies(plugin).some(name => !runtime.getCredentialProvider(name))) { deferred.push(plugin); continue; }
       try {
         await runtime.load(plugin);
         loaded.push(pluginId(plugin));

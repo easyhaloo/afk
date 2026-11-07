@@ -24,3 +24,5 @@ export { createConfiguredPlugins } from '../application/plugins/configured.js';
 export type { ConfiguredPluginsOptions } from '../application/plugins/configured.js';
 export { startRemoteContainerService } from '../application/plugins/remote-service.js';
 export type { RemoteContainerServiceOptions } from '../application/plugins/remote-service.js';
+export { GoogleOAuthCredentialProvider, GoogleOAuthError } from '../infrastructure/providers/google-oauth.js';
+export type { GoogleAccount, GoogleOAuthOptions } from '../infrastructure/providers/google-oauth.js';

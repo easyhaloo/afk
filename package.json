@@ -18,7 +18,7 @@
     "test:e2e:codex": "tsx tests/e2e/codex-runtime.ts",
     "test:e2e:claude": "pnpm build && AFK_REAL_CLAUDE_E2E=1 pnpm --filter afk exec vitest run src/tui/task-runtime.integration.test.ts src/tui/task-runtime.sandbox-integration.test.ts --no-file-parallelism",
     "test:e2e:pty": "vitest run --config vitest.pty.config.ts",
-    "test:e2e:cli": "pnpm build && vitest run tests/e2e/cli-workflow.test.ts",
+    "test:e2e:cli": "pnpm build && vitest run tests/e2e/cli-workflow.test.ts tests/e2e/plugin-local.test.ts",
     "test:e2e": "pnpm test:e2e:cli && pnpm test:e2e:pty && pnpm --filter afk-control-electron e2e",
     "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs"

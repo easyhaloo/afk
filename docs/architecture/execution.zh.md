@@ -28,6 +28,9 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
 - `afk plugin install <source>`：在暂存目录安装可信本地目录或 npm package spec，校验 `plugin.json` 的 manifest/entry，记录入口摘要并启用；普通升级失败保留旧安装，禁用 npm lifecycle scripts，包需要自带构建后的入口。
 - `afk plugin configure <id> --file <path> [--builtin] [--action <name>]`：保存 JSON 配置对象；已安装插件按 manifest schema 校验，`--builtin` 校验并构造已知的配置化 Provider。`--action` 写入插件条目的顶层 trigger action，省略时保留已有 action。
+- `afk plugin auth login google --client <path>`：将浏览器 OAuth 和 loopback 回调委托给 `GoogleOAuthCredentialProvider`，读取 Google Desktop app 客户端 JSON，无需输入邮箱。SIGINT/SIGTERM 取消认证并关闭回调服务器。登录成功后以 `{}` 配置 builtin `credential.google-oauth`，仅在缺失时以 `{}` 添加 builtin `notification.gmail`，保留已有 Gmail 配置；默认收件人为授权账号自身，登录不发送邮件。见 [Gmail OAuth 配置](plugins.zh.md#gmail-oauth)。
+- `afk plugin auth status google`：仅输出本地 Keychain 记录状态（`connected`，以及可选的 `email`、`expiresAt`），不需要客户端文件，不输出令牌，不检查 Google 会话或令牌有效性。
+- `afk plugin auth logout google`：Google 撤销授权成功后才删除 Keychain 记录，撤销失败保留记录供重试；不需要客户端文件，保留插件配置和启用状态；SIGINT/SIGTERM 取消操作。这三个认证命令的 Provider 仅接受 `google`。凭据使用 macOS/Linux Keychain；Windows 不支持，也不会将令牌保存到文件。
 - `afk plugin enable <id>` / `afk plugin disable <id>`：修改下次构造 Runtime 时的启用状态，不热更新正在执行的 Worker。
 - `afk plugin remove <id>`：禁用并删除已安装包，保留配置。
 - `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`：派发 43 项显式白名单操作之一，校验 JSON 输入和输出；无论是否带 `--json` 都输出 JSON。验证/策略/投递否定结果或远程非零 code 使 exit status 为 `1`；不开放凭据读取或 merge。CLI 验证输入必须显式提供 `target`。

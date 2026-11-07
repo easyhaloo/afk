@@ -1,6 +1,6 @@
 {
   "name": "@easyhaloo/afk-opencode",
-  "version": "1.2.2",
+  "version": "1.2.0",
   "description": "AFK workflow skills for OpenCode 2.x — one-command install of the plugin + 24 skill suite (requirements, implementation, testing, research, QA, hand-off).",
   "license": "MIT",
   "type": "module",

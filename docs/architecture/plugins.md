@@ -1074,3 +1074,28 @@ the `builtins*` / `builtin-*` modules alongside them, concrete adapters under
 `packages/runtime/src/application/runners/qa-runner.ts`,
 `apps/desktop/electron/services/{runtime-service,desktop-service}.ts` and
 `apps/desktop/electron/worker/execution-worker.ts`.
+
+## Runtime governance and experience reuse
+
+The [implementation plan](../superpowers/plans/2026-11-08-runtime-learning-and-validation.md) and its [Chinese design](../superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md) extend the existing execution engine.
+
+| Concern | Kernel / application owns | Plugin extension |
+| --- | --- | --- |
+| Context | Scope, size, provenance and prompt references | Existing context providers plus `context.experience` |
+| Execution | Identity, leases, state, budgets, cleanup and merge gates | Agent, Sandbox, typed system actions |
+| Templates | Validation, dependencies and dispatch | Explicit files → user templates → plugin templates → builtins |
+| Hooks | Ordering, required failure policy, reverse cleanup | Init, before/after agent, before publication, cleanup |
+| Sessions | Ownership, checksums, resume fallback, persistent usage | Agent/sandbox transports and session stores |
+| Experience | Evidence gates, state, scope, retention and recurrence | Verified local experience through `ContextSource.gather` |
+
+Implementation, QA/conflict resolution and CLI graph generation can select registered plugin templates. Prompt files in an in-memory plugin template must be absolute. Removing a plugin removes its templates without a stale cache. Required hooks still block execution/publication. The runtime does not offer a vendor-independent interception API for every Agent tool call.
+
+Selected reference context retains source identifiers and is capped at 32,000 characters per file; the lifecycle retains at most 64 bounded fragments per worktree. Experience retrieval selects at most five records within an 8,000-character serialized-record budget. Prompts carry short file references and remain subject to the provider's prompt limit. Only relevant, unexpired, verified records from the exact canonical project enter this context. The implementation runner audits a supplied experience context as `decision.made` with command `experience.recall`.
+
+Structured runner failures, including intermediate retryable failures, automatically create candidates with run/work-item provenance. A shared SQLite ledger isolates projects across checkouts and stores bounded redacted diagnoses and evidence references. It does not copy transcripts. Bounds are 1,000 records, 8 MiB logical payload/receipts, 32 KiB per record, 256 source identities per record and a default 90-day validity period. Eviction prefers expired and unverified records.
+
+`experience verify` requires an intact local audit chain, the same project, independent QA that started and passed, and additional evidence. The run must then finish successfully or publish a confirmed change and reach its matching human merge gate. Later QA or terminal failure disqualifies it. Experience verification never closes the human merge gate. Implementation success alone does not promote advice. Text corrections preserve the original failure identity; new evidence of recurrence withdraws verified state. Verification history prevents replaying earlier proof after recurrence. At the 256-source provenance limit, another recurrence still withdraws advice and blocks further promotion. Revoked and expired advice disappears from later context. Retrieval is lexical; no model weights are trained and no embedding service is created. The knowledge-base HTTP provider remains a retrieval adapter without generic remote writeback.
+
+Implementation workflows execute the compiled Agent/System plan. The specialized `pre-merge-qa-verification` and `merge-conflict-resolution` templates each require exactly one inline Agent step; unsupported multi-step, System or file-prompt shapes fail before launching the reviewer and cannot silently omit checks.
+
+`observe` and `retro` inspect execution/session evidence; `experience` governs derived advice. These controls apply to sessions owned by AFK, not arbitrary sessions started directly in Agent CLIs. Desktop shares execution behavior; experience management currently uses the CLI. The executable guarantee is evidence retention, scoped verified retrieval and withdrawal, rather than a promise that a model never repeats a mistake. See the [testing guide](../guides/testing.md) for the verification layers.

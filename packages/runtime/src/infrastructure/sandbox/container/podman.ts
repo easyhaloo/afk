@@ -4,7 +4,6 @@
  * was deliberately designed as a drop-in replacement for the subset we use).
  */
 
-import { spawn } from 'child_process';
 import { CliContainerProvider } from './cli-provider.js';
 import type { ContainerEngine } from './types.js';
 
@@ -13,12 +12,6 @@ export class PodmanContainerProvider extends CliContainerProvider {
   readonly binary = 'podman';
 
   async isAvailable(): Promise<boolean> {
-    return new Promise(resolve => {
-      const child = spawn(this.binary, ['version', '--format', '{{.Version}}'], { stdio: ['ignore', 'pipe', 'ignore'] });
-      let out = '';
-      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf-8')));
-      child.on('error', () => resolve(false));
-      child.on('close', code => resolve(code === 0 && out.trim().length > 0));
-    });
+    return this.probeVersion('{{.Version}}');
   }
 }

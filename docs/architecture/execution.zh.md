@@ -23,7 +23,9 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 
 - `afk`：打开交互式 TUI。
 - `afk run`：解析工作项后委托给实现 → 独立 QA → 发布的完整受管流程。现有运行时、超时、预算、扩展及显式执行模式参数继续生效；`--target-branch` 指工作分支，MR 目标由条目基线计划声明。
-- `afk execute --work-item-id <id>`：执行受管生命周期，包括资格与 manifest 校验、实现、独立 QA、变更请求处理，以及由人控制的合并闸门。
+- `afk execute --work-item-id <id>`：执行受管生命周期，包括资格与 manifest 校验、实现、独立 QA、变更请求处理，以及由人控制的合并闸门。`--agent <name>`、`--sandbox <name>` 和 `--execution-mode <batch|interactive>` 显式选择本次运行的 Provider 和模式；模板仍可为单个步骤单独选择 Provider。
+- `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`：查看项目经验；`recall --scope <scope> --query <text> [--json]` 只返回相关、已验证且未过期的经验。
+- `afk experience record --scope <scope> --trigger <text> --root-cause <text> --action <text> --run-id <id> --work-item-id <id> --evidence <refs...>`：保存候选经验。`verify <id> --scope <scope> --run-id <id> --action <text> --evidence <refs...> [--root <事件存储>] [--root-cause <text>]` 要求同项目、审计完整、独立 QA 通过，随后成功结束或已确认发布并抵达对应人工合并闸门。`revoke <id> --scope <scope>` 撤销经验，后续检索不再提供它。
 - `afk loop start`：针对一个绑定 manifest 的工作项持续尝试，并委托给同一受管执行路径；它不是全局多工作项调度器。
 - `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
 - `afk plugin install <source>`：在暂存目录安装可信本地目录或 npm package spec，校验 `plugin.json` 的 manifest/entry，记录入口摘要并启用；普通升级失败保留旧安装，禁用 npm lifecycle scripts，包需要自带构建后的入口。

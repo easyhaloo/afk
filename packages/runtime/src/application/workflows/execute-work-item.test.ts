@@ -11,6 +11,8 @@ import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
 import { QARunner } from '../runners/qa-runner.js';
 import { getLogContext } from '../../infrastructure/io/index.js';
+import { experienceStorePath, verifyExperienceRun } from '../learning/runtime.js';
+import { ExperienceStore } from '../learning/experience-store.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -276,6 +278,8 @@ describe('executeWorkItem', () => {
       'run.requested', 'run.started', 'implementation.completed', 'qa.started', 'qa.passed', 'change.published', 'human_gate.opened',
     ]);
     expect((await replayRun('attempt-1', store)).state).toMatchObject({ run: { status: 'awaiting_human' }, terminal: false });
+    await expect(verifyExperienceRun({ root: join(directory, 'events'), scope: 'github:acme/api',
+      runId: 'attempt-1', evidence: ['run:attempt-1#regression'] })).resolves.toContain('run:attempt-1#qa.passed');
   });
 
   it('records intent, claims through WorkflowRunner once, verifies independently, and only then succeeds', async () => {
@@ -353,6 +357,13 @@ describe('executeWorkItem', () => {
       failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
     });
     expect(vi.mocked(deps.recordAudit!).mock.calls[2][1]).toMatchObject({ kind: 'run.finished', reasonCode: 'qa_rework' });
+    const experiences = new ExperienceStore({ file: experienceStorePath() });
+    try {
+      expect(experiences.list({ scope: 'github:acme/api', status: 'candidate' })).toContainEqual(expect.objectContaining({
+        trigger: 'qa_rework', evidence: ['run:attempt-1#qa.failed'],
+        source: { runId: 'attempt-1', workItemId },
+      }));
+    } finally { experiences.close(); }
     const { deps: nextDeps, process: nextProcess } = await setup();
     nextProcess.mockResolvedValueOnce({ success: false } as any);
     expect((await executeWorkItem({ ...input, executionId: 'attempt-2' }, nextDeps)).status).toBe('blocked');

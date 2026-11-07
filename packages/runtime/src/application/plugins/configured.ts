@@ -6,6 +6,7 @@ import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import type { ProviderDiagnostic, ProviderHealth, TriggerDescriptor, TriggerProvider, ArtifactSink } from '../../plugin-sdk/capabilities.js';
 import type { Plugin, PluginSetupContext } from './runtime.js';
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
+import { ExperienceContextProvider, experienceStorePath } from '../learning/runtime.js';
 import { createJumpserverPlugin } from './builtins.js';
 import { AgentProviderRegistry, ensureBuiltinAgentProviders } from '../../domain/agents/index.js';
 import { createSshHostConnection, createAwsSsmHostConnection, createKubernetesExecHostConnection } from '../../infrastructure/host/index.js';
@@ -270,6 +271,10 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
     'trigger.schedule': define(z.object({ triggers: scheduleDescriptors }).strict(), config => trigger(new ScheduleTriggerProvider({ onFire: descriptor => fire('trigger.schedule', descriptor) }), config.triggers)),
     'trigger.git-push': define(z.object({ includeDeleted: z.boolean().optional(), triggers: webhookDescriptors }).strict(), config => trigger(new GitPushTriggerProvider({ includeDeleted: config.includeDeleted, onPush: (payload, descriptor) => fire('trigger.git-push', descriptor, payload) }), config.triggers)),
     'trigger.issue-event': define(z.object({ triggers: webhookDescriptors }).strict(), config => trigger(new IssueEventTriggerProvider({ onIssue: (payload, descriptor) => fire('trigger.issue-event', descriptor, payload) }), config.triggers)),
+    'context.experience': define(z.object({}).strict(), () => {
+      const provider = new ExperienceContextProvider(experienceStorePath(options.homeDir ?? homedir()));
+      return capability(provider, { contexts: [provider] });
+    }),
     'context.code': define(z.object({ root: text }).strict(), config => {
       const provider = new CodeContextProvider({ root: path(config.root) });
       return capability(provider, { contexts: [provider] });

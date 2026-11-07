@@ -268,13 +268,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
+    env:
+      COVERAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+      COVERAGE_CHANGED_LINES: ${{ vars.COVERAGE_CHANGED_LINES }}
+      COVERAGE_CHANGED_STATEMENTS: ${{ vars.COVERAGE_CHANGED_STATEMENTS }}
+      COVERAGE_CHANGED_FUNCTIONS: ${{ vars.COVERAGE_CHANGED_FUNCTIONS }}
+      COVERAGE_CHANGED_BRANCHES: ${{ vars.COVERAGE_CHANGED_BRANCHES }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -312,7 +318,22 @@ jobs:
         run: pnpm build
 
       - name: Test
+        id: tests
         run: pnpm test
+
+      - name: Collect source coverage (serial, after existing tests)
+        id: coverage
+        if: success() || (failure() && steps.tests.outcome == 'failure')
+        run: pnpm test:coverage
+
+      - name: Upload source coverage reports
+        if: always() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-coverage
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 14
 
 
   cli-pty-e2e:

@@ -30,6 +30,8 @@ import { withLogContext, logger } from '../../infrastructure/io/index.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import type { PluginRuntime } from '../plugins/runtime.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
+import { recordExecutionExperience } from '../learning/runtime.js';
+import { createFailureDiagnostic } from './failure-diagnostic.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -378,7 +380,16 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const executionId = context.runId;
   const observer = dependencies.recordAudit ? undefined : createPluginRunObserver(dependencies.plugins);
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
-  const audit = async (data: RunEventData) => { await recordAudit(context, data); };
+  const audit = async (data: RunEventData) => {
+    await recordAudit(context, data);
+    if (data.kind === 'qa.failed') {
+      try {
+        recordExecutionExperience({ runId: context.runId, workItemId, sourceEvent: 'qa.failed',
+          failure: createFailureDiagnostic({ code: data.reasonCode ?? (data.reason === 'rework' ? 'qa_rework' : 'qa_execution_failed'),
+            message: data.summary ?? `Independent QA ${data.reason ?? 'failed'}` }) });
+      } catch { logger.warn({ workItemId, runId: context.runId }, 'QA failure experience could not be recorded'); }
+    }
+  };
   const manifest = await resolveManifest(input, dependencies);
   return new RepositoryLeases().run((manifest.repositories ?? []).map(repository => `${repository.platform}:${repository.projectKey}`), async () => {
     const directory = join(workspaceDataDirectory(manifest.workspaceRoot), 'executions');

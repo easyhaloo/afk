@@ -896,3 +896,28 @@ lifecycle 策略闸门。
 `packages/runtime/src/application/runners/qa-runner.ts`、
 `apps/desktop/electron/services/{runtime-service,desktop-service}.ts` 和
 `apps/desktop/electron/worker/execution-worker.ts`。
+
+## 执行治理与经验复用
+
+[补充设计与架构图](../superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md)及[实施清单](../superpowers/plans/2026-11-08-runtime-learning-and-validation.md)沿用已有执行引擎。
+
+| 能力 | Core / Application 负责 | 插件扩展 |
+| --- | --- | --- |
+| 上下文 | 项目隔离、大小、来源和提示词引用 | 现有 Context Provider 及 `context.experience` |
+| 执行 | 身份、租约、状态、预算、清理、合并闸门 | Agent、Sandbox、类型化系统动作 |
+| 模板 | 校验、依赖编译和派发 | 显式文件 → 用户模板 → 插件模板 → 内置模板 |
+| Hooks | 执行顺序、必需失败策略、逆序清理 | 初始化、Agent 前后、发布前、清理 |
+| 会话 | 所有权、校验和、恢复回退、持久用量 | Agent / Sandbox transport 和 Session Store |
+| 经验 | 证据门禁、状态、作用域、保留和复发处理 | 已验证本地经验，经 `ContextSource.gather` 返回 |
+
+实现、QA / 冲突解决和 CLI 工作流图均可选取已注册的插件模板。内存模板的 prompt 文件必须是绝对路径。卸载插件后模板不可继续被缓存命中。必需 Hook 仍能阻断执行或发布；当前没有跨厂商拦截所有 Agent 工具调用的统一 API。
+
+引用上下文保留来源，每个文件最多 32,000 字符；生命周期每个工作树最多保留 64 个有界片段。经验检索最多五条，序列化记录预算 8,000 字符。提示词携带短文件引用，仍遵循 Provider 的提示词预算。只有同一规范项目内相关、已验证且未过期的经验能够进入上下文。实现引擎通过 `decision.made`、`command=experience.recall` 审计经验供应。
+
+结构化失败（含中途可重试失败）自动形成候选经验，保留运行和工作项身份。共享 SQLite 账本跨工作树使用、按项目隔离，保存有界且脱敏的诊断及证据引用，不复制原始会话。限制为 1,000 条、逻辑负载与来源收据合计 8 MiB、单条 32 KiB、每条 256 个来源，默认有效期 90 天；容量淘汰优先处理过期和未验证记录。
+
+`experience verify` 要求本地审计链完整、项目一致、独立 QA 已启动并通过，且提供新增证据。随后运行必须成功结束，或已确认发布变更并抵达对应的人工合并闸门；后续 QA 或终态失败使该运行失去资格。经验验证不会关闭人工合并闸门。实现成功不会自动提升经验。修改修复建议保留原始失败身份；新证据表明失败复发时，原建议退回候选。验证历史阻止复用复发前的旧证明；达到 256 个来源上限后，新复发仍使建议退回候选，并阻止继续提升。撤销和过期也会使建议退出后续上下文。当前使用词项相关性检索，不训练模型权重，也不自动创建向量服务；HTTP 知识库仍是检索适配器，没有通用远端写回协议。
+
+实现工作流执行编译后的 Agent / System 计划。专用的 `pre-merge-qa-verification` 与 `merge-conflict-resolution` 模板分别只接受一个 inline Agent 步骤；多步骤、System 或文件提示词形态会在复核 Agent 启动前报错，不能静默省略检查。
+
+`observe` 和 `retro` 查看执行及会话证据，`experience` 管理从证据派生的建议。治理范围是 AFK 拥有的会话，不接管用户直接启动的任意 Agent 会话。Desktop 共享执行行为，经验管理目前通过 CLI 完成。可执行保证是保留证据、按项目检索已验证经验、撤回无效经验，不能承诺模型永远不再犯错。[测试指南](../guides/testing.zh.md)分别说明验证层次。

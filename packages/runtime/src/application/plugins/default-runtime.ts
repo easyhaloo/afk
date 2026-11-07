@@ -1,7 +1,6 @@
 import { homedir } from 'node:os';
 import { constants, promises as fs } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { capabilitySelectionSchema as selectionSchema, createDefaultBuiltinProviderPlugins } from './builtin-manifests.js';
 import { loadInstalledPlugins } from './loader.js';
@@ -12,6 +11,7 @@ import { readPluginConfiguration, type PluginConfiguration } from './configurati
 import { createCapabilityLifecycle } from './integrations.js';
 import type { ContextFragment } from '../../plugin-sdk/capabilities.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
+import { CONTEXT_MAX_CHARS, writeReferenceContext } from '../workflows/context-file.js';
 
 const identifier = z.string().min(1);
 
@@ -112,17 +112,10 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
         contexts: selection.contexts.map(source => ({
           ...source, query: () => source.query,
           async consume(received, context) {
-            const merged = [...(fragments.get(context.worktreePath) ?? []), ...received];
+            const merged = [...(fragments.get(context.worktreePath) ?? []), ...received].slice(0, 64)
+              .map(fragment => ({ ...fragment, origin: fragment.origin.slice(0, 1000), content: fragment.content.slice(0, CONTEXT_MAX_CHARS) }));
             fragments.set(context.worktreePath, merged);
-            const root = await fs.realpath(context.worktreePath);
-            const directory = join(root, '.afk');
-            await fs.mkdir(directory, { recursive: true });
-            if (await fs.realpath(directory) !== directory) throw new Error('Plugin context directory must not be a symbolic link');
-            const temporary = join(directory, `plugin-context-${randomUUID()}.tmp`);
-            try {
-              await fs.writeFile(temporary, merged.map(fragment => `Source: ${fragment.origin}\n\n${fragment.content}`).join('\n\n---\n\n'), { flag: 'wx', mode: 0o600 });
-              await fs.rename(temporary, join(directory, 'plugin-context.md'));
-            } finally { await fs.rm(temporary, { force: true }); }
+            await writeReferenceContext(context.worktreePath, 'plugin-context.md', merged);
           },
         })),
         artifacts: selection.artifacts.map(artifact => ({

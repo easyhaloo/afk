@@ -12,6 +12,7 @@ import { createJumpserverPlugin } from './builtins.js';
 import { createBuiltinAgentPlugins, createBuiltinSandboxPlugins, createBuiltinVerificationPlugins } from './builtin-providers.js';
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
 import type { Plugin } from './runtime.js';
+import { ExperienceContextProvider } from '../learning/runtime.js';
 
 const identifier = z.string().min(1);
 export const capabilitySelectionSchema = z.object({
@@ -29,6 +30,7 @@ export function createDefaultBuiltinProviderPlugins(homeDir: string, workspaceRo
     ...createBuiltinCapabilityPlugins({
       notifications: [new DesktopNotificationProvider()],
       contexts: [
+        new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite')),
         new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
         new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') }),
       ],

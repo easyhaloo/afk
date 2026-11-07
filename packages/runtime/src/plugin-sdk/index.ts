@@ -7,6 +7,7 @@ export { loadInstalledPlugins } from '../application/plugins/loader.js';
 export { createJumpserverPlugin } from '../application/plugins/builtins.js';
 export { createBuiltinAgentPlugins, createBuiltinSandboxPlugins, createBuiltinVerificationPlugins, createRemoteContainerPlugin } from '../application/plugins/builtin-providers.js';
 export { createBuiltinCapabilityPlugins } from '../application/plugins/builtin-capabilities.js';
+export { builtinPluginManifests } from '../application/plugins/builtin-manifests.js';
 export { PluginManager } from '../application/plugins/manager.js';
 export type { PluginManagerOptions, InstalledPluginRecord } from '../application/plugins/manager.js';
 export { readPluginConfiguration, validatePluginConfig } from '../application/plugins/configuration.js';

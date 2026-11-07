@@ -1,9 +1,9 @@
 import { Command } from 'commander';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PluginRuntime, PluginManager, GoogleOAuthError, readPluginConfiguration } from '@afk/runtime/plugin-sdk';
+import { PluginRuntime, PluginManager, GoogleOAuthError, builtinPluginManifests, readPluginConfiguration } from '@afk/runtime/plugin-sdk';
 import { registerPluginCommands } from './plugin.js';
 
 describe('plugin commands', () => {
@@ -75,6 +75,67 @@ describe('plugin commands', () => {
       expect(process.exitCode).toBe(1);
       expect(String(output.mock.calls[0][0])).toContain('plugin.not-found');
     } finally { process.exitCode = exitCode; output.mockRestore(); }
+  });
+});
+
+describe('plugin management commands', () => {
+  const directories: string[] = [];
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
+  });
+
+  async function fixture() {
+    const homeDir = await mkdtemp(join(tmpdir(), 'plugin-management-'));
+    directories.push(homeDir);
+    const manager = new PluginManager({ homeDir });
+    const createRuntime = vi.fn(async (): Promise<PluginRuntime> => { throw new Error('Management must not activate providers'); });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const program = new Command().name('afk').exitOverride();
+    registerPluginCommands(program, { pluginManager: manager, createRuntime });
+    return { homeDir, manager, createRuntime, parse: (...args: string[]) => program.parseAsync(['node', 'afk', 'plugin', ...args]) };
+  }
+
+  it.each(builtinPluginManifests(tmpdir()).map(manifest => manifest.id))('enables and disables an unconfigured builtin %s using metadata', async id => {
+    const { homeDir, createRuntime, parse } = await fixture();
+    for (const command of ['enable', 'disable', 'enable']) {
+      await parse(command, id);
+      expect(readPluginConfiguration(homeDir).plugins).toEqual([{ id, enabled: command === 'enable', builtin: true }]);
+    }
+    expect(createRuntime).not.toHaveBeenCalled();
+  });
+
+  it('disables, enables and removes an installed plugin without constructing a runtime', async () => {
+    const { homeDir, manager, createRuntime, parse } = await fixture();
+    const source = join(homeDir, 'extension');
+    await mkdir(source);
+    const id = 'context.management-fixture';
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: 'management-fixture', version: '1.0.0', type: 'module' }));
+    await writeFile(join(source, 'plugin.json'), JSON.stringify({ id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true, entry: 'index.js' }));
+    await writeFile(join(source, 'index.js'), 'throw new Error("Management must not import installed plugins");');
+    await manager.install(source);
+    for (const command of ['disable', 'enable', 'remove']) {
+      await parse(command, id);
+      expect(readPluginConfiguration(homeDir).plugins).toEqual([{ id, enabled: command === 'enable', builtin: false }]);
+    }
+    await expect(readFile(join(homeDir, '.afk', 'plugins', id, 'install.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(createRuntime).not.toHaveBeenCalled();
+  });
+
+  it('rejects enabling an unknown plugin without activating providers or saving configuration', async () => {
+    const { homeDir, createRuntime, parse } = await fixture();
+    await expect(parse('enable', 'context.missing')).rejects.toThrow("Plugin 'context.missing' is not installed");
+    expect(readPluginConfiguration(homeDir).plugins).toEqual([]);
+    expect(createRuntime).not.toHaveBeenCalled();
+  });
+
+  it('does not turn an unknown disabled plugin into a builtin or bypass the installation guard', async () => {
+    const { homeDir, createRuntime, parse } = await fixture();
+    await parse('disable', 'context.missing');
+    expect(readPluginConfiguration(homeDir).plugins).toEqual([{ id: 'context.missing', enabled: false, builtin: false }]);
+    await expect(parse('enable', 'context.missing')).rejects.toThrow("Plugin 'context.missing' is not installed");
+    expect(readPluginConfiguration(homeDir).plugins).toEqual([{ id: 'context.missing', enabled: false, builtin: false }]);
+    expect(createRuntime).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,7 @@
 import { Argument, Command } from 'commander';
 import { readFile } from 'node:fs/promises';
-import { GoogleOAuthCredentialProvider, GoogleOAuthError, PluginManager, readPluginConfiguration, createDefaultPluginRuntime, startPluginListener, startRemoteContainerService, invokeCapability, type PluginRuntime, type PluginConfigValue } from '@afk/runtime/plugin-sdk';
+import { homedir } from 'node:os';
+import { GoogleOAuthCredentialProvider, GoogleOAuthError, PluginManager, readPluginConfiguration, builtinPluginManifests, createDefaultPluginRuntime, startPluginListener, startRemoteContainerService, invokeCapability, type PluginRuntime, type PluginConfigValue } from '@afk/runtime/plugin-sdk';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
 export interface PluginCommandComposition extends CommandRegistrationContext {
@@ -126,7 +127,12 @@ export function registerPluginCommands(program: Command, composition: PluginComm
   for (const [command, enabled] of [['enable', true], ['disable', false]] as const) {
     plugin.command(`${command} <id>`)
       .description(`${enabled ? 'Enable' : 'Disable'} a capability plugin`)
-      .action(async id => { await manager.setEnabled(id, enabled, !!(await runtime()).getPlugin(id)); process.stdout.write(`${enabled ? 'Enabled' : 'Disabled'} ${id}\n`); });
+      .action(async id => {
+        const configuration = (composition.readConfiguration ?? readPluginConfiguration)();
+        const builtin = builtinPluginManifests(homedir(), configuration.integrations).some(manifest => manifest.id === id);
+        await manager.setEnabled(id, enabled, builtin);
+        process.stdout.write(`${enabled ? 'Enabled' : 'Disabled'} ${id}\n`);
+      });
   }
   plugin.command('remove <id>')
     .description('Disable and remove an installed plugin; retain its settings')

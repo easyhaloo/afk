@@ -1,0 +1,12 @@
+{
+  "name": "api-workflow-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0"
+  }
+}

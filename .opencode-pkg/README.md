@@ -12,18 +12,29 @@ opencode plugin add @easyhaloo/afk-opencode
 
 AFK is a thin OpenCode V2 plugin (`{ id, setup }`) bundled with its skill suite.
 Because OpenCode discovers **skills** only from on-disk skills directories (it
-does not read `SKILL.md` from inside an installed npm package), the package ships
-a `postinstall` hook that copies every bundled skill into your global OpenCode
-skills directory:
+does not read `SKILL.md` from inside an installed npm package), the bundled
+skills are copied into your global OpenCode skills directory:
 
 ```
 ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/<skill-name>/
 ```
 
+This happens on **two** paths (same shared installer):
+
+- **On plugin load** — OpenCode calls the plugin's `setup(ctx)` every time it
+  loads `afk`. `opencode plugin add` does **not** run npm lifecycle scripts, so
+  `setup()` is what actually installs the skills on the OpenCode path.
+- **On manual install** — a direct `npm i @easyhaloo/afk-opencode` runs the
+  package's `postinstall` hook, which installs the same skills.
+
+Either way the copy is:
+
 - **Idempotent** — safe to reinstall; AFK-owned skill dirs are refreshed.
+- **Cheap on repeat** — a skill dir is only rewritten when its content actually
+  differs, and repeat sessions log at most one concise line.
 - **Non-destructive** — never deletes unrelated skills already in the directory.
-- **Resilient** — a non-fatal copy error is logged as a warning and the install
-  still succeeds (the plugin loads regardless).
+- **Resilient** — a non-fatal copy error is logged as a warning and the plugin
+  still loads regardless.
 
 ## The skills
 

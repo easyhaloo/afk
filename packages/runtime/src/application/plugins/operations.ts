@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PluginRuntime } from './runtime.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
+import { RepositoryLifecycleService } from './repository-lifecycle.js';
 
 const text = z.string().min(1).refine(value => value.trim().length > 0 && !value.includes('\0'));
 const timeout = z.number().int().positive().max(2_147_483_647);
@@ -17,6 +18,13 @@ const trackerList = z.object({
   state: z.enum(['opened', 'closed', 'all']).optional(), perPage: z.number().int().positive().safe().optional(), projectId: text.optional(),
 }).strict();
 const trackerUpdates = z.object({ ...issueFields, title: text.optional(), state: z.enum(['open', 'closed']).optional() }).strict();
+const repositoryRef = z.object({ url: text, ref: text.optional() }).strict();
+const repositorySnapshot = z.object({ commit: text, branch: text, dirty: z.boolean() });
+const repositoryPrepare = z.object({ repository: repositoryRef, runId: text }).strict();
+const repositoryHandle = z.object({ workspaceId: text }).strict();
+const repositoryWorkspace = z.object({ id: text, repository: repositoryRef, runId: text, snapshot: repositorySnapshot, path: text.optional() });
+const repositoryPublication = z.object({ commit: text, branch: text, url: text.optional() });
+const repositoryCleanup = z.object({ removed: z.boolean() });
 
 export const verificationRequestSchema = z.object({
   target: text,
@@ -73,7 +81,12 @@ const invocationSchema = z.union([
     name: text, mediaType: text,
     bytes: z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value),
   }).strict()),
-  operation('repository.provider', 'snapshot', z.object({ url: text, ref: text.optional() }).strict()),
+  operation('repository.provider', 'snapshot', repositoryRef),
+  operation('repository.provider', 'prepare', repositoryPrepare),
+  operation('repository.provider', 'checkout', repositoryHandle),
+  operation('repository.provider', 'publish', repositoryHandle),
+  operation('repository.provider', 'cleanup', repositoryHandle),
+  operation('repository.provider', 'run', repositoryPrepare.extend({ action: text, input: z.record(jsonValue) }).strict()),
   operation('policy.provider', 'evaluate', z.object({ action: text, context: z.record(scalar).optional() }).strict()),
   operation('trigger.provider', 'register', z.object({
     id: text, kind: z.enum(['schedule', 'webhook', 'manual']), schedule: text.optional(), payload: z.record(jsonValue).optional(), input: z.record(jsonValue).optional(),
@@ -157,9 +170,23 @@ export async function invokeCapability(runtime: PluginRuntime, input: unknown): 
       return output(artifactRefSchema, await required(runtime.getArtifactProvider(request.provider)).put({
         ...request.input, bytes: Buffer.from(request.input.bytes, 'base64'),
       }));
-    case 'repository.provider':
-      return output(z.object({ commit: text, branch: z.string(), dirty: z.boolean() }),
-        await required(runtime.getRepositoryProvider(request.provider)).snapshot(request.input));
+    case 'repository.provider': {
+      const provider = required(runtime.getRepositoryProvider(request.provider));
+      if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input));
+      if (request.operation === 'run') {
+        if (!runtime.listSystemActions().includes(request.input.action)) throw new Error('Repository execution action is not registered');
+        const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId }, workspace => runtime.dispatchSystemAction(request.input.action, {
+          input: request.input.input, repositoryWorkspace: workspace, worktreePath: workspace.path,
+        }));
+        return output(z.object({ value: z.unknown(), workspace: repositoryWorkspace, publication: repositoryPublication, cleanup: repositoryCleanup }), result);
+      }
+      const operation = request.operation;
+      if (!provider.capabilities[operation] || !provider[operation]) throw new Error(`Repository provider does not support ${operation}`);
+      if (operation === 'prepare') return output(repositoryWorkspace, await provider.prepare!(request.input));
+      if (operation === 'checkout') return output(repositoryWorkspace, await provider.checkout!(request.input));
+      if (operation === 'publish') return output(repositoryPublication, await provider.publish!(request.input));
+      return output(repositoryCleanup, await provider.cleanup!(request.input));
+    }
     case 'policy.provider':
       return output(policyDecisionSchema, await required(runtime.getPolicyProvider(request.provider)).evaluate(request.input));
     case 'trigger.provider': {

@@ -172,7 +172,9 @@ export interface ArtifactSink extends CapabilityProvider<ArtifactSinkCapability>
 
 // --- Repository ---
 
-export type RepositoryCapability = 'read' | 'clone' | 'push';
+export type RepositoryLifecycleOperation = 'prepare' | 'checkout' | 'publish' | 'cleanup';
+
+export type RepositoryCapability = 'read' | 'clone' | 'push' | RepositoryLifecycleOperation;
 
 export interface RepositoryRef {
   readonly url: string;
@@ -185,8 +187,41 @@ export interface RepositorySnapshot {
   readonly dirty: boolean;
 }
 
-export interface RepositoryProvider extends CapabilityProvider<RepositoryCapability> {
+export interface RepositoryPrepareRequest {
+  readonly repository: RepositoryRef;
+  readonly runId: string;
+}
+
+export interface RepositoryWorkspaceRequest {
+  readonly workspaceId: string;
+}
+
+export interface RepositoryWorkspace {
+  readonly id: string;
+  readonly repository: RepositoryRef;
+  readonly runId: string;
+  readonly snapshot: RepositorySnapshot;
+  readonly path?: string;
+}
+
+export interface RepositoryPublication {
+  readonly commit: string;
+  readonly branch: string;
+  readonly url?: string;
+}
+
+export interface RepositoryCleanupResult {
+  readonly removed: boolean;
+}
+
+export interface RepositoryProvider extends Omit<CapabilityProvider<RepositoryCapability>, 'capabilities'> {
+  withLifecycleLease?<Result>(request: RepositoryPrepareRequest, operation: () => Promise<Result>, options?: ProviderOperationOptions): Promise<Result>;
+  readonly capabilities: Readonly<Record<'read' | 'clone' | 'push', boolean> & Partial<Record<RepositoryLifecycleOperation, boolean>>>;
   snapshot(repository: RepositoryRef, options?: ProviderOperationOptions): Promise<RepositorySnapshot>;
+  prepare?(request: RepositoryPrepareRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
+  checkout?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
+  publish?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication>;
+  cleanup?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult>;
 }
 
 // --- Policy check ---

@@ -7,7 +7,7 @@
  * only set the binary path and engine name.
  */
 
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import type {
   ContainerProvider,
   ContainerEngine,
@@ -25,6 +25,13 @@ export abstract class CliContainerProvider implements ContainerProvider {
   abstract readonly binary: string;
 
   abstract isAvailable(): Promise<boolean>;
+
+  protected probeVersion(format: string): Promise<boolean> {
+    return new Promise(resolve => {
+      execFile(this.binary, ['version', '--format', format], { timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 },
+        (error, stdout) => resolve(!error && stdout.trim().length > 0));
+    });
+  }
 
   /**
    * Build the argv for `docker run` / `podman run` from ContainerCreateOptions.

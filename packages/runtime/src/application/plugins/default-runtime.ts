@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { constants, promises as fs } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { capabilitySelectionSchema as selectionSchema, createDefaultBuiltinProviderPlugins } from './builtin-manifests.js';
 import { loadInstalledPlugins } from './loader.js';
@@ -12,6 +12,13 @@ import { readPluginConfiguration, type PluginConfiguration } from './configurati
 import { createCapabilityLifecycle } from './integrations.js';
 import type { ContextFragment } from '../../plugin-sdk/capabilities.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
+import { assembleProviders } from '../../infrastructure/provider/assembly.js';
+import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
+import { importManagedIssue, syncManagedIssue, managedIssueStateMapSchema } from './managed-issues.js';
+import { CONTEXT_MAX_CHARS, writeReferenceContext } from '../workflows/context-file.js';
+import { setPluginAuditArtifacts } from './observability.js';
+import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
+import { currentTriggerDeliveryId } from './trigger-queue.js';
 
 const identifier = z.string().min(1);
 
@@ -27,6 +34,7 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const runtime = new PluginRuntime();
   const invalidSettings: string[] = [];
+  let auditArtifacts: { provider: string; timeoutMs?: number } | undefined;
   let configuration: PluginConfiguration;
   try { configuration = readPluginConfiguration(homeDir); }
   catch (error) {
@@ -38,13 +46,37 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
     {
       manifest: { id: 'workflow.capabilities', version: '0.1.0', apiVersion: 1 as const, provides: ['workflow.action'], trusted: true },
       activate(context: import('./runtime.js').PluginSetupContext) {
+        context.registerSystemAction('work-item.import', async action => {
+          const envelope = action && typeof action === 'object' && 'provider' in action ? action : (action as { input?: unknown } | null)?.input;
+          const input = z.object({ provider: identifier, issueId: identifier, project: identifier, executionMode: z.enum(['afk', 'hitl']).optional() }).strict().parse(envelope);
+          const project = parseCanonicalProject(input.project);
+          const provider = runtime.getIssueTrackerProvider(input.provider);
+          if (!provider) throw new Error('External issue tracker provider is not available');
+          const { providers } = await assembleProviders({ platform: project.platform, projectKey: project.projectKey, cwd: workspaceRoot, plugins: runtime });
+          return importManagedIssue({ ...input, provider, backlog: providers.backlog });
+        });
+        context.registerSystemAction('work-item.sync', async action => {
+          const envelope = action && typeof action === 'object' && 'provider' in action ? action : (action as { input?: unknown } | null)?.input;
+          const input = z.object({ provider: identifier, issueId: identifier, workItemId: identifier,
+            states: managedIssueStateMapSchema,
+          }).strict().parse(envelope);
+          parseWorkItemId(input.workItemId);
+          const provider = runtime.getIssueTrackerProvider(input.provider);
+          if (!provider) throw new Error('External issue tracker provider is not available');
+          const { providers } = await assembleProviders({ workItemId: input.workItemId, cwd: workspaceRoot, plugins: runtime });
+          const item = await providers.backlog.get(input.workItemId);
+          if (item.id !== input.workItemId) throw new Error('Managed issue identity conflicts with requested work item');
+          return syncManagedIssue({ ...input, provider, item });
+        });
         context.registerSystemAction('work-item.execute', async context => {
           const envelope = context && typeof context === 'object' && 'workItemId' in context ? context : (context as { input?: unknown } | null)?.input;
           const input = z.object({
             workItemId: identifier, manifestPath: identifier.optional(), executionId: identifier.optional(), template: identifier.optional(), project: identifier.optional(),
             runOptions: z.object({ executionMode: z.enum(['batch', 'interactive']).optional(), agentProvider: identifier.optional(), sandboxProvider: identifier.optional() }).strict().optional(),
           }).strict().parse(envelope);
-          const result = await executeWorkItem(input, { plugins: runtime, agentProviderRegistry: runtime.getAgentProviderRegistry() });
+          const deliveryId = currentTriggerDeliveryId();
+          const executionId = input.executionId ?? (deliveryId && createHash('sha256').update(`${deliveryId}\0${input.workItemId}`).digest('hex'));
+          const result = await executeWorkItem({ ...input, executionId }, { plugins: runtime, agentProviderRegistry: runtime.getAgentProviderRegistry() });
           if (result.status !== 'done' && result.status !== 'merge_ready') throw new Error(`Managed execution stopped: ${result.status}`);
           return result;
         });
@@ -106,23 +138,17 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
     }
     else {
       const selection = parsed.data;
+      auditArtifacts = selection.evidence;
       const fragments = new Map<string, ContextFragment[]>();
       const module = createCapabilityLifecycle(runtime, {
         policies: selection.policies.map(policy => ({ ...policy, input: context => ({ ...policy.input, context: { ...policy.input.context, worktreePath: context.worktreePath } }) })),
         contexts: selection.contexts.map(source => ({
           ...source, query: () => source.query,
           async consume(received, context) {
-            const merged = [...(fragments.get(context.worktreePath) ?? []), ...received];
+            const merged = [...(fragments.get(context.worktreePath) ?? []), ...received].slice(0, 64)
+              .map(fragment => ({ ...fragment, origin: fragment.origin.slice(0, 1000), content: fragment.content.slice(0, CONTEXT_MAX_CHARS) }));
             fragments.set(context.worktreePath, merged);
-            const root = await fs.realpath(context.worktreePath);
-            const directory = join(root, '.afk');
-            await fs.mkdir(directory, { recursive: true });
-            if (await fs.realpath(directory) !== directory) throw new Error('Plugin context directory must not be a symbolic link');
-            const temporary = join(directory, `plugin-context-${randomUUID()}.tmp`);
-            try {
-              await fs.writeFile(temporary, merged.map(fragment => `Source: ${fragment.origin}\n\n${fragment.content}`).join('\n\n---\n\n'), { flag: 'wx', mode: 0o600 });
-              await fs.rename(temporary, join(directory, 'plugin-context.md'));
-            } finally { await fs.rm(temporary, { force: true }); }
+            await writeReferenceContext(context.worktreePath, 'plugin-context.md', merged);
           },
         })),
         artifacts: selection.artifacts.map(artifact => ({
@@ -171,13 +197,21 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
       });
     }
   }
-  if (invalidSettings.length) plugins.push({
+  await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });
+  if (auditArtifacts) {
+    try {
+      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: await createLocalEncryptedEvidenceStore(homeDir), captureEvents: true });
+    } catch {
+      invalidSettings.push('Audit evidence storage could not be initialized');
+      runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });
+    }
+  }
+  if (invalidSettings.length) await runtime.activate({
     manifest: { id: 'workflow.invalid-settings', version: '0.1.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true },
     activate(context) {
       context.registerLifecycle({ name: 'invalid-plugin-settings', order: -1000, failureMode: 'required', async onInit() { throw new Error(invalidSettings.join('; ')); } });
     },
   });
-  await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });
   if (options.activateTriggers) {
     for (const entry of configuration.plugins) {
       if (!entry.builtin || entry.enabled === false || !entry.id.startsWith('trigger.') || !runtime.getPlugin(entry.id)) continue;

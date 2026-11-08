@@ -362,6 +362,79 @@ proc = spawn(process.execPath, [distPath, 'board'], {
 
 ---
 
+## Plugin matrix and source coverage
+
+```sh
+pnpm test:e2e:cli
+pnpm test:coverage
+pnpm test:coverage:report
+```
+
+The plugin matrix exercises built CLI subprocesses with isolated HOME directories,
+real temporary files/Git repositories, loopback HTTP/TLS services and explicit command
+fixtures. Local: 97 cases; HTTP: 27 cases; execution: 67 cases. These are test cases,
+not source coverage percentages. The execution matrix covers all six Agents against
+four Sandbox adapters and four Triggers against four Host adapters, with explicit
+pair-completion assertions. Simulated Agent/SSH/cloud/container commands do not prove
+live vendor behavior or container isolation. Verification command fixtures do not
+prove that a browser rendered a page.
+
+The learning E2E crosses the built CLI, actual workflow runner, subprocess Agent
+fixture, durable experience store and context assembly: failure → candidate →
+synthetic QA audit → guarded verification → later prompt reference → disable/re-enable → revocation.
+The QA audit in this test is explicitly synthetic. Real Claude acceptance separately
+executes the existing no-tool and full-tool sandbox tests; external backlog execution
+must separately show its real provider state and independent QA verdict.
+
+Coverage includes every executable TypeScript source in core, application,
+workflow-graph, runtime and CLI, including untested files. It excludes Desktop's
+separate toolchain, opt-in PTY tests, declarations, skills/scripts and generated output.
+Pure type-only modules omitted by V8 are inventoried as non-executable. Separate CLI,
+Agent and container subprocesses are not instrumented by this V8 report.
+
+Reports are `coverage/coverage-summary.json`, `lcov.info`, `index.html`, `report.json`
+and `report.md`. The collector uses the installed Vitest version with matching V8
+support and one test worker. CI fails on missing/empty artifacts or omitted executable
+source, and uploads reports even when coverage tests fail. `COVERAGE_BASE_REF` selects
+the changed-file comparison. Optional `COVERAGE_CHANGED_LINES`,
+`COVERAGE_CHANGED_STATEMENTS`, `COVERAGE_CHANGED_FUNCTIONS` and
+`COVERAGE_CHANGED_BRANCHES` are percentage gates from 0 to 100. They apply to whole
+changed files, not changed lines. No unstated 80% or full-repository gate is implied.
+
+The integrated implementation measured on November 8, 2026 with Node 24.18.0/macOS
+arm64 produced 3,525 passing tests and four explicit skips:
+
+| Scope | Lines / statements | Functions | Branches |
+| --- | ---: | ---: | ---: |
+| Core | 96.70% | 100.00% | 79.77% |
+| Application | 97.46% | 93.02% | 92.06% |
+| Workflow graph | 99.00% | 100.00% | 84.39% |
+| Runtime | 90.35% | 84.46% | 85.44% |
+| CLI | 69.76% | 71.86% | 74.83% |
+| Combined measured scope | 87.06% | 82.92% | 84.27% |
+
+The measured line numerator/denominator is 47,922/55,041. Use the generated report
+after later changes; this measurement does not establish whole-repository coverage.
+The checked-in `scripts/coverage-baseline.json` seeds nonregression gates from this
+local full-suite measurement. Every package and the total must retain each measured
+line/statement/function/branch percentage; CI explicitly loads the same baseline.
+The baseline records its Node/platform/commit provenance. This is a measured local
+seed, not a claim that a prior CI coverage run passed; evaluate the first CI result
+on its actual Node/platform before changing a baseline. Missing or invalid baseline
+data fails rather than silently disabling the gate.
+
+Separately validated: Desktop typecheck and 921 unit tests; three Electron E2E
+tests covering bundled Runtime, plugin Settings lifecycle and work-item creation /
+execution; 16 real-PTY tests; two opt-in real Claude Code tests, including code
+creation and Node test execution. Node 22.17.0 also passes the resource-registry
+warning regression. External vendor services and real container isolation remain
+outside the synthetic matrix's evidence boundary.
+
+The CLI 0.2.42 release was also packaged for macOS arm64 (5.2 MiB archive), installed
+offline outside the repository with checksum verification, and checked across all
+23 command entry points. The same archive is installed locally through the standard
+installer; use `~/.local/bin/afk` if an older unmanaged executable precedes it in PATH.
+
 ## Anti-patterns
 
 - ❌ Rendering full Ink components in unit tests without size context

@@ -355,6 +355,39 @@ proc = spawn(process.execPath, [distPath, 'board'], {
 
 ---
 
+## 插件矩阵与源码覆盖率
+
+```sh
+pnpm test:e2e:cli
+pnpm test:coverage
+pnpm test:coverage:report
+```
+
+插件矩阵使用构建后的 CLI 子进程、隔离 HOME、真实临时文件和 Git 仓库、loopback HTTP / TLS 服务及明确标记的命令替身。本地 97 个用例、HTTP 27 个用例、执行 67 个用例；这些数字是测试数，不是源码覆盖率。执行矩阵覆盖六种 Agent × 四种 Sandbox、四种 Trigger × 四种 Host，并检查组合完成情况。模拟 Agent、SSH、云端和容器命令不能证明真实厂商行为或容器隔离；验证器的命令替身也不能证明浏览器完成页面渲染。
+
+经验 E2E 穿过构建后的 CLI、真实工作流引擎、Agent 子进程替身、持久经验账本和上下文组装，覆盖“失败 → 候选 → 模拟 QA 审计 → 证据门禁验证 → 后续提示词引用 → 禁用及重新启用 → 撤销”。其中 QA 审计明确为模拟。真实 Claude 验收另行运行已有无工具和完整工具 Sandbox 用例；外部 backlog 的实际状态及独立 QA 结果必须单独报告。
+
+覆盖率包含 core、application、workflow-graph、runtime 和 CLI 的所有可执行 TypeScript 源码，未执行文件也计入。Desktop 使用独立工具链，PTY 可选测试、声明、skills / scripts 和生成文件不在此报告范围内。V8 略过的纯类型模块列为不可执行；独立 CLI、Agent、容器子进程没有被此 V8 报告采集。
+
+产物包括 `coverage/coverage-summary.json`、`lcov.info`、`index.html`、`report.json` 和 `report.md`。采集使用匹配版本的 Vitest / V8 和单个测试 worker。CI 对报告缺失、空文件、遗漏可执行源码直接失败，测试失败时仍上传报告。`COVERAGE_BASE_REF` 选择变更基线；可配置 `COVERAGE_CHANGED_LINES`、`COVERAGE_CHANGED_STATEMENTS`、`COVERAGE_CHANGED_FUNCTIONS`、`COVERAGE_CHANGED_BRANCHES`，值为 0–100。门禁作用于完整变更文件，不是变更行；没有隐含的 80% 或全仓库覆盖率承诺。
+
+2026 年 11 月 8 日在 Node 24.18.0 / macOS arm64 上，对集成后的实现采集：3525 项通过、4 项明确跳过。
+
+| 范围 | 行 / 语句 | 函数 | 分支 |
+| --- | ---: | ---: | ---: |
+| Core | 96.70% | 100.00% | 79.77% |
+| Application | 97.46% | 93.02% | 92.06% |
+| Workflow graph | 99.00% | 100.00% | 84.39% |
+| Runtime | 90.35% | 84.46% | 85.44% |
+| CLI | 69.76% | 71.86% | 74.83% |
+| 本次测量范围合计 | 87.06% | 82.92% | 84.27% |
+
+行覆盖分子 / 分母为 47922 / 55041；后续修改后以重新生成的报告为准，本次测量不代表全仓库覆盖率。已提交的 `scripts/coverage-baseline.json` 以此次本地全量测量作为防回退基线，逐包及总量的行、语句、函数、分支均不得低于实测值；CI 显式载入同一基线。文件记录 Node、平台和提交来源；它是本地实测种子，不代表此前 CI 已通过覆盖率验收。首次 CI 应按实际 Node/平台评估，不能为了通过而无证据降低基线；基线缺失或格式错误直接失败。
+
+另行验证：Desktop 类型检查及 921 项单测；覆盖内置 Runtime、插件设置生命周期、工作项创建与执行的 3 项 Electron E2E；16 项真实 PTY 测试；2 项真实 Claude Code 测试（含创建代码及执行 Node 测试）。Node 22.17.0 通过资源注册表警告回归。外部厂商服务与真实容器隔离仍不属于模拟矩阵的证明范围。
+
+CLI 0.2.42 已打包为 macOS arm64 独立发行包（5.2 MiB），在仓库外完成校验和验证、离线安装及全部 23 个命令入口检查；同一发行包也已通过标准安装器安装到本机。若 PATH 中旧的非托管程序优先，直接使用 `~/.local/bin/afk`。
+
 ## 反模式
 
 - ❌ 在单元测试中渲染完整 Ink 组件而不提供尺寸上下文

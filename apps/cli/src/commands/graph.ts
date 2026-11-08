@@ -1,10 +1,11 @@
 import { Command } from 'commander';
 import { generateWorkflowGraph, type WorkflowGraphFormat } from '@afk/runtime/application/visualizations/workflow-graph';
 import { writeGraphCache } from '@afk/runtime/application/visualizations/graph-cache';
+import type { CommandRegistrationContext } from '../command-registry.js';
 
 const formats: WorkflowGraphFormat[] = ['json', 'archify-json'];
 
-export function registerGraphCommands(program: Command): void {
+export function registerGraphCommands(program: Command, composition: CommandRegistrationContext = {}): void {
   const graph = program.command('graph').description('Generate derived workflow graph artifacts');
   graph.command('workflow')
     .description('Generate a deterministic workflow graph')
@@ -15,7 +16,7 @@ export function registerGraphCommands(program: Command): void {
     .option('--validate', 'Exit with failure when graph diagnostics contain errors')
     .action(async (template: string, options) => {
       if (!formats.includes(options.format)) throw new Error(`invalid graph format: ${options.format}`);
-      const result = await generateWorkflowGraph({ projectRoot: options.project, template });
+      const result = await generateWorkflowGraph({ projectRoot: options.project, template, plugins: composition.pluginRuntime });
       const cache = await writeGraphCache(options.project, result, options.format, options.output);
       const payload = options.format === 'archify-json' ? result.archify : result.snapshot;
       if (options.validate && result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {

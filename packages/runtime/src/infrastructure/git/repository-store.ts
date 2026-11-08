@@ -90,19 +90,46 @@ export class RepositoryStore {
     return commonRoot && this.contains(commonRoot) ? this.exclusive(commonRoot, operation) : operation();
   }
 
-  async removeCheckout(repoRoot: string): Promise<void> {
+  async removeCheckout(repoRoot: string, options: { force?: boolean; beforeRemove?: () => Promise<void> } = {}): Promise<void> {
+    const identity = options.force === false ? await this.checkoutIdentity(repoRoot) : undefined;
     const commonRoot = await this.commonDirectory(repoRoot);
-    if (!commonRoot) return;
+    if (!commonRoot) {
+      if (identity) throw new Error('checkout is no longer registered');
+      return;
+    }
     if (!this.contains(commonRoot)) throw new Error('refusing to remove a checkout outside the repository store');
     await this.exclusive(commonRoot, async () => {
+      await options.beforeRemove?.();
       const git = simpleGit(commonRoot);
       const entries = (await git.raw(['worktree', 'list', '--porcelain', '-z'])).split('\0');
       const paths = entries.filter(entry => entry.startsWith('worktree ')).map(entry => entry.slice(9));
+      if (identity) {
+        if (!paths.includes(identity.path) || paths.some(path => path.startsWith(`${identity.path}${sep}`))) {
+          throw new Error('checkout registration changed or contains a nested worktree');
+        }
+        if ((await simpleGit(repoRoot).raw(['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching', '--ignore-submodules=none'])).trim()) {
+          throw new Error('checkout contains uncommitted, untracked, or ignored content');
+        }
+        if (JSON.stringify(await this.checkoutIdentity(repoRoot)) !== JSON.stringify(identity)
+          || await this.commonDirectory(repoRoot) !== commonRoot) throw new Error('checkout identity changed while waiting for removal');
+        await git.raw(['worktree', 'remove', '--', identity.path]);
+        return;
+      }
       const target = await fs.realpath(repoRoot);
       for (const path of paths.filter(path => path === target || path.startsWith(`${target}${sep}`)).sort((left, right) => right.length - left.length)) {
         await git.raw(['worktree', 'remove', '--force', path]);
       }
     });
+  }
+
+  private async checkoutIdentity(repoRoot: string) {
+    const directory = await fs.lstat(repoRoot);
+    const marker = await fs.lstat(join(repoRoot, '.git'));
+    if (!directory.isDirectory() || directory.isSymbolicLink() || !marker.isFile() || marker.isSymbolicLink()) {
+      throw new Error('checkout and its git marker must not be symlinks');
+    }
+    return { path: await fs.realpath(repoRoot), device: directory.dev, inode: directory.ino,
+      markerDevice: marker.dev, markerInode: marker.ino, marker: await fs.readFile(join(repoRoot, '.git'), 'utf8') };
   }
 
   private async commonDirectory(repoRoot: string): Promise<string | undefined> {

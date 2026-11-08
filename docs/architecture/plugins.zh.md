@@ -2,10 +2,12 @@
 
 [English](plugins.md) · [架构概览](overview.zh.md) · [执行入口](execution.zh.md#执行入口) · [ADR-0030](../adr/0030-host-capability-plugin.md)
 
-本文以 2026 年 11 月 7 日集成工作树中的源码为依据。下方矩阵和调用路径说明
+本文以 2026 年 11 月 8 日集成工作树中的源码为依据。下方矩阵和调用路径说明
 具体 Provider 契约、受管执行、外部前提和协议范围。
 这里的 Node Runtime 能力插件，与 Claude Code Skills 发行包、CLI 的 TUI 扩展加载器
 不是同一套插件机制。
+
+源码与协议能力不表示已验证真实厂商端到端投递；外部账户和服务需单独验证。
 
 ## Core 与插件边界
 
@@ -78,15 +80,15 @@ dispose 自己的 fallback。
 |---|---|---|---|
 | Agent · `agent.provider` | Claude Code、Codex、Cursor、Pi、OpenCode、Copilot | 对应 CLI 及其登录、token 或 endpoint 配置 | `createBuiltinAgentPlugins` 注册，执行引擎使用投影出的 agent registry；会话能力依各适配器声明。 |
 | Sandbox · `sandbox.provider` | 本地 worktree、Docker、Podman、remote-container CLI/HTTP transport；可选 AFK HTTP 服务宿主 | 本地 Git；Docker/Podman 引擎；远端 backend 与所需认证 | 内置工厂注册 local/docker/podman；remote-container 必须显式提供 transport 和兼容后端，`plugin serve-container` 显式使用共享 sandbox/agent registry 托管 AFK 后端。 |
-| Tracker / backlog · `tracker.provider`、`tracker.issue`、`backlog.provider` | GitHub/GitLab 源码托管 tracker/backlog；独立 Linear、Jira issue 适配器 | GitHub/GitLab token 与仓库/项目；Linear token + team ID + API URL；Jira token + project key + API URL，可选 email | Configured GitHub/GitLab 注册 tracker 与 backlog；shared assembly 按 platform、project 和适用的 host 匹配 tracker，再构造受管 Provider bundle。多项匹配报错，无匹配沿用既有 tracker 工厂。Linear/Jira 仍是独立 `tracker.issue` 适配器，不提供仓库型 backlog/变更请求身份。 |
+| Tracker / backlog · `tracker.provider`、`tracker.issue`、`backlog.provider` | GitHub/GitLab 源码托管 tracker/backlog；Linear 和 Jira issue 适配器 | 源码托管 token、仓库/项目；Linear token/team/API URL；Jira token/project/API URL，可选 email | 共享 assembly 按 platform/project/host 选择源码托管 tracker，歧义拒绝。外部 issue 可导入规范 GitHub/GitLab backlog 项并显式回写状态，不替代受管身份。 |
 | Host · `host.connection` | JumpServer、SSH、AWS SSM、Kubernetes Exec | `jms` 登录；SSH key/agent/config；AWS CLI 凭据/profile + SSM 权限；`kubectl` context/kubeconfig + exec RBAC | `HostConnectionPort` → Application 主机用例 → `afk host ls/exec`；Desktop 可复用共享适配器。需要真实目标才能发现或远程执行。 |
 | Verification · `verification.provider` | Test runner、静态扫描、浏览器检查 | 已安装的 test/lint/browser 工具，项目需要时另供服务凭据 | `verify` 在目标工作区执行 argv；默认 `npm test`、`npm run lint`、`playwright test`，是命令适配器，不内置分析引擎。 |
 | Notification · `notification.provider` | 飞书、Slack、邮件、Gmail、桌面通知 | 飞书/Slack webhook URL；邮件需要已配置的 `sendmail` 和邮件传输；Gmail 需要 Gmail API 和 Google 用户 OAuth；桌面需要 OS 通知工具 | `notify`；HTTP 适配器默认使用 global fetch，可选注入 transport；Gmail 默认收件人为授权账号自身；receipt 报告真实投递结果，桌面依赖具体平台工具。 |
-| Trigger · `trigger.provider` | HMAC webhook、Git push、issue event、间隔定时器 | Webhook 共享 secret；负责接收并投递事件的宿主；本地 timer 无需外部账户 | `register/unregister`；`plugin listen` 提供常驻 HTTP 宿主并激活配置 timer/action。适配器自身不启动 listener、Git watcher 或持久 cron；schedule 是正整数毫秒。 |
+| Trigger · `trigger.provider` | HMAC webhook、Git push、issue event、interval schedule | Webhook secret；HTTP 投递需要常驻 listener 与私有 SQLite 队列；本地 timer 无需账户 | `register/unregister`；`plugin listen --queue` 通过常驻 listener 提供认证接收、持久回执、重试、replay 和显式清理。interval timer 仍在进程内运行，schedule 为正整数毫秒。 |
 | Context / memory · `context.provider` | 代码上下文、知识库、检索、项目记忆 | 可读的工作区/文件；知识库 HTTP endpoint，认证由其 transport 提供 | `gather`；代码读取本地内容，检索使用传入文档，记忆读取本地文件，知识库要求兼容 JSON fragment 协议；不自动建立 embedding/index 服务。 |
 | Credential / auth · `credential.provider` | 系统钥匙串、Google 用户 OAuth、OAuth client credentials、OIDC assertion/exchange、企业环境凭据 | Keychain 权限；Google Desktop app 客户端 JSON 和浏览器授权；OAuth endpoint/client ID/secret；OIDC issuer/client/assertion；环境变量或显式值 | `resolve`；scope 依能力声明；企业适配器读取配置值/环境变量，不是企业 vault SDK。HTTP 默认使用 global fetch，可选注入 transport；凭据解析仅供 SDK 消费者私下使用。 |
-| Artifact / report · `artifact.provider` | 本地测试报告、证据包 builder、对象存储上传、报告平台上传 | 本地可写路径；预签名/upload URL 或报告 endpoint，可选 bearer token | `put`；上传适配器只声明 write；configured 工厂把证据包 builder 包装为 `ArtifactSink`；对象存储不生成 AWS 签名。 |
-| Repository / workspace · `repository.provider` | 多本地仓库、远程工作区快照、特殊 Git backend | Git 与已配置本地路径；兼容远程 endpoint/token；已安装的特殊 backend 可执行文件 | `snapshot`；当前适配器声明 read/snapshot，不提供 clone/push；远程工作区和特殊 backend 分别要求其 HTTP/JSON 协议。 |
+| Artifact / report · `artifact.provider` | 本地测试报告、证据包、对象存储、报告平台 | 本地可写路径；upload URL/报告 endpoint，可选 bearer token | `put`；`integrations.evidence` 通过审计 bridge 选择审计证据导出，lifecycle 报告 hook 独立消费。本地审计为权威；对象存储不生成 AWS 签名。 |
+| Repository / workspace · `repository.provider` | 多本地仓库、远程工作区、特殊 Git backend | Git/本地路径；显式 managed root、remote、base branch、lease key；兼容远程/backend lifecycle 协议 | 默认仅 snapshot；显式启用 `prepare/checkout/publish/cleanup`，组合操作 `run` 在 checkout 与 publish 之间执行注册 action；所有权、租约及干净/已发布状态约束清理。 |
 | Security / policy · `policy.provider` | Secret scan、license policy、compliance policy | 工作区文件、显式许可证白名单和合规规则；本地检查无需账户 | 已选策略是 required 受管 lifecycle 闸门，覆盖引擎 `before-publish` 与 QA 发布检查；拒绝或评估异常阻止发布。直接调用 SDK 时由调用方接入 lifecycle 或自行评估并执行策略决定。本地模式、许可证与规则检查不等于外部合规服务。 |
 
 当前默认组合根构造六种 Agent、local/docker/podman、四种 Host、三种验证命令适配器、
@@ -149,7 +151,25 @@ trace 中，不作 metric label；属性不得携带秘密或证据正文。
 插件 Runtime dispose 负责，避免 CLI 退出遗失 fire-and-forget 导出。导出异常和超时
 与执行隔离，诊断不记录 secret 值或远端错误响应正文；本地审计失败仍是致命错误。
 导出为尽力交付，不代表已通过云账户端到端验证。`EvidenceStoreProvider` /
-`observe.evidence` 接口已存在，但外部证据上传尚未自动接入审计记录流程。
+`observe.evidence` 仍是独立接口；审计导出通过根配置选择可写的 `ArtifactSink` 注册名：
+
+```yaml
+integrations:
+  evidence:
+    provider: object-storage
+    timeoutMs: 5000
+```
+
+可选 `timeoutMs` 为 1..60000 整数。默认 Runtime 选择持久化本地加密证据存储并启用
+`captureEvents: true`。审计 bridge 先在本地保存 QA、发布、失败和运行结束事件
+的有界摘要，源审计追加后上传引用的证据；校验内容 hash、拒绝 restricted 证据、对
+支持的文本格式脱敏，并移除返回 URI 中的凭据、query 和 fragment。
+`artifact.upload` 的 `effect.completed` 记录关联源事件/序号、本地摘要、远端引用或
+安全失败原因。上传异常/超时不替代本地审计，上传回执不递归触发上传。既有 after-agent
+报告 hook 独立消费。SDK 调用方可通过 `createPluginRunObserver`、
+`setPluginAuditArtifacts`、`PluginRunObserverOptions` 选择同一 bridge，
+`createLocalEncryptedEvidenceStore` 提供持久本地证据；key 初始化加锁并复用已有 key，
+文本脱敏保留 restricted 状态。
 
 ## 标准 manifest 与 API v1
 
@@ -313,7 +333,17 @@ Loader 不统一展开环境变量引用：变量名只是普通字符串，只�
 修改在后续 Runtime 构造和新 Worker 中生效，现有 Worker 保留原 Runtime。
 有跟踪中的 Worker 或仍存活的 starting/running Worker 记录时阻止安装和卸载；
 无法读取或核实 Worker 状态也会阻止这两类文件修改。文件修改期间阻止启动 Worker。
-此入口不挂载 `surface.desktop`，不提供 OAuth 登录 UI，也不代装 Provider 所需工具。
+此入口不挂载 `surface.desktop`，也不代装 Provider 所需工具。
+
+Google 账号面板经主进程 IPC 提供状态、浏览器登录、取消及确认断开。原生文件选择器
+选择 Google **Desktop app** OAuth 客户端 JSON，复用 loopback/PKCE 授权和系统钥匙串。
+登录配置 `credential.google-oauth`，仅在缺失时添加 `notification.gmail`，保留已有
+Gmail 设置和禁用状态。登录后配置失败会保留凭据并报告部分完成；通知 integration
+仍需显式选择，连接账号不等于已完成投递验证。
+
+经验面板按当前工作项来源提供的项目列出记录或召回已验证记录，显示来源、证据和状态，
+用独立审计运行验证修正，并确认撤销。与 CLI 共用账本及审计闸门；交换和显式采纳
+仍由 CLI 提供。
 
 ### Gmail OAuth
 
@@ -423,8 +453,8 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `credential.enterprise` | 非空 `values` 映射，每个值为 secret 引用 |
 | `artifact.test-report-local`、`artifact.evidence-bundle` | `root`；evidence-bundle 工厂把 builder 包装成 `ArtifactSink`，`put` 调用单记录 bundle 的 `create` |
 | `artifact.object-storage`、`artifact.report-platform` | `endpoint`；报告平台另接受 secret `token?` |
-| `repository.multi-repository` | 非空 `repositories[{name,path}]`，名称唯一 |
-| `repository.remote-workspace`、`repository.special-git-backend` | 分别为 `baseUrl` 加 secret `token?`，或 `backend` |
+| `repository.multi-repository` | 非空 `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`，名称唯一；可选 `managed: {workspaceRoot}` 要求各仓库提供 remote URL、base branch 和规范 lease key |
+| `repository.remote-workspace`、`repository.special-git-backend` | 分别为 `baseUrl` 加 secret `token?`，或 `backend`；可选 `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` 选择支持的操作 |
 | `policy.secret-scan` | 兜底 `root`、非空 `files?`、`maxFileBytes?`；评估优先使用可信 lifecycle 的 `context.worktreePath` |
 | `policy.license-policy` | 非空 `allowlist`、非空 `licenses?` |
 | `policy.compliance-policy` | 非空 `rules[{id,effect,actions?,when?,reason?}]`、`defaultEffect?`；effect 为 `allow`/`deny`，actions 非空，`when` 为 scalar 相等条件映射 |
@@ -490,7 +520,8 @@ CLI 操作白名单；具体 Provider 仍由消费者显式选择。
 | Desktop Agent 选择 | Snapshot 提供已注册 Agent Provider 名称，工作流菜单包含外部插件；保存默认 Agent 或 Agent 节点时按当前 registry 校验，拒绝未知名称。工具安装诊断仍是独立检查。 |
 | GitHub/GitLab tracker 与 backlog | Configured 工厂注册两种契约；共享 `assembleProviders` 按 platform、project 和适用的 host 匹配 Runtime 的 tracker 并构造受管 bundle，多项匹配拒绝，无匹配沿用既有源码托管工厂。 |
 | 主机操作 | Runtime → `getHostProvider(name)` → 共享 Application 主机用例 → CLI `host` 或 Desktop adapter；CLI 默认 `jumpserver`，其他 Provider 需显式选择。 |
-| Linear/Jira issue 操作 | Runtime → `getIssueTrackerProvider(name)` → `IssueTrackerPort`；源码托管的 `TrackerProvider` / `BacklogProvider` 是另外的契约，独立 issue 适配器不能直接执行 GitHub/GitLab 规范 backlog 身份。 |
+| Linear/Jira 受管导入/同步 | `IssueTrackerPort` 读取来源 issue；`importManagedIssue` 幂等创建规范源码托管 backlog 项，`syncManagedIssue` 按显式映射向绑定来源回写状态。执行使用受管仓库的 tracker/backlog。 |
+| 仓库生命周期 | `RepositoryLifecycleService.run` 在 prepare/checkout/publish/cleanup 中执行 callback；公开 `repository.provider/run` 把工作区句柄/路径交给注册 action。 |
 | 其他能力操作 | 类型化 getter 与 CLI `invoke` 调用许可操作；根 `integrations` 为实现阶段和 QA 选择策略、上下文、制品和通知消费者。凭据保留为 SDK 私下操作，常驻 trigger 由 `listen` 驱动。 |
 | Lifecycle / system action | `getLifecycleModules()` 接入引擎与 QA hook，注册 system action 供 workflow step 和 trigger callback 使用；Core 状态转换、审计、重试和人工合并闸门继续有效。 |
 | Template / surface | 注册表向显式消费者提供条目；注册本身不替换现有命令派发、模板存储或 Desktop 渲染。 |
@@ -514,9 +545,9 @@ modules，命令或 Worker 结束时 dispose 自己拥有的实例。整体图�
 
 | 接入面 | 实际行为与核对结果 |
 |---|---|
-| 本地目录 / npm 包安装与升级保留旧版 | 已核对源码与安装示例；真实本地 npm 依赖、禁用 lifecycle scripts 检查已确认通过 |
-| CLI `invoke` 与 43 项操作 dispatcher | 已核对精确命令注册和白名单 |
-| CLI `listen` 与认证 HTTP 宿主 | 已实现并确认；精确 flags、路由和认证已核对 |
+| 本地目录 / npm 包安装与升级保留旧版 | 分阶段安装校验包、禁用 npm lifecycle scripts，失败保留原安装 |
+| CLI `invoke` 与 48 项操作 dispatcher | 已核对精确命令注册和白名单 |
+| CLI `listen`、`deliveries`、`replay`、`prune-deliveries` | 认证持久回执、分页状态、失败投递 replay 和 delivered 行显式清理 |
 | CLI `serve-container` 与共享 registry 服务组合 | 必需参数、共享 backend registry 和认证 HTTP handler 已核对 |
 | CLI 委托共享组合根 | 已核对源码 |
 | CLI 受管 Runtime 所有权 | `execute`、`qa`、`loop`、`schedule` 和 `run` 复用注入的 `composition.pluginRuntime`，命令只 dispose 自己创建的 fallback |
@@ -526,6 +557,8 @@ modules，命令或 Worker 结束时 dispose 自己拥有的实例。整体图�
 | QA lifecycle 与发布策略 | 验证前运行 required init 和 before-agent，context 使用文件指针；QA 通过后运行 after-agent 制品/通知 hook；branch push 与变更请求发布前单独执行 `before-publish` 检查 |
 | Desktop 插件管理 | 设置页调用共享管理器完成本地/npm 安装、启用/禁用、卸载及 JSON 配置导入；缓存检查快照、未来 Worker 状态与静态依赖守卫分别处理。 |
 | Desktop 外部 Agent 选择 | 已实现；菜单使用已注册 Provider，保存时拒绝未知默认/节点 Provider |
+| Desktop Google / 经验设置 | 主进程服务和校验 IPC 支持账号生命周期、项目内验证/撤销；真实 Google 授权/投递仍需外部验证 |
+| 审计证据导出 | 根配置初始化本地持久加密证据，以关联源事件的审计回执记录导出 |
 | Trigger 到受管 workflow | 已实现；descriptor 静态 `input` 派发 `work-item.execute`，使用相同 Runtime、正常资格与 lease 检查，不自动 merge |
 
 Project-note 示例对应的 invoke 集成契约为
@@ -533,6 +566,37 @@ Project-note 示例对应的 invoke 集成契约为
 输入文件为 `{"scope":".","prompt":"conventions"}`。Provider 名称是 `project-note`，
 不是插件 ID `context.project-note`。输入文件只放 `gather` 请求本身，调用 envelope
 由 CLI 位置参数提供；同一个操作也可通过 SDK getter 调用。
+
+### 受管 issue 身份与状态同步
+
+`plugin import-issue <provider> <issue> --project <platform:projectKey>`
+读取 Linear/Jira issue 并创建 GitHub/GitLab backlog 项，默认 `hitl`，`--mode afk`
+需显式指定。创建使用锁与幂等键，键来自 Provider ID、规范化 endpoint、来源项目和
+来源 issue ID；重复导入指向同一受管项。先剥离外部文本携带的绑定标记，再附加唯一
+权威来源标记；返回受管 ID 必须属于指定仓库。
+
+后续执行使用返回的规范 `workItemId`；Linear/Jira key 不充当 `BacklogItem.id`、
+`runId` 或仓库身份，导入本身不执行。
+`plugin sync-issue <provider> <issue> <work-item> --states <json-file>`
+核对来源项目、精确受管项及唯一匹配绑定，按显式映射回写受管生命周期状态，仅状态
+变化时更新。拒绝缺失映射、绑定不符及无生命周期状态的组织父项。这是显式单向同步。
+注册的 `work-item.import`、`work-item.sync` system action 向工作流开放相同受管操作。
+
+### 仓库生命周期 callback 与清理
+
+`RepositoryLifecycleService.run(request, callback, options?)` 要求
+`prepare`、`checkout`、`publish`、`cleanup`，可用 `withLifecycleLease` 包围完整顺序：
+`prepare → checkout → callback(workspace) → publish → cleanup`。
+公开 `repository.provider/run` 输入为 `{repository:{url,ref?},runId,action,input}`，
+注册 system action 收到 `{input,repositoryWorkspace,worktreePath}`；返回
+`{value,workspace,publication,cleanup}`，此显式操作不自动替换工作项执行器。
+
+受管本地仓库使用规范仓库租约和 checkout 所有权锁，句柄归 Provider 实例所有，
+checkout 创建 `afk/<runId>`。发布检查干净分支/commit 和配置 remote，不执行合并。
+清理拒绝脏工作区、迁移路径、无所有权或未发布内容以及嵌套 worktree。远程/特殊
+backend 必须实现选定的 lifecycle 协议，仅配置 snapshot 不启用这些操作。
+checkout/callback/发布失败或取消后，清理使用独立的 15 秒 signal；执行和清理同时
+失败时保留两项错误，拒绝清理时保留工作区而非报告成功。
 
 ### CLI 操作白名单
 
@@ -542,7 +606,7 @@ Project-note 示例对应的 invoke 集成契约为
 `passed: false`、`allowed: false`、`delivered: false` 或数值非零的远程 `code`
 使 CLI exit status 为 `1`；它不直接保留远程 code 为退出码，`afk host exec` 另有语义。
 
-`operations.ts` 校验严格请求 union 及各操作返回值，当前允许的 43 对 capability/operation 为：
+`operations.ts` 校验严格请求 union 及各操作返回值，当前允许的 48 对 capability/operation 为：
 
 | 能力 | 允许的 operation | 数量 |
 |---|---|---|
@@ -550,7 +614,7 @@ Project-note 示例对应的 invoke 集成契约为
 | `notification.provider` | `notify` | 1 |
 | `context.provider` | `gather` | 1 |
 | `artifact.provider` | `put` | 1 |
-| `repository.provider` | `snapshot` | 1 |
+| `repository.provider` | `snapshot`、`prepare`、`checkout`、`publish`、`cleanup`、`run` | 6 |
 | `policy.provider` | `evaluate` | 1 |
 | `trigger.provider` | `register`、`unregister` | 2 |
 | `tracker.issue` | `getIssue`、`listIssues`、`createIssue`、`updateIssue`、`deleteIssue`、`addComment`、`listComments`、`updateComment`、`deleteComment`、`linkIssues`、`listIssueLinks`、`health`、`doctor` | 13 |
@@ -600,7 +664,7 @@ SIGINT/SIGTERM 后关闭 HTTP service/backend，再 dispose Runtime。
 `transport: cli`、`command` 和可选 `timeoutMs`。
 
 它与 `8374` 端口投递 trigger 事件的 `plugin listen` 是不同服务，也不表示把
-Agent/Sandbox 执行加入 `plugin invoke` 的 43 项白名单。
+Agent/Sandbox 执行加入 `plugin invoke` 的 48 项白名单。
 客户端需要实现 remote-container transport 协议。
 
 ## 工作流与根配置接入示例
@@ -725,30 +789,48 @@ Trigger 插件条目用顶层 `action` 选择一个已注册的 `workflow.action
 不会合并这些对象。这和工作流 system step 自身的 `input` 承载 action 调用 envelope
 是不同层次。仅声明 trigger 不会自动打开 HTTP listener，也不会让一次性 CLI 进程持续驻留。
 
-间隔 schedule 需要常驻进程。已实现的精确命令为
-`afk plugin listen --token-env <name> [--host <address>] [--port <number>]`，
-默认 `127.0.0.1:8374`；`--token-env` 必需，所引用环境变量的值至少 16 字符且不能有 CR/LF。
-命令以 `activateTriggers: true` 构造 Runtime，等待 SIGINT / SIGTERM 后关闭 listener，
-再 dispose Runtime。普通 Runtime 构造（包括 `list`、`doctor`）不会启动配置 timer。
-启动时若存在 error diagnostic 则拒绝监听；配置的 action 未注册时，Runtime dispose
-对应 trigger 并记录 `trigger.action-missing`，避免静默接收后丢弃事件。
-Listener 启动失败也会 dispose Runtime 及其 timer。
+间隔 schedule 需要常驻进程。CLI 命令为
+`afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`，
+默认 `127.0.0.1:8374` 和 `~/.afk/triggers/deliveries.sqlite`。token 至少 16 字符，
+不含 CR/LF；仅专用 listener 激活 timer。error diagnostic 阻止启动；action 缺失时
+销毁对应 trigger 并报告 `trigger.action-missing`。
 
-关闭时会 drain 已接收的 action：listener close 停止接收新请求，并等待已追踪的
-request handler 完成，即使对应 HTTP 连接已经关闭；schedule dispose 先清除 timer，
-再等待已经运行的 callback。这是进程内等待，不提供持久事件队列、replay 保证，
-也不为永不结束的 callback 设置完成期限。
+listener API 接收 `POST /triggers/<已注册Provider名称>`，body 上限
+1 MiB；接受匹配的 bearer、`x-gitlab-token` 或 `x-hub-signature-256`
+（原始 body 的 HMAC-SHA256）。Webhook adapter 额外要求自身配置的原始 body 签名，
+bearer 不能绕过。持久化前校验 payload；入队成功返回 `202` 和 delivery ID、状态、
+尝试次数及 duplicate 标记，表示持久接收，不代表工作完成。
 
-HTTP 宿主接受 `POST /triggers/<已注册Provider名称>`，body 上限 1 MiB。
-Listener 认证接受匹配的 bearer token、`x-gitlab-token`，或 `x-hub-signature-256`
-中的 `sha256=<原始body的HMAC-SHA256十六进制摘要>`。
-`WebhookTriggerProvider` 还会按自己配置的 secret 再校验原始 body 签名，单有 bearer
-认证不能绕过它。需要一次签名通过两层校验时，listener token 与 webhook secret 应一致。
+投递身份由 Provider 名称与依次优先的 `Idempotency-Key`、`X-GitHub-Delivery`、
+`X-GitLab-Event-UUID` 或 body hash 组成。同一 ID 不同字节返回 `409`。私有、单拥有者
+SQLite 队列保存 `pending/processing/delivered/failed` 并恢复中断投递；默认最多五次
+尝试、1000 ms 重试间隔、10000 行、64 MiB payload，不自动静默淘汰。队列满返回
+`503`，body 超限 `413`，未知路由/Provider `404`，认证失败 `401`，无效 payload `400`。
 
-未知路由/Provider 返回 `404`，listener 认证失败返回 `401`，派发、解析或适配器签名
-失败返回 `400`；成功结果为 `{"dispatched": <count>}`，不证明受管工作项已完成。
-服务面向具体 webhook、Git-push、issue-event 适配器，不是插件任意 HTTP endpoint 的宿主；
-没有持久事件队列或 replay 服务。`--token-env` 只传变量名，不把 secret 值放入 argv。
+队列管理调用运行中的认证 listener，各命令都要求 `--token-env <name>`，
+可选 `--url <listener-url>`：
+
+| CLI 命令 | HTTP 协议 |
+|---|---|
+| `afk plugin deliveries [--offset <非负整数>] [--limit <1-100>]` | `GET /deliveries`；分页回执可查询更早的失败 ID，返回 `offset/limit/nextOffset` 和容量，不返回正文 |
+| `afk plugin replay <delivery-id>` | `POST /deliveries/<id>/replay`；仅失败投递允许 replay |
+| `afk plugin prune-deliveries` | `POST /deliveries/prune`；仅删除超过七天去重窗口的 delivered 行 |
+
+清理必须显式进行，绝不删除 pending/failed；删除 ID 后对应去重窗口结束。URL 默认
+`http://127.0.0.1:8374`；管理客户端只接受 HTTPS 或 loopback HTTP，拒绝 URL
+凭据/query/fragment 及重定向，超时 15 秒。`--token-env` 只传变量名，secret 不进 argv。
+HTTP 宿主服务具体 webhook、Git-push、issue-event 适配器，不挂载任意插件 HTTP endpoint。
+
+队列至少一次派发；`work-item.execute` 未显式指定 `executionId` 时，默认 Runtime
+按 `SHA256(deliveryId + '\0' + canonical workItemId)` 生成稳定执行 ID。仅实现前
+journal 处于 `requested` 或 `failed` 时允许重试，绝不自动重复已启动的实现。
+启动后中断仍须原生所有权及审计对账；队列重试/replay 不保证引擎续跑或任意 action
+恰好执行一次。
+
+关闭先停止接收、等待进程内已接收任务，再 dispose Runtime；待处理队列重启后保留。
+interval timer 仍在进程内，不补跑停机时段；callback 完成依赖 action 自身结束。
+SDK 提供 `currentTriggerDeliveryId()`、`TriggerQueueOptions`、
+`TriggerDeliveryStatus`，分别用于投递上下文、队列限制和回执契约。
 
 ### 完整配置与定时调用示例
 
@@ -887,6 +969,9 @@ lifecycle 策略闸门。
   为 `unknown`，不表示外部操作已经可用。
 - 没有文档的本地 retrieval、缺失的 memory 文件、空 repository 集合、空合规规则
   都不提供已配置的领域内容；输入需要真实配置，不会自动发现。
+- 受管执行锁通过 `ps -o lstart=` 校验进程身份。禁止执行 `ps` 的受限容器或沙箱会让
+  身份探针失败，执行以 fail-closed 方式拒绝启动；这类环境需提供等价的进程启动时间查询，
+  不能绕过身份校验。
 
 实现入口：`packages/runtime/src/plugin-sdk/{profile,capabilities,issue-tracker}.ts`、
 `packages/runtime/src/application/plugins/{runtime,loader,manager,configuration,configured,default-runtime,integrations,listener}.ts`、
@@ -896,3 +981,40 @@ lifecycle 策略闸门。
 `packages/runtime/src/application/runners/qa-runner.ts`、
 `apps/desktop/electron/services/{runtime-service,desktop-service}.ts` 和
 `apps/desktop/electron/worker/execution-worker.ts`。
+
+## 执行治理与经验复用
+
+[补充设计与架构图](../superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md)及[实施清单](../superpowers/plans/2026-11-08-runtime-learning-and-validation.md)沿用已有执行引擎。
+
+| 能力 | Core / Application 负责 | 插件扩展 |
+| --- | --- | --- |
+| 上下文 | 项目隔离、大小、来源和提示词引用 | 现有 Context Provider 及 `context.experience` |
+| 执行 | 身份、租约、状态、预算、清理、合并闸门 | Agent、Sandbox、类型化系统动作 |
+| 模板 | 校验、依赖编译和派发 | 显式文件 → 用户模板 → 插件模板 → 内置模板 |
+| Hooks | 执行顺序、必需失败策略、逆序清理 | 初始化、Agent 前后、发布前、清理 |
+| 会话 | 所有权、校验和、恢复回退、持久用量 | Agent / Sandbox transport 和 Session Store |
+| 经验 | 证据门禁、状态、作用域、保留和复发处理 | 已验证本地经验，经 `ContextSource.gather` 返回 |
+
+实现、QA / 冲突解决和 CLI 工作流图均可选取已注册的插件模板。内存模板的 prompt 文件必须是绝对路径。卸载插件后模板不可继续被缓存命中。必需 Hook 仍能阻断执行或发布；当前没有跨厂商拦截所有 Agent 工具调用的统一 API。
+
+引用上下文保留来源，每个文件最多 32,000 字符；生命周期每个工作树最多保留 64 个有界片段。经验检索最多五条，序列化记录预算 8,000 字符。提示词携带短文件引用，仍遵循 Provider 的提示词预算。只有同一规范项目内相关、已验证且未过期的经验能够进入上下文。实现引擎通过 `decision.made`、`command=experience.recall` 审计经验供应。
+
+结构化失败（含中途可重试失败）自动形成候选经验，保留运行和工作项身份。共享 SQLite 账本跨工作树使用、按项目隔离，保存有界且脱敏的诊断及证据引用，不复制原始会话。限制为 1,000 条、逻辑负载与来源收据合计 8 MiB、单条 32 KiB、每条 256 个来源，默认有效期 90 天；容量淘汰优先处理过期和未验证记录。
+
+`experience verify` 要求本地审计链完整、项目一致、独立 QA 已启动并通过，且提供新增证据。随后运行必须成功结束，或已确认发布变更并抵达对应的人工合并闸门；后续 QA 或终态失败使该运行失去资格。经验验证不会关闭人工合并闸门。实现成功不会自动提升经验。修改修复建议保留原始失败身份；新证据表明失败复发时，原建议退回候选。验证历史阻止复用复发前的旧证明；达到 256 个来源上限后，新复发仍使建议退回候选，并阻止继续提升。撤销和过期也会使建议退出后续上下文。当前使用词项相关性检索，不训练模型权重，也不自动创建向量服务；HTTP 知识库仍是检索适配器，没有通用远端写回协议。
+
+`experience export/import` 使用 version-1 JSON，上限 100 条、1 MiB；保留来源、
+原始失败身份和有界来源收据，不携带验证权威或采纳计数。导入必须显式选择目标规范项目，
+包括已验证/成功经验在内都作为候选；重复导入保留候选身份，拒绝内容冲突及覆盖本地
+已验证/撤销历史。`experience copy` 仅把有效已验证经验显式复制到另一项目并降为候选；
+目标项目独立 QA 和新证据通过后才能召回。
+
+`experience metrics` 分别统计保留记录的检索、显式采纳和去重复发。
+CLI `experience adopt` 核对精确目标 run/work item 的完整审计，要求同项目有效已验证
+经验；收据按运行/工作项去重，每条最多 64 个。召回不等于采纳，确认采纳也不证明模型
+实际采用。受管 runner 还可依据完整独立 QA/完成审计形成成功经验，附带已记录的
+workflow/commit/change 引用；仅实现成功仍不能产生已验证建议。
+
+实现工作流执行编译后的 Agent / System 计划。专用的 `pre-merge-qa-verification` 与 `merge-conflict-resolution` 模板分别只接受一个 inline Agent 步骤；多步骤、System 或文件提示词形态会在复核 Agent 启动前报错，不能静默省略检查。
+
+`observe` 和 `retro` 查看执行及会话证据，`experience` 管理从证据派生的建议。治理范围是 AFK 拥有的会话，不接管用户直接启动的任意 Agent 会话。Desktop 共享执行行为及项目内经验验证/撤销；交换和采纳由 CLI 提供。可执行保证是保留证据、按项目检索已验证经验、撤回无效经验，不能承诺模型永远不再犯错。[测试指南](../guides/testing.zh.md)分别说明验证层次。

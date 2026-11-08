@@ -83,6 +83,30 @@ async function fixture() {
 }
 
 describe('invokeCapability', () => {
+  it('dispatches repository lifecycle and its execution callback in one resident runtime', async () => {
+    const { runtime } = await fixture();
+    const workspace = { id: 'owned', repository: { url: 'api' }, runId: 'run-1', snapshot: { commit: 'abc', branch: 'afk/run-1', dirty: false }, path: '/owned/api' };
+    const prepare = vi.fn(async () => workspace);
+    const checkout = vi.fn(async () => workspace);
+    const publish = vi.fn(async () => ({ commit: 'abc', branch: 'afk/run-1' }));
+    const cleanup = vi.fn(async () => ({ removed: true }));
+    const execute = vi.fn(async () => ({ passed: true }));
+    await runtime.activate({ manifest: { id: 'repository.lifecycle', version: '1.0.0', apiVersion: 1, provides: ['repository.provider', 'workflow.action'], trusted: true }, activate(context) {
+      context.registerRepositoryProvider('managed', { id: 'managed', capabilities: { read: true, clone: true, push: true, prepare: true, checkout: true, publish: true, cleanup: true }, snapshot: async () => workspace.snapshot, prepare, checkout, publish, cleanup });
+      context.registerSystemAction('repository.verify', execute);
+    } });
+    try {
+      await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: 'repository', operation: 'prepare', input: { repository: { url: 'api' }, runId: 'run-1' } })).rejects.toThrow('does not support');
+      const result = await invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation: 'run', input: { repository: { url: 'api' }, runId: 'run-1', action: 'repository.verify', input: { target: 'all' } } });
+      expect(result).toMatchObject({ value: { passed: true }, publication: { commit: 'abc' }, cleanup: { removed: true } });
+      expect(execute).toHaveBeenCalledWith({ input: { target: 'all' }, repositoryWorkspace: workspace, worktreePath: '/owned/api' });
+      expect(prepare).toHaveBeenCalledWith({ repository: { url: 'api' }, runId: 'run-1' }, undefined);
+      for (const [operation, input] of [['prepare', { repository: { url: 'api' }, runId: 'run-1' }], ['checkout', { workspaceId: 'owned' }], ['publish', { workspaceId: 'owned' }], ['cleanup', { workspaceId: 'owned' }]] as const) {
+        await invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation, input });
+      }
+      await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation: 'run', input: { repository: { url: 'api' }, runId: 'run-1', action: 'missing', input: {} } })).rejects.toThrow('not registered');
+    } finally { await runtime.dispose(); }
+  });
   it('calls typed verification, notification, context, repository and policy providers and projects results', async () => {
     const { runtime, verification, notification, context, repository, policy } = await fixture();
     const cases = [

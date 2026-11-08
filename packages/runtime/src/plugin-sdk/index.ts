@@ -7,6 +7,7 @@ export { loadInstalledPlugins } from '../application/plugins/loader.js';
 export { createJumpserverPlugin } from '../application/plugins/builtins.js';
 export { createBuiltinAgentPlugins, createBuiltinSandboxPlugins, createBuiltinVerificationPlugins, createRemoteContainerPlugin } from '../application/plugins/builtin-providers.js';
 export { createBuiltinCapabilityPlugins } from '../application/plugins/builtin-capabilities.js';
+export { builtinPluginManifests } from '../application/plugins/builtin-manifests.js';
 export { PluginManager } from '../application/plugins/manager.js';
 export type { PluginManagerOptions, InstalledPluginRecord } from '../application/plugins/manager.js';
 export { readPluginConfiguration, validatePluginConfig } from '../application/plugins/configuration.js';
@@ -16,6 +17,14 @@ export { createDefaultPluginRuntime } from '../application/plugins/default-runti
 export type { DefaultPluginRuntimeOptions } from '../application/plugins/default-runtime.js';
 export { startPluginListener } from '../application/plugins/listener.js';
 export type { PluginListenerOptions } from '../application/plugins/listener.js';
+export { currentTriggerDeliveryId } from '../application/plugins/trigger-queue.js';
+export type { TriggerQueueOptions, TriggerDeliveryStatus } from '../application/plugins/trigger-queue.js';
+export { createPluginRunObserver, setPluginAuditArtifacts } from '../application/plugins/observability.js';
+export type { PluginRunObserverOptions } from '../application/plugins/observability.js';
+export { createLocalEncryptedEvidenceStore } from '../infrastructure/observability/local-evidence-store.js';
+export { importManagedIssue, syncManagedIssue, managedIssueStateMapSchema } from '../application/plugins/managed-issues.js';
+export { RepositoryLifecycleService } from '../application/plugins/repository-lifecycle.js';
+export type { RepositoryLifecycleResult } from '../application/plugins/repository-lifecycle.js';
 export { invokeCapability } from '../application/plugins/operations.js';
 export type { CapabilityInvocation } from '../application/plugins/operations.js';
 export { createCapabilityLifecycle, registerVerificationSystemActions } from '../application/plugins/integrations.js';
@@ -26,3 +35,4 @@ export { startRemoteContainerService } from '../application/plugins/remote-servi
 export type { RemoteContainerServiceOptions } from '../application/plugins/remote-service.js';
 export { GoogleOAuthCredentialProvider, GoogleOAuthError } from '../infrastructure/providers/google-oauth.js';
 export type { GoogleAccount, GoogleOAuthOptions } from '../infrastructure/providers/google-oauth.js';
+export { configureGoogleAccountPlugins } from '../application/plugins/google-account-plugins.js';

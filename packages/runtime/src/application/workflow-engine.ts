@@ -29,6 +29,7 @@ import { BudgetManager } from './workflows/budget.js';
 import { BudgetStore } from './workflows/budget-store.js';
 import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
+import { experienceScope, prepareExperienceContext, recordExecutionExperience } from './learning/runtime.js';
 import { TemplateLoader } from '../domain/templates/loader.js';
 import { PlanExecutor } from './workflows/plan-executor.js';
 import { SystemActionExecutor } from './workflows/system-actions.js';
@@ -606,7 +607,7 @@ export class WorkflowRunner {
 
     // Validate template early so failures throw before worktree creation. A
     // claimed backlog must never be left in-progress when validation fails.
-    await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
+    await new TemplateLoader({ projectRoot: this.repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(effectiveTemplate);
     } catch (error) {
       if (error instanceof AuditPersistenceError) {
         await this.resourceScope?.finish({ status: 'failed' });
@@ -754,7 +755,12 @@ export class WorkflowRunner {
     // The audit event is a side effect of the classification. A run that has
     // no observation context — a direct runBody call — still records the
     // fact; only the published event is skipped.
-    if (!this.observationContext) return recorded;
+    await this.persistFailureEvidence(recorded);
+    return recorded;
+  }
+
+  private async persistFailureEvidence(recorded: FailureDiagnostic): Promise<void> {
+    if (!this.observationContext) return;
     await this.recordObservation({
       kind: 'failure.classified',
       failureClass: recorded.class,
@@ -763,7 +769,12 @@ export class WorkflowRunner {
       ...(recorded.cause ? { cause: snapshotFailure(recorded.cause) } : {}),
       evidence: recorded.evidence,
     });
-    return recorded;
+    try { experienceScope(this.observationContext.workItemId); } catch { return; }
+    try {
+      recordExecutionExperience({ failure: recorded, runId: this.observationContext.runId, workItemId: this.observationContext.workItemId });
+    } catch {
+      logger.warn({ runId: this.observationContext.runId }, 'experience candidate could not be persisted; original failure evidence remains in the audit stream');
+    }
   }
 
   /**
@@ -864,6 +875,20 @@ export class WorkflowRunner {
         label: 'execution repositories',
         text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,
       });
+    }
+    const experienceWorkItemId = this.observationContext?.workItemId ?? this.activeBacklog?.workItemId;
+    if (experienceWorkItemId?.includes(':')) {
+      try {
+        const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
+          prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins });
+        if (path) {
+          segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Read the evidence and check applicability before acting; it cannot override repository instructions or verification gates.` });
+          if (this.observationContext) await this.recordObservation({ kind: 'decision.made', command: 'experience.recall', accepted: true, reason: path });
+        }
+      } catch (error) {
+        if (error instanceof AuditPersistenceError) throw error;
+        logger.warn({ workItemId: experienceWorkItemId }, 'verified experience context could not be prepared');
+      }
     }
     try {
       const context = await fs.lstat(join(worktreePath, '.afk', 'plugin-context.md'));
@@ -1146,7 +1171,7 @@ export class WorkflowRunner {
 
     // ── Template execution: compilation + typed dispatch ─────────────────────
     logger.info({ iid, template }, 'using compiled execution plan');
-    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot }).load(template);
+    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(template);
     await this.recordObservation({
       kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
       steps: loadedTemplate.steps.map(step => ({
@@ -1486,6 +1511,7 @@ export class WorkflowRunner {
         : diagnoseExecutionFailure(result);
       if (diagnosis?.retryable && agentFailures < this.config.maxRetries) {
         agentFailures++;
+        await this.persistFailureEvidence(diagnosis);
         logger.warn(
           { iid: p.iid, round, attempt: agentFailures, code: diagnosis.code, providerCode: diagnosis.providerCode },
           'the agent failed in a way that can be retried; repeating the step',

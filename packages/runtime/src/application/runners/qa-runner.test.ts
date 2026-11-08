@@ -13,6 +13,7 @@ import { BudgetStore } from '../workflows/budget-store.js';
 import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { PluginRuntime } from '../plugins/runtime.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
+import type { Step } from '../../domain/templates/types.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
@@ -109,6 +110,88 @@ function fixture() {
   };
   return { providers: { backlog, changes, branches } as any, changes, branches, sandboxProvider: sandboxProvider as any, agentProvider: agentProvider as any, sandbox, execution };
 }
+
+describe.each(['pre-merge-qa-verification', 'merge-conflict-resolution'])('QARunner specialized template %s', templateName => {
+  const reviewer: Step = { id: 'reviewer', kind: 'agent', role: 'reviewer', prompt: 'Review the change and report PASS.' };
+  const secondReviewer: Step = { id: 'second-reviewer', kind: 'agent', role: 'reviewer', prompt: 'Report FAIL for the required second review.', dependsOn: ['reviewer'] };
+  const systemStep: Step = { id: 'publish', kind: 'system', action: 'publish-change' };
+  const unsupported: Array<{ shape: string; steps: Step[] }> = [
+    { shape: 'two required reviewers', steps: [reviewer, secondReviewer] },
+    { shape: 'two parallel reviewers', steps: [{ ...reviewer, parallel: 'reviews' }, { ...secondReviewer, dependsOn: [], parallel: 'reviews' }] },
+    { shape: 'a system step', steps: [systemStep] },
+    { shape: 'an agent followed by a required system step', steps: [reviewer, { ...systemStep, dependsOn: ['reviewer'] }] },
+    { shape: 'a file prompt', steps: [{ ...reviewer, prompt: { file: join(tmpdir(), 'afk-specialized-review.md') } }] },
+  ];
+
+  it.each(unsupported)('rejects $shape before starting any agent or publishing', async ({ steps }) => {
+    const current = fixture();
+    const secondExecution = {
+      ...current.execution,
+      waitForResult: vi.fn(async () => ({
+        version: 1, runId: 'second-review', status: 'completed', provider: 'batch', commits: [],
+        structuredOutput: { type: 'goal_complete', kind: 'qa', result: 'FAIL', summary: 'required second review failed' },
+      })),
+    };
+    current.agentProvider.createExecution = vi.fn()
+      .mockResolvedValueOnce(current.execution)
+      .mockResolvedValueOnce(secondExecution);
+    if (templateName === 'merge-conflict-resolution') {
+      current.providers.branches.mergeFeatureIntoBaseline.mockResolvedValue({ merged: false, conflicts: ['shared.txt'] });
+    }
+    const plugins = new PluginRuntime();
+    await plugins.activate({
+      id: 'specialized-template', version: '1.0.0',
+      setup(context) { context.registerWorkflowTemplate({ name: templateName, version: 1, steps }); },
+    });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider, executionMode: 'batch',
+      });
+
+      expect(await runner.process('60')).toMatchObject({
+        success: false,
+        failureCode: 'qa_execution_failed',
+        summary: expect.stringContaining(`${templateName} template must contain exactly one inline agent step`),
+      });
+      expect(current.agentProvider.createExecution).not.toHaveBeenCalled();
+      expect(current.sandbox.startAgent).not.toHaveBeenCalled();
+      expect(current.branches.commit).not.toHaveBeenCalled();
+      expect(current.branches.push).not.toHaveBeenCalled();
+      expect(current.changes.create).not.toHaveBeenCalled();
+      expect(current.changes.merge).not.toHaveBeenCalled();
+      expect(current.providers.backlog.transition).not.toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+      expect(current.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', expect.anything());
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it('runs a single inline plugin agent and publishes after QA passes', async () => {
+    const current = fixture();
+    const prompt = `Specialized ${templateName} agent`;
+    if (templateName === 'merge-conflict-resolution') {
+      current.providers.branches.mergeFeatureIntoBaseline.mockResolvedValue({ merged: false, conflicts: ['shared.txt'] });
+    }
+    const plugins = new PluginRuntime();
+    await plugins.activate({
+      id: 'specialized-template', version: '1.0.0',
+      setup(context) { context.registerWorkflowTemplate({ name: templateName, version: 1, steps: [{ ...reviewer, prompt }] }); },
+    });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider, executionMode: 'batch',
+      });
+
+      expect(await runner.process('60')).toMatchObject({ success: true });
+      expect(current.agentProvider.createExecution).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining(prompt) }));
+      expect(current.agentProvider.createExecution).toHaveBeenCalledTimes(templateName === 'merge-conflict-resolution' ? 2 : 1);
+      expect(current.branches.push).toHaveBeenCalledOnce();
+      expect(current.changes.create).toHaveBeenCalledOnce();
+    } finally {
+      await plugins.dispose();
+    }
+  });
+});
 
 describe('QARunner plugin publication policies', () => {
   it('gathers plugin context before the QA prompt and completes lifecycle before publication', async () => {

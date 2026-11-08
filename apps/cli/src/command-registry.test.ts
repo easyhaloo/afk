@@ -25,12 +25,13 @@ describe('CLI command registry and dispatcher', () => {
       'completion',
       'host',
       'plugin',
+      'experience',
       '__complete',
     ]));
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it.each(['backlog', 'run', 'execute', 'loop', 'schedule', 'doctor', 'qa', 'observe', 'log', 'retro', 'graph', 'completion', 'host', 'plugin'])('loads the public %s command advertised by the registry', async name => {
+  it.each(['backlog', 'run', 'execute', 'loop', 'schedule', 'doctor', 'qa', 'observe', 'log', 'retro', 'graph', 'completion', 'host', 'plugin', 'experience'])('loads the public %s command advertised by the registry', async name => {
     const entry = COMMANDS.find(candidate => candidate.names.includes(name));
     expect(entry).toBeDefined();
 
@@ -130,6 +131,7 @@ describe('CLI command registry and dispatcher', () => {
     ['backlog', ['tag', 'remove', '--help'], 'Remove a business tag'],
     ['observe', ['timeline', '--help'], 'Show ordered audit events for a run'],
     ['log', ['--help'], 'Show one observed run and its verified timeline'],
+    ['experience', ['verify', '--help'], 'Verify a scoped experience with correction evidence'],
   ] as const)('runs the nested parser for %s %j', async (command, args, expectedHelp) => {
     const captured: string[] = [];
     const originalWrite = process.stdout.write.bind(process.stdout);

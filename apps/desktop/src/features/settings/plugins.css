@@ -1,3 +1,4 @@
+.settings-section.plugin-settings { overflow: visible; }
 .plugin-settings > header, .plugin-list > li { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .plugin-settings > header small, .plugin-description small, .plugin-diagnostics span { display: block; color: var(--afk-muted); overflow-wrap: anywhere; }
 .plugin-actions { display: flex; gap: 6px; flex-shrink: 0; }
@@ -12,4 +13,7 @@
 .plugin-install { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
 .plugin-install label { display: grid; gap: 6px; flex: 1; min-width: 180px; }
 .plugin-install input { width: 100%; box-sizing: border-box; min-height: 36px; padding: 8px; color: var(--afk-text); background: var(--afk-panel); border: 1px solid var(--afk-border); border-radius: var(--radius-md); }
+.plugin-account { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 16px 0; border-top: 1px solid var(--afk-border); }
+.plugin-account > p { flex-basis: 100%; margin: 0; }
+.plugin-install > p { flex-basis: 100%; }
 @media (max-width: 720px) { .plugin-list > li { flex-wrap: wrap; } }

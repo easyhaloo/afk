@@ -128,6 +128,20 @@ describe('CliContainerProvider — argv construction', () => {
 });
 
 describe('DockerContainerProvider — runtime', () => {
+  it('bounds a hung engine probe and terminates its owned process', async () => {
+    const root = await fsp.mkdtemp(join(os.tmpdir(), 'container-probe-'));
+    const executable = join(root, 'hung-engine');
+    const pidFile = join(root, 'probe.pid');
+    try {
+      await fsp.writeFile(executable, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`, { mode: 0o755 });
+      const provider = new DockerContainerProvider();
+      Object.defineProperty(provider, 'binary', { value: executable });
+      expect(await provider.isAvailable()).toBe(false);
+      const pid = Number(await fsp.readFile(pidFile, 'utf8'));
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally { await fsp.rm(root, { recursive: true, force: true }); }
+  });
+
   it('reports availability based on `docker version`', async () => {
     const p = new DockerContainerProvider();
     const available = await p.isAvailable();

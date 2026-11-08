@@ -81,23 +81,28 @@ export async function resolveAgentTranscriptPath(options: {
   return (await resolveAgentTranscript(options))?.path;
 }
 
+function isTelemetryProvider(value: string): value is ReadTelemetryOptions['provider'] {
+  return value === 'claude-code' || value === 'codex' || value === 'opencode';
+}
+
 export async function collectAgentTelemetry(
   execution: AgentExecution,
   result: ExecutionResult,
   sandboxKind: 'local' | 'container',
 ): Promise<{ sessionId: string; transcriptPath?: string; usage?: TokenUsage; tools?: AgentToolCallSummary[] }> {
   const provider = execution.metadata.provider;
-  const transcript = sandboxKind === 'local' && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')
+  const telemetryProvider = isTelemetryProvider(provider) ? provider : undefined;
+  const transcript = sandboxKind === 'local' && telemetryProvider
     ? await resolveAgentTranscript({
-      provider,
+      provider: telemetryProvider,
       telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
       threadId: execution.metadata.threadId,
     })
     : undefined;
   let usage = result.usage;
   let tools = result.tools;
-  if (transcript && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')) {
-    const options = { provider, transcriptPath: transcript.path, sandboxKind };
+  if (transcript && telemetryProvider) {
+    const options = { provider: telemetryProvider, transcriptPath: transcript.path, sandboxKind };
     if (!usage) usage = await readAgentTelemetry(options);
     if (!tools) tools = await readAgentTools(options);
   }

@@ -1,10 +1,11 @@
 import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import type { AgentProviderRegistry } from '../../domain/agents/registry.js';
 import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js';
 import type { BranchStrategyConfig } from '../../domain/branches/types.js';
 import { deriveBacklogBranchName } from '../../domain/backlog/index.js';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
 import { resolveProjectContext, type ProjectContext } from '../project/context.js';
-import { resolveAgentProviderName } from '../../domain/agents/index.js';
+import { defaultAgentProviderRegistry, resolveAgentProviderName } from '../../domain/agents/index.js';
 import { DEFAULT_CODEX_CONFIG, resolveCodexRuntime } from '../../domain/agents/codex-runtime.js';
 import {
   readExecutionManifest,
@@ -96,6 +97,7 @@ export interface WorkflowRunCliInput {
   provider?: AgentProviderName;
   executionMode?: ExecutionMode | string;
   agentRuntime?: AgentRuntimeSelection;
+  agentProviderRegistry?: AgentProviderRegistry;
   branchStrategy?: BranchStrategyConfig;
   executionManifestPath?: string;
   repositories?: WorkflowRunRepository[];
@@ -152,6 +154,7 @@ export function resolveWorkflowRequest(
   input: WorkflowRunCliInput,
   config: Partial<WorkflowConfig> = getWorkflowConfig(),
   project?: ProjectContext,
+  agentProviderRegistry = defaultAgentProviderRegistry,
 ): WorkflowRunRequest {
   const backlogId = input.backlogId?.trim();
   if (!backlogId) throw new Error('backlogId is required');
@@ -159,6 +162,7 @@ export function resolveWorkflowRequest(
   const budget = input.maxTotalTokens ?? config.goalBudget ?? defaults.goalBudget;
   const agentProvider = resolveAgentProviderName(
     input.agentProvider ?? input.provider ?? config.agentDefault ?? defaults.agentProvider,
+    agentProviderRegistry,
   );
   const context = project ?? {
     repoRoot: input.repoRoot ?? process.cwd(),
@@ -239,7 +243,7 @@ export async function resolveWorkflowRunRequest(
     const repoRoot = join(workspaceRoot, checkoutPath);
     const request = resolveWorkflowRequest({ ...input, backlogId: String(identity.issueNumber), workItemId: identity.id, workspaceRoot }, config, {
       repoRoot, projectName: projectKey, originalCwd: dependencies.cwd ?? process.cwd(),
-    });
+    }, dependencies.agentProviderRegistry);
     const workingBranch = request.branchStrategy.type === 'named' || request.branchStrategy.type === 'existing'
       ? request.branchStrategy.branch : deriveBacklogBranchName(String(identity.issueNumber));
     const tracker = trackerContext({ platform, projectKey, providerHost: resolved?.host ?? input.trackerHost });
@@ -255,7 +259,7 @@ export async function resolveWorkflowRunRequest(
     projectName: normalizedInput.projectName,
     cwd: dependencies.cwd,
   });
-  return resolveWorkflowRequest(normalizedInput, config, project);
+  return resolveWorkflowRequest(normalizedInput, config, project, dependencies.agentProviderRegistry);
 }
 
 function applyExecutionManifest(

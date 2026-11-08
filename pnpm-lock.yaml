@@ -278,6 +278,9 @@ importers:
       '@octokit/rest':
         specifier: ^22.0.1
         version: 22.0.1
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       conf:
         specifier: ^12.0.0
         version: 12.0.0
@@ -305,6 +308,9 @@ importers:
       simple-git:
         specifier: ^3.22.0
         version: 3.36.0(supports-color@8.1.1)
+      undici:
+        specifier: ^6.28.0
+        version: 6.28.0
       ws:
         specifier: ^8.21.3
         version: 8.21.3

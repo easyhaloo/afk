@@ -59,8 +59,9 @@ export const StepSchema = z.object({
   prompt: PromptSchema.optional(),
   /** System actions are deliberately enumerated by the compiler. */
   action: z.string().min(1).optional(),
+  input: z.unknown().optional(),
   completion: z.literal('goal_complete').optional(),
-  provider: z.enum(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']).optional(),
+  provider: z.string().min(1).optional(),
   executionMode: z.enum(['interactive', 'batch']).optional(),
   branch: BranchStrategyConfigSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
@@ -87,9 +88,7 @@ export const WorkflowTemplateSchema = z.object({
   /** Default branch strategy for steps that don't specify their own. */
   defaultBranch: BranchStrategyConfigSchema.optional(),
   /** Default agent provider for steps. */
-  defaultProvider: z.enum([
-    'claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot',
-  ]).optional(),
+  defaultProvider: z.string().min(1).optional(),
   steps: z.array(StepSchema).min(1),
 });
 

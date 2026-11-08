@@ -1,6 +1,119 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
+import type { EventStorePort, MetricsPort, TracerPort } from '@afk/core';
+import type { EventStoreProvider, MetricsProvider, TracerProvider, TraceContext, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import { logger } from '../io/logger.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
 import { RunObserver } from '../../observability/run-observer.js';
 
-export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR): RunObserver {
-  return new RunObserver({ events: new JsonlEventStore({ root }) });
+type ObservationProvider = Partial<EventStoreProvider & MetricsProvider & TracerProvider>;
+export interface ObservabilityProviderSelection {
+  readonly provider: object;
+  readonly signals: readonly ('events' | 'tracing' | 'metrics')[];
+}
+type ExportScope = { context: TraceContext; pending: Promise<void>; controller: AbortController; deadline: number };
+
+export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, providers: readonly ObservabilityProviderSelection[] = []): RunObserver {
+  const events = new JsonlEventStore({ root });
+  if (!providers.length) return new RunObserver({ events });
+  const providersFor = (signal: ObservabilityProviderSelection['signals'][number]) => [...new Set(providers.filter(entry => entry.signals.includes(signal)).map(entry => entry.provider))] as ObservationProvider[];
+  const tracers = providersFor('tracing');
+  const metricsProviders = providersFor('metrics');
+  const eventStores = providersFor('events');
+  const scopes = new AsyncLocalStorage<ExportScope>();
+  const warned = new Set<ObservationProvider>();
+  const enqueue = (provider: ObservationProvider, operation: (options: ProviderOperationOptions) => Promise<void>) => {
+    const scope = scopes.getStore();
+    if (!scope) return;
+    scope.pending = scope.pending.then(async () => {
+      if (scope.controller.signal.aborted) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const remaining = scope.deadline - performance.now();
+        if (remaining <= 0) {
+          scope.controller.abort();
+          throw new Error('Observability export timed out');
+        }
+        await Promise.race([
+          Promise.resolve().then(() => operation({ signal: scope.controller.signal })),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              scope.controller.abort();
+              reject(new Error('Observability export timed out'));
+            }, remaining);
+          }),
+        ]);
+      } catch {
+        if (!warned.has(provider)) {
+          warned.add(provider);
+          logger.warn({ provider_id: provider.id }, 'Observability export failed; local audit remains authoritative');
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  };
+  const tracer: TracerPort = {
+    async within(name, context, operation) {
+      const scope: ExportScope = {
+        context: { traceId: context.traceId, spanId: randomBytes(8).toString('hex'), parentSpanId: context.spanId },
+        pending: Promise.resolve(),
+        controller: new AbortController(), deadline: performance.now() + 5_000,
+      };
+      return scopes.run(scope, async () => {
+        const activeTracers = tracers.filter(provider => provider.capabilities?.span && typeof provider.startSpan === 'function');
+        for (const provider of activeTracers) enqueue(provider, options => provider.startSpan!(name, scope.context, {
+          ...options, attributes: { run_id: context.runId, work_item_id: context.workItemId, profile_id: context.profileId, attempt: context.attempt, actor_kind: context.actor.kind },
+        }));
+        let failed = true;
+        try {
+          const result = await operation();
+          failed = false;
+          return result;
+        } finally {
+          for (const provider of activeTracers) {
+            if (typeof provider.endSpan === 'function') enqueue(provider, options => provider.endSpan!(scope.context, { ...options, error: failed }));
+          }
+          await scope.pending;
+        }
+      });
+    },
+    addEvent(_context, name, attributes) {
+      const scope = scopes.getStore();
+      if (!scope) return;
+      for (const provider of tracers) {
+        if (provider.capabilities?.event && typeof provider.addEvent === 'function') {
+          enqueue(provider, options => provider.addEvent!(scope.context, name, { ...options, attributes }));
+        }
+      }
+    },
+  };
+  const sample = (kind: 'counter' | 'histogram' | 'gauge', name: string, value: number, attributes?: Readonly<Record<string, string | number | boolean>>) => {
+    for (const provider of metricsProviders) {
+      if (provider.capabilities?.[kind] && typeof provider.record === 'function') {
+        enqueue(provider, options => provider.record!({ name, value, kind, attributes }, options));
+      }
+    }
+  };
+  const metrics: MetricsPort = {
+    counter: (name, value, attributes) => sample('counter', name, value, attributes),
+    histogram: (name, value, attributes) => sample('histogram', name, value, attributes),
+    gauge: (name, value, attributes) => sample('gauge', name, value, attributes),
+  };
+  const mirroredEvents: EventStorePort = {
+    async append(drafts) {
+      const receipt = await events.append(drafts);
+      for (const provider of eventStores) {
+        if (provider.capabilities?.append && typeof provider.append === 'function') enqueue(provider, options => provider.append!(drafts.map((draft, index) => ({
+          runId: draft.context.runId, sequence: receipt.firstSequence + index, type: draft.type,
+          payload: { data: draft.data, context: draft.context, occurredAt: draft.occurredAt },
+        })), options));
+      }
+      return receipt;
+    },
+    read: (runId, options) => events.read(runId, options),
+    listRuns: () => events.listRuns(),
+    verify: runId => events.verify(runId),
+  };
+  return new RunObserver({ events: mirroredEvents, tracer, metrics });
 }

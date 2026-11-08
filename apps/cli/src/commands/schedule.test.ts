@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
-const mocks = vi.hoisted(() => ({ scheduleWorkItems: vi.fn(), detail: vi.fn(), warning: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scheduleWorkItems: vi.fn(), detail: vi.fn(), warning: vi.fn(), dispose: vi.fn(), registry: {} }));
+vi.mock('@afk/runtime/plugin-sdk', () => ({
+  createDefaultPluginRuntime: vi.fn(async () => ({ getAgentProviderRegistry: () => mocks.registry, dispose: mocks.dispose })),
+}));
 vi.mock('@afk/runtime/execution', async importOriginal => ({
   ...(await importOriginal<typeof import('@afk/runtime/execution')>()),
   scheduleWorkItems: mocks.scheduleWorkItems,
 }));
 vi.mock('../output.js', () => ({
-  handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: mocks.warning, detail: mocks.detail,
+  handleCommandError: (error: unknown) => { expect(mocks.dispose).toHaveBeenCalledOnce(); throw error; }, success: vi.fn(), warning: mocks.warning, detail: mocks.detail,
 }));
 
 import { registerScheduleCommands } from './schedule.js';
@@ -52,7 +55,16 @@ describe('schedule CLI', () => {
     await invoke(['--parent', 'github:acme/prd#1', '--max-concurrent', '4', '--load-limit', '16', '--poll-interval', '30000', '--watch']);
     expect(mocks.scheduleWorkItems).toHaveBeenCalledWith(expect.objectContaining({
       parent: 'github:acme/prd#1', maxConcurrent: 4, loadLimit: 16, pollIntervalMs: 30000, watch: true,
-    }));
+    }), { plugins: expect.objectContaining({ dispose: mocks.dispose }), agentProviderRegistry: mocks.registry });
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes plugins and removes signal listeners when dispatch fails', async () => {
+    const before = [process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')];
+    mocks.scheduleWorkItems.mockRejectedValueOnce(new Error('dispatch failed'));
+    await expect(invoke(['--parent', 'github:acme/prd#1'])).rejects.toThrow('dispatch failed');
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+    expect([process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')]).toEqual(before);
   });
 
   it('names the projects it cannot read, inside and outside the scope', async () => {

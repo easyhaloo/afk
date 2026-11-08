@@ -17,4 +17,16 @@ describe('LifecycleDispatcher', () => {
     await dispatcher.run('cleanup', context);
     expect(calls).toEqual(['a:before', 'b:before', 'b:cleanup', 'a:cleanup']);
   });
+
+  it('blocks required policy failures while still draining cleanup hooks', async () => {
+    const calls: string[] = [];
+    const dispatcher = new LifecycleDispatcher([
+      { name: 'later', onBeforeAgent: async () => { calls.push('agent'); }, onCleanup: async () => { calls.push('cleanup'); } },
+      { name: 'policy', order: -1, failureMode: 'required', onBeforeAgent: async () => { throw new Error('policy denied'); }, onCleanup: async () => { throw new Error('cleanup failed'); } },
+    ]);
+    await expect(dispatcher.run('before-agent', context)).rejects.toThrow('policy denied');
+    expect(calls).toEqual([]);
+    await dispatcher.run('cleanup', context);
+    expect(calls).toEqual(['cleanup']);
+  });
 });

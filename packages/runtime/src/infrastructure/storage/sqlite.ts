@@ -36,7 +36,7 @@ export function transaction<Result>(database: SqliteDatabase, operation: () => R
  * output. Only that single warning is dropped, and only while the module
  * loads — every other warning still reaches the runtime.
  */
-function requireNodeSqlite<T>(requireNode: ReturnType<typeof createRequire>): T {
+export function requireNodeSqlite<T>(requireNode: ReturnType<typeof createRequire>): T {
   const emitWarning = process.emitWarning;
   process.emitWarning = ((warning: string | Error, type?: string, ...rest: unknown[]) => {
     if (type === 'ExperimentalWarning' && typeof warning === 'string' && warning.includes('SQLite')) return;

@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { isWorkItemProjectKey } from '@afk/core';
 import { executionWorkspacePath } from '../../infrastructure/workspace.js';
 import { executionRef } from '../../domain/backlog/execution-plan.js';
+import type { AgentProviderRegistry } from '../../domain/agents/registry.js';
 
 const MANIFEST_KEYS = new Set(['schemaVersion', 'workItemId', 'providerBacklogId', 'tracker', 'workingBranch', 'repositories']);
 const TRACKER_KEYS = new Set(['platform', 'projectKey', 'providerHost', 'providerProjectId']);
@@ -85,6 +86,7 @@ export interface ParseExecutionManifestOptions {
 export interface ReadExecutionManifestDependencies {
   cwd?: string;
   readFile?: (file: string, encoding: 'utf8') => Promise<string>;
+  agentProviderRegistry?: AgentProviderRegistry;
 }
 
 export function parseExecutionManifest(value: unknown, options: ParseExecutionManifestOptions): ExecutionManifest {

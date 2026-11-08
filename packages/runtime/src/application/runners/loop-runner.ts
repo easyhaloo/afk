@@ -8,8 +8,12 @@ import { describeRunnability } from '../../domain/backlog/runnability.js';
 import { reconcileMergedBacklog, resolveExpectedTargetBranch } from '../../domain/backlog/commands.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
+import type { AgentProviderRegistry } from '../../domain/agents/index.js';
 
 export interface LoopRunnerOptions {
+  plugins?: PluginRuntime;
+  agentProviderRegistry?: AgentProviderRegistry;
   /** Backlog polling interval in ms. */
   pollIntervalMs: number;
   /** Periodic status print interval in ms. */
@@ -130,7 +134,9 @@ export class LoopRunner {
       template: options.template,
       managedExecution,
       readManifest: options.readManifest ?? readExecutionManifest,
-      executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
+      executeManagedWorkItem: options.executeManagedWorkItem ?? (input => executeWorkItem(input, {
+        plugins: options.plugins, agentProviderRegistry: options.agentProviderRegistry,
+      })),
       pidFilePath: options.pidFilePath ?? loopPidFilePath(options.runTag),
       statusFilePath: options.statusFilePath ?? loopStatusFilePath(options.runTag),
       runTag: options.runTag ?? DEFAULT_LOOP_RUN_TAG,

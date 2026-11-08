@@ -10,27 +10,27 @@
  */
 export * from './types.js';
 export * from './providers/index.js';
+export * from './registry.js';
 
-import { LocalSandboxProvider } from './providers/local.js';
-import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './providers/index.js';
-import type { SandboxProviderName } from './types.js';
+import type { SandboxProvider, SandboxProviderId, SandboxProviderName } from './types.js';
+import { defaultSandboxProviderRegistry } from './registry.js';
+import type { SandboxProviderDeps } from './registry.js';
 import type { WorktreeManager } from '../git/index.js';
 
 /**
- * Factory: resolve a SandboxProviderName to a SandboxProvider instance.
- * All provider-internal assembly is encapsulated here — callers only get
- * the ready-to-use provider.
+ * Compatibility factory: resolve a provider id to a ready-to-use SandboxProvider.
+ *
+ * This is now a thin wrapper over the default SandboxProviderRegistry, which
+ * keeps the built-in `local`, `docker`, and `podman` providers available with
+ * their existing constructors and exports. New providers should register with
+ * the registry rather than extending this function.
+ *
+ * `name` accepts the legacy `SandboxProviderName` union as well as any
+ * registered `SandboxProviderId`.
  */
 export function createSandboxProvider(
-  name: SandboxProviderName,
+  name: SandboxProviderName | SandboxProviderId,
   deps: { worktreeManager: WorktreeManager },
-): import('./types.js').SandboxProvider {
-  switch (name) {
-    case 'local':
-      return new LocalSandboxProvider(deps.worktreeManager);
-    case 'docker':
-      return new ContainerSandboxProvider({ provider: new DockerContainerProvider() });
-    case 'podman':
-      return new ContainerSandboxProvider({ provider: new PodmanContainerProvider() });
-  }
+): SandboxProvider {
+  return defaultSandboxProviderRegistry.create(name, deps as SandboxProviderDeps);
 }

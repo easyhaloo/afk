@@ -52,6 +52,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation.js";
 import { SqliteLocalConfigStore } from "@afk/runtime/storage";
+import { createPluginService } from "../services/plugin-service.js";
+import { parsePluginEnabled, parsePluginId, parsePluginInstall } from "../../shared/plugin-contract.js";
 
 type HandlerSchema = (value: unknown) => unknown;
 
@@ -182,8 +184,26 @@ const workItemExecutionQueryService = createWorkItemExecutionQueryService(create
   },
 }));
 const workItemRunHistoryService = createWorkItemRunHistoryService({ workspace: executionWorkspaceService, runStore: workItemRunStore });
+const pluginService = createPluginService({
+  chooseDirectory: async () => {
+    const selected = await dialog.showOpenDialog({ title: "选择可信本地插件目录", properties: ["openDirectory"] });
+    return selected.canceled ? undefined : selected.filePaths[0];
+  },
+  chooseJsonFile: async () => {
+    const selected = await dialog.showOpenDialog({ title: "选择插件配置 JSON", properties: ["openFile"], filters: [{ name: "JSON", extensions: ["json"] }] });
+    return selected.canceled ? undefined : selected.filePaths[0];
+  },
+  confirm: async (operation, label) => {
+    const messages = {
+      install: "插件是受信任的本地代码，安装后将启用，并可在后续运行中执行。仅安装可信来源。",
+      configure: "将使用所选 JSON 替换该插件的配置。配置值仅在主进程处理。",
+    };
+    const result = await dialog.showMessageBox({ type: "warning", message: `${({ install: "安装插件", configure: "导入插件配置" })[operation]}：${label}`, detail: `${messages[operation]}\n变更仅对后续运行生效，不热更新正在运行的 Worker。`, buttons: ["取消", "确认"], defaultId: 0, cancelId: 0, noLink: true });
+    return result.response === 1;
+  },
+});
 const workItemExecutionService = createWorkItemExecutionService({
-  launchExecution: (input, workspace) => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace),
+  launchExecution: (input, workspace) => pluginService.launchWorker(() => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace)),
   getWorkItem: async (workItemId) => {
     const item = (await workItemInventoryService.list()).items.find(candidate => candidate.id === workItemId);
     if (!item) throw new Error(`工作项 ${workItemId} 不存在或当前账号无权访问`);
@@ -328,6 +348,11 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   });
   registerHandler(IPC_CHANNELS.snapshot, (v: unknown) => backlogWorkspace(v, "snapshot"), (workspace) => snapshot(workspace));
   registerHandler(IPC_CHANNELS.appearance, (v: unknown) => v, () => readAppearance());
+  registerHandler(IPC_CHANNELS.pluginsList, (value: unknown) => value, () => pluginService.list());
+  registerHandler(IPC_CHANNELS.pluginsInstall, parsePluginInstall, input => pluginService.install(input));
+  registerHandlerMulti(IPC_CHANNELS.pluginsSetEnabled, [parsePluginId, parsePluginEnabled], ([id, enabled]) => pluginService.setEnabled(parsePluginId(id), parsePluginEnabled(enabled)));
+  registerHandler(IPC_CHANNELS.pluginsRemove, parsePluginId, id => pluginService.remove(id));
+  registerHandler(IPC_CHANNELS.pluginsConfigure, parsePluginId, id => pluginService.configure(id));
   registerHandler(IPC_CHANNELS.appearanceSave, (v: unknown) => v, (appearance) => saveAppearance(appearance));
   registerHandlerMulti(IPC_CHANNELS.workflowSave, [
     (v) => backlogWorkspace(v, "workflowSave"),

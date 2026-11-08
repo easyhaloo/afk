@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
 import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
+import { PluginRuntime } from '../plugins/runtime.js';
+import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
@@ -108,6 +110,166 @@ function fixture() {
   return { providers: { backlog, changes, branches } as any, changes, branches, sandboxProvider: sandboxProvider as any, agentProvider: agentProvider as any, sandbox, execution };
 }
 
+describe('QARunner plugin publication policies', () => {
+  it('gathers plugin context before the QA prompt and completes lifecycle before publication', async () => {
+    const current = fixture();
+    const contextFile = join(worktreePath, '.afk', 'plugin-context.md');
+    const onBeforeAgent = vi.fn(async () => { await mkdir(join(worktreePath, '.afk'), { recursive: true }); await writeFile(contextFile, 'Project knowledge'); });
+    const onAfterAgent = vi.fn(async () => {});
+    const onCleanup = vi.fn(async () => { await rm(contextFile, { force: true }); });
+    const plugins = await policyRuntime({ name: 'qa-context', failureMode: 'required', onBeforeAgent, onAfterAgent, onCleanup });
+    try {
+      const runner = new QARunner(current.providers, config, { plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+      expect(await runner.process('60')).toMatchObject({ success: true });
+      expect(current.agentProvider.createExecution).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('.afk/plugin-context.md') }));
+      expect(onBeforeAgent.mock.invocationCallOrder[0]).toBeLessThan(current.agentProvider.createExecution.mock.invocationCallOrder[0]);
+      expect(onAfterAgent.mock.invocationCallOrder[0]).toBeLessThan(current.branches.push.mock.invocationCallOrder[0]);
+      expect(onCleanup).toHaveBeenCalledOnce();
+    } finally { await plugins.dispose(); await rm(contextFile, { force: true }); }
+  });
+  async function policyRuntime(module: LifecycleModule) {
+    const plugins = new PluginRuntime();
+    await plugins.activate({
+      id: 'qa-publication-policy', version: '1.0.0',
+      setup(context) { context.registerLifecycle(module); },
+    });
+    return plugins;
+  }
+
+  it('does not restore an agent excluded from the plugin runtime registry', async () => {
+    const current = fixture();
+    const plugins = new PluginRuntime();
+    try {
+      expect(() => new QARunner(current.providers, { ...config, agentDefault: 'claude-code' }, {
+        plugins, sandboxProvider: current.sandboxProvider,
+      })).toThrow('agent provider not registered: claude-code');
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it('does not restore the local sandbox when it is excluded from the plugin runtime registry', async () => {
+    const current = fixture();
+    const plugins = new PluginRuntime();
+    try {
+      expect(() => new QARunner(current.providers, config, {
+        plugins, agentProvider: current.agentProvider,
+      })).toThrow(/local/);
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it('initializes plugins and rejects malformed configuration before starting QA or publishing', async () => {
+    const current = fixture();
+    const onInit = vi.fn(async () => { throw new Error('invalid plugin policy configuration'); });
+    const onBeforePublish = vi.fn(async () => {});
+    const plugins = await policyRuntime({ name: 'invalid-settings', failureMode: 'required', onInit, onBeforePublish });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      expect(await runner.process('60')).toMatchObject({ success: false, summary: expect.stringContaining('invalid plugin policy configuration') });
+      expect(onInit).toHaveBeenCalledWith(expect.objectContaining({ iid: 60, baseBranch: 'main', repoRoot: process.cwd() }));
+      expect(current.branches.createVerificationWorktree).not.toHaveBeenCalled();
+      expect(current.agentProvider.createExecution).not.toHaveBeenCalled();
+      expect(onBeforePublish).not.toHaveBeenCalled();
+      expect(current.branches.push).not.toHaveBeenCalled();
+      expect(current.changes.create).not.toHaveBeenCalled();
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it('evaluates required policy against the actual QA worktree and blocks its branch push', async () => {
+    const current = fixture();
+    const onBeforePublish = vi.fn(async (_context: LifecycleContext) => { throw new Error('QA policy denied'); });
+    const onCleanup = vi.fn(async () => {});
+    const plugins = await policyRuntime({ name: 'deny-publication', failureMode: 'required', onBeforePublish, onCleanup });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      expect(await runner.process('60')).toMatchObject({ success: false, summary: expect.stringContaining('QA policy denied') });
+      expect(onBeforePublish).toHaveBeenCalledOnce();
+      expect(onBeforePublish).toHaveBeenCalledWith(expect.objectContaining({
+        iid: 60, worktreePath, baseBranch: 'main', sessionName: expect.stringMatching(/^qa-60-/),
+        repoRoot: process.cwd(), params: {},
+      }));
+      expect(current.branches.push).not.toHaveBeenCalled();
+      expect(current.changes.create).not.toHaveBeenCalled();
+      expect(onCleanup).toHaveBeenCalledWith(onBeforePublish.mock.calls[0]![0]);
+      expect(current.branches.cleanup).toHaveBeenCalledWith(worktreePath, { preserve: true });
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it.each(['create', 'refresh'] as const)('rechecks policy before change request %s after an allowed branch push', async publication => {
+    const current = fixture();
+    const refresh = vi.fn(async () => ({ id: 'pr-60' }));
+    Object.assign(current.changes, { refresh });
+    if (publication === 'refresh') {
+      current.changes.findForBacklog.mockResolvedValue({
+        id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main',
+      } as never);
+    }
+    const onBeforePublish = vi.fn(async () => {})
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('publication evidence rejected'));
+    const plugins = await policyRuntime({ name: 'check-evidence', failureMode: 'required', onBeforePublish });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      expect(await runner.process('60')).toMatchObject({ success: false, summary: expect.stringContaining('publication evidence rejected') });
+      expect(onBeforePublish).toHaveBeenCalledTimes(2);
+      expect(current.branches.push).toHaveBeenCalledWith('qa-60', worktreePath);
+      expect(current.changes.create).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+      expect(current.changes.merge).not.toHaveBeenCalled();
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it.each([false, true])('keeps identity, publication audit and the human merge gate when plugin policy allows publication (canonical=%s)', async canonical => {
+    const current = fixture();
+    const backlogId = canonical ? 'github:acme/repo#60' : '60';
+    current.providers.backlog.get.mockResolvedValue({ ...await current.providers.backlog.get(), id: backlogId, providerRef: backlogId });
+    const onInit = vi.fn(async () => {});
+    const onBeforePublish = vi.fn(async () => {});
+    const onCleanup = vi.fn(async () => {});
+    const beforeChange = vi.fn(async () => {});
+    const onCommit = vi.fn(async () => {});
+    const afterPublication = vi.fn(async () => {});
+    const plugins = await policyRuntime({ name: 'allow-publication', failureMode: 'required', onInit, onBeforePublish, onCleanup });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+        beforeChange, onCommit, afterPublication,
+      });
+      expect(await runner.process('60')).toMatchObject({ success: true, mrUrl: 'https://example.test/pr/60' });
+      expect(onInit).toHaveBeenCalledOnce();
+      expect(onBeforePublish).toHaveBeenCalledTimes(2);
+      expect(onBeforePublish).toHaveBeenCalledWith(expect.objectContaining({ iid: 60, worktreePath }));
+      expect(onInit.mock.invocationCallOrder[0]).toBeLessThan(current.agentProvider.createExecution.mock.invocationCallOrder[0]);
+      expect(beforeChange).toHaveBeenCalledWith('publish', expect.objectContaining({ id: backlogId }));
+      expect(onCommit).toHaveBeenCalledWith('commit-60', 'qa-60');
+      expect(onCommit.mock.invocationCallOrder[0]).toBeLessThan(onBeforePublish.mock.invocationCallOrder[0]!);
+      expect(onBeforePublish.mock.invocationCallOrder[0]).toBeLessThan(current.branches.push.mock.invocationCallOrder[0]);
+      expect(onBeforePublish.mock.invocationCallOrder[1]).toBeLessThan(current.changes.create.mock.invocationCallOrder[0]);
+      expect(afterPublication).toHaveBeenCalledWith(expect.objectContaining({ id: 'pr-60' }));
+      expect(onCleanup).toHaveBeenCalledOnce();
+      expect(current.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
+      expect(current.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+      expect(current.changes.merge).not.toHaveBeenCalled();
+    } finally {
+      await plugins.dispose();
+    }
+  });
+});
+
 function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttempts = 3) {
   const issue: TrackedIssue = { id: 60, platform, title: 'search mode', description: 'support /s', labels: ['stage::qa', 'mode::afk'], state: 'opened', projectId: 'org/repo', url: '' };
   const comments: Array<{ id: string; body: string }> = [];
@@ -151,6 +313,26 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
 }
 
 describe('QARunner runtime binding', () => {
+  it('resolves and probes the reviewer from an isolated plugin registry', async () => {
+    const plugins = new PluginRuntime();
+    const provider = { name: 'codex', capabilities: new Set(), createExecution: vi.fn() };
+    await plugins.activate({
+      manifest: { id: 'agent.codex', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['agent.provider'] },
+      activate(context) { context.registerAgentProvider('codex', provider); },
+    });
+    const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+    try {
+      const runner = new QARunner(fixture().providers, {
+        ...config, agentDefault: 'codex', agents: { codex: codexConfig },
+      } as any, { plugins, sandboxProvider: fixture().sandboxProvider, prepareRuntime });
+      expect((runner as any).agentProvider).toBe(provider);
+      await (runner as any).probeOwnRuntime();
+      expect(prepareRuntime).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'codex', provider: 'afk-zyuncs', profile: 'afk', transport: 'exec',
+      }));
+    } finally { await plugins.dispose(); }
+  });
+
   const codexConfig = {
     transport: 'exec' as const,
     auth: 'auto' as const,

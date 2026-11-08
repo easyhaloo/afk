@@ -51,10 +51,11 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime sandbox in
     });
 
     try {
+      const goal = `/goal Work only in the absolute directory ${workspace}. First run pwd using Bash and confirm it equals that directory. Then create sum.mjs exporting function sum(a, b) that returns a + b, and sum.test.mjs using node:test and node:assert/strict to test positive, negative and decimal inputs. Run node --test ${workspace}/sum.test.mjs and fix any failures. Do not use browser or MCP tools, do not install dependencies, and do not modify files outside this workspace. Complete only after the files exist in that exact directory and the tests pass.`;
       const execution = await sandbox.startAgent({
         command: agent.buildCommand({ worktreePath: workspace, sessionId: 'integration-session', executionMode: 'batch' }),
         generation: 1,
-        prompt: buildExecutionPrompt('/goal In this workspace create sum.mjs exporting function sum(a, b) that returns a + b. Create sum.test.mjs using node:test and node:assert/strict to test positive, negative and decimal inputs. Run node --test sum.test.mjs and fix any failures. Do not install dependencies or modify files outside this workspace. Complete only after the tests pass.', 'batch', 'task'),
+        prompt: buildExecutionPrompt(goal, 'batch', 'task'),
         signalType: 'goal_complete',
         executionMode: 'batch',
         metadata: { provider: 'claude-code', transport: 'process' },

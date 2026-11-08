@@ -1,4 +1,5 @@
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import { guardedRestoreSession } from '../../domain/agents/registry.js';
 import type { Sandbox, AgentExecution } from '../../infrastructure/sandbox/types.js';
 import type { SessionStoreChain } from '../sessions/types.js';
 import { logger } from '../../infrastructure/io/index.js';
@@ -26,7 +27,7 @@ export async function attemptNativeResume(
   try {
     const loaded = await chainFactory().loadFirst({ runId: ctx.runId });
     if (!loaded) return undefined;
-    await agentProvider.restoreSession!({ snapshot: loaded.snapshot, worktreePath: ctx.wtPath });
+    await guardedRestoreSession(agentProvider, { snapshot: loaded.snapshot, worktreePath: ctx.wtPath });
   } catch (error) {
     logger.info({ iid: ctx.iid, runId: ctx.runId, error }, 'native resume unavailable; falling through to coordinator');
     return undefined;

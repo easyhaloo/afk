@@ -87,6 +87,7 @@ describe("SelectMenu", () => {
     let renderer!: ReturnType<typeof create>;
     act(() => {
       renderer = create(<WorkflowStudioInspector
+        agentProviders={["claude-code", "codex", "cursor", "pi", "opencode", "copilot"]}
         node={{ id: "agent-1", number: "A1", title: "实现节点", caption: "执行实现", state: "ready", x: 100, y: 100, custom: template }}
         workflow={{
           configPath: "/tmp/config.yml",

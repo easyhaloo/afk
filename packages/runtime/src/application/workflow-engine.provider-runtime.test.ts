@@ -4,6 +4,9 @@ import { WorkflowRunner } from './workflow-engine.js';
 import type { RunObserver } from '../observability/run-observer.js';
 import type { AgentRuntimeSelection } from '../domain/agents/types.js';
 import { DEFAULT_CODEX_CONFIG, type CodexConfig } from '../domain/agents/codex-runtime.js';
+import { AgentProviderRegistry, type AgentProvider } from '../domain/agents/index.js';
+import type { Step, StepResult } from '../domain/templates/types.js';
+import type { ObservationContext } from '@afk/core';
 
 /**
  * A step may run a different provider than the request did.
@@ -23,6 +26,7 @@ function runnerWith(input: {
   agentProvider: 'claude-code' | 'codex';
   agentRuntime?: AgentRuntimeSelection;
   codex?: CodexConfig;
+  agentProviderRegistry?: AgentProviderRegistry;
 }) {
   const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
   const workflow = new WorkflowRunner(
@@ -31,6 +35,7 @@ function runnerWith(input: {
       observer: { record: vi.fn(async () => undefined) } as unknown as RunObserver,
       agentProvider: { name: input.agentProvider, capabilities: new Set(), createExecution: vi.fn() } as never,
       agentRuntime: input.agentRuntime,
+      agentProviderRegistry: input.agentProviderRegistry,
       prepareRuntime,
       config: { agents: { codex: input.codex ?? codexConfig({ provider: 'afk-zyuncs', profile: 'afk' }) } } as never,
     },
@@ -42,6 +47,33 @@ function runnerWith(input: {
 }
 
 describe('WorkflowRunner runtime binding', () => {
+  it.each(['codex', 'plugin-agent'])('binds the runtime of a step resolved from the isolated registry (%s)', async name => {
+    const provider: AgentProvider = { name, capabilities: new Set(), createExecution: vi.fn() };
+    const registry = new AgentProviderRegistry();
+    registry.register(provider);
+    const { workflow, prepareRuntime } = runnerWith({ agentProvider: 'claude-code', agentProviderRegistry: registry });
+    const internals = workflow as unknown as {
+      observationContext: ObservationContext;
+      runStep(step: Step, context: { iid: number; session: string; primaryWtPath: string; primaryBranch: string; executionMode: 'batch' }, results: { [stepId: string]: StepResult }): Promise<StepResult>;
+      runPhase(input: unknown): Promise<{ completed: boolean; output: string }>;
+    };
+    const runPhase = vi.spyOn(internals, 'runPhase').mockResolvedValue({ completed: true, output: '' });
+    internals.observationContext = {
+      traceId: 'integration', runId: 'integration-42', workItemId: 'github:acme/repo#42',
+      profileId: 'development', attempt: 1, actor: { kind: 'system', id: 'integration-test' },
+    };
+
+    await internals.runStep({ id: 'implement', prompt: 'Implement the task', provider: name }, {
+      iid: 42, session: 'integration-42', primaryWtPath: process.cwd(), primaryBranch: 'feature', executionMode: 'batch',
+    }, {});
+
+    expect(runPhase).toHaveBeenCalledWith(expect.objectContaining({
+      agentProvider: provider,
+      runtime: name === 'codex' ? expect.objectContaining({ kind: 'codex', provider: 'afk-zyuncs', profile: 'afk' }) : undefined,
+    }));
+    expect(prepareRuntime).toHaveBeenCalledTimes(name === 'codex' ? 1 : 0);
+  });
+
   it('gives a Codex step the Codex runtime when the request level had none', async () => {
     // The production shape: the request ran Claude Code, so it carried no
     // Codex runtime, and the Codex step lost its profile entirely.

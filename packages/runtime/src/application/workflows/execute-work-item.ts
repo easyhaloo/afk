@@ -2,6 +2,7 @@ import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
+import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, readFile, rename, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -30,7 +31,7 @@ import { withLogContext, logger } from '../../infrastructure/io/index.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import type { PluginRuntime } from '../plugins/runtime.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
-import { recordExecutionExperience } from '../learning/runtime.js';
+import { recordExecutionExperience, recordSuccessfulExperience } from '../learning/runtime.js';
 import { createFailureDiagnostic } from './failure-diagnostic.js';
 
 export interface ExecuteWorkItemInput {
@@ -194,6 +195,54 @@ async function acquireLock(lockPath: string, workItemId: string, executionId: st
   } catch (error) {
     await releaseLock(lock, lockPath);
     throw error;
+  }
+}
+
+async function openExecutionJournal(journalPath: string, workItemId: string, executionId: string): Promise<FileHandle> {
+  try {
+    return await open(journalPath, 'wx');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  let journal: FileHandle | undefined;
+  try {
+    const before = await lstat(journalPath);
+    const maxBytes = 64 * 1024;
+    if (!before.isFile() || before.nlink !== 1 || before.size < 1 || before.size > maxBytes) {
+      throw new Error('journal must be a nonempty regular file of at most 64 KiB with one link');
+    }
+    journal = await open(journalPath, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const unchanged = (stat: typeof before) => stat.isFile() && stat.nlink === 1
+      && stat.dev === before.dev && stat.ino === before.ino && stat.size === before.size
+      && stat.mtimeMs === before.mtimeMs && stat.ctimeMs === before.ctimeMs;
+    if (!unchanged(await journal.stat())) throw new Error('journal changed while opening');
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await journal.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== before.size || !unchanged(await journal.stat()) || !unchanged(await lstat(journalPath))) {
+      throw new Error('journal changed while reading');
+    }
+    const contents = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, bytesRead));
+    if (!contents.endsWith('\n')) throw new Error('partial journal record');
+    let previous: string | undefined;
+    for (const line of contents.slice(0, -1).split('\n')) {
+      const entry = JSON.parse(line) as {
+        executionId?: unknown; workItemId?: unknown; phase?: unknown; at?: unknown; reason?: unknown;
+      } | null;
+      if (!entry || Array.isArray(entry) || JSON.stringify(entry) !== line
+        || entry.executionId !== executionId || entry.workItemId !== workItemId
+        || typeof entry.at !== 'string' || new Date(entry.at).toISOString() !== entry.at
+        || (entry.phase !== 'requested' && entry.phase !== 'failed')
+        || Object.keys(entry).sort().join(',') !== (entry.phase === 'requested'
+          ? 'at,executionId,phase,workItemId' : 'at,executionId,phase,reason,workItemId')
+        || (entry.phase === 'failed' && (previous !== 'requested' || typeof entry.reason !== 'string'))) {
+        throw new Error('journal is not an intact pre-implementation attempt with matching identity');
+      }
+      previous = entry.phase;
+    }
+    return journal;
+  } catch (error) {
+    await journal?.close();
+    throw new Error(`cannot safely retry execution journal ${executionId}`, { cause: error });
   }
 }
 
@@ -389,6 +438,10 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
             message: data.summary ?? `Independent QA ${data.reason ?? 'failed'}` }) });
       } catch { logger.warn({ workItemId, runId: context.runId }, 'QA failure experience could not be recorded'); }
     }
+    if ((data.kind === 'human_gate.opened' && data.gateId.startsWith('merge:')) || (data.kind === 'run.finished' && data.outcome === 'succeeded')) {
+      try { await recordSuccessfulExperience({ runId: context.runId, workItemId }); }
+      catch { logger.warn({ workItemId, runId: context.runId }, 'Successful workflow experience could not be recorded'); }
+    }
   };
   const manifest = await resolveManifest(input, dependencies);
   return new RepositoryLeases().run((manifest.repositories ?? []).map(repository => `${repository.platform}:${repository.projectKey}`), async () => {
@@ -397,7 +450,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
     const lockPath = join(directory, `${encodeWorkItemIdForPath(workItemId)}.lock`);
     const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
     try {
-      const journal = await open(join(directory, `${executionId}.jsonl`), 'wx');
+      const journal = await openExecutionJournal(join(directory, `${executionId}.jsonl`), workItemId, executionId);
       try {
         const record = async (phase: string, details: object = {}) => {
           await journal.writeFile(`${JSON.stringify({ executionId, workItemId, phase, at: new Date().toISOString(), ...details })}\n`);

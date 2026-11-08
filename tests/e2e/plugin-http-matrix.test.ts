@@ -240,7 +240,7 @@ it.each([
       state: { name: 'Todo' }, labels: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }, url: `${http}/issue/MATRIX-7` }
     : { id: '10007', key: 'MATRIX-7', fields: { summary: 'TCP issue', description: { type: 'doc', version: 1, content: [
       { type: 'paragraph', content: [{ type: 'text', text: 'Created locally' }] },
-    ] }, status: { name: 'Todo' }, labels: [] } };
+    ] }, status: { name: 'Todo' }, labels: [], project: { key: 'MATRIX' } } };
   const readReply = vendor === 'linear' ? { json: { data: { issue: raw } } } : { json: raw };
   const expected = { id: vendor === 'linear' ? 'linear-uuid' : 'MATRIX-7', key: 'MATRIX-7', projectId: vendor === 'linear' ? 'team-matrix' : 'MATRIX',
     title: 'TCP issue', description: 'Created locally', state: 'Todo', labels: [], url: vendor === 'linear' ? `${http}/issue/MATRIX-7` : `${http}/jira/browse/MATRIX-7` };
@@ -259,7 +259,7 @@ it.each([
   } else {
     checkRequest(0, 'POST', '/jira/rest/api/3/issue', auth, { fields: { project: { key: 'MATRIX' }, summary: input.title,
       description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: input.description }] }] }, issuetype: { name: 'Task' } } });
-    checkRequest(1, 'GET', '/jira/rest/api/3/issue/MATRIX-7?fields=summary,description,labels,status', auth);
+    checkRequest(1, 'GET', '/jira/rest/api/3/issue/MATRIX-7?fields=summary,description,labels,status,project', auth);
   }
   const issueInput = { issueId: 'MATRIX-7' };
   const count = requests.length;
@@ -268,7 +268,7 @@ it.each([
   if (vendor === 'linear') checkRequest(count, 'POST', '/linear/graphql', auth, {
     query: expect.stringContaining('query GetIssue'), variables: { id: 'MATRIX-7' },
   });
-  else checkRequest(count, 'GET', '/jira/rest/api/3/issue/MATRIX-7?fields=summary,description,labels,status', auth);
+  else checkRequest(count, 'GET', '/jira/rest/api/3/issue/MATRIX-7?fields=summary,description,labels,status,project', auth);
   for (const reply of [{ status: 401, text: 'denied' }, { json: {} }, { text: '{broken' },
     vendor === 'linear' ? { json: { errors: [{ message: 'rejected' }] } } : { json: { errorMessages: ['rejected'] } },
   ]) {

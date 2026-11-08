@@ -325,6 +325,8 @@ jobs:
         id: coverage
         if: success() || (failure() && steps.tests.outcome == 'failure')
         run: pnpm test:coverage
+        env:
+          COVERAGE_BASELINE: scripts/coverage-baseline.json
 
       - name: Upload source coverage reports
         if: always() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure')

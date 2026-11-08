@@ -151,6 +151,14 @@ async function deliver(url: string, trigger: Exclude<Trigger, 'schedule'>, match
   return { status: response.status, body: await response.json() };
 }
 
+async function waitDelivery(url: string, deliveryId: string) {
+  await vi.waitFor(async () => {
+    const response = await fetch(`${url}/deliveries`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(1000) });
+    const status = await response.json() as { deliveries: Array<{ deliveryId: string; status: string }> };
+    expect(status.deliveries.find(delivery => delivery.deliveryId === deliveryId)?.status).toBe('delivered');
+  }, { timeout: 5000, interval: 25 });
+}
+
 describe('built CLI host command transports (simulated remote commands)', () => {
   it.each(hosts)('%s preserves arguments, effects, process failures, invalid and disabled input', async host => {
     const current = await fixture();
@@ -199,9 +207,14 @@ describe('built CLI trigger listen lifecycle → host action pairs', () => {
       await vi.waitFor(async () => expect(await readFile(artifact, 'utf8')).toContain('"simulated":true'), { timeout: 5000, interval: 25 });
     } else {
       expect(await deliver(listener.url, trigger, true, false)).toMatchObject({ status: 401 });
-      expect(await deliver(listener.url, trigger, false)).toEqual({ status: 200, body: { dispatched: 0 } });
+      const ignored = await deliver(listener.url, trigger, false);
+      expect(ignored.status).toBe(202);
+      await waitDelivery(listener.url, ignored.body.deliveryId);
       expect(await current.transportCalls()).toEqual([]);
-      expect(await deliver(listener.url, trigger)).toEqual({ status: 200, body: { dispatched: 1 } });
+      const accepted = await deliver(listener.url, trigger);
+      expect(accepted.status).toBe(202);
+      await waitDelivery(listener.url, accepted.body.deliveryId);
+      expect(await deliver(listener.url, trigger)).toMatchObject({ status: 202, body: { deliveryId: accepted.body.deliveryId, duplicate: true } });
       expect((await readFile(artifact, 'utf8')).trim().split('\n')).toHaveLength(1);
     }
     await stop(listener.child);
@@ -235,11 +248,22 @@ describe('built CLI trigger listen lifecycle → host action pairs', () => {
     if (trigger === 'schedule') {
       await vi.waitFor(() => expect(active.stderr()).toContain('Trigger action failed'), { timeout: 5000, interval: 25 });
     } else {
-      const malformed = await fetch(`${active.url}/triggers/trigger.${trigger}`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: '{' });
+      const malformedBody = '{';
+      const malformed = await fetch(`${active.url}/triggers/trigger.${trigger}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          // Durable webhook delivery requires a valid HMAC signature before the
+          // payload is parsed; without it the listener correctly answers 401.
+          'x-hub-signature-256': `sha256=${createHmac('sha256', token).update(malformedBody).digest('hex')}`,
+        },
+        body: malformedBody,
+      });
       expect(malformed.status).toBe(400);
       expect(await current.transportCalls()).toEqual([]);
-      expect(await deliver(active.url, trigger)).toMatchObject({ status: 400 });
-      expect(active.stderr()).toContain('Trigger action failed');
+      expect(await deliver(active.url, trigger)).toMatchObject({ status: 202 });
+      await vi.waitFor(() => expect(active.stderr()).toContain('Trigger action failed'), { timeout: 5000, interval: 25 });
     }
     await stop(active.child);
     expect((await readFile(artifact, 'utf8')).trim()).toContain('"simulated":true');

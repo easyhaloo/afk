@@ -112,4 +112,13 @@ describe('Run reducer', () => {
       reason: 'run_not_finishable',
     });
   });
+
+  it('accepts only artifact upload receipts after termination without reopening the run', () => {
+    const finished = replay([requested(), event(2, { kind: 'run.started' }), event(3, { kind: 'run.finished', outcome: 'succeeded' })]);
+    const receipt = evolve(finished, event(4, { kind: 'effect.completed', effectKind: 'artifact.upload', idempotencyKey: 'upload-1', outcome: 'succeeded' }));
+    expect(receipt).toEqual({ ...finished, sequence: 4 });
+    expect(decide(receipt, { type: 'start', runId: context.runId })).toMatchObject({ accepted: false, reason: 'run_terminal' });
+    expect(() => evolve(receipt, event(5, { kind: 'effect.completed', effectKind: 'publish', idempotencyKey: 'publish-1', outcome: 'succeeded' }))).toThrow(RunEventTransitionError);
+    expect(() => evolve(receipt, event(5, { kind: 'qa.passed' }))).toThrow(RunEventTransitionError);
+  });
 });

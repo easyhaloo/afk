@@ -92,6 +92,55 @@ flowchart TD
 
 The local system is complete only when all local/mocked adapters run through the actual supported surfaces and the learning cycle is executable, not merely registered. External products requiring accounts or reachable infrastructure remain separately identified until exercised with those prerequisites. Repetition reduction is measured through duplicate fingerprints, occurrences and later use; no model can guarantee that it will never make another mistake.
 
+## Completion phase: plugin operations and governance
+
+Continue from the published baseline without repeating completed work. Independent workers own workspace cleanup, durable trigger delivery, artifact audit export, learning exchange, repository lifecycle and Desktop integration. The integration owner controls shared contracts, command registration, versions and final acceptance.
+
+- [x] Inspect legacy execution manifests without granting deletion authority; target cleanup explicitly and refuse active, dirty, unknown or escaping paths.
+- [x] Import Linear/Jira issues into a real managed repository backlog with deterministic provenance/idempotency, preserving canonical work identity; synchronize only explicitly selected external fields/states.
+- [x] Expose validated repository preparation, checkout, publication and cleanup, with truthful provider capabilities and ownership checks.
+- [x] Upload configured evidence to artifact providers while retaining local integrity and recording remote provenance/failure.
+- [x] Persist authenticated trigger receipts, recover pending deliveries after restart and support bounded retry/replay with duplicate detection.
+- [x] Capture successful lessons from independent QA evidence; exchange bounded records as untrusted candidates and measure retrieval, explicit adoption and recurrence separately.
+- [x] Provide Desktop browser OAuth and scoped experience management through public runtime services.
+- [x] Enforce measured source-coverage baselines in CI; report actual configured external checks separately from fixture tests.
+- [x] Rebuild and test affected packages, review worker patches, update paired operational documentation and push a reviewable change without merging.
+
+## Completion-phase evidence
+
+Integration was finished on `feat/plugin-matrix-validation` using macOS arm64 / Node 22.22.2.
+The restricted sandbox blocks `ps`, so verification used an equivalent process-start probe
+outside the repository; the shim is not committed and the execution-lock identity check is
+unchanged.
+
+- Integration fixes: `snapshot` for the remote-workspace and special-git-backend providers
+  keeps its original repository contract (an encoded path segment, or an absolute local path /
+  validated HTTPS URL) while still refusing `.` / `..`, encoded dot segments, control bytes,
+  credential-bearing URLs and option injection. Two focused provider regression tests were
+  added. The malformed-webhook E2E now supplies an HMAC signature, the backend failure
+  assertion uses the redacted message, and one listener warning-callback test closes the CLI
+  function-coverage gap.
+- Static checks and builds: `git diff --check`, typecheck, workspace build and Desktop
+  production build passed. The architecture guard covered 454 source and 255 desktop client
+  files with zero quarantined items; the link checker covered 420 files with zero broken links.
+- Tests: core 30, workflow-graph 9, application 78, runtime 2,881 (plus two skipped), CLI 533
+  (plus two skipped), Desktop 948 and plugin E2E 203 passed. The coverage run recorded 3,857
+  passing and four skipped tests.
+- Coverage: 49,909/57,021 source lines (87.52%), functions 83.69%, branches 85.95%. CLI
+  functions reached 313/435 (71.95%), above the 71.86% baseline. Every package and the total
+  meet `scripts/coverage-baseline.json`; the report-only gate exited 0. CI loads the same
+  baseline explicitly and Desktop is measured separately.
+- Environment difference: one pre-existing `streaming.test.ts` process-group case fails in the
+  restricted sandbox (`process.kill(-pgid)` does not actually terminate the detached child).
+  Neither its source nor its test changed in this round, so `pnpm test:coverage` exits 1 in
+  that sandbox; all other tests and the coverage gate pass.
+- External limits: Linear/Jira, Google OAuth, object storage and remote workspaces have not
+  been exercised against real accounts or services. Plugins remain in-process trusted code and
+  the human merge gate is retained.
+- Delivery: CLI `0.2.43` (version bump in the same commit). The change is pushed to
+  [PR #291](https://github.com/easyhaloo/afk/pull/291), stacked on
+  [PR #290](https://github.com/easyhaloo/afk/pull/290); neither change request is merged.
+
 ## Measured evidence
 
 - Shared packages / CLI / repository: 3,525 passed, four skipped; 47,922/55,041 reported source lines (87.06%), functions 82.92%, branches 84.27%. Desktop and subprocess internals are excluded from this coverage denominator.

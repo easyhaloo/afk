@@ -5,6 +5,7 @@ import type { EventStoreProvider, MetricsProvider, TracerProvider, TraceContext,
 import { logger } from '../io/logger.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
 import { RunObserver } from '../../observability/run-observer.js';
+import { captureEventEvidence, createArtifactAudit, type ArtifactAuditOptions } from './artifact-audit.js';
 
 type ObservationProvider = Partial<EventStoreProvider & MetricsProvider & TracerProvider>;
 export interface ObservabilityProviderSelection {
@@ -13,9 +14,13 @@ export interface ObservabilityProviderSelection {
 }
 type ExportScope = { context: TraceContext; pending: Promise<void>; controller: AbortController; deadline: number };
 
-export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, providers: readonly ObservabilityProviderSelection[] = []): RunObserver {
+export interface RunObserverOptions {
+  readonly artifacts?: ArtifactAuditOptions;
+}
+
+export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, providers: readonly ObservabilityProviderSelection[] = [], options: RunObserverOptions = {}): RunObserver {
   const events = new JsonlEventStore({ root });
-  if (!providers.length) return new RunObserver({ events });
+  if (!providers.length && !options.artifacts?.provider.capabilities.write) return new RunObserver({ events });
   const providersFor = (signal: ObservabilityProviderSelection['signals'][number]) => [...new Set(providers.filter(entry => entry.signals.includes(signal)).map(entry => entry.provider))] as ObservationProvider[];
   const tracers = providersFor('tracing');
   const metricsProviders = providersFor('metrics');
@@ -106,7 +111,7 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
       for (const provider of eventStores) {
         if (provider.capabilities?.append && typeof provider.append === 'function') enqueue(provider, options => provider.append!(drafts.map((draft, index) => ({
           runId: draft.context.runId, sequence: receipt.firstSequence + index, type: draft.type,
-          payload: { data: draft.data, context: draft.context, occurredAt: draft.occurredAt },
+          payload: { id: draft.id, data: draft.data, context: draft.context, occurredAt: draft.occurredAt, causationId: draft.causationId, evidence: draft.evidence },
         })), options));
       }
       return receipt;
@@ -115,5 +120,16 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
     listRuns: () => events.listRuns(),
     verify: runId => events.verify(runId),
   };
-  return new RunObserver({ events: mirroredEvents, tracer, metrics });
+  const auditArtifacts = createArtifactAudit(mirroredEvents, options.artifacts);
+  return new RunObserver({ events: {
+    ...mirroredEvents,
+    async append(drafts) {
+      const captured = await Promise.all(drafts.map(draft => captureEventEvidence(draft, options.artifacts)));
+      const receipt = await mirroredEvents.append(captured);
+      if (auditArtifacts) {
+        for (const [index, draft] of captured.entries()) await auditArtifacts(draft, receipt.firstSequence + index);
+      }
+      return receipt;
+    },
+  }, tracer, metrics });
 }

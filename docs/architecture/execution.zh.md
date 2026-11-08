@@ -25,6 +25,7 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk run`：解析工作项后委托给实现 → 独立 QA → 发布的完整受管流程。现有运行时、超时、预算、扩展及显式执行模式参数继续生效；`--target-branch` 指工作分支，MR 目标由条目基线计划声明。
 - `afk execute --work-item-id <id>`：执行受管生命周期，包括资格与 manifest 校验、实现、独立 QA、变更请求处理，以及由人控制的合并闸门。`--agent <name>`、`--sandbox <name>` 和 `--execution-mode <batch|interactive>` 显式选择本次运行的 Provider 和模式；模板仍可为单个步骤单独选择 Provider。
 - `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`：查看项目经验；`recall --scope <scope> --query <text> [--json]` 只返回相关、已验证且未过期的经验。
+- `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`、`import --scope <target> --file <file>`、`copy <id> --scope <source> --target-scope <target>`：交换最多 1 MiB / 100 条的可移植 JSON。导入与复制只产生候选，必须在目标项目独立验证；导出不携带验证权限。`metrics --scope <scope> [--json]` 区分检索、显式采纳与复发；`adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` 表达采纳确认，不声称观测了实际行为。
 - `afk experience record --scope <scope> --trigger <text> --root-cause <text> --action <text> --run-id <id> --work-item-id <id> --evidence <refs...>`：保存候选经验。`verify <id> --scope <scope> --run-id <id> --action <text> --evidence <refs...> [--root <事件存储>] [--root-cause <text>]` 要求同项目、审计完整、独立 QA 通过，随后成功结束或已确认发布并抵达对应人工合并闸门。`revoke <id> --scope <scope>` 撤销经验，后续检索不再提供它。
 - `afk loop start`：针对一个绑定 manifest 的工作项持续尝试，并委托给同一受管执行路径；它不是全局多工作项调度器。
 - `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
@@ -35,15 +36,18 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk plugin auth logout google`：Google 撤销授权成功后才删除 Keychain 记录，撤销失败保留记录供重试；不需要客户端文件，保留插件配置和启用状态；SIGINT/SIGTERM 取消操作。这三个认证命令的 Provider 仅接受 `google`。凭据使用 macOS/Linux Keychain；Windows 不支持，也不会将令牌保存到文件。
 - `afk plugin enable <id>` / `afk plugin disable <id>`：修改下次构造 Runtime 时的启用状态，不热更新正在执行的 Worker。
 - `afk plugin remove <id>`：禁用并删除已安装包，保留配置。
-- `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`：派发 43 项显式白名单操作之一，校验 JSON 输入和输出；无论是否带 `--json` 都输出 JSON。验证/策略/投递否定结果或远程非零 code 使 exit status 为 `1`；不开放凭据读取或 merge。CLI 验证输入必须显式提供 `target`。
-- `afk plugin listen --token-env <name> [--host <address>] [--port <number>]`：激活配置 trigger，保持认证 HTTP 宿主和 Runtime 常驻，SIGINT/SIGTERM 后关闭并 dispose；默认 `127.0.0.1:8374`，环境 token 必需且至少 16 字符、无 CR/LF。启动拒绝 error diagnostic，未注册的 action 会 dispose 对应 trigger；普通 Runtime 构造不启动 timer。见[能力插件架构](plugins.zh.md)。
+- `afk plugin import-issue <provider> <issue> --project <platform:projectKey> [--mode <hitl|afk>] [--json]`：按稳定来源和幂等键，将 Linear/Jira 条目导入目标代码仓库的真实受管 backlog。默认 `hitl`，返回的规范任务身份沿用现有执行、QA 和发布链路。`sync-issue <provider> <issue> <canonical-work-item> --states <json-file> [--json]` 校验来源绑定，仅更新显式映射的外部生命周期状态。工作流 action `work-item.import`、`work-item.sync` 提供同样能力。
+- `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`：派发显式白名单操作，校验 JSON 输入和输出；无论是否带 `--json` 都输出 JSON。验证/策略/投递否定结果或远程非零 code 使 exit status 为 `1`；不开放凭据读取或 merge。CLI 验证输入必须显式提供 `target`。仓库生命周期句柄属于单个 Runtime；`repository.provider/run` 在同一调用中完成准备、检出、注册 action 回调、发布和清理。
+- `afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`：激活配置 trigger，保持认证 HTTP 宿主和 Runtime 常驻，SIGINT/SIGTERM 后关闭并 dispose；默认 `127.0.0.1:8374`，持久化 SQLite 队列位于 `~/.afk/triggers/deliveries.sqlite`，环境 token 必需且至少 16 字符、无 CR/LF。已认证 Webhook 持久化后返回 HTTP 202，支持去重、有界退避重试以及失败投递查询和重放。启动拒绝 error diagnostic，未注册的 action 会 dispose 对应 trigger；普通 Runtime 构造不启动 timer。见[能力插件架构](plugins.zh.md)。
+- `afk plugin deliveries --token-env <name> [--url <listener>]` 和 `afk plugin replay <delivery-id> --token-env <name> [--url <listener>]`：通过认证 HTTP 查询运行中队列，或重放一条失败投递。仅允许 HTTPS 或回环 HTTP，拒绝重定向，状态不返回载荷。托管执行使用投递与规范工作项派生的稳定 ID；中断执行保留审计与日志供协调恢复，避免创建重复任务。
+- 投递查询支持 `--offset <number> --limit <1-100>` 访问较早记录。`afk plugin prune-deliveries --token-env <name> [--url <listener>]` 显式清理超过去重窗口（默认七天）的成功回执，保留待处理和失败记录。队列达到条数或字节上限时以 HTTP 503 拒绝新投递，不驱逐已保留的任务。
 - `afk plugin serve-container --repository <path> --workspace-root <path> --sandbox <provider> --agent <providers...> --token-env <name> [--host <address>] [--port <number>] [--allow-remote]`：显式通过共享 registry 提供 remote-container sandbox/agent 操作；五个未加方括号的 flag 全部必需，workspace root 必须已存在并限定执行 worktree，Agent 使用显式白名单，环境 token 至少 32 bytes。默认 `127.0.0.1:8375`，非 loopback 绑定/客户端需 `--allow-remote`；SIGINT/SIGTERM 后关闭服务并 dispose Runtime。后端组合与信任边界见[能力插件架构](plugins.zh.md)。
 - `afk plugin list [--json]`：列出已加载插件、声明能力与已注册 Provider 名称，不等于列出磁盘上的全部安装包。
 - `afk plugin doctor [--plugin <id>] [--json]`：检查 health 与 diagnostics，包括加载/配置错误；不健康 Provider 或 error 诊断返回失败，可选插件加载失败不阻止 Core 命令处理。API v1、Provider 矩阵及组合根/操作派发接入状态见[能力插件架构](plugins.zh.md)。
 - `afk backlog baseline --id <prd>`：报告 PRD 积累切片的分支以及继承它的切片；`--branch <name>` 把分支写进 PRD 正文。
 - `afk backlog rework revise --id <backlog> --record <r2> --summary "<事实陈述>"`：把一条 open 返工记录修订成当前事实；记录保留自己的 id 与证据，只有陈述被替换，修订轨迹留在记录里。
 - `afk schedule --parent <规范身份>`：跨项目调度父项的可执行后代，重叠仓库集合串行，遵循依赖与人工合并闸门。`--max-concurrent`、`--load-limit`、`--poll-interval` 控制派发；poll 间隔即重评估节奏——有执行在跑时仍会按间隔重新看一眼，一旦有空出的槽位和可派发的条目就立刻补派。`--watch` 让调度持续运行直到被停止，等待外部状态变化；`--dry-run` 在不认领、不启动 Agent 的情况下预览批次，`--json` 输出最终报告。报告里每条等待项都会写明卡住它的约束——依赖未就绪、容量已满、仓库租约被占、系统过载、等待人工、或重试预算耗尽。预览的后续批次以前序人工合并及 reconcile 完成为前提。清单读失败不会让调度退出：它会退避重试，并说明「调度器还活着，但看不到工作项」。SIGINT/SIGTERM 停止新派发并等待在途执行结束。
-- `afk doctor [--workspace-root <path>] [--json]`：只读统计裸库、依赖池、受管工作区、仓库租约及保守估算的可回收空间；`afk observe doctor` 仍用于查看事件存储。
+- `afk doctor [--workspace-root <path>] [--cleanup <target>] [--json]`：统计缓存、依赖池、受管工作区和租约，默认只读并兼容旧清单。清理必须指定唯一匹配的完整任务 ID 或工作区/依赖池绝对路径，保留未知、旧版、活动、脏、未发布和验证中的工作。空间与总量为清理前的逻辑估计；`afk observe doctor` 仍用于查看事件存储。
 - `afk observe`：查看执行记录及其审计、证据投影。
 
 完整命令面以 `apps/cli/src/command-registry.ts` 为准，不应从旧示例或历史计划推断当前支持的命令。

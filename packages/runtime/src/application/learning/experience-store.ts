@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { redactUtf8 } from '../../infrastructure/observability/local-evidence-store.js';
 import { openSqlite, transaction, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 
@@ -8,6 +9,8 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_RECORD_BYTES = 32 * 1024;
 const MAX_RECEIPTS = 256;
 const DAY = 24 * 60 * 60 * 1000;
+const MAX_EXCHANGE_BYTES = 1024 * 1024;
+const MAX_ADOPTIONS = 64;
 
 function text(maxBytes: number) {
   return z.string().max(maxBytes).trim().min(1).refine(value => Buffer.byteLength(value) <= maxBytes, 'Text exceeds byte limit')
@@ -40,10 +43,30 @@ const failureSchema = z.object({
 const verificationSchema = z.object({ evidence: evidenceSchema, runId: identity,
   action: text(4096).transform(redact).optional(), rootCause: text(2048).transform(redact).optional() }).strict();
 const observationSchema = z.object({ source: sourceSchema, evidence: evidenceSchema, recordedAt: z.string().datetime() }).strict();
+const failureIdentitySchema = failureSchema.pick({ trigger: true, rootCause: true, action: true });
+const originSchema = z.object({ scope: identity, id: z.string().uuid(), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), source: sourceSchema }).strict();
+const kindSchema = z.enum(['failure', 'success']);
+const receiptSchema = z.object({ sourceHash: z.string().regex(/^[a-f0-9]{64}$/), runHash: z.string().regex(/^[a-f0-9]{64}$/),
+  evidenceHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+const portableSchema = z.object({
+  version: z.literal(1), scope: identity,
+  experiences: z.array(z.object({
+    kind: kindSchema, trigger: failureSchema.shape.trigger, rootCause: failureSchema.shape.rootCause,
+    action: failureSchema.shape.action, evidence: evidenceSchema, expiresAt: z.string().datetime(), origin: originSchema,
+    failureIdentity: failureIdentitySchema.optional(),
+    receipts: z.array(receiptSchema).min(1).max(MAX_RECEIPTS),
+  }).strict().superRefine((entry, context) => {
+    if ((entry.kind === 'failure') !== (entry.failureIdentity !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom,
+      message: 'Failure exchange requires the original failure identity; success exchange must omit it' });
+  })).max(100),
+}).strict();
+const metricCountsSchema = z.object({ retrievals: z.number().int().nonnegative().safe(), adoptions: z.number().int().nonnegative().max(MAX_ADOPTIONS),
+  recurrences: z.number().int().nonnegative().safe() }).strict();
 const recordSchema = failureSchema.omit({ expiresAt: true }).extend({
   id: z.string().uuid(),
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   failureFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  failureIdentity: failureIdentitySchema.optional(),
   status: statusSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -52,12 +75,16 @@ const recordSchema = failureSchema.omit({ expiresAt: true }).extend({
   observations: z.array(observationSchema).min(1).max(8),
   verifiedEvidence: verificationSchema.extend({ verifiedAt: z.string().datetime() }).optional(),
   provenanceSaturated: z.boolean().optional(),
+  kind: kindSchema.optional(),
+  origin: originSchema.optional(),
 }).strict();
 
 export type ExperienceStatus = z.infer<typeof statusSchema>;
 export type RecordFailureInput = z.input<typeof failureSchema>;
 export type ExperienceVerification = z.input<typeof verificationSchema>;
 export type ExperienceRecord = z.infer<typeof recordSchema>;
+export type ExperienceExchange = z.infer<typeof portableSchema>;
+export type ExperienceMetrics = z.infer<typeof metricCountsSchema>;
 export interface ExperienceStoreOptions { file: string; now?: () => Date }
 
 const verificationHistorySchema = `
@@ -138,7 +165,8 @@ export class ExperienceStore {
       }
       const observation = { source: parsed.source, evidence: parsed.evidence, recordedAt: now };
       if (!existing) {
-        return this.save({ ...parsed, id: randomUUID(), fingerprint, failureFingerprint: fingerprint, status: 'candidate', createdAt: now, updatedAt: now,
+        return this.save({ ...parsed, id: randomUUID(), fingerprint, failureFingerprint: fingerprint,
+          failureIdentity: { trigger: parsed.trigger, rootCause: parsed.rootCause, action: parsed.action }, status: 'candidate', createdAt: now, updatedAt: now,
           expiresAt: expiry, occurrences: 1, observations: [observation] }, receipt);
       }
       const observations = existing.observations.filter(entry => entry !== previous);
@@ -149,11 +177,146 @@ export class ExperienceStore {
       const recurrence = !knownRun && !knownEvidence && parsed.evidence.some(ref =>
         !existing.evidence.includes(ref) && !existing.observations.some(entry => entry.evidence.includes(ref)));
       const keepVerified = existing.status === 'verified' && !expired && !recurrence;
+      if (recurrence && !existing.provenanceSaturated) this.incrementMetric(existing.id, 'recurrences');
       return this.save({ ...existing, status: existing.status === 'revoked' ? 'revoked' : keepVerified ? 'verified' : 'candidate',
         verifiedEvidence: existing.status === 'revoked' || keepVerified ? existing.verifiedEvidence : undefined,
         evidence: [...new Set([...existing.evidence, ...parsed.evidence])].slice(-8), observations: observations.slice(-8),
         occurrences: existing.occurrences + (seen || previous ? 0 : 1), updatedAt: now,
         expiresAt: expired ? expiry : existing.expiresAt }, receipt);
+    });
+  }
+
+  recordSuccess(input: RecordFailureInput): ExperienceRecord {
+    this.assertOpen();
+    const parsed = failureSchema.parse(input);
+    parseCanonicalProject(parsed.scope);
+    const workItem = parseWorkItemId(parsed.source.workItemId);
+    if (`${workItem.platform}:${workItem.projectKey}` !== parsed.scope) throw new Error('Success work item does not belong to scope');
+    const now = this.timestamp();
+    const expiresAt = parsed.expiresAt ?? new Date(Date.parse(now) + 90 * DAY).toISOString();
+    if (Date.parse(expiresAt) <= Date.parse(now) || Date.parse(expiresAt) > Date.parse(now) + 365 * DAY) throw new Error('Experience expiry must be in the next 365 days');
+    const fingerprint = this.fingerprint({ ...parsed, kind: 'success' });
+    return transaction(this.database, () => {
+      const existing = this.read(this.database.prepare('SELECT payload FROM experiences WHERE fingerprint = ?').get(fingerprint));
+      const receipt = { sourceHash: this.hash(parsed.source), runHash: this.hash(parsed.source.runId), evidenceHash: this.hash([...parsed.evidence].sort()) };
+      if (existing && (existing.status === 'revoked' || existing.provenanceSaturated ||
+        this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(existing.id, receipt.sourceHash))) return existing;
+      const record = this.save({ ...parsed, source: existing?.source ?? parsed.source, kind: 'success', id: existing?.id ?? randomUUID(), fingerprint, status: 'verified', createdAt: existing?.createdAt ?? now, updatedAt: now,
+        expiresAt, occurrences: (existing?.occurrences ?? 0) + 1,
+        observations: [...(existing?.observations ?? []), { source: parsed.source, evidence: parsed.evidence, recordedAt: now }].slice(-8),
+        verifiedEvidence: { runId: parsed.source.runId, evidence: parsed.evidence, verifiedAt: now } },
+      receipt);
+      if (!record.provenanceSaturated) this.database.prepare('INSERT INTO experience_verifications VALUES (?, ?, ?)')
+        .run(record.id, receipt.runHash, receipt.evidenceHash);
+      return record;
+    });
+  }
+
+  export(input: { scope: string; limit?: number }): string {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity, limit: z.number().int().min(0).max(100).default(100) }).strict().parse(input);
+    parseCanonicalProject(parsed.scope);
+    const records = this.database.prepare("SELECT payload FROM experiences WHERE scope = ? AND status <> 'revoked' AND expires_at > ? AND json_extract(payload, '$.provenanceSaturated') IS NOT 1 ORDER BY updated_at DESC, id LIMIT ?")
+      .all(parsed.scope, this.timestamp(), parsed.limit).map(row => this.read(row)!);
+    const document: ExperienceExchange = { version: 1, scope: parsed.scope, experiences: records.map(record => this.portable(record)) };
+    const json = JSON.stringify(document);
+    if (Buffer.byteLength(json) + 1 > MAX_EXCHANGE_BYTES) throw new Error('Experience exchange exceeds byte limit (1048576)');
+    return json;
+  }
+
+  import(input: { scope: string; json: string }): ExperienceRecord[] {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity, json: z.string().max(MAX_EXCHANGE_BYTES) }).strict().parse(input);
+    parseCanonicalProject(parsed.scope);
+    if (Buffer.byteLength(parsed.json) > MAX_EXCHANGE_BYTES) throw new Error('Experience exchange exceeds byte limit (1048576)');
+    const document = portableSchema.parse(JSON.parse(parsed.json));
+    parseCanonicalProject(document.scope);
+    for (const entry of document.experiences) {
+      parseCanonicalProject(entry.origin.scope);
+      const workItem = parseWorkItemId(entry.origin.source.workItemId);
+      if (`${workItem.platform}:${workItem.projectKey}` !== entry.origin.scope) throw new Error('Experience origin work item does not belong to source scope');
+      if (new Set(entry.receipts.map(receipt => receipt.sourceHash)).size !== entry.receipts.length
+        || !entry.receipts.some(receipt => receipt.sourceHash === this.hash(entry.origin.source) && receipt.runHash === this.hash(entry.origin.source.runId))) {
+        throw new Error('Experience source receipts must include its origin without duplicates');
+      }
+      const expiry = Date.parse(entry.expiresAt);
+      const now = Date.parse(this.timestamp());
+      if (expiry <= now || expiry > now + 365 * DAY) throw new Error('Experience expiry must be in the next 365 days');
+    }
+    return transaction(this.database, () => document.experiences.map(entry => {
+      const now = this.timestamp();
+      const fingerprint = this.hash(['exchange', parsed.scope, entry.origin.scope, entry.origin.id, entry.origin.fingerprint]);
+      const existing = this.read(this.database.prepare('SELECT payload FROM experiences WHERE fingerprint = ?').get(fingerprint));
+      const contentFingerprint = this.fingerprint({ ...entry, scope: parsed.scope });
+      const failureFingerprint = entry.failureIdentity ? this.fingerprint({ ...entry.failureIdentity, scope: parsed.scope }) : contentFingerprint;
+      const originFingerprint = entry.origin.scope === parsed.scope ? entry.origin.fingerprint : '';
+      const governed = this.database.prepare(`SELECT id FROM experiences WHERE scope = ? AND id <> ? AND (
+        id = ? OR fingerprint IN (?, ?, ?) OR json_extract(payload, '$.failureFingerprint') IN (?, ?, ?)
+        OR (json_extract(payload, '$.origin.scope') = ? AND json_extract(payload, '$.origin.id') = ?))`)
+        .get(parsed.scope, existing?.id ?? '', entry.origin.scope === parsed.scope ? entry.origin.id : '',
+          contentFingerprint, failureFingerprint, originFingerprint, contentFingerprint, failureFingerprint, originFingerprint, entry.origin.scope, entry.origin.id);
+      if (governed) throw new Error('Experience already exists under local governance; import cannot replace its identity or history');
+      if (existing) {
+        if (existing.status !== 'candidate') throw new Error('Experience already locally verified or revoked; import cannot replace local governance');
+        if (existing.trigger !== entry.trigger || existing.rootCause !== entry.rootCause || existing.action !== entry.action || existing.kind !== entry.kind
+          || JSON.stringify(existing.origin?.source) !== JSON.stringify(entry.origin.source)
+          || JSON.stringify(this.originalFailure(existing)) !== JSON.stringify(entry.failureIdentity)) {
+          throw new Error('Experience origin conflicts with previously imported content');
+        }
+        this.importReceipts(existing.id, entry.receipts);
+        return existing;
+      }
+      const { receipts, ...content } = entry;
+      const record = this.save({ ...content, scope: parsed.scope, source: entry.origin.source, id: randomUUID(), fingerprint,
+        failureFingerprint: entry.kind === 'failure' ? failureFingerprint : undefined,
+        status: 'candidate', createdAt: now, updatedAt: now, occurrences: 1,
+        observations: [{ source: entry.origin.source, evidence: entry.evidence, recordedAt: now }] });
+      this.importReceipts(record.id, receipts);
+      return record;
+    }));
+  }
+
+  copy(input: { id: string; scope: string; targetScope: string }): ExperienceRecord {
+    this.assertOpen();
+    const parsed = z.object({ id: z.string().uuid(), scope: identity, targetScope: identity }).strict().parse(input);
+    parseCanonicalProject(parsed.scope);
+    parseCanonicalProject(parsed.targetScope);
+    if (parsed.scope === parsed.targetScope) throw new Error('Copy requires a different target project');
+    const record = this.get(parsed.id, parsed.scope);
+    if (!record || record.status !== 'verified' || Date.parse(record.expiresAt) <= Date.parse(this.timestamp())) throw new Error('Copy requires a live verified source experience');
+    return this.import({ scope: parsed.targetScope, json: JSON.stringify({ version: 1, scope: parsed.scope, experiences: [this.portable(record)] }) })[0];
+  }
+
+  metrics(input: { scope: string }): ExperienceMetrics {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity }).strict().parse(input);
+    parseCanonicalProject(parsed.scope);
+    const counts = { retrievals: 0, adoptions: 0, recurrences: 0 };
+    for (const row of this.database.prepare(`SELECT r.evidence_hash FROM experience_receipts r JOIN experiences e ON e.id = r.experience_id
+      WHERE e.scope = ? AND r.source_hash = 'metric:counts'`).all(parsed.scope)) {
+      const metrics = metricCountsSchema.parse(JSON.parse(String(row.evidence_hash)));
+      for (const key of ['retrievals', 'adoptions', 'recurrences'] as const) counts[key] = Math.min(Number.MAX_SAFE_INTEGER, counts[key] + metrics[key]);
+    }
+    return counts;
+  }
+
+  adopt(input: { id: string; scope: string; source: RecordFailureInput['source'] }): ExperienceMetrics {
+    this.assertOpen();
+    const parsed = z.object({ id: z.string().uuid(), scope: identity, source: sourceSchema }).strict().parse(input);
+    parseCanonicalProject(parsed.scope);
+    const workItem = parseWorkItemId(parsed.source.workItemId);
+    if (`${workItem.platform}:${workItem.projectKey}` !== parsed.scope) throw new Error('Adoption work item does not belong to scope');
+    return transaction(this.database, () => {
+      const record = this.get(parsed.id, parsed.scope);
+      if (!record || record.status !== 'verified' || Date.parse(record.expiresAt) <= Date.parse(this.timestamp())) throw new Error('Adoption requires a live verified experience in scope');
+      const key = `metric:adoption:${this.hash(parsed.source)}`;
+      if (this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(record.id, key)) return this.metrics({ scope: parsed.scope });
+      const count = this.database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE experience_id = ? AND source_hash LIKE 'metric:adoption:%'").get(record.id)!;
+      if (Number(count.count) >= MAX_ADOPTIONS) throw new Error(`Experience adoption limit reached (${MAX_ADOPTIONS})`);
+      this.database.prepare('INSERT INTO experience_receipts VALUES (?, ?, ?, ?)').run(record.id, key, 'metric', 'metric');
+      this.incrementMetric(record.id, 'adoptions');
+      this.enforceBounds([record.id]);
+      return this.metrics({ scope: parsed.scope });
     });
   }
 
@@ -196,6 +359,10 @@ export class ExperienceStore {
       remaining -= size;
       if (selected.length === parsed.limit) break;
     }
+    transaction(this.database, () => {
+      for (const record of selected) this.incrementMetric(record.id, 'retrievals');
+      if (selected.length) this.enforceBounds(selected.map(record => record.id));
+    });
     return selected;
   }
 
@@ -216,8 +383,9 @@ export class ExperienceStore {
           .get(record.id, this.hash([...parsed.evidence].sort()))) {
         throw new Error('Verification requires new evidence');
       }
-      const corrected = { ...record, failureFingerprint: record.failureFingerprint ?? record.fingerprint, action: parsed.action ?? record.action, rootCause: parsed.rootCause ?? record.rootCause };
-      const fingerprint = this.fingerprint(corrected);
+      const corrected = { ...record, failureFingerprint: record.failureFingerprint ?? record.fingerprint,
+        failureIdentity: this.originalFailure(record), action: parsed.action ?? record.action, rootCause: parsed.rootCause ?? record.rootCause };
+      const fingerprint = record.origin ? record.fingerprint : this.fingerprint(corrected);
       const conflict = this.database.prepare("SELECT id FROM experiences WHERE (fingerprint = ? OR json_extract(payload, '$.failureFingerprint') = ?) AND id <> ?").get(fingerprint, fingerprint, record.id);
       if (conflict) throw new Error('Corrected experience already exists');
       if (record.status === 'verified' && record.verifiedEvidence?.runId === parsed.runId
@@ -251,8 +419,41 @@ export class ExperienceStore {
     return z.date().parse(this.now()).toISOString();
   }
 
-  private fingerprint(input: Pick<ExperienceRecord, 'scope' | 'trigger' | 'rootCause' | 'action'>): string {
-    return this.hash([input.scope, input.trigger, input.rootCause, input.action]);
+  private fingerprint(input: Pick<ExperienceRecord, 'scope' | 'trigger' | 'rootCause' | 'action' | 'kind'>): string {
+    const parts = [input.scope, input.trigger, input.rootCause, input.action];
+    return this.hash(input.kind === 'success' ? [...parts, 'success'] : parts);
+  }
+
+  private portable(record: ExperienceRecord): ExperienceExchange['experiences'][number] {
+    const failureIdentity = this.originalFailure(record);
+    if (record.kind !== 'success' && !failureIdentity) throw new Error('Original failure identity is unavailable; exchange cannot safely preserve recurrence');
+    const receipts = this.database.prepare("SELECT source_hash, run_hash, evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' ORDER BY source_hash")
+      .all(record.id).map(row => ({ sourceHash: String(row.source_hash), runHash: String(row.run_hash), evidenceHash: String(row.evidence_hash) }));
+    return { kind: record.kind ?? 'failure', failureIdentity, trigger: record.trigger, rootCause: record.rootCause, action: record.action, evidence: record.evidence,
+      expiresAt: record.expiresAt, receipts, origin: record.origin ?? { scope: record.scope, id: record.id, fingerprint: record.fingerprint, source: record.source } };
+  }
+
+  private originalFailure(record: ExperienceRecord): ExperienceRecord['failureIdentity'] {
+    if (record.kind === 'success') return undefined;
+    if (record.failureIdentity) return record.failureIdentity;
+    if (record.origin || (record.failureFingerprint && record.failureFingerprint !== this.fingerprint(record))) return undefined;
+    return { trigger: record.trigger, rootCause: record.rootCause, action: record.action };
+  }
+
+  private importReceipts(id: string, receipts: ExperienceExchange['experiences'][number]['receipts']): void {
+    for (const receipt of receipts) this.database.prepare('INSERT INTO experience_receipts VALUES (?, ?, ?, ?) ON CONFLICT(experience_id, source_hash) DO NOTHING')
+      .run(id, receipt.sourceHash, receipt.runHash, receipt.evidenceHash);
+    const count = this.database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%'").get(id)!;
+    if (Number(count.count) > MAX_RECEIPTS) throw new Error(`Experience source receipt limit reached (${MAX_RECEIPTS})`);
+    this.enforceBounds([id]);
+  }
+
+  private incrementMetric(id: string, key: keyof ExperienceMetrics): void {
+    const row = this.database.prepare("SELECT evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash = 'metric:counts'").get(id);
+    const counts = row ? metricCountsSchema.parse(JSON.parse(String(row.evidence_hash))) : { retrievals: 0, adoptions: 0, recurrences: 0 };
+    counts[key] = Math.min(Number.MAX_SAFE_INTEGER, counts[key] + 1);
+    this.database.prepare(`INSERT INTO experience_receipts VALUES (?, 'metric:counts', 'metric', ?)
+      ON CONFLICT(experience_id, source_hash) DO UPDATE SET evidence_hash=excluded.evidence_hash`).run(id, JSON.stringify(counts));
   }
 
   private hash(input: unknown): string {
@@ -277,7 +478,7 @@ export class ExperienceStore {
     let saturated = false;
     if (receipt) {
       const known = this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(input.id, receipt.sourceHash);
-      const sources = this.database.prepare('SELECT COUNT(*) AS count FROM experience_receipts WHERE experience_id = ?').get(input.id)!;
+      const sources = this.database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%'").get(input.id)!;
       saturated = !known && Number(sources.count) >= MAX_RECEIPTS;
     }
     const record = recordSchema.parse(saturated ? { ...input, provenanceSaturated: true,
@@ -295,15 +496,19 @@ export class ExperienceStore {
         ON CONFLICT(experience_id, source_hash) DO UPDATE SET evidence_hash=excluded.evidence_hash`)
         .run(record.id, receipt.sourceHash, receipt.runHash, receipt.evidenceHash);
     }
+    this.enforceBounds([record.id]);
+    return record;
+  }
+
+  private enforceBounds(protectedIds: string[]): void {
     for (;;) {
       const stats = this.database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0)
         + (SELECT COUNT(*) * 384 FROM experience_receipts)
         + (SELECT COUNT(*) * 256 FROM experience_verifications) AS bytes FROM experiences`).get()!;
       if (Number(stats.count) <= MAX_RECORDS && Number(stats.bytes) <= MAX_BYTES) break;
-      this.database.prepare(`DELETE FROM experiences WHERE id = (SELECT id FROM experiences WHERE id <> ? ORDER BY
+      this.database.prepare(`DELETE FROM experiences WHERE id = (SELECT id FROM experiences WHERE id NOT IN (${protectedIds.map(() => '?').join(',')}) ORDER BY
         (expires_at > ?) ASC, CASE status WHEN 'candidate' THEN 0 WHEN 'revoked' THEN 1 ELSE 2 END, updated_at, id LIMIT 1)`)
-        .run(record.id, this.timestamp());
+        .run(...protectedIds, this.timestamp());
     }
-    return record;
   }
 }

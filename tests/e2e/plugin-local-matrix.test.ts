@@ -401,7 +401,8 @@ describe('repository snapshots against real temporary Git data', () => {
   });
 
   it.each([
-    { mode: 'failure', error: 'Provider command failed (7)' },
+    // Backend stderr is deliberately redacted, so the exit code is not exposed.
+    { mode: 'failure', error: 'special git backend snapshot command failed' },
     { mode: 'invalid-json', error: 'special git backend returned invalid JSON' },
     { mode: 'invalid-shape', error: 'repository snapshot is missing a commit' },
   ])('special-git-backend rejects $mode rather than fabricating a snapshot', async row => {

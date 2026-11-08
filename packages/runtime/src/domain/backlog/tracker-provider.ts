@@ -28,7 +28,7 @@ import {
   type BacklogRelationUpdate,
 } from './metadata-codec.js';
 import { projectBacklogItem } from './projection.js';
-import { idempotencyMarkerIn, legacyIdempotencyLabel } from './idempotency.js';
+import { idempotencyMarkerIn, legacyIdempotencyLabel, withIdempotencyMarker } from './idempotency.js';
 import { findDependencyCycle, type BacklogGraphSource } from './graph.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
@@ -198,9 +198,8 @@ export class TrackerBacklogProvider implements BacklogProvider {
     await this.writeParentLink(this.tracker, id, plan.parentId);
     const created = await this.get(String(id));
     if (!created.webUrl) return created;
-    await this.tracker.updateIssue(id, {
-      description: renderBacklogDescription(input.description, { ...plan.links, self: created }),
-    });
+    const description = renderBacklogDescription(input.description, { ...plan.links, self: created });
+    await this.tracker.updateIssue(id, { description: plan.idempotencyMarker ? withIdempotencyMarker(description, plan.idempotencyMarker) : description });
     return this.get(String(id));
   }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileJson, FolderOpen, Plus, Power, RefreshCw, Trash2 } from "lucide-react";
 import type { DesktopPluginList } from "../../../shared/plugin-contract.js";
 import { SshConfirmDialog } from "../ssh/SshConfirmDialog.js";
+import { GoogleAccountSettings } from "./GoogleAccountSettings.js";
 import "./plugins.css";
 
 export function PluginSettings() {
@@ -56,9 +57,11 @@ export function PluginSettings() {
     {message ? <p role="status">{message}</p> : null}
     {!inventory ? <p role="status">{busy ? "正在读取插件…" : "未能读取插件，请刷新重试。"}</p> : null}
     {inventory?.plugins.length === 0 ? <p>没有可管理的插件。</p> : null}
+    <GoogleAccountSettings onConnected={() => void run()} />
     <ul className="plugin-list">{inventory?.plugins.map(plugin => <li key={plugin.id}>
       <div className="plugin-description"><b>{plugin.id}</b><small>{plugin.version ?? "版本未知"} · {({ builtin: "内置", installed: "已安装", configured: "仅配置记录" })[plugin.origin]} · 后续运行：{plugin.enabled ? "启用" : "禁用"} · 检查快照：{plugin.runtimeLoaded ? "已加载" : "未加载"}</small>
         <small>{plugin.capabilities.join(" · ") || "未声明能力"}</small>
+        <small>{plugin.configurationPresent === undefined ? "未能确认配置状态" : plugin.configurationPresent ? "已保存插件配置；值仅在主进程处理" : "未保存自定义配置；请参考插件默认值与诊断"}</small>
       </div><div className="plugin-actions">
         <button type="button" aria-label={`${plugin.enabled ? "禁用" : "启用"} ${plugin.id}`} title={plugin.enabled ? "禁用插件" : "启用插件"} aria-pressed={plugin.enabled} disabled={busy || configInvalid || (!plugin.enabled && plugin.origin === "configured")} onClick={() => void run(() => window.afkDesktop.plugins.setEnabled(plugin.id, !plugin.enabled))}><Power size={16} /></button>
         {plugin.configurable ? <button type="button" aria-label={`导入 ${plugin.id} 配置 JSON`} title="从本机 JSON 文件替换配置；现有配置值不会传入界面" disabled={busy} onClick={() => void run(() => window.afkDesktop.plugins.configure(plugin.id))}><FileJson size={16} /></button> : null}

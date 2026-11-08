@@ -110,8 +110,8 @@ describe('TrackerBacklogProvider', () => {
     await expect(provider.isRunnable(created)).resolves.toBe(true);
   });
 
-  it('returns an existing issue for a repeated idempotency key', async () => {
-    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Anchor', labels: [] as string[], description: '', state: 'opened' };
+  it('retains idempotency when adding repository self links and returns the existing issue on retry', async () => {
+    const issue = { id: 42, platform: 'github', projectId: 'org/repo', title: 'Anchor', labels: [] as string[], description: '', state: 'opened', url: 'https://example.test/issues/42' };
     const t = { ...tracker(issue), ensureBacklogMetadata: vi.fn(async () => {}),
       listIssues: vi.fn(async () => issue.description ? [{ ...issue }] : []),
       createIssue: vi.fn(async (input: any) => { issue.description = input.description; return 42; }) };

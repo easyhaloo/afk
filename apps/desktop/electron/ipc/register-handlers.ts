@@ -53,6 +53,9 @@ import { fileURLToPath } from "node:url";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation.js";
 import { SqliteLocalConfigStore } from "@afk/runtime/storage";
 import { createPluginService } from "../services/plugin-service.js";
+import { createGoogleAuthService } from "../services/google-auth-service.js";
+import { createExperienceService } from "../services/experience-service.js";
+import { parseExperienceQuery, parseExperienceSelection, parseExperienceVerify, parseNoInput } from "../../shared/experience-contract.js";
 import { parsePluginEnabled, parsePluginId, parsePluginInstall } from "../../shared/plugin-contract.js";
 
 type HandlerSchema = (value: unknown) => unknown;
@@ -202,6 +205,14 @@ const pluginService = createPluginService({
     return result.response === 1;
   },
 });
+const googleAuthService = createGoogleAuthService({
+  chooseClientFile: async () => {
+    const selected = await dialog.showOpenDialog({ title: "选择 Google Desktop OAuth 客户端 JSON", properties: ["openFile"], filters: [{ name: "JSON", extensions: ["json"] }] });
+    return selected.canceled ? undefined : selected.filePaths[0];
+  },
+  openExternal: url => shell.openExternal(url),
+});
+const experienceService = createExperienceService({ projects: async () => (await workItemInventoryService.list()).projects.map(project => `${project.platform}:${project.projectKey}`) });
 const workItemExecutionService = createWorkItemExecutionService({
   launchExecution: (input, workspace) => pluginService.launchWorker(() => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace)),
   getWorkItem: async (workItemId) => {
@@ -273,6 +284,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   const jumpserverService = deps.jumpserverService ?? defaultJumpserverService;
   workItemInventorySyncService.start();
   if (typeof app.once === "function") app.once("before-quit", () => {
+    void googleAuthService.cancel();
     workItemInventorySyncService.stop();
     workItemInventoryStore.close();
     localConfigStore.close();
@@ -353,6 +365,27 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandlerMulti(IPC_CHANNELS.pluginsSetEnabled, [parsePluginId, parsePluginEnabled], ([id, enabled]) => pluginService.setEnabled(parsePluginId(id), parsePluginEnabled(enabled)));
   registerHandler(IPC_CHANNELS.pluginsRemove, parsePluginId, id => pluginService.remove(id));
   registerHandler(IPC_CHANNELS.pluginsConfigure, parsePluginId, id => pluginService.configure(id));
+  registerHandler(IPC_CHANNELS.googleStatus, parseNoInput, () => googleAuthService.status());
+  registerHandler(IPC_CHANNELS.googleCancel, parseNoInput, () => googleAuthService.cancel());
+  registerHandler(IPC_CHANNELS.googleLogout, parseNoInput, () => googleAuthService.logout());
+  ipcMain.handle(IPC_CHANNELS.googleLogin, async (event, input: unknown) => {
+    assertTrustedSender(event);
+    parseNoInput(input);
+    const cancel = () => { void googleAuthService.cancel(); };
+    event.sender?.once("destroyed", cancel);
+    event.sender?.once("render-process-gone", cancel);
+    event.sender?.once("did-start-navigation", cancel);
+    try { return await googleAuthService.login(); }
+    finally {
+      event.sender?.removeListener("destroyed", cancel);
+      event.sender?.removeListener("render-process-gone", cancel);
+      event.sender?.removeListener("did-start-navigation", cancel);
+    }
+  });
+  registerHandler(IPC_CHANNELS.experiencesProjects, parseNoInput, () => experienceService.projects());
+  registerHandler(IPC_CHANNELS.experiencesList, parseExperienceQuery, input => experienceService.list(input));
+  registerHandler(IPC_CHANNELS.experiencesVerify, parseExperienceVerify, input => experienceService.verify(input));
+  registerHandler(IPC_CHANNELS.experiencesRevoke, parseExperienceSelection, input => experienceService.revoke(input));
   registerHandler(IPC_CHANNELS.appearanceSave, (v: unknown) => v, (appearance) => saveAppearance(appearance));
   registerHandlerMulti(IPC_CHANNELS.workflowSave, [
     (v) => backlogWorkspace(v, "workflowSave"),

@@ -415,7 +415,13 @@ arm64 produced 3,525 passing tests and four explicit skips:
 
 The measured line numerator/denominator is 47,922/55,041. Use the generated report
 after later changes; this measurement does not establish whole-repository coverage.
-No percentage nonregression gate is enabled until a stable CI baseline is accepted.
+The checked-in `scripts/coverage-baseline.json` seeds nonregression gates from this
+local full-suite measurement. Every package and the total must retain each measured
+line/statement/function/branch percentage; CI explicitly loads the same baseline.
+The baseline records its Node/platform/commit provenance. This is a measured local
+seed, not a claim that a prior CI coverage run passed; evaluate the first CI result
+on its actual Node/platform before changing a baseline. Missing or invalid baseline
+data fails rather than silently disabling the gate.
 
 Separately validated: Desktop typecheck and 921 unit tests; three Electron E2E
 tests covering bundled Runtime, plugin Settings lifecycle and work-item creation /

@@ -2,6 +2,7 @@ import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSu
 import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 import type { DesktopPluginApi } from "./plugin-contract.js";
+import type { DesktopExperienceApi } from "./experience-contract.js";
 
 export type DesktopUpdateStatus = { state: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; message?: string; };
 
@@ -189,6 +190,7 @@ export type ExecutionAttachInput = {
 };
 
 export type DesktopApi = {
+  experiences: DesktopExperienceApi;
   plugins: DesktopPluginApi;
   update: { getStatus: () => Promise<DesktopUpdateStatus>; check: () => Promise<DesktopUpdateStatus>; download: () => Promise<DesktopUpdateStatus>; install: () => Promise<boolean>; onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void; };
   copyText: (text: string) => Promise<boolean>;
@@ -261,6 +263,14 @@ export type DesktopApi = {
 };
 
 export const IPC_CHANNELS = {
+  googleStatus: "afk:google-status",
+  googleLogin: "afk:google-login",
+  googleCancel: "afk:google-cancel",
+  googleLogout: "afk:google-logout",
+  experiencesProjects: "afk:experiences-projects",
+  experiencesList: "afk:experiences-list",
+  experiencesVerify: "afk:experiences-verify",
+  experiencesRevoke: "afk:experiences-revoke",
   pluginsList: "afk:plugins-list",
   pluginsInstall: "afk:plugins-install",
   pluginsSetEnabled: "afk:plugins-set-enabled",

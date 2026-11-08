@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "provenance": {
+    "commit": "a5485dd6",
+    "date": "2026-11-08",
+    "provider": "v8",
+    "node": "v24.18.0",
+    "platform": "darwin-arm64",
+    "source": "Local full configured package and repository test run; CI enforcement starts from this measured seed, not a prior CI result"
+  },
+  "total": { "lines": 87.06, "statements": 87.06, "functions": 82.92, "branches": 84.27 },
+  "packages": {
+    "core": { "lines": 96.7, "statements": 96.7, "functions": 100, "branches": 79.77 },
+    "application": { "lines": 97.46, "statements": 97.46, "functions": 93.02, "branches": 92.06 },
+    "workflow-graph": { "lines": 99, "statements": 99, "functions": 100, "branches": 84.39 },
+    "runtime": { "lines": 90.35, "statements": 90.35, "functions": 84.46, "branches": 85.44 },
+    "cli": { "lines": 69.76, "statements": 69.76, "functions": 71.86, "branches": 74.83 }
+  }
+}

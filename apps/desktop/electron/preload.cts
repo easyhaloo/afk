@@ -4,6 +4,14 @@ import type { DesktopApi } from "../shared/ipc-contract.js";
 // Sandboxed preloads can only require Electron built-ins. Keep the wire names
 // local while the shared contract remains the source of renderer/main types.
 const IPC_CHANNELS = {
+  googleStatus: "afk:google-status",
+  googleLogin: "afk:google-login",
+  googleCancel: "afk:google-cancel",
+  googleLogout: "afk:google-logout",
+  experiencesProjects: "afk:experiences-projects",
+  experiencesList: "afk:experiences-list",
+  experiencesVerify: "afk:experiences-verify",
+  experiencesRevoke: "afk:experiences-revoke",
   pluginsList: "afk:plugins-list",
   pluginsInstall: "afk:plugins-install",
   pluginsSetEnabled: "afk:plugins-set-enabled",
@@ -76,7 +84,19 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: DesktopApi = {
+  experiences: {
+    projects: () => ipcRenderer.invoke(IPC_CHANNELS.experiencesProjects),
+    list: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesList, input),
+    verify: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesVerify, input),
+    revoke: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesRevoke, input),
+  },
   plugins: {
+    google: {
+      status: () => ipcRenderer.invoke(IPC_CHANNELS.googleStatus),
+      login: () => ipcRenderer.invoke(IPC_CHANNELS.googleLogin),
+      cancel: () => ipcRenderer.invoke(IPC_CHANNELS.googleCancel),
+      logout: () => ipcRenderer.invoke(IPC_CHANNELS.googleLogout),
+    },
     list: () => ipcRenderer.invoke(IPC_CHANNELS.pluginsList),
     install: input => ipcRenderer.invoke(IPC_CHANNELS.pluginsInstall, input),
     setEnabled: (id, enabled) => ipcRenderer.invoke(IPC_CHANNELS.pluginsSetEnabled, id, enabled),

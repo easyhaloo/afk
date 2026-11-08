@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { aggregate, main, markdown, metrics, sourcePackage, sourceRoots, summarize } from './coverage-report.mjs';
+import { aggregate, enforceBaseline, main, markdown, metrics, sourcePackage, sourceRoots, summarize } from './coverage-report.mjs';
 
 const root = '/workspace';
 const entry = (covered, total) => Object.fromEntries(metrics.map(metric => [metric, { covered, total, pct: 99 }]));
@@ -52,6 +52,21 @@ test('changed-file gates apply only to selected source files and configured metr
   for (const thresholds of [{ lines: -1 }, { lines: 101 }, { lines: NaN }, { misspelled: 50 }]) {
     assert.throws(() => aggregate(summary(), expected, { root, thresholds }), /Invalid changed-file threshold/);
   }
+});
+
+test('measured baselines gate every package and metric without averaging away regressions', () => {
+  const minimum = Object.fromEntries(metrics.map(metric => [metric, 50]));
+  const baseline = { version: 1, provenance: { source: 'test' }, total: minimum,
+    packages: Object.fromEntries(Object.keys(sourceRoots).map(name => [name, minimum])) };
+  const report = aggregate(summary(), expected, { root });
+  assert.equal(enforceBaseline(report, baseline).violations.length, 0);
+  report.packages.cli.functions.pct = 49.99;
+  enforceBaseline(report, baseline);
+  assert.deepEqual(report.violations, ['cli: functions 49.99% < baseline 50%']);
+  assert.throws(() => enforceBaseline(report, { ...baseline, packages: {} }), /Invalid/);
+  assert.throws(() => enforceBaseline(report, { ...baseline, total: { lines: 50 } }), /Invalid/);
+  assert.throws(() => enforceBaseline(report, { ...baseline, total: { ...minimum, branches: -1 } }), /Invalid/);
+  assert.match(markdown(report), /enforced from the checked-in measured baseline/);
 });
 
 test('requires nonempty artifacts, inventories real source, and writes JSON/Markdown reports', context => {

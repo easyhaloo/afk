@@ -1,12 +1,14 @@
 import { Command, InvalidArgumentError, Option } from 'commander';
-import { ExperienceStore, experienceScope, experienceStorePath, verifyExperienceRun } from '@afk/runtime/execution';
+import { constants, promises as fs } from 'node:fs';
+import { ExperienceStore, experienceScope, experienceStorePath, verifyAdoptionRun, verifyExperienceRun } from '@afk/runtime/execution';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
-type Store = Pick<ExperienceStore, 'recordFailure' | 'list' | 'get' | 'recall' | 'verify' | 'revoke' | 'close'>;
+type Store = Pick<ExperienceStore, 'recordFailure' | 'list' | 'get' | 'recall' | 'verify' | 'revoke' | 'export' | 'import' | 'copy' | 'metrics' | 'adopt' | 'close'>;
 
 export interface ExperienceCommandComposition extends CommandRegistrationContext {
   createStore?: () => Store;
   verifyRun?: typeof verifyExperienceRun;
+  verifyAdoptionRun?: typeof verifyAdoptionRun;
 }
 
 function parseScope(value: string): string {
@@ -29,6 +31,24 @@ function parseLimit(value: string): number {
 
 function collectEvidence(value: string, previous: string[] = []): string[] {
   return [...previous, parseText(value)];
+}
+
+async function readExchange(file: string): Promise<string> {
+  const maximum = 1024 * 1024;
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > maximum) throw new Error('Exchange must be a regular JSON file of at most 1048576 bytes');
+    const buffer = Buffer.alloc(maximum + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    if (length > maximum) throw new Error('Experience exchange exceeds byte limit (1048576)');
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length));
+  } finally { await handle.close(); }
 }
 
 export function registerExperienceCommands(program: Command, composition: ExperienceCommandComposition = {}): void {
@@ -114,4 +134,56 @@ export function registerExperienceCommands(program: Command, composition: Experi
       store.revoke(id);
       process.stdout.write(`Revoked experience ${id}\n`);
     }));
+
+  experience.command('export')
+    .description('Export up to 100 live scoped lessons as portable JSON without verification authority (maximum 1 MiB)')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--limit <count>', 'Maximum records to export (default 100)', parseLimit)
+    .option('--output <file>', 'Write a new JSON file; otherwise emit JSON to stdout', parseText)
+    .action(options => withStore(async store => {
+      const json = store.export({ scope: options.scope, limit: options.limit });
+      if (options.output) await fs.writeFile(options.output, `${json}\n`, { flag: 'wx', mode: 0o600 });
+      else process.stdout.write(`${json}\n`);
+    }));
+
+  experience.command('import')
+    .description('Import portable JSON into an explicit target project as candidates; local QA verification is required')
+    .requiredOption('--scope <project>', 'Target canonical platform:projectKey', parseScope)
+    .requiredOption('--file <file>', 'Portable JSON file (maximum 1 MiB, 100 lessons)', parseText)
+    .action(async options => {
+      const json = await readExchange(options.file);
+      return withStore(store => emit(store.import({ scope: options.scope, json }), true));
+    });
+
+  experience.command('copy <id>')
+    .description('Explicitly copy a live verified source lesson into another project as a candidate')
+    .requiredOption('--scope <project>', 'Source canonical platform:projectKey', parseScope)
+    .requiredOption('--target-scope <project>', 'Target canonical platform:projectKey', parseScope)
+    .action((id, options) => withStore(store => emit([store.copy({ id, scope: options.scope, targetScope: options.targetScope })], true)));
+
+  experience.command('metrics')
+    .description('Read bounded persisted counts for retained scoped lessons; retrieval is separate from explicit adoption')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit JSON')
+    .action(options => withStore(store => {
+      const counts = store.metrics({ scope: options.scope });
+      process.stdout.write(`${options.json ? JSON.stringify(counts) : `Retrievals: ${counts.retrievals}\nExplicit adoptions: ${counts.adoptions}\nRecurrences: ${counts.recurrences}`}\n`);
+    }));
+
+  experience.command('adopt <id>')
+    .description('Explicitly acknowledge use of a verified lesson in an intact target run/task; this does not measure observed use (maximum 64 per lesson)')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--run-id <id>', 'Run where the lesson was used', parseText)
+    .requiredOption('--work-item-id <id>', 'Canonical target work item ID', parseText)
+    .option('--root <path>', 'Local event-store root (defaults to AFK_EVENT_STORE_DIR)', parseText)
+    .action((id, options) => {
+      if (experienceScope(options.workItemId) !== options.scope) throw new Error('Work item does not belong to scope');
+      return withStore(async store => {
+        requireScopedRecord(store, id, options.scope);
+        await (composition.verifyAdoptionRun ?? verifyAdoptionRun)({ scope: options.scope, runId: options.runId, workItemId: options.workItemId,
+          ...(options.root === undefined ? {} : { root: options.root }) });
+        const counts = store.adopt({ id, scope: options.scope, source: { runId: options.runId, workItemId: options.workItemId } });
+        process.stdout.write(`${JSON.stringify(counts)}\n`);
+      });
+    });
 }

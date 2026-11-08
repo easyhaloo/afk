@@ -130,6 +130,23 @@ describe('local experience ledger', () => {
     expect(store.recall({ scope: original.scope, prompt: 'sqlite transaction' })).toEqual([]);
   });
 
+  it('fails closed for legacy corrected records whose original identity fields are unavailable', () => {
+    const { store, file } = fixture();
+    const original = failure();
+    const record = store.recordFailure(original);
+    const corrected = store.verify(record.id, { runId: 'legacy-qa', evidence: ['run:legacy-qa#passed'], rootCause: 'corrected cause', action: 'corrected action' });
+    const legacy = { ...corrected };
+    delete legacy.failureIdentity;
+    const payload = JSON.stringify(legacy);
+    const database = openSqlite({ file, schema: '', version: 2 });
+    databases.push(database);
+    database.prepare('UPDATE experiences SET payload = ?, bytes = ? WHERE id = ?').run(payload, Buffer.byteLength(payload), record.id);
+    expect(() => store.export({ scope: original.scope })).toThrow('Original failure identity is unavailable');
+    expect(() => store.copy({ id: record.id, scope: original.scope, targetScope: 'github:owner/target' })).toThrow('Original failure identity is unavailable');
+    expect(store.recordFailure({ ...original, source: { ...original.source, runId: 'legacy-recurrence' }, evidence: ['run:legacy-recurrence#qa.failed'] }))
+      .toMatchObject({ id: record.id, status: 'candidate' });
+  });
+
   it('rejects reused verification runs and evidence after recurrence, including after reopening', () => {
     const { store, file } = fixture();
     const original = failure();
@@ -352,9 +369,11 @@ describe('local experience ledger', () => {
     expect(store.get(first.id, first.scope)?.observations).toHaveLength(8);
     expect(store.get(first.id, first.scope)?.evidence).toHaveLength(8);
     expect(() => store.verify(first.id, { runId: 'fresh-qa', evidence: ['evidence://fresh-proof'] })).toThrow('saturated');
+    expect(JSON.parse(store.export({ scope: first.scope })).experiences).toEqual([]);
     const database = openSqlite({ file, schema: '', version: 2 });
     databases.push(database);
-    expect(database.prepare('SELECT COUNT(*) AS count FROM experience_receipts').get()?.count).toBe(256);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE source_hash NOT LIKE 'metric:%'").get()?.count).toBe(256);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE source_hash LIKE 'metric:%'").get()?.count).toBe(1);
     store.close();
     const reopened = fixture(file).store;
     expect(reopened.get(first.id, first.scope)?.status).toBe('candidate');

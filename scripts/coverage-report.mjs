@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -119,7 +119,7 @@ export function markdown(report) {
     ...report.changed.map(entry => row(entry.path, entry)),
     ...(report.changed.length ? [] : ['No changed source files selected.']),
     '',
-    `Changed-file thresholds: ${JSON.stringify(report.policy.changedFileThresholds)}. Missing reports/files fail. Package baselines are not enforced until a stable CI baseline is measured and checked in.`,
+    `Changed-file thresholds: ${JSON.stringify(report.policy.changedFileThresholds)}. Missing reports/files fail. Package baselines: ${report.policy.packageBaselines ? 'enforced from the checked-in measured baseline' : 'not configured'}.`,
     '',
     '## Lowest line coverage',
     '',
@@ -132,6 +132,24 @@ export function markdown(report) {
     ...report.violations.map(violation => `FAIL: ${violation}`),
     '',
   ].join('\n');
+}
+
+export function enforceBaseline(report, baseline) {
+  if (baseline?.version !== 1 || !baseline.provenance || typeof baseline.provenance !== 'object'
+    || !baseline.total || !baseline.packages
+    || Object.keys(baseline.packages).sort().join(',') !== Object.keys(sourceRoots).sort().join(',')) throw new Error('Invalid coverage baseline');
+  const scopes = { total: report.total, ...report.packages };
+  const minimums = { total: baseline.total, ...baseline.packages };
+  for (const [name, expected] of Object.entries(minimums)) {
+    if (Object.keys(expected).sort().join(',') !== [...metrics].sort().join(',')) throw new Error(`Invalid baseline metrics for ${name}`);
+    for (const [metric, minimum] of Object.entries(expected)) {
+      if (!Number.isFinite(minimum) || minimum < 0 || minimum > 100) throw new Error(`Invalid baseline minimum for ${name}.${metric}`);
+      const actual = scopes[name][metric].pct;
+      if (actual === null || actual < minimum) report.violations.push(`${name}: ${metric} ${actual ?? 'n/a'}% < baseline ${minimum}%`);
+    }
+  }
+  report.policy.packageBaselines = baseline;
+  return report;
 }
 
 export function main(root = process.cwd(), environment = process.env) {
@@ -162,6 +180,8 @@ export function main(root = process.cwd(), environment = process.env) {
     }
   }
   const report = aggregate(summary, expectedFiles, { root, changedFiles, thresholds });
+  const baselinePath = resolve(root, environment.COVERAGE_BASELINE || 'scripts/coverage-baseline.json');
+  if (environment.COVERAGE_BASELINE || existsSync(baselinePath)) enforceBaseline(report, JSON.parse(readFileSync(baselinePath, 'utf8')));
   report.measurement = { provider: 'v8', node: process.version, platform: process.platform, arch: process.arch,
     tests: environment.COVERAGE_TEST_STATUS || 'not checked by report-only command; see Vitest/CI results',
     testSelection: environment.COVERAGE_TEST_SELECTION || 'not checked by report-only command' };
@@ -170,7 +190,7 @@ export function main(root = process.cwd(), environment = process.env) {
   writeFileSync(join(directory, 'report.md'), text);
   if (environment.GITHUB_STEP_SUMMARY) appendFileSync(environment.GITHUB_STEP_SUMMARY, text);
   console.log(text);
-  if (report.violations.length) throw new Error(`${report.violations.length} changed-file coverage threshold(s) failed`);
+  if (report.violations.length) throw new Error(`${report.violations.length} changed-file coverage threshold(s) or baseline gate(s) failed`);
   return report;
 }
 

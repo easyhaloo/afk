@@ -463,9 +463,11 @@ offline outside the repository with checksum verification, and checked across al
 installer, including the managed executable that currently leads PATH. An installed
 CLI 0.2.43 smoke test additionally verified authenticated durable receipt, actual artifact
 bytes, restart deduplication, pagination, retention and rejection of replaying a
-successful delivery. A real SSH no-op also passed. The earlier Gmail OAuth/mail
-delivery acceptance remains historical: the November 9 refresh attempt reported
-`token.network`, so current Gmail reachability is not accepted. No new email was sent.
+successful delivery. A real SSH no-op also passed. Gmail delivery was confirmed on
+November 7. A November 9 recheck using the installed 0.2.44 authentication module
+successfully refreshed OAuth with sending scope, verified the account identity and
+received HTTP 200 from the Gmail API discovery endpoint. No new email was sent;
+this recheck establishes authentication and connectivity, not a new delivery.
 
 ## Anti-patterns
 

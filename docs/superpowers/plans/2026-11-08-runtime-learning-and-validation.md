@@ -136,8 +136,9 @@ the standard installer at both local and PATH-leading entry points.
   retention, invalid replay rejection and clean shutdown. A real SSH command through
   `fangcloud-jumpserver` exited 0.
 - External limits: Gmail browser authorization and recipient-confirmed delivery passed on
-  November 7, and real refresh passed on November 8. The November 9 refresh attempt failed
-  with `token.network`; no new message was sent. Live Desktop browser consent/revocation,
+  November 7. The November 9 installed-module recheck passed OAuth refresh, sending-scope
+  and account-identity checks; Gmail API discovery returned HTTP 200. No new message was sent.
+  Live Desktop browser consent/revocation,
   Linear/Jira, object storage and remote workspaces are not established by mocked tests.
   Docker Desktop recovered through its supported restart command: two real Docker cases
   and one authenticated HTTP/Docker/Claude case passed, with independent host assertions.

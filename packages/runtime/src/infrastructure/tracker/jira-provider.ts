@@ -19,7 +19,7 @@ const adf: z.ZodType<AdfNode> = z.lazy(() => z.object({ type: z.string(), text: 
 const body = z.union([z.string(), adf, z.null()]);
 const issue = z.object({
   id: z.string().min(1), key: z.string().min(1),
-  fields: z.object({ summary: z.string(), description: body, labels: z.array(z.string()), status: z.object({ name: z.string() }) }),
+  fields: z.object({ summary: z.string(), description: body, labels: z.array(z.string()), status: z.object({ name: z.string() }), project: z.object({ key: z.string().min(1) }) }),
 });
 const comment = z.object({
   id: z.string().min(1), body, author: z.object({ displayName: z.string() }).optional(), created: z.string().optional(), updated: z.string().optional(),
@@ -29,7 +29,7 @@ const link = z.object({
   id: z.string().min(1), type: z.object({ name: z.string() }),
   inwardIssue: linkedIssue.optional(), outwardIssue: linkedIssue.optional(),
 }).refine(value => Boolean(value.inwardIssue) !== Boolean(value.outwardIssue));
-const fields = ['summary', 'description', 'labels', 'status'];
+const fields = ['summary', 'description', 'labels', 'status', 'project'];
 
 export class JiraTrackerProvider implements IssueTrackerPort {
   readonly id = 'jira';
@@ -209,7 +209,7 @@ export class JiraTrackerProvider implements IssueTrackerPort {
   }
 
   private mapIssue(node: z.infer<typeof issue>): IssueTrackerIssue {
-    return { id: node.key, key: node.key, projectId: this.projectId, title: node.fields.summary, description: fromAdf(node.fields.description), state: node.fields.status.name, labels: node.fields.labels, url: `${this.baseUrl}/browse/${encodeURIComponent(node.key)}` };
+    return { id: node.key, key: node.key, projectId: node.fields.project.key, title: node.fields.summary, description: fromAdf(node.fields.description), state: node.fields.status.name, labels: node.fields.labels, url: `${this.baseUrl}/browse/${encodeURIComponent(node.key)}` };
   }
 
   private mapComment(issueId: string, node: z.infer<typeof comment>): IssueComment {

@@ -3,11 +3,14 @@
 [中文](plugins.zh.md) · [Architecture overview](overview.md) · [Execution entry points](execution.md#execution-entry-points) · [ADR-0030](../adr/0030-host-capability-plugin.md)
 
 This document describes the capability plugin implementation in the integration
-tree as of November 7, 2026. The matrix and consumption paths describe concrete
+tree as of November 8, 2026. The matrix and consumption paths describe concrete
 provider contracts, managed execution, external prerequisites and protocol
 boundaries. These Node
 runtime plugins are separate from the Claude Code skills distribution and
 the CLI's TUI extension loader.
+
+Source and protocol coverage does not establish verified live vendor
+end-to-end delivery; external accounts and services require separate validation.
 
 ## Core and extension boundary
 
@@ -87,15 +90,15 @@ Capability IDs are the values in `packages/runtime/src/plugin-sdk/profile.ts`.
 |---|---|---|---|
 | Agent · `agent.provider` | Claude Code, Codex, Cursor, Pi, OpenCode, Copilot | Corresponding CLI and its login, token or endpoint configuration | Registered by `createBuiltinAgentPlugins`; workflow engine consumes the projected agent registry. Session features follow each adapter's capabilities. |
 | Sandbox · `sandbox.provider` | Local worktree, Docker, Podman, remote-container CLI/HTTP transport; optional AFK HTTP service host | Local Git; Docker/Podman engine; remote backend and its authentication when applicable | Builtin sandbox factory registers local/docker/podman. Remote container needs explicit transport configuration and a compatible backend; `plugin serve-container` explicitly hosts AFK's backend using shared sandbox/agent registries. |
-| Tracker / backlog · `tracker.provider`, `tracker.issue`, `backlog.provider` | GitHub/GitLab source-host tracker/backlog integrations; independent Linear and Jira issue adapters | GitHub/GitLab tokens and repository/project; Linear token + team ID + API URL; Jira token + project key + API URL, optionally email | Configured GitHub/GitLab register tracker and backlog providers; shared assembly selects a tracker matching platform, project and applicable host, then builds its managed provider bundle. Multiple matches fail; no match uses the existing tracker factory. Linear/Jira remain independent `tracker.issue` adapters and do not supply repository-backed backlog/change-request identity. |
+| Tracker / backlog · `tracker.provider`, `tracker.issue`, `backlog.provider` | GitHub/GitLab source-host tracker/backlog; Linear and Jira issue adapters | Source-host tokens and repository/project; Linear token/team/API URL; Jira token/project/API URL, optionally email | Shared assembly selects source-host trackers by platform/project/host and rejects ambiguity. External issues can be imported into canonical GitHub/GitLab backlog items, then explicitly synchronized back without replacing managed identity. |
 | Host · `host.connection` | JumpServer, SSH, AWS SSM, Kubernetes Exec | `jms` login; SSH keys/agent/config; AWS CLI credentials/profile + SSM permission; `kubectl` context/kubeconfig + exec RBAC | `HostConnectionPort` → Application host use cases → `afk host ls/exec`; Desktop can reuse the shared adapter. Discovery and remote execution require a real target. |
 | Verification · `verification.provider` | Test runner, static scan, browser check | Installed test/lint/browser tools; optional project-specific service credentials | `verify` runs an argv command in the target workspace. Defaults are `npm test`, `npm run lint`, `playwright test`; these are command wrappers, not embedded analyzers. |
 | Notification · `notification.provider` | Feishu, Slack, email, Gmail, desktop | Feishu/Slack webhook URL; configured `sendmail` and mail transport for email; Gmail API and Google user OAuth; native desktop notification tool | `notify`; HTTP adapters default to global fetch with optional transport injection. Gmail defaults to the authenticated account as recipient. A delivery receipt reports actual success/failure. Desktop delivery depends on the OS tool. |
-| Trigger · `trigger.provider` | HMAC webhook, Git push, issue event, interval schedule | Webhook shared secret; a host that delivers incoming events; no external account for local interval timers | `register/unregister`; `plugin listen` supplies the resident HTTP host and activates configured timers/actions. The adapters themselves do not start a listener, Git watcher or durable cron service. Schedule text is positive integer milliseconds. |
+| Trigger · `trigger.provider` | HMAC webhook, Git push, issue event, interval schedule | Webhook secret; resident listener and private SQLite queue for HTTP delivery; no account for local timers | `register/unregister`; `plugin listen --queue` supplies authenticated HTTP intake, durable receipts, retries, replay and explicit pruning through the resident listener. Interval timers remain process-local; schedule text is positive integer milliseconds. |
 | Context / memory · `context.provider` | Code context, knowledge base, retrieval, project memory | Readable workspace/files; knowledge-base HTTP endpoint and any authentication supplied by its transport | `gather`; code reads local content, retrieval uses supplied documents, memory reads a local file, knowledge base expects protocol-compatible JSON fragments. No automatic embedding or indexing service. |
 | Credential / auth · `credential.provider` | System keychain, Google user OAuth, OAuth client credentials, OIDC assertion/exchange, enterprise environment credentials | Keychain access; Google Desktop app client JSON and browser consent; OAuth endpoint/client ID/secret; OIDC issuer/client/assertion; supplied environment/value entries | `resolve`; scopes only where advertised. Enterprise adapter reads configured values/environment; it is not an enterprise vault SDK. HTTP adapters default to global fetch with optional transport injection. Credential resolution remains private to SDK consumers. |
-| Artifact / report · `artifact.provider` | Local test reports, evidence bundle builder, object storage upload, report platform upload | Writable local path; presigned/upload URL or report endpoint, optionally bearer token | `put`; upload adapters advertise write only. The configured evidence-bundle factory wraps its builder as an `ArtifactSink`. Object storage does not implement AWS request signing. |
-| Repository / workspace · `repository.provider` | Multiple local repositories, remote workspace snapshot, special Git backend | Git and configured local paths; compatible remote endpoint/token; installed special backend executable | `snapshot`; current adapters advertise read/snapshot, not clone or push. Remote workspace expects its specific HTTP protocol; special backend must return snapshot JSON. |
+| Artifact / report · `artifact.provider` | Local test reports, evidence bundles, object storage, report platform | Writable local path; upload URL/report endpoint, optionally bearer token | `put`; `integrations.evidence` selects audit evidence export through the audit bridge. Lifecycle report hooks remain separate. Local audit is authoritative; object storage does not implement AWS request signing. |
+| Repository / workspace · `repository.provider` | Multiple local repositories, remote workspace, special Git backend | Git/local paths; explicit managed root, remote, base branch and lease key; compatible remote/backend lifecycle protocol | Snapshot-only by default. Opt-in `prepare/checkout/publish/cleanup` and orchestrated `run` execute a registered action between checkout and publish; ownership, leases and clean/published state protect cleanup. |
 | Security / policy · `policy.provider` | Secret scan, license policy, compliance policy | Workspace files, explicit license allowlist and compliance rules; no account required for local checks | Selected policies are required managed lifecycle gates, including engine `before-publish` and QA publication checks; denial or evaluation failure blocks publication. Direct SDK callers must invoke the lifecycle or evaluate/enforce policy themselves. Local pattern, license and rule checks do not constitute an external compliance service. |
 
 The current default root constructs all six agent adapters, local/docker/podman,
@@ -175,8 +178,34 @@ owns cleanup, so CLI exit does not abandon fire-and-forget exports. Export
 errors and timeouts are isolated from execution; diagnostics exclude secret
 values and remote error bodies. Local audit failures remain fatal. This is
 best-effort export, not a cloud-account end-to-end delivery claim.
-`EvidenceStoreProvider` / `observe.evidence` is available as an interface;
-external evidence upload is not automatically hooked into audit recording.
+`EvidenceStoreProvider` / `observe.evidence` remains a separate interface.
+Audit export selects a writable `ArtifactSink` by registered name:
+
+```yaml
+integrations:
+  evidence:
+    provider: object-storage
+    timeoutMs: 5000
+```
+
+Optional `timeoutMs` is an integer from 1 to 60000. Only when root
+`integrations.evidence` selects an enabled, writable Artifact provider does the
+default runtime initialize persistent local encrypted storage and enable
+`captureEvents: true`. Selection or initialization failure installs a required
+initialization guard that blocks managed execution. Without this selection,
+the bridge does not automatically capture event evidence.
+The audit bridge captures bounded summaries of QA, publication, failure and
+run-completion events locally, then uploads referenced evidence after the source
+audit append. It checks content hashes, refuses restricted evidence, redacts
+supported text formats and strips credentials/query/fragment from returned URIs.
+An `effect.completed` record for `artifact.upload` links the source event/sequence,
+local digest, remote reference or safe failure reason. Upload failures/timeouts
+preserve local audit authority; upload receipts do not recursively upload
+themselves. Existing after-agent report hooks remain a separate consumer.
+SDK consumers can select the same bridge with `createPluginRunObserver`,
+`setPluginAuditArtifacts` and `PluginRunObserverOptions`, using
+`createLocalEncryptedEvidenceStore` for persistent local evidence. Key initialization
+is locked and reuses an existing key; text redaction preserves restricted status.
 
 ## Standard manifest and API v1
 
@@ -374,8 +403,23 @@ Changes affect subsequent runtime construction and future Workers. Existing
 Workers keep their runtime. Install/remove are blocked while tracked Workers or
 live starting/running Worker records exist; unreadable Worker state also blocks
 those file mutations. Worker launches are blocked during a file mutation. The
-Settings manager does not mount `surface.desktop`, add an OAuth login UI, or
-install the external tools required by providers.
+Settings manager does not mount `surface.desktop` or install the external tools
+required by providers.
+
+The Google account panel supports status, browser login, cancellation and
+confirmed disconnect through main-process IPC. A native picker selects a Google
+**Desktop app** OAuth client JSON; authorization uses loopback/PKCE and the system
+keychain. Login configures `credential.google-oauth` and adds `notification.gmail`
+only when absent, preserving existing Gmail settings and disabled state. If
+configuration fails after login, credentials are retained and the UI reports the
+partial result. Notification integration still needs explicit selection;
+connecting an account does not prove delivery.
+
+The experience panel lists records or recalls verified records within a project
+exposed by current work-item sources. It displays provenance, evidence and status,
+verifies corrections against independent audited runs, and confirms revocation.
+It shares the CLI ledger and audit gates; exchange and explicit adoption remain
+CLI operations.
 
 ### Gmail OAuth
 
@@ -457,8 +501,8 @@ explicit HTTP proxy because the system proxy was disabled. A separate real
 refresh request also succeeded: the injected clock forced only the initial
 expiry check, then the real clock determined the refreshed token's persisted
 expiry. The account remained unchanged and no email was sent. Revocation
-remains unverified. Desktop Google authentication buttons are
-not included. Connecting Gmail does not configure workflow notifications;
+remains unverified. Desktop account controls are implemented; live Desktop
+browser consent and revocation remain unverified. Connecting Gmail does not configure workflow notifications;
 select the notification provider in the workflow integrations separately.
 
 Gmail failures distinguish unavailable network/proxy, HTTP 401 authentication,
@@ -509,8 +553,8 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `credential.enterprise` | Nonempty `values` map of secret references |
 | `artifact.test-report-local`, `artifact.evidence-bundle` | `root`; evidence-bundle factory wraps the builder as an `ArtifactSink`, mapping `put` to a one-record bundle's `create` |
 | `artifact.object-storage`, `artifact.report-platform` | `endpoint`; report platform also accepts secret `token?` |
-| `repository.multi-repository` | Nonempty `repositories[{name,path}]` with unique names |
-| `repository.remote-workspace`, `repository.special-git-backend` | Respectively `baseUrl` plus secret `token?`, or `backend` |
+| `repository.multi-repository` | Nonempty `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`, unique names; optional `managed: {workspaceRoot}` requires each repository's remote URL, base branch and canonical lease key |
+| `repository.remote-workspace`, `repository.special-git-backend` | Respectively `baseUrl` plus secret `token?`, or `backend`; optional `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` selects supported operations |
 | `policy.secret-scan` | Fallback `root`, nonempty `files?`, `maxFileBytes?`; evaluation prefers the trusted lifecycle's `context.worktreePath` |
 | `policy.license-policy` | Nonempty `allowlist`, nonempty `licenses?` |
 | `policy.compliance-policy` | Nonempty `rules[{id,effect,actions?,when?,reason?}]`, `defaultEffect?`; effect is `allow`/`deny`, actions are nonempty, `when` is a scalar equality map |
@@ -601,7 +645,8 @@ trusted code from mutating global state, reading files or crashing the process.
 | Desktop Agent selection | Snapshot exposes registered agent provider names; workflow menus offer those names, including external plugins. Saving the default Agent or an Agent node validates membership in the current registry and rejects unknown names. Tool installation diagnostics remain a separate check. |
 | GitHub/GitLab tracker and backlog | Configured factories register both contracts. Shared `assembleProviders` matches the runtime's tracker by platform, project and applicable host, builds the managed bundle and rejects ambiguous matches; no match uses the existing source-host factory. |
 | Host operations | Runtime → `getHostProvider(name)` → shared Application host use cases → CLI `host` or a Desktop adapter. `jumpserver` is the CLI default; another provider must be selected explicitly. |
-| Linear/Jira issue operations | Runtime → `getIssueTrackerProvider(name)` → `IssueTrackerPort` methods. Source-host `TrackerProvider` and `BacklogProvider` remain separate contracts; an issue adapter alone cannot execute a canonical GitHub/GitLab backlog item. |
+| Linear/Jira managed import/sync | `IssueTrackerPort` supplies the source issue; `importManagedIssue` creates an idempotent canonical source-host backlog item and `syncManagedIssue` explicitly maps its state back to the bound source. Execution uses the managed repository's tracker/backlog. |
+| Repository lifecycle | `RepositoryLifecycleService.run` wraps the callback with prepare/checkout/publish/cleanup; public `repository.provider/run` dispatches a registered action with the workspace handle/path. |
 | Other capability operations | Typed getters and CLI `invoke` call the permitted operations. Root `integrations` selects policy, context, artifact and notification consumers for implementation and QA; credentials remain private SDK operations and resident triggers run through `listen`. |
 | Lifecycle modules and system actions | `getLifecycleModules()` feeds engine and QA hooks; registered system actions serve workflow steps and trigger callbacks. Core transitions, audit, retry and the human merge gate remain mandatory. |
 | Templates and surfaces | Registry entries are available to explicit consumers. Registration alone does not replace existing command dispatch, template storage or Desktop rendering. |
@@ -632,9 +677,9 @@ owns. The diagram shows these implemented composition and invocation paths.
 
 | Integration surface | Implemented behavior and checks |
 |---|---|
-| Local directory / npm package installer and upgrade preservation | Source checked; installation/example checks passed; real local npm dependency with disabled lifecycle scripts confirmed |
-| CLI `invoke` and its 43-operation dispatcher | Exact command registration and whitelist checked |
-| CLI `listen` and authenticated HTTP host | Implemented and confirmed; exact flags, routing and authentication checked |
+| Local directory / npm package installer and upgrade preservation | Staged installation validates packages, disables npm lifecycle scripts and preserves the previous installation on failure |
+| CLI `invoke` and its 48-operation dispatcher | Exact command registration and whitelist checked |
+| CLI `listen`, `deliveries`, `replay`, `prune-deliveries` | Authenticated durable receipts, paginated status, failed-delivery replay and explicit delivered-row pruning |
 | CLI `serve-container` and shared registry service assembly | Required flags, shared backend registries and authenticated HTTP handler checked |
 | CLI delegation to shared composition root | Source checked |
 | CLI managed Runtime ownership | `execute`, `qa`, `loop`, `schedule` and `run` reuse injected `composition.pluginRuntime`; only their own fallback instance is disposed by the command |
@@ -644,6 +689,8 @@ owns. The diagram shows these implemented composition and invocation paths.
 | QA lifecycle and publication policy | Required init and before-agent hooks run before verification; context uses a file pointer; successful QA runs after-agent artifact/notification hooks; separate `before-publish` checks precede branch push and change-request publication |
 | Desktop plugin management | Settings calls the shared manager for local/npm install, enable/disable, removal and JSON configuration import; cached inspection is distinct from future Worker state and the static dependency guard. |
 | Desktop external Agent selection | Implemented; menu uses registered providers and save rejects an unknown default/node provider |
+| Desktop Google / experience settings | Main-process services and validated IPC support account lifecycle and scoped verification/revocation; live Google consent/delivery remains an external check |
+| Audit evidence export | Root selection initializes persistent local encrypted evidence and exports with source-linked audit receipts |
 | Trigger to managed workflow | Implemented; static descriptor `input` dispatches `work-item.execute` with the same Runtime, normal eligibility/lease checks and no automatic merge |
 
 For the project-note example, the invoke integration contract is
@@ -653,6 +700,47 @@ provider name is `project-note`, not the plugin ID `context.project-note`.
 The input file contains the `gather` request itself, not the invocation envelope;
 the positional CLI arguments supply that envelope. The same operation is
 available through the SDK getter.
+
+### Managed issue identity and synchronization
+
+`plugin import-issue <provider> <issue> --project <platform:projectKey>` reads a
+Linear/Jira issue and creates a GitHub/GitLab backlog item. Mode defaults to
+`hitl`; `--mode afk` is explicit. Creation uses a lock and an idempotency key
+derived from provider ID, normalized endpoint, source project and issue ID.
+Repeated import targets the same managed item. Source binding markers are
+stripped from untrusted source text before one authoritative marker is added.
+The returned managed ID must belong to the requested repository.
+
+Execution uses the returned canonical `workItemId`; an external key never
+replaces `BacklogItem.id`, `runId` or repository identity. Import alone does not
+execute. `plugin sync-issue <provider> <issue> <work-item> --states <json-file>`
+checks source project, exact managed item and its single matching binding, then
+writes the explicitly mapped managed lifecycle state back only if changed.
+Missing mappings, mismatched bindings and organizational parents without a
+lifecycle state are rejected. Synchronization is explicit and one-way.
+Registered `work-item.import` and `work-item.sync` system actions expose these
+same managed operations to workflows.
+
+### Repository lifecycle callback and cleanup
+
+`RepositoryLifecycleService.run(request, callback, options?)` requires
+`prepare`, `checkout`, `publish` and `cleanup`. Optional `withLifecycleLease`
+wraps the full sequence: `prepare → checkout → callback(workspace) → publish → cleanup`.
+Public `repository.provider/run` input is
+`{repository:{url,ref?},runId,action,input}`; the registered system action receives
+`{input,repositoryWorkspace,worktreePath}`. The result is
+`{value,workspace,publication,cleanup}`. This explicit operation does not
+automatically replace the work-item runner.
+
+Managed local repositories use canonical repository leases and checkout
+ownership locks. Handles belong to the provider instance; checkout creates
+`afk/<runId>`. Publish validates the clean branch/commit and configured remote,
+and never merges. Cleanup refuses dirty, relocated, unowned or unpublished work
+and nested worktrees. Remote/special backends must implement the selected
+lifecycle protocol; snapshot-only configuration does not enable it. Following
+checkout/callback/publication failure or cancellation, cleanup uses a separate
+15-second signal. Execution and cleanup failures are both retained; refused
+cleanup preserves the workspace instead of reporting success.
 
 ### CLI invocation whitelist
 
@@ -665,7 +753,7 @@ remote `code`. It does not preserve that remote code as the process exit status;
 `afk host exec` has separate exit-code semantics.
 
 `operations.ts` validates a strict request union and each operation's result.
-Its 43 allowed capability/operation pairs are:
+Its 48 allowed capability/operation pairs are:
 
 | Capability | Allowed operations | Count |
 |---|---|---|
@@ -673,7 +761,7 @@ Its 43 allowed capability/operation pairs are:
 | `notification.provider` | `notify` | 1 |
 | `context.provider` | `gather` | 1 |
 | `artifact.provider` | `put` | 1 |
-| `repository.provider` | `snapshot` | 1 |
+| `repository.provider` | `snapshot`, `prepare`, `checkout`, `publish`, `cleanup`, `run` | 6 |
 | `policy.provider` | `evaluate` | 1 |
 | `trigger.provider` | `register`, `unregister` | 2 |
 | `tracker.issue` | `getIssue`, `listIssues`, `createIssue`, `updateIssue`, `deleteIssue`, `addComment`, `listComments`, `updateComment`, `deleteComment`, `linkIssues`, `listIssueLinks`, `health`, `doctor` | 13 |
@@ -730,7 +818,7 @@ runtime. The client factory accepts `transport: http`, `endpoint`, optional
 accepts `transport: cli`, `command` and optional `timeoutMs`.
 
 This is separate from `plugin listen` on port `8374`, which delivers trigger
-events. It does not add agent/sandbox execution to `plugin invoke`'s 43-operation
+events. It does not add agent/sandbox execution to `plugin invoke`'s 48-operation
 whitelist. Clients must implement the remote-container transport protocol.
 
 ## Workflow and root integration recipes
@@ -852,10 +940,10 @@ Context integration gathers selected fragments into the current attempt's
 worktree at `.afk/plugin-context.md`. The Agent goal receives a pointer to that
 file, using a fixed reference segment rather than injecting all fragments into
 the prompt. The file is written atomically and removed during cleanup; symlink
-directories are rejected. `query.limit` is passed to the provider. There is no
-shared total byte cap or truncation policy for the assembled context file in
-this implementation; provider limits and the reference segment must not be
-described as such a cap. The file is execution context, not an audit record or a
+directories are rejected. `query.limit` is passed to the provider. Composition
+retains at most 64 fragments, and the complete context file is capped at 32,000
+characters, including introductory text and source references; excess content
+is truncated within that budget. The file is execution context, not an audit record or a
 replacement for evidence classification and redaction.
 
 ### Secret references and trigger lifetime
@@ -880,38 +968,59 @@ objects. This differs from a workflow system step, whose `input` holds its
 action's invocation envelope. Declaring a trigger does not itself open an HTTP
 listener or keep a CLI process alive.
 
-Interval schedules need a resident process. The implemented command is
-`afk plugin listen --token-env <name> [--host <address>] [--port <number>]`.
-It defaults to `127.0.0.1:8374`; `--token-env` is required and names an environment
-variable whose value must have at least 16 characters and contain no CR/LF.
-The command creates a runtime with `activateTriggers: true`, waits for SIGINT or
-SIGTERM, closes the listener, then disposes the runtime. Ordinary runtime
-construction, including `list` and `doctor`, does not arm configured timers.
-Startup rejects any error diagnostic. If a configured trigger's action is not
-registered, the runtime disposes that trigger and records `trigger.action-missing`;
-events are not silently accepted and discarded. Listener startup failure also
-disposes the runtime and its timers.
+Interval schedules need a resident process. The CLI command is
+`afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`,
+with defaults `127.0.0.1:8374` and `~/.afk/triggers/deliveries.sqlite`.
+The token must contain at least 16 characters and no CR/LF. Only the dedicated
+listener enables timers. Error diagnostics prevent startup; missing actions
+dispose their triggers and report `trigger.action-missing`.
 
-Shutdown drains accepted actions: listener close stops accepting requests and
-awaits tracked request handlers even if their HTTP connections have closed;
-schedule disposal clears timers before awaiting callbacks already in flight.
-This waits for accepted work within the process, not a durable event queue,
-replay guarantee or deadline for a callback that never settles.
+The listener API accepts `POST /triggers/<registered-provider-name>`
+with bodies up to 1 MiB. Authentication accepts matching bearer,
+`x-gitlab-token`, or `x-hub-signature-256` (raw-body HMAC-SHA256) credentials.
+Webhook adapters additionally require their own configured raw-body signature;
+bearer authentication alone does not bypass it. Payloads are validated before
+persistence. A queued response is `202` with delivery ID, status, attempts and
+duplicate flag; this acknowledges receipt, not completed work.
 
-The HTTP host accepts `POST /triggers/<registered-provider-name>`, with request
-bodies limited to 1 MiB. Listener authentication accepts a matching bearer
-token, `x-gitlab-token`, or `x-hub-signature-256` containing
-`sha256=<hex HMAC-SHA256 of the raw body>`. For `WebhookTriggerProvider`, the
-adapter additionally verifies that raw-body signature against its configured
-secret; bearer authentication alone does not bypass it. Use matching listener
-and webhook secrets when signing once for both checks.
+Delivery identity combines provider name with `Idempotency-Key`,
+`X-GitHub-Delivery`, `X-GitLab-Event-UUID` (in that order), or a body hash.
+Reusing an ID with different bytes returns `409`. A private, single-owner
+SQLite queue retains `pending/processing/delivered/failed` states and recovers
+interrupted deliveries. Defaults are five attempts, 1000 ms retry delay, 10000
+retained rows and 64 MiB payloads. There is no automatic silent eviction: a full
+queue returns `503`. Oversized bodies return `413`, unknown routes/providers
+`404`, authentication failure `401`, invalid payloads `400`.
 
-Unknown routes/providers return `404`, failed listener authentication `401`,
-and dispatch/parsing/signature failures `400`. A successful response reports
-`{"dispatched": <count>}`; it does not certify a managed work item completed.
-The server handles the concrete webhook, Git-push and issue-event adapters, not
-arbitrary plugin HTTP endpoints. There is no durable event queue or replay
-service. `--token-env` passes a variable name, not its secret value on argv.
+Queue administration uses the running authenticated listener. Each command
+requires `--token-env <name>` and accepts `--url <listener-url>`:
+
+| CLI command | HTTP protocol |
+|---|---|
+| `afk plugin deliveries [--offset <nonnegative>] [--limit <1-100>]` | `GET /deliveries`; paginated receipts including older failures, with `offset/limit/nextOffset` and storage usage, without payload bodies |
+| `afk plugin replay <delivery-id>` | `POST /deliveries/<id>/replay`; failed deliveries only |
+| `afk plugin prune-deliveries` | `POST /deliveries/prune`; delivered rows beyond the seven-day deduplication window only |
+
+Pruning is explicit, never removes pending/failed rows, and ends deduplication
+for deleted IDs. The default URL is `http://127.0.0.1:8374`. Admin clients
+require HTTPS or loopback HTTP, reject URL credentials/query/fragment and
+redirects, and use a 15-second timeout. `--token-env` passes a variable name,
+not its secret value on argv. The HTTP host serves concrete webhook, Git-push
+and issue-event adapters, not arbitrary plugin HTTP endpoints.
+
+Dispatch is at least once. For `work-item.execute`, absent an explicit
+`executionId`, the default runtime derives
+`SHA256(deliveryId + '\0' + canonical workItemId)`. Stable IDs allow retries only
+while the pre-implementation journal is `requested` or `failed`; they never
+automatically repeat started implementation. Post-start interruption still
+requires native ownership and audit reconciliation. Queue retries/replay do not
+guarantee engine resume or exactly-once arbitrary actions.
+
+Shutdown stops intake, drains accepted in-process work, then disposes the
+runtime; pending queue entries survive restart. Interval timers remain
+process-local and do not backfill downtime. Callback completion still depends
+on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `TriggerQueueOptions` and
+`TriggerDeliveryStatus` for delivery context, queue limits and receipt contracts.
 
 ### Complete configured example and scheduled invocation
 
@@ -1064,6 +1173,10 @@ does not execute the managed action or enforce its lifecycle policy gates.
 - Local retrieval with no documents, a missing memory file, an empty repository
   set or an empty compliance rule set provides no configured domain content.
   Supplying those inputs is part of configuration, not automatic discovery.
+- The managed execution lock verifies process identity via `ps -o lstart=`.
+  A restricted container or sandbox that blocks `ps` fails that probe and
+  refuses to start execution (fail closed); supply an equivalent process-start
+  lookup in such environments instead of bypassing the identity check.
 
 Implementation owners: `packages/runtime/src/plugin-sdk/{profile,capabilities,issue-tracker}.ts`,
 `packages/runtime/src/application/plugins/{runtime,loader,manager,configuration,configured,default-runtime,integrations,listener}.ts`,
@@ -1074,3 +1187,47 @@ the `builtins*` / `builtin-*` modules alongside them, concrete adapters under
 `packages/runtime/src/application/runners/qa-runner.ts`,
 `apps/desktop/electron/services/{runtime-service,desktop-service}.ts` and
 `apps/desktop/electron/worker/execution-worker.ts`.
+
+## Runtime governance and experience reuse
+
+The [implementation plan](../superpowers/plans/2026-11-08-runtime-learning-and-validation.md) and its [Chinese design](../superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md) extend the existing execution engine.
+
+| Concern | Kernel / application owns | Plugin extension |
+| --- | --- | --- |
+| Context | Scope, size, provenance and prompt references | Existing context providers plus `context.experience` |
+| Execution | Identity, leases, state, budgets, cleanup and merge gates | Agent, Sandbox, typed system actions |
+| Templates | Validation, dependencies and dispatch | Explicit files → user templates → plugin templates → builtins |
+| Hooks | Ordering, required failure policy, reverse cleanup | Init, before/after agent, before publication, cleanup |
+| Sessions | Ownership, checksums, resume fallback, persistent usage | Agent/sandbox transports and session stores |
+| Experience | Evidence gates, state, scope, retention and recurrence | Verified local experience through `ContextSource.gather` |
+
+Implementation, QA/conflict resolution and CLI graph generation can select registered plugin templates. Prompt files in an in-memory plugin template must be absolute. Removing a plugin removes its templates without a stale cache. Required hooks still block execution/publication. The runtime does not offer a vendor-independent interception API for every Agent tool call.
+
+Selected reference context retains source identifiers and is capped at 32,000 characters per file; the lifecycle retains at most 64 bounded fragments per worktree. Experience retrieval selects at most five records within an 8,000-character serialized-record budget. Prompts carry short file references and remain subject to the provider's prompt limit. Only relevant, unexpired, verified records from the exact canonical project enter this context. The implementation runner audits a supplied experience context as `decision.made` with command `experience.recall`.
+
+Structured runner failures, including intermediate retryable failures, automatically create candidates with run/work-item provenance. A shared SQLite ledger isolates projects across checkouts and stores bounded redacted diagnoses and evidence references. It does not copy transcripts. Bounds are 1,000 records, 8 MiB logical payload/receipts, 32 KiB per record, 256 source identities per record and a default 90-day validity period. Eviction prefers expired and unverified records.
+
+`experience verify` requires an intact local audit chain, the same project, independent QA that started and passed, and additional evidence. The run must then finish successfully or publish a confirmed change and reach its matching human merge gate. Later QA or terminal failure disqualifies it. Experience verification never closes the human merge gate. Implementation success alone does not promote advice. Text corrections preserve the original failure identity; new evidence of recurrence withdraws verified state. Verification history prevents replaying earlier proof after recurrence. At the 256-source provenance limit, another recurrence still withdraws advice and blocks further promotion. Revoked and expired advice disappears from later context. Retrieval is lexical; no model weights are trained and no embedding service is created. The knowledge-base HTTP provider remains a retrieval adapter without generic remote writeback.
+
+Portable `experience export/import` uses version-1 JSON, capped at 100 lessons
+and 1 MiB. It preserves origin, failure identity and bounded source receipts,
+not verification authority or adoption metrics. Imports require an explicit
+target canonical project and enter as candidates, including previously verified
+or successful lessons. Repeated imports preserve candidate identity; conflicts
+and attempts to replace locally verified/revoked history are rejected.
+`experience copy` explicitly transfers a live verified source lesson to a
+different project as a candidate. Target-local independent QA and fresh evidence
+are required before recall.
+
+`experience metrics` separates retained-record retrievals, explicit adoptions
+and deduplicated recurrences. CLI `experience adopt` checks an intact audit for
+the exact target run/work item and requires a live verified lesson in scope;
+receipts deduplicate by run/work item and cap at 64 per lesson. Recall is not
+adoption; acknowledgement does not prove the model applied the lesson.
+The managed runner can also record a success lesson from an intact independent
+QA/completion audit, with workflow/commit/change references where recorded.
+Successful implementation alone still cannot create verified advice.
+
+Implementation workflows execute the compiled Agent/System plan. The specialized `pre-merge-qa-verification` and `merge-conflict-resolution` templates each require exactly one inline Agent step; unsupported multi-step, System or file-prompt shapes fail before launching the reviewer and cannot silently omit checks.
+
+`observe` and `retro` inspect execution/session evidence; `experience` governs derived advice. These controls apply to sessions owned by AFK, not arbitrary sessions started directly in Agent CLIs. Desktop shares execution behavior and scoped experience verification/revocation; exchange and adoption use the CLI. The executable guarantee is evidence retention, scoped verified retrieval and withdrawal, rather than a promise that a model never repeats a mistake. See the [testing guide](../guides/testing.md) for the verification layers.

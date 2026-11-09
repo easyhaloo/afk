@@ -18,7 +18,7 @@ const inventory: DesktopPluginList = {
 
 async function render(settingsPage = false) {
   const plugins = { list: vi.fn().mockResolvedValue(inventory), setEnabled: vi.fn().mockResolvedValue(true), install: vi.fn().mockResolvedValue(true), remove: vi.fn().mockResolvedValue(true), configure: vi.fn().mockResolvedValue(true) };
-  vi.stubGlobal("window", { afkDesktop: { plugins } });
+  vi.stubGlobal("window", { afkDesktop: { plugins: { ...plugins, google: { status: vi.fn().mockResolvedValue({ connected: false }), cancel: vi.fn().mockResolvedValue(undefined) } }, experiences: { projects: vi.fn().mockResolvedValue([]) } } });
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   let renderer!: ReturnType<typeof create>;
   await act(async () => { renderer = create(settingsPage

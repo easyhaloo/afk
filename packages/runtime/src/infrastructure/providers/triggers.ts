@@ -210,14 +210,23 @@ export class WebhookTriggerProvider extends BaseTriggerProvider implements Trigg
     } catch {
       throw new Error('Invalid webhook payload');
     }
-    if (!isObject(parsed)) throw new Error('Invalid webhook payload: expected an object');
-    const body = parsed;
+    return this.handleAuthenticatedPayload(parsed, options);
+  }
+
+  validatePayload(body: unknown): WebhookEvent {
+    if (!isObject(body)) throw new Error('Invalid webhook payload: expected an object');
     if ((body.event !== undefined && (typeof body.event !== 'string' || !body.event.trim()))
       || (body.type !== undefined && (typeof body.type !== 'string' || !body.type.trim()))) throw new Error('Invalid webhook event name');
     const name =
       typeof body.event === 'string' ? body.event : typeof body.type === 'string' ? body.type : 'message';
     const payload = body.payload === undefined ? body : body.payload;
     if (!isObject(payload)) throw new Error('Invalid webhook payload: expected an object');
+    return { name, payload };
+  }
+
+  async handleAuthenticatedPayload(input: unknown, options?: ProviderOperationOptions): Promise<{ readonly dispatched: number }> {
+    checkAbort(options);
+    const { name, payload } = this.validatePayload(input);
     let dispatched = 0;
     for (const trigger of [...this.registered.values()]) {
       checkAbort(options);
@@ -281,11 +290,7 @@ export class GitPushTriggerProvider extends BaseTriggerProvider implements Trigg
 
   async handle(input: unknown, options?: ProviderOperationOptions): Promise<{ readonly dispatched: number }> {
     checkAbort(options);
-    if (!isObject(input) || typeof input.ref !== 'string' || !input.ref.trim()
-      || ['before', 'after'].some(key => input[key] !== undefined && typeof input[key] !== 'string')
-      || ['created', 'deleted'].some(key => input[key] !== undefined && typeof input[key] !== 'boolean')
-      || ['repository', 'pusher'].some(key => input[key] !== undefined && !isObject(input[key]))) throw new Error('Invalid git push payload');
-    const payload = input as unknown as GitPushPayload;
+    const payload = this.validatePayload(input);
     if (!this.includeDeleted && payload.deleted) return { dispatched: 0 };
     let dispatched = 0;
     for (const trigger of [...this.registered.values()]) {
@@ -302,6 +307,14 @@ export class GitPushTriggerProvider extends BaseTriggerProvider implements Trigg
       }
     }
     return { dispatched };
+  }
+
+  validatePayload(input: unknown): GitPushPayload {
+    if (!isObject(input) || typeof input.ref !== 'string' || !input.ref.trim()
+      || ['before', 'after'].some(key => input[key] !== undefined && typeof input[key] !== 'string')
+      || ['created', 'deleted'].some(key => input[key] !== undefined && typeof input[key] !== 'boolean')
+      || ['repository', 'pusher'].some(key => input[key] !== undefined && !isObject(input[key]))) throw new Error('Invalid git push payload');
+    return input as unknown as GitPushPayload;
   }
 }
 
@@ -353,12 +366,7 @@ export class IssueEventTriggerProvider extends BaseTriggerProvider implements Tr
 
   async handle(input: unknown, options?: ProviderOperationOptions): Promise<{ readonly dispatched: number }> {
     checkAbort(options);
-    if (!isObject(input) || typeof input.action !== 'string' || !input.action.trim()
-      || (input.issue !== undefined && !isObject(input.issue))
-      || (input.repository !== undefined && !isObject(input.repository))) throw new Error('Invalid issue event payload');
-    if (isObject(input.issue) && input.issue.labels !== undefined
-      && (!Array.isArray(input.issue.labels) || input.issue.labels.some(label => typeof label !== 'string' && (!isObject(label) || typeof label.name !== 'string')))) throw new Error('Invalid issue event labels');
-    const payload = input as unknown as IssueEventPayload;
+    const payload = this.validatePayload(input);
     let dispatched = 0;
     for (const trigger of [...this.registered.values()]) {
       checkAbort(options);
@@ -373,6 +381,15 @@ export class IssueEventTriggerProvider extends BaseTriggerProvider implements Tr
       }
     }
     return { dispatched };
+  }
+
+  validatePayload(input: unknown): IssueEventPayload {
+    if (!isObject(input) || typeof input.action !== 'string' || !input.action.trim()
+      || (input.issue !== undefined && !isObject(input.issue))
+      || (input.repository !== undefined && !isObject(input.repository))) throw new Error('Invalid issue event payload');
+    if (isObject(input.issue) && input.issue.labels !== undefined
+      && (!Array.isArray(input.issue.labels) || input.issue.labels.some(label => typeof label !== 'string' && (!isObject(label) || typeof label.name !== 'string')))) throw new Error('Invalid issue event labels');
+    return input as unknown as IssueEventPayload;
   }
 }
 

@@ -12,12 +12,14 @@ import { createJumpserverPlugin } from './builtins.js';
 import { createBuiltinAgentPlugins, createBuiltinSandboxPlugins, createBuiltinVerificationPlugins } from './builtin-providers.js';
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
 import type { Plugin } from './runtime.js';
+import { ExperienceContextProvider } from '../learning/runtime.js';
 
 const identifier = z.string().min(1);
 export const capabilitySelectionSchema = z.object({
   policies: z.array(z.object({ provider: identifier, input: z.object({ action: identifier, context: z.record(z.union([z.string(), z.number(), z.boolean()])).optional() }).strict() }).strict()).default([]),
   contexts: z.array(z.object({ provider: identifier, query: z.object({ scope: identifier, prompt: z.string(), limit: z.number().int().positive().optional() }).strict() }).strict()).default([]),
   artifacts: z.array(z.object({ provider: identifier, path: identifier, name: identifier, mediaType: identifier }).strict()).default([]),
+  evidence: z.object({ provider: identifier, timeoutMs: z.number().int().positive().max(60_000).optional() }).strict().optional(),
   notifications: z.array(z.object({ provider: identifier, message: z.object({ title: identifier, body: z.string(), channel: z.string().optional(), urgency: z.enum(['low', 'normal', 'high']).optional() }).strict() }).strict()).default([]),
 }).strict();
 
@@ -29,6 +31,7 @@ export function createDefaultBuiltinProviderPlugins(homeDir: string, workspaceRo
     ...createBuiltinCapabilityPlugins({
       notifications: [new DesktopNotificationProvider()],
       contexts: [
+        new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite')),
         new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
         new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') }),
       ],

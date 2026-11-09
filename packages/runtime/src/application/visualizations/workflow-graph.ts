@@ -1,5 +1,6 @@
 import { createReceipt, layoutWorkflow, projectWorkflow, toArchifyWorkflow, validateSnapshot, type ArchifyWorkflowDocument, type GraphReceipt, type GraphSnapshot } from '@afk/workflow-graph';
 import { TemplateLoader, type LoadedTemplate } from '../../domain/templates/loader.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
 
 export type WorkflowGraphFormat = 'json' | 'archify-json';
 
@@ -12,9 +13,9 @@ export interface WorkflowGraphResult {
   readonly archify?: ArchifyWorkflowDocument;
 }
 
-export async function generateWorkflowGraph(options: { readonly projectRoot?: string; readonly template: string; readonly generatedAt?: string }): Promise<WorkflowGraphResult> {
+export async function generateWorkflowGraph(options: { readonly projectRoot?: string; readonly template: string; readonly generatedAt?: string; readonly plugins?: PluginRuntime }): Promise<WorkflowGraphResult> {
   const projectRoot = options.projectRoot ?? process.cwd();
-  const loaded = await new TemplateLoader({ projectRoot }).loadWithSource(options.template);
+  const loaded = await new TemplateLoader({ projectRoot, getPluginTemplate: options.plugins ? name => options.plugins!.getTemplate(name) : undefined }).loadWithSource(options.template);
   const definition = projectWorkflow({
     templateId: loaded.template.name,
     templateVersion: loaded.template.version,

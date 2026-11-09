@@ -30,11 +30,19 @@ async function main(): Promise<void> {
 
   const { createCliPluginRuntime } = await import('./composition-root.js');
   const { dispatchCommand } = await import('./command-registry.js');
-  const pluginRuntime = await createCliPluginRuntime();
+  let runtimePromise: ReturnType<typeof createCliPluginRuntime> | undefined;
+  const composition = {
+    argv: process.argv,
+    createRuntime: () => runtimePromise ??= createCliPluginRuntime(),
+  };
   try {
-    await dispatchCommand(cmd, extraArgs, { pluginRuntime });
+    const pluginRuntime = ['run', 'execute', 'reconcile', 'qa', 'loop', 'schedule', 'graph'].includes(cmd)
+      && !extraArgs.some(argument => argument === '--help' || argument === '-h')
+      ? await composition.createRuntime() : undefined;
+    await dispatchCommand(cmd, extraArgs, { ...composition, pluginRuntime });
   } finally {
-    await pluginRuntime.dispose();
+    const pluginRuntime = await runtimePromise?.catch(() => undefined);
+    await pluginRuntime?.dispose();
   }
 }
 

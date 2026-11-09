@@ -138,14 +138,40 @@ Values injected through these generic references are not automatically
 refreshed; Gmail retains its own OAuth refresh behavior. Secret values and raw
 authentication errors must not enter renderer DTOs or diagnostics.
 
-Plugin Settings does not mount `surface.desktop`, provide OAuth login controls,
-or install external provider tools. Google authorization remains a CLI flow;
-the manager can import Gmail configuration without supplying an OAuth UI. See
+Plugin Settings does not mount `surface.desktop` or install external provider
+tools. Google sign-in selects a Desktop OAuth client JSON in Main and calls
+the shared `GoogleOAuthCredentialProvider` with Electron `shell.openExternal`.
+The provider owns PKCE, the automatic localhost callback, account detection and
+keychain storage. Fixed IPC methods expose account status, login, cancellation
+and logout, never client files, tokens or raw provider errors. Cancellation,
+renderer navigation/crash/destruction and application exit abort pending login;
+explicit cancellation waits for the provider's callback cleanup.
+After login, Main calls the shared `configureGoogleAccountPlugins` SDK helper
+to populate Google credential/Gmail defaults while preserving existing Gmail
+settings and disabled preferences. Configuration failures retain the connected
+account and produce a safe, explicit partial-success error; the renderer
+refreshes account status without logging out.
+
+Settings also lists and recalls project-scoped experiences through
+`@afk/runtime/execution`. Project options come from the existing work-item
+inventory; Main rechecks membership and record scope on each operation. Recall
+uses the store's verified/unexpired filtering. Verification first validates the
+recorded run through `verifyExperienceRun`, then calls `ExperienceStore.verify`
+for independent-run/new-evidence enforcement with an explicit corrected action.
+Revoke retains the original evidence. The renderer receives an explicit DTO,
+and never supplies database paths or claims an audit verification result. See
 the paired [plugin architecture](../../docs/architecture/plugins.md) /
 [中文说明](../../docs/architecture/plugins.zh.md) for configuration and lifecycle
 boundaries.
 
 ## End-to-End Testing
+
+Google account E2E tests inject an expired connected account and a cancellable
+simulated consent operation at the provider boundary; Main service, IPC, preload
+and renderer remain real, and automated runs never read the user's keychain or
+authorize against Google. This is separate from manually verified live token
+refresh. Experience E2E uses real isolated SQLite records and intact hash-chained
+audit runs to exercise project scope, recall, independent verification and revoke.
 
 Run `pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts`
 from the repository root. Set `AFK_E2E_PORT` to a free port when the development

@@ -1,6 +1,7 @@
 import { loadStore, mutateStore, INVENTORY } from "./provider-inventory.mjs";
 import type { BacklogRuntime } from "@afk/runtime/backlog";
 import type { ExecuteWorkItemInput, ExecuteWorkItemResult } from "@afk/runtime/execution";
+export { ExperienceStore, experienceStorePath, experienceScope, verifyExperienceRun } from "@afk/runtime/execution";
 
 function requireItem(store: ReturnType<typeof loadStore>, id: string) {
   const item = store.items.find((entry: { id: string }) => entry.id === id);

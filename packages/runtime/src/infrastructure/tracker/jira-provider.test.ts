@@ -4,7 +4,7 @@ import { JiraTrackerProvider, type JiraTrackerOptions } from './jira-provider.js
 const adf = (...paragraphs: string[][]) => ({
   type: 'doc', version: 1, content: paragraphs.map(texts => ({ type: 'paragraph', content: texts.map(text => ({ type: 'text', text })) })),
 });
-const issue = (key = 'ENG-42') => ({ id: '10001', key, fields: { summary: 'Title', description: adf(['Details']), labels: ['bug'], status: { name: 'To Do' } } });
+const issue = (key = 'ENG-42') => ({ id: '10001', key, fields: { summary: 'Title', description: adf(['Details']), labels: ['bug'], status: { name: 'To Do' }, project: { key: key.slice(0, key.lastIndexOf('-')) } } });
 const comment = (id = 'comment-1') => ({ id, body: adf(['Hello ', 'world']), author: { displayName: 'Bot' } });
 const link = (id = 'real-link-id', inward = false, name = 'Blocks') => ({ id, type: { name }, [inward ? 'inwardIssue' : 'outwardIssue']: { key: 'ENG-43', id: '10002' } });
 const links = (nodes = [link()]) => ({ key: 'ENG-42', fields: { issuelinks: nodes } });
@@ -21,6 +21,11 @@ function setup(responses: { status?: number; body?: unknown }[], options: Partia
 }
 
 describe('JiraTrackerProvider', () => {
+  it('reports the actual issue project rather than attributing a foreign issue to the configured project', async () => {
+    const { provider, fetcher } = setup([{ body: issue('OTHER-42') }]);
+    await expect(provider.getIssue('OTHER-42')).resolves.toMatchObject({ projectId: 'OTHER' });
+    expect(String(fetcher.mock.calls[0][0])).toContain('fields=summary,description,labels,status,project');
+  });
   it('creates native Jira keys with ADF paragraphs and preserves the configured base path', async () => {
     const { provider, fetcher, request } = setup([{ status: 201, body: { id: '10001', key: 'ENG-42' } }, { body: issue() }], { baseUrl: 'https://jira.test/ex/jira/cloud-id', email: 'bot@example.test' });
     await expect(provider.createIssue({ title: 'Title', description: 'one\n\nthree', labels: ['bug'] })).resolves.toMatchObject({ id: 'ENG-42', key: 'ENG-42', description: 'Details' });
@@ -38,7 +43,7 @@ describe('JiraTrackerProvider', () => {
     expect(String(fetcher.mock.calls[0][0])).toBe('https://jira.test/rest/api/3/search/jql');
     expect(request(0)).toEqual({
       jql: 'project = "ENG\\"\\\\ AND project = ALL" AND status = "In Progress" AND labels = "bug\\"\\\\" AND labels = "urgent" ORDER BY updated DESC, key ASC',
-      fields: ['summary', 'description', 'labels', 'status'], maxResults: 2, nextPageToken: 'first-token',
+      fields: ['summary', 'description', 'labels', 'status', 'project'], maxResults: 2, nextPageToken: 'first-token',
     });
     expect(request(1)).toMatchObject({ maxResults: 1, nextPageToken: 'next-page' });
   });

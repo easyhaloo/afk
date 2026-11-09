@@ -110,6 +110,7 @@ describe('PluginManager', () => {
       const { manager } = await dependencyFixture('context.provider', 'context.code');
       await manager.setEnabled('context.retrieval', false, true);
       await manager.setEnabled('context.project-memory', false, true);
+      await manager.setEnabled('context.experience', false, true);
       await expect(operation === 'remove' ? manager.remove('context.code') : manager.setEnabled('context.code', false)).rejects.toThrow('example.dependent');
     });
 

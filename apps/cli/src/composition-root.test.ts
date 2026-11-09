@@ -14,7 +14,7 @@ describe('CLI plugin composition root', () => {
     expect(runtime.listProviders('host.connection')).toEqual(['jumpserver', 'ssh', 'aws-ssm', 'kubernetes-exec']);
     expect(runtime.listProviders('verification.provider')).toEqual(['test-runner', 'static-scan', 'browser-check']);
     expect(runtime.listProviders('notification.provider')).toEqual(['notification.desktop']);
-    expect(runtime.listProviders('context.provider')).toEqual(['context.code', 'context.retrieval', 'context.project-memory']);
+    expect(runtime.listProviders('context.provider')).toEqual(['context.experience', 'context.code', 'context.retrieval', 'context.project-memory']);
     expect(runtime.listProviders('credential.provider')).toEqual(['credential.system-keychain']);
     expect(runtime.listProviders('artifact.provider')).toEqual(['test-report-local']);
     expect(runtime.listProviders('repository.provider')).toEqual(['multi-repository']);

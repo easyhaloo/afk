@@ -86,6 +86,7 @@ export function createPluginService(options: PluginServiceOptions) {
         enabled: setting?.enabled ?? (!!loaded || !!record), runtimeLoaded: !!loaded,
         capabilities: [...(record?.manifest.provides ?? loaded?.capabilities ?? [])],
         configurable: !!configuration && (!!record || (builtin && !id.startsWith("workflow."))), removable: !!record,
+        configurationPresent: configuration ? setting?.config !== undefined : undefined,
       };
     });
     return { plugins, diagnostics };

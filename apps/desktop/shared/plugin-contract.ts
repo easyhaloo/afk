@@ -14,6 +14,7 @@ export type DesktopPlugin = {
   capabilities: string[];
   configurable: boolean;
   removable: boolean;
+  configurationPresent?: boolean;
 };
 
 export type DesktopPluginList = {
@@ -24,12 +25,20 @@ export type DesktopPluginList = {
 export type PluginInstallInput = { kind: "local" } | { kind: "npm"; spec: string };
 
 export type DesktopPluginApi = {
+  google: {
+    status(): Promise<GoogleAccountStatus>;
+    login(): Promise<GoogleAccountStatus | null>;
+    cancel(): Promise<void>;
+    logout(): Promise<void>;
+  };
   list(): Promise<DesktopPluginList>;
   install(input: PluginInstallInput): Promise<boolean>;
   setEnabled(id: string, enabled: boolean): Promise<boolean>;
   remove(id: string): Promise<boolean>;
   configure(id: string): Promise<boolean>;
 };
+
+export type GoogleAccountStatus = { connected: boolean; email?: string; expiresAt?: string };
 
 export function parsePluginId(value: unknown): string {
   if (typeof value !== "string" || value.length > 200 || !/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/.test(value) || /^(?:afk[-.])/.test(value)) throw new Error("插件 ID 无效");

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { executeWorkItem, reconcileWorkItemMerge } from '@afk/runtime/execution';
 import { createDefaultPluginRuntime, type PluginRuntime } from '@afk/runtime/plugin-sdk';
 import { detail, handleCommandError, success, warning } from '../output.js';
@@ -37,6 +37,9 @@ export function registerExecuteCommands(program: Command, composition: CommandRe
     .option('--template <name>', 'Implementation workflow template')
     .option('--project <project>', 'Provider project/repository')
     .option('--execution-id <id>', 'Attempt ID (default: generated UUID)')
+    .option('--agent <name>', 'Registered agent provider for implementation and independent QA')
+    .option('--sandbox <name>', 'Registered sandbox provider')
+    .addOption(new Option('--execution-mode <mode>', 'Agent execution mode').choices(['batch', 'interactive']))
     .action(async options => {
       try {
         let plugins: PluginRuntime | undefined;
@@ -48,6 +51,11 @@ export function registerExecuteCommands(program: Command, composition: CommandRe
             template: options.template,
             project: options.project,
             executionId: options.executionId ?? randomUUID(),
+            ...(options.agent || options.sandbox || options.executionMode ? { runOptions: {
+              ...(options.agent ? { agentProvider: options.agent } : {}),
+              ...(options.sandbox ? { sandboxProvider: options.sandbox } : {}),
+              ...(options.executionMode ? { executionMode: options.executionMode } : {}),
+            } } : {}),
           }, { plugins, agentProviderRegistry: plugins.getAgentProviderRegistry() });
           if (result.status !== 'merge_ready' && result.status !== 'done') {
             warning(`Work item execution stopped: ${result.status}`);

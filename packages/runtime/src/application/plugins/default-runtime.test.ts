@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,6 +9,11 @@ import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecyc
 import type { PluginRuntime } from './runtime.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 import { GitPushTriggerProvider, IssueEventTriggerProvider } from '../../infrastructure/providers/triggers.js';
+import { startPluginListener } from './listener.js';
+import { createPluginRunObserver } from './observability.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
+import type { RunEvent } from '@afk/core';
 
 vi.mock('../workflows/execute-work-item.js', () => ({ executeWorkItem: vi.fn() }));
 
@@ -56,6 +62,46 @@ async function installedCredentialFixture(plugins: unknown[], requires = ['conte
 }
 
 describe('createDefaultPluginRuntime', () => {
+  it('captures and exports evidence through the configured default runtime and keeps the key across restarts', async () => {
+    const { runtime, homeDir, workspaceRoot } = await fixture({ integrations: { evidence: { provider: 'test-report-local', timeoutMs: 1000 } } });
+    const root = join(workspaceRoot, 'audit');
+    const context = { traceId: 'trace', runId: 'evidence-run', workItemId: 'github:acme/api#42', profileId: 'local', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+    await createPluginRunObserver(runtime, root).record(context, { kind: 'qa.passed' });
+    const events: RunEvent[] = [];
+    const store = new JsonlEventStore({ root });
+    for await (const event of store.read(context.runId)) events.push(event);
+    expect(events).toHaveLength(2);
+    expect(events[0].evidence).toHaveLength(1);
+    expect(events[1].data).toMatchObject({ kind: 'effect.completed', effectKind: 'artifact.upload', outcome: 'succeeded' });
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    expect(JSON.parse(Buffer.from(await evidence.get(events[0].evidence![0])).toString('utf8'))).toMatchObject({ kind: 'qa.passed' });
+    expect(await store.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  });
+
+  it('blocks configured audit capture when its artifact provider cannot write', async () => {
+    const { runtime, lifecycle } = await fixture({ integrations: { evidence: { provider: 'missing-artifacts' } } });
+    expect(await runtime.diagnostics()).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'config.evidence-invalid' })]));
+    await expect(lifecycle.run('init', { iid: 42, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow('Audit evidence');
+  });
+
+  it('propagates durable delivery identity to managed execution and deduplicates HTTP redelivery', async () => {
+    vi.mocked(executeWorkItem).mockResolvedValue({ status: 'done' } as Awaited<ReturnType<typeof executeWorkItem>>);
+    const { runtime, homeDir } = await fixture({ plugins: [
+      { id: 'trigger.git-push', builtin: true, action: 'work-item.execute', config: { triggers: [{ id: 'push', kind: 'webhook', input: { workItemId: 'github:acme/api#42' } }] } },
+    ] }, { activateTriggers: true });
+    const listener = await startPluginListener(runtime, { token: 'synthetic-listener-token', port: 0, queuePath: join(homeDir, '.afk', 'triggers', 'deliveries.sqlite') });
+    try {
+      const address = listener.address;
+      if (!address || typeof address === 'string') throw new Error('Missing listener address');
+      const send = () => fetch(`http://127.0.0.1:${address.port}/triggers/trigger.git-push`, { method: 'POST', headers: { authorization: 'Bearer synthetic-listener-token', 'x-github-delivery': 'stable-delivery' }, body: JSON.stringify({ ref: 'refs/heads/main' }) });
+      const receipt = await (await send()).json() as { deliveryId: string };
+      await vi.waitFor(() => expect(listener.queue!.status(receipt.deliveryId)[0].status).toBe('delivered'));
+      expect(vi.mocked(executeWorkItem).mock.calls.at(-1)?.[0]).toMatchObject({ workItemId: 'github:acme/api#42', executionId: createHash('sha256').update(`${receipt.deliveryId}\0github:acme/api#42`).digest('hex') });
+      const before = vi.mocked(executeWorkItem).mock.calls.length;
+      expect((await send()).status).toBe(202);
+      expect(vi.mocked(executeWorkItem).mock.calls).toHaveLength(before);
+    } finally { await listener.close(); }
+  });
   it.each([false, true])('waits for an installed named credential provider across builtin activation (nested: %s)', async nested => {
     const network = vi.fn();
     vi.stubGlobal('fetch', network);

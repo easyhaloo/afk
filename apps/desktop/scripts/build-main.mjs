@@ -41,8 +41,19 @@ const common = {
   external: ['electron', 'node-pty', 'electron-updater'],
   ...(e2e ? { alias: {
     '@afk/runtime/backlog': join(desktop, 'tests/e2e/fixtures/runtime.ts'),
-    '@afk/runtime/execution': join(desktop, 'tests/e2e/fixtures/runtime.ts'),
-  } } : {}),
+  }, plugins: [{
+    name: 'execution-fixture',
+    setup(build) {
+      const fixture = join(desktop, 'tests/e2e/fixtures/runtime.ts');
+      build.onResolve({ filter: /^@afk\/runtime\/execution$/ }, args => args.importer === fixture ? undefined : { path: fixture });
+    },
+  }, {
+    name: 'google-auth-fixture',
+    setup(build) {
+      const fixture = join(desktop, 'tests/e2e/fixtures/google-auth.ts');
+      build.onResolve({ filter: /\/services\/google-auth-service\.js$/ }, args => args.importer === fixture ? undefined : { path: fixture });
+    },
+  }] } : {}),
 };
 
 const configs = [

@@ -6,6 +6,7 @@ import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import type { ProviderDiagnostic, ProviderHealth, TriggerDescriptor, TriggerProvider, ArtifactSink } from '../../plugin-sdk/capabilities.js';
 import type { Plugin, PluginSetupContext } from './runtime.js';
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
+import { ExperienceContextProvider, experienceStorePath } from '../learning/runtime.js';
 import { createJumpserverPlugin } from './builtins.js';
 import { AgentProviderRegistry, ensureBuiltinAgentProviders } from '../../domain/agents/index.js';
 import { createSshHostConnection, createAwsSsmHostConnection, createKubernetesExecHostConnection } from '../../infrastructure/host/index.js';
@@ -199,6 +200,10 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
   const fire = (pluginId: string, trigger: TriggerDescriptor, payload?: unknown): void | Promise<void> => options.onTrigger!({ pluginId, trigger, payload });
   const hostFields = { id: text.optional(), alias: text, address: text };
   const commandConfig = z.object({ command: strings, timeoutMs: milliseconds.optional() }).strict();
+  const repositoryLifecycle = z.object({
+    repositories: z.array(z.object({ url: text, ref: text.optional() }).strict()).min(1),
+    operations: z.array(z.enum(['prepare', 'checkout', 'publish', 'cleanup'])).min(1),
+  }).strict();
   const definitions: Record<string, Definition> = {
     'observability.otlp': define(secret => z.object({
       endpoint: baseUrl.refine(value => !/[?#]/.test(value), 'must not contain a query or fragment'),
@@ -270,6 +275,10 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
     'trigger.schedule': define(z.object({ triggers: scheduleDescriptors }).strict(), config => trigger(new ScheduleTriggerProvider({ onFire: descriptor => fire('trigger.schedule', descriptor) }), config.triggers)),
     'trigger.git-push': define(z.object({ includeDeleted: z.boolean().optional(), triggers: webhookDescriptors }).strict(), config => trigger(new GitPushTriggerProvider({ includeDeleted: config.includeDeleted, onPush: (payload, descriptor) => fire('trigger.git-push', descriptor, payload) }), config.triggers)),
     'trigger.issue-event': define(z.object({ triggers: webhookDescriptors }).strict(), config => trigger(new IssueEventTriggerProvider({ onIssue: (payload, descriptor) => fire('trigger.issue-event', descriptor, payload) }), config.triggers)),
+    'context.experience': define(z.object({}).strict(), () => {
+      const provider = new ExperienceContextProvider(experienceStorePath(options.homeDir ?? homedir()));
+      return capability(provider, { contexts: [provider] });
+    }),
     'context.code': define(z.object({ root: text }).strict(), config => {
       const provider = new CodeContextProvider({ root: path(config.root) });
       return capability(provider, { contexts: [provider] });
@@ -326,15 +335,19 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       const provider = new ReportPlatformProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),
-    'repository.multi-repository': define(z.object({ repositories: z.array(z.object({ name: text, path: text }).strict()).min(1).refine(items => new Set(items.map(item => item.name)).size === items.length, 'repository names must be unique') }).strict(), config => {
-      const provider = new MultiRepositoryProvider({ repositories: config.repositories.map(item => ({ ...item, path: path(item.path) })), git: execute });
+    'repository.multi-repository': define(z.object({
+      repositories: z.array(z.object({ name: text, path: text, remoteUrl: text.optional(), baseBranch: text.optional(), leaseKey: text.optional() }).strict()).min(1).refine(items => new Set(items.map(item => item.name)).size === items.length, 'repository names must be unique'),
+      managed: z.object({ workspaceRoot: text }).strict().optional(),
+    }).strict(), config => {
+      const provider = new MultiRepositoryProvider({ repositories: config.repositories.map(item => ({ ...item, path: path(item.path) })), git: execute,
+        managed: config.managed && { workspaceRoot: path(config.managed.workspaceRoot) } });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.remote-workspace': define(secret => z.object({ baseUrl, token: secret.optional() }).strict(), config => {
+    'repository.remote-workspace': define(secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional() }).strict(), config => {
       const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.special-git-backend': define(z.object({ backend: text }).strict(), config => {
+    'repository.special-git-backend': define(z.object({ backend: text, lifecycle: repositoryLifecycle.optional() }).strict(), config => {
       const provider = new SpecialGitBackendProvider({ ...config, executor: execute });
       return capability(provider, { repositories: [provider] });
     }),

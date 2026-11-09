@@ -49,6 +49,14 @@ describe('execute CLI', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('passes explicit provider and mode selection to both managed phases', async () => {
+    mocks.executeWorkItem.mockResolvedValue({ status: 'merge_ready' });
+    await invoke([...argv, '--agent', 'claude-code', '--sandbox', 'local', '--execution-mode', 'batch']);
+    expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.objectContaining({
+      runOptions: { agentProvider: 'claude-code', sandboxProvider: 'local', executionMode: 'batch' },
+    }), { plugins, agentProviderRegistry: mocks.registry });
+  });
+
   it.each(['rework', 'blocked', 'not_claimed'])('exits nonzero on %s', async status => {
     mocks.executeWorkItem.mockResolvedValue({ status });
     await invoke(argv);

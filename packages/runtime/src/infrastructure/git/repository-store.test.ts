@@ -103,6 +103,41 @@ describe('RepositoryStore', () => {
     expect((await simpleGit(bare).raw(['worktree', 'list', '--porcelain'])).match(/^worktree /gm)).toHaveLength(1);
   });
 
+  it.each(['tracked', 'untracked', 'ignored'])('safe removal retains %s files and preserves existing forced-removal behavior', async kind => {
+    const checkout = join(root, 'item-1');
+    await store.ensureCheckout(url, checkout, 'main');
+    const path = join(checkout, kind === 'tracked' ? 'tracked.txt' : kind === 'ignored' ? '.env' : 'notes.txt');
+    if (kind === 'ignored') {
+      const exclude = (await simpleGit(checkout).raw(['rev-parse', '--git-path', 'info/exclude'])).trim();
+      await writeFile(exclude, '.env\n');
+    }
+    await writeFile(path, 'local content');
+    await expect(store.removeCheckout(checkout, { force: false })).rejects.toThrow('content');
+    expect(await readFile(path, 'utf8')).toBe('local content');
+    await store.removeCheckout(checkout);
+    await expect(lstat(checkout)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('safe removal retains nested worktrees instead of recursively forcing their removal', async () => {
+    const checkout = join(root, 'item-1');
+    await store.ensureCheckout(url, checkout, 'main');
+    const verification = join(checkout, 'verification');
+    await simpleGit(checkout).raw(['worktree', 'add', '--detach', verification, 'HEAD']);
+    await expect(store.removeCheckout(checkout, { force: false })).rejects.toThrow('nested worktree');
+    expect(await readFile(join(verification, 'tracked.txt'), 'utf8')).toBe('baseline\n');
+  });
+
+  it('runs the safe validation hook before removal and preserves files when it rejects', async () => {
+    const checkout = join(root, 'item-1');
+    await store.ensureCheckout(url, checkout, 'main');
+    const beforeRemove = vi.fn(async () => { throw new Error('validation refused'); });
+    await expect(store.removeCheckout(checkout, { force: false, beforeRemove })).rejects.toThrow('validation refused');
+    expect(beforeRemove).toHaveBeenCalledOnce();
+    expect(await readFile(join(checkout, 'tracked.txt'), 'utf8')).toBe('baseline\n');
+    await store.removeCheckout(checkout, { force: false });
+    await expect(lstat(checkout)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('discards failed clone staging and can retry using the same repository identity', async () => {
     vi.stubEnv('GIT_CONFIG_KEY_0', `url.${join(root, 'missing.git')}.insteadOf`);
     await expect(store.ensureCheckout(url, join(root, 'item-1'), 'main')).rejects.toThrow();

@@ -1,39 +1,21 @@
 # 插件接入标准 v1
 
-本文用于指导 AI 或开发者实现可被宿主发现、安装、配置、激活和调用的能力插件。
+本文规定能力插件的接口、协议和生命周期。能力现状与配置示例见[插件架构](plugins.zh.md)，
+命令入口见[执行架构](execution.zh.md#执行入口)。注册成功、协议测试通过与真实厂商端到端
+可用是不同证据，不能互相替代。
 
-## 1. 设计约束
+## 1. 身份与权限边界
 
-- Core 负责身份、状态机、执行顺序、重试、取消、审计、租约和人工合并闸门。
-- 插件只实现一个或多个 Provider，不修改 Core 规则。
-- CLI、Desktop、Worker 和自动化触发器只调用统一 Provider，不直接实现第三方连接逻辑。
-- 插件 ID、能力 ID、Provider 名称分别独立。
-- 插件 ID 不得以 `afk.` 或 `afk-` 开头。
-- 插件运行在宿主进程内，属于可信代码；插件协议不提供进程级安全隔离。
+- Core 负责工作身份、状态机、资格、审计顺序、预算、租约和人工合并闸门；插件返回操作结果。
+- 插件 ID、能力 ID、Provider 注册名分别独立；插件 ID 不得以 `afk.` 或 `afk-` 开头。
+- `BacklogItem.id`、`Run.workItemId`、`runId`、`parentId`、`dependsOn`、`baseBacklogId` 不可互换。
+- 插件为宿主进程内的可信代码；`trusted: true` 不构成进程隔离或发布者签名验证。
+- 不提供自动合并、审批、提升权限或绕过策略的插件操作。
 
-## 2. 实现路径
+## 2. 包、Manifest 与工厂
 
-按以下顺序实现：
-
-1. 选择能力类别，确定插件 ID、Provider 名称和支持的操作。
-2. 定义 Manifest、配置 Schema、依赖和冲突声明。
-3. 实现 Provider 接口和输入输出校验。
-4. 在工厂中读取配置，创建 transport、客户端和资源。
-5. 在 `activate` 阶段向宿主注册 Provider。
-6. 对外部资源、定时器、监听器和子进程注册销毁函数。
-7. 接入健康检查、诊断、取消、超时和错误分类。
-8. 编写单元测试、协议测试、失败路径测试和最小集成测试。
-9. 验证安装、配置、激活、调用、禁用、重新启用和卸载。
-
-## 3. 标准包和 Manifest
-
-插件包必须包含：
-
-- 标准包描述文件。
-- 根目录的 `plugin.json`。
-- 编译后的入口模块，默认入口为 `dist/index.js`。
-
-`plugin.json`：
+安装包包含包描述、根 `plugin.json` 及可加载入口。入口必须在包内，禁止绝对路径、目录穿越
+和符号链接逃逸。Manifest 示例：
 
 ```json
 {
@@ -44,466 +26,215 @@
   "provides": ["context.provider"],
   "requires": [],
   "conflicts": [],
-  "entry": "dist/index.js",
   "configSchema": {
     "type": "object",
-    "properties": {
-      "note": { "type": "string", "minLength": 1 }
-    },
+    "properties": {"note": {"type": "string", "minLength": 1}},
     "required": ["note"],
     "additionalProperties": false
   }
 }
 ```
 
-字段规则：
-
-| 字段 | 规则 |
-|---|---|
-| `id` | 稳定、全局唯一、领域化命名，例如 `host.ssh`、`tracker.linear`。 |
-| `version` | 语义化版本。 |
-| `apiVersion` | 当前固定为 `1`。 |
-| `trusted` | 必须明确声明；表示宿主信任其进程内执行。 |
-| `provides` | 只能声明标准能力或已注册扩展能力。 |
-| `requires` | 声明所需能力，不声明具体实现细节。 |
-| `conflicts` | 声明不能共存的插件 ID 或能力 ID。 |
-| `configSchema` | 描述插件配置对象，禁止隐式接收未知字段。 |
-| `entry` | 包内相对入口，禁止绝对路径和目录穿越。 |
-
-公共类型：
-
-```ts
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-
-interface PluginManifest {
-  id: string;
-  version: string;
-  apiVersion: 1;
-  trusted: boolean;
-  provides: readonly string[];
-  requires?: readonly string[];
-  conflicts?: readonly string[];
-  configSchema?: JsonValue;
-}
-
-interface PluginHealth {
-  status: "healthy" | "degraded" | "unhealthy" | "unknown";
-  message?: string;
-}
-
-interface PluginDiagnostic {
-  severity: "info" | "warning" | "error";
-  code: string;
-  message: string;
-}
-```
-
-入口模块可以导出插件对象，也可以导出工厂：
-
-```ts
-export default function createPlugin(context: PluginFactoryContext): Plugin;
-```
-
-工厂上下文：
-
-```ts
-interface PluginFactoryContext {
-  configuration: JsonValue;
-  homeDir: string;
-  workspaceRoot: string;
-}
-```
-
-配置只承载可序列化数据。函数、transport、命令执行器、客户端和密钥读取逻辑必须由工厂创建。
-
-## 4. 标准插件接口
+`id` 稳定且唯一，`version` 使用语义化版本，`apiVersion` 当前为 `1`；`provides/requires`
+声明能力，`conflicts` 声明插件或能力冲突。安装入口元数据与运行时 Manifest 分开校验。
+模块可导出插件对象，或接收 `{configuration, homeDir, workspaceRoot}` 的工厂。
+配置只含可序列化值；transport、回调、执行器、客户端由工厂创建。
 
 ```ts
 interface Plugin {
-  manifest: PluginManifest;
+  readonly manifest: PluginManifest;
   activate(context: PluginSetupContext): void | Promise<void>;
-  health?(options?: OperationOptions): Promise<PluginHealth>;
-  diagnostics?(options?: OperationOptions): Promise<readonly PluginDiagnostic[]>;
+  health?(): PluginHealth | Promise<PluginHealth>;
+  diagnostics?(): readonly PluginDiagnostic[] | Promise<readonly PluginDiagnostic[]>;
 }
 ```
 
-```ts
-interface PluginSetupContext {
-  registerAgentProvider(name: string, provider: AgentProvider): void;
-  registerSandboxProvider(name: string, provider: SandboxProvider): void;
-  registerTrackerProvider(name: string, provider: TrackerProvider): void;
-  registerIssueTrackerProvider(name: string, provider: IssueTrackerProvider): void;
-  registerBacklogProvider(name: string, provider: BacklogProvider): void;
-  registerHostProvider(name: string, provider: HostProvider): void;
-  registerVerificationProvider(name: string, provider: VerificationProvider): void;
-  registerNotificationProvider(name: string, provider: NotificationProvider): void;
-  registerTriggerProvider(name: string, provider: TriggerProvider): void;
-  registerContextProvider(name: string, provider: ContextProvider): void;
-  registerCredentialProvider(name: string, provider: CredentialProvider): void;
-  registerArtifactProvider(name: string, provider: ArtifactProvider): void;
-  registerRepositoryProvider(name: string, provider: RepositoryProvider): void;
-  registerPolicyProvider(name: string, provider: PolicyProvider): void;
-  registerObservabilityProvider(name: string, provider: EventStoreProvider | EvidenceStoreProvider | TracerProvider | MetricsProvider): void;
-  registerCapability(capability: string, name: string, provider: Provider): void;
-  onDispose(dispose: () => void | Promise<void>): void;
-  getProvider<T>(capability: string, name: string): T | undefined;
-  getCredentialProvider(name: string): CredentialProvider | undefined;
-}
-```
+`PluginSetupContext` 提供类型化 `register…Provider`、`registerCapability`、
+`getProvider/getCredentialProvider`，以及 `registerLifecycle`、`registerSystemAction`、
+模板/界面注册和 `onDispose`。注册名稳定、唯一；Manifest 声明本身不会构造 Provider 或挂载 UI。
 
-Provider 必须满足以下通用约束：
+## 3. 能力接口与调用协议
 
-```ts
-interface Provider {
-  id: string;
-  capabilities: Readonly<Record<string, boolean>>;
-  health?(options?: OperationOptions): Promise<PluginHealth>;
-  doctor?(options?: OperationOptions): Promise<readonly PluginDiagnostic[]>;
-}
-
-interface OperationOptions {
-  signal?: AbortSignal;
-}
-```
-
-- 所有外部操作必须支持取消或明确说明不支持。
-- 所有网络、进程和文件操作必须有超时、输出大小或资源大小上限。
-- 输入必须在信任边界校验，输出必须在返回前校验。
-- 不得把 Token、密码、私钥或完整认证响应写入日志、错误信息或普通返回值。
-- Provider 不得通过 shell 字符串拼接用户输入。
-
-## 5. 能力接口
-
-### Agent
-
-```ts
-interface AgentProvider extends Provider {
-  run(input: AgentRequest, options?: OperationOptions): Promise<AgentResult>;
-}
-```
-
-要求：支持工作区、提示词、超时、取消、输出收集和结果分类；不得改变 Core 的工作项状态。
-
-### Sandbox
-
-```ts
-interface SandboxProvider extends Provider {
-  create(input: SandboxRequest, options?: OperationOptions): Promise<SandboxSession>;
-  destroy(session: SandboxSession, options?: OperationOptions): Promise<void>;
-}
-```
-
-要求：声明工作区边界、资源限制、网络策略和可用 Agent；销毁必须幂等。
-
-### Host
-
-```ts
-interface HostProvider extends Provider {
-  listHosts(options?: OperationOptions): Promise<readonly HostRecord[]>;
-  resolve(host: string, options?: OperationOptions): Promise<HostRecord>;
-  exec(host: string, argv: readonly string[], options?: OperationOptions): Promise<HostExecResult>;
-  upload?(host: string, source: string, destination: string, options?: OperationOptions): Promise<void>;
-}
-```
-
-远程命令使用 argv 数组传递。远程命令非零退出返回 `HostExecResult`；连接、认证、超时、协议和工具缺失返回分类错误。
-
-### Tracker
-
-```ts
-interface IssueTrackerProvider extends Provider {
-  list(input: IssueListRequest, options?: OperationOptions): Promise<readonly Issue[]>;
-  get(input: IssueIdRequest, options?: OperationOptions): Promise<Issue>;
-  create(input: IssueCreateRequest, options?: OperationOptions): Promise<Issue>;
-  update(input: IssueUpdateRequest, options?: OperationOptions): Promise<Issue>;
-  comment(input: IssueCommentRequest, options?: OperationOptions): Promise<Comment>;
-  link(input: IssueLinkRequest, options?: OperationOptions): Promise<IssueLink>;
-}
-```
-
-只有声明并实现对应操作时才注册为可用 Provider。不得伪造外部平台 ID、URL 或状态。
-
-### Verification
-
-```ts
-interface VerificationProvider extends Provider {
-  verify(input: VerificationRequest, options?: OperationOptions): Promise<VerificationResult>;
-}
-```
-
-必须返回 `passed`、执行时长和可选输出。目标工作区由调用方传入，Provider 不得自行切换工作区。
-
-### Notification
-
-```ts
-interface NotificationProvider extends Provider {
-  notify(input: NotificationMessage, options?: OperationOptions): Promise<NotificationReceipt>;
-}
-```
-
-必须返回是否投递、目标渠道和安全错误信息。重复投递策略由调用方决定。
-
-### Trigger
-
-```ts
-interface TriggerProvider extends Provider {
-  register(input: TriggerDescriptor, options?: OperationOptions): Promise<void>;
-  unregister(id: string, options?: OperationOptions): Promise<void>;
-}
-```
-
-Trigger Provider 负责接收和登记事件，不得隐式启动常驻服务。监听器、定时器和事件分发由宿主生命周期管理。
-
-### Context / Memory
-
-```ts
-interface ContextProvider extends Provider {
-  gather(input: ContextQuery, options?: OperationOptions): Promise<readonly ContextFragment[]>;
-}
-```
-
-必须返回来源标识；内容应有大小上限。不得把未授权文件、凭据或秘密内容加入上下文。
-
-### Credential / Auth
-
-```ts
-interface CredentialProvider extends Provider {
-  resolve(input: CredentialReference, options?: OperationOptions): Promise<Credential>;
-}
-```
-
-Credential 只供 Provider 或 SDK 内部使用，不作为通用插件操作直接输出。优先返回短期凭据，并提供过期时间。
-
-### Artifact / Report
-
-```ts
-interface ArtifactProvider extends Provider {
-  put(input: ArtifactInput, options?: OperationOptions): Promise<ArtifactReference>;
-}
-```
-
-写入前校验大小、路径和媒体类型；返回引用、名称和摘要，不返回不必要的原始内容。
-
-### Repository / Workspace
-
-```ts
-interface RepositoryProvider extends Provider {
-  snapshot(input: RepositoryReference, options?: OperationOptions): Promise<RepositorySnapshot>;
-}
-```
-
-必须明确声明读、写、clone、push 等能力。未实现的操作不得注册或伪装成功。
-
-### Security / Policy
-
-```ts
-interface PolicyProvider extends Provider {
-  evaluate(input: PolicyRequest, options?: OperationOptions): Promise<PolicyDecision>;
-}
-```
-
-拒绝、评估失败或结果不完整时，受管执行默认阻止发布。策略结果必须包含规则标识和原因。
-
-### Observability
-
-通过 `registerObservabilityProvider` 注册通用 `observability.provider`，或通过
-`registerCapability` 注册专用能力。宿主自动发现已启用的 tracing、metrics 和
-event-store Provider，并按对象身份去重；同一对象注册多个能力时不会重复导出。
-
-| 接口 / 专用能力 | 操作与消费边界 |
+| 能力 / 接口 | 操作和结果契约 |
 |---|---|
-| `EventStoreProvider` / `observe.event-store` | `append`、`read`；仅在本地持久追加成功后镜像事件，本地 JSONL 始终是审计权威。 |
-| `TracerProvider` / `observe.tracing` | `startSpan`、`addEvent`、可选 `endSpan`；每条审计记录使用独立 span，trace 属性携带运行及工作项标识；兼容没有 `endSpan` 的旧 Provider。 |
-| `MetricsProvider` / `observe.metrics` | `record`；事件计数使用低基数属性，`run.event_persistence_ms` 是持久化延迟 histogram，不以运行或工作项标识作 label。 |
-| `EvidenceStoreProvider` / `observe.evidence` | `put`、`get`；接口可用，外部证据上传尚未自动接入审计流程。 |
+| `agent.provider` / `AgentProvider` | `createExecution`；声明会话、streaming、usage、resume 等能力及提示词上限，运行器拥有进程/会话生命周期。 |
+| `sandbox.provider` / `SandboxProvider` | `createWorktree`、`create`；返回的 Sandbox 管理 Agent 启动、命令执行与销毁，明确工作区和隔离边界。 |
+| `host.connection` / `HostConnectionPort` | `listHosts/resolve/exec`，可选 `upload`；命令使用 argv，远程非零退出仍返回原 `code/stdout/stderr`，连接/认证/超时单独分类。 |
+| `tracker.issue` / `IssueTrackerPort` | 字符串 issue ID 的 CRUD、评论、关系、`health/doctor`；保留真实项目、ID、key 和 URL。 |
+| `tracker.provider`、`backlog.provider` | 源码托管 issue/change request 与规范 backlog 身份；不把外部 issue key 当源码托管数字 ID。 |
+| `verification.provider` / `VerificationProvider` | `verify` 返回 `passed`、时长和可选输出；目标工作区来自调用方。 |
+| `notification.provider` / `NotificationProvider` | `notify` 返回 `delivered/channel/error?`；失败不得伪装为送达。 |
+| `trigger.provider` / `TriggerProvider` | `register/unregister`；宿主管理 listener、timer 和 action 派发，见第 6 节。 |
+| `context.provider` / `ContextSource` | `gather({scope,prompt,limit?})` 返回带 `origin` 的有界 fragment；只读取授权内容。 |
+| `credential.provider` / `CredentialProvider` | `resolve({name,scope?})` 返回私有 `secret/expiresAt?`；不开放通用 CLI 输出。 |
+| `artifact.provider` / `ArtifactSink` | `put({name,mediaType,bytes})` 返回 `{uri,name}`；写入前校验大小/路径，审计导出见第 7 节。 |
+| `repository.provider` / `RepositoryProvider` | 必需 `snapshot`；可选 `prepare/checkout/publish/cleanup/withLifecycleLease`，见第 5 节。 |
+| `policy.provider` / `PolicyCheckProvider` | `evaluate({action,context?})` 返回 `allowed/rule?/reason?`；required 闸门拒绝或异常阻止继续。 |
+| Observability | EventStore `append/read`，EvidenceStore `put/get`，Tracer `startSpan/addEvent/endSpan?`，Metrics `record`。本地审计始终为权威。 |
 
-```ts
-interface TraceContext {
-  readonly traceId: string;
-  readonly spanId: string;
-  readonly parentSpanId?: string;
-}
+通用能力 Provider 声明 `id` 与操作能力布尔表；Agent/Sandbox 使用各自的名称和能力集合。
+可取消操作使用 `ProviderOperationOptions.signal`；未支持取消的接口必须明确边界。
+Provider `health` 状态为 `ok/degraded/unavailable`，`doctor` 返回 `check/ok/detail?`；
+插件级 `health` 状态为 `healthy/degraded/unhealthy/unknown`，与 Provider 检查结果区分。
 
-interface TraceSpanOptions extends OperationOptions {
-  readonly attributes?: Readonly<Record<string, string | number | boolean>>;
-}
-
-interface MetricSample {
-  readonly name: string;
-  readonly value: number;
-  readonly kind?: 'counter' | 'gauge' | 'histogram';
-  readonly attributes?: Readonly<Record<string, string | number | boolean>>;
-}
-
-interface TracerProvider extends Provider {
-  startSpan(name: string, context: TraceContext, options?: TraceSpanOptions): Promise<void>;
-  addEvent(context: TraceContext, name: string, options?: TraceSpanOptions): Promise<void>;
-  endSpan?(context: TraceContext, options?: TraceSpanOptions & { readonly error?: boolean }): Promise<void>;
-}
-
-interface MetricsProvider extends Provider {
-  record(sample: MetricSample, options?: OperationOptions): Promise<void>;
-}
-
-interface EventRecord {
-  readonly runId: string;
-  readonly sequence: number;
-  readonly type: string;
-  readonly payload?: Readonly<{ readonly [key: string]: unknown }>;
-}
-
-interface EventStoreProvider extends Provider {
-  append(events: readonly EventRecord[], options?: OperationOptions): Promise<void>;
-  read(runId: string, options?: OperationOptions): Promise<readonly EventRecord[]>;
-}
-```
-
-宿主在审计记录方法返回前等待本次导出操作完成，每条记录共用 5000 ms 导出期限；
-到期中止在途请求并跳过剩余导出；专用注册只启用对应信号，通用注册启用全部已声明信号。
-不得依赖 CLI 退出后仍有 fire-and-forget 任务运行。资源通过现有 `onDispose` /
-Runtime 销毁流程清理。导出错误或超时与执行隔离，日志不得包含秘密或远端错误正文；
-本地审计追加失败仍阻止执行，未持久化的事件不作镜像。
-
-内置 `observability.otlp` / Provider `otlp` 发送 OTLP/HTTP JSON 到基础 endpoint
-加 `/v1/traces`、`/v1/metrics`；`serviceName` 默认 `runtime`，`resourceAttributes` 仅接受
-string、number、boolean 标量值。`headers` 每个值只接受环境或 Credential 引用，
-禁止原始字符串。`timeoutMs` 默认 2000、上限 300000，不能突破每条记录共用的宿主导出期限。
-配置及可选外部 collector 示例见[可观测性导出](plugins.zh.md#可观测性导出)；
-不包含厂商专用 Prometheus exporter、Langfuse API，也不宣称云账户端到端验证。
-OTLP Provider 将缺省 `MetricSample.kind` 解释为 `gauge`；取消信号必须中止在途网络请求。
-
-## 6. 生命周期
-
-```text
-发现
-  ↓
-读取 Manifest
-  ↓
-校验 ID / 版本 / 能力 / 依赖 / 冲突 / 配置
-  ↓
-加载入口或调用工厂
-  ↓
-按依赖顺序激活
-  ↓
-注册 Provider、Action、Trigger 和清理函数
-  ↓
-健康检查与诊断
-  ↓
-执行调用
-  ↓
-停用 Trigger / 等待异步操作
-  ↓
-逆序 dispose
-```
-
-激活规则：
-
-- 激活按依赖拓扑排序执行。
-- 任一插件激活失败，当前激活批次整体回滚。
-- 已完成注册的 Provider 必须撤销。
-- Runtime 在卸载会丢失其他插件必需能力时拒绝操作；这不等于保护所有具名 Provider 引用。
-- 健康检查无实现时返回 `unknown`，不得伪造 `healthy`。
-
-运行规则：
-
-- 普通 CLI、Desktop 和 Worker 默认不启动定时器或监听器。
-- 只有专用监听运行时显式启用 Trigger。
-- 关闭时先停止接收新事件，再等待已接受任务完成，最后销毁 Provider。
-- 清理失败记录诊断，但继续清理其他资源。
-
-## 7. 错误协议
-
-错误至少包含：
-
-```ts
-interface PluginError {
-  code: string;
-  message: string;
-  retryable?: boolean;
-  cause?: unknown;
-}
-```
-
-标准错误类别：
-
-- `invalid-input`：输入不符合协议。
-- `configuration-invalid`：插件配置无效。
-- `dependency-missing`：依赖能力不可用。
-- `authentication-required`：需要认证或凭据已失效。
-- `permission-denied`：权限不足。
-- `not-found`：目标资源不存在。
-- `unavailable`：外部服务或工具不可用。
-- `timeout`：超过调用时限。
-- `cancelled`：调用方取消。
-- `remote-failed`：远程目标执行失败。
-- `protocol-invalid`：外部响应不符合协议。
-- `internal-error`：插件内部错误。
-
-错误消息必须可供用户理解，不得包含秘密、完整响应、命令凭据或内部绝对路径。
-
-## 8. 配置、凭据与管理
-
-- 配置为 JSON 可序列化对象，须通过插件 Schema；内置配置拒绝未知字段，外部插件应显式限制额外字段。
-- 内置 secret 字段接受 `{"env":"TOKEN"}` 或 `{"provider":"credential.enterprise","name":"deployment","scope":"read"}`；`scope` 可省略，`provider` 必须是精确注册名。不要保存明文 secret。
-- 保存配置只校验 credential 引用形状，不调用 `resolve`、外部认证或网络；环境引用在构造时校验并取值。外部插件的 Schema 不会自动获得引用解析能力。
-- 激活时复用现有 Credential Provider，await 每个字段的一次 `resolve`，校验真实值后注册消费者；webhook URL 在解析完成后校验。通用引用注入值不随普通操作重取或刷新，重新激活会重取；Gmail 保留自身 OAuth 刷新行为。
-- 同批内置配置按具体 credential 引用排序，支持凭据链，拒绝自引用和循环；loader 等待批次外插件注册精确具名 Provider。缺失或循环报告 `load.dependencies`，实际解析失败不重试。
-- 凭据解析异常使用安全提示，已解析秘密不得进入事件、日志、诊断、普通结果或 Artifact。
-- 管理守卫只检查静态 manifest、入口元数据及配置，不执行插件或凭据操作。检查能力、冲突和精确的内置凭据引用；外部注册名不透明时，先禁用相关消费者再修改潜在凭据所有者。
-- Desktop 设置支持本地目录/npm 安装、启用/禁用、卸载及不超过 1 MiB 的本地 JSON 对象配置导入。内置插件只能禁用，卸载保留配置。
-- 修改影响后续 Runtime 与新 Worker，不热更新现有 Worker。Runtime 检查快照缓存到 Desktop 重启，刷新安装状态不表示 Worker 实时状态；检查本身可执行受信插件及凭据解析。
-- 活动 Worker 或无法核实的运行记录阻止安装/卸载；文件修改期间阻止启动 Worker。Renderer 不接收已存配置或秘密，不挂载动态 Desktop surface，也没有 OAuth 登录 UI。
-- 安装插件不会自动安装第三方 CLI、引擎或服务；本仓库已有适配器不代表已发布独立插件包，也不表示 Linear/Jira 已接入受管 backlog 全流程。
-
-## 9. 生命周期接入点
-
-插件可以声明以下扩展点：
-
-- `before-agent`：Agent 执行前。
-- `after-agent`：Agent 执行后。
-- `before-publish`：创建或更新发布对象前。
-- `cleanup`：执行结束后的资源清理。
-- `workflow.action`：受白名单约束的系统动作。
-- `surface.cli`、`surface.tui`、`surface.desktop`：界面注册信息，注册本身不挂载 UI；Desktop 设置的插件管理不加载动态 surface。
-
-策略、验证和上下文属于受管执行的一部分；插件只能返回结果，最终是否继续由 Core 和工作流状态机决定。
-
-## 10. 调用协议
-
-公共调用使用统一 Envelope：
+公共调用 Envelope：
 
 ```json
 {
   "capability": "verification.provider",
   "provider": "test-runner",
   "operation": "verify",
-  "input": {
-    "target": "workspace",
-    "command": ["npm", "test"]
-  }
+  "input": {"target": "workspace", "command": ["npm", "test"]}
 }
 ```
 
-调用要求：
+能力、注册名和操作须在白名单内；输入及结果均校验专用 Schema。CLI 的输入文件仅包含
+`input` 对象，位置参数组成 Envelope。Artifact 字节使用规范 base64，SDK 调用前解码。
+Agent/Sandbox、任意插件方法及凭据解析不属于通用 dispatcher；可选操作仍须检查能力。
+网络、进程、文件及输出须有边界；用户输入不得拼入 shell 字符串。
 
-- `capability`、`provider`、`operation` 必须来自已注册白名单。
-- `input` 必须通过操作专用 Schema 校验。
-- 输出必须通过对应结果 Schema 校验。
-- Credential Provider 不开放通用公开调用。
-- 不开放自动合并、审批和绕过策略的操作。
+## 4. 激活、凭据和配置生命周期
 
-## 11. 最小验收清单
+`发现 → Manifest/配置校验 → 依赖排序 → 激活及注册 → 操作 → 逆序 dispose`。
+激活失败回滚当前批次注册；外部资源、子进程和 timer 通过 `onDispose` 清理。
+清理应幂等，一项失败不阻止其余清理；缺少健康检查时不得伪造健康。
 
-- [ ] Manifest 可解析，ID 不带 `afk` 前缀。
-- [ ] 能力、依赖、冲突和配置 Schema 校验通过。
-- [ ] Provider 注册名稳定且唯一。
-- [ ] 输入、输出、错误和取消行为有测试。
-- [ ] 网络、进程、文件、响应和输出均有边界。
-- [ ] 凭据不进入日志、事件、Artifact 和普通返回值；配置校验不认证，异步解析后校验真实值。
-- [ ] 具体凭据依赖顺序、自环/互引环、缺失 Provider、重新激活取值均有测试。
-- [ ] 管理守卫不执行插件；能力可达性与精确具名引用的保护范围分别说明。
-- [ ] `health`、`doctor` 和缺失依赖诊断可用。
-- [ ] 激活失败可回滚，dispose 幂等。
-- [ ] 能完成安装、配置、激活、调用、禁用、启用和卸载。
-- [ ] 至少有一个真实本地 transport 或进程级集成测试。
-- [ ] 没有伪造外部资源状态或成功结果。
+内置 secret 字段接受 `{"env":"TOKEN"}` 或
+`{"provider":"credential.enterprise","name":"deployment","scope":"read"}`，
+`scope` 可省略，`provider` 为精确注册名。保存配置只校验引用形状，不认证、不访问网络。
+构造时读取环境引用；激活时 await 凭据解析并校验实际值后注册消费者，失败不泄露原始错误。
+同批具体凭据依赖排序，拒绝自环/互引环；缺失具名 Provider 延迟加载并给出诊断。
+通用引用按激活取值，重新激活重取；Gmail 保留自身 OAuth 刷新。
+
+管理守卫只检查静态 Manifest/配置及依赖，不执行插件；运行时检查可执行受信代码和凭据
+解析。修改影响后续 Runtime/Worker，不热更新已有 Worker。活动或不可核实的 Worker
+状态阻止安装/卸载，文件修改期间阻止 Worker 启动。Desktop 支持本地/npm 安装、启停、
+卸载及最多 1 MiB 的 JSON 对象配置导入；内置插件不可卸载，卸载保留配置。
+
+Google 面板经主进程完成客户端文件选择、浏览器授权、状态、取消和确认断开，凭据保存在
+系统钥匙串，Renderer 只接收安全账号状态。成功登录配置 Google 凭据，仅缺失时添加 Gmail，
+保留已有 Gmail 配置及禁用状态；后续配置失败保留已连接凭据，通知仍需显式集成。
+
+## 5. 受管 issue 与仓库生命周期
+
+外部 issue 导入指定的规范源码托管项目，默认 `hitl`。来源身份由 Provider、endpoint、
+来源项目和 issue ID 形成，创建加锁且幂等。剥离外部伪造绑定后保存唯一来源绑定，返回
+目标项目的规范工作项 ID；导入不隐式执行。状态同步须检查精确工作项与来源绑定，并提供
+显式状态映射；仅变化时回写，拒绝组织父项和缺失映射。
+
+仓库接口：
+
+| 操作 | 请求 → 结果 |
+|---|---|
+| `snapshot` | `{url,ref?}` → `{commit,branch,dirty}` |
+| `prepare` | `{repository:{url,ref?},runId}` → `{id,repository,runId,snapshot,path?}` |
+| `checkout` | `{workspaceId}` → 同身份工作区，分支 `afk/<runId>` |
+| `publish` | `{workspaceId}` → `{commit,branch,url?}`，必须匹配检查后的快照，不合并 |
+| `cleanup` | `{workspaceId}` → `{removed}` |
+| 组合 `run` | `{repository,runId,action,input}` → `{value,workspace,publication,cleanup}` |
+
+`RepositoryLifecycleService.run` 要求四个 lifecycle 操作，按
+`prepare → checkout → callback(workspace) → publish → cleanup` 执行，可由
+`withLifecycleLease` 覆盖全过程。公开 `run` 仅派发已注册 action，传入
+`{input,repositoryWorkspace,worktreePath}`；不自动替换工作项执行器。
+本地 managed 仓库要求规范租约键和 checkout 所有权；远程/特殊 backend 显式声明
+仓库/ref 白名单和支持的操作，默认仍仅 snapshot。
+
+远程工作区协议以 `/workspaces/<repository>` 为资源根：GET `snapshot`；POST `prepare`；
+句柄下 GET `sessions/<id>/snapshot` 及 POST `sessions/<id>/{checkout,publish,cleanup}`。
+`<repository>` 是 `encodeURIComponent` 编码后的单一路径段，不是 lifecycle identifier：
+可含空格和斜杠（如 `team/repo with space`），但拒绝 `.` / `..` 段、编码点段、 URL
+形式及控制字符。lifecycle 的 `workspaceId` / `runId` 仍按 identifier 规则严格校验。
+Bearer 只经 HTTPS。特殊 backend 使用 argv `[operation,"--json"]`，stdin 传 JSON 请求，
+stdout 返回 JSON 结果；其仓库标识可以是本地绝对路径或经校验的 HTTPS URL，作为单个 argv
+传入。两者都须校验句柄身份、运行/仓库对应关系及结果。
+
+清理拒绝脏工作区、未发布提交、所有权缺失或变化的分支；本地另拒绝迁移路径及嵌套
+worktree。失败/取消后以独立 15 秒 signal 清理，拒绝删除时保留现场；执行和清理同时
+失败须同时报告。租约、幂等键均不授权删除未发布工作或自动合并。
+
+## 6. Trigger 接收、重试与管理协议
+
+普通 Runtime 不启动 timer/listener，只有专用监听运行时显式启用。Descriptor 为
+`{id,kind,schedule?,payload?,input?}`；`schedule` 是正整数毫秒。条目选择注册 `action`，
+派发参数依次选 `input`、事件 payload、descriptor payload、`{}`，不合并。
+
+`listen --token-env <name> [--queue <path>]` 默认监听 loopback 8374，队列默认
+`~/.afk/triggers/deliveries.sqlite`。POST `/triggers/<provider>` 接受最多 1 MiB body，
+认证支持 bearer、GitLab token、原始 body 的 HMAC-SHA256；Webhook 自身签名不可被
+bearer 绕过。payload 校验并持久化后返回 `202` 回执，不证明执行完成。
+
+投递身份使用 Provider 名称及依次优先的 Idempotency-Key、GitHub delivery、GitLab event
+UUID，缺失时用 body hash；同 ID 不同内容返回 `409`。单拥有者私有 SQLite 保存
+`pending/processing/delivered/failed`，恢复中断投递；默认五次尝试、1000 ms 间隔，
+10000 行/64 MiB payload，不自动淘汰，满时 `503`。body 超限 `413`、认证失败 `401`、
+无效 payload `400`、未知 Provider/路由 `404`。
+
+| 管理操作 | 认证 HTTP 协议 |
+|---|---|
+| `deliveries --offset <非负整数> --limit <1-100>` | GET `/deliveries?offset=…&limit=…`，返回回执、容量和 `offset/limit/nextOffset`，可查更早失败，不含正文 |
+| `replay <delivery-id>` | POST `/deliveries/<id>/replay`，仅失败投递 |
+| `prune-deliveries` | POST `/deliveries/prune`，只删除超过默认七天去重窗口的 delivered 行，绝不删除 pending/failed |
+
+以上为 `plugin` 子命令，均要求 `--token-env`，接受 `--url`；只允许 HTTPS 或 loopback HTTP，
+拒绝 URL 凭据/query/fragment 及重定向。SDK 暴露 `TriggerQueueOptions/TriggerDeliveryStatus`
+和 `currentTriggerDeliveryId()`。队列配置可限定重试、行数、字节及 delivered 保留期。
+
+至少一次派发时，未显式给 `executionId` 的 `work-item.execute` 使用
+`SHA256(deliveryId + '\0' + canonical workItemId)`。仅实现前 journal 的 `requested/failed`
+允许重试，不自动重复已启动实现；启动后中断必须走原生所有权及审计对账，不保证任意重试
+续跑引擎或外部 action 恰好一次。关闭停止接收、等待在途操作并 dispose；pending 保留，
+interval timer 不补跑停机时段。
+
+## 7. Artifact 与审计证据协议
+
+`integrations.evidence` 为 `{provider,timeoutMs?}`，超时须为 1..60000 整数。
+仅配置根级 `integrations.evidence` 并选择已启用、可写的 Artifact Provider 时，默认
+Runtime 才初始化持久化本地加密证据存储并启用 `captureEvents: true`；未配置时不自动采集。
+选择或初始化失败必须通过必需的初始化闸门阻止受管执行。本地 key 以互斥方式
+初始化并复用已有 key，不能因重启或并发丢失解密能力。SDK 提供
+`createLocalEncryptedEvidenceStore`、`createPluginRunObserver`、`setPluginAuditArtifacts`
+和 `PluginRunObserverOptions`，调用方可显式选择可写 Artifact Provider 与本地证据接口。
+
+QA、发布、失败、运行结束事件先生成有界脱敏摘要并存本地；源事件持久化后校验证据摘要，
+拒绝 restricted 内容，再向选定 `ArtifactSink.put` 导出。文本内容脱敏，保留真实脱敏状态；
+返回 URI 去掉 userinfo/query/fragment，不得把凭据带入事件、日志或错误。
+`artifact.upload` 的 `effect.completed` 关联源事件/序号、本地 URI/hash、远端引用及成功/
+失败原因；其回执不递归上传。上传异常/超时不替代本地审计，本地追加失败仍阻止操作。
+既有 after-agent 报告 hook 与此独立。
+
+Observability 仅镜像已本地持久化的事件，同一对象重复注册去重。每条记录使用独立 span，
+运行/工作项身份放 trace 属性；metric 使用低基数属性，持久化延迟为 histogram。
+导出受截止时间和取消约束；无外部健康或投递证据时不得宣称真实服务可用。
+
+## 8. 经验交换、验证与采纳
+
+经验按规范项目隔离，记录来源运行/工作项、稳定失败身份、证据、状态、有效期和复发次数。
+结构化失败形成候选；建议文本修正不改变失败身份。`verify` 必须核对同项目完整本地审计、
+独立 QA 启动和通过、新证据，以及成功结束或确认发布并抵达对应人工合并闸门。
+后续失败取消资格；复发、撤销或过期退出召回，旧证明不能在复发后重放。
+成功经验同样来自独立 QA/完成审计，只有实现成功不构成经验验证。
+
+`export/import` 使用 version-1 JSON，上限 100 条/1 MiB，保留 origin、失败身份与有界
+来源收据，不携带验证权威或采纳计数。显式指定目标项目，导入及跨项目 `copy` 均为候选；
+重复导入保留身份，拒绝冲突或覆盖本地已验证/撤销历史。再次进入上下文前须目标项目独立
+QA 和新证据。HTTP 知识库检索不隐含远程写回。
+
+`metrics` 区分检索、显式采纳、去重复发；`adopt` 核对精确目标 run/work item 完整审计，
+且要求同项目有效已验证经验，按运行/工作项去重，每条最多 64 个采纳收据。召回不等于
+采纳，声明采纳不证明模型实际使用。Desktop 提供项目内列表/召回、验证和确认撤销；
+交换及采纳由 CLI 提供。共享账本限 1000 条、逻辑数据/收据 8 MiB、单条 32 KiB、每条
+256 来源，默认有效期 90 天；来源饱和仍撤回复发建议并禁止继续提升。
+
+## 9. 生命周期闸门与最小验收
+
+required init、before-agent、after-agent、before-publish 及逆序 cleanup 保留执行顺序和
+失败策略。插件模板需通过宿主验证；专用 QA/冲突模板只接受一个 inline Agent 步骤。
+不提供通用逐工具拦截 API；插件不能修改 Core 状态、放宽预算或关闭人工合并闸门。
+
+- Manifest、配置、依赖/冲突、唯一注册名及可选操作声明正确；激活失败回滚，dispose 幂等。
+- 信任边界校验输入/结果；取消、超时、资源及输出有界；缺失凭据/工具/协议有安全诊断。
+- 原始认证响应、秘密及未授权内容不进入 Renderer、上下文、事件、Artifact 或普通结果。
+- 错误区分输入、配置、认证、权限、缺失、不可用、超时、取消、远程失败及协议失败；保留可诊断分类，不伪造成功。
+- 验证安装、配置、激活、操作、禁用/启用、卸载及失败路径；至少有实际本地 transport/进程集成检查。
+- 租约/所有权、幂等/重放、清理拒绝、审计关联和经验验证边界具有可运行检查；真实服务验证单独记录，不用模拟 transport 代替。

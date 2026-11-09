@@ -27,6 +27,7 @@ import { formatExecutionFailure, formatExecutionFailureReport } from '../workflo
 import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
 import { assemblePrompt, buildExecutionPromptSegments, type PromptSegment } from '../workflows/execution-protocol.js';
 import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from '../workflows/backlog-context.js';
+import { prepareExperienceContext } from '../learning/runtime.js';
 import { measurePromptBudget } from '../../domain/agents/prompt-budget.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
@@ -285,12 +286,11 @@ export class QARunner {
         await this.logWorktreeDiagnostics(id, 'statusline-configured', worktreePath);
       }
 
-      const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot }).load('pre-merge-qa-verification');
-      const qaStep = compileTemplate(qaTemplate).groups
-        .flatMap(group => group.steps)
-        .find(step => step.kind === 'agent');
-      if (!qaStep || typeof qaStep.prompt !== 'string') {
-        throw new Error('pre-merge-qa-verification template must contain an inline agent prompt');
+      const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load('pre-merge-qa-verification');
+      const qaSteps = compileTemplate(qaTemplate).groups.flatMap(group => group.steps);
+      const [qaStep] = qaSteps;
+      if (qaSteps.length !== 1 || !qaStep || qaStep.kind !== 'agent' || typeof qaStep.prompt !== 'string') {
+        throw new Error('pre-merge-qa-verification template must contain exactly one inline agent step');
       }
 
       sandbox = await this.sandboxProvider.create({
@@ -373,6 +373,16 @@ export class QARunner {
         if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Plugin context must be a regular file');
         segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      const experienceWorkItemId = getLogContext()?.workItemId ?? backlog.workItemId;
+      if (experienceWorkItemId?.includes(':')) {
+        try {
+          const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
+            prompt: `${backlog.title}\n${backlog.description ?? ''}`.slice(0, 2000), plugins: this.plugins });
+          if (path) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
+        } catch {
+          logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
+        }
+      }
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
       if (overBudget) {
@@ -543,12 +553,11 @@ export class QARunner {
     targetBranch: string,
   ): Promise<{ resolved: boolean; summary: string; failureCode?: RunFailureReasonCode }> {
     logger.info({ backlogId, worktreePath, targetBranch, conflicts }, 'merge conflict detected; resolving it in the QA worktree');
-    const template = await new TemplateLoader({ projectRoot: this.projectRoot }).load('merge-conflict-resolution');
-    const step = compileTemplate(template).groups
-      .flatMap(group => group.steps)
-      .find(candidate => candidate.kind === 'agent');
-    if (!step || typeof step.prompt !== 'string') {
-      throw new Error('merge-conflict-resolution template must contain an inline agent prompt');
+    const template = await new TemplateLoader({ projectRoot: this.projectRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load('merge-conflict-resolution');
+    const steps = compileTemplate(template).groups.flatMap(group => group.steps);
+    const [step] = steps;
+    if (steps.length !== 1 || !step || step.kind !== 'agent' || typeof step.prompt !== 'string') {
+      throw new Error('merge-conflict-resolution template must contain exactly one inline agent step');
     }
     const goal = step.prompt
       .replaceAll('{targetBranch}', targetBranch)

@@ -251,11 +251,11 @@ Each task follows failing check → confirmed failure → minimal implementation
 
 **Dependencies:** T01. **Files:** `evidence.ts`, `analysis.ts`, matching tests, CLI `retro.ts` and its tests.
 
-- [ ] Extract evidence assembly and report parsing while preserving `retro run/show` output and signatures.
-- [ ] Reuse managed telemetry/readers; define message locators, audit sequences, completeness and source/content digests. An ID is not access permission.
-- [ ] Test corrupted audits, missing transcripts, malformed JSONL, explicit oversized-source splitting, secret/private-key redaction, source replacement and path escape. Insufficient evidence cannot produce a complete-process claim.
-- [ ] Run runtime `evidence.test.ts` / `analysis.test.ts` and `pnpm --filter afk exec vitest run src/commands/retro.test.ts`.
-- [ ] Remove personal directory dependencies and commit; report native-source support separately.
+- [x] Extract evidence assembly and report parsing while preserving `retro run/show` output and signatures.
+- [x] Reuse managed telemetry/readers; define message locators, audit sequences, completeness and source/content digests. An ID is not access permission.
+- [x] Test corrupted audits, missing transcripts, malformed JSONL, explicit oversized-source splitting, secret/private-key redaction, source replacement and path escape. Insufficient evidence cannot produce a complete-process claim.
+- [x] Run runtime `evidence.test.ts` / `analysis.test.ts` and `pnpm --filter afk exec vitest run src/commands/retro.test.ts`.
+- [x] Remove personal directory dependencies and commit; report native-source support separately.
 
 ### T04 — Restricted independent profile and plugin (P0)
 
@@ -450,11 +450,13 @@ Implementation follows this order and continues along the dependencies. Existing
 
 This table describes inspected code. Close each checklist only after implementation, validation and the required commit; passing a focused test does not complete the task or system.
 
+Kernel commit `4b7295e9` is pushed to the task branch. Validation: runtime full suite 3,018 passed/3 skipped, followed by 31 focused checks after the CLI-flag compatibility fix; CLI full suite 542 passed/2 skipped; skill catalog 86 passed. Runtime/CLI builds and typechecks, architecture and documentation checks passed. This phase has no live Claude E2E or new Desktop-governance E2E result.
+
 | Task | Current state | Next acceptance gate |
 | --- | --- | --- |
 | T01 | Committed as `d0190782`: strict contracts, candidate payloads, evidence binding and stable keys | Preserve compatibility and rerun boundary checks for subsequent contract changes |
 | T02 | Requests, candidates, cursors, publication journals and budgets implemented; cold-start contention and target-version binding fixed; attempt ledger connected to the Worker | Controlled disposition of unfinished attempts after crashes and publication recovery integration |
-| T03 | Evidence packs, immutable snapshots and shared prompts implemented; redaction, exact reference binding and frozen metrics fixed | Retro now shares restricted execution and public-package test imports; final re-review and aggregate commit remain |
+| T03 | Evidence packs, immutable snapshots and shared prompts implemented; redaction, exact reference binding and frozen metrics fixed | Independent re-review and kernel commit complete; automatic intake remains T06 |
 | T04 | Disabled-by-default plugin, dynamic Agent resolution and Claude analysis profile implemented | Live CLI verification of tool, MCP, Hook and automatic-skill restrictions; process fixtures are insufficient |
 | T05 | Single consumer, inbox handoff, cancellation, budgets and completed-call deduplication implemented; wrapper-child cleanup regression added | Persisted call identities, controlled retry/budget recovery and orphan handling after parent SIGKILL |
 | T06 | Automatic event reconciliation and corrections not implemented | Recoverable audit-to-inbox flow, late negative evidence and learning recursion prevention; achieve M1 |

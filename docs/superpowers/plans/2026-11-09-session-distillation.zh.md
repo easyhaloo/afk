@@ -251,11 +251,11 @@ function distillationKey(input: DistillationRequest): string {
 
 **依赖：** T01。**写入：** `evidence.ts`、`analysis.ts` 及测试；修改 `retro.ts` 和相应测试。
 
-- [ ] 从 `retro` 提取证据组装和报告解析，保留 `retro run/show` 输出兼容；不改变正式 CLI 签名。
-- [ ] 复用受管遥测与本地 reader，定义消息定位、审计序列、完整性、原始摘要 / 内容 digest；sourceId 不是访问权限。
-- [ ] 加入损坏审计、缺失转录、部分 JSONL、超大来源分片、secret / 私钥脱敏、文件替换和越界路径测试。没有足够来源时不得生成“完整业务路径”。
-- [ ] 运行 `pnpm --filter @afk/runtime exec vitest run src/application/learning/evidence.test.ts src/application/learning/analysis.test.ts` 与 `pnpm --filter afk exec vitest run src/commands/retro.test.ts`。
-- [ ] 移除个人目录依赖，提交；不同原生来源解析能力须独立报告。
+- [x] 从 `retro` 提取证据组装和报告解析，保留 `retro run/show` 输出兼容；不改变正式 CLI 签名。
+- [x] 复用受管遥测与本地 reader，定义消息定位、审计序列、完整性、原始摘要 / 内容 digest；sourceId 不是访问权限。
+- [x] 加入损坏审计、缺失转录、部分 JSONL、超大来源分片、secret / 私钥脱敏、文件替换和越界路径测试。没有足够来源时不得生成“完整业务路径”。
+- [x] 运行 `pnpm --filter @afk/runtime exec vitest run src/application/learning/evidence.test.ts src/application/learning/analysis.test.ts` 与 `pnpm --filter afk exec vitest run src/commands/retro.test.ts`。
+- [x] 移除个人目录依赖，提交；不同原生来源解析能力须独立报告。
 
 ### T04 — 受限独立分析配置与插件（P0）
 
@@ -450,11 +450,13 @@ pnpm release:cli --output /tmp/session-distillation-release
 
 此表描述已检查的代码状态；任务清单只有在实现、验证和提交均满足时才整体关闭。局部测试通过不等于该任务或系统已交付。
 
+内核已在 `4b7295e9` 提交并推送至任务分支。验证记录：Runtime 全包 3,018 项通过、3 项跳过；随后参数兼容修复的定向 31 项通过；CLI 全包 542 项通过、2 项跳过；技能目录 86 项通过。Runtime / CLI 构建与类型检查、架构与文档检查通过。尚未运行本阶段真实 Claude E2E 或新增 Desktop 治理 E2E。
+
 | 任务 | 当前状态 | 下一验收点 |
 | --- | --- | --- |
 | T01 | 已提交 `d0190782`；严格契约、候选载荷、证据绑定与幂等键已实现 | 后续契约改动保持兼容并重跑边界测试 |
 | T02 | 请求、候选、游标、发布日志及预算账本已实现；冷启动并发与目标版本绑定已修复；调用尝试账本已接入 Worker | 崩溃时未完成尝试的受控处置与发布恢复集成 |
-| T03 | 证据包、不可变快照及共享提示已实现；脱敏、精确引用绑定和冻结指标已修复 | 复盘已复用同一受限执行器并移除测试跨包源码导入；等待最终复审和整体提交 |
+| T03 | 证据包、不可变快照及共享提示已实现；脱敏、精确引用绑定和冻结指标已修复 | 已完成独立复审并提交内核；自动触发入口继续由 T06 完成 |
 | T04 | 默认关闭的插件、动态 Agent 解析与 Claude analysis 配置已实现 | 真实 CLI 验证工具、MCP、Hooks 与自动技能限制；当前进程 fixtures 不能替代此项 |
 | T05 | 单消费者、收件箱交接、取消、预算与完成去重已实现；wrapper 子进程清理回归已补 | 持久化调用身份、受控恢复与预算恢复；父进程被强杀后的孤儿进程治理 |
 | T06 | 未实现自动事件补查和纠正入口 | 原始审计到收件箱的可恢复链路、晚到否定证据及学习防递归；达到 M1 |

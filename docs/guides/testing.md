@@ -300,6 +300,25 @@ It closes the test issue and pull request and deletes its remote branches on
 completion. It does not merge into the target branch. Set `AFK_CODEX_E2E_KEEP=1`
 only when the remote artifacts should be retained for inspection.
 
+Real Docker acceptance uses existing local images and fails if explicitly enabled
+without a reachable engine; unset flags produce visible skips. Prepare `alpine:3.20`
+and the [Claude sandbox image](../../docker/README.md) before running:
+
+```sh
+AFK_DOCKER_E2E=1 pnpm --filter @afk/runtime exec vitest run \
+  src/infrastructure/sandbox/container/container.test.ts -t 'Container sandbox integration'
+
+CLAUDE_CONFIG_DIR="$HOME/.claude" AFK_DOCKER_E2E=1 AFK_REAL_CLAUDE_E2E=1 \
+  pnpm --filter @afk/runtime exec vitest run src/application/plugins/remote-service.integration.test.ts
+```
+
+The remote test runs an authenticated loopback HTTP service backed by actual Docker
+and Claude Code, checks unauthenticated rejection, and independently tests the generated
+code on the host. It reuses read-only mounted Claude configuration, creates no remote
+issue or pull request, and closes its sandbox/service and temporary workspace. This
+test uses real model credentials and may incur provider charges. It establishes the
+local HTTP/Docker/Claude path, not a separately deployed remote host or Podman.
+
 ---
 
 ## node-pty macOS Installation Issues
@@ -406,19 +425,19 @@ the changed-file comparison. Optional `COVERAGE_CHANGED_LINES`,
 changed files, not changed lines. No unstated 80% or full-repository gate is implied.
 
 The integrated implementation measured on November 9, 2026 with Node 24.18.0/macOS
-arm64 produced 3,858 passing tests and four explicit skips across 303 passing test
-files and two skipped files. The full coverage command exited successfully:
+arm64 produced 3,874 passing tests and five explicit skips across 304 passing test
+files and three skipped files. The full coverage command exited successfully:
 
 | Scope | Lines / statements | Functions | Branches |
 | --- | ---: | ---: | ---: |
 | Core | 97.40% | 100.00% | 82.79% |
 | Application | 97.46% | 93.02% | 92.06% |
 | Workflow graph | 99.00% | 100.00% | 84.39% |
-| Runtime | 90.75% | 85.02% | 86.16% |
+| Runtime | 90.77% | 85.07% | 86.19% |
 | CLI | 70.45% | 71.88% | 75.25% |
-| Combined measured scope | 87.56% | 83.43% | 84.98% |
+| Combined measured scope | 87.58% | 83.47% | 85.01% |
 
-The measured line numerator/denominator is 49,931/57,021. Use the generated report
+The measured line numerator/denominator is 49,956/57,036. Use the generated report
 after later changes; this measurement does not establish whole-repository coverage.
 The checked-in `scripts/coverage-baseline.json` retains the November 8 measurement as
 the nonregression seed. Every package and the total must retain its baseline
@@ -433,14 +452,16 @@ Separately validated on November 9: 948 Desktop unit tests, all 99 Electron E2E
 tests and two real Claude Code tests, including generated code independently
 checked and tested by the host. Desktop typecheck/production build, 16 real-PTY
 tests and the Node 22.17.0 registry-warning regression also passed in the preceding
-acceptance. External vendor services and real container isolation remain outside
-the synthetic matrix's evidence boundary.
+acceptance. Two real Docker integration cases and the authenticated HTTP/Docker/Claude
+case also passed on November 9 after Docker Desktop recovery. External vendor services
+remain outside the synthetic matrix's evidence boundary; actual container evidence is
+reported separately from simulated transport tests.
 
-The CLI 0.2.43 release was also packaged for macOS arm64 (5.2 MiB archive), installed
+The CLI 0.2.44 release was also packaged for macOS arm64, installed
 offline outside the repository with checksum verification, and checked across all
 23 command entry points. The same archive is installed locally through the standard
 installer, including the managed executable that currently leads PATH. An installed
-CLI smoke test additionally verifies authenticated durable receipt, actual artifact
+CLI 0.2.43 smoke test additionally verified authenticated durable receipt, actual artifact
 bytes, restart deduplication, pagination, retention and rejection of replaying a
 successful delivery. A real SSH no-op also passed. The earlier Gmail OAuth/mail
 delivery acceptance remains historical: the November 9 refresh attempt reported

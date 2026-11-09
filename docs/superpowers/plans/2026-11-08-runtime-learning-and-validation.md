@@ -109,7 +109,7 @@ Continue from the published baseline without repeating completed work. Independe
 ## Completion-phase evidence
 
 Fresh acceptance on November 9 used macOS arm64 / Node 24.18.0, with unrestricted
-process access and no process-probe substitute. CLI `0.2.43` is installed through
+process access and no process-probe substitute. CLI `0.2.44` is installed through
 the standard installer at both local and PATH-leading entry points.
 
 - Integration fixes: `snapshot` for the remote-workspace and special-git-backend providers
@@ -120,18 +120,18 @@ the standard installer at both local and PATH-leading entry points.
   assertion uses the redacted message, and one listener warning-callback test closes the CLI
   function-coverage gap.
 - Static checks and builds: `git diff --check`, typecheck, workspace build and Desktop
-  production build passed. The architecture guard covered 454 source and 255 desktop client
+  production build passed. The architecture guard covered 456 source and 255 desktop client
   files with zero quarantined items; the link checker covered 420 files with zero broken links.
-- Tests: the full shared-package, CLI and repository coverage run passed with 3,858 tests
-  across 303 files, four tests skipped, and exit code 0. The real process-group termination
+- Tests: the full shared-package, CLI and repository coverage run passed with 3,874 tests
+  across 304 files, five tests skipped, and exit code 0. The real process-group termination
   case passed. Desktop separately passed 948 unit tests and all 99 Electron E2E cases.
   Both real Claude Code integrations passed using the existing local configuration directory.
-- Coverage: 49,931/57,021 source lines (87.56%), functions 83.43%, branches 84.98%.
+- Coverage: 49,956/57,036 source lines (87.58%), functions 83.47%, branches 85.01%.
   Every package and the total exceed the unchanged November 8 measured seed in
   `scripts/coverage-baseline.json`; CI loads this baseline explicitly. Desktop and spawned
   subprocess internals are outside this source-coverage denominator.
-- Installed CLI: the 5.2 MiB archive passed isolated offline installation and all 23 command
-  entry points. An actual installed-CLI webhook/artifact smoke passed authenticated receipt,
+- Installed CLI: the 0.2.44 archive passed isolated offline installation and all 23 command
+  entry points. An installed-CLI 0.2.43 webhook/artifact smoke passed authenticated receipt,
   artifact-byte verification, restart persistence, deduplication with one attempt, pagination,
   retention, invalid replay rejection and clean shutdown. A real SSH command through
   `fangcloud-jumpserver` exited 0.
@@ -139,15 +139,18 @@ the standard installer at both local and PATH-leading entry points.
   November 7, and real refresh passed on November 8. The November 9 refresh attempt failed
   with `token.network`; no new message was sent. Live Desktop browser consent/revocation,
   Linear/Jira, object storage and remote workspaces are not established by mocked tests.
-  Docker/Podman are currently unhealthy. Plugins remain in-process trusted code and the human
-  merge gate is retained.
+  Docker Desktop recovered through its supported restart command: two real Docker cases
+  and one authenticated HTTP/Docker/Claude case passed, with independent host assertions.
+  The latter is an opt-in regression requiring both real-test flags; Podman remains
+  unavailable. Remote health without a probe is unknown, and an explicit Docker opt-in
+  fails when the engine is unavailable. Plugins remain in-process trusted code and the
+  human merge gate is retained.
 - Delivery: CLI `0.2.43` (version bump in the implementation commit). Remote inspection
   confirms [PR #290](https://github.com/easyhaloo/afk/pull/290) was merged into `main`,
   and [PR #291](https://github.com/easyhaloo/afk/pull/291) into `feat/plugin-architecture`
-  on November 8. The latter integration tree matches the verified implementation;
-  its additional implementation is not yet in `main`. The implementation and acceptance
-  documentation are delivered on `feat/plugin-acceptance` against `main`. No merge
-  was performed by this acceptance run.
+  on November 8. [PR #292](https://github.com/easyhaloo/afk/pull/292) was merged by the
+  user into `main` on November 9. Follow-up health and acceptance corrections are delivered
+  on `fix/plugin-health-readiness` with CLI `0.2.44`. The agent performs no merges.
 
 ## Prior baseline and wiki acceptance evidence
 

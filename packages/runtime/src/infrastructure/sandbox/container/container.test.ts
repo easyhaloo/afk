@@ -423,11 +423,13 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
 
   it.skipIf(!enabled)('a file written inside /workspace is visible on the host worktree', async () => {
     const wtPath = fs.mkdtempSync(join(os.tmpdir(), 'afk-docker-e2e-'));
+    let sb: ContainerSandbox | undefined;
+    let testFailed = false;
     try {
       const provider = new DockerContainerProvider();
-      if (!(await provider.isAvailable())) return; // silently skip
+      expect(await provider.isAvailable(), 'AFK_DOCKER_E2E=1 requires Docker: install the docker CLI and start or connect to a reachable Docker engine.').toBe(true);
 
-      const sb = new ContainerSandbox({ worktreePath: wtPath, image: 'alpine:3.20', user: '1000:1000' });
+      sb = new ContainerSandbox({ worktreePath: wtPath, image: 'alpine:3.20', user: '1000:1000' });
       sb.bindProvider(provider);
       await sb.createContainer();
 
@@ -440,20 +442,27 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
       const hostFile = join(wtPath, 'from-container.txt');
       expect(fs.existsSync(hostFile)).toBe(true);
       expect(fs.readFileSync(hostFile, 'utf-8').trim()).toBe('hello');
-
-      await sb.close();
+    } catch (error) {
+      testFailed = true;
+      throw error;
     } finally {
-      fs.rmSync(wtPath, { recursive: true, force: true });
+      try {
+        await sb?.close().catch(error => { if (!testFailed) throw error; });
+      } finally {
+        fs.rmSync(wtPath, { recursive: true, force: true });
+      }
     }
   });
 
   it.skipIf(!enabled)('runs a detached sandbox execution and observes goal_complete', async () => {
     const wtPath = fs.mkdtempSync(join(os.tmpdir(), 'afk-docker-agent-e2e-'));
+    let sb: ContainerSandbox | undefined;
+    let testFailed = false;
     try {
       const provider = new DockerContainerProvider();
-      if (!(await provider.isAvailable())) return;
+      expect(await provider.isAvailable(), 'AFK_DOCKER_E2E=1 requires Docker: install the docker CLI and start or connect to a reachable Docker engine.').toBe(true);
 
-      const sb = new ContainerSandbox({
+      sb = new ContainerSandbox({
         worktreePath: wtPath,
         image: process.env.AFK_SANDBOX_IMAGE || 'afk-sandbox-claude:node22',
         user: '1000:1000',
@@ -476,9 +485,15 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
         provider: 'container',
         structuredOutput: { type: 'goal_complete', summary: 'docker sandbox' },
       });
-      await sb.close();
+    } catch (error) {
+      testFailed = true;
+      throw error;
     } finally {
-      fs.rmSync(wtPath, { recursive: true, force: true });
+      try {
+        await sb?.close().catch(error => { if (!testFailed) throw error; });
+      } finally {
+        fs.rmSync(wtPath, { recursive: true, force: true });
+      }
     }
   });
 });

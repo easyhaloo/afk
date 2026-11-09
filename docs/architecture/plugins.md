@@ -817,6 +817,13 @@ runtime. The client factory accepts `transport: http`, `endpoint`, optional
 `token: {env: AFK_CONTAINER_TOKEN}` and `timeoutMs`; the CLI transport instead
 accepts `transport: cli`, `command` and optional `timeoutMs`.
 
+Remote sandbox health uses the transport's registered probe. An unprobed transport
+reports `unknown` without launching commands or requests. Configured HTTP probes
+use the authenticated `/health` endpoint and transport timeout; a negative result
+or failure reports `unhealthy` with a safe message. A successful probe confirms
+endpoint health only, not agent authentication or execution readiness. CLI
+transports without an explicit probe remain `unknown`.
+
 This is separate from `plugin listen` on port `8374`, which delivers trigger
 events. It does not add agent/sandbox execution to `plugin invoke`'s 48-operation
 whitelist. Clients must implement the remote-container transport protocol.

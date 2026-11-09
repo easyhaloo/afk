@@ -5,6 +5,7 @@ import type {
 } from '../../domain/agents/types.js';
 import type { Sandbox, SandboxOptions, SandboxProvider, SandboxCapability, WorktreeInfo } from './types.js';
 import { createHostCommandExecutor, validateTimeout } from '../host/command.js';
+import type { ProviderHealth } from '../../plugin-sdk/capabilities.js';
 
 export interface RemoteRequestOptions {
   readonly timeoutMs?: number;
@@ -228,8 +229,20 @@ export class RemoteContainerSandboxProvider implements SandboxProvider {
   readonly name = 'remote-container';
   readonly isolation = 'filesystem' as const;
   readonly capabilities = REMOTE_CAPABILITIES;
+  readonly health?: () => Promise<ProviderHealth>;
 
-  constructor(private readonly transport: RemoteContainerTransport) {}
+  constructor(private readonly transport: RemoteContainerTransport) {
+    const probe = transport.health?.bind(transport);
+    if (probe) this.health = async () => {
+      try {
+        return await probe()
+          ? { status: 'ok', message: 'Remote container health probe succeeded; execution readiness was not checked' }
+          : { status: 'unavailable', message: 'Remote container health probe reported unavailable' };
+      } catch {
+        return { status: 'unavailable', message: 'Remote container health probe failed' };
+      }
+    };
+  }
 
   async createWorktree(options: { iid: number; baseBranch: string }): Promise<WorktreeInfo> {
     return request(this.transport, 'workspace.create', options);

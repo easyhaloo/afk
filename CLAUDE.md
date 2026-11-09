@@ -44,6 +44,7 @@ dependency direction. Do not import another workspace's source by relative path.
 | --- | --- |
 | Architecture, execution design, glossary | [`docs/architecture/`](docs/architecture/overview.md) |
 | Capability plugins, provider matrix, installation, runtime governance and experience reuse | [`plugins.md`](docs/architecture/plugins.md) · [中文](docs/architecture/plugins.zh.md) |
+| Planned session distillation into knowledge, skills and tools | [Implementation plan](docs/superpowers/plans/2026-11-09-session-distillation.md) · [中文](docs/superpowers/plans/2026-11-09-session-distillation.zh.md) |
 | Task guides (workflows, skills, testing) | [`docs/guides/`](docs/guides/workflows.md) |
 | Architecture decision records | [`docs/adr/`](docs/adr/README.md) |
 | Desktop execution and interactive tmux access | [`ADR-0019`](docs/adr/0019-desktop-run-log-viewer-projection.md) |

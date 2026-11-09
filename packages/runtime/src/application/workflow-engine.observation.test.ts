@@ -12,9 +12,14 @@ import { join } from 'node:path';
 import { afterEach } from 'vitest';
 import { LifecycleDispatcher, type LifecycleContext } from './workflows/lifecycle.js';
 import { createDefaultPluginRuntime } from './plugins/default-runtime.js';
+import { createFailureDiagnostic, type FailureDiagnostic } from './workflows/failure-diagnostic.js';
+import * as learningRuntime from './learning/runtime.js';
+import { ExperienceStore } from './learning/experience-store.js';
+import type { Step } from '../domain/templates/types.js';
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
@@ -30,6 +35,45 @@ function runner() {
 }
 
 describe('WorkflowRunner audit identity', () => {
+  it.each([undefined, 'execution', 'learning'] as const)('preserves classified failure audit and captures ordinary experience only (%s)', async purpose => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'learning-purpose-failure-'));
+    roots.push(root);
+    vi.stubEnv('HOME', root);
+    const { workflow, record } = runner();
+    await workflow.run({ backlogId: '42', session: 'session-42', targetBranch: 'main', purpose,
+      observationRunId: 'execution-42', observationWorkItemId: 'github:acme/api#42' });
+    const internals = workflow as unknown as { classifyFailure(failure: FailureDiagnostic): Promise<FailureDiagnostic> };
+    await internals.classifyFailure(createFailureDiagnostic({ code: 'workflow_crash', message: 'Execution failed.' }));
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ purpose, runId: 'execution-42' }),
+      expect.objectContaining({ kind: 'failure.classified', code: 'workflow_crash' }));
+    expect(record.mock.calls.every(([context]) => context.purpose === purpose)).toBe(true);
+    if (purpose === 'learning') {
+      await expect(fs.lstat(learningRuntime.experienceStorePath())).rejects.toMatchObject({ code: 'ENOENT' });
+    } else {
+      const store = new ExperienceStore({ file: learningRuntime.experienceStorePath() });
+      try { expect(store.list({ scope: 'github:acme/api' })).toMatchObject([{ source: { runId: 'execution-42' } }]); }
+      finally { store.close(); }
+    }
+  });
+
+  it.each([undefined, 'execution', 'learning'] as const)('injects verified experience context for ordinary purpose only (%s)', async purpose => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'learning-purpose-context-'));
+    roots.push(root);
+    const recall = vi.spyOn(learningRuntime, 'prepareExperienceContext').mockResolvedValue('.afk/experience-context.md');
+    const { workflow, record } = runner();
+    await workflow.run({ backlogId: '42', session: 'session-42', targetBranch: 'main', purpose,
+      observationRunId: 'execution-42', observationWorkItemId: 'github:acme/api#42' });
+    const internals = workflow as unknown as {
+      resolveStepPrompt(step: Step, context: undefined, worktreePath: string): Promise<{ label: string; text: string }[]>;
+    };
+    const segments = await internals.resolveStepPrompt({ id: 'implement', prompt: 'Implement the change.' } as Step, undefined, root);
+    expect(segments.some(segment => segment.label === 'verified experience reference')).toBe(purpose !== 'learning');
+    expect(recall).toHaveBeenCalledTimes(purpose === 'learning' ? 0 : 1);
+    const recalled = record.mock.calls.filter(([, event]) => event.kind === 'decision.made' && event.command === 'experience.recall');
+    expect(recalled).toHaveLength(purpose === 'learning' ? 0 : 1);
+    expect(record.mock.calls.map(([, event]) => event.kind)).toContain('run.requested');
+  });
+
   it('preserves disabled providers in the shared plugin registries', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'disabled-providers-'));
     roots.push(root);

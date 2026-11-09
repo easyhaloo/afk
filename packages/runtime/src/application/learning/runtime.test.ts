@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { ObservationContext, RunEventData } from '@afk/core';
+import type { ObservationContext, RunEvent, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { PluginRuntime } from '../plugins/runtime.js';
 import { createFailureDiagnostic } from '../workflows/failure-diagnostic.js';
 import { ExperienceStore } from './experience-store.js';
-import { ExperienceContextProvider, experienceScope, experienceStorePath, prepareExperienceContext, recordExecutionExperience, recordSuccessfulExperience, verifyAdoptionRun, verifyExperienceRun } from './runtime.js';
+import { ExperienceContextProvider, experienceScope, experienceStorePath, prepareExperienceContext, recordExecutionExperience, recordSuccessfulExperience, successfulRunEvidenceFromEvents, verifyAdoptionRun, verifyExperienceRun } from './runtime.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -37,6 +37,19 @@ async function recordRun(root: string, runId: string, kinds: readonly RunEventDa
 }
 
 describe('runtime experience loop', () => {
+  it('uses the same successful-run gate for frozen history and refuses learning-purpose or mismatched run evidence', async () => {
+    const { root, store } = await fixture();
+    try {
+      await recordRun(root, 'proof', [{ kind: 'qa.started' }, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]);
+      const history: RunEvent[] = [];
+      for await (const event of new JsonlEventStore({ root }).read('proof')) history.push(event);
+      const input = { scope: 'github:acme/wiki', runId: 'proof', workItemId: 'github:acme/wiki#42', evidence: [] };
+      expect(successfulRunEvidenceFromEvents(input, history)).toMatchObject({ completionEvent: 'run.finished', evidence: ['run:proof#qa.passed'] });
+      expect(() => successfulRunEvidenceFromEvents(input, history.map(event => ({ ...event, context: { ...event.context, purpose: 'learning' as const } })))).toThrow('Learning runs');
+      expect(() => successfulRunEvidenceFromEvents({ ...input, runId: 'other' }, history)).toThrow('another run');
+    } finally { store.close(); }
+  });
+
   it('links a successful route to bounded redacted published-change and implementation/QA commit evidence', async () => {
     const { root, file, store } = await fixture();
     const implementationCommit = 'a'.repeat(40);

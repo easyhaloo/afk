@@ -140,6 +140,7 @@ function issueNumberOf(reference: string): number {
 }
 
 export interface RunnerOptions {
+  purpose?: ObservationContext['purpose'];
   /** Canonical backlog ID. */
   backlogId: string;
   /**
@@ -769,6 +770,7 @@ export class WorkflowRunner {
       ...(recorded.cause ? { cause: snapshotFailure(recorded.cause) } : {}),
       evidence: recorded.evidence,
     });
+    if (this.observationContext.purpose === 'learning') return;
     try { experienceScope(this.observationContext.workItemId); } catch { return; }
     try {
       recordExecutionExperience({ failure: recorded, runId: this.observationContext.runId, workItemId: this.observationContext.workItemId });
@@ -877,7 +879,7 @@ export class WorkflowRunner {
       });
     }
     const experienceWorkItemId = this.observationContext?.workItemId ?? this.activeBacklog?.workItemId;
-    if (experienceWorkItemId?.includes(':')) {
+    if (this.observationContext?.purpose !== 'learning' && experienceWorkItemId?.includes(':')) {
       try {
         const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
           prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins });
@@ -1727,6 +1729,7 @@ export class WorkflowRunner {
       traceId: runId,
       runId,
       workItemId: options.observationWorkItemId ?? options.workItemId ?? backlogId,
+      purpose: options.purpose,
       profileId: process.env.AFK_PROFILE ?? 'local',
       attempt: 1,
       actor: { kind: 'system', id: session },

@@ -3,10 +3,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
-import { buildEvidencePack, loadEvidencePack, redactEvidenceText, saveEvidencePack, validateEvidencePack, type EvidenceSourceInput } from './evidence.js';
+import { buildEvidencePack, loadEvidencePack, readEvidenceSource, redactEvidenceText, saveEvidencePack, validateEvidencePack, type EvidenceSourceInput } from './evidence.js';
 import { buildAnalysisPrompt } from './analysis.js';
 
 const roots: string[] = [];
+it('bounds direct evidence reads and applies the same allowed-root guard as pack construction', async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'evidence-source-'));
+  roots.push(root);
+  const path = join(root, 'source.txt');
+  await fs.writeFile(path, 'snapshot');
+  expect((await readEvidenceSource(path, root, 8))?.toString()).toBe('snapshot');
+  await expect(readEvidenceSource(path, root, 7)).rejects.toThrow(/safety limit/);
+  await expect(readEvidenceSource(path, join(root, 'other'), 8)).rejects.toThrow(/outside allowed root/);
+});
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
 async function fixture(content: string, format: EvidenceSourceInput['format'] = 'jsonl') {
   const root = await fs.mkdtemp(join(tmpdir(), 'afk-learning-evidence-'));
@@ -18,6 +27,17 @@ async function fixture(content: string, format: EvidenceSourceInput['format'] = 
 const message = (content: string) => JSON.stringify({ type: 'user', timestamp: '2026-11-09T00:00:00Z', message: { content } });
 
 describe('bounded immutable evidence', () => {
+  it.each(['root', 'path'] as const)('preserves temporary access error codes while resolving the evidence %s', async target => {
+    const source = await fixture(message('Review is required.'));
+    const canonicalRoot = await fs.realpath(source.allowedRoot);
+    const realpath = vi.spyOn(fs, 'realpath');
+    if (target === 'path') realpath.mockResolvedValueOnce(canonicalRoot);
+    realpath.mockRejectedValueOnce(Object.assign(new Error('Access temporarily denied'), { code: 'EACCES' }));
+    await expect(readEvidenceSource(source.path, source.allowedRoot, 4096)).rejects.toMatchObject({
+      code: 'EACCES', message: `Cannot resolve evidence ${target}`,
+    });
+  });
+
   it('removes accounts, email, IP addresses and forward slash Windows paths from both pack and prompt', async () => {
     const sensitive = 'username=alice@example.com host=10.23.45.67 cwd=C:/Users/alice/project';
     const source = await fixture(message(sensitive));

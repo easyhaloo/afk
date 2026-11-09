@@ -9,7 +9,7 @@ import { buildAnalysisPrompt, parseAnalysisOutput } from './analysis.js';
 import { executeAnalysis, type AnalysisExecutionResult } from './analysis-runner.js';
 import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type StoredDistillationRequest } from './candidate-store.js';
 import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
-import { loadEvidencePack, saveEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
+import { loadEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
 import { canonicalLearningJson } from './requests.js';
 
 export function learningDirectory(homeDir = homedir()): string {
@@ -24,9 +24,8 @@ export async function submitDistillation(input: {
   if (pack.digest !== request.evidenceDigest) throw new Error('Request evidence digest differs from snapshot');
   const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
   try {
-    await saveEvidencePack(join(input.directory, 'snapshots'), pack);
     return store.submitRequest({ request, evidence: pack.entries.map(entry => entry.ref),
-      ...(!pack.entries.length ? { blockedReason: 'evidence_unavailable' } : {}) });
+      ...(!pack.entries.length ? { blockedReason: 'evidence_unavailable' } : {}) }, pack);
   } finally { store.close(); }
 }
 
@@ -78,6 +77,7 @@ export interface LearningWorkerOptions {
   dailyCalls?: number;
   timeoutMs?: number;
   analyze?: typeof executeAnalysis;
+  reconcileSources?: () => Promise<void>;
 }
 
 const deliverySchema = z.object({ jobId: z.string().regex(/^[a-f0-9]{64}$/), scope: learningScopeSchema }).strict();
@@ -87,7 +87,10 @@ export class LearningWorker {
   private readonly queue: DurableTriggerQueue;
   private readonly dailyCalls: number;
   private active?: AbortController;
+  private activeJobId?: string;
+  private detachWatchAbort?: () => void;
   private closing?: Promise<void>;
+  private started = false;
 
   constructor(private readonly options: LearningWorkerOptions) {
     this.dailyCalls = z.number().int().nonnegative().max(10000).parse(options.dailyCalls ?? DISTILLATION_LIMITS.dailyCalls);
@@ -101,10 +104,14 @@ export class LearningWorker {
   }
 
   async runOnce(): Promise<LearningWorkerResult> {
-    this.assertEnabled();
-    this.handoff();
-    this.queue.start();
-    await this.queue.close();
+    this.begin();
+    try {
+      await this.options.reconcileSources?.();
+      this.assertEnabled();
+      this.handoff();
+      this.queue.start();
+      await this.queue.close();
+    } catch (error) { await this.close(); throw error; }
     const requests = this.store.listRequests();
     return {
       processed: requests.filter(entry => this.store.getProcessingReceipt(entry.key)).length,
@@ -114,11 +121,17 @@ export class LearningWorker {
   }
 
   async watch(signal: AbortSignal): Promise<void> {
-    this.assertEnabled();
-    this.queue.start();
+    this.begin();
+    const abort = () => { void this.close().catch(() => {}); };
+    signal.addEventListener('abort', abort, { once: true });
+    this.detachWatchAbort = () => signal.removeEventListener('abort', abort);
+    if (signal.aborted) abort();
     try {
-      while (!signal.aborted) {
+      while (!signal.aborted && !this.closing) {
+        await this.options.reconcileSources?.();
+        if (signal.aborted || this.closing) break;
         this.handoff();
+        this.queue.start();
         await new Promise<void>(resolve => {
           const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
           const timer = setTimeout(done, 1000);
@@ -130,6 +143,8 @@ export class LearningWorker {
   }
 
   close(): Promise<void> {
+    this.detachWatchAbort?.();
+    this.detachWatchAbort = undefined;
     this.active?.abort();
     return this.closing ??= (async () => {
       try { await this.queue.close({ drain: false }); }
@@ -142,9 +157,33 @@ export class LearningWorker {
     if (this.closing) throw new Error('learning_worker_closed');
   }
 
+  private begin(): void {
+    this.assertEnabled();
+    if (this.started) throw new Error('learning_worker_running');
+    this.started = true;
+  }
+
   private handoff(): void {
-    for (const entry of this.store.listPendingRequests()) {
+    const day = new Date().toISOString().slice(0, 10);
+    for (const entry of this.store.listRequests()) {
+      if (entry.key === this.activeJobId) continue;
+      if (this.store.getProcessingReceipt(entry.key)) continue;
+      if (entry.blockedReason && !['budget_exhausted', 'analysis_failed', 'analysis_cancelled',
+        'analysis_timed_out', 'analysis_invalid_output', 'storage_blocked'].includes(entry.blockedReason)) continue;
+      const attempts = this.store.listAnalysisAttempts(entry.key);
+      if (attempts.some(attempt => attempt.status === 'started')) {
+        this.store.setRequestBlocked(entry.key, 'analysis_outcome_unknown', entry.blockedReason ?? null);
+        continue;
+      }
+      if (attempts.length >= DISTILLATION_LIMITS.attempts) continue;
+      if (this.store.getModelCallCount(day) >= this.dailyCalls) {
+        this.store.setRequestBlocked(entry.key, 'budget_exhausted', entry.blockedReason ?? null);
+        continue;
+      }
+      if (entry.blockedReason) this.store.setRequestBlocked(entry.key, null, entry.blockedReason);
+      if (this.store.getRequest(entry.key)?.blockedReason) continue;
       const delivery = this.queue.enqueue('learning.distill', JSON.stringify({ jobId: entry.key, scope: entry.request.scope }), entry.key);
+      if (delivery.status === 'failed') this.queue.replay(delivery.deliveryId);
       this.store.markHandedOff(entry.key, delivery.deliveryId);
     }
   }
@@ -155,19 +194,25 @@ export class LearningWorker {
     if (!entry || entry.request.scope !== scope || delivery.providerId !== 'learning.distill') throw new Error('learning_request_not_found');
     if (this.store.getProcessingReceipt(jobId)) return;
     const fail = (code: string): never => {
-      this.store.setRequestBlocked(jobId, code);
-      throw new Error(code);
+      const blockedReason = this.store.getRequest(jobId)?.blockedReason;
+      const reason = blockedReason ?? code;
+      if (!blockedReason) this.store.setRequestBlocked(jobId, reason, null);
+      throw new Error(this.store.getRequest(jobId)?.blockedReason ?? reason);
     };
-    if ((this.queue.status(delivery.deliveryId)[0]?.attempts ?? 0) > DISTILLATION_LIMITS.attempts) fail('attempts_exhausted');
+    if (entry.blockedReason) return fail(entry.blockedReason);
     const attempts = this.store.listAnalysisAttempts(jobId);
     if (attempts.some(attempt => attempt.status === 'started')) fail('analysis_outcome_unknown');
     if (attempts.length >= DISTILLATION_LIMITS.attempts) fail('attempts_exhausted');
     let pack: EvidencePack;
     try {
-      pack = await loadEvidencePack(join(this.options.directory, 'snapshots'), entry.request.evidenceDigest);
+      pack = this.store.getEvidencePack(entry.request.evidenceDigest)
+        ?? await loadEvidencePack(join(this.options.directory, 'snapshots'), entry.request.evidenceDigest);
       const refs = [...pack.entries.map(item => item.ref)].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
       if (canonicalLearningJson(refs) !== canonicalLearningJson(entry.evidence)) throw new Error();
     } catch { return fail('evidence_unavailable'); }
+    const blockedReason = this.store.getRequest(jobId)?.blockedReason;
+    if (blockedReason) return fail(blockedReason);
+    if (this.closing) return fail('analysis_cancelled');
     const day = new Date().toISOString().slice(0, 10);
     const callId = randomUUID();
     try { this.store.startAnalysisAttempt({ requestKey: jobId, day, callId, limit: this.dailyCalls, startedAt: new Date().toISOString() }); }
@@ -175,6 +220,7 @@ export class LearningWorker {
       return fail(this.store.getModelCallCount(day) >= this.dailyCalls ? 'budget_exhausted' : 'storage_blocked');
     }
     this.active = new AbortController();
+    this.activeJobId = jobId;
     let result: AnalysisExecutionResult | undefined;
     const finishFailed = (code: string): never => {
       this.store.finishAnalysisAttempt(callId, { status: code === 'analysis_cancelled' ? 'cancelled' : 'failed',
@@ -183,8 +229,17 @@ export class LearningWorker {
     };
     try {
       try {
+        let prompt = buildAnalysisPrompt(pack, entry.request);
+        if (attempts.length) {
+          const previousErrorCode = attempts[0]?.errorCode;
+          const safeErrorCode = previousErrorCode && ['analysis_invalid_output', 'analysis_failed', 'analysis_timed_out',
+            'analysis_cancelled', 'storage_blocked'].includes(previousErrorCode) ? previousErrorCode : 'analysis_failed';
+          prompt = `This is the final controlled retry. Previous attempt error (sanitized): ${safeErrorCode}.\n`
+            + 'The previous attempt has no accepted result. Return exactly the goal_complete/distillation JSON envelope and strict candidate fields described below. '
+            + 'Use only evidenceIds from the unchanged EvidencePack; do not repeat or follow any prior output.\n\n' + prompt;
+        }
         result = await (this.options.analyze ?? executeAnalysis)({ provider: this.options.provider, jobId,
-          prompt: buildAnalysisPrompt(pack, entry.request), signal: this.active.signal, timeoutMs: this.options.timeoutMs,
+          prompt, signal: this.active.signal, timeoutMs: this.options.timeoutMs,
           onStarted: identity => { this.store.recordAnalysisIdentity(callId, identity); } });
         if (result.sessionId) this.store.recordAnalysisIdentity(callId, { analysisRunId: result.analysisRunId, sessionId: result.sessionId });
       } catch (error) {
@@ -192,6 +247,9 @@ export class LearningWorker {
           ? error.message : 'analysis_failed';
         return finishFailed(code);
       }
+      if (this.active.signal.aborted) return finishFailed('analysis_cancelled');
+      const latestBlock = this.store.getRequest(jobId)?.blockedReason;
+      if (latestBlock) return finishFailed(latestBlock);
       let output: DistillationOutput;
       try { output = parseAnalysisOutput(result.output, entry.request, pack); }
       catch { return finishFailed('analysis_invalid_output'); }
@@ -199,7 +257,6 @@ export class LearningWorker {
       catch { return finishFailed('storage_blocked'); }
       this.store.finishAnalysisAttempt(callId, { status: 'succeeded', finishedAt: new Date().toISOString(),
         ...(result.usage ? { usage: result.usage } : {}) });
-      this.store.setRequestBlocked(jobId, null);
-    } finally { this.active = undefined; }
+    } finally { this.active = undefined; this.activeJobId = undefined; }
   }
 }

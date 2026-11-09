@@ -4,7 +4,7 @@ import type { EventStorePort, MetricsPort, TracerPort } from '@afk/core';
 import type { EventStoreProvider, MetricsProvider, TracerProvider, TraceContext, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { logger } from '../io/logger.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
-import { RunObserver } from '../../observability/run-observer.js';
+import { RunObserver, type RunObserverDependencies } from '../../observability/run-observer.js';
 import { captureEventEvidence, createArtifactAudit, type ArtifactAuditOptions } from './artifact-audit.js';
 
 type ObservationProvider = Partial<EventStoreProvider & MetricsProvider & TracerProvider>;
@@ -16,11 +16,12 @@ type ExportScope = { context: TraceContext; pending: Promise<void>; controller: 
 
 export interface RunObserverOptions {
   readonly artifacts?: ArtifactAuditOptions;
+  readonly onPersisted?: RunObserverDependencies['onPersisted'];
 }
 
 export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, providers: readonly ObservabilityProviderSelection[] = [], options: RunObserverOptions = {}): RunObserver {
   const events = new JsonlEventStore({ root });
-  if (!providers.length && !options.artifacts?.provider.capabilities.write) return new RunObserver({ events });
+  if (!providers.length && !options.artifacts?.provider.capabilities.write) return new RunObserver({ events, onPersisted: options.onPersisted });
   const providersFor = (signal: ObservabilityProviderSelection['signals'][number]) => [...new Set(providers.filter(entry => entry.signals.includes(signal)).map(entry => entry.provider))] as ObservationProvider[];
   const tracers = providersFor('tracing');
   const metricsProviders = providersFor('metrics');
@@ -131,5 +132,5 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
       }
       return receipt;
     },
-  }, tracer, metrics });
+  }, tracer, metrics, onPersisted: options.onPersisted });
 }

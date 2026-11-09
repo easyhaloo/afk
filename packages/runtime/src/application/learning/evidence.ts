@@ -143,17 +143,17 @@ function within(root: string, path: string): boolean {
   return suffix !== '..' && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix);
 }
 
-async function readBounded(path: string, allowedRoot: string, limit: number): Promise<Buffer | undefined> {
+export async function readEvidenceSource(path: string, allowedRoot: string, limit: number): Promise<Buffer | undefined> {
   if (!within(resolve(allowedRoot), resolve(path))) throw new Error('Evidence path is outside allowed root');
   let root: string;
   try { root = await fs.realpath(allowedRoot); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw new Error('Cannot resolve evidence root');
+    throw Object.assign(new Error('Cannot resolve evidence root'), { code: (error as NodeJS.ErrnoException).code });
   }
   let canonical: string;
   try { canonical = await fs.realpath(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw new Error('Cannot resolve evidence path');
+    throw Object.assign(new Error('Cannot resolve evidence path'), { code: (error as NodeJS.ErrnoException).code });
   }
   if (!within(root, canonical) || (await fs.lstat(path)).isSymbolicLink()) throw new Error('Unsafe evidence path or symbolic link');
   const handle = await fs.open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -170,8 +170,13 @@ async function readBounded(path: string, allowedRoot: string, limit: number): Pr
     }
     const after = await handle.stat();
     const current = await fs.lstat(path);
+    if (current.isSymbolicLink() || current.ino !== before.ino || current.dev !== before.dev || await fs.realpath(path) !== canonical) {
+      throw new Error('Evidence source replaced during read');
+    }
     if (offset !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs
-      || current.isSymbolicLink() || current.ino !== before.ino || current.dev !== before.dev || await fs.realpath(path) !== canonical) throw new Error('Evidence source replaced during read');
+      || current.size !== after.size || current.mtimeMs !== after.mtimeMs || current.ctimeMs !== after.ctimeMs) {
+      throw Object.assign(new Error('Evidence source changed during read'), { code: 'EVIDENCE_SOURCE_UNSTABLE' });
+    }
     return bytes.subarray(0, offset);
   } finally { await handle.close(); }
 }
@@ -240,14 +245,16 @@ export async function buildEvidencePack(options: { sources: readonly EvidenceSou
     if (input.provider !== undefined) z.enum(['claude-code', 'codex', 'opencode']).parse(input.provider);
     if (input.format !== undefined) z.enum(['jsonl', 'json', 'text']).parse(input.format);
     if (input.kind === 'audit' && !input.runId) throw new Error('Audit evidence requires runId');
-    const bytes = await readBounded(input.path, input.allowedRoot, MAX_SOURCE_BYTES);
+    const bytes = await readEvidenceSource(input.path, input.allowedRoot, MAX_SOURCE_BYTES);
     if (!bytes) {
       if (input.expectedDigest) throw new Error('Evidence source missing or replaced');
       sources.push({ id: input.id, kind: input.kind, completeness: 'partial', messageCount: 0 });
       warnings.push(`${input.id}:missing`); continue;
     }
     const sourceDigest = hash(bytes);
-    if (input.expectedDigest && sourceDigest !== input.expectedDigest) throw new Error('Evidence source digest changed or replaced');
+    if (input.expectedDigest && sourceDigest !== input.expectedDigest) {
+      throw Object.assign(new Error('Evidence source digest changed or replaced'), { code: 'EVIDENCE_SOURCE_UNSTABLE' });
+    }
     if (bytes.length > maxBytes && !input.range) throw new Error('Evidence source requires an explicit message range shard');
     let text: string;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('Evidence source is not UTF-8'); }
@@ -325,7 +332,7 @@ export async function saveEvidencePack(directory: string, input: EvidencePack): 
 }
 export async function loadEvidencePack(directory: string, digest: string): Promise<EvidencePack> {
   digestSchema.parse(digest);
-  const bytes = await readBounded(join(directory, `${digest}.json`), directory, DISTILLATION_LIMITS.evidenceBytes);
+  const bytes = await readEvidenceSource(join(directory, `${digest}.json`), directory, DISTILLATION_LIMITS.evidenceBytes);
   if (!bytes) throw new Error('Evidence snapshot missing');
   const pack = validateEvidencePack(JSON.parse(bytes.toString('utf8')));
   if (pack.digest !== digest) throw new Error('Evidence snapshot digest mismatch');

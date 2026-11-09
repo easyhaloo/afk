@@ -14,7 +14,7 @@
  * or signal files — completion is detected purely via the stream-json output.
  */
 
-import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { randomUUID } from 'crypto';
 import { realpathSync } from 'fs';
 import type { AgentToolCallSummary } from '@afk/core';
@@ -37,6 +37,7 @@ import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
 import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
+import { spawnGuardedAnalysis } from './analysis-process-guard.js';
 
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
@@ -48,6 +49,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private readonly signalType: 'goal_complete';
   private readonly worktreePath: string;
   private readonly parseLine?: (line: string) => AgentEvent[];
+  private readonly analysisParentGuard: boolean;
   /** Mutable metadata so providers can update fields (e.g. threadId) after start. */
   private _mutableMetadata: AgentExecutionMetadata;
 
@@ -74,6 +76,7 @@ export class StreamingAgentExecution implements AgentExecution {
     sessionId?: string;
     metadata: AgentExecutionMetadata;
     parseLine?: (line: string) => AgentEvent[];
+    analysisParentGuard?: boolean;
   }) {
     this.id = randomUUID();
     this.sessionId = opts.sessionId;
@@ -84,6 +87,7 @@ export class StreamingAgentExecution implements AgentExecution {
     this.signalType = opts.signalType;
     this.worktreePath = opts.worktreePath;
     this.parseLine = opts.parseLine;
+    this.analysisParentGuard = opts.analysisParentGuard ?? false;
   }
 
   /**
@@ -96,7 +100,7 @@ export class StreamingAgentExecution implements AgentExecution {
     // prompt already contains the `/goal ` prefix (from the template).
     const argv = this.command.argv;
 
-    this.proc = spawn(this.command.argv[0]!, this.command.argv.slice(1), {
+    const spawnOptions: SpawnOptions = {
       cwd: this.command.cwd ?? this.worktreePath,
       env: { ...process.env, ...this.command.env },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -104,10 +108,18 @@ export class StreamingAgentExecution implements AgentExecution {
       // and can spawn a real agent child. Put the whole tree in one process
       // group so timeout/interrupt cleanup cannot leave the agent orphaned.
       detached: process.platform !== 'win32',
-    });
+    };
+    this.proc = this.analysisParentGuard
+      ? spawnGuardedAnalysis(argv, spawnOptions)
+      : spawn(argv[0]!, argv.slice(1), spawnOptions);
 
     // Send prompt via stdin
     if (this.proc.stdin) {
+      this.proc.stdin.on('error', () => {
+        this.error ??= { code: 'STDIN_ERROR', message: 'Agent input pipe closed before prompt delivery' };
+        this.done = true;
+        this.terminateProcess();
+      });
       this.proc.stdin.write(`${this.prompt}\n`);
       this.proc.stdin.end();
     }
@@ -509,7 +521,7 @@ export class StreamingAgentExecution implements AgentExecution {
         process.kill(descendant, signal);
       } catch { /* process already exited */ }
     }
-    if (process.platform !== 'win32') {
+    if (process.platform !== 'win32' && (!this.analysisParentGuard || parentRunning)) {
       try {
         process.kill(-pid, signal);
         return;

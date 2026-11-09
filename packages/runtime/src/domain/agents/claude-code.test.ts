@@ -23,7 +23,7 @@ describe('restricted analysis profile', () => {
       expect(built.argv).toContain(flag);
     }
     expect(built.argv[built.argv.indexOf('--tools') + 1]).toBe('');
-    expect(built.argv[built.argv.indexOf('--setting-sources') + 1]).toBe('');
+    expect(built.argv[built.argv.indexOf('--setting-sources') + 1]).toBe('user');
     expect(built.argv[built.argv.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(JSON.parse(built.argv[built.argv.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: {} });
     expect(JSON.parse(built.argv[built.argv.indexOf('--settings') + 1]!)).toMatchObject({ disableAllHooks: true });

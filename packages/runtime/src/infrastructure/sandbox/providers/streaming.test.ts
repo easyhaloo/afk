@@ -3,6 +3,7 @@ import { StreamingAgentExecution } from './streaming.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
 import { mkdirSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
@@ -11,6 +12,46 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  for (const analysisParentGuard of [false, true]) {
+    it.skipIf(analysisParentGuard && (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')))(`reports startup failure without crashing on a closed prompt pipe (guarded: ${analysisParentGuard})`, () => {
+      const source = new URL('./streaming.ts', import.meta.url).href;
+      const script = `
+        const { StreamingAgentExecution } = await import(${JSON.stringify(source)});
+        const execution = new StreamingAgentExecution({
+          command: { argv: [process.execPath, '-e', 'process.exit(2)'], cwd: process.cwd() },
+          analysisParentGuard: ${analysisParentGuard}, prompt: 'x'.repeat(256 * 1024), signalType: 'goal_complete',
+          worktreePath: process.cwd(), metadata: { provider: 'claude-code', transport: 'process' },
+        });
+        try {
+          execution.start();
+          const result = await execution.waitForResult({ completionTimeoutMs: 3000 });
+          console.log(JSON.stringify({ status: result.status }));
+        } finally { await execution.kill(); }
+      `;
+      const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script],
+        { cwd: process.cwd(), encoding: 'utf8', timeout: 10000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout.trim())).toEqual({ status: 'failed' });
+    });
+  }
+
+  it.skipIf(process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec'))('does not signal a potentially reused analysis process group after its guard exits', async () => {
+    const execution = new StreamingAgentExecution({
+      command: command("console.log('guard:' + process.ppid)"), analysisParentGuard: true,
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    await execution.waitForResult({ completionTimeoutMs: 5000 });
+    const guardPid = Number((await execution.captureOutput()).match(/guard:(\d+)/)?.[1]);
+    expect(guardPid).toBeGreaterThan(0);
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      await execution.kill();
+      expect(kill).not.toHaveBeenCalledWith(-guardPid, 'SIGKILL');
+    } finally { kill.mockRestore(); }
+  });
+
   it.skipIf(process.platform === 'win32').each([false, true])('kills a surviving child after its wrapper exits on interrupt (detached: %s)', async detached => {
     const execution = new StreamingAgentExecution({
       command: command(`const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', "process.on('SIGINT', () => {}); console.log('ready:' + process.pid); setInterval(() => {}, 1000)"], { detached: ${detached}, stdio: ['ignore', 'pipe', 'ignore'] }); child.stdout.pipe(process.stdout); console.log('wrapper:' + process.pid); setInterval(() => {}, 1000)`),

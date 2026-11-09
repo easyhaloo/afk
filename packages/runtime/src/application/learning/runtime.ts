@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import type { RunEvent } from '@afk/core';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
@@ -134,6 +135,16 @@ async function successfulRunEvidence(input: Parameters<typeof verifyExperienceRu
   const events = new JsonlEventStore({ root: input.root ?? process.env.AFK_EVENT_STORE_DIR });
   const integrity = await events.verify(input.runId);
   if (!integrity.valid || !integrity.lastSequence) throw new Error('Experience verification requires an intact recorded run');
+  const history: RunEvent[] = [];
+  for await (const event of events.read(input.runId)) history.push(event);
+  return successfulRunEvidenceFromEvents(input, history);
+}
+
+export function successfulRunEvidenceFromEvents(input: Omit<Parameters<typeof verifyExperienceRun>[0], 'root'>, history: readonly RunEvent[]): {
+  evidence: string[]; workflowName?: string; publishedChange?: string; completionEvent: string;
+  implementationCommit?: string; qaCommit?: string; changeUrl?: string;
+} {
+  parseCanonicalProject(input.scope);
   let verified = false;
   let qaStarted = false;
   let completed = false;
@@ -144,7 +155,9 @@ async function successfulRunEvidence(input: Parameters<typeof verifyExperienceRu
   let implementationCommit: string | undefined;
   let qaCommit: string | undefined;
   let changeUrl: string | undefined;
-  for await (const event of events.read(input.runId)) {
+  for (const event of history) {
+    if (event.context.runId !== input.runId) throw new Error('Verification evidence belongs to another run');
+    if (event.context.purpose === 'learning') throw new Error('Learning runs cannot verify ordinary execution experience');
     if (experienceScope(event.context.workItemId) !== input.scope) throw new Error('Verification run belongs to another project');
     if (input.workItemId !== undefined && event.context.workItemId !== input.workItemId) throw new Error('Verification run belongs to another work item');
     const data = event.data;

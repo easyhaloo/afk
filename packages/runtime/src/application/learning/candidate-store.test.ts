@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, chmodSync, readFileSync, linkSync, renameSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, chmodSync, readFileSync, linkSync, renameSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { openSqlite, requireNodeSqlite, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 import { createRequire } from 'node:module';
 import { CandidateStore } from './candidate-store.js';
+import { buildEvidencePack } from './evidence.js';
 import { request, evidence, output } from './ledger-data.fixture.spec.js';
 
 let root: string;
@@ -46,8 +47,8 @@ function response(child: ChildProcess): Promise<unknown> {
   });
 }
 
-async function startChild() {
-  const child = fork(fixture, [file], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+async function startChild(execArgv?: string[]) {
+  const child = fork(fixture, [file], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'], ...(execArgv ? { execArgv } : {}) });
   child.stderr?.on('data', chunk => childErrors.set(child, `${childErrors.get(child) ?? ''}${chunk}`.slice(-4000)));
   children.push(child);
   expect(await response(child)).toBe('ready');
@@ -121,6 +122,22 @@ describe('private learning ledger', () => {
     expect(() => store.startAnalysisAttempt({ ...start, callId: 'already-spent' })).toThrow(/capacity/i);
     expect(store.getModelCallCount(start.day)).toBe(1);
     expect(store.listAnalysisAttempts()).toEqual([]);
+  });
+
+  it.each(['source_invalidated', 'source_unstable'])('atomically refuses a %s source before reserving a paid attempt', blockedReason => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    store.setRequestBlocked(entry.key, blockedReason);
+    expect(() => store.startAnalysisAttempt({ requestKey: entry.key, day: '2026-11-10', callId: 'blocked-call', limit: 20,
+      startedAt: '2026-11-10T00:00:00.000Z' })).toThrow(/blocked/i);
+    expect(store.getModelCallCount('2026-11-10')).toBe(0);
+    expect(store.listAnalysisAttempts(entry.key)).toEqual([]);
+    store.setRequestBlocked(entry.key, null, 'budget_exhausted');
+    expect(store.getRequest(entry.key)?.blockedReason).toBe(blockedReason);
+    store.setRequestBlocked(entry.key, 'analysis_failed', null);
+    expect(store.getRequest(entry.key)?.blockedReason).toBe(blockedReason);
+    store.setRequestBlocked(entry.key, null, blockedReason);
+    expect(store.getRequest(entry.key)?.blockedReason).toBeUndefined();
   });
 
   it('records analysis identity once, rejects replacing either ID and keeps it across restart', () => {
@@ -304,6 +321,51 @@ describe('private learning ledger', () => {
     expect(store.getScanCursor({ ...scan, analyzerVersion: '2' })).toBeUndefined();
   });
 
+  it('stores immutable evidence with its request and rolls both back on submit or scan capacity failures', async () => {
+    const path = join(root, 'session.txt');
+    writeFileSync(path, 'Review before publishing.');
+    const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path, allowedRoot: root, format: 'text' }] });
+    const submission = { request: { ...request, evidenceDigest: pack.digest }, evidence: pack.entries.map(entry => entry.ref) };
+    const store = open({ pendingRequests: 1 });
+    const entry = store.submitRequest(submission, pack);
+    expect(store.getEvidencePack(pack.digest)).toEqual(pack);
+    expect(store.submitRequest(submission, pack).key).toBe(entry.key);
+    writeFileSync(path, 'A different verified source.');
+    const nextPack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path, allowedRoot: root, format: 'text' }] });
+    const next = { request: { ...request, sourceId: 'new-source', evidenceDigest: nextPack.digest }, evidence: nextPack.entries.map(item => item.ref) };
+    expect(() => store.submitRequest(next, nextPack)).toThrow(/capacity/i);
+    expect(() => store.commitScan({ ...scan, requests: [next] }, [nextPack])).toThrow(/capacity/i);
+    expect(store.getEvidencePack(nextPack.digest)).toBeUndefined();
+    expect(store.getScanCursor(scan)).toBeUndefined();
+    expect(store.listRequests()).toHaveLength(1);
+    store.close();
+    expect(open().getEvidencePack(pack.digest)).toEqual(pack);
+  });
+
+  it('counts pending snapshot bytes and rejects unrelated evidence before committing', async () => {
+    const path = join(root, 'large-session.txt');
+    writeFileSync(path, 'Review. '.repeat(1000));
+    const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path, allowedRoot: root, format: 'text' }] });
+    const store = open({ pendingBytes: 4000 });
+    expect(() => store.submitRequest(input, pack)).toThrow(/snapshot|evidence/i);
+    const submission = { request: { ...request, evidenceDigest: pack.digest }, evidence: pack.entries.map(entry => entry.ref) };
+    expect(() => store.submitRequest(submission, pack)).toThrow(/capacity/i);
+    expect(store.listRequests()).toEqual([]);
+    expect(store.getEvidencePack(pack.digest)).toBeUndefined();
+    expect(() => store.commitScan({ ...scan, requests: [] }, [pack])).toThrow(/snapshot|evidence/i);
+  });
+
+  it('atomically adds late-source evidence at an unchanged audit cursor without allowing cursor regression', () => {
+    const store = open();
+    store.commitScan(scan);
+    const late = { ...input, request: { ...request, sourceId: 'late-source', evidenceDigest: 'e'.repeat(64) } };
+    expect(store.commitScan({ ...scan, expectedCursor: scan.cursor, requests: [late] })).toHaveLength(1);
+    expect(store.listRequests()).toHaveLength(2);
+    expect(store.getScanCursor(scan)).toEqual(scan.cursor);
+    expect(() => store.commitScan({ ...scan, expectedCursor: scan.cursor, requests: [] })).toThrow(/advance/i);
+    expect(() => store.commitScan({ ...scan, expectedCursor: scan.cursor, cursor: { ...scan.cursor, head: 'd'.repeat(64) }, requests: [late] })).toThrow(/advance|cursor/i);
+  });
+
   it('blocks rather than evicts active references and accounts for bytes and receipts', () => {
     const store = open({ records: 3 });
     const entry = store.submitRequest(input);
@@ -315,6 +377,69 @@ describe('private learning ledger', () => {
     const tiny = open({ pendingBytes: 10 });
     expect(() => tiny.submitRequest({ ...input, request: { ...request, sourceId: 'new' } })).toThrow(/capacity/i);
     expect(tiny.getRequest(entry.key)).toBeDefined();
+  });
+
+  it.each(['records', 'bytes'] as const)('atomically withdraws sources at the %s admission limit without accepting new work', dimension => {
+    const store = open({ records: 5 });
+    const entry = store.submitRequest(input);
+    const receipt = store.completeRequest(entry.key, output);
+    store.reserveModelCall({ day: '2026-11-09', callId: 'fill', limit: 20 });
+    const inspect = new sqlite.DatabaseSync(file);
+    const bytes = Number(inspect.prepare('SELECT SUM(bytes) AS bytes FROM learning_ledger').get()!.bytes);
+    inspect.close();
+    store.close();
+    const full = open(dimension === 'records' ? { records: 5 } : { recordBytes: bytes });
+    expect(() => full.reserveModelCall({ day: '2026-11-09', callId: 'overflow', limit: 20 })).toThrow(/capacity/i);
+    expect(full.invalidateRequestSource(entry.key)).toBe(true);
+    expect(full.getRequest(entry.key)?.blockedReason).toBe('source_invalidated');
+    expect(full.getCandidate(receipt.candidateIds[0])?.state).toBe('conflict');
+    expect(full.getCandidateVersions(receipt.candidateIds[0])).toHaveLength(2);
+    expect(full.invalidateRequestSource(entry.key)).toBe(false);
+    expect(full.getCandidateVersions(receipt.candidateIds[0])).toHaveLength(2);
+    expect(() => full.submitRequest({ ...input, request: { ...request, sourceId: 'overflow' } })).toThrow(/capacity/i);
+    full.close();
+    const restarted = open();
+    expect(restarted.getRequest(entry.key)?.blockedReason).toBe('source_invalidated');
+    expect(restarted.getCandidate(receipt.candidateIds[0])?.state).toBe('conflict');
+  });
+
+  it('uses the bounded reserve only to tighten source state and rolls back incomplete withdrawal', () => {
+    const store = open({ records: 1 });
+    const entry = store.submitRequest(input);
+    store.setRequestBlocked(entry.key, 'source_unstable', null);
+    expect(store.getRequest(entry.key)?.blockedReason).toBe('source_unstable');
+    expect(() => store.setRequestBlocked(entry.key, null, 'source_unstable')).toThrow(/capacity/i);
+    expect(() => store.reserveModelCall({ day: '2026-11-09', callId: 'overflow', limit: 20 })).toThrow(/capacity/i);
+    store.close();
+    const normal = open();
+    normal.setRequestBlocked(entry.key, null, 'source_unstable');
+    const receipt = normal.completeRequest(entry.key, output);
+    normal.close();
+    const reduced = open({ records: 2 });
+    expect(() => reduced.invalidateRequestSource(entry.key)).toThrow(/capacity/i);
+    expect(reduced.getRequest(entry.key)?.blockedReason).toBeUndefined();
+    expect(reduced.getCandidate(receipt.candidateIds[0])?.state).toBe('candidate');
+    expect(reduced.getCandidateVersions(receipt.candidateIds[0])).toHaveLength(1);
+  });
+
+  it('rolls back source blocking when SQLite rejects the derived conflict version', () => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    const receipt = store.completeRequest(entry.key, output);
+    const sabotage = new sqlite.DatabaseSync(file);
+    try {
+      sabotage.exec(`CREATE TRIGGER reject_conflict_version BEFORE INSERT ON learning_ledger
+        WHEN NEW.kind = 'candidate-version' AND json_extract(NEW.payload, '$.state') = 'conflict'
+        BEGIN SELECT RAISE(ABORT, 'injected conflict write failure'); END;`);
+      expect(() => store.invalidateRequestSource(entry.key)).toThrow(/injected conflict write failure/);
+      expect(store.getRequest(entry.key)?.blockedReason).toBeUndefined();
+      expect(store.getCandidate(receipt.candidateIds[0])?.state).toBe('candidate');
+      expect(store.getCandidateVersions(receipt.candidateIds[0])).toHaveLength(1);
+      sabotage.exec('DROP TRIGGER reject_conflict_version');
+      expect(store.invalidateRequestSource(entry.key)).toBe(true);
+      expect(store.getRequest(entry.key)?.blockedReason).toBe('source_invalidated');
+      expect(store.getCandidate(receipt.candidateIds[0])?.state).toBe('conflict');
+    } finally { sabotage.close(); }
   });
 
   it('persists candidate versions, binds validation digests and only publishes through the application journal', () => {
@@ -434,16 +559,26 @@ describe('private learning ledger', () => {
   it('rolls back a future failed migration without losing real ledger data', () => {
     const entry = open().submitRequest(input);
     stores[0]!.close();
-    expect(() => openSqlite({ file, schema: '', version: 2, migrations: [{ from: 1, to: 2, migrate: database => {
+    expect(() => openSqlite({ file, schema: '', version: 3, migrations: [{ from: 2, to: 3, migrate: database => {
       database.exec('CREATE TABLE migration_probe(value TEXT); DELETE FROM learning_ledger;');
       throw new Error('migration interrupted');
     } }] })).toThrow(/migration interrupted/i);
     const restarted = open();
     expect(restarted.getRequest(entry.key)?.evidence).toEqual([evidence]);
     const check = new sqlite.DatabaseSync(file);
-    expect(check.prepare('PRAGMA user_version').get()?.user_version).toBe(1);
+    expect(check.prepare('PRAGMA user_version').get()?.user_version).toBe(2);
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'migration_probe'").get()).toBeUndefined();
     check.close();
+  });
+
+  it('preserves version-one requests on upgrade and rejects older writers after inline snapshots are enabled', () => {
+    const entry = open().submitRequest(input);
+    stores[0]!.close();
+    const legacy = new sqlite.DatabaseSync(file);
+    legacy.exec('PRAGMA user_version = 1');
+    legacy.close();
+    expect(open().getRequest(entry.key)?.evidence).toEqual([evidence]);
+    expect(() => openSqlite({ file, schema: '', version: 1 })).toThrow(/unsupported.*version/i);
   });
 
   it('uses private modes and rejects linked database, parent and sqlite sidecar paths', () => {
@@ -465,6 +600,52 @@ describe('private learning ledger', () => {
     symlinkSync(file, `${file}-wal`);
     expect(() => open()).toThrow(/symlink|symbolic/i);
   });
+
+  it.each(['removed', 'recreated', 'symbolic', 'linked', 'persistent', 'database'] as const)(
+    'rechecks an unlinked SQLite sidecar without accepting unsafe replacements (%s)', async scenario => {
+      open().close();
+      const journal = `${file}-journal`;
+      const external = join(root, 'external-sentinel');
+      if (scenario === 'recreated') writeFileSync(journal, '', { mode: 0o600 });
+      if (scenario === 'symbolic') symlinkSync(file, journal);
+      if (scenario === 'linked') {
+        writeFileSync(external, 'unchanged', { mode: 0o644 });
+        linkSync(external, journal);
+      }
+      const preload = join(root, 'unlinked-sidecar.mjs');
+      writeFileSync(preload, [
+        "import filesystem from 'node:fs';",
+        "import { syncBuiltinESMExports } from 'node:module';",
+        'const original = filesystem.lstatSync;',
+        `const database = ${JSON.stringify(file)};`,
+        `const target = ${JSON.stringify(scenario === 'database' ? file : journal)};`,
+        'let observed = false;',
+        'filesystem.lstatSync = function(path, ...options) {',
+        "  if (String(path) === target) process.stderr.write('target-lstat\\n');",
+        `  if (String(path) === target && (!observed || ${scenario === 'persistent'})) {`,
+        '    observed = true;',
+        '    const metadata = Reflect.apply(original, this, [database, ...options]);',
+        "    Object.defineProperty(metadata, 'nlink', { value: 0 });",
+        '    return metadata;',
+        '  }',
+        '  return Reflect.apply(original, this, [path, ...options]);',
+        '};',
+        'syncBuiltinESMExports();',
+      ].join('\n'));
+      if (scenario === 'removed' || scenario === 'recreated') {
+        const child = await startChild(['--import', preload]);
+        expect(await send(child, { action: 'submit', input })).toHaveProperty('result');
+        expect(open().listRequests()).toHaveLength(1);
+      } else {
+        await expect(startChild(['--import', preload])).rejects.toThrow(/regular|private|symbolic/i);
+        if (scenario === 'linked') {
+          expect(childErrors.get(children.at(-1)!)?.match(/target-lstat/g)).toHaveLength(2);
+          expect(statSync(file).nlink).toBe(1);
+          expect(readFileSync(external, 'utf8')).toBe('unchanged');
+          expect(statSync(external).mode & 0o777).toBe(0o644);
+        }
+      }
+    });
 
   it('refuses a parent directory replaced with a symbolic link after opening', () => {
     const store = open();
@@ -497,6 +678,20 @@ describe('private learning ledger', () => {
     expect(open().listPendingRequests()).toHaveLength(1);
     const conflict = await send(second, { action: 'submit', input: { ...input, request: { ...request, reason: 'correction' } } });
     expect(conflict).toEqual({ error: expect.stringMatching(/same key|content/i) });
+  });
+
+  it('atomically deduplicates snapshots submitted by independent producer processes', async () => {
+    const path = join(root, 'shared-session.txt');
+    writeFileSync(path, 'Independent approval is required.');
+    const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path, allowedRoot: root, format: 'text' }] });
+    const submission = { request: { ...request, evidenceDigest: pack.digest }, evidence: pack.entries.map(entry => entry.ref) };
+    const [first, second] = await Promise.all([startChild(), startChild()]);
+    const results = await Promise.all([send(first, { action: 'submit', input: submission, snapshot: pack }),
+      send(second, { action: 'submit', input: submission, snapshot: pack })]);
+    expect(results.every(result => (result as { result?: unknown }).result)).toBe(true);
+    const store = open();
+    expect(store.listRequests()).toHaveLength(1);
+    expect(store.getEvidencePack(pack.digest)).toEqual(pack);
   });
 
   it('cold-starts sixty independent process pairs against fresh ledgers without losing either producer', async () => {

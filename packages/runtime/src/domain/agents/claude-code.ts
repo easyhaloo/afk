@@ -82,7 +82,7 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
         argv: ['claude', '--print', '--output-format', 'stream-json', '--verbose',
           '--safe-mode', '--tools', '', '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
           '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--disable-slash-commands',
-          '--setting-sources', '', '--settings', '{"disableAllHooks":true,"enabledPlugins":{}}',
+          '--setting-sources', 'user', '--settings', '{"disableAllHooks":true,"enabledPlugins":{}}',
           '--no-session-persistence', '--no-chrome',
           ...(options.sessionId ? ['--session-id', options.sessionId] : [])],
         cwd: options.worktreePath,

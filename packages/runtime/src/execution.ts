@@ -18,3 +18,8 @@ export { buildEvidencePack, validateEvidencePack, saveEvidencePack, loadEvidence
 export { buildAnalysisPrompt, parseAnalysisOutput, buildRetroPrompt, parseModelJson,
   retroModelOutputSchema, retroReportSchema } from './application/learning/analysis.js';
 export { executeAnalysis, type AnalysisExecutionInput, type AnalysisExecutionResult } from './application/learning/analysis-runner.js';
+export { reconcileDistillationSources, submitLearningCorrection,
+  type ReconcileDistillationOptions, type DistillationReconciliation } from './application/learning/intake.js';
+export { LearningWorker, learningDirectory, queryLearningState, submitDistillation,
+  type LearningJob, type LearningState, type LearningWorkerOptions, type LearningWorkerResult } from './application/learning/worker.js';
+export type { LearningCandidate, AnalysisAttempt } from './application/learning/candidate-store.js';

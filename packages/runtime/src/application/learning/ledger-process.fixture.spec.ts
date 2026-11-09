@@ -2,11 +2,12 @@ import { CandidateStore } from './candidate-store.js';
 import { createRequire } from 'node:module';
 import { requireNodeSqlite, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 import type { CandidateState } from './contracts.js';
+import type { EvidencePack } from './evidence.js';
 
 const store = new CandidateStore({ file: process.argv[2]! });
 process.send?.('ready');
 process.on('message', (message: { action: 'submit' | 'complete' | 'scan' | 'transition' | 'reserve'; input: never;
-  key?: string; id?: string; version?: number; state?: CandidateState; pauseBeforeCommit?: boolean }) => {
+  key?: string; id?: string; version?: number; state?: CandidateState; pauseBeforeCommit?: boolean; snapshot?: EvidencePack }) => {
   try {
     if (message.pauseBeforeCommit) {
       const { DatabaseSync } = requireNodeSqlite<{ DatabaseSync: { prototype: SqliteDatabase } }>(createRequire(import.meta.url));
@@ -16,7 +17,7 @@ process.on('message', (message: { action: 'submit' | 'complete' | 'scan' | 'tran
         return execute.call(this, sql);
       };
     }
-    const result = message.action === 'submit' ? store.submitRequest(message.input)
+    const result = message.action === 'submit' ? store.submitRequest(message.input, message.snapshot)
       : message.action === 'scan' ? store.commitScan(message.input)
         : message.action === 'reserve' ? store.reserveModelCall(message.input)
         : message.action === 'transition' ? store.transitionCandidate(message.id!, message.version!, message.state!)

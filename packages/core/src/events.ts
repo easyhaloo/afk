@@ -10,6 +10,7 @@ export interface ObservationContext {
   profileId: string;
   attempt: number;
   leaseEpoch?: number;
+  purpose?: 'execution' | 'learning';
   actor: { kind: ObservationActorKind; id: string };
 }
 

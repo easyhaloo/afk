@@ -38,6 +38,7 @@ export interface RunObserverDependencies {
   clock?: ClockPort;
   ids?: IdPort;
   log?: Logger;
+  onPersisted?: (draft: RunEventDraft, receipt: AppendReceipt) => Promise<void>;
 }
 
 /** Records audit facts before reporting success to callers. */
@@ -86,6 +87,11 @@ export class RunObserver {
       });
       this.tracer.addEvent(context, data.kind, { event_sequence: receipt.lastSequence });
       this.metrics.histogram('run.event_persistence_ms', performance.now() - started, { event_type: data.kind });
+      try {
+        await this.deps.onPersisted?.(draft, receipt);
+      } catch {
+        this.log.warn({ ...fields, event_type: data.kind, code: 'derived_intake_failed' }, 'Derived intake failed; local audit remains available for recovery');
+      }
       return receipt;
     });
   }

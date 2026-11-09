@@ -291,6 +291,22 @@ Codex 使用当前仓库的真实 Tracker 与认证，创建专用 Issue 和分�
 结束后关闭测试 Issue、PR 并删除本次远程分支，不合并到目标分支。
 仅在需要保留远程产物供检查时设置 `AFK_CODEX_E2E_KEEP=1`。
 
+真实 Docker 验收需要本地已有 `alpine:3.20` 和 [Claude Sandbox 镜像](../../docker/README.md)。
+显式启用后引擎不可达必须失败；未启用时明确跳过：
+
+```sh
+AFK_DOCKER_E2E=1 pnpm --filter @afk/runtime exec vitest run \
+  src/infrastructure/sandbox/container/container.test.ts -t 'Container sandbox integration'
+
+CLAUDE_CONFIG_DIR="$HOME/.claude" AFK_DOCKER_E2E=1 AFK_REAL_CLAUDE_E2E=1 \
+  pnpm --filter @afk/runtime exec vitest run src/application/plugins/remote-service.integration.test.ts
+```
+
+远程用例通过带认证的 loopback HTTP 服务连接真实 Docker 和 Claude Code，验证未认证请求
+被拒绝，并在宿主独立测试生成代码。Claude 配置只读挂载，不创建远端 Issue/PR；结束后
+关闭 Sandbox、服务并清理临时工作区。此用例使用真实模型凭据，可能产生服务费用；验收
+范围为本机 HTTP/Docker/Claude 链路，不代表另行部署的远端主机或 Podman 已通过。
+
 ---
 
 ## node-pty macOS 安装问题
@@ -373,22 +389,22 @@ pnpm test:coverage:report
 
 产物包括 `coverage/coverage-summary.json`、`lcov.info`、`index.html`、`report.json` 和 `report.md`。采集使用匹配版本的 Vitest / V8 和单个测试 worker。CI 对报告缺失、空文件、遗漏可执行源码直接失败，测试失败时仍上传报告。`COVERAGE_BASE_REF` 选择变更基线；可配置 `COVERAGE_CHANGED_LINES`、`COVERAGE_CHANGED_STATEMENTS`、`COVERAGE_CHANGED_FUNCTIONS`、`COVERAGE_CHANGED_BRANCHES`，值为 0–100。门禁作用于完整变更文件，不是变更行；没有隐含的 80% 或全仓库覆盖率承诺。
 
-2026 年 11 月 9 日在 Node 24.18.0 / macOS arm64 上，对集成后的实现采集：3858 项通过、4 项明确跳过，测试文件为 303 项通过、2 项跳过，完整覆盖率命令退出码为 0。
+2026 年 11 月 9 日在 Node 24.18.0 / macOS arm64 上，对集成后的实现采集：3874 项通过、5 项明确跳过，测试文件为 304 项通过、3 项跳过，完整覆盖率命令退出码为 0。
 
 | 范围 | 行 / 语句 | 函数 | 分支 |
 | --- | ---: | ---: | ---: |
 | Core | 97.40% | 100.00% | 82.79% |
 | Application | 97.46% | 93.02% | 92.06% |
 | Workflow graph | 99.00% | 100.00% | 84.39% |
-| Runtime | 90.75% | 85.02% | 86.16% |
+| Runtime | 90.77% | 85.07% | 86.19% |
 | CLI | 70.45% | 71.88% | 75.25% |
-| 本次测量范围合计 | 87.56% | 83.43% | 84.98% |
+| 本次测量范围合计 | 87.58% | 83.47% | 85.01% |
 
-行覆盖分子 / 分母为 49931 / 57021；后续修改后以重新生成的报告为准，本次测量不代表全仓库覆盖率。已提交的 `scripts/coverage-baseline.json` 保留 11 月 8 日本地全量测量作为防回退基线，逐包及总量的行、语句、函数、分支均不得低于基线；本次测量全部通过，CI 显式载入同一基线。文件记录 Node、平台和提交来源；它是本地实测种子，不代表此前 CI 已通过覆盖率验收。首次 CI 应按实际 Node/平台评估，不能为了通过而无证据降低基线；基线缺失或格式错误直接失败。
+行覆盖分子 / 分母为 49956 / 57036；后续修改后以重新生成的报告为准，本次测量不代表全仓库覆盖率。已提交的 `scripts/coverage-baseline.json` 保留 11 月 8 日本地全量测量作为防回退基线，逐包及总量的行、语句、函数、分支均不得低于基线；本次测量全部通过，CI 显式载入同一基线。文件记录 Node、平台和提交来源；它是本地实测种子，不代表此前 CI 已通过覆盖率验收。首次 CI 应按实际 Node/平台评估，不能为了通过而无证据降低基线；基线缺失或格式错误直接失败。
 
-11 月 9 日另行验证：Desktop 948 项单测、全部 99 项 Electron E2E、2 项真实 Claude Code 测试（宿主独立检查生成代码并运行 Node 测试）全部通过。前次验收还包括 Desktop 类型检查与生产构建、16 项真实 PTY 测试和 Node 22.17.0 注册表警告回归。外部厂商服务与真实容器隔离仍不属于模拟矩阵的证明范围。
+11 月 9 日另行验证：Desktop 948 项单测、全部 99 项 Electron E2E、2 项真实 Claude Code 测试（宿主独立检查生成代码并运行 Node 测试）全部通过。前次验收还包括 Desktop 类型检查与生产构建、16 项真实 PTY 测试和 Node 22.17.0 注册表警告回归。Docker Desktop 恢复后另行通过 2 项真实容器测试及 1 项认证 HTTP/Docker/Claude 用例；真实证据与模拟矩阵分别报告，外部厂商服务不属于模拟矩阵的证明范围。
 
-CLI 0.2.43 已打包为 macOS arm64 独立发行包（5.2 MiB），在仓库外完成校验和验证、离线安装及全部 23 个命令入口检查；同一发行包已通过标准安装器安装到本机，包括当前 PATH 优先的受管命令。安装后实测认证投递持久化、制品字节、重启去重、分页、保留窗口和拒绝重放成功投递，真实 SSH 空操作也通过。此前 Gmail OAuth 与邮件送达验收保留为历史证据；11 月 9 日刷新报告 `token.network`，不据此认定当前 Gmail 可达，本次未发送新邮件。
+CLI 0.2.44 已打包为 macOS arm64 独立发行包，在仓库外完成校验和验证、离线安装及全部 23 个命令入口检查；同一发行包已通过标准安装器安装到本机，包括当前 PATH 优先的受管命令。0.2.43 安装后实测认证投递持久化、制品字节、重启去重、分页、保留窗口和拒绝重放成功投递，真实 SSH 空操作也通过。Gmail 邮件送达已于 11 月 7 日确认；11 月 9 日使用安装版 0.2.44 认证模块复测，OAuth 自动刷新及发送权限检查、账号身份验证通过，Gmail API discovery 返回 HTTP 200。本次未发送新邮件，仅证明当前认证和连通性，不代表新增送达验收。
 
 ## 反模式
 

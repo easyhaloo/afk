@@ -53,11 +53,13 @@ export function createRemoteContainerPlugin(provider: RemoteContainerSandboxProv
   return {
     manifest: { id: 'sandbox.remote-container', version: '0.1.0', apiVersion: 1, provides: ['sandbox.provider'], trusted: true },
     activate: context => context.registerSandboxProvider(provider.name, provider),
-    health: async () => ({ status: (await providerHealth(provider)) ? 'healthy' as const : 'degraded' as const }),
+    async health(): Promise<PluginHealth> {
+      if (!provider.health) return { status: 'unknown', message: 'No remote container health probe is registered' };
+      const health = await provider.health();
+      return {
+        status: health.status === 'ok' ? 'healthy' : health.status === 'unavailable' ? 'unhealthy' : 'degraded',
+        message: health.message,
+      };
+    },
   };
-}
-
-async function providerHealth(provider: RemoteContainerSandboxProvider): Promise<boolean> {
-  const transport = (provider as unknown as { transport?: { health?: () => Promise<boolean> } }).transport;
-  return transport?.health ? transport.health() : true;
 }

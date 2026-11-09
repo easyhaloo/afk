@@ -665,6 +665,11 @@ SIGINT/SIGTERM 后关闭 HTTP service/backend，再 dispose Runtime。
 `token: {env: AFK_CONTAINER_TOKEN}`、`timeoutMs`；CLI transport 使用
 `transport: cli`、`command` 和可选 `timeoutMs`。
 
+远程 Sandbox 健康检查使用 transport 已注册的探针。缺少探针时返回 `unknown`，不启动
+命令或请求。配置的 HTTP transport 使用带认证的 `/health` 及已有超时限制；返回否定结果
+或失败时报告 `unhealthy`，错误提示不暴露原始异常。探针成功只代表端点健康，不能证明
+Agent 已认证或可成功执行；未显式提供探针的 CLI transport 继续返回 `unknown`。
+
 它与 `8374` 端口投递 trigger 事件的 `plugin listen` 是不同服务，也不表示把
 Agent/Sandbox 执行加入 `plugin invoke` 的 48 项白名单。
 客户端需要实现 remote-container transport 协议。

@@ -15,8 +15,9 @@ disallowed-tools: >-
 **Mode:** AFK — the backlog item must have `executionMode: afk`.
 **Contract:** runnable backlog (AC present, dependencies complete, no parent
 execution) → pushed implementation branch and `verification`; QA publishes the
-PR/MR after PASS. Any automation failure escalates to canonical `blocked`
-state with `executionMode: hitl`.
+PR/MR after PASS. A change to a deployable service also carries the delivery
+contract below into `verification`. Any automation failure escalates to canonical
+`blocked` state with `executionMode: hitl`.
 
 ## Preconditions (fail-closed)
 
@@ -35,6 +36,36 @@ All checks are mandatory. Stop immediately if any fails.
 4. **The item is runnable.** Confirm `state: ready | rework`, `executionMode: afk`,
    and no `parentId` that makes this a grouping backlog. Claiming is atomic;
    a lost claim means another worker owns the item, so stop.
+
+## Delivery contract (before `verification`)
+
+A change that affects a deployable service reaches `verification` with three
+facts recorded. A local pass is an input to these three, not a substitute for
+them.
+
+| Fact | What it contains |
+|---|---|
+| **Deployable artifact (可部署物)** | image tag or artifact version that points at exactly one build |
+| **Deployment method (部署方式)** | the target repository's existing deploy asset — deploy script, compose file, or CI job — and the target **test** environment (测试环境) |
+| **Environment verification (环境验证步骤)** | the assertions that run on that test environment (endpoint, page, log, or probe) and the path that stores their output |
+
+Rules:
+
+- **Test only.** Pre-production and production are operated by a human (manual CI
+  console, manual deploy). An agent does not trigger them by any route.
+- **Reuse the repository's assets.** Extend an existing deploy file with a
+  switch; it ships no parallel deploy script or compose file. Before writing
+  anything new, look for the repository's existing deploy scripts (e.g.
+  `scripts/deploy/`), its stack definitions (e.g. `deployments/docker-compose*.yml`),
+  and its CI job.
+- **One owner per step.** The build and deploy step belongs to the repository's
+  build tooling (for example a `jenkins-build` skill, when one is installed);
+  this skill owns what is deployed, where, and what is asserted afterwards.
+- **Environment unavailable → `blocked`, not "verified".** Record `blocked` with
+  the retry condition — which environment, which artifact, what has to come back
+  — and keep the local checks reported as what they are: local checks.
+- **Not deployable?** A library, a document, or a config-only change states that
+  explicitly, so QA knows the environment gate does not apply to it.
 
 ## Routing
 
@@ -144,6 +175,9 @@ verification.
   → flaky, rerun. Identical failure twice → fix the cause.
 - **Self-reported completion is not evidence:** if Progress checklist
   does not show every AC line with evidence, MUST NOT proceed to the change request.
+- **Local pass, not deployed:** the change runs on the developer machine but
+  was not deployed → the environment verification is missing, so the item is
+  not ready for `verification` yet.
 - **Secrets discipline:** a secret in a WIP commit is unrecoverable —
   never read credential files beyond `.env.fork`.
 
@@ -155,6 +189,10 @@ verification.
 - MUST NOT treat comments as the sole progress record — WIP
   commit `Next:` trailer is the real handoff document.
 - MUST NOT squash/rewrite WIP commit history before the change request.
+- MUST NOT hand a deployable change to QA with local checks only — the delivery
+  contract is part of the handoff.
+- MUST NOT trigger a pre-production or production deployment by any route — both
+  are human-operated.
 - MUST NOT skip Step 3 — TDD methodology is not optional.
 - MUST NOT delete remote branches — remote history is the audit trail.
 - MUST NOT leave a tmux session hanging without idle detection.

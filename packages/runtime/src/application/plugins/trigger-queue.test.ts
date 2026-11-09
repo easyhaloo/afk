@@ -32,6 +32,38 @@ function database(file: string) {
 }
 
 describe('durable trigger queue', () => {
+  it('can stop dispatching on close while retaining pending work for a new owner', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    let finish!: () => void;
+    const active = new Promise<void>(resolve => { finish = resolve; });
+    const first = queue(file, vi.fn(async () => active));
+    first.instance.enqueue('learning.distill', '{}', 'first');
+    first.instance.enqueue('learning.distill', '{}', 'second');
+    first.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.dispatch).toHaveBeenCalledTimes(1);
+    const closed = first.instance.close({ drain: false });
+    finish();
+    await closed;
+    expect(first.dispatch).toHaveBeenCalledTimes(1);
+    const restarted = queue(file);
+    expect(restarted.instance.status().map(entry => entry.status).sort()).toEqual(['delivered', 'pending']);
+    restarted.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    await restarted.instance.close();
+    expect(restarted.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not dispatch a scheduled delivery when explicitly paused before it starts', async () => {
+    const file = queueFile();
+    const first = queue(file);
+    first.instance.enqueue('learning.distill', '{}', 'first');
+    first.instance.start();
+    await first.instance.close({ drain: false });
+    expect(first.dispatch).not.toHaveBeenCalled();
+    expect(queue(file).instance.status()[0]?.status).toBe('pending');
+  });
   it('paginates retained deliveries with validated bounds while preserving status by ID', () => {
     const file = queueFile();
     const { instance } = queue(file);

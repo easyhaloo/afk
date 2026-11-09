@@ -1238,3 +1238,21 @@ Successful implementation alone still cannot create verified advice.
 Implementation workflows execute the compiled Agent/System plan. The specialized `pre-merge-qa-verification` and `merge-conflict-resolution` templates each require exactly one inline Agent step; unsupported multi-step, System or file-prompt shapes fail before launching the reviewer and cannot silently omit checks.
 
 `observe` and `retro` inspect execution/session evidence; `experience` governs derived advice. These controls apply to sessions owned by AFK, not arbitrary sessions started directly in Agent CLIs. Desktop shares execution behavior and scoped experience verification/revocation; exchange and adoption use the CLI. The executable guarantee is evidence retention, scoped verified retrieval and withdrawal, rather than a promise that a model never repeats a mistake. See the [testing guide](../guides/testing.md) for the verification layers.
+
+### Session-distillation plugin kernel
+
+`learning.distiller` uses the existing `workflow.action` protocol and defaults to disabled. Configuration is `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000 }`; unknown fields are rejected. Currently only Claude Code qualifies for the `analysis` profile; other Providers return `analysis_unsupported`.
+
+| Standard action | Input | Behavior |
+| --- | --- | --- |
+| `learning.settings` | `{}` | Return the current instance configuration |
+| `learning.distill` | `{ request, pack }` | Validate the evidence snapshot and persist a private inbox request without calling the model |
+| `learning.jobs` | `{ scope }` | Query exact-project requests, blocking reasons and analysis attempts |
+| `learning.candidates` | `{ scope }` | Query exact-project candidates; model output cannot grant validation or publication state |
+| `learning.worker.once` | `{}` | Process eligible requests across projects through one global consumer, then exit |
+
+The Worker uses the existing durable delivery queue, atomically reserving the UTC daily budget and recording an attempt before execution. Completed-request replay makes no extra model call. Unfinished prior attempts retain unknown outcomes and block automatic retry; absent usage is not zero. Plugin disposal cancels Workers owned by that instance.
+
+Analysis uses a fresh temporary directory and session with tools, MCP, automatic skills, Hooks and session persistence disabled; `retro` shares this executor. Input is a bounded, redacted Evidence Pack with source digests. Findings must cite exact evidence IDs from that snapshot. `goal_complete` is transport completion, not verification authority.
+
+The current kernel does not include automatic event reconciliation, asset publication or new governance CLI/Desktop entry points. See the [session-distillation plan](../superpowers/plans/2026-11-09-session-distillation.md) for implementation order and live-model acceptance; local process fixtures are not live Claude E2E.

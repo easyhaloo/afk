@@ -27,6 +27,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
   parseLine?(line: string): AgentEvent[];
 
   async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
+    this.assertExecutionProfile(options);
     // A goal the provider would refuse is refused here, where the reason is
     // still known. Dispatching it would cost the whole idle timeout and
     // produce a timeout instead of a cause.
@@ -45,5 +46,11 @@ export abstract class ProcessAgentProvider implements AgentProvider {
 
   protected executionMetadata(_options: AgentExecutionOptions): AgentExecutionMetadata {
     return { provider: this.name, transport: 'process' };
+  }
+
+  protected assertExecutionProfile(options: AgentCommandOptions): void {
+    if (options.executionProfile === 'analysis' && !this.capabilities.has('analysis')) {
+      throw new Error(`analysis_unsupported: ${this.name}`);
+    }
   }
 }

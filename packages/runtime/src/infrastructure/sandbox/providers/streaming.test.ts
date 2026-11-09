@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { StreamingAgentExecution } from './streaming.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
 import { mkdirSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
@@ -11,6 +11,47 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it.skipIf(process.platform === 'win32').each([false, true])('kills a surviving child after its wrapper exits on interrupt (detached: %s)', async detached => {
+    const execution = new StreamingAgentExecution({
+      command: command(`const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', "process.on('SIGINT', () => {}); console.log('ready:' + process.pid); setInterval(() => {}, 1000)"], { detached: ${detached}, stdio: ['ignore', 'pipe', 'ignore'] }); child.stdout.pipe(process.stdout); console.log('wrapper:' + process.pid); setInterval(() => {}, 1000)`),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    let childPid: number | undefined;
+    try {
+      await vi.waitFor(async () => expect(await execution.captureOutput()).toContain('ready:'), { timeout: 2000 });
+      const output = await execution.captureOutput();
+      childPid = Number(output.match(/ready:(\d+)/)?.[1]);
+      const wrapperPid = Number(output.match(/wrapper:(\d+)/)?.[1]);
+      expect(Number.isInteger(childPid)).toBe(true);
+      await execution.interrupt('manual');
+      await vi.waitFor(() => expect(() => process.kill(wrapperPid, 0)).toThrow(), { timeout: 2000 });
+      expect(() => process.kill(childPid!, 0)).not.toThrow();
+      await execution.kill();
+      await vi.waitFor(() => expect(() => process.kill(childPid!, 0)).toThrow(), { timeout: 2000 });
+    } finally {
+      if (childPid) { try { process.kill(childPid, 'SIGKILL'); } catch {} }
+      await execution.kill();
+    }
+  });
+  it.skipIf(process.platform === 'win32')('can forcibly terminate an interrupted process that ignores SIGINT', async () => {
+    const execution = new StreamingAgentExecution({
+      command: command("process.on('SIGINT', () => {}); console.log('ready:' + process.pid); setInterval(() => {}, 1000)"),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    let processId: number | undefined;
+    try {
+      await vi.waitFor(async () => expect(await execution.captureOutput()).toContain('ready:'), { timeout: 2000 });
+      processId = Number((await execution.captureOutput()).match(/ready:(\d+)/)?.[1]);
+      expect(Number.isInteger(processId)).toBe(true);
+      await execution.interrupt('manual');
+      await execution.kill();
+      await vi.waitFor(() => expect(() => process.kill(processId!, 0)).toThrow(), { timeout: 1000 });
+    } finally {
+      if (processId) { try { process.kill(processId, 'SIGKILL'); } catch {} }
+    }
+  });
   it('collects Codex tools per line before output truncation and deduplicates replayed items', async () => {
     const started = { type: 'item.started', item: { id: 'cmd-1', type: 'command_execution', command: 'private command', status: 'in_progress' } };
     const completed = { type: 'item.completed', item: { id: 'cmd-1', type: 'command_execution', exit_code: 3, status: 'completed', aggregated_output: 'success private output' } };

@@ -1025,3 +1025,21 @@ workflow/commit/change 引用；仅实现成功仍不能产生已验证建议。
 实现工作流执行编译后的 Agent / System 计划。专用的 `pre-merge-qa-verification` 与 `merge-conflict-resolution` 模板分别只接受一个 inline Agent 步骤；多步骤、System 或文件提示词形态会在复核 Agent 启动前报错，不能静默省略检查。
 
 `observe` 和 `retro` 查看执行及会话证据，`experience` 管理从证据派生的建议。治理范围是 AFK 拥有的会话，不接管用户直接启动的任意 Agent 会话。Desktop 共享执行行为及项目内经验验证/撤销；交换和采纳由 CLI 提供。可执行保证是保留证据、按项目检索已验证经验、撤回无效经验，不能承诺模型永远不再犯错。[测试指南](../guides/testing.zh.md)分别说明验证层次。
+
+### 会话提炼插件内核
+
+`learning.distiller` 使用既有 `workflow.action` 协议，默认关闭。配置为 `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000 }`；未知字段拒绝。当前仅 Claude Code 提供合格的 `analysis` 配置，其他 Provider 返回 `analysis_unsupported`。
+
+| 标准动作 | 输入 | 行为 |
+| --- | --- | --- |
+| `learning.settings` | `{}` | 返回当前实例配置 |
+| `learning.distill` | `{ request, pack }` | 校验证据快照并写入私有收件箱，不直接调用模型 |
+| `learning.jobs` | `{ scope }` | 查询准确项目的请求、阻断原因和调用尝试 |
+| `learning.candidates` | `{ scope }` | 查询准确项目的候选；模型输出不授予验证或发布状态 |
+| `learning.worker.once` | `{}` | 一个全局消费者处理各项目待处理请求后退出 |
+
+Worker 通过已有持久队列投递；启动前原子预留 UTC 日预算并记录调用尝试。完成请求重放不重复调用模型，未完成的旧尝试保持结果未知并阻断自动重试；用量缺失不补零。插件释放会取消本实例拥有的 Worker。
+
+分析使用独立临时目录和新会话，禁用工具、MCP、自动技能和 Hooks，不持久化会话；`retro` 也复用同一执行器。输入是有大小限制和来源摘要的脱敏 Evidence Pack；发现仅能引用该快照的精确证据 ID。`goal_complete` 是传输完成标记，不是验证凭据。
+
+当前内核不包含自动事件补查、资产发布或新增治理 CLI / Desktop。完整实施顺序与真实模型验收见[会话提炼计划](../superpowers/plans/2026-11-09-session-distillation.zh.md)；本地子进程 fixtures 不等于真实 Claude E2E。

@@ -13,6 +13,7 @@ import { createBuiltinAgentPlugins, createBuiltinSandboxPlugins, createBuiltinVe
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
 import type { Plugin } from './runtime.js';
 import { ExperienceContextProvider } from '../learning/runtime.js';
+import { createLearningPlugin } from './learning.js';
 
 const identifier = z.string().min(1);
 export const capabilitySelectionSchema = z.object({
@@ -28,6 +29,7 @@ export function createDefaultBuiltinProviderPlugins(homeDir: string, workspaceRo
     createJumpserverPlugin(), ...createHostPlugins(), ...createBuiltinAgentPlugins(),
     ...createBuiltinSandboxPlugins({ worktreeManager: new WorktreeManager(workspaceRoot) }),
     ...createBuiltinVerificationPlugins(),
+    createLearningPlugin({ homeDir }),
     ...createBuiltinCapabilityPlugins({
       notifications: [new DesktopNotificationProvider()],
       contexts: [

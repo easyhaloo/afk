@@ -46,6 +46,7 @@ export type AgentCapability =
   | 'usage'           // Provider can report token usage
   | 'resume'           // Provider supports native session resume
   | 'fork'             // Provider supports session forking
+  | 'analysis'
   | 'interactive';     // Provider supports HITL attach */
 
 /** Token usage snapshot for a single generation. */
@@ -80,6 +81,7 @@ export interface AgentCommandOptions {
   interactive?: boolean;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
+  executionProfile?: 'development' | 'analysis';
   /** Immutable provider runtime resolved before backlog claim. */
   runtime?: AgentRuntimeSelection;
 }

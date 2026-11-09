@@ -35,6 +35,7 @@ import {
 } from '../../infrastructure/providers/index.js';
 import type { CommandExecutor, FetchTransport } from '../../infrastructure/providers/dependencies.js';
 import { OtlpObservabilityProvider } from '../../infrastructure/observability/otlp-provider.js';
+import { createLearningPlugin, learningConfigurationSchema } from './learning.js';
 
 export interface ConfiguredTriggerEvent {
   readonly pluginId: string;
@@ -275,6 +276,7 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
     'trigger.schedule': define(z.object({ triggers: scheduleDescriptors }).strict(), config => trigger(new ScheduleTriggerProvider({ onFire: descriptor => fire('trigger.schedule', descriptor) }), config.triggers)),
     'trigger.git-push': define(z.object({ includeDeleted: z.boolean().optional(), triggers: webhookDescriptors }).strict(), config => trigger(new GitPushTriggerProvider({ includeDeleted: config.includeDeleted, onPush: (payload, descriptor) => fire('trigger.git-push', descriptor, payload) }), config.triggers)),
     'trigger.issue-event': define(z.object({ triggers: webhookDescriptors }).strict(), config => trigger(new IssueEventTriggerProvider({ onIssue: (payload, descriptor) => fire('trigger.issue-event', descriptor, payload) }), config.triggers)),
+    'learning.distiller': define(learningConfigurationSchema, config => ({ provider: {}, plugin: createLearningPlugin({ homeDir: options.homeDir, config }) })),
     'context.experience': define(z.object({}).strict(), () => {
       const provider = new ExperienceContextProvider(experienceStorePath(options.homeDir ?? homedir()));
       return capability(provider, { contexts: [provider] });

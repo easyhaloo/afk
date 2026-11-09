@@ -30,6 +30,8 @@ export type { CapabilityInvocation } from '../application/plugins/operations.js'
 export { createCapabilityLifecycle, registerVerificationSystemActions } from '../application/plugins/integrations.js';
 export type { CapabilityLifecycleSelection, VerificationSystemActionSelection } from '../application/plugins/integrations.js';
 export { createConfiguredPlugins } from '../application/plugins/configured.js';
+export { createLearningPlugin, learningConfigurationSchema, learningPluginManifest } from '../application/plugins/learning.js';
+export type { LearningConfiguration } from '../application/plugins/learning.js';
 export type { ConfiguredPluginsOptions } from '../application/plugins/configured.js';
 export { startRemoteContainerService } from '../application/plugins/remote-service.js';
 export type { RemoteContainerServiceOptions } from '../application/plugins/remote-service.js';

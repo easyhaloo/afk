@@ -8,13 +8,13 @@
 
 **Tech Stack:** TypeScript, Zod, Node SQLite, existing plugin runtime and Agent Providers, Vitest, existing Python Wiki utilities, Electron / React / Playwright.
 
-**Status:** Development plan. New interfaces, configuration, commands and files below are proposed contracts, not claims about implemented behavior. See the [Chinese plan](2026-11-09-session-distillation.zh.md) and [previous completed phase](2026-11-08-runtime-learning-and-validation.md).
+**Status:** In progress; updated 2026-11-10. T01 is committed; section 13 tracks the remaining tasks. An implementation is not complete until its acceptance gates pass. See the [Chinese plan](2026-11-09-session-distillation.zh.md) and [previous completed phase](2026-11-08-runtime-learning-and-validation.md).
 
 ---
 
 ## 1. Goal, baseline and exclusions
 
-The baseline is the implementation merged by the user in PR #294. The checkout inspected while planning is `8b5a911a`. Before implementation, fetch and verify the actual integration / PRD baseline; a recorded hash does not replace current Git inspection. Planning does not change runtime code, invoke paid analysis or install generated tools.
+The baseline is the implementation merged by the user in PR #294. Planning initially inspected `8b5a911a`; implementation verified the local `origin/main` at `7194f5eb` and uses `feat/session-distillation`. Recheck the baseline before subsequent integration. Automated fixtures are not live model tests; paid analysis and generated-tool installation retain their explicit execution prerequisites.
 
 | Requirement | Required result |
 | --- | --- |
@@ -51,10 +51,10 @@ No model training, graph database, vector service, multitenant cloud, automatic 
 ```mermaid
 flowchart TD
     A[Managed execution / explicit import / current correction] --> B[Verified audit and source references]
-    B --> C[Durable request inbox]
+    B --> E[Normalized redacted Evidence Pack]
+    E --> C[Durable request inbox]
     C --> D[Single consumer / existing delivery queue]
-    D --> E[Normalized redacted Evidence Pack]
-    E --> F[learning.distiller / independent tool-free session]
+    D --> F[learning.distiller / independent tool-free session]
     F --> G[Strict schema / candidate ledger / conflicts]
     G --> H[Fact and process verification]
     G --> I[Independent corrective QA]
@@ -231,11 +231,11 @@ Each task follows failing check → confirmed failure → minimal implementation
 
 **Dependencies:** none. **Files:** `contracts.ts`, `contracts.test.ts`.
 
-- [ ] Implement section 4 strict schemas, discriminated payloads, state transitions, canonical scope checks and `distillationKey`.
-- [ ] Write rejection cases first: forged verified state, unowned evidence IDs, cross-project scope, oversized output and invalid work identity.
-- [ ] Fixed fixture `github:acme/api`, `run:r1`, identical evidence/analyzer yields one key; changing hash, scope or analyzer changes the key.
-- [ ] Run `pnpm --filter @afk/runtime exec vitest run src/application/learning/contracts.test.ts`; confirm red then green.
-- [ ] Export shared types and commit the contract slice without changing old exchange formats or commands.
+- [x] Implement section 4 strict schemas, discriminated payloads, state transitions, canonical scope checks and `distillationKey`.
+- [x] Write rejection cases first: forged verified state, unowned evidence IDs, cross-project scope, oversized output and invalid work identity.
+- [x] Fixed fixture `github:acme/api`, `run:r1`, identical evidence/analyzer yields one key; changing hash, scope or analyzer changes the key.
+- [x] Run `pnpm --filter @afk/runtime exec vitest run src/application/learning/contracts.test.ts`; confirm red then green.
+- [x] Export shared types and commit the contract slice without changing old exchange formats or commands.
 
 ### T02 — Private request/candidate ledger (P0)
 
@@ -444,4 +444,37 @@ Initial acceptance requires computable evidence and passing positive/negative ca
 - [ ] T11–T12: shared CLI/Desktop and operable Worker.
 - [ ] T13: live use, fault drills, independent reviews, versions and PR delivery.
 
-This turn saves the development plan only. Existing authorization avoids repetitive substep questions, but never grants permission to merge or bypass target-system controls.
+Implementation follows this order and continues along the dependencies. Existing authorization avoids repetitive substep questions, but never grants permission to merge or bypass target-system controls.
+
+## 13. Implementation status and remaining queue (2026-11-10)
+
+This table describes inspected code. Close each checklist only after implementation, validation and the required commit; passing a focused test does not complete the task or system.
+
+| Task | Current state | Next acceptance gate |
+| --- | --- | --- |
+| T01 | Committed as `d0190782`: strict contracts, candidate payloads, evidence binding and stable keys | Preserve compatibility and rerun boundary checks for subsequent contract changes |
+| T02 | Requests, candidates, cursors, publication journals and budgets implemented; cold-start contention and target-version binding fixed; attempt ledger connected to the Worker | Controlled disposition of unfinished attempts after crashes and publication recovery integration |
+| T03 | Evidence packs, immutable snapshots and shared prompts implemented; redaction, exact reference binding and frozen metrics fixed | Retro now shares restricted execution and public-package test imports; final re-review and aggregate commit remain |
+| T04 | Disabled-by-default plugin, dynamic Agent resolution and Claude analysis profile implemented | Live CLI verification of tool, MCP, Hook and automatic-skill restrictions; process fixtures are insufficient |
+| T05 | Single consumer, inbox handoff, cancellation, budgets and completed-call deduplication implemented; wrapper-child cleanup regression added | Persisted call identities, controlled retry/budget recovery and orphan handling after parent SIGKILL |
+| T06 | Automatic event reconciliation and corrections not implemented | Recoverable audit-to-inbox flow, late negative evidence and learning recursion prevention; achieve M1 |
+| T07 | Chinese tokenization and frozen evaluation implemented in a separate worktree, not integrated | Exclude inapplicable, negated and wrong-version matches; independent QA, adoption feedback and recurrence revocation |
+| T08 | Candidate-to-Wiki publication adapter not implemented | Existing plan/preview/apply/recovery, conflicts, rollback and node-level evidence |
+| T09 | Invocation/tool declarations retained in the skill catalog; YAML edge cases under review | Candidate patches, normal/recovery/rejection behavior comparison, original-version binding and PR receipts |
+| T10 | Tool-proposal validation and delivery not implemented | Existing-tool search, two parameter sets, safe failures, cancellation, side-effect recovery and reviewable changes |
+| T11 | New learning-governance CLI not connected | Shared use cases, global Worker, scoped queries, failure replay and installed-package black-box checks |
+| T12 | New learning-governance Desktop not connected | Shared state/consumer, IPC checks, project switching, process shutdown and Electron E2E |
+| T13 | No live Claude distillation E2E in this phase | Complete loop, fault drills, coverage, installed package, independent reviews, PR and worktree cleanup |
+
+### Next parallel batches
+
+1. Integrate T02–T05 locally, close review findings and commit the verified kernel as the common worktree baseline.
+2. Complete T06 locally; sidecars prepare T07 negative/applicability cases, T08's existing Wiki publication seam and T09–T10 behavior fixtures. Preparation does not replace automatic intake.
+3. After M1 passes, use three worktrees for T07, T08 and T09–T10. Freeze the publication contract first and assign one writer per file.
+4. Integrate T11 locally, including versions, command registry and public exports. Once contracts stabilize, use a separate worktree for T12 and another executor for T13 preparation.
+5. Run T13 through a real model, filesystem/processes and user entry points, using local Claude Code first. Report remote-provider configuration and coverage separately; the earlier Gmail success does not validate this learning phase.
+6. Push reviewable milestones and inspect CI; a person decides merging. Preserve changes and validation evidence before archiving completed worktrees and releasing their dependencies/build outputs.
+
+### Complete-system delivery constraint
+
+Continue using existing Agent, Sandbox, Host, Tracker, Verification, Notification, Trigger, Context/Memory, Credential/Auth, Artifact/Report, Repository/Workspace, Security/Policy and Observability interfaces. This phase closes the loop from their execution evidence to reusable assets without duplicating frameworks. Track each external Provider as implemented, configured and live-verified separately; missing configuration cannot count as passing.

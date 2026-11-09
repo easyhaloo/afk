@@ -8,13 +8,13 @@
 
 **Tech Stack:** TypeScript、Zod、Node SQLite、现有插件运行时与 Agent Provider、Vitest、已有 Python Wiki 工具、Electron / React / Playwright。
 
-**Status:** 开发计划；以下新增接口、配置、命令与文件均为拟实现契约，不代表已存在。对应 [English plan](2026-11-09-session-distillation.md)。替代性扩展范围以本计划为准；已有能力的完成证据仍见 [前一阶段计划](2026-11-08-runtime-learning-and-validation.zh.md)。
+**Status:** 实施中；2026-11-10 更新。T01 已提交，其余任务状态见第 13 节；未通过对应验收门禁的能力不能算完成。对应 [English plan](2026-11-09-session-distillation.md)。替代性扩展范围以本计划为准；已有能力的完成证据仍见 [前一阶段计划](2026-11-08-runtime-learning-and-validation.zh.md)。
 
 ---
 
 ## 1. 目标、基线与非目标
 
-基线是用户已合并的 PR #294 实现。本次计划编写 checkout 为 `8b5a911a`；开始开发时先更新远端，核实合并后的集成线和 PRD 基线，不以文档中的提交替代实时 Git 查证。计划阶段不修改运行时代码、不启动收费分析任务、不安装生成工具。
+基线是用户已合并的 PR #294 实现。计划最初编写 checkout 为 `8b5a911a`；实施已核实本地 `origin/main` 为 `7194f5eb`，当前任务分支为 `feat/session-distillation`。后续集成仍需实时核对基线。自动化 fixtures 不等于真实模型测试，收费分析和生成工具安装分别受其明确执行条件约束。
 
 | 编号 | 必须实现的结果 |
 | --- | --- |
@@ -51,10 +51,10 @@
 ```mermaid
 flowchart TD
     A[受管执行 / 显式历史导入 / 当前用户纠正] --> B[完整审计与来源引用]
-    B --> C[持久请求收件箱]
+    B --> E[标准化与脱敏 Evidence Pack]
+    E --> C[持久请求收件箱]
     C --> D[单消费者 Worker / 现有持久投递队列]
-    D --> E[标准化与脱敏 Evidence Pack]
-    E --> F[learning.distiller / 独立无工具会话]
+    D --> F[learning.distiller / 独立无工具会话]
     F --> G[Zod 校验 / 候选账本 / 冲突识别]
     G --> H[事实与业务路径验证]
     G --> I[独立 QA 修复验证]
@@ -231,11 +231,11 @@ function distillationKey(input: DistillationRequest): string {
 
 **依赖：** 无。**写入：** `contracts.ts`、`contracts.test.ts`。
 
-- [ ] 定义第 4 节 strict schema、逐类型 payload、状态转换及上述 `distillationKey`，验证规范项目身份。
-- [ ] 先写反例：伪造 `state=verified`、未知 evidence ID、跨项目适用范围、超长输出、非法 work item 均拒绝。
-- [ ] 固定输入例 `scope=github:acme/api`、`sourceId=run:r1`、同 evidence / analyzer 产生同 key；改变任一 hash / scope / analyzer 必须不同。
-- [ ] 运行 `pnpm --filter @afk/runtime exec vitest run src/application/learning/contracts.test.ts`，预期先失败后全部通过。
-- [ ] 导出共享类型，提交契约切片；不增加命令或修改旧交换格式。
+- [x] 定义第 4 节 strict schema、逐类型 payload、状态转换及上述 `distillationKey`，验证规范项目身份。
+- [x] 先写反例：伪造 `state=verified`、未知 evidence ID、跨项目适用范围、超长输出、非法 work item 均拒绝。
+- [x] 固定输入例 `scope=github:acme/api`、`sourceId=run:r1`、同 evidence / analyzer 产生同 key；改变任一 hash / scope / analyzer 必须不同。
+- [x] 运行 `pnpm --filter @afk/runtime exec vitest run src/application/learning/contracts.test.ts`，预期先失败后全部通过。
+- [x] 导出共享类型，提交契约切片；不增加命令或修改旧交换格式。
 
 ### T02 — 私有请求与候选账本（P0）
 
@@ -444,4 +444,37 @@ pnpm release:cli --output /tmp/session-distillation-release
 - [ ] T11–T12：接入统一 CLI、Desktop 和可运维 Worker。
 - [ ] T13：完成真实使用、故障演练、独立审查、版本与 PR 交付。
 
-当前只保存开发计划。该顺序不要求用户在已经授权的每个子步骤重复确认，也不授予 Agent 代替人合并或突破目标系统权限的能力。
+已按此顺序实施；未完成项继续沿依赖推进。该顺序不要求用户在已经授权的每个子步骤重复确认，也不授予 Agent 代替人合并或突破目标系统权限的能力。
+
+## 13. 实施进度与剩余开发队列（2026-11-10）
+
+此表描述已检查的代码状态；任务清单只有在实现、验证和提交均满足时才整体关闭。局部测试通过不等于该任务或系统已交付。
+
+| 任务 | 当前状态 | 下一验收点 |
+| --- | --- | --- |
+| T01 | 已提交 `d0190782`；严格契约、候选载荷、证据绑定与幂等键已实现 | 后续契约改动保持兼容并重跑边界测试 |
+| T02 | 请求、候选、游标、发布日志及预算账本已实现；冷启动并发与目标版本绑定已修复；调用尝试账本已接入 Worker | 崩溃时未完成尝试的受控处置与发布恢复集成 |
+| T03 | 证据包、不可变快照及共享提示已实现；脱敏、精确引用绑定和冻结指标已修复 | 复盘已复用同一受限执行器并移除测试跨包源码导入；等待最终复审和整体提交 |
+| T04 | 默认关闭的插件、动态 Agent 解析与 Claude analysis 配置已实现 | 真实 CLI 验证工具、MCP、Hooks 与自动技能限制；当前进程 fixtures 不能替代此项 |
+| T05 | 单消费者、收件箱交接、取消、预算与完成去重已实现；wrapper 子进程清理回归已补 | 持久化调用身份、受控恢复与预算恢复；父进程被强杀后的孤儿进程治理 |
+| T06 | 未实现自动事件补查和纠正入口 | 原始审计到收件箱的可恢复链路、晚到否定证据及学习防递归；达到 M1 |
+| T07 | 中文分词与冻结评价集已在独立 worktree 实现，尚未合入 | 消除不适用条件、否定和版本误召回，接入独立 QA、采纳反馈与复发撤销 |
+| T08 | 尚未实现候选到 Wiki 的发布适配 | 复用现有 plan / preview / apply / recovery；冲突、回滚、逐节点证据 |
+| T09 | 技能目录的调用限制和工具声明保留已实现，YAML 边界复审中 | 候选到补丁、正常 / 恢复 / 拒绝行为比较、原版本绑定、PR 收据 |
+| T10 | 尚未实现工具提案的验证与交付 | 已有工具查重、两组参数、安全失败、取消、副作用恢复和可审查变更 |
+| T11 | 新学习治理 CLI 尚未接入 | 共享用例、全局 Worker、按项目查询、故障重放及安装版黑盒验证 |
+| T12 | 新学习治理 Desktop 尚未接入 | 同一数据与消费者、IPC 校验、项目切换、进程关闭与 Electron E2E |
+| T13 | 本阶段尚未执行真实 Claude 提炼 E2E | 完整闭环、故障演练、覆盖率、安装包、独立审查、PR 与工作区清理 |
+
+### 接下来的并行批次
+
+1. 主线程集成 T02–T05，独立审查关闭已发现缺口；将验证通过的内核提交为后续 worktree 的共同基线。
+2. 主线程完成 T06；旁路先准备 T07 的负例与适用性、T08 的现有 Wiki 发布接缝、T09–T10 的行为 fixtures。不能以这些准备工作替代自动入口。
+3. M1 通过后，分别由三个 worktree 完成 T07、T08、T09–T10。先冻结 publication 契约；同一文件只有一个写入者。
+4. 主线程接入 T11 并维护版本、命令注册表和公共导出；契约稳定后独立 worktree 完成 T12，另一执行者准备 T13。
+5. 执行 T13 的真实模型、真实文件 / 进程与用户入口闭环；默认本地用 Claude Code。远程服务验证单独报告配置与覆盖范围，不以已有 Gmail 成功证明本次学习能力通过。
+6. 按里程碑推送可审查变更、检查 CI；人工决定合并。保存变更与测试证据后归档已完成 worktree，释放其依赖和构建产物占用。
+
+### 完整系统的交付约束
+
+插件仍使用既有 Agent、Sandbox、Host、Tracker、Verification、Notification、Trigger、Context / Memory、Credential / Auth、Artifact / Report、Repository / Workspace、Security / Policy 与 Observability 接口。此阶段补齐从这些执行证据到可复用资产的闭环，不重复创建框架。每项外部 Provider 的“已实现”“已配置”“已通过真实验证”分开记录；缺配置不能标记为通过。

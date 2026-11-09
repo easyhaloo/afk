@@ -13,3 +13,8 @@ export { DISTILLATION_LIMITS, learningScopeSchema, evidenceRefSchema, distillati
   parseDistillationOutput, assertCandidateTransition, type EvidenceRef as LearningEvidenceRef,
   type DistillationRequest, type CandidateProposal, type DistillationOutput, type AssetKind,
   type CandidateState } from './application/learning/contracts.js';
+export { buildEvidencePack, validateEvidencePack, saveEvidencePack, loadEvidencePack,
+  type EvidencePack, type EvidenceSourceInput, type EvidenceSource, type EvidenceEntry } from './application/learning/evidence.js';
+export { buildAnalysisPrompt, parseAnalysisOutput, buildRetroPrompt, parseModelJson,
+  retroModelOutputSchema, retroReportSchema } from './application/learning/analysis.js';
+export { executeAnalysis, type AnalysisExecutionInput, type AnalysisExecutionResult } from './application/learning/analysis-runner.js';

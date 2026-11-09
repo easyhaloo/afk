@@ -53,6 +53,8 @@ export class StreamingAgentExecution implements AgentExecution {
 
   private proc: ChildProcess | null = null;
   private done = false;
+  private killed = false;
+  private readonly signalledDescendants = new Map<number, string>();
   private interruptAcked = false;
   private exitCode: number | undefined;
   private error: ExecutionResult['error'] | undefined;
@@ -416,7 +418,8 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   async kill(): Promise<void> {
-    if (this.done) return;
+    if (!this.proc || this.killed) return;
+    this.killed = true;
     this.done = true;
     try {
       this.signalProcess('SIGKILL');
@@ -490,10 +493,7 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   private terminateProcess(): void {
-    if (this.exitCode !== undefined) return;
-    try {
-      this.signalProcess('SIGKILL');
-    } catch { /* process already exited */ }
+    void this.kill();
   }
 
   private signalProcess(signal: NodeJS.Signals): void {
@@ -502,7 +502,8 @@ export class StreamingAgentExecution implements AgentExecution {
 
     // Claude may start shell commands in their own process groups. Capture
     // descendants before signalling the agent group so they cannot be orphaned.
-    const descendants = this.findDescendantPids(pid);
+    const parentRunning = this.proc?.exitCode === null && this.proc.signalCode === null;
+    const descendants = this.findDescendantPids(parentRunning ? pid : undefined);
     for (const descendant of descendants) {
       try {
         process.kill(descendant, signal);
@@ -516,20 +517,22 @@ export class StreamingAgentExecution implements AgentExecution {
         // Fall back to the direct child when the group has already exited.
       }
     }
-    this.proc?.kill(signal);
+    if (parentRunning) this.proc?.kill(signal);
   }
 
-  private findDescendantPids(rootPid: number): number[] {
+  private findDescendantPids(rootPid: number | undefined): number[] {
     if (process.platform === 'win32') return [];
 
     try {
-      const output = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+      const output = execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], { encoding: 'utf8', timeout: 1000 });
       const children = new Map<number, number[]>();
+      const starts = new Map<number, string>();
       for (const line of output.split('\n')) {
-        const [pidText, parentText] = line.trim().split(/\s+/);
-        const pid = Number(pidText);
-        const parent = Number(parentText);
-        if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        if (!match) continue;
+        const pid = Number(match[1]);
+        const parent = Number(match[2]);
+        starts.set(pid, match[3]!);
         const siblings = children.get(parent) ?? [];
         siblings.push(pid);
         children.set(parent, siblings);
@@ -542,7 +545,11 @@ export class StreamingAgentExecution implements AgentExecution {
           descendants.push(child);
         }
       };
-      visit(rootPid);
+      if (rootPid !== undefined) visit(rootPid);
+      for (const [pid, start] of this.signalledDescendants) {
+        if (starts.get(pid) === start && !descendants.includes(pid)) descendants.push(pid);
+      }
+      for (const pid of descendants) this.signalledDescendants.set(pid, starts.get(pid)!);
       return descendants;
     } catch {
       return [];

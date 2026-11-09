@@ -33,6 +33,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'structured-output',
   'usage',
   'interactive',
+  'analysis',
 ]);
 
 /**
@@ -75,6 +76,18 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
   readonly promptLimits: AgentPromptLimits = PROMPT_LIMITS;
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
+    if (options.executionProfile === 'analysis') {
+      if (options.executionMode !== 'batch' || options.interactive) throw new Error('Analysis requires batch execution');
+      return {
+        argv: ['claude', '--print', '--output-format', 'stream-json', '--verbose',
+          '--safe-mode', '--tools', '', '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
+          '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--disable-slash-commands',
+          '--setting-sources', '', '--settings', '{"disableAllHooks":true,"enabledPlugins":{}}',
+          '--no-session-persistence', '--no-chrome',
+          ...(options.sessionId ? ['--session-id', options.sessionId] : [])],
+        cwd: options.worktreePath,
+      };
+    }
     const argv = ['claude', '--dangerously-skip-permissions'];
     if (options.executionMode === 'batch') {
       argv.push('--print', '--output-format', 'stream-json', '--verbose');

@@ -86,6 +86,32 @@ describe('distillation contracts', () => {
       candidates: [{ ...fact, ...proposal }] }).success).toBe(false);
   });
 
+  it('accepts all five asset kinds and validates nested process evidence', () => {
+    const evaluations = ['normal', 'recovery', 'refusal'].map(kind => ({ kind, input: 'example', expected: 'verified outcome' }));
+    const proposals = [fact,
+      { ...fact, kind: 'process', payload: { entry: 'submit', systems: ['api'], preconditions: [],
+        steps: [{ id: 's1', action: 'approve', stateChange: 'submitted → approved', evidenceIds: ['e1'] }],
+        exceptions: ['reject'], completion: 'approved' } },
+      { ...fact, kind: 'lesson', payload: { trigger: 'failed', rootCause: 'missing transaction', rootCauseStatus: 'confirmed',
+        attempts: ['retry'], fix: 'BEGIN IMMEDIATE', prevention: ['independent concurrent regression'] } },
+      { ...fact, kind: 'skill', payload: { targetSkill: 'skill:existing', originalDigest: 'c'.repeat(64),
+        triggers: ['requested review'], prohibitedConditions: ['unrelated task'], inputs: [], branches: [],
+        recovery: ['restore'], completion: 'checks pass', patch: 'review evidence first', evaluationCases: evaluations } },
+      { ...fact, kind: 'tool', payload: { existingTools: ['existing-cli'], inputSchema: { type: 'object' },
+        outputSchema: { type: 'object' }, dependencies: [], permissions: [], timeoutMs: 1000,
+        sideEffects: 'none', idempotency: 'read only', recovery: 'none required', source: 'return input', tests: evaluations } },
+    ];
+    expect(parseDistillationOutput({ ...output, candidates: proposals }, request, [evidence]).candidates.map(candidate => candidate.kind))
+      .toEqual(['fact', 'process', 'lesson', 'skill', 'tool']);
+    const process = proposals[1]!;
+    expect(() => parseDistillationOutput({ ...output, candidates: [{ ...process, payload: {
+      ...(process.payload as object), steps: [{ id: 's1', action: 'approve', stateChange: 'approved', evidenceIds: ['unknown'] }],
+    } }] }, request, [evidence])).toThrow(/evidence/i);
+    expect(() => parseDistillationOutput(output, request, [evidence, evidence])).toThrow(/duplicate/i);
+    expect(distillationRequestSchema.parse({ ...request, scope: 'gitlab:git.example.com/team/api',
+      workItemId: 'gitlab:git.example.com/team/api#42' }).scope).toBe('gitlab:git.example.com/team/api');
+  });
+
   it('does not allow publication before validation or resurrection of terminal assets', () => {
     expect(() => assertCandidateTransition('candidate', 'validated')).not.toThrow();
     expect(() => assertCandidateTransition('validated', 'published')).not.toThrow();

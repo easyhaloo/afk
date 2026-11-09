@@ -33,6 +33,26 @@ describe("JumpServer CLI", () => {
       const servers = await cli.listServers();
       expect(servers).toEqual([]);
     });
+
+    it("recovers the host column when it runs straight into the username column", async () => {
+      const row = (alias: string, host: string, user: string, marker: string) =>
+        `${alias.padEnd(20)}${host.padEnd(36)}${user.padEnd(20)}${marker}`;
+      const mockExec = vi.fn().mockResolvedValue({
+        ok: true,
+        stdout: [
+          row("Alias", "Host", "Username", "Default"),
+          "-".repeat(78),
+          row("dev", "https://dev-jumpserver.fangcloud.net", "wangwendi", "*"),
+          "",
+          "Total: 1 server(s)",
+        ].join("\n"),
+        stderr: "",
+      });
+      const cli = createJumpserverCli({ exec: mockExec });
+      await expect(cli.listServers()).resolves.toEqual([
+        { alias: "dev", host: "https://dev-jumpserver.fangcloud.net", username: "wangwendi", isDefault: true },
+      ]);
+    });
   });
 
   describe("listAssets", () => {
@@ -83,6 +103,28 @@ describe("JumpServer CLI", () => {
       expect(assets).toEqual([
         { name: "web-01", address: "10.0.1.10", platform: "Linux", rawType: "Ubuntu" },
         { name: "db-01", address: "10.0.2.10", platform: "Windows", rawType: "WinServer" },
+      ]);
+    });
+
+    it("parses the padded table jms actually prints", async () => {
+      const row = (name: string, address: string, platform: string, type: string) =>
+        `${name.padEnd(36)}${address.padEnd(21)}${platform.padEnd(16)}${type}`;
+      const mockExec = vi.fn().mockResolvedValue({
+        ok: true,
+        stdout: [
+          row("Name", "Address", "Platform", "Type"),
+          "-".repeat(80),
+          row("172.16.206.237", "172.16.206.237", "Linux", "Linux"),
+          row("group-demo-ai知识库", "172.16.0.241", "Linux", "Linux"),
+          "",
+          "Total: 2 asset(s)",
+        ].join("\n"),
+        stderr: "",
+      });
+      const cli = createJumpserverCli({ exec: mockExec });
+      await expect(cli.listAssets("dev")).resolves.toEqual([
+        { name: "172.16.206.237", address: "172.16.206.237", platform: "Linux", rawType: "Linux" },
+        { name: "group-demo-ai知识库", address: "172.16.0.241", platform: "Linux", rawType: "Linux" },
       ]);
     });
   });
@@ -145,6 +187,37 @@ describe("JumpServer CLI", () => {
       const cli = createJumpserverCli({ exec: mockExec });
       const result = await cli.probeAssetReachability({ asset: "web-01", serverAlias: "server-a" });
       expect(result).toBe(false);
+    });
+  });
+
+  describe("execCommand", () => {
+    it("passes the command as a single argv entry", async () => {
+      const mockExec = vi.fn().mockResolvedValue({ ok: true, stdout: "  true \n", stderr: "" });
+      const cli = createJumpserverCli({ exec: mockExec });
+      await expect(cli.execCommand("llm-wiki@dev", "true")).resolves.toEqual({ ok: true, stdout: "true", stderr: "" });
+      expect(mockExec).toHaveBeenCalledWith("jms", ["exec", "llm-wiki@dev", "true"]);
+    });
+
+    it("reports failure with the jms stderr", async () => {
+      const mockExec = vi.fn().mockResolvedValue({ ok: false, stdout: "", stderr: "Permission denied" });
+      const cli = createJumpserverCli({ exec: mockExec });
+      await expect(cli.execCommand("llm-wiki@dev", "true")).resolves.toEqual({ ok: false, stdout: "", stderr: "Permission denied" });
+    });
+  });
+
+  describe("uploadFile", () => {
+    it("targets the remote directory through jms sftp", async () => {
+      const mockExec = vi.fn().mockResolvedValue({ ok: true, stdout: "", stderr: "" });
+      const cli = createJumpserverCli({ exec: mockExec });
+      await cli.uploadFile("/tmp/report.pdf", "llm-wiki@dev", "/srv/data");
+      expect(mockExec).toHaveBeenCalledWith("jms", ["sftp", "/tmp/report.pdf", "llm-wiki@dev:/srv/data/"]);
+    });
+
+    it("keeps an existing trailing slash", async () => {
+      const mockExec = vi.fn().mockResolvedValue({ ok: true, stdout: "", stderr: "" });
+      const cli = createJumpserverCli({ exec: mockExec });
+      await cli.uploadFile("/tmp/report.pdf", "llm-wiki@dev", "/srv/data/");
+      expect(mockExec).toHaveBeenCalledWith("jms", ["sftp", "/tmp/report.pdf", "llm-wiki@dev:/srv/data/"]);
     });
   });
 

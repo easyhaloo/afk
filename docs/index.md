@@ -8,6 +8,8 @@
 |---|---|
 | 安装与首次使用 | [Getting Started (EN)](getting-started.md) · [快速开始（中文）](getting-started.zh.md) |
 | 理解当前系统边界与包职责 | [Architecture Overview](architecture/overview.md) · [架构概览（中文）](architecture/overview.zh.md) |
+| 接入能力插件、配置 Provider 与理解可信模块边界 | [Capability Plugins (EN)](architecture/plugins.md) · [能力插件架构（中文）](architecture/plugins.zh.md) |
+| 按标准实现一个能力插件 | [插件接入标准（中文）](architecture/plugin-integration-standard.zh.md) |
 | 跟踪一次工作项的完整执行、QA、证据和人工合并闸门 | [Full Workflow & E2E Architecture](architecture/full-workflow-e2e-architecture.md) |
 | 理解架构原则与取舍 | [系统架构设计说明书](architecture/system-architecture-design.md) |
 | 使用 CLI、Desktop 与 Skills 工作流 | [Workflows (EN)](guides/workflows.md) · [工作流（中文）](guides/workflows.zh.md) |
@@ -19,6 +21,7 @@
 | 文档 | 职责与权威范围 |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | 系统边界、workspace 包职责、数据权威、工作项关系、生命周期与关键架构约束；不承担完整 CLI 参考或逐步执行手册 |
+| [architecture/plugins.md](architecture/plugins.md) · [中文](architecture/plugins.zh.md) | Core / 插件边界、整体 Mermaid 图、十二类 Provider 与凭据矩阵、manifest API v1、安装配置、依赖事务、CLI / Desktop 接入状态及真实限制 |
 | [architecture/full-workflow-e2e-architecture.md](architecture/full-workflow-e2e-architecture.md) | 当前实现中的 run / execute / loop、模板、QA、状态转换、证据和 E2E 验证细节 |
 | [architecture/execution.md](architecture/execution.md) | 执行入口、运行目录、托管生命周期和恢复原则摘要；英文版本 |
 | [architecture/execution.zh.md](architecture/execution.zh.md) | 执行入口、运行目录、托管生命周期和恢复原则摘要；中文版 |
@@ -51,6 +54,22 @@ ADR 记录已经作出的架构决策，不替代当前实现说明。
 | [0019](adr/0019-desktop-run-log-viewer-projection.md) | Desktop run log viewer projection | in progress |
 | [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop as singular change request | accepted |
 | [0021](adr/0021-backlog-relation-carrying.md) | Backlog 关系的承载方式与记录可读性 | accepted |
+| [0030](adr/0030-host-capability-plugin.md) | Shared host and capability plugins | accepted |
+| [0022](adr/0022-execution-plan-and-repository-leases.md) | Execution plans and repository leases | accepted |
+| [0023](adr/0023-repository-store-and-dependency-pool.md) | Repository store and dependency pool | accepted |
+| [0024](adr/0024-prd-baseline-branches.md) | PRD baseline branches | accepted |
+| [0025](adr/0025-structured-failure-diagnostics.md) | Structured failure diagnostics | proposed |
+| [0026](adr/0026-goal-condition-budget-and-worktree-context.md) | The goal condition budget, and context in the worktree | accepted |
+| [0027](adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md) | The scheduler re-evaluates on a timer, and says why it waits | accepted |
+| [0028](adr/0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted |
+| [0029](adr/0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted |
+| [0030](adr/0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted |
+| [0031](adr/0031-publish-boundary.md) | The target branch belongs to AFK's change request | accepted |
+| [0032](adr/0032-provider-and-runtime-are-one-decision.md) | A provider and the runtime that runs it are one decision | accepted |
+| [0033](adr/0033-agent-tui-modals.md) | A modal in the agent's TUI belongs to AFK to dismiss | accepted |
+| [0034](adr/0034-transient-failure-is-not-permanent-failure.md) | A temporary failure is not a permanent failure | accepted |
+| [0035](adr/0035-rework-records-are-revisable.md) | A rework record is correctable | accepted |
+| [0036](adr/0036-schedule-scope.md) | A schedule is judged against the range it depends on | accepted |
 
 ## 保留的研究材料（research/）
 

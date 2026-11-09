@@ -14,7 +14,8 @@
 | RunCoordinator | 已实现基础能力 | 已有 command → decision → effect audit 解释器；尚未接管所有 runner 的 effect 执行。 |
 | Trusted profile / capability manifest | 已实现 | 可解析能力、拒绝缺失与冲突；当前为仓库内可信组合，不下载远程插件。 |
 | 查询 CLI | 已实现 | `observe runs|timeline|verify|replay|explain|doctor`。 |
-| OTLP、跨进程 fencing、投影替换、confirm-merge | 未切换 | 下一阶段工作，保持为明确的生产门禁。 |
+| 可选 OTLP traces / metrics | 已接入 | `observability.otlp` 导出审计 span 与持久化指标，事件镜像在本地追加成功后导出；本地 JSONL 仍为权威，外部证据上传未自动接入。 |
+| 跨进程 fencing、投影替换、confirm-merge | 未切换 | 下一阶段工作，保持为明确的生产门禁。 |
 
 ## 2. 审计配置
 
@@ -43,6 +44,38 @@ not execution or business-state evidence.
 | --- | --- | --- |
 | `AFK_EVENT_STORE_DIR` | `~/.afk/events` | JSONL audit stream 根目录。 |
 | `AFK_PROFILE` | `local` | 写入 `ObservationContext.profileId` 的可复现运行组合标识。 |
+
+### Optional local OTLP collector
+
+Collector 是可选的外部进程，AFK 不负责安装、启动或探测其就绪状态。若已安装
+OpenTelemetry Collector，可将以下内容保存为 `collector.yaml`，在独立终端运行：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+exporters:
+  debug: {}
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      exporters: [debug]
+```
+
+```sh
+otelcol --config collector.yaml
+```
+
+按[插件配置示例](plugins.zh.md#可观测性导出)将 `endpoint` 指向
+`http://127.0.0.1:4318`，本地无认证示例省略 `headers`。此配置只将接收到的 telemetry
+输出到 collector 控制台，不代表云后端已验证；无需 collector 也能使用本地审计。
+宿主等待有时限的导出操作后返回，导出失败不覆盖本地审计结果；本地写入错误仍致命。
 
 ## 3. 审计、重放与诊断
 
@@ -207,7 +240,7 @@ and rebuilt from event streams when its schema or cached usage is invalid.
 
 1. 以 `RunCoordinator` 替换 Workflow、Loop、QA 之间的直接状态编排，并将 runtime JSON/TUI 转为 event projections。
 2. 将 JSONL store 接入 LeasePort/fencing，覆盖多 worker、崩溃重启、重复回调和 event append 故障注入。
-3. 接入 OTLP traces、logs 与 metrics；将 `afk.observability.coverage_ratio`、event append latency、run stale、lease expiry、approval aging 设为 SLO。
+3. 在已有可选 OTLP traces / metrics 导出之上补齐 logs 与生产 SLO：`afk.observability.coverage_ratio`、event append latency、run stale、lease expiry、approval aging；当前插件接入不代表这些门禁已完成。
 4. 实现受控 `confirm-merge`：先经 ChangePort 验证外部 PR/MR 已合并且目标正确，再追加 `HumanGateSatisfied` 与 terminal `done` event。
 5. 持续让 Workflow/QA 通过 core `ExecutionBasePolicy` 使用 `baseBacklogId`，不得用 `parentId` 或 `dependsOn` 推断 Git 基线。
 6. 执行隔离 GitHub/GitLab 真实 E2E：Issue → claim → agent → QA → PR/MR → human merge → dependency unlock → timeline → dry-run replay。

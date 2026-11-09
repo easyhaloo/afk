@@ -10,6 +10,8 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'vitest';
+import { LifecycleDispatcher, type LifecycleContext } from './workflows/lifecycle.js';
+import { createDefaultPluginRuntime } from './plugins/default-runtime.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -28,6 +30,27 @@ function runner() {
 }
 
 describe('WorkflowRunner audit identity', () => {
+  it('preserves disabled providers in the shared plugin registries', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'disabled-providers-'));
+    roots.push(root);
+    await fs.mkdir(join(root, '.afk'));
+    await fs.writeFile(join(root, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [{ id: 'agent.claude-code', enabled: false, builtin: true }, { id: 'sandbox.local', enabled: false, builtin: true }] }));
+    const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
+    try {
+      const workflow = new WorkflowRunner({} as ProviderBundle, { plugins, observer: { record: vi.fn() } as unknown as RunObserver });
+      const internals = workflow as unknown as { agentProviderRegistry: { has(name: string): boolean }; sandboxProviderByName(name: string): unknown };
+      expect(internals.agentProviderRegistry.has('claude-code')).toBe(false);
+      expect(() => internals.sandboxProviderByName('local')).toThrow('unknown sandbox provider');
+    } finally { await plugins.dispose(); }
+  });
+  it('blocks publication before any git or provider push when required policy rejects', async () => {
+    const { workflow } = runner();
+    const context: LifecycleContext = { iid: 42, worktreePath: '/missing-worktree', baseBranch: 'main', sessionName: 'session-42', params: {} };
+    const internals = workflow as unknown as { lifecycleCtx: LifecycleContext; lifecycleDispatcher: LifecycleDispatcher; pushBranch(path: string): Promise<void> };
+    internals.lifecycleCtx = context;
+    internals.lifecycleDispatcher = new LifecycleDispatcher([{ name: 'security', failureMode: 'required', onBeforePublish: async () => { throw new Error('policy denied'); } }]);
+    await expect(internals.pushBranch(context.worktreePath)).rejects.toThrow('policy denied');
+  });
   it('uses deterministic run ID and canonical work item on the first requested event', async () => {
     const { workflow, record, claim } = runner();
     claim.mockImplementationOnce(async () => {

@@ -661,6 +661,10 @@ describe('MultiRepositoryPreparer', () => {
       await fs.writeFile(join(repoRoot, '.afk-signal.json'), '{"type":"goal_complete"}\n');
       await fs.mkdir(join(repoRoot, '.afk'), { recursive: true });
       await fs.writeFile(join(repoRoot, '.afk', 'artifacts.txt'), '/tmp/evidence.log\n');
+      // AFK's worktrees live inside the checkout, so Git reports them as
+      // content of the user's repository.
+      await fs.mkdir(join(repoRoot, '.worktrees', 'afk-backlog-7-qa'), { recursive: true });
+      await fs.writeFile(join(repoRoot, '.worktrees', 'afk-backlog-7-qa', 'evidence.log'), 'why it failed\n');
 
       const prepared = await new MultiRepositoryPreparer().prepare([
         repository({ repoRoot }),

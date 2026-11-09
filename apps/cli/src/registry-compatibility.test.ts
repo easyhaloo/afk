@@ -18,6 +18,8 @@ describe('CLI hard cutover registry', () => {
       'observe',
       'graph',
       'completion',
+      'host',
+      'plugin',
       '__complete',
     ]));
     expect(new Set(names).size).toBe(names.length);

@@ -8,22 +8,26 @@ import { getWorkflowConfig, repositoryExecutionDefaults } from '../../infrastruc
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { blockBacklog } from '../../domain/backlog/commands.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
-import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
+import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgentProviders } from '../../domain/agents/index.js';
+import { prepareAgentRuntime } from '../../domain/agents/codex-runtime.js';
+import { resolveRuntimeForProvider } from '../../domain/agents/runtime-binding.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../infrastructure/sandbox/types.js';
 import type { ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
-import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index.js';
+import { parseWorkItemId, type BacklogItem, type NewReworkRecord } from '../../domain/backlog/index.js';
 import { createExecutionPlan, parseExecutionPlan, type ExecutionPlan } from '../../domain/backlog/execution-plan.js';
 import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 import type { ChangeMergeState } from '../../domain/tracker/types.js';
+import { decideMergeVerdict } from '../../domain/branches/publish-boundary.js';
 import type { BaselineMergeResult } from '../../infrastructure/git/branches/provider.js';
 import { formatExecutionFailure, formatExecutionFailureReport } from '../workflow-engine.js';
 import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
 import { assemblePrompt, buildExecutionPromptSegments, type PromptSegment } from '../workflows/execution-protocol.js';
 import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from '../workflows/backlog-context.js';
+import { prepareExperienceContext } from '../learning/runtime.js';
 import { measurePromptBudget } from '../../domain/agents/prompt-budget.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
@@ -34,15 +38,39 @@ import { BudgetStore } from '../workflows/budget-store.js';
 import { RunResourceScope } from '../workflows/resource-scope.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import { runQaPreflight } from './qa-preflight.js';
+import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecycle.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
 import type { RunEventData, RunFailureReasonCode } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
 type QAProcessResult = { success: boolean; mrUrl?: string; rework?: boolean; summary?: string; failureCode?: RunFailureReasonCode; failedCriteria?: QAFailureCriterion[]; evidence?: FailureEvidence[] };
 
+/**
+ * What the platform said about a published change request.
+ *
+ * The three answers are not the same kind of news:
+ *
+ * - `accept` — the change request can land, or the platform has not
+ *   settled on a verdict yet. Either way AFK has nothing to act on.
+ * - `conflict` — the content conflicts. Another round of work can resolve
+ *   it.
+ * - `baseline_advanced` — the target branch already carries the change, so
+ *   there is nothing left to merge. The baseline moved; the content did
+ *   not conflict. Another round of work cannot resolve this, because the
+ *   work is already in the baseline and doing it again would move the
+ *   baseline again. A person decides.
+ */
+type PublicationVerdict =
+  | { kind: 'accept' }
+  | { kind: 'conflict'; detail: string }
+  | { kind: 'baseline_advanced'; detail: string };
+
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
   agentProvider?: AgentProvider;
+  agentProviderRegistry?: AgentProviderRegistry;
+  plugins?: PluginRuntime;
   agentRuntime?: AgentRuntimeSelection;
   tmux?: TmuxClient;
   executionMode?: ExecutionMode;
@@ -64,6 +92,12 @@ export interface QARunnerDependencies {
     featureBranch: string,
   ) => Promise<BaselineMergeResult>;
   runtimeManager?: TaskRuntimeManager;
+  /**
+   * Readiness probe for a runtime the runner resolved itself (tests).
+   * Defaults to AFK's Codex readiness probe, which spends a live model
+   * round-trip.
+   */
+  prepareRuntime?: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   beforeChange?: (action: 'publish', backlog: BacklogItem) => Promise<void>;
   afterPublication?: (change: ChangeRequest) => Promise<void>;
   onCommit?: (commitSha: string, branch: string) => Promise<void>;
@@ -83,7 +117,18 @@ export class QARunner {
   private readonly providers: ManagementProviderBundle;
   private readonly sandboxProvider: SandboxProvider;
   private readonly agentProvider: AgentProvider;
-  private readonly agentRuntime?: AgentRuntimeSelection;
+  private agentRuntime?: AgentRuntimeSelection;
+  /**
+   * A runtime the runner resolved itself has not been probed yet.
+   *
+   * The CLI and the work-item runner both probe the runtime before they
+   * hand it over, so an injected runtime is already probed. A runtime
+   * resolved here — because the reviewer runs a provider the caller did
+   * not name — is probed here, so an unreachable model fails with the
+   * probe's own diagnosis instead of a transport error from the wrong
+   * endpoint.
+   */
+  private runtimeNeedsProbe: boolean;
   private readonly tmux?: TmuxClient;
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
@@ -93,10 +138,13 @@ export class QARunner {
   private readonly prepareRepositories: MultiRepositoryPreparationService;
   private readonly mergeFeatureIntoBaselineOverride?: QARunnerDependencies['mergeFeatureIntoBaseline'];
   private readonly runtimeManager: TaskRuntimeManager;
+  private readonly prepareRuntime: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   private readonly beforeChange?: QARunnerDependencies['beforeChange'];
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
   private readonly onCommit?: QARunnerDependencies['onCommit'];
   private readonly onSession?: QARunnerDependencies['onSession'];
+  private readonly agentProviderRegistry: AgentProviderRegistry;
+  private readonly plugins?: PluginRuntime;
   private activeConflictExecution?: AgentExecution;
   private leaseFailure?: unknown;
 
@@ -116,9 +164,27 @@ export class QARunner {
     this.afterPublication = deps.afterPublication;
     this.onCommit = deps.onCommit;
     this.onSession = deps.onSession;
-    this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
-    this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
-    this.agentRuntime = deps.agentRuntime;
+    this.plugins = deps.plugins;
+    this.agentProviderRegistry = deps.agentProviderRegistry ?? deps.plugins?.getAgentProviderRegistry() ?? defaultAgentProviderRegistry;
+    if (!deps.agentProviderRegistry && !deps.plugins) ensureBuiltinAgentProviders(this.agentProviderRegistry);
+    this.sandboxProvider = deps.sandboxProvider ?? (deps.plugins
+      ? deps.plugins.getSandboxProviderRegistry().create('local', { worktreeManager: new WorktreeManager() })
+      : createSandboxProvider('local', { worktreeManager: new WorktreeManager() }));
+    this.agentProvider = deps.agentProvider ?? this.agentProviderRegistry.require(this.config.agentDefault ?? 'claude-code');
+    // The reviewer runs a provider, and a provider runs with a runtime: the
+    // two are one decision. A reviewer that resolves its own provider —
+    // from AFK's configuration — must resolve the runtime that belongs to
+    // it as well. Without this, a Codex reviewer runs with no runtime at
+    // all: no profile, no provider, no transport, so Codex falls back to
+    // the host's own configuration and talks to an endpoint nobody chose.
+    const bound = resolveRuntimeForProvider({
+      provider: this.agentProvider.name,
+      runtime: deps.agentRuntime,
+      codex: this.config.agents?.codex,
+    });
+    this.agentRuntime = bound;
+    this.runtimeNeedsProbe = bound !== undefined && bound !== deps.agentRuntime;
+    this.prepareRuntime = deps.prepareRuntime ?? prepareAgentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 
@@ -128,12 +194,26 @@ export class QARunner {
     return withLogContext(getLogContext() ?? { runId: `${session}-runtime`, workItemId: id }, () => this.processObserved(id, session));
   }
 
+  /**
+   * Probe a runtime the runner resolved itself, once, before the agent runs.
+   *
+   * An injected runtime was probed by the caller; probing it again would
+   * spend a second live model round-trip for an answer AFK already has.
+   */
+  private async probeOwnRuntime(): Promise<void> {
+    if (!this.runtimeNeedsProbe || this.agentRuntime?.kind !== 'codex') return;
+    this.agentRuntime = await this.prepareRuntime(this.agentRuntime);
+    this.runtimeNeedsProbe = false;
+  }
+
   private async processObserved(id: string, session: string): Promise<QAProcessResult> {
     logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
     let execution: AgentExecution | undefined;
     let workspace: PreparedRepositorySet | undefined;
+    let lifecycle: LifecycleDispatcher | undefined;
+    let lifecycleContext: LifecycleContext | undefined;
     const runtimeRunId = `${session}-runtime`;
     let runtimeStarted = false;
     let runtimeErrorSummary: string | undefined;
@@ -159,6 +239,18 @@ export class QARunner {
       await this.startRuntime(runtimeRunId, backlog, session);
       runtimeStarted = true;
       workspace = await this.prepareWorkspace(id);
+      const dispatcher = new LifecycleDispatcher(this.plugins?.getLifecycleModules());
+      lifecycle = dispatcher;
+      const lifecycleBase = {
+        iid: backlog.issueNumber ?? (/^[1-9]\d*$/.test(backlog.id)
+          ? Number(backlog.id) : parseWorkItemId(backlog.workItemId ?? backlog.id).issueNumber),
+        baseBranch: baselineBranch,
+        params: {},
+        originalCwd: this.projectRoot,
+        repoRoot: workspace?.primary.repoRoot ?? this.projectRoot,
+        repositories: workspace?.repositories,
+      };
+      await dispatcher.run('init', { ...lifecycleBase, projectName: undefined });
       const heartbeat = async () => {
         await workspace?.heartbeat?.();
         const current = await this.providers.backlog.get(id);
@@ -171,6 +263,9 @@ export class QARunner {
       });
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
+      const context = { ...lifecycleBase, worktreePath, sessionName: session };
+      lifecycleContext = context;
+      await dispatcher.run('before-agent', context);
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
       await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
@@ -191,12 +286,11 @@ export class QARunner {
         await this.logWorktreeDiagnostics(id, 'statusline-configured', worktreePath);
       }
 
-      const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot }).load('pre-merge-qa-verification');
-      const qaStep = compileTemplate(qaTemplate).groups
-        .flatMap(group => group.steps)
-        .find(step => step.kind === 'agent');
-      if (!qaStep || typeof qaStep.prompt !== 'string') {
-        throw new Error('pre-merge-qa-verification template must contain an inline agent prompt');
+      const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load('pre-merge-qa-verification');
+      const qaSteps = compileTemplate(qaTemplate).groups.flatMap(group => group.steps);
+      const [qaStep] = qaSteps;
+      if (qaSteps.length !== 1 || !qaStep || qaStep.kind !== 'agent' || typeof qaStep.prompt !== 'string') {
+        throw new Error('pre-merge-qa-verification template must contain exactly one inline agent step');
       }
 
       sandbox = await this.sandboxProvider.create({
@@ -210,6 +304,10 @@ export class QARunner {
       });
       logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
       await this.logWorktreeDiagnostics(id, 'before-agent-start', worktreePath);
+      // The reviewer is about to start. A runtime the runner resolved itself
+      // is probed first, so an unreachable model fails here — with the
+      // probe's own diagnosis — instead of halfway through the first turn.
+      await this.probeOwnRuntime();
 
       // A conflict is resolved here, in the QA worktree, which is the change
       // request's own branch — so the resolution lands exactly where the
@@ -270,6 +368,21 @@ export class QARunner {
         this.executionMode,
         'qa',
       );
+      try {
+        const metadata = await fs.lstat(join(worktreePath, '.afk', 'plugin-context.md'));
+        if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Plugin context must be a regular file');
+        segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      const experienceWorkItemId = getLogContext()?.workItemId ?? backlog.workItemId;
+      if (experienceWorkItemId?.includes(':')) {
+        try {
+          const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
+            prompt: `${backlog.title}\n${backlog.description ?? ''}`.slice(0, 2000), plugins: this.plugins });
+          if (path) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
+        } catch {
+          logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
+        }
+      }
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
       if (overBudget) {
@@ -320,7 +433,9 @@ export class QARunner {
       }
       if (leaseError) throw leaseError;
       await heartbeat();
-      const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName);
+      if (signal.result === 'PASS') await dispatcher.run('after-agent', context);
+      const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName,
+        () => dispatcher.run('before-publish', context));
       if (!outcome.success) {
         runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
       }
@@ -340,6 +455,7 @@ export class QARunner {
       await leaseScope.finish({ status: runtimeErrorSummary ? 'failed' : 'success' });
       if (execution) await execution.kill().catch(() => {});
       if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
+      if (lifecycleContext) await lifecycle?.run('cleanup', lifecycleContext);
       if (worktreePath) {
         try {
           await this.providers.branches.cleanup(worktreePath, { preserve: !!runtimeErrorSummary });
@@ -437,12 +553,11 @@ export class QARunner {
     targetBranch: string,
   ): Promise<{ resolved: boolean; summary: string; failureCode?: RunFailureReasonCode }> {
     logger.info({ backlogId, worktreePath, targetBranch, conflicts }, 'merge conflict detected; resolving it in the QA worktree');
-    const template = await new TemplateLoader({ projectRoot: this.projectRoot }).load('merge-conflict-resolution');
-    const step = compileTemplate(template).groups
-      .flatMap(group => group.steps)
-      .find(candidate => candidate.kind === 'agent');
-    if (!step || typeof step.prompt !== 'string') {
-      throw new Error('merge-conflict-resolution template must contain an inline agent prompt');
+    const template = await new TemplateLoader({ projectRoot: this.projectRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load('merge-conflict-resolution');
+    const steps = compileTemplate(template).groups.flatMap(group => group.steps);
+    const [step] = steps;
+    if (steps.length !== 1 || !step || step.kind !== 'agent' || typeof step.prompt !== 'string') {
+      throw new Error('merge-conflict-resolution template must contain exactly one inline agent step');
     }
     const goal = step.prompt
       .replaceAll('{targetBranch}', targetBranch)
@@ -580,6 +695,7 @@ export class QARunner {
     signal: QAResult,
     worktreePath: string,
     verificationBranch: string,
+    beforePublish: () => Promise<void>,
   ): Promise<QAProcessResult> {
     if (signal.result === 'FAIL') return this.routeQARework(backlogId, signal as QAFailure);
 
@@ -595,6 +711,7 @@ export class QARunner {
           'binary files left out of the QA commit');
       }
       if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
+      await beforePublish();
       await this.providers.branches.push(verificationBranch, worktreePath);
       // A previous attempt may have left the change request behind (a re-run
       // of an already-published item). Look it up unconditionally: `beforeChange`
@@ -613,6 +730,7 @@ export class QARunner {
         notes: signal.notes,
       };
       let mr = existing;
+      await beforePublish();
       if (mr) {
         // A previous attempt left the review request behind. The evidence in
         // its body is the evidence of that attempt, so it is refreshed with
@@ -632,15 +750,28 @@ export class QARunner {
       // it can land. A conflict means the target branch moved under the
       // change, so the change goes back for another round instead of being
       // handed over as something a person can merge.
-      const conflict = await this.detectPublishedConflict(mr);
-      if (conflict) {
-        const summary = `change request ${mr.id} conflicts with ${targetBranch}: ${conflict}`;
+      const verdict = await this.detectPublishedVerdict(mr);
+      if (verdict.kind === 'baseline_advanced') {
+        // The target branch already carries this change. Nothing left to
+        // merge is not a conflict: the baseline moved, and the content did
+        // not. Sending the item back for another round would be answered
+        // by the same agent pushing the same baseline again — the loop
+        // this state was split out to break. A person has to decide whether
+        // the target branch keeps the commits or is rolled back.
+        const summary = `change request ${mr.id} has nothing left to merge: ${targetBranch} already carries its commits (${verdict.detail}). A person has to decide whether the target branch keeps them.`;
+        await this.markBlocked(backlogId, summary);
+        logger.warn({ backlogId, changeId: mr.id, targetBranch, detail: verdict.detail },
+          'published change request found the target branch advanced');
+        return { success: false, summary, failureCode: 'baseline_advanced' };
+      }
+      if (verdict.kind === 'conflict') {
+        const summary = `change request ${mr.id} conflicts with ${targetBranch}: ${verdict.detail}`;
         const rework = await this.openConflictRework(backlogId, summary);
         if (!rework) {
           await this.markBlocked(backlogId, summary);
           return { success: false, summary, failureCode: 'merge_conflict' };
         }
-        logger.warn({ backlogId, changeId: mr.id, reworkId: rework.id, conflict }, 'published change request conflicts with the target branch');
+        logger.warn({ backlogId, changeId: mr.id, reworkId: rework.id, detail: verdict.detail }, 'published change request conflicts with the target branch');
         return { success: false, rework: true, summary, failureCode: 'merge_conflict' };
       }
       if (activeRework) {
@@ -706,15 +837,19 @@ export class QARunner {
       failedCriteria: signal.failedCriteria,
       requiredChecks: signal.requiredChecks ?? [],
     };
+    // The budget belongs to the cycle, not to the item: the attempt count is
+    // the number of retries this round of work has spent. An operator retry
+    // opened a fresh cycle with a fresh budget, so the first failure of that
+    // cycle is attempt 1 and is still a rework rather than a block.
     const rework = active && active.attempt >= limit ? active : await this.providers.backlog.createRework(backlogId, record);
     if (rework.attempt >= limit) {
-      const summary = `QA rework attempt limit reached (${rework.attempt}/${limit}): ${signal.summary}`;
+      const summary = `QA rework attempt limit reached (cycle ${rework.cycle}, ${rework.attempt}/${limit} attempts used): ${signal.summary}`;
       await this.markBlocked(backlogId, summary);
       return { success: false, summary, failureCode: 'qa_rework', failedCriteria: signal.failedCriteria };
     }
     await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${rework.id}: ${signal.summary}` });
     await this.providers.backlog.setExecutionMode(backlogId, 'afk');
-    logger.info({ backlogId, reworkId: rework.id, attempt: rework.attempt }, 'QA failure persisted rework record');
+    logger.info({ backlogId, reworkId: rework.id, cycle: rework.cycle, attempt: rework.attempt }, 'QA failure persisted rework record');
     return { success: false, rework: true, summary: signal.summary, failureCode: 'qa_rework', failedCriteria: signal.failedCriteria };
   }
 
@@ -725,25 +860,33 @@ export class QARunner {
   /**
    * Ask the platform whether the published change request can land.
    *
-   * Only a real conflict counts. A verdict the platform has not computed yet,
-   * or a reason that is not a conflict — a failing check, a missing
-   * approval — leaves the change as it is.
+   * Only a real conflict counts as a conflict. A verdict the platform has
+   * not computed yet, or a reason that is not a conflict — a failing
+   * check, a missing approval — leaves the change as it is.
+   *
+   * A target branch that already carries the change is the third verdict,
+   * and it is not a conflict: there is nothing left to merge because the
+   * baseline moved, not because the content disagrees.
    */
-  private async detectPublishedConflict(mr: ChangeRequest): Promise<string | undefined> {
+  private async detectPublishedVerdict(mr: ChangeRequest): Promise<PublicationVerdict> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let state: ChangeMergeState | undefined;
       try {
         state = (await this.providers.changes.get(String(mr.id))).mergeState;
       } catch (error) {
         logger.warn({ changeId: mr.id, error }, 'could not read the merge state of the published change request');
-        return undefined;
+        return { kind: 'accept' };
       }
-      if (state === 'conflict') return 'the target branch changed the same lines';
-      if (state === 'mergeable') return undefined;
+      if (state === 'mergeable') return { kind: 'accept' };
+      if (state === 'conflict' || state === 'baseline_advanced') {
+        return decideMergeVerdict(state) === 'escalate'
+          ? { kind: 'baseline_advanced', detail: 'the target branch already carries this change' }
+          : { kind: 'conflict', detail: 'the target branch changed the same lines' };
+      }
       // The platform has not settled on a verdict yet. Give it a moment.
       await new Promise(resolve => setTimeout(resolve, 1_500));
     }
-    return undefined;
+    return { kind: 'accept' };
   }
 
   /**
@@ -753,7 +896,8 @@ export class QARunner {
    * has to make compatible. The previous rework record is still open when
    * this runs — a conflict means it did not do its job — so it is
    * superseded by this one and the attempt count carries on. A conflict that
-   * outlives the attempt limit goes to a person instead.
+   * outlives the attempt limit of the current cycle goes to a person
+   * instead; an operator retry opens a new cycle with a fresh limit.
    */
   private async openConflictRework(
     backlogId: string,

@@ -3,7 +3,10 @@ import { Command } from 'commander';
 
 const mocks = vi.hoisted(() => ({
   runWorkflowCli: vi.fn(async () => ({ success: true })),
+  registry: {},
+  dispose: vi.fn(),
 }));
+vi.mock('@afk/runtime/plugin-sdk', () => ({ createDefaultPluginRuntime: async () => ({ getAgentProviderRegistry: () => mocks.registry, dispose: mocks.dispose }) }));
 
 vi.mock('@afk/runtime/application/workflows/run-cmd', () => ({ runWorkflowCli: mocks.runWorkflowCli }));
 vi.mock('@afk/runtime/infrastructure/config/manager', () => ({
@@ -16,7 +19,10 @@ vi.mock('@afk/runtime/infrastructure/config/manager', () => ({
     agents: { codex: {} },
   }),
 }));
-vi.mock('@afk/runtime/domain/agents/index', () => ({ resolveAgentProviderName: () => 'claude-code' }));
+vi.mock('@afk/runtime/domain/agents/index', () => ({
+  defaultAgentProviderRegistry: {},
+  resolveAgentProviderName: () => 'claude-code',
+}));
 vi.mock('./agent-runtime-options.js', () => ({
   addAgentRuntimeOptions: (command: Command) => command,
   resolveAgentRuntimeOptions: () => ({ kind: 'default' }),
@@ -45,6 +51,9 @@ describe('run command', () => {
     expect(mocks.runWorkflowCli).toHaveBeenCalledWith(expect.objectContaining({
       backlogId: 'github:acme/api#42',
       executionManifestPath: '/workspace/.afk/execution-manifest.json',
+      agentProviderRegistry: mocks.registry,
+      plugins: expect.anything(),
     }));
+    expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 });

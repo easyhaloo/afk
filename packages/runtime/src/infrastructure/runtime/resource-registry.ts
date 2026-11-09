@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { requireNodeSqlite } from '../storage/sqlite.js';
 
 type SQLiteStatement = {
   run(...params: unknown[]): unknown;
@@ -18,7 +19,7 @@ type SQLiteDatabase = {
 
 const requireNode = createRequire(import.meta.url);
 // Constructing the specifier avoids Vite versions that do not yet recognise node:sqlite as a builtin.
-const { DatabaseSync } = requireNode(`node:${'sqlite'}`) as { DatabaseSync: new (path: string) => SQLiteDatabase };
+const { DatabaseSync } = requireNodeSqlite<{ DatabaseSync: new (path: string) => SQLiteDatabase }>(requireNode);
 
 export type AfkResourceKind = 'tmux' | 'container' | 'isolate-service';
 export type AfkResourceOrigin = 'local-sandbox' | 'container-sandbox' | 'isolate';

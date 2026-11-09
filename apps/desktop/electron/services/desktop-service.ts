@@ -7,9 +7,10 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
 import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser.js";
-import { detectAgentRuntimes } from "./runtime-service.js";
+import { detectAgentRuntimes, listRegisteredAgentProviders } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
 import { readEvents, resolveWorkspace } from "./workspace-service.js";
+import { selectLoopStatusCandidate, type LoopStatusCandidate } from "./loop-status-selection.js";
 
 type CliCapability = {
   id: string;
@@ -168,7 +169,6 @@ type WorkflowConfigPatch = {
   templateName?: string;
 };
 
-const EDITABLE_AGENT_PROVIDERS = new Set(["claude-code", "codex", "cursor", "pi", "opencode", "copilot"]);
 const EDITABLE_CODEX_TRANSPORTS = new Set(["auto", "exec", "app-server"]);
 const EDITABLE_CODEX_AUTHS = new Set(["auto", "chatgpt", "api"]);
 
@@ -210,11 +210,11 @@ function endpointField(value: unknown): string | undefined {
   } catch { throw new Error("Codex App Server 地址必须是 http(s)、ws(s) 或 stdio:// 地址"); }
 }
 
-function cleanWorkflowPatch(value: unknown): WorkflowConfigPatch {
+function cleanWorkflowPatch(value: unknown, agentProviders: ReadonlySet<string>): WorkflowConfigPatch {
   const patch = asConfigObject(value);
   const codex = asConfigObject(patch.codex);
   const agentDefault = textField(patch.agentDefault, "默认 Agent", 40);
-  if (!EDITABLE_AGENT_PROVIDERS.has(agentDefault)) throw new Error("默认 Agent 不受当前 AFK 支持");
+  if (!agentProviders.has(agentDefault)) throw new Error("默认 Agent 未注册到当前 AFK");
   const tmuxSession = textField(patch.tmuxSession, "tmux 会话", 100);
   if (!validSession(tmuxSession)) throw new Error("tmux 会话只能包含字母、数字、点、下划线、连字符或冒号");
   const transport = textField(codex.transport, "Codex 传输", 24);
@@ -242,12 +242,12 @@ function cleanWorkflowPatch(value: unknown): WorkflowConfigPatch {
       authTokenEnv,
       startupTimeoutMs: positiveInteger(codex.startupTimeoutMs, "Codex 启动超时", 1_000, 300_000),
     },
-    canvasNodes: cleanCanvasNodes(patch.canvasNodes),
+    canvasNodes: cleanCanvasNodes(patch.canvasNodes, agentProviders),
     templateName: templateNameField(patch.templateName),
   };
 }
 
-function cleanCanvasNodes(value: unknown): CanvasTemplateNode[] {
+function cleanCanvasNodes(value: unknown, agentProviders?: ReadonlySet<string>): CanvasTemplateNode[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || value.length > 12) throw new Error("画布节点必须是最多 12 个模板节点的列表");
   const ids = new Set<string>();
@@ -260,8 +260,8 @@ function cleanCanvasNodes(value: unknown): CanvasTemplateNode[] {
     if (template !== "agent" && template !== "qa") throw new Error("画布节点类型仅支持 agent 或 qa");
     const description = optionalTextField(node.description, "画布节点说明", 180) || (template === "qa" ? "验证验收条件与集成质量" : "实现当前工作项并提交执行摘要");
     const prompt = optionalTextField(node.prompt, "画布节点执行指令", 1_600) || (template === "qa" ? "Verify the implemented backlog change against its acceptance criteria. Report concise PASS or FAIL evidence before completion." : "Implement the assigned backlog item in the current AFK worktree. Follow the repository conventions, run relevant checks, and leave a concise completion summary.");
-    const provider = optionalTextField(node.provider, "节点 Agent", 40);
-    if (provider && !EDITABLE_AGENT_PROVIDERS.has(provider)) throw new Error("节点 Agent 不受当前 AFK 支持");
+    const provider = node.provider === undefined ? undefined : textField(node.provider, "节点 Agent", 40);
+    if (provider && agentProviders && !agentProviders.has(provider)) throw new Error("节点 Agent 未注册到当前 AFK");
     return { id, template, label: textField(node.label, "画布节点名称", 80), description, prompt, provider, x: positiveInteger(node.x, "画布节点横向位置", 0, 1400), y: positiveInteger(node.y, "画布节点纵向位置", 0, 440) } as CanvasTemplateNode;
   });
 }
@@ -325,7 +325,7 @@ function assignOptional(target: ConfigObject, key: string, value: string | undef
 
 export async function saveWorkflowConfig(workspace: string, value: unknown): Promise<WorkflowConfigSummary> {
   const root = resolveWorkspace(workspace);
-  const patch = cleanWorkflowPatch(value);
+  const patch = cleanWorkflowPatch(value, new Set(await listRegisteredAgentProviders(root)));
   if (patch.templateName === "afk-control-workflow" && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
   const configPath = path.join(workspaceStateDirectory(), "config.yml");
   const existingRaw = await fs.readFile(configPath, "utf8").catch(() => "");
@@ -451,15 +451,9 @@ async function readLoopStatusSnapshot(): Promise<string> {
   ];
   const snapshots = (await Promise.all(candidates.map(async candidate => {
     const [raw, stat] = await Promise.all([fs.readFile(candidate.file, "utf8").catch(() => ""), fs.stat(candidate.file).catch(() => undefined)]);
-    return raw ? { ...candidate, raw, modifiedAt: stat?.mtimeMs ?? 0 } : undefined;
-  }))).filter((snapshot): snapshot is { tag: string; file: string; raw: string; modifiedAt: number } => snapshot !== undefined);
-  const newest = (pool: typeof snapshots) => [...pool].sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
-  const live = snapshots.filter(snapshot => {
-    const pid = jsonRecord(snapshot.raw).pid;
-    return typeof pid === "number" && processAlive(pid);
-  });
-  const chosen = live.find(snapshot => snapshot.tag === "default") ?? newest(live) ?? snapshots.find(snapshot => snapshot.tag === "default") ?? newest(snapshots);
-  return chosen?.raw ?? "";
+    return raw ? { tag: candidate.tag, raw, modifiedAt: stat?.mtimeMs ?? 0 } : undefined;
+  }))).filter((snapshot): snapshot is LoopStatusCandidate => snapshot !== undefined);
+  return selectLoopStatusCandidate(snapshots, processAlive)?.raw ?? "";
 }
 
 async function readLoopStatus(): Promise<LoopStatus> {
@@ -482,7 +476,7 @@ async function readLoopStatus(): Promise<LoopStatus> {
 export async function snapshot(workspace?: string) {
   const root = resolveWorkspace(workspace);
   const resourceWorkspaces = await projectRunScopeService.workspaces(root);
-  const [events, workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
+  const [events, workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates, registeredAgentProviders] = await Promise.all([
     readEvents(root),
     projectRunScopeService.runs(root, resourceWorkspaces),
     listAfkContainers(resourceWorkspaces),
@@ -492,6 +486,7 @@ export async function snapshot(workspace?: string) {
     readWorkflowRuns(root),
     readLoopStatus(),
     readWorkflowTemplates(root),
+    listRegisteredAgentProviders(root),
   ]);
   const afkAvailable = true;
   return {
@@ -503,6 +498,7 @@ export async function snapshot(workspace?: string) {
     workflowRuns,
     loop,
     agentRuntimes,
+    registeredAgentProviders,
     events,
     workItemRuns,
     containers,

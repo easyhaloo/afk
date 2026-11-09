@@ -2,6 +2,7 @@ import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
+import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, readFile, rename, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -17,18 +18,21 @@ import { createExecutionPlan, parseExecutionPlan } from '../../domain/backlog/ex
 import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
-import { createAgentProvider, prepareAgentRuntime } from '../../domain/agents/index.js';
+import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgentProviders, prepareAgentRuntime } from '../../domain/agents/index.js';
 import { getWorkflowConfig, repositoryExecutionDefaults, type WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
-import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
-import { RunObserver } from '../../observability/run-observer.js';
+import { createPluginRunObserver } from '../plugins/observability.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
 import { parseExecutionManifest, readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
 import { executionManifestPath, executionWorkspacePath } from '../../infrastructure/workspace.js';
 import { resolveWorkflowRunRequest, type WorkflowRunRequest, type WorkflowRunCliInput } from './run-request.js';
 import { withLogContext, logger } from '../../infrastructure/io/index.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
+import type { PluginRuntime } from '../plugins/runtime.js';
+import { WorktreeManager } from '../../infrastructure/git/worktree.js';
+import { recordExecutionExperience, recordSuccessfulExperience } from '../learning/runtime.js';
+import { createFailureDiagnostic } from './failure-diagnostic.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -36,7 +40,7 @@ export interface ExecuteWorkItemInput {
   manifestPath?: string;
   template?: string;
   project?: string;
-  runOptions?: WorkflowRunCliInput;
+  runOptions?: Omit<WorkflowRunCliInput, 'backlogId'> & { backlogId?: string };
 }
 
 export type ExecuteWorkItemStatus = 'merge_ready' | 'done' | 'rework' | 'blocked' | 'not_claimed';
@@ -194,7 +198,57 @@ async function acquireLock(lockPath: string, workItemId: string, executionId: st
   }
 }
 
+async function openExecutionJournal(journalPath: string, workItemId: string, executionId: string): Promise<FileHandle> {
+  try {
+    return await open(journalPath, 'wx');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  let journal: FileHandle | undefined;
+  try {
+    const before = await lstat(journalPath);
+    const maxBytes = 64 * 1024;
+    if (!before.isFile() || before.nlink !== 1 || before.size < 1 || before.size > maxBytes) {
+      throw new Error('journal must be a nonempty regular file of at most 64 KiB with one link');
+    }
+    journal = await open(journalPath, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const unchanged = (stat: typeof before) => stat.isFile() && stat.nlink === 1
+      && stat.dev === before.dev && stat.ino === before.ino && stat.size === before.size
+      && stat.mtimeMs === before.mtimeMs && stat.ctimeMs === before.ctimeMs;
+    if (!unchanged(await journal.stat())) throw new Error('journal changed while opening');
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await journal.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== before.size || !unchanged(await journal.stat()) || !unchanged(await lstat(journalPath))) {
+      throw new Error('journal changed while reading');
+    }
+    const contents = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, bytesRead));
+    if (!contents.endsWith('\n')) throw new Error('partial journal record');
+    let previous: string | undefined;
+    for (const line of contents.slice(0, -1).split('\n')) {
+      const entry = JSON.parse(line) as {
+        executionId?: unknown; workItemId?: unknown; phase?: unknown; at?: unknown; reason?: unknown;
+      } | null;
+      if (!entry || Array.isArray(entry) || JSON.stringify(entry) !== line
+        || entry.executionId !== executionId || entry.workItemId !== workItemId
+        || typeof entry.at !== 'string' || new Date(entry.at).toISOString() !== entry.at
+        || (entry.phase !== 'requested' && entry.phase !== 'failed')
+        || Object.keys(entry).sort().join(',') !== (entry.phase === 'requested'
+          ? 'at,executionId,phase,workItemId' : 'at,executionId,phase,reason,workItemId')
+        || (entry.phase === 'failed' && (previous !== 'requested' || typeof entry.reason !== 'string'))) {
+        throw new Error('journal is not an intact pre-implementation attempt with matching identity');
+      }
+      previous = entry.phase;
+    }
+    return journal;
+  } catch (error) {
+    await journal?.close();
+    throw new Error(`cannot safely retry execution journal ${executionId}`, { cause: error });
+  }
+}
+
 export interface ExecuteWorkItemDependencies {
+  plugins?: PluginRuntime;
+  agentProviderRegistry?: AgentProviderRegistry;
   readManifest?: typeof readExecutionManifest;
   lookupWorkItem?: (id: string) => Promise<GlobalWorkItem>;
   createContext?: (manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) => Promise<{
@@ -306,7 +360,15 @@ async function resolveManifest(input: ExecuteWorkItemInput, dependencies: Execut
   return (dependencies.readManifest ?? readExecutionManifest)(manifestPath, workItemId);
 }
 
-async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) {
+function resolveAgentRegistry(dependencies: ExecuteWorkItemDependencies): AgentProviderRegistry {
+  if (dependencies.agentProviderRegistry) return dependencies.agentProviderRegistry;
+  if (dependencies.plugins) return dependencies.plugins.getAgentProviderRegistry();
+  ensureBuiltinAgentProviders(defaultAgentProviderRegistry);
+  return defaultAgentProviderRegistry;
+}
+
+async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig,
+  agentProviderRegistry: AgentProviderRegistry, plugins?: PluginRuntime) {
   const request = await resolveWorkflowRunRequest({
     ...input.runOptions,
     backlogId: input.workItemId,
@@ -316,10 +378,10 @@ async function createContext(manifest: ResolvedExecutionManifest, input: Execute
     // ADR-0019 §4: managed executions are interactive tmux sessions, never
     // batch/exec. Do not "simplify" this back to 'batch'.
     executionMode: input.runOptions?.executionMode ?? 'interactive',
-  }, config);
+  }, config, { agentProviderRegistry });
   const { providers } = await assembleProviders({ workItemId: input.workItemId,
     projectId: request.trackerProjectId ?? request.projectName, projectKey: request.trackerProjectKey,
-    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost });
+    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost, plugins });
   return { request, providers };
 }
 
@@ -365,9 +427,22 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
 async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies, context: ObservationContext): Promise<ExecuteWorkItemResult> {
   const workItemId = parseWorkItemId(context.workItemId).id;
   const executionId = context.runId;
-  const observer = dependencies.recordAudit ? undefined : new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) });
+  const observer = dependencies.recordAudit ? undefined : createPluginRunObserver(dependencies.plugins);
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
-  const audit = async (data: RunEventData) => { await recordAudit(context, data); };
+  const audit = async (data: RunEventData) => {
+    await recordAudit(context, data);
+    if (data.kind === 'qa.failed') {
+      try {
+        recordExecutionExperience({ runId: context.runId, workItemId, sourceEvent: 'qa.failed',
+          failure: createFailureDiagnostic({ code: data.reasonCode ?? (data.reason === 'rework' ? 'qa_rework' : 'qa_execution_failed'),
+            message: data.summary ?? `Independent QA ${data.reason ?? 'failed'}` }) });
+      } catch { logger.warn({ workItemId, runId: context.runId }, 'QA failure experience could not be recorded'); }
+    }
+    if ((data.kind === 'human_gate.opened' && data.gateId.startsWith('merge:')) || (data.kind === 'run.finished' && data.outcome === 'succeeded')) {
+      try { await recordSuccessfulExperience({ runId: context.runId, workItemId }); }
+      catch { logger.warn({ workItemId, runId: context.runId }, 'Successful workflow experience could not be recorded'); }
+    }
+  };
   const manifest = await resolveManifest(input, dependencies);
   return new RepositoryLeases().run((manifest.repositories ?? []).map(repository => `${repository.platform}:${repository.projectKey}`), async () => {
     const directory = join(workspaceDataDirectory(manifest.workspaceRoot), 'executions');
@@ -375,7 +450,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
     const lockPath = join(directory, `${encodeWorkItemIdForPath(workItemId)}.lock`);
     const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
     try {
-      const journal = await open(join(directory, `${executionId}.jsonl`), 'wx');
+      const journal = await openExecutionJournal(join(directory, `${executionId}.jsonl`), workItemId, executionId);
       try {
         const record = async (phase: string, details: object = {}) => {
           await journal.writeFile(`${JSON.stringify({ executionId, workItemId, phase, at: new Date().toISOString(), ...details })}\n`);
@@ -386,7 +461,10 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         let auditConcluded = false;
         try {
           const config = getWorkflowConfig();
-          const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, config);
+          const agentProviderRegistry = resolveAgentRegistry(dependencies);
+          const { request, providers } = await (dependencies.createContext
+            ? dependencies.createContext(manifest, input, config)
+            : createContext(manifest, input, config, agentProviderRegistry, dependencies.plugins));
           if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
           const item = await providers.backlog.get(request.backlogId);
           const inventoryItem = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
@@ -415,7 +493,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
           await record('implementing');
           const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
-            new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime, observer: createRunObserver() })))(providers, config, request);
+            new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createPluginRunObserver(dependencies.plugins) })))(providers, config, request);
           const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
             executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
             observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
@@ -438,7 +516,12 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           const management = asManagementProviders(providers);
           const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
             new QARunner(bundle, workflowConfig, {
-              agentProvider: createAgentProvider(runRequest.agentProvider),
+              plugins: dependencies.plugins,
+              agentProviderRegistry,
+              agentProvider: agentProviderRegistry.require(runRequest.agentProvider ?? workflowConfig.agentDefault ?? 'claude-code'),
+              sandboxProvider: dependencies.plugins?.getSandboxProviderRegistry().create(runRequest.sandboxProvider ?? 'local', {
+                worktreeManager: new WorktreeManager(),
+              }),
               agentRuntime: runRequest.agentRuntime, executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : runRequest.executionMode, projectRoot: runRequest.workspaceRoot,
               repositories: runRequest.repositories,
               executionBaseBranch: runRequest.executionBaseBranch,
@@ -578,7 +661,10 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
           && event.data.changeId === summary.pr?.id && event.data.url === summary.pr.url)))) {
       throw new Error('execution is not awaiting a verified root PR merge');
     }
-    const { request, providers } = await (dependencies.createContext ?? createContext)(manifest, input, getWorkflowConfig());
+    const config = getWorkflowConfig();
+    const { request, providers } = await (dependencies.createContext
+      ? dependencies.createContext(manifest, input, config)
+      : createContext(manifest, input, config, resolveAgentRegistry(dependencies), dependencies.plugins));
     if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
     const item = await providers.backlog.get(request.backlogId);
     if (item.parentId || item.id !== workItemId
@@ -600,7 +686,8 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     if (change.state !== 'open' && change.state !== 'merged') throw new Error('provider change request is closed without merge');
     if (item.state === 'done' && change.state !== 'merged') throw new Error('backlog is done without a merged provider change request');
     await providers.changes.verifyIssueAssociation(change, workItemId);
-    const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => new RunObserver({ events: store }).record(context, data));
+    const observer = dependencies.recordAudit ? undefined : createPluginRunObserver(dependencies.plugins);
+    const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => observer!.record(context, data));
     const context: ObservationContext = {
       traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
       attempt: 1, actor: { kind: 'system', id: 'merge-reconciliation' },

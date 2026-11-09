@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { GitBranchProvider } from './git-provider.js';
 import type { BacklogItem } from '../../../domain/backlog/index.js';
@@ -143,6 +143,88 @@ describe('GitBranchProvider', () => {
 
     expect(handle.branchName).toBe('afk/backlog-43-qa');
     await expect(simpleGit(handle.worktreePath).raw(['show', 'HEAD:parent-result.txt'])).resolves.toContain('parent baseline');
+  });
+
+  it('lets the next verification take over the worktree a failed attempt kept for evidence', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const child: BacklogItem = { ...item(), id: '43', branchName: 'afk/backlog-43' };
+
+    const first = await provider.createVerificationWorktree(child, 'main');
+    // The attempt failed: the worktree stays for the evidence it holds.
+    await provider.cleanup(first.worktreePath, { preserve: true });
+    await writeFile(join(first.worktreePath, 'evidence.txt'), 'why it failed\n');
+
+    // The claim belongs to the attempt, so the next attempt of the same item
+    // takes the worktree over instead of refusing to prepare it.
+    const second = await provider.createVerificationWorktree(child, 'main');
+
+    expect(second.worktreePath).toBe(first.worktreePath);
+    expect(second.branchName).toBe('afk/backlog-43-qa');
+    await expect(simpleGit(second.worktreePath).revparse(['--abbrev-ref', 'HEAD']))
+      .resolves.toContain('afk/backlog-43-qa');
+  });
+
+  it('keeps a preserved worktree usable as the evidence it was kept for', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const child: BacklogItem = { ...item(), id: '43', branchName: 'afk/backlog-43' };
+
+    const handle = await provider.createVerificationWorktree(child, 'main');
+    await provider.cleanup(handle.worktreePath, { preserve: true });
+
+    await expect(readFile(join(handle.worktreePath, 'README.md'), 'utf8')).resolves.toContain('base');
+  });
+
+  it('keeps AFK\'s own worktree directory out of the commit', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    // AFK keeps its worktrees inside the checkout. The agent stages whatever
+    // it finds, and Git stages a nested worktree as a submodule pointer — a
+    // change request that carries a submodule nobody can clone.
+    await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
+    await writeFile(join(repoPath, 'result.txt'), 'the work\n');
+    await simpleGit(repoPath).raw(['add', '-A']);
+
+    const { sha } = await provider.commit(repoPath, 'agent: staged everything');
+
+    expect(sha).not.toBe('');
+    const files = (await simpleGit(repoPath).raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toContain('result.txt');
+    expect(files.some(file => file.startsWith('.worktrees'))).toBe(false);
+  });
+
+  it('publishes the work when the checkout ignores its own worktree directory', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    // ADR-0030 keeps AFK's worktrees out of the repository's view by writing
+    // them into the checkout's local ignore file. Git refuses to add a path
+    // that is ignored, so naming that path in the add's pathspec fails the
+    // whole commit — and the item publishes nothing at all.
+    await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
+    const excludePath = (await simpleGit(repoPath).raw(['rev-parse', '--git-path', 'info/exclude'])).trim();
+    await writeFile(isAbsolute(excludePath) ? excludePath : join(repoPath, excludePath), '# AFK\'s own worktrees\n.worktrees/\n');
+    await writeFile(join(repoPath, 'result.txt'), 'the work\n');
+
+    const { sha } = await provider.commit(repoPath, 'agent: staged everything');
+
+    expect(sha).not.toBe('');
+    const files = (await simpleGit(repoPath).raw(['show', '--name-only', '--format='])).split('\n').filter(Boolean);
+    expect(files).toContain('result.txt');
+    expect(files.some(file => file.startsWith('.worktrees'))).toBe(false);
+  });
+
+  it('drops a worktree directory that an earlier attempt already tracked', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    await simpleGit(repoPath).raw(['worktree', 'add', '-b', 'feature/scratch', join(repoPath, '.worktrees', 'scratch'), 'main']);
+    await simpleGit(repoPath).raw(['add', '-A']);
+    await simpleGit(repoPath).commit('agent: staged everything');
+    expect((await simpleGit(repoPath).raw(['ls-files', '.worktrees'])).trim()).not.toBe('');
+
+    await provider.commit(repoPath, 'agent: staged everything again');
+
+    expect((await simpleGit(repoPath).raw(['ls-files', '.worktrees'])).trim()).toBe('');
   });
 
   it('shares repository dependencies with QA worktrees', async () => {

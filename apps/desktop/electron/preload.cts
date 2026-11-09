@@ -4,6 +4,19 @@ import type { DesktopApi } from "../shared/ipc-contract.js";
 // Sandboxed preloads can only require Electron built-ins. Keep the wire names
 // local while the shared contract remains the source of renderer/main types.
 const IPC_CHANNELS = {
+  googleStatus: "afk:google-status",
+  googleLogin: "afk:google-login",
+  googleCancel: "afk:google-cancel",
+  googleLogout: "afk:google-logout",
+  experiencesProjects: "afk:experiences-projects",
+  experiencesList: "afk:experiences-list",
+  experiencesVerify: "afk:experiences-verify",
+  experiencesRevoke: "afk:experiences-revoke",
+  pluginsList: "afk:plugins-list",
+  pluginsInstall: "afk:plugins-install",
+  pluginsSetEnabled: "afk:plugins-set-enabled",
+  pluginsRemove: "afk:plugins-remove",
+  pluginsConfigure: "afk:plugins-configure",
   updateStatus: "afk:update-status",
   updateGetStatus: "afk:update-get-status",
   updateCheck: "afk:update-check",
@@ -71,6 +84,25 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: DesktopApi = {
+  experiences: {
+    projects: () => ipcRenderer.invoke(IPC_CHANNELS.experiencesProjects),
+    list: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesList, input),
+    verify: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesVerify, input),
+    revoke: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesRevoke, input),
+  },
+  plugins: {
+    google: {
+      status: () => ipcRenderer.invoke(IPC_CHANNELS.googleStatus),
+      login: () => ipcRenderer.invoke(IPC_CHANNELS.googleLogin),
+      cancel: () => ipcRenderer.invoke(IPC_CHANNELS.googleCancel),
+      logout: () => ipcRenderer.invoke(IPC_CHANNELS.googleLogout),
+    },
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.pluginsList),
+    install: input => ipcRenderer.invoke(IPC_CHANNELS.pluginsInstall, input),
+    setEnabled: (id, enabled) => ipcRenderer.invoke(IPC_CHANNELS.pluginsSetEnabled, id, enabled),
+    remove: id => ipcRenderer.invoke(IPC_CHANNELS.pluginsRemove, id),
+    configure: id => ipcRenderer.invoke(IPC_CHANNELS.pluginsConfigure, id),
+  },
   update: {
     getStatus: () => ipcRenderer.invoke(IPC_CHANNELS.updateGetStatus), check: () => ipcRenderer.invoke(IPC_CHANNELS.updateCheck), download: () => ipcRenderer.invoke(IPC_CHANNELS.updateDownload), install: () => ipcRenderer.invoke(IPC_CHANNELS.updateInstall),
     onStatus: listener => { const handler = (_event: Electron.IpcRendererEvent, status: import('../shared/ipc-contract.js').DesktopUpdateStatus) => listener(status); ipcRenderer.on(IPC_CHANNELS.updateStatus, handler); return () => ipcRenderer.removeListener(IPC_CHANNELS.updateStatus, handler); },

@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
-const mocks = vi.hoisted(() => ({ executeWorkItem: vi.fn(), reconcileWorkItemMerge: vi.fn() }));
+const mocks = vi.hoisted(() => ({ executeWorkItem: vi.fn(), reconcileWorkItemMerge: vi.fn(), dispose: vi.fn(), registry: {} }));
+const plugins = expect.objectContaining({ dispose: mocks.dispose });
+vi.mock('@afk/runtime/plugin-sdk', () => ({
+  createDefaultPluginRuntime: vi.fn(async () => ({ getAgentProviderRegistry: () => mocks.registry, dispose: mocks.dispose })),
+}));
 vi.mock('@afk/runtime/execution', () => ({ executeWorkItem: mocks.executeWorkItem, reconcileWorkItemMerge: mocks.reconcileWorkItemMerge }));
 vi.mock('../output.js', () => ({
-  handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: vi.fn(), detail: vi.fn(),
+  handleCommandError: (error: unknown) => { expect(mocks.dispose).toHaveBeenCalledOnce(); throw error; }, success: vi.fn(), warning: vi.fn(), detail: vi.fn(),
 }));
 
 import { registerExecuteCommands } from './execute.js';
+import type { PluginRuntime } from '@afk/runtime/plugin-sdk';
 
 async function invoke(argv: string[], command = 'execute') {
   const program = new Command().name('afk').exitOverride();
@@ -18,11 +23,21 @@ async function invoke(argv: string[], command = 'execute') {
 describe('execute CLI', () => {
   afterEach(() => { vi.clearAllMocks(); process.exitCode = 0; });
   const argv = ['--work-item-id', 'github:acme/api#42', '--execution-manifest', '/tmp/item.json', '--template', 'custom'];
+  it('reuses the process composition without disposing a runtime owned by its caller', async () => {
+    mocks.executeWorkItem.mockResolvedValue({ status: 'merge_ready' });
+    const shared = { getAgentProviderRegistry: () => mocks.registry, dispose: mocks.dispose } as unknown as PluginRuntime;
+    const program = new Command().name('afk').exitOverride();
+    registerExecuteCommands(program, { pluginRuntime: shared });
+    await program.parseAsync(['node', 'afk', 'execute', ...argv]);
+    expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.anything(), { plugins: shared, agentProviderRegistry: mocks.registry });
+    expect(mocks.dispose).not.toHaveBeenCalled();
+  });
 
   it('allows the shared runtime to locate the work item workspace automatically', async () => {
     mocks.executeWorkItem.mockResolvedValue({ status: 'merge_ready' });
     await invoke(['--work-item-id', 'github:acme/api#42']);
-    expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.objectContaining({ workItemId: 'github:acme/api#42', manifestPath: undefined }));
+    expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.objectContaining({ workItemId: 'github:acme/api#42', manifestPath: undefined }),
+      { plugins, agentProviderRegistry: mocks.registry });
   });
 
   it('accepts the desktop argv without a backlog ID', async () => {
@@ -30,20 +45,36 @@ describe('execute CLI', () => {
     await invoke(argv);
     expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.objectContaining({
       workItemId: 'github:acme/api#42', manifestPath: '/tmp/item.json', template: 'custom',
-    }));
+    }), { plugins, agentProviderRegistry: mocks.registry });
     expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('passes explicit provider and mode selection to both managed phases', async () => {
+    mocks.executeWorkItem.mockResolvedValue({ status: 'merge_ready' });
+    await invoke([...argv, '--agent', 'claude-code', '--sandbox', 'local', '--execution-mode', 'batch']);
+    expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.objectContaining({
+      runOptions: { agentProvider: 'claude-code', sandboxProvider: 'local', executionMode: 'batch' },
+    }), { plugins, agentProviderRegistry: mocks.registry });
   });
 
   it.each(['rework', 'blocked', 'not_claimed'])('exits nonzero on %s', async status => {
     mocks.executeWorkItem.mockResolvedValue({ status });
     await invoke(argv);
     expect(process.exitCode).toBe(1);
+    expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 
   it('exits zero for an eligible merged child', async () => {
     mocks.executeWorkItem.mockResolvedValue({ status: 'done' });
     await invoke(argv);
     expect(process.exitCode ?? 0).toBe(0);
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes the runtime when execution fails', async () => {
+    mocks.executeWorkItem.mockRejectedValueOnce(new Error('execution failed'));
+    await expect(invoke(argv)).rejects.toThrow('execution failed');
+    expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 
   it('reconciles a root PR by explicit attempt ID without rerunning implementation', async () => {

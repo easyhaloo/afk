@@ -57,7 +57,18 @@ export function opencodePluginSource(adapterPath) {
   return `export { JevAgentGuard } from ${JSON.stringify(pathToFileURL(adapterPath).href)};\n`;
 }
 
+export function opencodePluginSourceV2(adapterPath) {
+  // The emitted shim must keep the literal "JevAgentGuard" marker: install.mjs
+  // refuses to overwrite an unrelated plugin unless that string is present.
+  return `// jev-agent-guard (JevAgentGuard) OpenCode V2 plugin\nexport { default } from ${JSON.stringify(pathToFileURL(adapterPath).href)};\n`;
+}
+
 export function supportsOpenCodePlugin(version) {
   const parsed = String(version).trim().match(/^1\.(\d+)\.(\d+)/);
   return Boolean(parsed && (Number(parsed[1]) > 18 || Number(parsed[1]) === 18 && Number(parsed[2]) >= 29));
+}
+
+export function supportsOpenCodeV2(version) {
+  // Accept "2.0.0", "v2.2.2", and "opencode v2.2.2" (the CLI prefixes its output).
+  return /(?:^|[\sv])2\.\d+\.\d+/.test(String(version).trim());
 }

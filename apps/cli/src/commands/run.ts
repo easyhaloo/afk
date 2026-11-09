@@ -3,6 +3,8 @@ import { handleCommandError, success, warning, detail } from '../output.js';
 import { runWorkflowCli } from '@afk/runtime/application/workflows/run-cmd';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { resolveAgentProviderName } from '@afk/runtime/domain/agents/index';
+import { createDefaultPluginRuntime, type PluginRuntime } from '@afk/runtime/plugin-sdk';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 
 function positiveInt(value: string): number {
@@ -12,7 +14,7 @@ function positiveInt(value: string): number {
   }
   return parsed;
 }
-export function registerRunCommands(program: Command): void {
+export function registerRunCommands(program: Command, composition: CommandRegistrationContext = {}): void {
   const command = program
     .command('run')
     .description('Claim and execute one backlog item')
@@ -29,15 +31,18 @@ export function registerRunCommands(program: Command): void {
     .option('--max-total-tokens <tokens>', 'Maximum total tokens', positiveInt)
     .option('--ext <modules...>', 'Lifecycle modules to activate')
     .option('--ext-param <params...>', 'Lifecycle module parameters')
-    .option('--sandbox <provider>', 'Sandbox provider: local | docker | podman')
+    .option('--sandbox <provider>', 'Registered sandbox provider')
     .option('--agent <name>', 'Agent provider')
     .option('--execution-mode <mode>', 'Agent execution mode: interactive | batch')
     .option('--template <name>', 'Workflow template name');
   addAgentRuntimeOptions(command)
     .action(async options => {
+      let ownedRuntime: PluginRuntime | undefined;
       try {
+        const plugins = composition.pluginRuntime ?? (ownedRuntime = await createDefaultPluginRuntime());
+        const agentProviderRegistry = plugins.getAgentProviderRegistry();
         const cfg = getWorkflowConfig();
-        const agentProvider = resolveAgentProviderName(options.agent ?? cfg.agentDefault);
+        const agentProvider = resolveAgentProviderName(options.agent ?? cfg.agentDefault, agentProviderRegistry);
         const goalBudget = cfg.goalBudget || 500_000;
         const result = await runWorkflowCli({
           backlogId: options.backlogId,
@@ -56,6 +61,8 @@ export function registerRunCommands(program: Command): void {
           sandboxProvider: options.sandbox,
           agentProvider,
           agentRuntime: resolveAgentRuntimeOptions(agentProvider, cfg, options),
+          agentProviderRegistry,
+          plugins,
           executionMode: options.executionMode,
           template: options.template,
         });
@@ -68,6 +75,6 @@ export function registerRunCommands(program: Command): void {
         if (result.url) detail(`Change: ${result.url}`);
       } catch (error) {
         handleCommandError(error);
-      }
+      } finally { await ownedRuntime?.dispose(); }
     });
 }

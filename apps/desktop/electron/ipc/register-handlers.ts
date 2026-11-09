@@ -25,6 +25,8 @@ import { createBacklogRuntimeService } from "../services/backlog-runtime-service
 import { createClipboardService } from "../services/clipboard-service.js";
 import { createSshCredentialService } from "../services/ssh-credential-service.js";
 import { createJumpserverService } from "../services/jumpserver-service.js";
+import { createJumpserverCli } from "../adapters/jumpserver-cli.js";
+import { createJmsConnectionService } from "../services/jms-connection-service.js";
 import { createJumpserverCredentialService } from "../services/jumpserver-credential-service.js";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service.js";
 import { createSshService } from "../services/ssh-service.js";
@@ -50,6 +52,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation.js";
 import { SqliteLocalConfigStore } from "@afk/runtime/storage";
+import { createPluginService } from "../services/plugin-service.js";
+import { createGoogleAuthService } from "../services/google-auth-service.js";
+import { createExperienceService } from "../services/experience-service.js";
+import { parseExperienceQuery, parseExperienceSelection, parseExperienceVerify, parseNoInput } from "../../shared/experience-contract.js";
+import { parsePluginEnabled, parsePluginId, parsePluginInstall } from "../../shared/plugin-contract.js";
 
 type HandlerSchema = (value: unknown) => unknown;
 
@@ -113,12 +120,20 @@ const sshManagedHostStore = createSqliteSshManagedHostStore(localConfigStore, lo
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
+const jumpserverCli = createJumpserverCli();
 const defaultJumpserverService = createJumpserverService({
   home,
   bastionStore: createSqliteJumpserverStore(localConfigStore, localConfigReady),
   credentialService: createJumpserverCredentialService({ home, safeStorage }),
+  cli: jumpserverCli,
   managedHostStore: sshManagedHostStore,
   listManagedHosts: async () => ({ hosts: await sshManagedHostStore.list() }),
+});
+const sshConfigAdapter = createSshConfigAdapter({ home, exec, managedStore: sshManagedHostStore });
+const jmsConnectionService = createJmsConnectionService({
+  cli: jumpserverCli,
+  listBastions: () => defaultJumpserverService.listBastions(),
+  listHosts: () => sshConfigAdapter.listHosts(),
 });
 const externalTerminal = createExternalTerminalAdapter();
 const commands = createSshCommandAdapter({ exec });
@@ -133,11 +148,12 @@ const knownHosts = createKnownHostsAdapter({
 });
 const sshService = createSshService({
   home,
-  config: createSshConfigAdapter({ home, exec, managedStore: sshManagedHostStore }),
+  config: sshConfigAdapter,
   commands,
   knownHosts,
   credentialService: sshCredentialService,
   externalTerminal,
+  jms: jmsConnectionService,
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
 const backlogService = createRuntimeBacklogService(resolveWorkspace);
@@ -171,8 +187,34 @@ const workItemExecutionQueryService = createWorkItemExecutionQueryService(create
   },
 }));
 const workItemRunHistoryService = createWorkItemRunHistoryService({ workspace: executionWorkspaceService, runStore: workItemRunStore });
+const pluginService = createPluginService({
+  chooseDirectory: async () => {
+    const selected = await dialog.showOpenDialog({ title: "选择可信本地插件目录", properties: ["openDirectory"] });
+    return selected.canceled ? undefined : selected.filePaths[0];
+  },
+  chooseJsonFile: async () => {
+    const selected = await dialog.showOpenDialog({ title: "选择插件配置 JSON", properties: ["openFile"], filters: [{ name: "JSON", extensions: ["json"] }] });
+    return selected.canceled ? undefined : selected.filePaths[0];
+  },
+  confirm: async (operation, label) => {
+    const messages = {
+      install: "插件是受信任的本地代码，安装后将启用，并可在后续运行中执行。仅安装可信来源。",
+      configure: "将使用所选 JSON 替换该插件的配置。配置值仅在主进程处理。",
+    };
+    const result = await dialog.showMessageBox({ type: "warning", message: `${({ install: "安装插件", configure: "导入插件配置" })[operation]}：${label}`, detail: `${messages[operation]}\n变更仅对后续运行生效，不热更新正在运行的 Worker。`, buttons: ["取消", "确认"], defaultId: 0, cancelId: 0, noLink: true });
+    return result.response === 1;
+  },
+});
+const googleAuthService = createGoogleAuthService({
+  chooseClientFile: async () => {
+    const selected = await dialog.showOpenDialog({ title: "选择 Google Desktop OAuth 客户端 JSON", properties: ["openFile"], filters: [{ name: "JSON", extensions: ["json"] }] });
+    return selected.canceled ? undefined : selected.filePaths[0];
+  },
+  openExternal: url => shell.openExternal(url),
+});
+const experienceService = createExperienceService({ projects: async () => (await workItemInventoryService.list()).projects.map(project => `${project.platform}:${project.projectKey}`) });
 const workItemExecutionService = createWorkItemExecutionService({
-  launchExecution: (input, workspace) => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace),
+  launchExecution: (input, workspace) => pluginService.launchWorker(() => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace)),
   getWorkItem: async (workItemId) => {
     const item = (await workItemInventoryService.list()).items.find(candidate => candidate.id === workItemId);
     if (!item) throw new Error(`工作项 ${workItemId} 不存在或当前账号无权访问`);
@@ -242,6 +284,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   const jumpserverService = deps.jumpserverService ?? defaultJumpserverService;
   workItemInventorySyncService.start();
   if (typeof app.once === "function") app.once("before-quit", () => {
+    void googleAuthService.cancel();
     workItemInventorySyncService.stop();
     workItemInventoryStore.close();
     localConfigStore.close();
@@ -317,6 +360,32 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   });
   registerHandler(IPC_CHANNELS.snapshot, (v: unknown) => backlogWorkspace(v, "snapshot"), (workspace) => snapshot(workspace));
   registerHandler(IPC_CHANNELS.appearance, (v: unknown) => v, () => readAppearance());
+  registerHandler(IPC_CHANNELS.pluginsList, (value: unknown) => value, () => pluginService.list());
+  registerHandler(IPC_CHANNELS.pluginsInstall, parsePluginInstall, input => pluginService.install(input));
+  registerHandlerMulti(IPC_CHANNELS.pluginsSetEnabled, [parsePluginId, parsePluginEnabled], ([id, enabled]) => pluginService.setEnabled(parsePluginId(id), parsePluginEnabled(enabled)));
+  registerHandler(IPC_CHANNELS.pluginsRemove, parsePluginId, id => pluginService.remove(id));
+  registerHandler(IPC_CHANNELS.pluginsConfigure, parsePluginId, id => pluginService.configure(id));
+  registerHandler(IPC_CHANNELS.googleStatus, parseNoInput, () => googleAuthService.status());
+  registerHandler(IPC_CHANNELS.googleCancel, parseNoInput, () => googleAuthService.cancel());
+  registerHandler(IPC_CHANNELS.googleLogout, parseNoInput, () => googleAuthService.logout());
+  ipcMain.handle(IPC_CHANNELS.googleLogin, async (event, input: unknown) => {
+    assertTrustedSender(event);
+    parseNoInput(input);
+    const cancel = () => { void googleAuthService.cancel(); };
+    event.sender?.once("destroyed", cancel);
+    event.sender?.once("render-process-gone", cancel);
+    event.sender?.once("did-start-navigation", cancel);
+    try { return await googleAuthService.login(); }
+    finally {
+      event.sender?.removeListener("destroyed", cancel);
+      event.sender?.removeListener("render-process-gone", cancel);
+      event.sender?.removeListener("did-start-navigation", cancel);
+    }
+  });
+  registerHandler(IPC_CHANNELS.experiencesProjects, parseNoInput, () => experienceService.projects());
+  registerHandler(IPC_CHANNELS.experiencesList, parseExperienceQuery, input => experienceService.list(input));
+  registerHandler(IPC_CHANNELS.experiencesVerify, parseExperienceVerify, input => experienceService.verify(input));
+  registerHandler(IPC_CHANNELS.experiencesRevoke, parseExperienceSelection, input => experienceService.revoke(input));
   registerHandler(IPC_CHANNELS.appearanceSave, (v: unknown) => v, (appearance) => saveAppearance(appearance));
   registerHandlerMulti(IPC_CHANNELS.workflowSave, [
     (v) => backlogWorkspace(v, "workflowSave"),

@@ -102,6 +102,72 @@ ln -s /path/to/afk/skills/* ~/.claude/skills/
 
 Run `/afk-grill-me` in Claude Code to confirm skills are loaded.
 
+## Install on OpenCode 2.x
+
+AFK also ships as an OpenCode 2.x package. OpenCode treats **plugins** and
+**skills** as two separate mechanisms, so there are two parts: the plugin entry
+(optional) and skill discovery (this is what gives you the AFK workflows).
+
+### 1. Add the plugin (optional)
+
+The plugin entry is a thin loader — AFK's substance is its skills, which
+OpenCode discovers separately (step 2). Register the plugin from npm, a git
+spec, or a local checkout:
+
+```bash
+# npm package
+opencode plugin add afk
+
+# git
+opencode plugin add github:easyhaloo/afk
+```
+
+Or reference it in `opencode.json(c)` (`~/.config/opencode/opencode.jsonc` for
+global, or a project-level one). Relative paths resolve from the config file:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    "afk",                          // npm
+    "github:easyhaloo/afk",         // git
+    "/path/to/afk"                  // local checkout (directory)
+  ]
+}
+```
+
+### 2. Make the skills discoverable
+
+OpenCode does not auto-load `SKILL.md` files from inside an installed npm
+package, so point it at AFK's `skills/` directory via the `skills` array (an
+absolute path or `~/` path is most reliable):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": [
+    "/path/to/afk/skills"
+  ]
+}
+```
+
+Alternatively, link the skills into the global skills directory that OpenCode
+scans automatically:
+
+```bash
+mkdir -p ~/.config/opencode/skills
+ln -s /path/to/afk/skills/* ~/.config/opencode/skills/
+```
+
+Each `skills/<name>/SKILL.md` becomes a skill whose ID is its directory name
+(e.g. `afk-do`, `afk-qa`). The `jev-agent-guard` skill owns its own OpenCode
+host integration and is independent of the thin plugin entry above.
+
+### Verify Installation
+
+Run `opencode plugin list` to confirm the plugin loaded, then invoke a skill
+(e.g. `@afk-do`) in an OpenCode session.
+
 ## CLI Commands
 
 ```bash

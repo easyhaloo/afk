@@ -21,7 +21,7 @@ import { WorkflowTemplateSchema, type WorkflowTemplate } from './types.js';
 import { TemplateError } from './types.js';
 import { getTemplate } from './registry.js';
 
-export type TemplateSource = 'cli' | 'project' | 'user' | 'builtin';
+export type TemplateSource = 'cli' | 'project' | 'user' | 'plugin' | 'builtin';
 export interface LoadedTemplate {
   template: WorkflowTemplate;
   source: TemplateSource;
@@ -36,14 +36,17 @@ export interface TemplateLoaderOptions {
   homeDir?: string;
   /** Override the cache (used by tests to force re-load). */
   bypassCache?: boolean;
+  getPluginTemplate?: (name: string) => WorkflowTemplate | undefined;
 }
 
 export class TemplateLoader {
   private readonly homeDir: string;
   private readonly cache = new Map<string, LoadedTemplate>();
+  private readonly getPluginTemplate?: TemplateLoaderOptions['getPluginTemplate'];
 
   constructor(opts: TemplateLoaderOptions = {}) {
     this.homeDir = opts.homeDir ?? homedir();
+    this.getPluginTemplate = opts.getPluginTemplate;
   }
 
   /** Search priority chain for the named template; returns first hit. */
@@ -53,7 +56,7 @@ export class TemplateLoader {
 
   /** Load a template plus its origin so callers can resolve relative assets. */
   async loadWithSource(name: string, opts: TemplateLoaderOptions = {}): Promise<LoadedTemplate> {
-    if (!opts.bypassCache && this.cache.has(name)) {
+    if (!opts.bypassCache && !this.getPluginTemplate && this.cache.has(name)) {
       return this.cache.get(name)!;
     }
 
@@ -80,6 +83,15 @@ export class TemplateLoader {
         }
         throw err;
       }
+    }
+    const plugin = this.getPluginTemplate?.(name);
+    if (plugin) {
+      const parsed = WorkflowTemplateSchema.safeParse(plugin);
+      if (!parsed.success) throw new TemplateError(`invalid plugin template '${name}'`, name, parsed.error);
+      if (parsed.data.steps.some(step => typeof step.prompt === 'object' && !isAbsolute(step.prompt.file))) {
+        throw new TemplateError('plugin template prompt files must use absolute paths', name);
+      }
+      return { template: parsed.data, source: 'plugin' };
     }
     const builtin = getTemplate(name);
     if (builtin) {

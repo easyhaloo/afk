@@ -6,6 +6,11 @@ import { execFileSync } from 'node:child_process';
 import { readSignalSync } from '../io/signal.js';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 import { ControlModeConnection } from './control-mode.js';
+import { logger } from '../io/logger.js';
+
+vi.mock('../io/logger.js', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 describe('normalizeTmuxSessionName', () => {
   it('rewrites colons the same way tmux stores session names', () => {
@@ -100,6 +105,36 @@ describe('TmuxClient provider readiness', () => {
     await expect(client.waitForPrompt('/w', 1000, 'codex', 'codex-session')).resolves.toBe(true);
     expect(capture).toHaveBeenCalled();
   });
+
+  it('answers a modal that is up before the goal is typed', async () => {
+    // A modal covers the composer, so the placeholder stays hidden and the
+    // composer never looks ready. The modal holds the keyboard, so the goal
+    // would be typed into the modal and lost with it. AFK answers the modal
+    // instead of waiting the timeout out.
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('Trust this folder?\n  1. Trust and continue\n  2. Quit')
+      .mockResolvedValue('› Ask Codex to do anything');
+
+    await expect(client.waitForPrompt('/w', 1000, 'codex', 'codex-session')).resolves.toBe(true);
+
+    expect(exec).toHaveBeenCalledWith(['send-keys', '-t', 'codex-session:main', 'C-m']);
+  });
+
+  it('does not press Enter while the composer is simply not ready yet', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client, 'capturePane').mockResolvedValue('› the goal is still typed into the composer');
+
+    await expect(client.waitForPrompt('/w', 20, 'codex', 'codex-session')).resolves.toBe(true);
+
+    expect(exec).not.toHaveBeenCalled();
+  });
 });
 
 describe('TmuxClient prompt submission', () => {
@@ -121,6 +156,45 @@ describe('TmuxClient prompt submission', () => {
     // that a modal swallowed.
     expect(countEnterPresses(exec as never)).toBe(3);
     expect(capture).toHaveBeenCalled();
+  });
+
+  it('keeps pressing Enter while Codex restarts behind a modal', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
+    // Codex asks whether it may trust a directory it has not seen before.
+    // The modal takes the Enter that submits the goal, and the TUI restarts
+    // behind it with the goal still in the composer — so the run has to keep
+    // pressing Enter until the composer is finally empty.
+    const capture = vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('› the goal is still typed into the composer')
+      .mockResolvedValueOnce('Trust this folder?\n  1. Trust and continue\n  2. Quit')
+      .mockResolvedValueOnce('› the goal is still typed into the composer')
+      .mockResolvedValueOnce('› the goal is still typed into the composer')
+      .mockResolvedValue('› Ask Codex to do anything');
+
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'codex');
+
+    // Two presses submit the goal; the rest cover the modal and the restart.
+    expect(countEnterPresses(exec as never)).toBe(6);
+  });
+
+  it('names the modal it is answering instead of only retrying', async () => {
+    const client = new TmuxClient();
+    vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
+    vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('Trust this folder?\n  1. Trust and continue')
+      .mockResolvedValue('› Ask Codex to do anything');
+
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'codex');
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ modal: 'Trust this folder?' }),
+      expect.stringContaining('modal'),
+    );
   });
 
   it('does not press Enter again once the composer is empty', async () => {

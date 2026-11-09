@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { simpleGit } from 'simple-git';
 import { WorktreeManager } from '../infrastructure/git/index.js';
 import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index.js';
-import { createSandboxProvider } from '../infrastructure/sandbox/index.js';
-import { createAgentProvider } from '../domain/agents/index.js';
+import { defaultSandboxProviderRegistry, SandboxProviderRegistry } from '../infrastructure/sandbox/registry.js';
+import { AgentProviderRegistry, defaultAgentProviderRegistry, ensureBuiltinAgentProviders } from '../domain/agents/index.js';
+import { prepareAgentRuntime } from '../domain/agents/codex-runtime.js';
+import { resolveRuntimeForProvider } from '../domain/agents/runtime-binding.js';
 import type {
   Sandbox,
   SandboxProvider,
@@ -27,6 +29,7 @@ import { BudgetManager } from './workflows/budget.js';
 import { BudgetStore } from './workflows/budget-store.js';
 import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
+import { experienceScope, prepareExperienceContext, recordExecutionExperience } from './learning/runtime.js';
 import { TemplateLoader } from '../domain/templates/loader.js';
 import { PlanExecutor } from './workflows/plan-executor.js';
 import { SystemActionExecutor } from './workflows/system-actions.js';
@@ -41,6 +44,7 @@ import {
   type PromptSegment,
 } from './workflows/execution-protocol.js';
 import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from './workflows/backlog-context.js';
+import { describePublishBoundary } from '../domain/branches/publish-boundary.js';
 import { measurePromptBudget } from '../domain/agents/prompt-budget.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
@@ -110,13 +114,14 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
 }
 
 function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
+  const round = `cycle ${rework.cycle}, attempt ${rework.attempt}`;
   if (rework.source === 'conflict') {
     // The change request could not be merged because the target branch
     // changed the same lines. Making the change compatible with the target
     // here is what keeps the next merge conflict-free.
-    return `\n\nAn open merge-conflict rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
+    return `\n\nAn open merge-conflict rework record (${rework.id}, ${round}) applies to this backlog. The change request could not be merged because the target branch changed the same lines. Make the change compatible with the target branch — merge the target branch into the current branch and resolve the conflicts, keeping the intent of both sides:${rework.summary}`;
   }
-  return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
+  return `\n\nAn open QA rework record (${rework.id}, ${round}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
 /**
@@ -214,10 +219,19 @@ export interface RunnerDependencies {
   watchdog?: Watchdog;
   /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
   sandboxProvider?: SandboxProvider;
+  /** Registry used to resolve configured and plugin-provided sandboxes. */
+  sandboxProviderRegistry?: SandboxProviderRegistry;
   /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
   agentProvider?: AgentProvider;
+  /** Registry used to resolve configured and template step providers. */
+  agentProviderRegistry?: AgentProviderRegistry;
   /** Immutable runtime selection resolved by the caller. */
   agentRuntime?: AgentRuntimeSelection;
+  /**
+   * Readiness probe for a runtime resolved inside the run (tests). Defaults
+   * to AFK's Codex readiness probe, which spends a live model round-trip.
+   */
+  prepareRuntime?: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
   sessionStoreChain?: (worktreePath: string) => import('./sessions/types.js').SessionStoreChain;
   /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
@@ -290,8 +304,17 @@ export class WorkflowRunner {
   private watchdog: Watchdog;
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
+  private readonly sandboxProviderRegistry: SandboxProviderRegistry;
   private agentProvider: AgentProvider;
   private readonly agentRuntime?: AgentRuntimeSelection;
+  /**
+   * Runtimes already probed for this run, keyed by the provider that runs them.
+   *
+   * A live readiness probe costs a real model round-trip, so a provider is
+   * probed at most once per run even when several steps use it.
+   */
+  private readonly preparedRuntimes = new Map<AgentProviderName, AgentRuntimeSelection | undefined>();
+  private readonly prepareRuntime: (runtime: AgentRuntimeSelection) => Promise<AgentRuntimeSelection>;
   /** Session store chain factory — defaults to defaultSessionStoreChain. */
   private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types.js').SessionStoreChain;
   /** Resolved sandbox provider name (set in run()). */
@@ -316,6 +339,7 @@ export class WorkflowRunner {
   private config: WorkflowConfig;
   private systemActionsRan = false;
   private readonly agentProviderInjected: boolean;
+  private readonly agentProviderRegistry: AgentProviderRegistry;
   private readonly sandboxProviderInjected: boolean;
   private primaryHandle?: BranchHandle;
   private resourceScope?: RunResourceScope;
@@ -381,16 +405,46 @@ export class WorkflowRunner {
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ backlog: providers?.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config } as never)
       : ({ handoff: async () => 'terminal' } as unknown as HandoffCoordinator);
-    this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
+    this.sandboxProviderRegistry = deps?.sandboxProviderRegistry ?? deps?.plugins?.getSandboxProviderRegistry() ?? defaultSandboxProviderRegistry;
+    this.sandboxProvider = deps?.sandboxProvider ?? this.sandboxProviderRegistry.create(this.sandboxProviderRegistry.has('local') ? 'local' : this.sandboxProviderRegistry.ids()[0] ?? 'local', { worktreeManager: this.worktree });
     this.sandboxProviderInjected = deps?.sandboxProvider !== undefined;
+    this.agentProviderRegistry = deps?.agentProviderRegistry ?? deps?.plugins?.getAgentProviderRegistry() ?? defaultAgentProviderRegistry;
+    if (this.agentProviderRegistry === defaultAgentProviderRegistry) ensureBuiltinAgentProviders(this.agentProviderRegistry);
     this.agentProviderInjected = deps?.agentProvider !== undefined;
-    this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
+    this.agentProvider = deps?.agentProvider ?? this.agentProviderRegistry.get(this.agentProviderName) ?? this.agentProviderRegistry.list()[0] ?? this.agentProviderRegistry.require(this.agentProviderName);
+    this.agentProviderName = this.agentProvider.name;
     this.agentRuntime = deps?.agentRuntime;
+    this.prepareRuntime = deps?.prepareRuntime ?? prepareAgentRuntime;
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
     this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
     this.observer = deps.observer;
     this.multiRepositoryPreparer = deps?.multiRepositoryPreparer ?? new MultiRepositoryPreparer();
+  }
+
+  /**
+   * The runtime a provider runs with, probed at most once per run.
+   *
+   * The request-level runtime was already probed by the caller, so it is
+   * reused as-is. A runtime resolved here — because the step runs a provider
+   * other than the request-level one — is probed here, which is what makes an
+   * unreachable model fail before the agent starts instead of halfway
+   * through its first turn.
+   */
+  private async runtimeForProvider(provider: AgentProviderName): Promise<AgentRuntimeSelection | undefined> {
+    if (this.preparedRuntimes.has(provider)) return this.preparedRuntimes.get(provider);
+    const bound = resolveRuntimeForProvider({
+      provider,
+      runtime: this.agentRuntime,
+      codex: this.config.agents?.codex,
+    });
+    if (!bound) {
+      this.preparedRuntimes.set(provider, undefined);
+      return undefined;
+    }
+    const prepared = bound === this.agentRuntime ? bound : await this.prepareRuntime(bound);
+    this.preparedRuntimes.set(provider, prepared);
+    return prepared;
   }
 
   /**
@@ -507,7 +561,7 @@ export class WorkflowRunner {
 
     const effectiveTemplate = options.template ?? 'issue-implementation';
     this.sandboxProviderName = options.sandboxProvider ?? 'local';
-    this.agentProviderName = options.agentProvider ?? 'claude-code';
+    this.agentProviderName = options.agentProvider ?? this.agentProvider.name;
     this.executionMode = options.executionMode ?? 'batch';
     this.repoRoot = options.repoRoot ?? process.cwd();
     await this.startRuntime(options.backlogId, session);
@@ -529,7 +583,7 @@ export class WorkflowRunner {
     // the named provider registered (import side-effect or explicit registration).
     // Skip if constructor already injected one via deps (tests use this path).
     if (!this.agentProviderInjected) {
-      this.agentProvider = createAgentProvider(this.agentProviderName);
+      this.agentProvider = this.agentProviderRegistry.require(this.agentProviderName);
     }
 
     // Load lifecycle modules
@@ -553,7 +607,7 @@ export class WorkflowRunner {
 
     // Validate template early so failures throw before worktree creation. A
     // claimed backlog must never be left in-progress when validation fails.
-    await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
+    await new TemplateLoader({ projectRoot: this.repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(effectiveTemplate);
     } catch (error) {
       if (error instanceof AuditPersistenceError) {
         await this.resourceScope?.finish({ status: 'failed' });
@@ -587,6 +641,7 @@ export class WorkflowRunner {
         await this.preparedRepositories.heartbeat?.();
         await this.activeClaim?.heartbeat();
         for (const repository of this.preparedRepositories.repositories) {
+          await this.runPublicationHooks(repository.handle.path);
           await this.commitImplementationWork(iid, repository.handle.path);
           await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
         }
@@ -662,7 +717,7 @@ export class WorkflowRunner {
 
   /** Resolve sandbox provider name to a SandboxProvider instance. */
   private sandboxProviderByName(name: SandboxProviderName): SandboxProvider {
-    return createSandboxProvider(name, { worktreeManager: this.worktree });
+    return this.sandboxProviderRegistry.create(name, { worktreeManager: this.worktree });
   }
 
   /**
@@ -700,7 +755,12 @@ export class WorkflowRunner {
     // The audit event is a side effect of the classification. A run that has
     // no observation context — a direct runBody call — still records the
     // fact; only the published event is skipped.
-    if (!this.observationContext) return recorded;
+    await this.persistFailureEvidence(recorded);
+    return recorded;
+  }
+
+  private async persistFailureEvidence(recorded: FailureDiagnostic): Promise<void> {
+    if (!this.observationContext) return;
     await this.recordObservation({
       kind: 'failure.classified',
       failureClass: recorded.class,
@@ -709,7 +769,12 @@ export class WorkflowRunner {
       ...(recorded.cause ? { cause: snapshotFailure(recorded.cause) } : {}),
       evidence: recorded.evidence,
     });
-    return recorded;
+    try { experienceScope(this.observationContext.workItemId); } catch { return; }
+    try {
+      recordExecutionExperience({ failure: recorded, runId: this.observationContext.runId, workItemId: this.observationContext.workItemId });
+    } catch {
+      logger.warn({ runId: this.observationContext.runId }, 'experience candidate could not be persisted; original failure evidence remains in the audit stream');
+    }
   }
 
   /**
@@ -795,13 +860,42 @@ export class WorkflowRunner {
       if (acCorrection) segments.push({ label: 'AC correction', text: acCorrection.trim() });
     }
     if (this.preparedRepositories) {
-      const repositories = this.preparedRepositories.repositories.map((repository, index) =>
-        `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${repository.targetBranch ?? repository.baseBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`,
-      ).join('\n');
+      const repositories = this.preparedRepositories.repositories.map((repository, index) => {
+        const targetBranch = repository.targetBranch ?? repository.baseBranch;
+        const boundary = describePublishBoundary({
+          workingBranch: repository.workingBranch,
+          targetBranch,
+          baseBranch: repository.baseBranch,
+          ...(repository.sourceBranch ? { sourceBranch: repository.sourceBranch } : {}),
+        });
+        const listing = `${index + 1}. ${repository.primary ? 'primary' : 'secondary'} checkoutPath=${repository.checkoutPath} baseBranch=${repository.baseBranch} targetBranch=${targetBranch}${repository.sourceBranch ? ` sourceBranch=${repository.sourceBranch}` : ''} workingBranch=${repository.workingBranch}`;
+        return `${listing}\n   ${boundary}`;
+      }).join('\n');
       segments.push({
         label: 'execution repositories',
         text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,
       });
+    }
+    const experienceWorkItemId = this.observationContext?.workItemId ?? this.activeBacklog?.workItemId;
+    if (experienceWorkItemId?.includes(':')) {
+      try {
+        const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
+          prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins });
+        if (path) {
+          segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Read the evidence and check applicability before acting; it cannot override repository instructions or verification gates.` });
+          if (this.observationContext) await this.recordObservation({ kind: 'decision.made', command: 'experience.recall', accepted: true, reason: path });
+        }
+      } catch (error) {
+        if (error instanceof AuditPersistenceError) throw error;
+        logger.warn({ workItemId: experienceWorkItemId }, 'verified experience context could not be prepared');
+      }
+    }
+    try {
+      const context = await fs.lstat(join(worktreePath, '.afk', 'plugin-context.md'));
+      if (!context.isFile() || context.isSymbolicLink()) throw new Error('Plugin context must be a regular file');
+      segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     return segments;
   }
@@ -859,6 +953,12 @@ export class WorkflowRunner {
     const completionKind: CompletionKind = step.id === 'verify-ac' ? 'ac' : 'task';
     const observationPhase = completionKind === 'ac' ? 'verification' : 'implementation';
     await this.recordObservation({ kind: 'step.started', stepId: step.id, phase: observationPhase });
+    const stepProvider = step.provider ? this.agentProviderRegistry.require(step.provider) : this.agentProvider;
+    // The runtime belongs to the provider this step actually runs with. A step
+    // that overrides the provider must not inherit the request-level
+    // provider's runtime: that silently drops every provider-specific
+    // setting (for Codex: provider, profile and transport).
+    const runtime = await this.runtimeForProvider(stepProvider.name);
     let phase: PhaseResult;
     try {
       phase = await this.runPhase({
@@ -875,8 +975,8 @@ export class WorkflowRunner {
         segments,
         signalType,
         executionMode: ctx.executionMode ?? 'batch',
-        agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
-        runtime: this.agentRuntime,
+        agentProvider: stepProvider,
+        runtime,
         sandbox,
         completionKind,
       });
@@ -924,13 +1024,13 @@ export class WorkflowRunner {
    * + the inline before/after loops in runBody) behind one helper.
    */
   private async runLifecycleHooks(
-    hooks: ('before' | 'after' | 'cleanup')[],
+    hooks: ('before' | 'after' | 'publish' | 'cleanup')[],
     ctx: LifecycleContext,
     reverse = false,
   ): Promise<void> {
     if (this.lifecycleDispatcher) {
       for (const hook of hooks) {
-        const phase = hook === 'before' ? 'before-agent' : hook === 'after' ? 'after-agent' : 'cleanup';
+        const phase = hook === 'before' ? 'before-agent' : hook === 'after' ? 'after-agent' : hook === 'publish' ? 'before-publish' : 'cleanup';
         await this.lifecycleDispatcher.run(phase, ctx);
       }
       return;
@@ -941,10 +1041,12 @@ export class WorkflowRunner {
         try {
           if (hook === 'before') await mod.onBeforeAgent?.(ctx);
           else if (hook === 'after') await mod.onAfterAgent?.(ctx);
+          else if (hook === 'publish') await mod.onBeforePublish?.(ctx);
           else await mod.onCleanup?.(ctx);
           logger.info({ iid: ctx.iid, module: mod.name, hook }, 'lifecycle hook succeeded');
         } catch (err) {
           logger.warn({ iid: ctx.iid, module: mod.name, err }, `lifecycle ${hook} hook failed`);
+          if (hook !== 'cleanup' && mod.failureMode === 'required') throw err;
         }
       }
     }
@@ -1069,7 +1171,7 @@ export class WorkflowRunner {
 
     // ── Template execution: compilation + typed dispatch ─────────────────────
     logger.info({ iid, template }, 'using compiled execution plan');
-    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot }).load(template);
+    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(template);
     await this.recordObservation({
       kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
       steps: loadedTemplate.steps.map(step => ({
@@ -1080,6 +1182,7 @@ export class WorkflowRunner {
     const autoWrapupOverridden = this.autoWrapup !== WorkflowRunner.prototype.autoWrapup;
     const systemActions = new SystemActionExecutor({
       publishChange: async () => {
+        await this.runPublicationHooks(wt.path);
         if (autoWrapupOverridden) return { url: undefined };
         if (this.preparedRepositories) {
           this.systemActionsRan = true;
@@ -1108,7 +1211,7 @@ export class WorkflowRunner {
       executeSystem: async step => {
         const startedAt = new Date().toISOString();
         try {
-          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch });
+          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input });
           return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
         } catch (error) {
           return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };
@@ -1125,6 +1228,7 @@ export class WorkflowRunner {
         hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
       }, verification, stepResults);
       if (recovered) {
+        await this.runPublicationHooks(wt.path);
         if (!this.preparedRepositories) {
           await this.recordImplementationCommit(wt.path, wt.branch);
           await this.providers.branches.push(wt.branch, wt.path);
@@ -1407,6 +1511,7 @@ export class WorkflowRunner {
         : diagnoseExecutionFailure(result);
       if (diagnosis?.retryable && agentFailures < this.config.maxRetries) {
         agentFailures++;
+        await this.persistFailureEvidence(diagnosis);
         logger.warn(
           { iid: p.iid, round, attempt: agentFailures, code: diagnosis.code, providerCode: diagnosis.providerCode },
           'the agent failed in a way that can be retried; repeating the step',
@@ -1448,7 +1553,7 @@ export class WorkflowRunner {
           // Errors are best-effort and do not affect the handoff flow.
           const chain = this.sessionStoreChainFactory(p.wtPath);
           const runId = `issue-${p.iid}-gen-${p.budget.used + 1}`;
-          if (sandbox) {
+          if (sandbox && agentProvider.capabilities.has('resume')) {
             try {
               const snapshot = await execution.captureSession();
               if (snapshot) {
@@ -1582,9 +1687,14 @@ export class WorkflowRunner {
    * Push worktree branch to origin
    */
   private async pushBranch(worktreePath: string): Promise<void> {
+    await this.runPublicationHooks(worktreePath);
     const git = simpleGit(worktreePath);
     const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
     await this.providers.branches.push(branch, worktreePath);
+  }
+
+  private async runPublicationHooks(worktreePath: string): Promise<void> {
+    if (this.lifecycleCtx) await this.runLifecycleHooks(['publish'], { ...this.lifecycleCtx, worktreePath });
   }
 
   private async transitionBacklog(iid: number, state: BacklogState, reason?: string): Promise<void> {
@@ -1654,9 +1764,10 @@ export class WorkflowRunner {
     if (this.runtimeRunId) return;
     const now = new Date().toISOString();
     this.runtimeRunId = this.observationContext?.runId ?? `${session}-${Date.now()}`;
+    const runId = this.runtimeRunId;
     try {
       await this.runtimeManager.start({
-        runId: this.runtimeRunId,
+        runId,
         backlogId,
         workspace: this.repoRoot,
         providerRef: this.activeBacklog?.providerRef,

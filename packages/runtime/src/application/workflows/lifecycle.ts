@@ -1,7 +1,7 @@
 import type { ProjectContext } from '../project/context.js';
 import type { PreparedRepository } from './multi-repository-preparer.js';
 
-export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'cleanup';
+export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'before-publish' | 'cleanup';
 export type ModuleParamValue = string | number | boolean | null;
 export type ModuleParams = Record<string, Record<string, ModuleParamValue>>;
 
@@ -31,9 +31,11 @@ export interface LifecycleContext {
 export interface LifecycleModule {
   name: string;
   order?: number;
+  failureMode?: 'required' | 'best-effort';
   onInit?(ctx: InitContext): Promise<void>;
   onBeforeAgent?(ctx: LifecycleContext): Promise<void>;
   onAfterAgent?(ctx: LifecycleContext): Promise<void>;
+  onBeforePublish?(ctx: LifecycleContext): Promise<void>;
   onCleanup?(ctx: LifecycleContext): Promise<void>;
 }
 
@@ -58,12 +60,12 @@ export class LifecycleDispatcher {
     for (const module of entries) {
       const hook = phase === 'init' ? module.onInit
         : phase === 'before-agent' ? module.onBeforeAgent
-          : phase === 'after-agent' ? module.onAfterAgent : module.onCleanup;
+          : phase === 'after-agent' ? module.onAfterAgent : phase === 'before-publish' ? module.onBeforePublish : module.onCleanup;
       if (!hook) continue;
       try {
         await hook(ctx as never);
       } catch (error) {
-        if (phase === 'init') throw error;
+        if (phase === 'init' || (phase !== 'cleanup' && module.failureMode === 'required')) throw error;
       }
     }
     const extensions = this.extensions.get(phase) ?? [];

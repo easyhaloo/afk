@@ -59,6 +59,17 @@ afterEach(async () => {
 });
 
 describe('JsonlEventStore', () => {
+  it('prunes a terminal run with artifact receipts only after every receipt passes retention', async () => {
+    const store = new JsonlEventStore({ root: await root(), now: () => new Date('2026-10-13T00:00:00.000Z') });
+    await terminal(store, 'uploaded', '2026-10-11T00:00:00.000Z');
+    await store.append([{
+      ...draft('uploaded-artifact', 'run.started', { ...context, runId: 'uploaded' }),
+      type: 'effect.completed', occurredAt: '2026-10-12T12:00:00.000Z',
+      data: { kind: 'effect.completed', effectKind: 'artifact.upload', idempotencyKey: 'uploaded-artifact', outcome: 'succeeded' },
+    }]);
+    await expect(store.prune({ retentionMs: 24 * 60 * 60 * 1000, exclusiveAccess: true })).resolves.toEqual([]);
+    await expect(store.prune({ retentionMs: 0, exclusiveAccess: true })).resolves.toEqual(['uploaded']);
+  });
   it('retains history by default and prunes only terminal runs strictly older than the event-time cutoff', async () => {
     const store = new JsonlEventStore({ root: await root(), now: () => new Date('2026-10-13T00:00:00.000Z') });
     const retentionMs = 24 * 60 * 60 * 1000;

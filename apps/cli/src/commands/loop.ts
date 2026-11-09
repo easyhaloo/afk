@@ -6,6 +6,8 @@ import { assembleProviders } from '@afk/runtime/infrastructure/provider/assembly
 import { resolveWorkflowRunRequest } from '@afk/runtime/execution';
 import { executionManifestPath } from '@afk/runtime/infrastructure/workspace';
 import { LoopRunner } from '@afk/runtime/application/runners/loop-runner';
+import { createDefaultPluginRuntime } from '@afk/runtime/plugin-sdk';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import { installLoopSignalHandlers } from './loop-signals.js';
 import { getSchedulerConfig, getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { parseWorkItemId } from '@afk/runtime/domain/backlog/index';
@@ -33,6 +35,7 @@ import {
   sanitizeLoopRunTag,
 } from '@afk/runtime/infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
+import { chooseCommandRunTag } from './loop-run-tag.js';
 
 export function resolveManagedLoopExecution(
   options: LoopStartOptions,
@@ -51,17 +54,17 @@ export function resolveManagedLoopExecution(
   return { workItemId, manifestPath: options.executionManifest };
 }
 
-export function registerLoopCommands(program: Command): void {
+export function registerLoopCommands(program: Command, composition: CommandRegistrationContext = {}): void {
   const loop = program.command('loop').description('Continuous manifest-bound work item execution').usage('[command] [options]');
   addLoopStartOptions(loop);
   loop.action(async (options: LoopStartOptions) => {
-    try { await startLoop(options); } catch (error) { handleCommandError(error); }
+    try { await startLoop(options, composition); } catch (error) { handleCommandError(error); }
   });
 
   const start = loop.command('start').description('Start the loop (foreground by default; -d runs in background)').usage('[options]');
   addLoopStartOptions(start);
   start.action(async (options: LoopStartOptions) => {
-    try { await startLoop(options); } catch (error) { handleCommandError(error); }
+    try { await startLoop(options, composition); } catch (error) { handleCommandError(error); }
   });
 
   loop.command('status')
@@ -80,7 +83,7 @@ export function registerLoopCommands(program: Command): void {
     });
 }
 
-async function startLoop(options: LoopStartOptions): Promise<void> {
+async function startLoop(options: LoopStartOptions, composition: CommandRegistrationContext): Promise<void> {
   const managedExecution = resolveManagedLoopExecution(options, loadLoopConfig().moduleTriggers);
   const runTag = resolveStartRunTag(options, managedExecution.workItemId);
   warnLegacyPathOverrides();
@@ -88,7 +91,7 @@ async function startLoop(options: LoopStartOptions): Promise<void> {
     await startDaemon(runTag, Boolean(options.runTag));
     return;
   }
-  await runLoop(options, runTag);
+  await runLoop(options, runTag, composition);
 }
 
 /** The run directory a started loop is filed under: explicit tag, else the work item's. */
@@ -109,47 +112,54 @@ function warnLegacyPathOverrides(): void {
   }
 }
 
-async function runLoop(options: LoopStartOptions, runTag: string): Promise<void> {
+async function runLoop(options: LoopStartOptions, runTag: string, composition: CommandRegistrationContext): Promise<void> {
   if (process.env.AFK_LOOP_CHILD === '1') redirectStdioToLog();
-
-  const schedulerConfig = getSchedulerConfig();
-  const loopConfig = loadLoopConfig();
-  const managedExecution = resolveManagedLoopExecution(options, loopConfig.moduleTriggers);
-  const pollIntervalMs = (options.pollInterval ?? schedulerConfig.pollInterval) * 1000;
-  const statusIntervalMs = (options.statusInterval ?? 30) * 1000;
-  const shutdownTimeoutMs = (options.shutdownTimeout ?? 300) * 1000;
-
-  const manifestPath = managedExecution.manifestPath ?? executionManifestPath(managedExecution.workItemId);
-  const request = managedExecution.manifestPath || fs.existsSync(manifestPath) ? await resolveWorkflowRunRequest({
-    backlogId: managedExecution.workItemId, executionManifestPath: manifestPath,
-  }, getWorkflowConfig()) : undefined;
-  const { providers } = await assembleProviders({ workItemId: managedExecution.workItemId, cwd: request?.repoRoot ?? process.cwd(),
-    ...(request ? { projectId: request.trackerProjectId, projectKey: request.trackerProjectKey, providerHost: request.trackerHost } : {}) });
-  const runner = new LoopRunner(providers, {
-    pollIntervalMs,
-    statusIntervalMs,
-    shutdownTimeoutMs,
-    maxIterations: options.maxIterations,
-    backlogIds: options.backlogId,
-    managedExecution,
-    targetBranch: getWorkflowConfig().targetBranch,
-    template: options.template,
-    runTag,
-  });
-
-  printStartup(pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, options.backlogId, runTag);
-  const removeSignals = installLoopSignalHandlers(
-    () => runner.stop(),
-    signal => warning(`Received ${signal}, draining in-flight work...`),
-    error => logger.error({ err: error }, 'error during loop shutdown'),
-  );
+  const plugins = composition.pluginRuntime ?? await createDefaultPluginRuntime({ warn: message => warning(message) });
   try {
-    await runner.start();
+    const agentProviderRegistry = plugins.getAgentProviderRegistry();
+    const schedulerConfig = getSchedulerConfig();
+    const loopConfig = loadLoopConfig();
+    const managedExecution = resolveManagedLoopExecution(options, loopConfig.moduleTriggers);
+    const pollIntervalMs = (options.pollInterval ?? schedulerConfig.pollInterval) * 1000;
+    const statusIntervalMs = (options.statusInterval ?? 30) * 1000;
+    const shutdownTimeoutMs = (options.shutdownTimeout ?? 300) * 1000;
+
+    const manifestPath = managedExecution.manifestPath ?? executionManifestPath(managedExecution.workItemId);
+    const request = managedExecution.manifestPath || fs.existsSync(manifestPath) ? await resolveWorkflowRunRequest({
+      backlogId: managedExecution.workItemId, executionManifestPath: manifestPath,
+    }, getWorkflowConfig(), { agentProviderRegistry }) : undefined;
+    const { providers } = await assembleProviders({ workItemId: managedExecution.workItemId, cwd: request?.repoRoot ?? process.cwd(),
+      plugins,
+      ...(request ? { projectId: request.trackerProjectId, projectKey: request.trackerProjectKey, providerHost: request.trackerHost } : {}) });
+    const runner = new LoopRunner(providers, {
+      plugins,
+      agentProviderRegistry,
+      pollIntervalMs,
+      statusIntervalMs,
+      shutdownTimeoutMs,
+      maxIterations: options.maxIterations,
+      backlogIds: options.backlogId,
+      managedExecution,
+      targetBranch: getWorkflowConfig().targetBranch,
+      template: options.template,
+      runTag,
+    });
+
+    printStartup(pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, options.backlogId, runTag);
+    const removeSignals = installLoopSignalHandlers(
+      () => runner.stop(),
+      signal => warning(`Received ${signal}, draining in-flight work...`),
+      error => logger.error({ err: error }, 'error during loop shutdown'),
+    );
+    try {
+      await runner.start();
+    } finally {
+      removeSignals();
+    }
+    success('Loop finished (max-iterations reached)');
   } finally {
-    removeSignals();
+    if (plugins !== composition.pluginRuntime) await plugins.dispose();
   }
-  success('Loop finished (max-iterations reached)');
-  process.exit(0);
 }
 
 function printStartup(pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, backlogIds: string[] | undefined, runTag: string): void {
@@ -205,20 +215,18 @@ async function startDaemon(runTag: string, explicitTag = false): Promise<void> {
 /**
  * The run a command acts on when the operator names none.
  *
- * `default` when that run is alive, otherwise the only live run. With several
- * live runs there is no single answer: guessing would report "not running"
- * while loops are working, so the command refuses and names them instead.
+ * The choice itself lives in `chooseCommandRunTag`; this only turns an
+ * ambiguous answer into the command error an operator can act on.
  */
 function resolveCommandRunTag(explicit?: string): string {
-  if (explicit) return sanitizeLoopRunTag(explicit);
-  const live = liveLoopRunTags();
-  if (live.length === 0) return DEFAULT_LOOP_RUN_TAG;
-  if (live.includes(DEFAULT_LOOP_RUN_TAG)) return DEFAULT_LOOP_RUN_TAG;
-  if (live.length === 1) return live[0];
-  return handleCommandError(
-    new Error(`afk loop: ${live.length} loops are running (${live.join(', ')})`),
-    'name one with --run-tag, or list them all with --all',
-  );
+  const choice = chooseCommandRunTag(explicit, liveLoopRunTags());
+  if ('ambiguous' in choice) {
+    return handleCommandError(
+      new Error(`afk loop: ${choice.ambiguous.length} loops are running (${choice.ambiguous.join(', ')})`),
+      'name one with --run-tag, or list them all with --all',
+    );
+  }
+  return choice.tag;
 }
 
 /**

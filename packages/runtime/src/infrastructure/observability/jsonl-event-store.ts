@@ -121,7 +121,7 @@ export class JsonlEventStore implements EventStorePort {
         try {
           if (!(await this.verify(runId)).valid) return false;
           const events = await this.load(runId);
-          const last = events.at(-1);
+          const last = events.filter(event => event.data.kind === 'run.finished').at(-1);
           if (last?.data.kind !== 'run.finished' || !['succeeded', 'failed', 'cancelled'].includes(last.data.outcome)) return false;
           if (!events.every(event => event.schemaVersion === 1 && event.type === event.data.kind && typeof event.occurredAt === 'string'
             && Number.isFinite(Date.parse(event.occurredAt)) && Date.parse(event.occurredAt) < cutoff)) return false;

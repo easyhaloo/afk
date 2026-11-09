@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { generateWorkflowGraph } from '@afk/runtime/application/visualizations/workflow-graph';
 import { writeGraphCache } from '@afk/runtime/application/visualizations/graph-cache';
 import { workspaceStateDirectory, workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
+import { PluginRuntime } from '@afk/runtime/plugin-sdk';
 
 const projects: string[] = [];
 afterEach(async () => { await Promise.all(projects.splice(0).map((project) => rm(project, { recursive: true, force: true }))); });
@@ -19,6 +20,20 @@ async function projectWithTemplate(content: string): Promise<string> {
 }
 
 describe('workflow graph application', () => {
+  it('uses the same registered plugin template as execution and rejects it after plugin disposal', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'plugin-template-graph-'));
+    projects.push(project);
+    const plugins = new PluginRuntime();
+    await plugins.activate({ manifest: { id: 'workflow.graph-review', version: '1.0.0', apiVersion: 1, provides: ['workflow.template'], trusted: true },
+      activate(context) { context.registerWorkflowTemplate({ name: 'plugin-graph-review', version: 1, steps: [{ id: 'review', kind: 'agent', role: 'reviewer', prompt: 'Review' }] }); } });
+    try {
+      const result = await generateWorkflowGraph({ projectRoot: project, template: 'plugin-graph-review', plugins });
+      expect(result.template.source).toBe('plugin');
+      expect(result.snapshot.nodes).toHaveLength(1);
+      await plugins.dispose('workflow.graph-review');
+      await expect(generateWorkflowGraph({ projectRoot: project, template: 'plugin-graph-review', plugins })).rejects.toThrow('not found');
+    } finally { await plugins.dispose(); }
+  });
   it('generates JSON-safe graph output and hash-addressed cache files', async () => {
     const project = await projectWithTemplate('name: review\nversion: 1\nsteps:\n  - id: implement\n    role: implementer\n    prompt: implement\n  - id: review\n    role: reviewer\n    prompt: review\n    dependsOn: [implement]\n');
     const result = await generateWorkflowGraph({ projectRoot: project, template: 'review', generatedAt: '2026-01-01T00:00:00.000Z' });

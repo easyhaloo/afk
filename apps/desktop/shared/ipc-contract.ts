@@ -1,6 +1,8 @@
 import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSummary } from "./execution-contract.js";
 import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
+import type { DesktopPluginApi } from "./plugin-contract.js";
+import type { DesktopExperienceApi } from "./experience-contract.js";
 
 export type DesktopUpdateStatus = { state: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; message?: string; };
 
@@ -41,7 +43,7 @@ export type CanvasTemplateNode = {
   label: string;
   description: string;
   prompt: string;
-  provider?: "claude-code" | "codex" | "cursor" | "pi" | "opencode" | "copilot";
+  provider?: string;
   x: number;
   y: number;
 };
@@ -161,6 +163,7 @@ export type Snapshot = {
   workflowRuns: WorkflowRunSummary[];
   loop: LoopStatus;
   agentRuntimes: AgentRuntime[];
+  registeredAgentProviders?: string[];
   events: RuntimeEvent[];
   workItemRuns: ProjectRun[];
   containers: Array<{ engine: string; name: string; image: string; status: string }>;
@@ -187,6 +190,8 @@ export type ExecutionAttachInput = {
 };
 
 export type DesktopApi = {
+  experiences: DesktopExperienceApi;
+  plugins: DesktopPluginApi;
   update: { getStatus: () => Promise<DesktopUpdateStatus>; check: () => Promise<DesktopUpdateStatus>; download: () => Promise<DesktopUpdateStatus>; install: () => Promise<boolean>; onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void; };
   copyText: (text: string) => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
@@ -258,6 +263,19 @@ export type DesktopApi = {
 };
 
 export const IPC_CHANNELS = {
+  googleStatus: "afk:google-status",
+  googleLogin: "afk:google-login",
+  googleCancel: "afk:google-cancel",
+  googleLogout: "afk:google-logout",
+  experiencesProjects: "afk:experiences-projects",
+  experiencesList: "afk:experiences-list",
+  experiencesVerify: "afk:experiences-verify",
+  experiencesRevoke: "afk:experiences-revoke",
+  pluginsList: "afk:plugins-list",
+  pluginsInstall: "afk:plugins-install",
+  pluginsSetEnabled: "afk:plugins-set-enabled",
+  pluginsRemove: "afk:plugins-remove",
+  pluginsConfigure: "afk:plugins-configure",
   updateStatus: "afk:update-status",
   updateGetStatus: "afk:update-get-status",
   updateCheck: "afk:update-check",

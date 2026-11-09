@@ -47,6 +47,15 @@ export type RunFailureReasonCode =
   | 'qa_rework'
   | 'provider_change_unconfirmed'
   | 'merge_conflict'
+  /**
+   * The target branch already carries the change: there is nothing left to
+   * merge because the baseline moved, not because the content conflicts.
+   *
+   * It is not a conflict and never a reason to redo the work — the work is
+   * already in the baseline. A person has to decide whether the baseline
+   * keeps the commits or is rolled back.
+   */
+  | 'baseline_advanced'
   /** The machine cannot run the acceptance criteria's own check commands. */
   | 'qa_environment_missing'
   /**

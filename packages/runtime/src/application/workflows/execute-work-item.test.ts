@@ -1,5 +1,5 @@
 import { workspaceDataDirectory, executionWorkspacePath, executionManifestPath } from '../../infrastructure/workspace.js';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,8 @@ import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
 import { QARunner } from '../runners/qa-runner.js';
 import { getLogContext } from '../../infrastructure/io/index.js';
+import { experienceStorePath, verifyExperienceRun } from '../learning/runtime.js';
+import { ExperienceStore } from '../learning/experience-store.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -20,7 +22,7 @@ const item: BacklogItem = {
   state: 'ready', executionMode: 'afk', tags: [], branchName: 'afk/backlog-42', providerRef: workItemId,
 };
 let directory: string;
-afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { vi.unstubAllEnvs(); if (directory) await rm(directory, { recursive: true, force: true }); });
 
 async function setup(overrides: Partial<BacklogItem> = {}) {
   directory = await mkdtemp(join(tmpdir(), 'afk-execute-'));
@@ -254,6 +256,7 @@ describe('executeWorkItem', () => {
 
   it('writes implementation, independent QA, and the confirmed PR to one replayable execution stream', async () => {
     const { deps, run, current, directory } = await setup();
+    vi.stubEnv('AFK_EVENT_STORE_DIR', join(directory, 'events'));
     const store = new JsonlEventStore({ root: join(directory, 'events') });
     const observer = new RunObserver({ events: store });
     deps.recordAudit = (context, data) => observer.record(context, data);
@@ -276,6 +279,11 @@ describe('executeWorkItem', () => {
       'run.requested', 'run.started', 'implementation.completed', 'qa.started', 'qa.passed', 'change.published', 'human_gate.opened',
     ]);
     expect((await replayRun('attempt-1', store)).state).toMatchObject({ run: { status: 'awaiting_human' }, terminal: false });
+    await expect(verifyExperienceRun({ root: join(directory, 'events'), scope: 'github:acme/api',
+      runId: 'attempt-1', evidence: ['run:attempt-1#regression'] })).resolves.toContain('run:attempt-1#qa.passed');
+    const experiences = new ExperienceStore({ file: experienceStorePath() });
+    try { expect(experiences.list({ scope: 'github:acme/api', status: 'verified' })).toContainEqual(expect.objectContaining({ kind: 'success', source: { runId: 'attempt-1', workItemId } })); }
+    finally { experiences.close(); }
   });
 
   it('records intent, claims through WorkflowRunner once, verifies independently, and only then succeeds', async () => {
@@ -353,6 +361,13 @@ describe('executeWorkItem', () => {
       failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
     });
     expect(vi.mocked(deps.recordAudit!).mock.calls[2][1]).toMatchObject({ kind: 'run.finished', reasonCode: 'qa_rework' });
+    const experiences = new ExperienceStore({ file: experienceStorePath() });
+    try {
+      expect(experiences.list({ scope: 'github:acme/api', status: 'candidate' })).toContainEqual(expect.objectContaining({
+        trigger: 'qa_rework', evidence: ['run:attempt-1#qa.failed'],
+        source: { runId: 'attempt-1', workItemId },
+      }));
+    } finally { experiences.close(); }
     const { deps: nextDeps, process: nextProcess } = await setup();
     nextProcess.mockResolvedValueOnce({ success: false } as any);
     expect((await executeWorkItem({ ...input, executionId: 'attempt-2' }, nextDeps)).status).toBe('blocked');
@@ -452,6 +467,117 @@ describe('executeWorkItem', () => {
     await writeFile(join(journalDirectory, 'attempt-1.jsonl'), 'existing attempt');
     await expect(executeWorkItem(input, deps)).rejects.toThrow();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('retries the same execution after a transient initial provider read without losing evidence or repeating implementation', async () => {
+    const { deps, get, run, process, directory } = await setup();
+    get.mockRejectedValueOnce(new Error('temporary provider failure'));
+    await expect(executeWorkItem(input, deps)).rejects.toThrow('temporary provider failure');
+    expect(run).not.toHaveBeenCalled();
+    expect(process).not.toHaveBeenCalled();
+    expect(deps.recordAudit).not.toHaveBeenCalled();
+    const journalPath = join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl');
+    const original = await readFile(journalPath, 'utf8');
+    const identity = await lstat(journalPath);
+    expect(original.trim().split('\n').map(JSON.parse)).toMatchObject([
+      { phase: 'requested' }, { phase: 'failed', reason: 'temporary provider failure' },
+    ]);
+
+    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
+    const recovered = await readFile(journalPath, 'utf8');
+    expect(recovered.startsWith(original)).toBe(true);
+    expect(await lstat(journalPath)).toMatchObject({ ino: identity.ino, dev: identity.dev, nlink: 1 });
+    expect(recovered.trim().split('\n').map(line => JSON.parse(line).phase)).toEqual([
+      'requested', 'failed', 'requested', 'implementing', 'verifying', 'merge_ready',
+    ]);
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(/journal/);
+    expect(await readFile(journalPath, 'utf8')).toBe(recovered);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(process).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual([
+      'qa.started', 'qa.passed', 'change.published', 'human_gate.opened',
+    ]);
+  });
+
+  it('recovers an intact requested-only journal', async () => {
+    const { deps, get, run, directory } = await setup();
+    get.mockRejectedValueOnce(new Error('temporary provider failure'));
+    await expect(executeWorkItem(input, deps)).rejects.toThrow('temporary provider failure');
+    const journalPath = join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl');
+    const requested = (await readFile(journalPath, 'utf8')).split('\n')[0] + '\n';
+    await writeFile(journalPath, requested);
+    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
+    expect((await readFile(journalPath, 'utf8')).startsWith(requested)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  const requested = { executionId: 'attempt-1', workItemId, phase: 'requested', at: '2026-11-08T00:00:00.000Z' };
+  const failed = { ...requested, phase: 'failed', reason: 'temporary provider failure' };
+  it.each([
+    ['empty', ''],
+    ['partial', JSON.stringify(requested)],
+    ['malformed', '{broken}\n'],
+    ['invalid UTF-8', Buffer.from([requested, { ...failed, reason: '\xff' }].map(entry => JSON.stringify(entry)).join('\n') + '\n', 'latin1')],
+    ['null', 'null\n'],
+    ['array', '[]\n'],
+    ['blank line', JSON.stringify(requested) + '\n\n'],
+    ['foreign work item', JSON.stringify({ ...requested, workItemId: 'github:other/api#42' }) + '\n'],
+    ['foreign execution', JSON.stringify({ ...requested, executionId: 'another-attempt' }) + '\n'],
+    ['foreign later record', [requested, { ...failed, workItemId: 'github:other/api#42' }].map(entry => JSON.stringify(entry)).join('\n') + '\n'],
+    ['missing timestamp', JSON.stringify({ ...requested, at: undefined }) + '\n'],
+    ['invalid timestamp', JSON.stringify({ ...requested, at: 'unknown' }) + '\n'],
+    ['unknown field', JSON.stringify({ ...requested, changeId: '5' }) + '\n'],
+    ['duplicate phase', JSON.stringify(requested).replace('"phase":"requested"', '"phase":"implementing","phase":"requested"') + '\n'],
+    ['missing request', JSON.stringify(failed) + '\n'],
+    ['malformed failure', [requested, { ...failed, reason: null }].map(entry => JSON.stringify(entry)).join('\n') + '\n'],
+    ['oversize', (JSON.stringify(requested) + '\n').repeat(1024)],
+    ...['unknown', 'implementing', 'verifying', 'publication_requested', 'published', 'merge_ready', 'done', 'blocked', 'not_claimed', 'rework']
+      .map(phase => [phase, [requested, { ...requested, phase }, failed].map(entry => JSON.stringify(entry)).join('\n') + '\n']),
+  ])('refuses a %s journal before provider access and preserves its evidence', async (_label, contents) => {
+    const { deps, run, process, directory } = await setup();
+    const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
+    await mkdir(journalDirectory, { recursive: true });
+    const journalPath = join(journalDirectory, 'attempt-1.jsonl');
+    await writeFile(journalPath, contents);
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(/journal/);
+    expect(await readFile(journalPath)).toEqual(Buffer.from(contents));
+    expect(deps.createContext).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(process).not.toHaveBeenCalled();
+    expect(deps.recordAudit).not.toHaveBeenCalled();
+  });
+
+  it.each(['symlink', 'hardlink', 'directory'])('refuses a %s journal without touching its target', async kind => {
+    const { deps, run, directory } = await setup();
+    const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
+    await mkdir(journalDirectory, { recursive: true });
+    const target = join(journalDirectory, 'evidence');
+    const contents = JSON.stringify(requested) + '\n';
+    await writeFile(target, contents);
+    const journalPath = join(journalDirectory, 'attempt-1.jsonl');
+    if (kind === 'symlink') await symlink(target, journalPath);
+    else if (kind === 'hardlink') await link(target, journalPath);
+    else await mkdir(journalPath);
+    const before = await lstat(journalPath);
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(/journal/);
+    expect(await lstat(journalPath)).toMatchObject({ ino: before.ino, dev: before.dev, nlink: before.nlink });
+    expect(await readFile(target, 'utf8')).toBe(contents);
+    expect(deps.createContext).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('refuses retry after QA throws even when the final journal phase is failed', async () => {
+    const { deps, run, process, directory } = await setup();
+    process.mockRejectedValueOnce(new Error('QA unavailable'));
+    await expect(executeWorkItem(input, deps)).rejects.toThrow('QA unavailable');
+    const journalPath = join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl');
+    const contents = await readFile(journalPath, 'utf8');
+    expect(contents.trim().split('\n').map(line => JSON.parse(line).phase)).toEqual(['requested', 'implementing', 'verifying', 'failed']);
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(/journal/);
+    expect(await readFile(journalPath, 'utf8')).toBe(contents);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(process).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
   });
 
   it('reports an existing open PR rather than starting a duplicate attempt', async () => {

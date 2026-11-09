@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { describeScheduleWaitReason, scheduleWaitReason, scheduleWorkItems, scheduledDescendants, schedulerCapacity } from './scheduler.js';
+import { describeScheduleWaitReason, inventoryBackoffMs, scheduleWaitReason, scheduleWorkItems, scheduledDescendants, schedulerCapacity, type ScheduleInventory } from './scheduler.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { executionManifestPath } from '../../infrastructure/workspace.js';
@@ -13,12 +13,17 @@ function item(project: string, number: number, overrides: Partial<GlobalWorkItem
     dependsOn: [], tags: [], branchName: `afk/${number}`, providerRef: id, ...overrides };
 }
 
+/** A read of the world in which nothing failed. */
+function read(items: GlobalWorkItem[]): ScheduleInventory {
+  return { items, diagnostics: [] };
+}
+
 describe('scheduler', () => {
   it('uses the item repository when its manifest is absent but rejects an invalid existing manifest', async () => {
     const parent = item('scheduler-test/prd', 1, { kind: 'prd' });
     const child = item('scheduler-test/api', 2, { parentId: parent.id });
     const execute = vi.fn();
-    const dependencies = { inventory: async () => [parent, child], execute };
+    const dependencies = { inventory: async () => read([parent, child]), execute };
     const options = { parent: parent.id, dryRun: true };
     expect((await scheduleWorkItems(options, dependencies)).waves).toEqual([[child.id]]);
     const manifestPath = executionManifestPath(child.id);
@@ -36,7 +41,7 @@ describe('scheduler', () => {
     const dependent = item('acme/worker', 5, { parentId: parent.id, dependsOn: [first.id] });
     const execute = vi.fn();
     const report = await scheduleWorkItems({ parent: parent.id, dryRun: true, maxConcurrent: 2 }, {
-      inventory: async () => [parent, first, same, other, dependent], repositories: async subject => [subject.project.projectKey], execute,
+      inventory: async () => read([parent, first, same, other, dependent]), repositories: async subject => [subject.project.projectKey], execute,
     });
     expect(report.waves).toEqual([[first.id, other.id], [same.id, dependent.id]]);
     expect(execute).not.toHaveBeenCalled();
@@ -53,7 +58,7 @@ describe('scheduler', () => {
     let peak = 0;
     const starts: string[] = [];
     const result = await scheduleWorkItems({ parent: parent.id, maxConcurrent: 3 }, {
-      inventory: async () => all,
+      inventory: async () => read(all),
       repositories: async subject => [subject.project.projectKey], cores: 12, load: () => 0,
       execute: async ({ workItemId }) => {
         const subject = all.find(candidate => candidate.id === workItemId)!;
@@ -82,7 +87,7 @@ describe('scheduler', () => {
     const third = item('acme/api', 4, { parentId: parent.id });
     const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => ({ workItemId, executionId: 'attempt', status: 'merge_ready' as const }));
     const result = await scheduleWorkItems({ parent: parent.id }, {
-      inventory: async () => [parent, first, second, third], repositories: async () => ['shared', 'other'], execute, load: () => 0,
+      inventory: async () => read([parent, first, second, third]), repositories: async () => ['shared', 'other'], execute, load: () => 0,
     });
     expect(execute).toHaveBeenCalledTimes(2);
     expect(result.waiting.find(entry => entry.workItemId === second.id)?.runnability.blockedBy).toEqual([first.id]);
@@ -100,7 +105,7 @@ describe('scheduler', () => {
       return { workItemId, executionId: 'attempt', status: 'merge_ready' as const };
     });
     const result = await scheduleWorkItems({ parent: parent.id, loadLimit: 4, signal: controller.signal }, {
-      inventory: async () => [parent, child], repositories: async () => ['api'], load, wait, execute,
+      inventory: async () => read([parent, child]), repositories: async () => ['api'], load, wait, execute,
     });
     // One wait while the machine was overloaded, one re-evaluation timer while
     // the attempt was in flight.
@@ -122,7 +127,7 @@ describe('scheduler', () => {
     });
     const wait = vi.fn(async () => { if (child.state === 'merge_ready') child.state = 'rework'; });
     const report = await scheduleWorkItems({ parent: parent.id, watch: true, signal: controller.signal }, {
-      inventory: async () => [parent, child], repositories: async () => ['api'], load: () => 0, execute, wait,
+      inventory: async () => read([parent, child]), repositories: async () => ['api'], load: () => 0, execute, wait,
     });
     // A re-evaluation timer for each attempt, and one poll while the merge
     // gate waited for a person.
@@ -167,7 +172,7 @@ describe('scheduler', () => {
       reads += 1;
       // An operator releases the three sibling slices while the first one runs.
       if (reads > 1) for (const subject of released) subject.state = 'ready';
-      return all;
+      return read(all);
     });
     const startedAt = Date.now();
     const report = await scheduleWorkItems({ parent: parent.id, maxConcurrent: 4, pollIntervalMs: 50 }, {
@@ -195,7 +200,7 @@ describe('scheduler', () => {
     const inventory = vi.fn(async () => {
       reads += 1;
       if (reads >= 3) controller.abort();
-      return [parent, child];
+      return read([parent, child]);
     });
     const report = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal }, {
       inventory, repositories: async () => ['api'], load: () => 0, execute,
@@ -218,7 +223,7 @@ describe('scheduler', () => {
       return { workItemId, executionId: 'attempt', status: 'merge_ready' as const };
     });
     const result = await scheduleWorkItems({ parent: parent.id, maxConcurrent: 1, signal: controller.signal }, {
-      inventory: async () => [parent, base, sibling, dependent, human],
+      inventory: async () => read([parent, base, sibling, dependent, human]),
       repositories: async subject => [subject.project.projectKey], load: () => 0, execute,
     });
     const reason = (workItemId: string) => result.waiting.find(entry => entry.workItemId === workItemId)?.waitReason;
@@ -235,7 +240,7 @@ describe('scheduler', () => {
     const controller = new AbortController();
     const execute = vi.fn();
     const result = await scheduleWorkItems({ parent: parent.id, loadLimit: 4, signal: controller.signal }, {
-      inventory: async () => { controller.abort(); return [parent, child]; },
+      inventory: async () => { controller.abort(); return read([parent, child]); },
       repositories: async () => ['api'], load: () => 8, execute,
     });
     expect(result.waiting.find(entry => entry.workItemId === child.id)?.waitReason).toBe('system_overloaded');
@@ -247,12 +252,223 @@ describe('scheduler', () => {
     const first = item('acme/api', 2, { parentId: parent.id });
     first.dependsOn = [first.id];
     const execute = vi.fn();
-    await expect(scheduleWorkItems({ parent: parent.id }, { inventory: async () => [parent, first], execute })).rejects.toThrow('cycle');
+    await expect(scheduleWorkItems({ parent: parent.id }, { inventory: async () => read([parent, first]), execute })).rejects.toThrow('cycle');
     expect(execute).not.toHaveBeenCalled();
     expect(schedulerCapacity(10, 12)).toBe(4);
     expect(schedulerCapacity(1, 12)).toBe(1);
     expect(() => schedulerCapacity(2, 4, 0)).toThrow('positive');
     expect(() => scheduledDescendants([], parent.id)).toThrow('absent');
+  });
+
+  it('keeps scheduling after one failed inventory read', async () => {
+    // One fetch that did not make it through the network is not a verdict
+    // on the provider. The old scheduler treated it as one and the whole
+    // process died with it.
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const child = item('acme/api', 2, { parentId: parent.id });
+    const controller = new AbortController();
+    let reads = 0;
+    const inventory = vi.fn(async () => {
+      reads += 1;
+      if (reads === 1) throw new Error('schedule inventory is incomplete: fetch failed');
+      return read([parent, child]);
+    });
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => {
+      controller.abort();
+      return { workItemId, executionId: 'attempt', status: 'merge_ready' as const };
+    });
+
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal }, {
+      inventory, repositories: async () => ['api'], load: () => 0, execute,
+    });
+
+    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.executions.map(execution => execution.status)).toEqual(['merge_ready']);
+  });
+
+  it('retries a failing inventory with a growing backoff instead of exiting', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const controller = new AbortController();
+    const failures: number[] = [];
+    const statuses: Array<{ failures: number; error: string; retryInMs: number } | undefined> = [];
+    const inventory = vi.fn(async () => {
+      failures.push(failures.length + 1);
+      if (failures.length === 4) controller.abort();
+      throw new Error('schedule inventory is incomplete: fetch failed');
+    });
+    const wait = vi.fn(async () => {});
+
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 100, signal: controller.signal,
+      onStatus: status => statuses.push(status.inventoryUnavailable) }, {
+      inventory, repositories: async () => ['api'], load: () => 0, wait,
+    });
+
+    // Four failed reads, and the scheduler is still alive: it never threw.
+    expect(failures).toHaveLength(4);
+    expect(result.stopped).toBe(true);
+    // The backoff grows with every failure, starting at the poll interval.
+    expect(wait.mock.calls.map(call => call[0])).toEqual([100, 200, 400, 800]);
+    // And it says so: the operator is told the scheduler is running but
+    // cannot see the work items.
+    expect(statuses).toHaveLength(4);
+    expect(statuses[0]).toMatchObject({ failures: 1, retryInMs: 100 });
+    expect(statuses[0]!.error).toContain('fetch failed');
+    expect(statuses[3]).toMatchObject({ failures: 4, retryInMs: 800 });
+  });
+});
+
+describe('the range a schedule depends on', () => {
+  /**
+   * A PRD with two slices: one that stands on its own, and one that waits for
+   * a piece of work in another repository — the piece of work that could not
+   * be read.
+   */
+  function tree() {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const standalone = item('acme/api', 2, { parentId: parent.id });
+    const dependent = item('acme/web', 3, { parentId: parent.id, dependsOn: ['github:acme/base#9'] });
+    return { parent, standalone, dependent };
+  }
+
+  it('keeps dispatching when a project outside the range cannot be read', async () => {
+    // The credential reaches far more projects than the PRD touches, and one
+    // of them failing to read says nothing about this schedule. The old
+    // scheduler treated every project as part of every schedule, so this
+    // failure blinded the whole PRD.
+    const { parent, standalone, dependent } = tree();
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => ({ workItemId, executionId: 'attempt', status: 'merge_ready' as const }));
+    const result = await scheduleWorkItems({ parent: parent.id }, {
+      inventory: async () => ({ items: [parent, standalone, dependent], diagnostics: [
+        { platform: 'github', projectKey: 'other/repo', code: 'issue_list_failed', message: 'Repository access blocked', retryable: false },
+      ] }),
+      repositories: async subject => [subject.project.projectKey], load: () => 0, execute,
+    });
+
+    // The unrelated failure is named, and the schedule moves on.
+    expect(result.scope?.reported.map(diagnostic => diagnostic.projectKey)).toEqual(['other/repo']);
+    expect(result.scope?.unreadable).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({ workItemId: standalone.id });
+  });
+
+  it('holds back the work that depends on a project inside the range that cannot be read', async () => {
+    // The dependency lives in a repository whose issue list could not be
+    // read. AFK does not know whether that dependency is done, so the slice
+    // that waits for it is not dispatched — and the slice that does not
+    // wait for it is.
+    const { parent, standalone, dependent } = tree();
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => ({ workItemId, executionId: 'attempt', status: 'merge_ready' as const }));
+    const result = await scheduleWorkItems({ parent: parent.id }, {
+      inventory: async () => ({ items: [parent, standalone, dependent], diagnostics: [
+        { platform: 'github', projectKey: 'acme/base', code: 'issue_list_failed', message: 'HTTP 503', retryable: true },
+      ] }),
+      repositories: async subject => [subject.project.projectKey], load: () => 0, execute,
+    });
+
+    // The repository is inside the range even though not one of its items was
+    // ever read: the dependency names it.
+    expect(result.scope?.unreadable.map(diagnostic => diagnostic.projectKey)).toEqual(['acme/base']);
+    expect(result.scope?.reported).toEqual([]);
+    // The slice that waits for the unreadable repository waits, and says why.
+    expect(result.waiting.find(entry => entry.workItemId === dependent.id)?.waitReason).toBe('visibility_unknown');
+    expect(result.scope?.heldBack).toEqual([dependent.id]);
+    // The rest of the tree is not paralyzed.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({ workItemId: standalone.id });
+  });
+
+  it('escalates a failure inside the range that cannot be retried instead of backing off', async () => {
+    // A repository that is gone does not come back by being read again. The
+    // old scheduler backed off and retried forever, which is a different
+    // answer from "a person has to act".
+    const { parent, standalone, dependent } = tree();
+    const wait = vi.fn(async () => {});
+    const execute = vi.fn(async ({ workItemId }: { workItemId: string }) => ({ workItemId, executionId: 'attempt', status: 'merge_ready' as const }));
+    const statuses: Array<{ inventoryUnavailable?: unknown; scope?: { unreadable: Array<{ retryable: boolean }> } }> = [];
+    const result = await scheduleWorkItems({ parent: parent.id, onStatus: status => statuses.push(status) }, {
+      inventory: async () => ({ items: [parent, standalone, dependent], diagnostics: [
+        { platform: 'github', projectKey: 'acme/base', code: 'project_not_found', message: '404 Project Not Found', retryable: false },
+      ] }),
+      repositories: async subject => [subject.project.projectKey], load: () => 0, wait, execute,
+    });
+
+    // The escalation is visible: the item waits for a person, the scope
+    // report names the repository, and the status carries the same news.
+    expect(result.waiting.find(entry => entry.workItemId === dependent.id)?.waitReason).toBe('awaiting_human');
+    expect(result.scope?.unreadable.map(diagnostic => diagnostic.code)).toEqual(['project_not_found']);
+    expect(statuses.at(-1)?.scope?.unreadable.map(diagnostic => diagnostic.retryable)).toEqual([false]);
+    // And it is not a transient failure: the schedule did not go down the
+    // backoff path, because the read itself succeeded.
+    expect(statuses.every(status => status.inventoryUnavailable === undefined)).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the schedule alive when the repository holding the parent cannot be read', async () => {
+    // The parent is the anchor of the range. Without it AFK knows nothing
+    // about this PRD, so the read failed for this schedule — and the old
+    // scheduler died on it instead of retrying.
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const controller = new AbortController();
+    const wait = vi.fn(async () => { controller.abort(); });
+    const statuses: Array<{ inventoryUnavailable?: { error: string; permanent?: boolean } }> = [];
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal,
+      onStatus: status => statuses.push(status) }, {
+      inventory: async () => ({ items: [], diagnostics: [
+        { platform: 'github', projectKey: 'acme/prd', code: 'issue_list_failed', message: 'HTTP 503', retryable: true },
+      ] }),
+      repositories: async () => ['api'], load: () => 0, wait,
+    });
+
+    expect(result.stopped).toBe(true);
+    expect(statuses[0]?.inventoryUnavailable?.error).toContain('the project holding the schedule parent cannot be read');
+    expect(statuses[0]?.inventoryUnavailable?.permanent).toBe(false);
+  });
+
+  it('keeps the schedule alive when the project list cannot be read', async () => {
+    // The list of projects is how AFK finds the parent at all. A list that
+    // could not be read leaves the parent unknown — and the old scheduler
+    // read that as "the parent does not exist" and died on it.
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    const controller = new AbortController();
+    const wait = vi.fn(async () => { controller.abort(); });
+    const statuses: Array<{ inventoryUnavailable?: { error: string } }> = [];
+    const result = await scheduleWorkItems({ parent: parent.id, watch: true, pollIntervalMs: 10, signal: controller.signal,
+      onStatus: status => statuses.push(status) }, {
+      inventory: async () => ({ items: [], diagnostics: [
+        { platform: 'gitlab', projectKey: 'gitlab.corp', code: 'project_list_failed', message: 'fetch failed', retryable: true },
+      ] }),
+      repositories: async () => ['api'], load: () => 0, wait,
+    });
+
+    expect(result.stopped).toBe(true);
+    expect(statuses[0]?.inventoryUnavailable?.error).toContain('the project list cannot be read');
+  });
+
+  it('says that the parent does not exist when no project failed', async () => {
+    const parent = item('acme/prd', 1, { kind: 'prd' });
+    await expect(scheduleWorkItems({ parent: parent.id }, {
+      inventory: async () => read([]), repositories: async () => ['api'], load: () => 0,
+    })).rejects.toThrow('schedule parent is absent from inventory');
+  });
+});
+
+describe('inventoryBackoffMs', () => {
+  it('starts at the poll interval and doubles with every failure', () => {
+    expect(inventoryBackoffMs(1, 30_000)).toBe(30_000);
+    expect(inventoryBackoffMs(2, 30_000)).toBe(60_000);
+    expect(inventoryBackoffMs(3, 30_000)).toBe(120_000);
+  });
+
+  it('never waits longer than the ceiling', () => {
+    expect(inventoryBackoffMs(10, 30_000)).toBe(300_000);
+    expect(inventoryBackoffMs(100, 30_000)).toBe(300_000);
+    expect(inventoryBackoffMs(5, 1_000, 4_000)).toBe(4_000);
+  });
+
+  it('refuses a nonsensical interval', () => {
+    expect(() => inventoryBackoffMs(1, 0)).toThrow('poll interval must be positive');
+    expect(() => inventoryBackoffMs(1, 30_000, 0)).toThrow('maximum backoff must be positive');
   });
 });
 

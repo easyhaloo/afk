@@ -8,8 +8,15 @@ vi.mock('./execute-work-item.js', () => ({ executeWorkItem: mocks.execute }));
 vi.mock('./run-request.js', () => ({ resolveWorkflowRunRequest: mocks.resolve }));
 vi.mock('../../infrastructure/config/manager.js', () => ({ getWorkflowConfig: () => ({}) }));
 import { runWorkflowCli } from './run-cmd.js';
+import { PluginRuntime } from '../plugins/runtime.js';
 
 describe('runWorkflowCli', () => {
+  it('passes plugin composition as a dependency rather than serializable run options', async () => {
+    const plugins = new PluginRuntime();
+    mocks.execute.mockResolvedValue({ status: 'merge_ready' });
+    await runWorkflowCli({ backlogId: '42', plugins });
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({ runOptions: { backlogId: '42' } }), { plugins, agentProviderRegistry: expect.anything() });
+  });
   beforeEach(() => mocks.execute.mockReset());
   it('runs the managed implementation and QA chain with all explicit options', async () => {
     mocks.execute.mockResolvedValue({ status: 'merge_ready', changeUrl: 'https://example.test/42' });

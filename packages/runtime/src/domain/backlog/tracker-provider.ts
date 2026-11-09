@@ -9,7 +9,8 @@ import {
 } from './claim-strategy.js';
 import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization.js';
 import { isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
-import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
+import { latestOpenRework, nextReworkAttempt, parseReworkRecord, renderReworkRecord, reworkRecordId, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
+import { planReworkRevision, type ReworkRevisionInput } from './rework-revision.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
@@ -27,7 +28,7 @@ import {
   type BacklogRelationUpdate,
 } from './metadata-codec.js';
 import { projectBacklogItem } from './projection.js';
-import { idempotencyMarkerIn, legacyIdempotencyLabel } from './idempotency.js';
+import { idempotencyMarkerIn, legacyIdempotencyLabel, withIdempotencyMarker } from './idempotency.js';
 import { findDependencyCycle, type BacklogGraphSource } from './graph.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
@@ -197,9 +198,8 @@ export class TrackerBacklogProvider implements BacklogProvider {
     await this.writeParentLink(this.tracker, id, plan.parentId);
     const created = await this.get(String(id));
     if (!created.webUrl) return created;
-    await this.tracker.updateIssue(id, {
-      description: renderBacklogDescription(input.description, { ...plan.links, self: created }),
-    });
+    const description = renderBacklogDescription(input.description, { ...plan.links, self: created });
+    await this.tracker.updateIssue(id, { description: plan.idempotencyMarker ? withIdempotencyMarker(description, plan.idempotencyMarker) : description });
     return this.get(String(id));
   }
 
@@ -298,15 +298,19 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (active?.record.source === 'operator' && input.source === 'operator') {
       throw new Error(`backlog ${id} already has an open rework record`);
     }
-    const attempts = comments
+    // The count comes from the cycle that is running now, not from every
+    // record the issue ever carried: a closed record stays in the history for
+    // the audit trail without spending the budget of the rounds after it.
+    const history = comments
       .map(parseReworkRecord)
       .filter((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry !== undefined)
-      .map(entry => entry.record.attempt);
-    const attempt = (attempts.length ? Math.max(...attempts) : 0) + 1;
+      .map(entry => entry.record);
+    const { cycle, attempt } = nextReworkAttempt(history, input.source);
     const record: ReworkRecord = {
       ...input,
       version: 1,
-      id: `r${attempt}`,
+      id: reworkRecordId(cycle, attempt),
+      cycle,
       attempt,
       status: 'open',
       createdAt: new Date().toISOString(),
@@ -357,6 +361,31 @@ export class TrackerBacklogProvider implements BacklogProvider {
       resolutionSummary: resolution.summary,
     };
     await target.tracker.updateIssueComment(target.issueId, rework.commentId, renderReworkRecord(record));
+  }
+
+  /**
+   * Correct an open rework record to the current fact.
+   *
+   * The record is corrected in place: it keeps its identity, its round, its
+   * attempt and the evidence the verification produced, and only the
+   * statement about the current situation is replaced. A correction that
+   * opened a new record would spend an attempt of the running round — the
+   * price of saying "this is still true today" would be one try less to
+   * actually fix the item.
+   *
+   * The correction is planned before anything is written, so a statement
+   * that is not a fact never reaches the provider.
+   */
+  async reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord> {
+    const target = this.resolveTarget(id);
+    const comments = await target.tracker.listIssueComments(target.issueId);
+    const rework = comments
+      .map(parseReworkRecord)
+      .find((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry?.record.id === reworkId && entry.record.status === 'open');
+    if (!rework) throw new Error(`open rework record not found: ${reworkId}`);
+    const revised = planReworkRevision(rework.record, revision);
+    await target.tracker.updateIssueComment(target.issueId, rework.commentId, renderReworkRecord(revised));
+    return revised;
   }
 
   async addTag(id: string, tag: string): Promise<void> {

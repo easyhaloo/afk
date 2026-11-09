@@ -10,13 +10,11 @@
 
 import type { AgentToolCallSummary } from '@afk/core';
 
-export type AgentProviderName =
-  | 'claude-code'
-  | 'codex'
-  | 'cursor'
-  | 'pi'
-  | 'opencode'
-  | 'copilot';
+/**
+ * Provider identifiers are runtime extension points. The built-in provider
+ * names remain the documented values, but a registry may supply any string.
+ */
+export type AgentProviderName = string;
 
 /**
  * The limits a provider puts on the text AFK hands it.

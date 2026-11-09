@@ -8,13 +8,17 @@ import { saveWorkflowConfig, snapshot } from "../../electron/services/desktop-se
 
 vi.mock("../../electron/adapters/process-executor.js", () => ({ executable: async () => undefined, firstLine: () => "" }));
 vi.mock("../../electron/adapters/resource-adapter.js", () => ({ listAfkContainers: async () => [], listAfkTmux: async () => [] }));
-vi.mock("../../electron/services/runtime-service.js", () => ({ detectAgentRuntimes: async () => [] }));
+const registered = vi.hoisted(() => ({ names: ["claude-code", "codex"] }));
+vi.mock("../../electron/services/runtime-service.js", () => ({
+  detectAgentRuntimes: async () => [], listRegisteredAgentProviders: async () => registered.names,
+}));
 vi.mock("../../electron/services/project-run-scope-service.js", () => ({ projectRunScopeService: { workspaces: async (root: string) => [root], runs: async () => [] } }));
 
 let directory: string;
 const node = { id: "implement", template: "agent" as const, label: "实现", description: "实现工作项", prompt: "Implement the work item.", provider: "codex", x: 220, y: 74 };
 
 beforeEach(async () => {
+  registered.names = ["claude-code", "codex"];
   directory = await mkdtemp(path.join(tmpdir(), "afk-workflow-config-"));
   vi.stubEnv("HOME", directory);
 });
@@ -30,6 +34,45 @@ async function saveNode() {
 }
 
 describe("workflow definition persistence", () => {
+  it("discovers and persists a plugin agent in the default and per-step provider fields", async () => {
+    registered.names.push("enterprise-agent");
+    const current = await snapshot(directory);
+    expect(current.registeredAgentProviders).toContain("enterprise-agent");
+    expect(current.agentRuntimes).toEqual([]);
+    const customNode = { ...node, provider: "enterprise-agent" };
+    const saved = await saveWorkflowConfig(directory, { ...current.workflow, agentDefault: "enterprise-agent", templateName: "afk-control-workflow", canvasNodes: [customNode] });
+    expect(saved).toMatchObject({ agentDefault: "enterprise-agent", canvasNodes: [customNode] });
+    const reopened = await snapshot(directory);
+    expect(reopened.workflowTemplates.find(template => template.id === "afk-control-workflow")).toMatchObject({
+      canvasNodes: [customNode], steps: [{ provider: "enterprise-agent" }],
+    });
+    registered.names = ["claude-code", "codex"];
+    await expect(saveWorkflowConfig(directory, saved)).rejects.toThrow("默认 Agent 未注册");
+    expect((await snapshot(directory)).workflow.canvasNodes).toEqual([customNode]);
+  });
+
+  it.each(["unknown-agent", "", "   ", "codex\ninvalid"])("rejects an invalid default provider %j before writes", async provider => {
+    const saved = await saveNode();
+    const before = await readFile(saved.configPath, "utf8");
+    await expect(saveWorkflowConfig(directory, { ...saved, agentDefault: provider })).rejects.toThrow();
+    expect(await readFile(saved.configPath, "utf8")).toBe(before);
+  });
+
+  it.each(["unknown-agent", "", "   ", "codex\ninvalid"])("rejects an invalid node provider %j before writes", async provider => {
+    const saved = await saveNode();
+    const templatePath = path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml");
+    const before = await readFile(templatePath, "utf8");
+    await expect(saveWorkflowConfig(directory, { ...saved, canvasNodes: [{ ...node, provider }] })).rejects.toThrow();
+    expect(await readFile(templatePath, "utf8")).toBe(before);
+  });
+
+  it("retains provider inheritance when the node has no explicit provider", async () => {
+    const current = await snapshot(directory);
+    const saved = await saveWorkflowConfig(directory, { ...current.workflow, templateName: "afk-control-workflow", canvasNodes: [{ ...node, provider: undefined }] });
+    expect(saved.canvasNodes[0].provider).toBeUndefined();
+    expect(load(await readFile(path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml"), "utf8"))).toMatchObject({ steps: [{ provider: current.workflow.agentDefault }] });
+  });
+
   it("rejects clearing the final managed node and keeps the saved definition intact", async () => {
     const saved = await saveNode();
     const templatePath = path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml");

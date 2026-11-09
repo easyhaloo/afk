@@ -108,10 +108,9 @@ Continue from the published baseline without repeating completed work. Independe
 
 ## Completion-phase evidence
 
-Integration was finished on `feat/plugin-matrix-validation` using macOS arm64 / Node 22.22.2.
-The restricted sandbox blocks `ps`, so verification used an equivalent process-start probe
-outside the repository; the shim is not committed and the execution-lock identity check is
-unchanged.
+Fresh acceptance on November 9 used macOS arm64 / Node 24.18.0, with unrestricted
+process access and no process-probe substitute. CLI `0.2.43` is installed through
+the standard installer at both local and PATH-leading entry points.
 
 - Integration fixes: `snapshot` for the remote-workspace and special-git-backend providers
   keeps its original repository contract (an encoded path segment, or an absolute local path /
@@ -123,32 +122,41 @@ unchanged.
 - Static checks and builds: `git diff --check`, typecheck, workspace build and Desktop
   production build passed. The architecture guard covered 454 source and 255 desktop client
   files with zero quarantined items; the link checker covered 420 files with zero broken links.
-- Tests: core 30, workflow-graph 9, application 78, runtime 2,881 (plus two skipped), CLI 533
-  (plus two skipped), Desktop 948 and plugin E2E 203 passed. The coverage run recorded 3,857
-  passing and four skipped tests.
-- Coverage: 49,909/57,021 source lines (87.52%), functions 83.69%, branches 85.95%. CLI
-  functions reached 313/435 (71.95%), above the 71.86% baseline. Every package and the total
-  meet `scripts/coverage-baseline.json`; the report-only gate exited 0. CI loads the same
-  baseline explicitly and Desktop is measured separately.
-- Environment difference: one pre-existing `streaming.test.ts` process-group case fails in the
-  restricted sandbox (`process.kill(-pgid)` does not actually terminate the detached child).
-  Neither its source nor its test changed in this round, so `pnpm test:coverage` exits 1 in
-  that sandbox; all other tests and the coverage gate pass.
-- External limits: Linear/Jira, Google OAuth, object storage and remote workspaces have not
-  been exercised against real accounts or services. Plugins remain in-process trusted code and
-  the human merge gate is retained.
-- Delivery: CLI `0.2.43` (version bump in the same commit). The change is pushed to
-  [PR #291](https://github.com/easyhaloo/afk/pull/291), stacked on
-  [PR #290](https://github.com/easyhaloo/afk/pull/290); neither change request is merged.
+- Tests: the full shared-package, CLI and repository coverage run passed with 3,858 tests
+  across 303 files, four tests skipped, and exit code 0. The real process-group termination
+  case passed. Desktop separately passed 948 unit tests and all 99 Electron E2E cases.
+  Both real Claude Code integrations passed using the existing local configuration directory.
+- Coverage: 49,931/57,021 source lines (87.56%), functions 83.43%, branches 84.98%.
+  Every package and the total exceed the unchanged November 8 measured seed in
+  `scripts/coverage-baseline.json`; CI loads this baseline explicitly. Desktop and spawned
+  subprocess internals are outside this source-coverage denominator.
+- Installed CLI: the 5.2 MiB archive passed isolated offline installation and all 23 command
+  entry points. An actual installed-CLI webhook/artifact smoke passed authenticated receipt,
+  artifact-byte verification, restart persistence, deduplication with one attempt, pagination,
+  retention, invalid replay rejection and clean shutdown. A real SSH command through
+  `fangcloud-jumpserver` exited 0.
+- External limits: Gmail browser authorization and recipient-confirmed delivery passed on
+  November 7, and real refresh passed on November 8. The November 9 refresh attempt failed
+  with `token.network`; no new message was sent. Live Desktop browser consent/revocation,
+  Linear/Jira, object storage and remote workspaces are not established by mocked tests.
+  Docker/Podman are currently unhealthy. Plugins remain in-process trusted code and the human
+  merge gate is retained.
+- Delivery: CLI `0.2.43` (version bump in the implementation commit). Remote inspection
+  confirms [PR #290](https://github.com/easyhaloo/afk/pull/290) was merged into `main`,
+  and [PR #291](https://github.com/easyhaloo/afk/pull/291) into `feat/plugin-architecture`
+  on November 8. The latter integration tree matches the verified implementation;
+  its additional implementation is not yet in `main`. The implementation and acceptance
+  documentation are delivered on `feat/plugin-acceptance` against `main`. No merge
+  was performed by this acceptance run.
 
-## Measured evidence
+## Prior baseline and wiki acceptance evidence
 
 - Shared packages / CLI / repository: 3,525 passed, four skipped; 47,922/55,041 reported source lines (87.06%), functions 82.92%, branches 84.27%. Desktop and subprocess internals are excluded from this coverage denominator.
 - Plugin matrix: 97 local + 27 HTTP + 67 execution cases, plus one learning E2E including disable/re-enable and revocation.
 - Desktop: typecheck, 921 unit tests and three Electron E2E passed. Real PTY: 16 passed. Real Claude Code: two local integration tests passed.
 - Node 22.17.0 SQLite-warning regression passed. Workspace build/typecheck, architecture and documentation checks passed.
-- CLI 0.2.42: 5.2 MiB macOS arm64 archive, offline installation and all 23 command entry points verified; installed locally using the standard installer.
+- Baseline CLI 0.2.42: its archive, offline installation and all 23 command entry points passed before the current 0.2.43 upgrade.
 - Real wiki work item `gitlab:w.src.corp.qihoo.net/fang/services/llm-wiki#21`: managed local Claude execution `plugin-matrix-wiki-claude-20261108-2` passed independent QA and published [MR !198](https://w.src.corp.qihoo.net/fang/services/llm-wiki/-/merge_requests/198). Its intact 18-event audit ends at `human_gate.opened`, gate `merge:198`; the MR awaits human merge.
 - Wiki acceptance: targeted CSV tests (4), existing page tests (6), typecheck and 8 browser assertions passed. The browser exercised the built application with a stubbed operations-summary GET: the backend endpoint is absent and Docker was unreachable. This verifies client-side downloads, SHA-256 redaction and the 5001-row confirmation/cancellation behavior, not a deployed backend chain. The full frontend suite had 263 passes and 7 pre-existing failures, reproduced identically on a clean baseline.
 - Real learning: the earlier `qa.failed` ENOSPC incident is candidate `15eb278e-6d24-4f36-9749-fdef1f03f4a7`, now verified against the successful independent QA and publication evidence. Both `experience recall` and the installed `context.experience` provider's `gather` returned its scoped correction and provenance. Later-agent injection and revocation are separately covered by the learning E2E; the real incident remains available for future relevant runs.
-- Delivery: CLI `0.2.42` is installed and runnable. Implementation commit `a5485dd6` is pushed in [PR #291](https://github.com/easyhaloo/afk/pull/291), stacked on the plugin baseline [PR #290](https://github.com/easyhaloo/afk/pull/290). Neither change request has been merged.
+- Baseline implementation `a5485dd6` supplied the November 8 coverage seed. Current delivery, merge destinations and installation evidence are recorded above.

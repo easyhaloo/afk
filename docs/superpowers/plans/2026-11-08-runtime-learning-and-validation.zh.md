@@ -81,9 +81,8 @@ flowchart TD
 
 ## 补齐阶段实测证据
 
-本轮在 `feat/plugin-matrix-validation` 完成集成收尾，环境为 macOS arm64 / Node 22.22.2。
-受限沙箱禁止执行 `ps`，验证期间使用仓库外的等价进程启动时间探针替身；替身不进入仓库，
-执行锁的身份校验逻辑未改动。
+11 月 9 日重新验收使用 macOS arm64 / Node 24.18.0，进程访问不受限，未使用进程探针替身。
+CLI `0.2.43` 已通过标准安装器安装到本地入口和 PATH 优先入口。
 
 - 集成修复：远程工作区与特殊 Git backend 的 `snapshot` 恢复原有仓库标识契约（编码路径段、
   本地绝对路径 / HTTPS URL），保留对 `.` / `..`、编码点段、控制字符、凭据 URL 和参数注入的
@@ -91,27 +90,32 @@ flowchart TD
   断言改用脱敏后的错误消息，并新增 1 项 listener 警告回调测试以补齐 CLI 函数覆盖。
 - 静态与构建：`git diff --check`、类型检查、工作区构建、Desktop 生产构建通过；架构检查覆盖
   454 个源文件与 255 个桌面客户端文件、0 隔离项；文档检查 420 份文件、0 断链。
-- 测试：core 30、workflow-graph 9、application 78、runtime 2881（另 2 跳过）、CLI 533
-  （另 2 跳过）、Desktop 948、插件 E2E 203 项通过；覆盖率运行合计 3857 项通过、4 项跳过。
-- 覆盖率：行 49909/57021（87.52%）、函数 83.69%、分支 85.95%；CLI 函数 313/435（71.95%）
-  高于基线 71.86%。逐包与总量均不低于 `scripts/coverage-baseline.json`，report-only 门禁
-  检查退出码为 0；CI 显式加载同一基线，Desktop 单独统计。
-- 环境差异：1 项既有 `streaming.test.ts` 进程组测试在受限沙箱中失败
-  （`process.kill(-pgid)` 未真正终止 detached 子进程），相关源码与测试本轮均未改动，因此
-  `pnpm test:coverage` 在该沙箱内退出码为 1；其余测试及覆盖率门禁通过。
-- 外部边界：Linear/Jira、Google OAuth、对象存储、远程工作区等仍未使用真实账户或真实服务
-  完成生产联调；插件仍为进程内可信代码模型，人工合并闸门保留。
-- 交付：CLI `0.2.43`（同提交含版本 bump），变更推送至 [PR #291](https://github.com/easyhaloo/afk/pull/291)，
-  基于 [PR #290](https://github.com/easyhaloo/afk/pull/290)，两项变更请求均未合并。
+- 测试：共享包、CLI 与仓库的完整覆盖率运行通过 303 个测试文件、3858 项测试，4 项跳过，
+  退出码为 0；真实进程组终止测试通过。Desktop 另行通过 948 项单测和全部 99 项 Electron E2E。
+  真实 Claude Code 的 2 项集成测试使用已有本地配置目录通过。
+- 覆盖率：行 49931/57021（87.56%）、函数 83.43%、分支 84.98%；逐包与总量均超过
+  `scripts/coverage-baseline.json` 中保持不变的 11 月 8 日实测基线。CI 显式加载同一基线；
+  Desktop 和独立子进程内部不属于该源码覆盖率分母。
+- 已安装 CLI：5.2 MiB 发行包通过隔离离线安装和全部 23 个命令入口验证。实际安装版的
+  webhook/制品验证通过认证接收、制品字节校验、重启持久化、单次尝试去重、分页、保留期、
+  无效重放拒绝和正常退出；经 `fangcloud-jumpserver` 执行真实 SSH 命令退出码为 0。
+- 外部边界：Gmail 浏览器授权和用户确认收件已于 11 月 7 日通过，真实令牌刷新于 11 月 8 日
+  通过；11 月 9 日刷新失败为 `token.network`，未再次发信。桌面浏览器真实授权/撤销、
+  Linear/Jira、对象存储和远程工作区不能以模拟测试认定完成真实验收。Docker/Podman 当前
+  不健康；插件仍为进程内可信代码模型，人工合并闸门保留。
+- 交付：CLI `0.2.43`（实现提交含版本 bump）。远端核实 [PR #290](https://github.com/easyhaloo/afk/pull/290)
+  已于 11 月 8 日合入 `main`，[PR #291](https://github.com/easyhaloo/afk/pull/291) 同日合入
+  `feat/plugin-architecture`；后者集成树与本次验证的实现一致，其增量实现尚未进入 `main`。
+  实现增量和验收文档在 `feat/plugin-acceptance` 向 `main` 交付，本次验收未执行合并。
 
-## 实测证据
+## 前次基线与 wiki 验收证据
 
 - 共享包、CLI 与仓库测试：3525 项通过、4 项跳过。源码行覆盖 47922 / 55041（87.06%）、函数 82.92%、分支 84.27%；Desktop 和子进程内部不计入这个覆盖率分母。
 - 插件矩阵：本地 97、HTTP 27、执行 67 项，另有 1 项经验闭环 E2E，覆盖禁用、重新启用和撤销。
 - Desktop：类型检查、921 项单测、3 项 Electron E2E 通过；真实 PTY 16 项通过，真实 Claude Code 本地集成 2 项通过。
 - Node 22.17.0 的 SQLite 警告回归通过；工作区构建、类型检查、架构和文档检查通过。
-- CLI 0.2.42：5.2 MiB 的 macOS arm64 发行包，仓库外离线安装及 23 个命令入口均已验证，并已通过标准安装器安装到本机。
+- 基线 CLI 0.2.42：发行包、离线安装和全部 23 个命令入口在本次升级至 0.2.43 之前已验证。
 - 真实 wiki 条目 `gitlab:w.src.corp.qihoo.net/fang/services/llm-wiki#21`：本地 Claude 受管运行 `plugin-matrix-wiki-claude-20261108-2` 通过独立 QA，已发布 [MR !198](https://w.src.corp.qihoo.net/fang/services/llm-wiki/-/merge_requests/198)。18 条事件的审计链完整，停在 `human_gate.opened`、闸门 `merge:198`，等待人工合并。
 - wiki 验收：CSV 定向测试 4 项、既有页面测试 6 项、类型检查和浏览器断言 8 项通过。浏览器使用实际构建产物，并模拟一次 operations-summary GET；后端缺少该接口，Docker 当时不可用。因此验收范围为客户端文件下载、SHA-256 脱敏和 5001 行确认与取消，不代表部署后的后端全链路。前端全量测试为 263 项通过、7 项既有失败，已在干净基线上复现相同失败。
 - 真实经验：前次 `qa.failed` 的 ENOSPC 故障已记录为 `15eb278e-6d24-4f36-9749-fdef1f03f4a7`，并以本次独立 QA 和发布证据完成验证。`experience recall` 与已安装的 `context.experience` 插件 `gather` 均返回了项目内的修复建议和来源。后续 Agent 注入与撤销另由经验 E2E 覆盖；本条真实经验保留供后续相关任务复用。
-- 交付：CLI `0.2.42` 已安装并可运行，实现提交 `a5485dd6` 已推送至 [PR #291](https://github.com/easyhaloo/afk/pull/291)，基于插件基线 [PR #290](https://github.com/easyhaloo/afk/pull/290)。两项变更请求均未合并。
+- 基线实现 `a5485dd6` 提供了 11 月 8 日覆盖率种子；当前交付、合并目标和安装证据见上。

@@ -160,8 +160,10 @@ integrations:
     timeoutMs: 5000
 ```
 
-可选 `timeoutMs` 为 1..60000 整数。默认 Runtime 选择持久化本地加密证据存储并启用
-`captureEvents: true`。审计 bridge 先在本地保存 QA、发布、失败和运行结束事件
+可选 `timeoutMs` 为 1..60000 整数。仅当根配置 `integrations.evidence` 选择已启用、
+可写的 Artifact Provider 时，默认 Runtime 才初始化持久化本地加密证据存储并启用
+`captureEvents: true`。选择或初始化失败会安装必需的初始化闸门，阻止受管执行；
+未选择时，此 bridge 不自动采集事件证据。审计 bridge 先在本地保存 QA、发布、失败和运行结束事件
 的有界摘要，源审计追加后上传引用的证据；校验内容 hash、拒绝 restricted 证据、对
 支持的文本格式脱敏，并移除返回 URI 中的凭据、query 和 fragment。
 `artifact.upload` 的 `effect.completed` 记录关联源事件/序号、本地摘要、远端引用或
@@ -406,7 +408,7 @@ CLI 测试使用注入的认证对象及隔离配置，不授权真实 Google �
 保存、CLI 通知调用、Gmail API 接受以及用户确认实际收件。本次系统代理关闭，
 发信通过显式 HTTP 代理完成。另行通过注入时钟触发首次过期检查，完成真实 Google
 令牌刷新并用真实时钟保存新有效期；账号保持一致，未再次发信。撤销授权尚未实测，
-桌面 Google 认证按钮尚未接入。
+桌面账号操作已接入；桌面浏览器真实授权及撤销尚未实测。
 连接 Gmail 不会自动配置工作流通知；需要在工作流 integrations 中另行选择通知 Provider。
 
 Gmail 失败区分网络/代理不可用、HTTP 401 认证失效、HTTP 403 API/权限拒绝、
@@ -769,8 +771,8 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 上下文接入将收集的片段写入本次 attempt 的 worktree 下 `.afk/plugin-context.md`，
 往 Agent 目标中放固定长度的文件指针段，避免把所有片段直接塞进 prompt。
 文件原子写入，cleanup 时删除，拒绝符号链接目录。`query.limit` 传给 Provider；
-当前实现没有为拼装后的上下文文件统一设置总字节上限或截断策略，不能把 Provider 的
-limit 或固定指针描述成已有总预算限制。该文件是执行上下文，不是审计记录，
+组合结果最多保留 64 个片段，整个上下文文件上限为 32,000 个字符，包含引导文字和
+来源引用，超出内容在该预算内截断。该文件是执行上下文，不是审计记录，
 也不替代证据分类与脱敏。
 
 ### Secret 引用和 Trigger 生命周期

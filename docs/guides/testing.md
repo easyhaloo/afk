@@ -281,12 +281,16 @@ These suites do not run a live coding agent or mutate a remote repository.
 
 ```bash
 # Real Claude protocol, code generation, test execution and task projection
-CLAUDE_CODE_SAFE_MODE=1 pnpm test:e2e:claude
+CLAUDE_CONFIG_DIR="$HOME/.claude" CLAUDE_CODE_SAFE_MODE=1 pnpm test:e2e:claude
 
 # Real Codex implementation, independent QA and remote pull request
 pnpm test:e2e:codex
 ```
 
+Vitest isolates `HOME`; set `CLAUDE_CONFIG_DIR` to the existing authenticated Claude
+configuration directory before starting the tests. This reuses its authentication
+without copying credentials into fixtures. If a custom API endpoint or model is
+defined there, confirm it remains available in safe mode.
 Claude runs in temporary workspaces; the host independently checks its generated
 function and reruns its tests. Safe mode disables user customizations while
 preserving authentication and built-in tools. Omit it to include local plugins
@@ -401,39 +405,46 @@ the changed-file comparison. Optional `COVERAGE_CHANGED_LINES`,
 `COVERAGE_CHANGED_BRANCHES` are percentage gates from 0 to 100. They apply to whole
 changed files, not changed lines. No unstated 80% or full-repository gate is implied.
 
-The integrated implementation measured on November 8, 2026 with Node 24.18.0/macOS
-arm64 produced 3,525 passing tests and four explicit skips:
+The integrated implementation measured on November 9, 2026 with Node 24.18.0/macOS
+arm64 produced 3,858 passing tests and four explicit skips across 303 passing test
+files and two skipped files. The full coverage command exited successfully:
 
 | Scope | Lines / statements | Functions | Branches |
 | --- | ---: | ---: | ---: |
-| Core | 96.70% | 100.00% | 79.77% |
+| Core | 97.40% | 100.00% | 82.79% |
 | Application | 97.46% | 93.02% | 92.06% |
 | Workflow graph | 99.00% | 100.00% | 84.39% |
-| Runtime | 90.35% | 84.46% | 85.44% |
-| CLI | 69.76% | 71.86% | 74.83% |
-| Combined measured scope | 87.06% | 82.92% | 84.27% |
+| Runtime | 90.75% | 85.02% | 86.16% |
+| CLI | 70.45% | 71.88% | 75.25% |
+| Combined measured scope | 87.56% | 83.43% | 84.98% |
 
-The measured line numerator/denominator is 47,922/55,041. Use the generated report
+The measured line numerator/denominator is 49,931/57,021. Use the generated report
 after later changes; this measurement does not establish whole-repository coverage.
-The checked-in `scripts/coverage-baseline.json` seeds nonregression gates from this
-local full-suite measurement. Every package and the total must retain each measured
-line/statement/function/branch percentage; CI explicitly loads the same baseline.
+The checked-in `scripts/coverage-baseline.json` retains the November 8 measurement as
+the nonregression seed. Every package and the total must retain its baseline
+line/statement/function/branch percentage; the November 9 run passes every gate,
+and CI explicitly loads the same baseline.
 The baseline records its Node/platform/commit provenance. This is a measured local
 seed, not a claim that a prior CI coverage run passed; evaluate the first CI result
 on its actual Node/platform before changing a baseline. Missing or invalid baseline
 data fails rather than silently disabling the gate.
 
-Separately validated: Desktop typecheck and 921 unit tests; three Electron E2E
-tests covering bundled Runtime, plugin Settings lifecycle and work-item creation /
-execution; 16 real-PTY tests; two opt-in real Claude Code tests, including code
-creation and Node test execution. Node 22.17.0 also passes the resource-registry
-warning regression. External vendor services and real container isolation remain
-outside the synthetic matrix's evidence boundary.
+Separately validated on November 9: 948 Desktop unit tests, all 99 Electron E2E
+tests and two real Claude Code tests, including generated code independently
+checked and tested by the host. Desktop typecheck/production build, 16 real-PTY
+tests and the Node 22.17.0 registry-warning regression also passed in the preceding
+acceptance. External vendor services and real container isolation remain outside
+the synthetic matrix's evidence boundary.
 
-The CLI 0.2.42 release was also packaged for macOS arm64 (5.2 MiB archive), installed
+The CLI 0.2.43 release was also packaged for macOS arm64 (5.2 MiB archive), installed
 offline outside the repository with checksum verification, and checked across all
 23 command entry points. The same archive is installed locally through the standard
-installer; use `~/.local/bin/afk` if an older unmanaged executable precedes it in PATH.
+installer, including the managed executable that currently leads PATH. An installed
+CLI smoke test additionally verifies authenticated durable receipt, actual artifact
+bytes, restart deduplication, pagination, retention and rejection of replaying a
+successful delivery. A real SSH no-op also passed. The earlier Gmail OAuth/mail
+delivery acceptance remains historical: the November 9 refresh attempt reported
+`token.network`, so current Gmail reachability is not accepted. No new email was sent.
 
 ## Anti-patterns
 

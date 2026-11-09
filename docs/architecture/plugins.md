@@ -188,8 +188,12 @@ integrations:
     timeoutMs: 5000
 ```
 
-Optional `timeoutMs` is an integer from 1 to 60000. The default runtime selects
-a persistent local encrypted evidence store and enables `captureEvents: true`.
+Optional `timeoutMs` is an integer from 1 to 60000. Only when root
+`integrations.evidence` selects an enabled, writable Artifact provider does the
+default runtime initialize persistent local encrypted storage and enable
+`captureEvents: true`. Selection or initialization failure installs a required
+initialization guard that blocks managed execution. Without this selection,
+the bridge does not automatically capture event evidence.
 The audit bridge captures bounded summaries of QA, publication, failure and
 run-completion events locally, then uploads referenced evidence after the source
 audit append. It checks content hashes, refuses restricted evidence, redacts
@@ -497,8 +501,8 @@ explicit HTTP proxy because the system proxy was disabled. A separate real
 refresh request also succeeded: the injected clock forced only the initial
 expiry check, then the real clock determined the refreshed token's persisted
 expiry. The account remained unchanged and no email was sent. Revocation
-remains unverified. Desktop Google authentication buttons are
-not included. Connecting Gmail does not configure workflow notifications;
+remains unverified. Desktop account controls are implemented; live Desktop
+browser consent and revocation remain unverified. Connecting Gmail does not configure workflow notifications;
 select the notification provider in the workflow integrations separately.
 
 Gmail failures distinguish unavailable network/proxy, HTTP 401 authentication,
@@ -936,10 +940,10 @@ Context integration gathers selected fragments into the current attempt's
 worktree at `.afk/plugin-context.md`. The Agent goal receives a pointer to that
 file, using a fixed reference segment rather than injecting all fragments into
 the prompt. The file is written atomically and removed during cleanup; symlink
-directories are rejected. `query.limit` is passed to the provider. There is no
-shared total byte cap or truncation policy for the assembled context file in
-this implementation; provider limits and the reference segment must not be
-described as such a cap. The file is execution context, not an audit record or a
+directories are rejected. `query.limit` is passed to the provider. Composition
+retains at most 64 fragments, and the complete context file is capped at 32,000
+characters, including introductory text and source references; excess content
+is truncated within that budget. The file is execution context, not an audit record or a
 replacement for evidence classification and redaction.
 
 ### Secret references and trigger lifetime

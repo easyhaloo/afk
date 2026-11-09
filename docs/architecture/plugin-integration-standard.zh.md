@@ -189,7 +189,9 @@ interval timer 不补跑停机时段。
 ## 7. Artifact 与审计证据协议
 
 `integrations.evidence` 为 `{provider,timeoutMs?}`，超时须为 1..60000 整数。
-默认 Runtime 选择持久化本地加密证据存储并启用 `captureEvents: true`；本地 key 以互斥方式
+仅配置根级 `integrations.evidence` 并选择已启用、可写的 Artifact Provider 时，默认
+Runtime 才初始化持久化本地加密证据存储并启用 `captureEvents: true`；未配置时不自动采集。
+选择或初始化失败必须通过必需的初始化闸门阻止受管执行。本地 key 以互斥方式
 初始化并复用已有 key，不能因重启或并发丢失解密能力。SDK 提供
 `createLocalEncryptedEvidenceStore`、`createPluginRunObserver`、`setPluginAuditArtifacts`
 和 `PluginRunObserverOptions`，调用方可显式选择可写 Artifact Provider 与本地证据接口。

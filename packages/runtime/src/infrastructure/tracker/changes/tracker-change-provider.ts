@@ -169,12 +169,14 @@ export class TrackerChangeProvider implements ChangeProvider {
    * A listing answers in groups of states and can under-report a change that
    * has landed, so the readback of the provider is the truth. A readback
    * that fails leaves the listed state standing rather than losing the
-   * candidate altogether.
+   * candidate altogether — and says so, because a state nobody read back
+   * must not pass for a state that was read.
    */
   private async readCandidate(candidate: TrackedMR): Promise<ChangeRequest> {
     try {
       return await this.get(String(candidate.id));
-    } catch {
+    } catch (error) {
+      logger.warn({ changeRequestId: candidate.id, error }, 'failed to read the state of a change request; the listed state stands');
       return {
         id: String(candidate.id),
         state: candidate.state === 'opened' ? 'open' : candidate.state,

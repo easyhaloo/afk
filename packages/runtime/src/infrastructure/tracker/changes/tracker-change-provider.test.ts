@@ -383,6 +383,21 @@ describe('TrackerChangeProvider', () => {
     ]);
   });
 
+  it('keeps the listed state when the provider cannot read a change back', async () => {
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 47, state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+      ]),
+      getMR: vi.fn().mockRejectedValue(new Error('provider unavailable')),
+    } as unknown as TrackerProvider;
+    const backlog = { id: '3', branchName: 'afk/backlog-3' } as BacklogItem;
+
+    // The candidate is lost neither way: a change nobody could read back
+    // still counts, with the state the listing gave it.
+    await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog, { preferredTargetBranch: 'prd/27' }))
+      .resolves.toMatchObject({ id: '47', state: 'merged', targetBranch: 'prd/27' });
+  });
+
   it('never merges a change that a person has already merged', async () => {
     // The merge gate belongs to a person. The association has to land on the
     // change that was merged, and the confirmation has to leave it alone.

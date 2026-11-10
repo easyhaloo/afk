@@ -234,6 +234,20 @@ describe('backlog commands', () => {
     expect(provider.transition).toHaveBeenCalledWith(item.id, 'done', { changeId: 'mr-9' });
   });
 
+  it('tells the association which branch the change was headed for, and merges nothing that landed', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: item.branchName, targetBranch: 'main' }),
+      merge: vi.fn(),
+      get: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: item.branchName, targetBranch: 'main' }),
+    };
+
+    await expect(confirmBacklogMerge(provider, changes, item.id, 'main')).resolves.toMatchObject({ state: 'done' });
+    expect(changes.findForBacklog).toHaveBeenCalledWith(expect.objectContaining({ id: item.id }), { preferredTargetBranch: 'main' });
+    expect(changes.merge).not.toHaveBeenCalled();
+  });
+
   it('accepts the QA verification branch created for a root backlog', async () => {
     const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
     const provider = lifecycleProvider(item);
@@ -375,6 +389,42 @@ describe('backlog commands', () => {
     expect(outcome.reconciled).toBe(true);
     expect(outcome.reason).toMatch(/mr-10 is merged/);
     expect(provider.transition).toHaveBeenCalledWith('43', 'done', { changeId: 'mr-10' });
+  });
+
+  it('names the changes it had to choose between when the association went astray', async () => {
+    // A change that targets another branch reads like a branch that was set
+    // wrong. The changes on the branch tell the two failures apart: the
+    // person reads which change landed and where it went.
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-48', state: 'closed', sourceBranch: `${item.branchName}-qa`, targetBranch: 'master' }),
+      listForBacklog: vi.fn().mockResolvedValue([
+        { id: 'mr-47', state: 'merged', sourceBranch: `${item.branchName}-qa`, targetBranch: 'main' },
+        { id: 'mr-48', state: 'closed', sourceBranch: `${item.branchName}-qa`, targetBranch: 'master' },
+      ]),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, item.id, 'main');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/#mr-47 merged/);
+    expect(outcome.reason).toMatch(/#mr-48 closed/);
+    expect(provider.transition).not.toHaveBeenCalled();
+  });
+
+  it('tells the association which branch the change was headed for', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: `${item.branchName}-qa`, targetBranch: 'main' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    await reconcileMergedBacklog(provider, changes, item.id, 'main');
+    expect(changes.findForBacklog).toHaveBeenCalledWith(expect.objectContaining({ id: item.id }), { preferredTargetBranch: 'main' });
   });
 
   it('leaves a blocked item alone while its change is still open', async () => {

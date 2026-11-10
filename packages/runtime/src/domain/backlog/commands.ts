@@ -8,6 +8,7 @@ import type {
   QABacklogProvider,
 } from './index.js';
 import type { BacklogRelationUpdate } from './metadata-codec.js';
+import type { ChangeAssociationOptions } from './change-association.js';
 import type { ReworkRecord } from './rework-record.js';
 import type { ReworkRevisionInput } from './rework-revision.js';
 import { assertFactStatement } from './rework-revision.js';
@@ -121,10 +122,34 @@ export async function applyBacklogPrdBaseline(
   await provider.applyPrdBaseline(id, branch.trim());
 }
 
+/** What a caller needs to know about the change request of a backlog item. */
+export interface BacklogChangeRequest {
+  id: string;
+  state: 'open' | 'merged' | 'closed';
+  sourceBranch: string;
+  targetBranch: string;
+  mergeable?: boolean;
+}
+
 export interface BacklogChangeProvider {
-  findForBacklog(backlog: BacklogItem): Promise<{ id: string; state: 'open' | 'merged' | 'closed'; sourceBranch: string; targetBranch: string; mergeable?: boolean } | null>;
+  /**
+   * The change request of a backlog item.
+   *
+   * One branch can carry several changes, so the association is a decision
+   * with a rule; the caller that knows where the work was headed says so in
+   * the options.
+   */
+  findForBacklog(backlog: BacklogItem, options?: ChangeAssociationOptions): Promise<BacklogChangeRequest | null>;
+  /**
+   * Every change request that shares a branch of a backlog item.
+   *
+   * It is optional because a provider that knows one change per item has
+   * nothing to list. Where it is there, the reason a reconciliation failed
+   * can name the changes it had to choose between.
+   */
+  listForBacklog?(backlog: BacklogItem): Promise<BacklogChangeRequest[]>;
   merge(id: string): Promise<void>;
-  get(id: string): Promise<{ id: string; state: 'open' | 'merged' | 'closed'; sourceBranch: string; targetBranch: string; mergeable?: boolean }>;
+  get(id: string): Promise<BacklogChangeRequest>;
 }
 
 export async function interruptBacklog(
@@ -249,13 +274,15 @@ export async function confirmBacklogMerge(
   if (labeledState !== 'merge_ready' || item.executionMode !== 'hitl') {
     throw new Error(`invalid lifecycle transition: merge confirmation requires merge_ready + hitl for backlog ${id}`);
   }
-  const change = await changes.findForBacklog(item);
+  const change = await changes.findForBacklog(item, { preferredTargetBranch: expectedTargetBranch });
   if (!change) throw new Error(`backlog ${id} must have an associated change`);
   const verificationBranch = `${item.branchName}-qa`;
   if (change.sourceBranch !== verificationBranch && change.sourceBranch !== item.branchName) {
     throw new Error(`associated change ${change.id} must use source branch ${verificationBranch} or ${item.branchName}`);
   }
-  if (change.targetBranch !== expectedTargetBranch) throw new Error(`associated change ${change.id} must target ${expectedTargetBranch}`);
+  if (change.targetBranch !== expectedTargetBranch) {
+    throw new Error(`associated change ${change.id} must target ${expectedTargetBranch}${await describeChangeCandidates(changes, item)}`);
+  }
   if (change.state === 'closed') throw new Error(`associated change ${change.id} must be open or merged`);
   if (change.state === 'open' && change.mergeable === false) throw new Error(`associated change ${change.id} must be mergeable`);
   if (change.state === 'open') await changes.merge(change.id);
@@ -307,7 +334,7 @@ export async function reconcileMergedBacklog(
   if ((labeledState !== 'merge_ready' && labeledState !== 'blocked') || item.executionMode !== 'hitl') {
     return { reconciled: false, reason: `backlog ${id} is ${labeledState}/${item.executionMode}; only merge_ready or blocked + hitl can be reconciled`, item };
   }
-  const change = await changes.findForBacklog(item);
+  const change = await changes.findForBacklog(item, { preferredTargetBranch: expectedTargetBranch });
   if (!change) {
     return { reconciled: false, reason: `backlog ${id} has no associated change`, item };
   }
@@ -316,13 +343,37 @@ export async function reconcileMergedBacklog(
     return { reconciled: false, reason: `associated change ${change.id} uses source branch ${change.sourceBranch}`, item };
   }
   if (change.targetBranch !== expectedTargetBranch) {
-    return { reconciled: false, reason: `associated change ${change.id} targets ${change.targetBranch}, not ${expectedTargetBranch}`, item };
+    const candidates = await describeChangeCandidates(changes, item);
+    return { reconciled: false, reason: `associated change ${change.id} targets ${change.targetBranch}, not ${expectedTargetBranch}${candidates}`, item };
   }
   if (change.state !== 'merged') {
-    return { reconciled: false, reason: `associated change ${change.id} is ${change.state}; the human merge gate is still open`, item };
+    const candidates = await describeChangeCandidates(changes, item);
+    return { reconciled: false, reason: `associated change ${change.id} is ${change.state}; the human merge gate is still open${candidates}`, item };
   }
   await provider.transition(id, 'done', { changeId: change.id });
   return { reconciled: true, reason: `associated change ${change.id} is merged`, item: await provider.get(id) };
+}
+
+/**
+ * The changes that share a branch of an item.
+ *
+ * The reason a reconciliation failed has to tell the two failures apart: "the
+ * change targets another branch" reads like a branch that was set wrong,
+ * while "the change that landed is #47 and #48 is a probe on master" reads
+ * like an association that went astray. The candidates are what tells them
+ * apart, so they are named.
+ */
+async function describeChangeCandidates(changes: BacklogChangeProvider, item: BacklogItem): Promise<string> {
+  if (!changes.listForBacklog) return '';
+  const candidates = await changes.listForBacklog(item);
+  if (candidates.length <= 1) return '';
+  const branches = [...new Set(candidates.map(candidate => candidate.sourceBranch))];
+  const where = branches.length === 1 ? `branch ${branches[0]}` : `branches ${branches.join(', ')}`;
+  const picture = candidates.map(candidate => {
+    const branch = branches.length === 1 ? '' : ` (${candidate.sourceBranch})`;
+    return `#${candidate.id} ${candidate.state} → ${candidate.targetBranch}${branch}`;
+  }).join(', ');
+  return `; ${candidates.length} changes share ${where}: ${picture}`;
 }
 
 /**

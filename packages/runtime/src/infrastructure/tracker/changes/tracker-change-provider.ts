@@ -1,5 +1,5 @@
 import type { BacklogItem } from '../../../domain/backlog/index.js';
-import { selectChangeAssociation, type ChangeAssociationOptions } from '../../../domain/backlog/change-association.js';
+import { scopeChangeCandidates, selectChangeAssociation, type ChangeAssociationOptions } from '../../../domain/backlog/change-association.js';
 import type { ChangeProvider, ChangeRequest, CreateChangeInput } from './provider.js';
 import type { TrackerProvider, TrackedMR } from '../../../domain/tracker/types.js';
 import { parseWorkItemId } from '../../../domain/work-item/identity.js';
@@ -153,10 +153,7 @@ export class TrackerChangeProvider implements ChangeProvider {
    */
   private async candidatesForBacklog(backlog: BacklogItem): Promise<{ scope: ChangeRequest[]; others: ChangeRequest[] }> {
     const changes = await this.tracker.listMRs({ state: 'all' });
-    const onVerification = changes.filter(candidate => candidate.sourceBranch === `${backlog.branchName}-qa`);
-    const onItem = changes.filter(candidate => candidate.sourceBranch === backlog.branchName);
-    const scope = onVerification.length > 0 ? onVerification : onItem;
-    const others = onVerification.length > 0 ? onItem : [];
+    const { scope, others } = scopeChangeCandidates(changes, backlog.branchName);
     return {
       scope: await Promise.all(scope.map(candidate => this.readCandidate(candidate))),
       others: await Promise.all(others.map(candidate => this.readCandidate(candidate))),

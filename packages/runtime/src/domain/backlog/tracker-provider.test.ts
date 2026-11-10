@@ -268,6 +268,166 @@ describe('TrackerBacklogProvider', () => {
     });
   });
 
+  it('shows the change that landed for a finished item instead of the closed probe on its branch', async () => {
+    const issue = {
+      id: 3, title: 'Landed', description: '', labels: ['stage::done', 'mode::hitl'],
+      state: 'opened', url: 'https://example/3', projectId: 'org/repo',
+    };
+    const t = tracker(issue);
+    t.listMRs = vi.fn(async () => [
+      { id: 48, platform: 'github', projectId: 'org/repo', title: 'probe', state: 'closed', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'master', url: 'https://example/pull/48' },
+      { id: 47, platform: 'github', projectId: 'org/repo', title: 'landed', state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27', url: 'https://example/pull/47' },
+    ]);
+    t.getMR = vi.fn(async (id: number) => ({
+      id,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'change',
+      state: id === 47 ? 'merged' : 'closed',
+      sourceBranch: 'afk/backlog-3-qa',
+      targetBranch: id === 47 ? 'prd/27' : 'master',
+      url: `https://example/pull/${id}`,
+    }));
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.get('3')).resolves.toMatchObject({
+      state: 'done',
+      changeRequest: {
+        id: '47',
+        state: 'merged',
+        sourceBranch: 'afk/backlog-3-qa',
+        targetBranch: 'prd/27',
+      },
+    });
+  });
+
+  it('takes the state that was read back, not the one a listing reports', async () => {
+    // A listing answers in groups of states and can under-report a change
+    // that has landed, so the readback of the provider is what decides.
+    const issue = {
+      id: 3, title: 'Landed', description: '', labels: ['stage::done', 'mode::hitl'],
+      state: 'opened', url: 'https://example/3', projectId: 'org/repo',
+    };
+    const t = tracker(issue);
+    t.listMRs = vi.fn(async () => [
+      { id: 48, platform: 'github', projectId: 'org/repo', title: 'probe', state: 'closed', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'master', url: 'https://example/pull/48' },
+      { id: 47, platform: 'github', projectId: 'org/repo', title: 'landed', state: 'closed', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27', url: 'https://example/pull/47' },
+    ]);
+    t.getMR = vi.fn(async (id: number) => ({
+      id,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'change',
+      state: id === 47 ? 'merged' : 'closed',
+      sourceBranch: 'afk/backlog-3-qa',
+      targetBranch: id === 47 ? 'prd/27' : 'master',
+      url: `https://example/pull/${id}`,
+    }));
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.get('3')).resolves.toMatchObject({
+      changeRequest: { id: '47', state: 'merged' },
+    });
+  });
+
+  it('shows the change that is still open for an item that waits for a person', async () => {
+    // The branch was reworked: the change of the earlier round has landed and
+    // the change of the current round is open. Only the second one is the
+    // merge gate, so it is the one the item shows.
+    const issue = {
+      id: 9, title: 'Waiting', description: '', labels: ['stage::merge-ready', 'mode::hitl'],
+      state: 'opened', url: 'https://example/9', projectId: 'org/repo',
+    };
+    const t = tracker(issue);
+    t.listMRs = vi.fn(async () => [
+      { id: 47, platform: 'github', projectId: 'org/repo', title: 'earlier round', state: 'merged', sourceBranch: 'afk/backlog-9-qa', targetBranch: 'prd/27', url: 'https://example/pull/47' },
+      { id: 55, platform: 'github', projectId: 'org/repo', title: 'current round', state: 'opened', sourceBranch: 'afk/backlog-9-qa', targetBranch: 'prd/27', url: 'https://example/pull/55' },
+    ]);
+    t.getMR = vi.fn(async (id: number) => ({
+      id,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'change',
+      state: id === 55 ? 'opened' : 'merged',
+      sourceBranch: 'afk/backlog-9-qa',
+      targetBranch: 'prd/27',
+      url: `https://example/pull/${id}`,
+      mergeState: id === 55 ? 'conflict' : 'mergeable',
+    }));
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.get('9')).resolves.toMatchObject({
+      state: 'merge_ready',
+      changeRequest: {
+        id: '55',
+        state: 'open',
+        targetBranch: 'prd/27',
+        mergeState: 'conflict',
+      },
+    });
+  });
+
+  it('shows the only change of a branch unchanged', async () => {
+    const issue = {
+      id: 42, title: 'Single change', description: '', labels: ['stage::merge-ready', 'mode::hitl'],
+      state: 'opened', url: 'https://example/42', projectId: 'org/repo',
+    };
+    const t = tracker(issue);
+    t.listMRs = vi.fn(async () => [
+      { id: 55, platform: 'github', projectId: 'org/repo', title: 'change', state: 'opened', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'prd/27', url: 'https://example/pull/55' },
+    ]);
+    t.getMR = vi.fn(async (id: number) => ({
+      id,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'change',
+      state: 'opened',
+      sourceBranch: 'afk/backlog-42-qa',
+      targetBranch: 'prd/27',
+      url: `https://example/pull/${id}`,
+      mergeState: 'mergeable',
+    }));
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.get('42')).resolves.toMatchObject({
+      changeRequest: {
+        id: '55',
+        state: 'open',
+        mergeState: 'mergeable',
+        url: 'https://example/pull/55',
+      },
+    });
+  });
+
+  it('shows the same change in the listing and in the item', async () => {
+    const issue = {
+      id: 3, title: 'Landed', description: '', labels: ['stage::done', 'mode::hitl'],
+      state: 'opened', url: 'https://example/3', projectId: 'org/repo',
+    };
+    const t = tracker(issue);
+    t.listMRs = vi.fn(async () => [
+      { id: 48, platform: 'github', projectId: 'org/repo', title: 'probe', state: 'closed', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'master', url: 'https://example/pull/48' },
+      { id: 47, platform: 'github', projectId: 'org/repo', title: 'landed', state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27', url: 'https://example/pull/47' },
+    ]);
+    t.getMR = vi.fn(async (id: number) => ({
+      id,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'change',
+      state: id === 47 ? 'merged' : 'closed',
+      sourceBranch: 'afk/backlog-3-qa',
+      targetBranch: id === 47 ? 'prd/27' : 'master',
+      url: `https://example/pull/${id}`,
+    }));
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    const item = await provider.get('3');
+    const listed = await provider.list();
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.changeRequest).toEqual(item.changeRequest);
+  });
+
   it('creates a child backlog with metadata, provider links, and concrete URLs in its body', async () => {
     const parent = { id: 7, title: 'PRD', description: '', labels: [], state: 'opened', url: 'https://example/7', projectId: 'org/repo' };
     const dependency = { id: 6, title: 'Foundation', description: '', labels: [], state: 'opened', url: 'https://example/6', projectId: 'org/repo' };

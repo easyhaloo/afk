@@ -163,7 +163,11 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
     // that already carries the change is the other one: it needs a person
     // too, but for a different reason — the baseline moved, so a person has
     // to decide whether it keeps the commits.
-    const verdict = change.mergeState === 'conflict'
+    // The verdict is about the merge gate, and only a change that is still
+    // open has one: "can be merged" on a change that has already landed
+    // describes a decision nobody has to make, and a conflict on a change
+    // that was closed long ago describes a merge nobody is going to do.
+    const verdict = change.state !== 'open' ? '' : change.mergeState === 'conflict'
       ? ' — CONFLICTS with the target branch, it cannot be merged as it stands'
       : change.mergeState === 'baseline_advanced'
         ? ' — the target branch already carries this change, a person has to decide what to do with the baseline'

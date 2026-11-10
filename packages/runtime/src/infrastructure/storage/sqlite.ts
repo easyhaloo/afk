@@ -113,6 +113,7 @@ export function openSqlite(options: {
     database.exec('PRAGMA busy_timeout = 0');
     const deadline = performance.now() + 3000;
     const pause = new Int32Array(new SharedArrayBuffer(4));
+    let retryDelay = 25;
     for (;;) {
       try {
         database.exec('PRAGMA journal_mode = WAL');
@@ -121,7 +122,8 @@ export function openSqlite(options: {
         const failure = error as { code?: string; errcode?: number };
         const remaining = deadline - performance.now();
         if (failure.code !== 'ERR_SQLITE_ERROR' || ![5, 261, 773].includes(failure.errcode ?? -1) || remaining <= 0) throw error;
-        Atomics.wait(pause, 0, 0, Math.min(25, remaining));
+        Atomics.wait(pause, 0, 0, Math.min(retryDelay * (0.5 + Math.random() * 0.5), remaining));
+        retryDelay = Math.min(retryDelay * 2, 250);
       }
     }
     database.exec(`PRAGMA busy_timeout = 3000; PRAGMA synchronous = ${options.durability ?? 'NORMAL'};`);

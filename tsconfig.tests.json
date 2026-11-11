@@ -9,6 +9,7 @@
     ]
   },
   "include": [
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "packages/runtime/src/application/learning/lesson-knowledge-publication.test.ts"
   ]
 }

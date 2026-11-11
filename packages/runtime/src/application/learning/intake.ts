@@ -9,7 +9,7 @@ import { CandidateStore, type StoredDistillationRequest } from './candidate-stor
 import { learningScopeSchema } from './contracts.js';
 import { buildEvidencePack, readEvidenceSource, redactEvidenceText, type EvidencePack, type EvidenceSourceInput } from './evidence.js';
 import { canonicalLearningJson, learningIdentitySchema } from './requests.js';
-import { experienceScope, successfulRunEvidenceFromEvents } from './runtime.js';
+import { experienceScope, successfulRunEvidenceFromEvents } from './run-evidence.js';
 import { submitDistillation } from './worker.js';
 
 export interface ReconcileDistillationOptions {

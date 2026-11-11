@@ -240,6 +240,16 @@ QA 和新证据。HTTP 知识库检索不隐含远程写回。
 - 截止时间覆盖开库、解析、执行和提交；最终获写锁后复核身份、授权、来源、目标和 deadline。取消、漂移和超时不得留下 validated 状态或验证收据。
 - lesson 最终获写锁后同步重读 QA 审计摘要；追加、删除、替换或配置变化阻断提交。错误码增加 `qa_unconfigured/qa_not_independent/audit_unavailable/audit_changed/qa_unverified`；错误结果仅含安全分类，不携带审计正文或路径。
 
+### 8.2 Lesson 发布、读取与撤回协议
+
+- 验证许可与发布许可分别检查；目标授权必须显式包含 `lesson`，不能从 `fact/process` 推导。
+- 沿用 `learning.knowledge.prepare/publish/reconcile`；调用方不提供验证收据、授权文件或 Wiki 执行参数。
+- 发布核对当前候选、原始来源、独立 QA、语义断言收据、保存配置、目标授权及规则；读取已发布资产时执行相同资格检查。
+- 发布准备、导航替换及 `applied/committed` 晋级在取得数据库写锁后同步复核依赖；守卫抛错或返回异步结果必须回滚，不得成功返回陈旧计划。
+- 正文包含候选版本、验证执行及 QA 修复版本的引用；只向权限、项目、版本与适用条件匹配的任务提供。
+- QA、来源、规则或授权失效立即禁止新消费；补查只将对应 lesson 置为冲突并安排撤回，同请求其他候选不因 QA 单独变化而失效。未配置知识发布时仍执行候选资格补查。
+- 撤回复用持久恢复日志并保持幂等；权限不足或人工编辑返回阻断，保留现场，不能覆盖人工正文。
+
 ## 9. 生命周期闸门与最小验收
 
 required init、before-agent、after-agent、before-publish 及逆序 cleanup 保留执行顺序和

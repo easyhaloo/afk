@@ -411,12 +411,13 @@ export class CandidateStore {
       .sort((first, second) => second.validatedVersion - first.validatedVersion)[0];
   }
 
-  preparePublication(id: string, expectedVersion: number, input: PublicationInput): PublicationRecord {
+  preparePublication(id: string, expectedVersion: number, input: PublicationInput, beforeCommit?: () => void): PublicationRecord {
     versionSchema.parse(expectedVersion);
     const parsed = publicationSchema.parse(input);
     return this.write(() => {
       const current = this.requireCandidate(id, expectedVersion);
       this.assertPublicationValidation(current, parsed);
+      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Publication beforeCommit guard must be synchronous and return no value');
       const record: PublicationRecord = { ...parsed, candidateId: id, candidateVersion: current.version,
         candidateDigest: current.digest, evidenceDigest: current.evidenceDigest, phase: 'prepared' };
       const existing = this.read<PublicationRecord>('publication', parsed.key);
@@ -431,13 +432,14 @@ export class CandidateStore {
     });
   }
 
-  supersedePreparedPublication(oldKey: string, newInput: PublicationInput): PublicationRecord {
+  supersedePreparedPublication(oldKey: string, newInput: PublicationInput, beforeCommit?: () => void): PublicationRecord {
     learningIdentitySchema.parse(oldKey);
     const parsed = publicationSchema.parse(newInput);
     if (parsed.key === oldKey) throw new Error('Superseding publication requires a different key');
     return this.write(() => {
       const old = this.getPublication(oldKey);
       if (!old) throw new Error('Publication not found');
+      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Publication beforeCommit guard must be synchronous and return no value');
       if (old.phase === 'superseded') {
         if (old.supersededBy !== parsed.key) throw new Error('Publication already superseded by a different key');
       } else if (old.phase !== 'prepared') throw new Error('Supersession requires a prepared publication phase');
@@ -475,13 +477,14 @@ export class CandidateStore {
     });
   }
 
-  advancePublication(key: string, phase: 'applied' | 'committed', observedDigest: string | null): PublicationRecord {
+  advancePublication(key: string, phase: 'applied' | 'committed', observedDigest: string | null, beforeCommit?: () => void): PublicationRecord {
     learningIdentitySchema.parse(key);
     z.enum(['applied', 'committed']).parse(phase);
     learningDigestSchema.nullable().parse(observedDigest);
     return this.write(() => {
       const publication = this.read<PublicationRecord>('publication', key);
       if (!publication) throw new Error('Publication not found');
+      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Publication beforeCommit guard must be synchronous and return no value');
       if (publication.phase === phase && publication.observedDigest === observedDigest) return publication;
       if (publication.phase === 'committed' && phase === 'applied' && publication.observedDigest === observedDigest) return publication;
       if (!((publication.phase === 'prepared' && phase === 'applied') || (publication.phase === 'applied' && phase === 'committed'))) throw new Error('Invalid publication phase');

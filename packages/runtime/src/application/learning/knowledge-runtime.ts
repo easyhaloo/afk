@@ -9,12 +9,14 @@ import { readKnowledgeGrant, type KnowledgePolicy } from './knowledge.js';
 import { prepareKnowledgePublication, publishLearningCandidate, readPublishedKnowledge, reconcileKnowledgePublications, resolveKnowledgePublication,
   type KnowledgePublicationResult, type PublicationOptions } from './publication.js';
 import { learningDigestSchema } from './requests.js';
+import { verifyLessonPublication } from './lesson-publication-guard.js';
 
 const savedPath = z.string().min(1).max(4096).refine(value => isAbsolute(value) && resolve(value) === value && !value.includes('\0'));
 export const knowledgeConfigurationSchema = z.object({ wikiScript: savedPath,
   grants: z.array(savedPath).min(1).max(64).refine(values => new Set(values).size === values.length) }).strict();
 export type KnowledgeConfiguration = z.infer<typeof knowledgeConfigurationSchema>;
-export type KnowledgeRuntimeOptions = { file: string; recoveryDirectory: string; config: KnowledgeConfiguration; signal?: AbortSignal };
+export type KnowledgeRuntimeOptions = { file: string; recoveryDirectory: string; config: KnowledgeConfiguration;
+  validationConfigurationFile?: string; signal?: AbortSignal };
 type Binding = { grantIndex: number; authorizationFile: string; policy: KnowledgePolicy };
 type BindingFailure = { grantIndex: number; code: 'knowledge_grant_unavailable' | 'knowledge_target_ambiguous' };
 
@@ -45,10 +47,12 @@ function route(options: KnowledgeRuntimeOptions, store: CandidateStore, scope: s
   const { bindings } = loadBindings(options.config);
   const matches = bindings.filter(binding => binding.policy.scope === scope && binding.policy.targets.some(target => target.ref === targetRef));
   if (matches.length !== 1) throw new Error('knowledge_target_unavailable_or_ambiguous');
-  return { ...matches[0]!, store, wikiScript: options.config.wikiScript, recoveryDirectory: options.recoveryDirectory, signal: options.signal };
+  return { ...matches[0]!, store, wikiScript: options.config.wikiScript, recoveryDirectory: options.recoveryDirectory,
+    validationConfigurationFile: options.validationConfigurationFile, signal: options.signal };
 }
 
-async function withStore<Result>(options: KnowledgeRuntimeOptions, operation: (store: CandidateStore) => Promise<Result>): Promise<Result> {
+async function withStore<Result>(options: Pick<KnowledgeRuntimeOptions, 'file' | 'recoveryDirectory' | 'signal'>,
+  operation: (store: CandidateStore) => Promise<Result>): Promise<Result> {
   checkAbort(options);
   savedPath.parse(options.file);
   savedPath.parse(options.recoveryDirectory);
@@ -78,11 +82,33 @@ export async function publishConfiguredKnowledge(input: KnowledgeRuntimeOptions 
   });
 }
 
+export async function reconcileConfiguredLessons(input: Pick<KnowledgeRuntimeOptions, 'file' | 'recoveryDirectory' | 'validationConfigurationFile' | 'signal'>
+  & { scope?: string }): Promise<{ invalidated: string[] }> {
+  if (input.scope !== undefined) learningScopeSchema.parse(input.scope);
+  checkAbort(input);
+  if (!existsSync(input.file)) return { invalidated: [] };
+  return withStore(input, async store => {
+    const invalidated: string[] = [];
+    for (const candidate of store.listCandidates()) {
+      checkAbort(input);
+      if (candidate.proposal.kind !== 'lesson' || !['validated', 'published'].includes(candidate.state)
+        || (input.scope !== undefined && candidate.proposal.applicability.project !== input.scope)) continue;
+      const result = verifyLessonPublication({ store, candidate, configurationFile: input.validationConfigurationFile }, { signal: input.signal });
+      checkAbort(input);
+      if (result.status === 'current') continue;
+      store.transitionCandidate(candidate.id, candidate.version, 'conflict');
+      invalidated.push(candidate.id);
+    }
+    return { invalidated };
+  });
+}
+
 export async function reconcileConfiguredKnowledge(input: KnowledgeRuntimeOptions & { scope?: string }): Promise<{
   results: KnowledgePublicationResult[]; blocked: Array<BindingFailure | { key: string; code: 'publication_recovery_blocked' }>;
 }> {
   if (input.scope !== undefined) learningScopeSchema.parse(input.scope);
   checkAbort(input);
+  await reconcileConfiguredLessons(input);
   const loaded = loadBindings(input.config);
   const results: KnowledgePublicationResult[] = [];
   const blocked: Array<BindingFailure | { key: string; code: 'publication_recovery_blocked' }> = [...loaded.blocked];
@@ -91,7 +117,7 @@ export async function reconcileConfiguredKnowledge(input: KnowledgeRuntimeOption
     for (const binding of loaded.bindings) {
       if (input.scope !== undefined && binding.policy.scope !== input.scope) continue;
       const result = await reconcileKnowledgePublications({ ...binding, store, wikiScript: input.config.wikiScript,
-        recoveryDirectory: input.recoveryDirectory, signal: input.signal });
+        recoveryDirectory: input.recoveryDirectory, validationConfigurationFile: input.validationConfigurationFile, signal: input.signal });
       results.push(...result.results);
       blocked.push(...result.blocked);
     }
@@ -99,7 +125,7 @@ export async function reconcileConfiguredKnowledge(input: KnowledgeRuntimeOption
       ...blocked.flatMap(failure => 'key' in failure ? [failure.key] : [])]);
     for (const publication of store.listPublications()) {
       const candidate = store.getCandidate(publication.candidateId);
-      if (observed.has(publication.key) || !candidate || !['fact', 'process'].includes(candidate.proposal.kind)
+      if (observed.has(publication.key) || !candidate || !['fact', 'process', 'lesson'].includes(candidate.proposal.kind)
         || (input.scope !== undefined && candidate.proposal.applicability.project !== input.scope)) continue;
       if (publication.phase === 'superseded') {
         const binding = loaded.bindings.find(entry => entry.policy.scope === candidate.proposal.applicability.project
@@ -107,7 +133,8 @@ export async function reconcileConfiguredKnowledge(input: KnowledgeRuntimeOption
         if (binding) {
           try {
             const successor = resolveKnowledgePublication({ ...binding, store, key: publication.key,
-              wikiScript: input.config.wikiScript, recoveryDirectory: input.recoveryDirectory, signal: input.signal });
+              wikiScript: input.config.wikiScript, recoveryDirectory: input.recoveryDirectory,
+              validationConfigurationFile: input.validationConfigurationFile, signal: input.signal });
             if (observed.has(successor.key)) continue;
           } catch { checkAbort(input); }
         }
@@ -147,6 +174,7 @@ export class KnowledgeContextProvider implements ContextSource {
           if (!binding) continue;
           const knowledge = await readPublishedKnowledge({ ...binding, store, key: publication.key,
             wikiScript: this.options.config.wikiScript, recoveryDirectory: this.options.recoveryDirectory, signal,
+            validationConfigurationFile: this.options.validationConfigurationFile,
             applicability: query.applicability, target: query.target });
           checkAbort({ signal });
           if (!knowledge || bytes + Buffer.byteLength(knowledge.content, 'utf8') > 8000) continue;

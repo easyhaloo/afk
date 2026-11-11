@@ -13,7 +13,7 @@ import { experienceQueryContextSchema } from '../learning/experience-store.js';
 import { validateConfiguredLearningCandidate } from '../learning/validation-runtime.js';
 import type { VerificationProvider } from '../../plugin-sdk/capabilities.js';
 import { KnowledgeContextProvider, knowledgeConfigurationSchema, prepareConfiguredKnowledge, publishConfiguredKnowledge,
-  reconcileConfiguredKnowledge } from '../learning/knowledge-runtime.js';
+  reconcileConfiguredKnowledge, reconcileConfiguredLessons } from '../learning/knowledge-runtime.js';
 import type { Plugin } from './runtime.js';
 
 export const learningConfigurationSchema = z.object({
@@ -74,7 +74,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
   const captureFailures = new Map<string, { root: string; runId: string; code: string }>();
   const publicationFailures = new Set<string>();
   const knowledge = config.knowledge && { config: config.knowledge, file: join(directory, 'candidates.sqlite'),
-    recoveryDirectory: join(directory, 'publications'), signal: lifetime.signal };
+    recoveryDirectory: join(directory, 'publications'), validationConfigurationFile: config.validation?.configurationFile, signal: lifetime.signal };
   const reconcileKnowledge = async (scope?: string) => {
     if (!knowledge) return { results: [], blocked: [] };
     try {
@@ -93,6 +93,8 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
   const eventRootSchema = z.string().min(1).max(4096).refine(isAbsolute).optional();
   const reconcile = async (input: { scope?: string; runId?: string; eventRoot?: string } = {}) => {
     const reconciliation = await reconcileDistillationSources({ directory, homeDir: options.homeDir, ...input });
+    await reconcileConfiguredLessons({ file: join(directory, 'candidates.sqlite'), recoveryDirectory: join(directory, 'publications'),
+      validationConfigurationFile: config.validation?.configurationFile, scope: input.scope, signal: lifetime.signal });
     const root = resolve(input.eventRoot ?? process.env.AFK_EVENT_STORE_DIR ?? join(options.homeDir ?? homedir(), '.afk', 'events'));
     for (const source of reconciliation.checkedSources) {
       captureFailures.delete(JSON.stringify([source.eventRoot, source.runId]));

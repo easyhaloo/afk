@@ -13,7 +13,7 @@ import { DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { buildEvidencePack, readEvidenceSource, type EvidenceSourceInput } from './evidence.js';
 import { assertKnowledgeDirectory, readKnowledgeAuthorization, readKnowledgeGrant } from './knowledge.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
-import { successfulRunEvidenceFromEvents } from './runtime.js';
+import { successfulRunEvidenceFromEvents } from './run-evidence.js';
 import { lessonQaConfigurationSchema, validateLearningCandidate, type LearningValidationChecker, type LearningValidationDependencies, type LearningValidationResult } from './validation.js';
 
 const savedPath = z.string().min(1).max(4096).refine(value => isAbsolute(value) && resolve(value) === value && !/[\0\r\n]/.test(value));

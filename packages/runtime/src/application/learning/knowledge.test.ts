@@ -1,10 +1,43 @@
-import { chmodSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { candidateProposalSchema } from './contracts.js';
 import { output } from './ledger-data.fixture.spec.js';
-import { knowledgeFixture, page } from './knowledge.fixture.spec.js';
+import { hash, knowledgeFixture, page } from './knowledge.fixture.spec.js';
 import { planKnowledgePublication, readKnowledgeAuthorization, readKnowledgeGrant, runWikiIngest, verifyKnowledgePlan } from './knowledge.js';
+
+const reads = vi.hoisted(() => ({ file: '', descriptors: new Set<number>(), sizes: [] as number[], wholeFileSizes: [] as number[],
+  afterRead: undefined as (() => void) | undefined }));
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual,
+    openSync: (...parameters: Parameters<typeof actual.openSync>) => {
+      const descriptor = actual.openSync(...parameters);
+      if (parameters[0] === reads.file) reads.descriptors.add(descriptor);
+      return descriptor;
+    },
+    closeSync: (descriptor: number) => {
+      const result = actual.closeSync(descriptor);
+      reads.descriptors.delete(descriptor);
+      return result;
+    },
+    readSync: (descriptor: number, buffer: NodeJS.ArrayBufferView, offset: number, length: number, position: number | null) => {
+      const result = actual.readSync(descriptor, buffer, offset, length, position);
+      if (reads.descriptors.has(descriptor)) {
+        reads.sizes.push(length);
+        const afterRead = reads.afterRead;
+        reads.afterRead = undefined;
+        afterRead?.();
+      }
+      return result;
+    },
+    readFileSync: (...parameters: Parameters<typeof actual.readFileSync>) => {
+      const result = actual.readFileSync(...parameters);
+      if (parameters[0] === reads.file || (typeof parameters[0] === 'number' && reads.descriptors.has(parameters[0]))) reads.wholeFileSizes.push(Buffer.byteLength(result));
+      return result;
+    },
+  };
+});
 
 const fixtures: ReturnType<typeof knowledgeFixture>[] = [];
 const open = (proposal?: Parameters<typeof knowledgeFixture>[0]) => {
@@ -12,9 +45,107 @@ const open = (proposal?: Parameters<typeof knowledgeFixture>[0]) => {
   fixtures.push(fixture);
   return fixture;
 };
-afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup(); });
+afterEach(() => {
+  reads.file = '';
+  reads.afterRead = undefined;
+  reads.sizes = [];
+  reads.wholeFileSizes = [];
+  reads.descriptors.clear();
+  vi.restoreAllMocks();
+  for (const fixture of fixtures.splice(0)) fixture.cleanup();
+});
 
 describe('knowledge plan through the existing Python wiki CLI', () => {
+  it('captures authorized file and missing directory-rule dependencies without changing the grant DTO', () => {
+    const fixture = open();
+    const readSet = new Map<string, string | null>();
+    expect(readKnowledgeAuthorization(fixture.input, false, readSet)).toEqual(readKnowledgeGrant(fixture.authorizationFile));
+    expect(readSet.get('AGENTS.md')).toBe(fixture.policy.rules['AGENTS.md']);
+    expect([...readSet]).toEqual(expect.arrayContaining([['.tools/wiki-lint.py', null], ['知识/AGENTS.md', null], ['99-收件箱/AGENTS.md', null]]));
+  });
+
+  it('rejects oversized rule files before reading their content and closes the descriptor', () => {
+    const fixture = open();
+    reads.file = join(fixture.vault, 'AGENTS.md');
+    truncateSync(reads.file, 64 * 1024 * 1024 + 1);
+    expect(() => readKnowledgeAuthorization(fixture.input)).toThrow();
+    expect(reads.sizes).toEqual([]);
+    expect(reads.wholeFileSizes).toEqual([]);
+    expect(reads.descriptors.size).toBe(0);
+  });
+
+  it('accepts an authorized multi-chunk rule through bounded FD reads', () => {
+    const fixture = open();
+    const content = '# Authorized rules\n'.repeat(6000);
+    fixture.write('AGENTS.md', content);
+    fixture.policy.rules['AGENTS.md'] = hash(content);
+    fixture.persistGrant();
+    reads.file = join(fixture.vault, 'AGENTS.md');
+    expect(readKnowledgeAuthorization(fixture.input).policy).toEqual(fixture.policy);
+    expect(reads.sizes.length).toBeGreaterThan(1);
+    expect(reads.sizes.every(size => size <= 65536)).toBe(true);
+    expect(reads.wholeFileSizes).toEqual([]);
+    expect(reads.descriptors.size).toBe(0);
+  });
+
+  it.each(['directory', 'symlink'] as const)('rejects nonregular authorization rules before content reading: %s', kind => {
+    const fixture = open();
+    const rule = join(fixture.vault, 'AGENTS.md');
+    fixture.write('rule-copy.md', readFileSync(rule, 'utf8'));
+    rmSync(rule);
+    if (kind === 'directory') mkdirSync(rule);
+    else symlinkSync(join(fixture.vault, 'rule-copy.md'), rule);
+    reads.file = rule;
+    expect(() => readKnowledgeAuthorization(fixture.input)).toThrow(/regular|links/i);
+    expect(reads.sizes).toEqual([]);
+    expect(reads.wholeFileSizes).toEqual([]);
+    expect(reads.descriptors.size).toBe(0);
+  });
+
+  it.each(['rule', 'grant'] as const)('rejects %s growth on the same read descriptor', kind => {
+    const fixture = open();
+    reads.file = kind === 'rule' ? join(fixture.vault, 'AGENTS.md') : fixture.authorizationFile;
+    reads.afterRead = () => truncateSync(reads.file, statSync(reads.file).size + 1);
+    expect(() => readKnowledgeAuthorization(fixture.input)).toThrow(/changed|unavailable/i);
+    expect(reads.sizes.length).toBeGreaterThan(0);
+    expect(reads.sizes.every(size => size <= 65536)).toBe(true);
+    expect(reads.descriptors.size).toBe(0);
+  });
+
+  it('checks cancellation during rule reading, preserves a null reason, and closes the descriptor', () => {
+    const fixture = open();
+    const controller = new AbortController();
+    reads.file = join(fixture.vault, 'AGENTS.md');
+    reads.afterRead = () => controller.abort(null);
+    let thrown: unknown = 'not aborted';
+    try { readKnowledgeAuthorization({ ...fixture.input, signal: controller.signal }); } catch (error) { thrown = error; }
+    expect(thrown).toBeNull();
+    expect(reads.sizes.length).toBeGreaterThan(0);
+    expect(reads.descriptors.size).toBe(0);
+  });
+
+  it('accepts explicit lesson publication grants without extending existing fact/process grants', () => {
+    const fixture = open();
+    expect(readKnowledgeGrant(fixture.authorizationFile).policy.targets[0].kinds).toEqual(['fact', 'process']);
+    const grant = JSON.parse(readFileSync(fixture.authorizationFile, 'utf8'));
+    grant.policy.targets[0].kinds = ['lesson'];
+    writeFileSync(fixture.authorizationFile, JSON.stringify(grant), { mode: 0o600 });
+    expect(readKnowledgeGrant(fixture.authorizationFile).policy.targets[0].kinds).toEqual(['lesson']);
+    expect(() => readKnowledgeAuthorization(fixture.input)).toThrow('Persistent authorization policy scope, vault or target changed');
+  });
+
+  it('refuses legacy lesson publication without a complete source snapshot and independent QA receipt', async () => {
+    const fixture = open(candidateProposalSchema.parse({ ...output.candidates[0], kind: 'lesson', targetRef: 'wiki:approval', payload: {
+      trigger: 'Approval was bypassed', rootCause: 'Approval guard was absent', rootCauseStatus: 'confirmed',
+      attempts: ['Retry publication'], fix: 'Enforce approval before publication', prevention: ['Test denied publication'],
+    } }));
+    fixture.policy.targets[0].kinds = ['lesson'];
+    fixture.persistGrant();
+    await expect(planKnowledgePublication(fixture.input)).rejects.toThrow('lesson_publication_storage_unavailable');
+    expect(fixture.store.getCandidate(fixture.candidate.id)?.version).toBe(2);
+    expect(fixture.store.listPublications()).toEqual([]);
+  });
+
   it('loads trusted grant metadata without treating revoked publication permission as withdrawal permission', () => {
     const fixture = open();
     expect(readKnowledgeGrant(fixture.authorizationFile)).toMatchObject({ version: 1, revoked: false, policy: fixture.policy });

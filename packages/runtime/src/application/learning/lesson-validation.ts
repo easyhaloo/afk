@@ -9,7 +9,7 @@ import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/obs
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { buildEvidencePack, readEvidenceSource, validateEvidencePack } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
-import { successfulRunEvidenceFromEvents } from './runtime.js';
+import { successfulRunEvidenceFromEvents } from './run-evidence.js';
 
 const identity = z.string().min(1).max(512).refine(value => value.trim() === value && !/[\0\r\n\t]/.test(value));
 const revision = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);

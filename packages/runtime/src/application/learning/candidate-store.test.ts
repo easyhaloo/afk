@@ -731,6 +731,83 @@ describe('private learning ledger', () => {
     expect(store.getValidation(candidate.id)).toBeUndefined();
   });
 
+  it.each(['prepare', 'supersede'] as const)('runs the publication %s guard before writes or idempotent replay', operation => {
+    const store = open();
+    const completed = store.completeRequest(store.submitRequest(input).key, output);
+    const candidate = store.getCandidate(completed.candidateIds[0]!)!;
+    store.recordValidation(candidate.id, 1, { candidateDigest: candidate.digest, evidenceDigest: request.evidenceDigest,
+      validatorVersion: 'guarded-publication', passed: true, results: ['passed'] });
+    const original = { key: 'publication-old', validatorVersion: 'guarded-publication',
+      targetRef: 'wiki:rules', originalDigest: null, targetDigest: 'd'.repeat(64), recoveryRef: 'backup:rules' };
+    const replacement = { ...original, key: 'publication-new', targetDigest: 'e'.repeat(64) };
+    if (operation === 'supersede') store.preparePublication(candidate.id, 2, original);
+    const invoke = (guard?: () => void) => operation === 'prepare'
+      ? store.preparePublication(candidate.id, 2, original, guard)
+      : store.supersedePreparedPublication(original.key, replacement, guard);
+    const before = store.listPublications();
+    const versions = store.getCandidateVersions(candidate.id);
+    const competing = new sqlite.DatabaseSync(file);
+    competing.exec('PRAGMA busy_timeout = 0');
+    let guarded = false;
+    try {
+      const reject = new Error('publication planning guard rejected');
+      expect(() => invoke(() => {
+        guarded = true;
+        expect(() => competing.exec('BEGIN IMMEDIATE')).toThrow(/locked|busy/i);
+        throw reject;
+      })).toThrow(reject);
+      expect(guarded).toBe(true);
+      expect(() => invoke(async () => {})).toThrow(/synchronous/i);
+      expect(store.listPublications()).toEqual(before);
+      expect(store.getCandidateVersions(candidate.id)).toEqual(versions);
+      expect(invoke().phase).toBe('prepared');
+      expect(() => invoke(() => { throw reject; })).toThrow(reject);
+    } finally { competing.close(); }
+  });
+
+  it.each(['applied', 'committed'] as const)('runs the publication %s guard under the writer lock and rolls back rejection', phase => {
+    const store = open();
+    const completed = store.completeRequest(store.submitRequest(input).key, output);
+    const candidate = store.getCandidate(completed.candidateIds[0]!)!;
+    store.recordValidation(candidate.id, 1, { candidateDigest: candidate.digest, evidenceDigest: request.evidenceDigest,
+      validatorVersion: 'guarded-publication', passed: true, results: ['passed'] });
+    const publication = store.preparePublication(candidate.id, 2, { key: 'publication-guard', validatorVersion: 'guarded-publication',
+      targetRef: 'wiki:rules', originalDigest: null, targetDigest: 'd'.repeat(64), recoveryRef: 'backup:rules' });
+    if (phase === 'committed') store.advancePublication(publication.key, 'applied', publication.targetDigest);
+    const before = store.getPublication(publication.key);
+    const versions = store.getCandidateVersions(candidate.id);
+    const competing = new sqlite.DatabaseSync(file);
+    competing.exec('PRAGMA busy_timeout = 0');
+    let guarded = false;
+    try {
+      const reject = new Error('publication guard rejected');
+      expect(() => store.advancePublication(publication.key, phase, publication.targetDigest, () => {
+        guarded = true;
+        expect(() => competing.exec('BEGIN IMMEDIATE')).toThrow(/locked|busy/i);
+        throw reject;
+      })).toThrow(reject);
+      expect(guarded).toBe(true);
+      expect(store.getPublication(publication.key)).toEqual(before);
+      expect(store.getCandidateVersions(candidate.id)).toEqual(versions);
+      expect(store.advancePublication(publication.key, phase, publication.targetDigest).phase).toBe(phase);
+      expect(() => store.advancePublication(publication.key, phase, publication.targetDigest, () => { throw reject; })).toThrow(reject);
+    } finally { competing.close(); }
+  });
+
+  it('rejects asynchronous publication guards before journal or candidate writes', () => {
+    const store = open();
+    const completed = store.completeRequest(store.submitRequest(input).key, output);
+    const candidate = store.getCandidate(completed.candidateIds[0]!)!;
+    store.recordValidation(candidate.id, 1, { candidateDigest: candidate.digest, evidenceDigest: request.evidenceDigest,
+      validatorVersion: 'guarded-publication', passed: true, results: ['passed'] });
+    const publication = store.preparePublication(candidate.id, 2, { key: 'publication-guard', validatorVersion: 'guarded-publication',
+      targetRef: 'wiki:rules', originalDigest: null, targetDigest: 'd'.repeat(64), recoveryRef: 'backup:rules' });
+    expect(() => store.advancePublication(publication.key, 'applied', publication.targetDigest, async () => {})).toThrow(/synchronous/i);
+    expect(store.getPublication(publication.key)).toEqual(publication);
+    expect(store.getCandidate(candidate.id)?.state).toBe('validated');
+    expect(store.getCandidateVersions(candidate.id)).toHaveLength(2);
+  });
+
   it('records publication conflicts on third party changes without publishing or overwriting', () => {
     const store = open();
     const receipt = store.completeRequest(store.submitRequest(input).key, output);

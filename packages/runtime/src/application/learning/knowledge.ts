@@ -1,14 +1,16 @@
 import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
+import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import type { CandidateStore, LearningCandidate } from './candidate-store.js';
 import { candidateProposalSchema, evidenceRefSchema, learningScopeSchema, type CandidateProposal } from './contracts.js';
 import { redactEvidenceText } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
+import { assertCurrentLessonPublication, verifyLessonPublication } from './lesson-publication-guard.js';
 
 const publicationDescriptors = new AsyncLocalStorage<{ vault: string; fd: number }>();
 
@@ -18,7 +20,7 @@ export function withKnowledgePublicationDescriptor<Result>(vault: string, fd: nu
 
 const targetSchema = z.object({
   ref: z.string().regex(/^wiki:[A-Za-z0-9][A-Za-z0-9._/-]*$/), paths: z.array(z.string()).min(1).max(32),
-  kinds: z.array(z.enum(['fact', 'process'])).min(1), inbox: z.boolean(), templatePath: z.string(),
+  kinds: z.array(z.enum(['fact', 'process', 'lesson'])).min(1), inbox: z.boolean(), templatePath: z.string(),
   snapshot: z.boolean().optional(),
   indexPaths: z.array(z.string()).min(1).max(32), backlinkPaths: z.array(z.string()).min(1).max(32),
 }).strict();
@@ -33,12 +35,12 @@ export type WikiPlan = { version: 1; summary: string; evidence: string[];
 export type KnowledgePlan = {
   candidateId: string; candidateVersion: number; candidateDigest: string; evidenceDigest: string;
   validatorVersion: string; targetRef: string; policyDigest: string; authorizationFile: string; authorizationDigest: string; reused: boolean;
-  classification: 'fact' | 'proposal' | 'unverified' | 'process' | 'partial' | 'snapshot';
+  classification: 'fact' | 'proposal' | 'unverified' | 'process' | 'lesson' | 'partial' | 'snapshot';
   applicability: CandidateProposal['applicability']; proposal: CandidateProposal;
   plan: WikiPlan; withdrawalContent: string; readSet: Record<string, string | null>; searches: { query: string; paths: string[] }[];
 };
 export type KnowledgePlanningInput = { store: CandidateStore; candidateId: string; expectedVersion: number; targetRef?: string;
-  policy: KnowledgePolicy; wikiScript: string; authorizationFile: string; signal?: AbortSignal };
+  policy: KnowledgePolicy; wikiScript: string; authorizationFile: string; validationConfigurationFile?: string; signal?: AbortSignal };
 export type WikiResult = { status: 'preview' | 'applied' | 'unchanged' };
 
 export class WikiIngestError extends Error {
@@ -52,6 +54,8 @@ export function knowledgeDigest(value: unknown): string {
 function bytesDigest(value: Buffer | string): string {
   return createHash('sha256').update(value).digest('hex');
 }
+
+export const KNOWLEDGE_FILE_BYTES = 64 * 1024 * 1024;
 
 export function assertKnowledgeDirectory(directory: string): void {
   if (!isAbsolute(directory)) throw new Error('Expected absolute directory path');
@@ -84,9 +88,53 @@ export function knowledgeFile(vault: string, path: string, write = false): strin
   return target;
 }
 
-function fileDigest(vault: string, path: string): string | null {
-  try { return bytesDigest(readFileSync(knowledgeFile(vault, path))); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+function readKnowledgeBytes(file: string, limit: number, privateFile = false, signal?: ProviderOperationOptions['signal']): Buffer {
+  const check = () => checkAbort({ signal });
+  const checkDirectory = () => {
+    assertKnowledgeDirectory(dirname(file));
+    if (privateFile) {
+      const directory = lstatSync(dirname(file));
+      if ((directory.mode & 0o077) || (process.getuid && directory.uid !== process.getuid())) throw new Error('Authorization directory must be private');
+    }
+  };
+  check();
+  checkDirectory();
+  const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = fstatSync(descriptor);
+    if (!before.isFile() || before.size > limit) throw new Error('Knowledge file unavailable or exceeds byte limit');
+    if (privateFile && (before.nlink !== 1 || (before.mode & 0o077) || (process.getuid && before.uid !== process.getuid()))) {
+      throw new Error('Authorization must be an owned private regular file');
+    }
+    const bytes = Buffer.alloc(before.size + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      check();
+      const count = readSync(descriptor, bytes, offset, Math.min(bytes.length - offset, 65536), offset);
+      check();
+      if (!count) break;
+      offset += count;
+    }
+    const fingerprint = (stats: typeof before) => canonicalLearningJson([stats.dev, stats.ino, stats.size, stats.mode,
+      stats.uid, stats.nlink, stats.mtimeMs, stats.ctimeMs]);
+    let current: typeof before;
+    try { current = lstatSync(file); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('Knowledge file changed during read');
+      throw error;
+    }
+    if (offset !== before.size || current.isSymbolicLink() || fingerprint(before) !== fingerprint(current)
+      || fingerprint(before) !== fingerprint(fstatSync(descriptor))) throw new Error('Knowledge file changed during read');
+    checkDirectory();
+    check();
+    return bytes.subarray(0, offset);
+  } finally { closeSync(descriptor); }
+}
+
+function fileDigest(vault: string, path: string, signal?: ProviderOperationOptions['signal']): string | null {
+  checkAbort({ signal });
+  try { return bytesDigest(readKnowledgeBytes(knowledgeFile(vault, path), KNOWLEDGE_FILE_BYTES, false, signal)); }
+  catch (error) { if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return null; throw error; }
 }
 
 async function wiki(script: string, vault: string, arguments_: string[], input?: string, temporary?: string, signal?: AbortSignal): Promise<unknown> {
@@ -146,14 +194,21 @@ async function search(script: string, vault: string, query: string, signal?: Abo
   return result.results.map(entry => entry.path).sort();
 }
 
-function authorize(policy: KnowledgePolicy): void {
+function authorize(policy: KnowledgePolicy, signal?: ProviderOperationOptions['signal'], readSet?: Map<string, string | null>): void {
+  checkAbort({ signal });
   policySchema.parse(policy);
   if (policy.vault !== resolve(policy.vault)) throw new Error('Vault must use a canonical absolute path');
   assertKnowledgeDirectory(policy.vault);
   if (!policy.rules['AGENTS.md'] || !Object.hasOwn(policy.rules, '.tools/wiki-lint.py')) throw new Error('Explicit rules and linter authorization required');
   if (new Set(policy.targets.map(target => target.ref)).size !== policy.targets.length) throw new Error('Duplicate target authorization');
+  const read = (path: string) => {
+    const observed = fileDigest(policy.vault, path, signal);
+    if (readSet?.has(path) && readSet.get(path) !== observed) throw new Error('Authorization rule changed during read');
+    readSet?.set(path, observed);
+    return observed;
+  };
   for (const [path, expected] of Object.entries(policy.rules)) {
-    if (fileDigest(policy.vault, path) !== expected) throw new Error('Vault rules differ from authorization');
+    if (read(path) !== expected) throw new Error('Vault rules differ from authorization');
   }
   for (const target of policy.targets) {
     for (const path of [...target.paths, ...target.indexPaths, ...target.backlinkPaths]) {
@@ -162,7 +217,7 @@ function authorize(policy: KnowledgePolicy): void {
       let directory = dirname(path);
       while (directory !== '.') {
         const rule = `${directory}/AGENTS.md`;
-        if (fileDigest(policy.vault, rule) !== null && !policy.rules[rule]) throw new Error('Directory rules require explicit authorization');
+        if (read(rule) !== null && !policy.rules[rule]) throw new Error('Directory rules require explicit authorization');
         directory = dirname(directory);
       }
     }
@@ -170,32 +225,30 @@ function authorize(policy: KnowledgePolicy): void {
   }
 }
 
-export function readKnowledgeGrant(file: string): z.infer<typeof grantSchema> {
+export function readKnowledgeGrant(file: string, options: Pick<ProviderOperationOptions, 'signal'> = {}): z.infer<typeof grantSchema> {
+  checkAbort(options);
   if (!isAbsolute(file) || file !== resolve(file)) throw new Error('Persistent authorization requires an absolute canonical file');
   assertKnowledgeDirectory(dirname(file));
   const directory = lstatSync(dirname(file));
   if ((process.getuid && directory.uid !== process.getuid()) || (directory.mode & 0o077)) throw new Error('Authorization directory must be private');
-  const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const stats = fstatSync(descriptor);
-    if (!stats.isFile() || stats.nlink !== 1 || stats.size > 1024 * 1024 || (stats.mode & 0o077)
-      || (process.getuid && stats.uid !== process.getuid())) throw new Error('Authorization must be an owned private regular file');
-    const grant = grantSchema.parse(JSON.parse(readFileSync(descriptor, 'utf8')));
-    if (grant.policy.vault !== resolve(grant.policy.vault)) throw new Error('Vault must use a canonical absolute path');
-    if (file === grant.policy.vault || file.startsWith(`${grant.policy.vault}${sep}`)) throw new Error('Authorization must be outside vault');
-    return grant;
-  } finally { closeSync(descriptor); }
-}
-
-export function readKnowledgeAuthorization(input: { authorizationFile: string; policy: KnowledgePolicy }, withdrawal = false): z.infer<typeof grantSchema> {
-  const grant = readKnowledgeGrant(input.authorizationFile);
-  if (knowledgeDigest(grant.policy) !== knowledgeDigest(input.policy)) throw new Error('Persistent authorization policy scope, vault or target changed');
-  if (withdrawal ? !grant.allowWithdrawal : grant.revoked) throw new Error('Persistent authorization revoked');
-  authorize(grant.policy);
+  const bytes = readKnowledgeBytes(file, 1024 * 1024, true, options.signal);
+  const grant = grantSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  if (grant.policy.vault !== resolve(grant.policy.vault)) throw new Error('Vault must use a canonical absolute path');
+  if (file === grant.policy.vault || file.startsWith(`${grant.policy.vault}${sep}`)) throw new Error('Authorization must be outside vault');
   return grant;
 }
 
-export function assertKnowledgeCandidate(input: Pick<KnowledgePlanningInput, 'store' | 'candidateId' | 'expectedVersion' | 'policy'>): LearningCandidate {
+export function readKnowledgeAuthorization(input: { authorizationFile: string; policy: KnowledgePolicy; signal?: ProviderOperationOptions['signal'] },
+  withdrawal = false, readSet?: Map<string, string | null>): z.infer<typeof grantSchema> {
+  checkAbort(input);
+  const grant = readKnowledgeGrant(input.authorizationFile, input);
+  if (knowledgeDigest(grant.policy) !== knowledgeDigest(input.policy)) throw new Error('Persistent authorization policy scope, vault or target changed');
+  if (withdrawal ? !grant.allowWithdrawal : grant.revoked) throw new Error('Persistent authorization revoked');
+  authorize(grant.policy, input.signal, readSet);
+  return grant;
+}
+
+export function assertKnowledgeCandidate(input: Pick<KnowledgePlanningInput, 'store' | 'candidateId' | 'expectedVersion' | 'policy' | 'validationConfigurationFile'>): LearningCandidate {
   const candidate = input.store.getCandidate(input.candidateId);
   const receipt = input.store.getValidation(input.candidateId);
   const source = candidate && input.store.getRequest(candidate.requestKey);
@@ -207,6 +260,8 @@ export function assertKnowledgeCandidate(input: Pick<KnowledgePlanningInput, 'st
     throw new Error('Knowledge publication requires current version and validation receipt');
   }
   if (candidate.proposal.applicability.project !== input.policy.scope) throw new Error('Candidate project differs from authorized scope');
+  if (candidate.proposal.kind === 'lesson') assertCurrentLessonPublication({ store: input.store, candidate,
+    configurationFile: input.validationConfigurationFile });
   return candidate;
 }
 
@@ -226,6 +281,7 @@ function sameKnowledge(existing: string, rendered: string): boolean {
   try {
     const prior = schema.parse(JSON.parse(previous));
     const current = schema.parse(JSON.parse(next));
+    if (prior.proposal.kind === 'lesson' || current.proposal.kind === 'lesson') return false;
     const sensitive = JSON.stringify(prior);
     return redactEvidenceText(sensitive) === sensitive && prior.classification === current.classification
       && knowledgeDigest(identity(prior.proposal)) === knowledgeDigest(identity(current.proposal))
@@ -235,14 +291,16 @@ function sameKnowledge(existing: string, rendered: string): boolean {
 
 function knowledgeRelation(existing: string, proposal: CandidateProposal): 'unrelated' | 'review' | 'contrary' {
   const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-  const identity = normalize(proposal.kind === 'fact' ? proposal.payload.subject : proposal.kind === 'process' ? proposal.payload.entry : proposal.title);
+  const identity = normalize(proposal.kind === 'fact' ? proposal.payload.subject : proposal.kind === 'process' ? proposal.payload.entry
+    : proposal.kind === 'lesson' ? proposal.payload.trigger : proposal.title);
   const block = /\n```json\n([^\n]+)\n```\n/.exec(existing)?.[1];
   let rules: string[] = [];
   if (block) {
     try {
       const material = JSON.parse(block);
       const previous = candidateProposalSchema.parse(material.proposal);
-      const previousIdentity = normalize(previous.kind === 'fact' ? previous.payload.subject : previous.kind === 'process' ? previous.payload.entry : previous.title);
+      const previousIdentity = normalize(previous.kind === 'fact' ? previous.payload.subject : previous.kind === 'process' ? previous.payload.entry
+        : previous.kind === 'lesson' ? previous.payload.trigger : previous.title);
       if (previousIdentity !== identity || knowledgeDigest(previous.applicability) !== knowledgeDigest(proposal.applicability)) return 'unrelated';
       if (previous.kind === 'fact' && ['fact', 'snapshot'].includes(material.classification)) rules = [normalize(previous.payload.rule)];
     } catch { return 'review'; }
@@ -271,9 +329,9 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
   const authorizationDigest = knowledgeDigest(readKnowledgeAuthorization(input));
   const candidate = assertKnowledgeCandidate(input);
   const proposal = candidate.proposal;
-  if (proposal.kind !== 'fact' && proposal.kind !== 'process') throw new Error('Unsupported knowledge asset kind');
+  if (proposal.kind !== 'fact' && proposal.kind !== 'process' && proposal.kind !== 'lesson') throw new Error('Unsupported knowledge asset kind');
   if (input.targetRef && proposal.targetRef && input.targetRef !== proposal.targetRef) throw new Error('Publication target differs from validated candidate');
-  const target = policy.targets.find(entry => entry.ref === (input.targetRef ?? proposal.targetRef) && entry.kinds.includes(proposal.kind as 'fact' | 'process'));
+  const target = policy.targets.find(entry => entry.ref === (input.targetRef ?? proposal.targetRef) && entry.kinds.includes(proposal.kind as 'fact' | 'process' | 'lesson'));
   if (!target) throw new Error('Knowledge target and asset kind require explicit authorization');
   const source = store.getRequest(candidate.requestKey);
   if (!source || source.request.evidenceDigest !== candidate.evidenceDigest || source.request.scope !== policy.scope) throw new Error('Evidence snapshot differs from validated candidate');
@@ -291,7 +349,7 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
   }
   if (!snapshot && target.snapshot) throw new Error('Snapshot destination cannot receive ordinary business knowledge');
   const classification = proposal.kind === 'fact' ? proposal.payload.classification === 'proposal' ? 'proposal' : partial ? 'unverified' : snapshot ? 'snapshot' : 'fact'
-    : partial ? 'partial' : 'process';
+    : partial ? 'partial' : proposal.kind;
   if ((classification === 'proposal' || partial) && !target.inbox) throw new Error('Proposal or partial knowledge requires an authorized inbox');
   if (proposal.kind === 'process' && partial && !proposal.payload.steps.some(step => step.missingEvidence)) throw new Error('Partial process requires explicit node evidence gaps');
   const readSet: Record<string, string | null> = { ...policy.rules };
@@ -306,11 +364,16 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
   if (!template.includes('{{knowledge}}') || !template.includes('{{title}}')) throw new Error('Authorized template needs title and knowledge placeholders');
   const related = [...new Set([...target.indexPaths, ...target.backlinkPaths])];
   const links = related.map(path => `[[${path.slice(0, -3)}]]`).join(' ');
-  const material = canonicalLearningJson({ classification, proposal, evidence, evidenceDigest: candidate.evidenceDigest });
+  const lesson = proposal.kind === 'lesson' ? verifyLessonPublication({ store, candidate,
+    configurationFile: input.validationConfigurationFile }, { signal: input.signal }) : undefined;
+  if (lesson?.status === 'blocked') throw new Error(`lesson_publication_${lesson.code}`);
+  const material = canonicalLearningJson({ classification, proposal, evidence, evidenceDigest: candidate.evidenceDigest,
+    ...(lesson?.status === 'current' ? { validation: { binding: lesson.binding, evidence: lesson.evidence } } : {}) });
+  if (redactEvidenceText(material) !== material) throw new Error('Sensitive credentials or personal data cannot be published');
   const body = `## ${classification}${partial ? ' (partial)' : ''}\n\n\`\`\`json\n${material.replaceAll('`', '\\u0060').replaceAll('<', '\\u003c')}\n\`\`\`\n\n${links}`;
   const title = proposal.title.replace(/[\[\]<>#\r\n`]/g, ' ');
   const content = template.replaceAll('{{title}}', () => title).replaceAll('{{knowledge}}', () => body);
-  const queries = [...new Set([proposal.kind === 'fact' ? proposal.payload.subject : proposal.payload.entry, proposal.title]
+  const queries = [...new Set([proposal.kind === 'fact' ? proposal.payload.subject : proposal.kind === 'process' ? proposal.payload.entry : proposal.payload.trigger, proposal.title]
     .map(value => value.replace(/\s+/g, ' ').trim().toLowerCase()))];
   const searches: KnowledgePlan['searches'] = [];
   let existingPath: string | undefined;
@@ -336,7 +399,7 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
     }
   }
   for (const path of target.paths) {
-    if (fileDigest(policy.vault, path) === null) readSet[path] = null;
+    if (fileDigest(policy.vault, path, input.signal) === null) readSet[path] = null;
     else {
       const existing = await read(path);
       if (!sameKnowledge(existing, content)) {
@@ -443,7 +506,7 @@ export async function refreshKnowledgeNavigation(prepared: KnowledgePlan, input:
   const navigation = navigationPaths(prepared, input.policy);
   let drift = false;
   for (const [path, expected] of Object.entries(prepared.readSet)) {
-    if (fileDigest(input.policy.vault, path) === expected) continue;
+    if (fileDigest(input.policy.vault, path, input.signal) === expected) continue;
     if (!navigation.has(path)) return undefined;
     drift = true;
   }
@@ -457,12 +520,12 @@ export async function refreshKnowledgeNavigation(prepared: KnowledgePlan, input:
 
 export async function verifyKnowledgePlan(prepared: KnowledgePlan, policy: KnowledgePolicy, script: string, signal?: AbortSignal): Promise<void> {
   checkAbort({ signal });
-  if (prepared.authorizationDigest !== knowledgeDigest(readKnowledgeAuthorization({ authorizationFile: prepared.authorizationFile, policy }))) {
+  if (prepared.authorizationDigest !== knowledgeDigest(readKnowledgeAuthorization({ authorizationFile: prepared.authorizationFile, policy, signal }))) {
     throw new Error('Publication authorization changed');
   }
   if (prepared.policyDigest !== knowledgeDigest(policy)) throw new Error('Publication policy changed');
   for (const [path, expected] of Object.entries(prepared.readSet)) {
-    const actual = fileDigest(policy.vault, path);
+    const actual = fileDigest(policy.vault, path, signal);
     const change = prepared.plan.changes.find(entry => entry.path === path);
     if (actual !== expected && (!change || actual !== bytesDigest(change.content))) throw new Error('Knowledge read or target changed; conflict');
   }

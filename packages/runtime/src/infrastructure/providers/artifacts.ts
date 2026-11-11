@@ -159,10 +159,16 @@ export class TestReportProvider implements ArtifactSink {
 
   async health(): Promise<ProviderHealth> {
     try {
-      await this.fs.mkdir(this.options.root, { recursive: true });
+      const root = await this.fs.lstat(this.options.root);
+      if (root.isSymbolicLink() || !root.isDirectory()) {
+        return { status: 'unavailable', message: 'artifact root must be a regular directory' };
+      }
       return { status: 'ok' };
     } catch (error) {
-      return { status: 'unavailable', message: `artifact root is not usable: ${(error as Error).message}` };
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { status: 'degraded', message: 'artifact root is not initialized' };
+      }
+      return { status: 'unavailable', message: 'artifact root could not be inspected' };
     }
   }
 

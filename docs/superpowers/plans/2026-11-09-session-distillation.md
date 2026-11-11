@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Zod, Node SQLite, existing plugin runtime and Agent Providers, Vitest, existing Python Wiki utilities, Electron / React / Playwright.
 
-**Status:** In progress; reviewed 2026-11-11. The validation, knowledge publication, trusted context and Desktop integration slice is committed as `64044a27`. Saved CI `42958399025` succeeded for the earlier recall repair `d18e7d5f`; it does not establish success for `64044a27` or the current working tree. The aggregate tree still contains uncommitted lesson, proposal runtime and frozen container execution work. The latest real Claude distillation failed with `MISSING_RESULT`; the complete five-asset product loop is not delivered. Sections 13, 17.11 and 17.12 preserve historical snapshots; section 18 defines the unified plan, execution order and acceptance contract, and section 18.12 lists remaining delivery work. See the [Chinese plan](2026-11-09-session-distillation.zh.md) and [previous phase](2026-11-08-runtime-learning-and-validation.md).
+**Status:** In progress; reviewed 2026-11-11. The current local commit baseline is `f99e9aa2`; saved matching CI `43014598002` succeeded, including 102 Linux Electron tests. This does not qualify the uncommitted read-only diagnostics, lesson, proposal runtime, Desktop error boundary or frozen container changes. The latest real Claude distillation failed with `MISSING_RESULT`; the complete five-asset product loop is not delivered. Sections 13, 17.11 and 17.12 preserve historical snapshots; section 18 defines the unified plan, execution order and acceptance contract, section 18.12 lists remaining work, and section 18.13 provides dispatchable tasks and milestones. See the [Chinese plan](2026-11-09-session-distillation.zh.md) and [previous phase](2026-11-08-runtime-learning-and-validation.md).
 
 ---
 
@@ -1165,7 +1165,7 @@ This is an execution view of section 18.3, not another task namespace. W00–W12
 
 This checklist continues W00–W12 without reopening reviewed implementations. Integrate existing patches before filling gaps. Record real models, external services, installed artifacts and automated fixtures separately. Each work package retains its owner, dependencies, commit, counterexamples, review conclusions and final receipts.
 
-Verified in this pass: CI `43007899210` for `64044a27` completed. Shared Packages And CLI, Wiki Python and documentation checks passed. Plugin metadata failed because the root manifest remained at 1.2.3 while the other manifest was 1.2.4; Desktop E2E failed because the isolated HOME launcher omitted XAUTHORITY. The manifest synchronization and explicit XAUTHORITY allowlist pass local checks; the new actual Electron environment-isolation regression failed before the fix and passed afterward, with all three related E2E cases passing. The corrective commit still requires matching Linux CI; local Darwin success does not establish Linux success.
+Verified in this pass: CI `43007899210` for `64044a27` failed because of inconsistent plugin manifest versions and omitted XAUTHORITY under the isolated HOME; shared packages, Wiki Python and docs passed. Corrective commit `f99e9aa2` passed CI `43014598002`: shared packages/CLI, metadata, Wiki Python, docs and Linux Electron checks succeeded, including 102 Electron cases. Two advisory/PRD jobs were skipped by path conditions. This CI does not qualify subsequent uncommitted read-only diagnostics, lesson or frozen execution work.
 
 #### Phase one: establish the baseline and trusted execution (W00 / W01 / W02)
 
@@ -1221,3 +1221,87 @@ Exit gate: all explicitly requested implementations have production wiring and c
 - [ ] Update CLI/skill versions and bilingual protocols, commit/push and follow the corresponding CI. Preserve human PR merge decisions; retain evidence before archiving integrated, unreferenced workspaces and reporting storage changes.
 
 Final delivery package: bilingual plan/integration standard, per-implementation matrix across 13 families, five-asset receipts, real Claude/cross-Agent reuse report, installation/upgrade/recovery record, benefit report, known limits, reviewable PR and matching commit CI. Declare whole-system delivery only after every required item closes; local operation with outstanding external qualifications is an explicitly limited delivery.
+
+### 18.13 Dispatchable development tasks and milestones
+
+This section expands the existing work packages rather than introducing another numbering system or replacing historical receipts. Sections 18.2 and 18.5 and the [plugin integration standard](../../architecture/plugin-integration-standard.zh.md) own architecture, implementation scope and contracts. These are development tasks and acceptance requirements, not declarations that proposed APIs already exist.
+
+#### Current slices and integration order
+
+| Slice | Local evidence | Next action | Completion gate |
+| --- | --- | --- | --- |
+| Read-only diagnostics | Artifact health/lazy evidence initialization, JumpServer unknown and built-CLI counterexamples implemented; independent specification and quality reviews passed | Integrate frozen files and verify commit CI | Inventory/doctor write nothing; actual writes work; exact-commit CI |
+| Lesson | QA identity, audit digest, completion ordering, commit guard and semantic assertions implemented | Independent specification/quality review; connect publication, invalidation and recurrence | Unrelated QA/wrong root causes rejected; trusted new-task reuse and withdrawal |
+| Frozen container | Independent specification recheck passed; quality review found a P2 where inherited helper pipes block timeout finalization | Fix shared CLI finalization and rerun unchanged probes before Repository proposal wiring | Immutable actual inputs; traceable resource ownership; uncertain cleanup retains recovery state |
+| Desktop QA errors | Shared DTO and service regressions implemented | Independent review and corresponding Electron scenario | Unconfigured/non-independent QA and changed audit states rendered accurately |
+| Real Claude | Latest real distillation failed; local diagnostics distinguish valid envelopes from wrong text | Bounded diagnosis of actual execution and result consumption, retaining original failure | Valid structured production result with tool/MCP/Hook isolation preserved |
+
+Integrate reviewed slices, complete semantic/execution wiring, finish product/governance and qualify real operation. W00 blocks final delivery without blocking independent work. Each source commit updates the CLI version; skill changes update plugin versions. Tests from different snapshots cannot be combined as one acceptance run.
+
+#### M0: freeze contracts and close reliability blockers (W00–W02)
+
+- [ ] Main freezes file digests, baseline commit, Provider inventory and counterexamples; tracks implementation, integration, automation, configuration and live qualification independently.
+- [ ] Diagnostics checks actual Claude requests, supported flags, native results, event consumption and schema. Each reproduction states time/output/call limits, retains classified failures and stops rather than repeating paid guesses.
+- [ ] Kernel reviews `requests.ts` / `worker.ts` / `evidence.ts` / `candidate-store.ts` for dual producers, a single consumer, lease expiry, crash recovery, bounded queues, duplicate events, cancellation, budgets and database lock waits.
+- [ ] Validation freezes `validation.ts` / `validation-runtime.ts` inputs/receipts: callers select candidates and saved checkers; reject injected commands, results, targets and self-awarded states; recheck time and authorization after acquiring the write lock.
+- [ ] Independent reviewers check specification and quality separately. Authors fix findings and rerun unchanged counterexamples before per-package typecheck/build/test.
+
+Deliver trusted requests/validation, a real Claude diagnostic conclusion and commit-bound evidence. M0 remains partial until W00 succeeds.
+
+#### M1: validate and revoke each asset type (W03–W06)
+
+- [ ] Knowledge reuses authoritative observers in `knowledge.ts` / `knowledge-runtime.ts`: facts bind sources; processes bind roles, nodes, order and branches. Missing intermediate path evidence blocks validation.
+- [ ] Publication checks concurrent index merging, target drift, old-plan replay, changed grants, process termination, recovery and actual withdrawal in `publication.ts` / `publication-lock.ts`. Only navigation drift permits a fresh preview.
+- [ ] Lessons bind specific root cause, fix, prevention and applicability to independent QA in `lesson-validation.ts` / `validation-runtime.ts`; add post-validation source changes, QA invalidation, recurrence demotion and withdrawal propagation.
+- [ ] Skills use `proposals.ts` / `proposal-runtime.ts` to discover existing skills before patching, preserve triggers and compare normal/refusal/recovery behavior on identical frozen inputs, producing managed PRs.
+- [ ] Tools reuse proposal/container mechanisms, checking dependencies, arguments, side effects, idempotency, cancellation, timeouts and recovery. Passing candidates produce versioned changes rather than automatic host installation.
+- [ ] Acceptance checks source → candidate → independent validation → publication/proposal → consumption → feedback → invalidation for each type. Skill/tool merge, installation and actual invocation require separate receipts.
+
+Deliver actual execution evidence for all five types. Model analysis, a zero test exit or a generated PR alone cannot establish publication or reuse.
+
+#### M2: session governance, shared Context and usable products (W07–W09)
+
+- [ ] Governance correlates business work item, source run, analysis job, attempt, candidate version, validation, publication and consumer run. Queries, cancellation, timeouts, budgets, recovery and retention reuse existing audit/storage.
+- [ ] Context filters permission, project, revision, environment, conditions, source completeness and expiry; deduplicates/trims within budget and cites sources. Withdrawal invalidates subsequent reads/caches; cross-project imports are revalidated.
+- [ ] Workflow runs three templates: successful retrospective, failure/fix/independent QA, and skill/tool optimization. Connect existing required Hooks and test failure blocking and non-recursive learning events.
+- [ ] Environment uses existing Host/Sandbox/Repository diagnostics for targets, tool versions, dependencies, workspace and disk. Repairs are managed tasks; cleanup requires owned resources without processes, leases, references or unpreserved changes.
+- [ ] CLI extends `experience.ts` and the registry for submission/import, paged queries, validation, preview, publication, withdrawal, feedback and worker operation. Test installed artifacts and synchronize execution documentation.
+- [ ] Desktop reuses shared DTOs/use cases for evidence, version diffs, validation/publication, withdrawal, budgets and diagnostics. Real Electron checks project-switch races, refresh failures after successful operations and CLI concurrency.
+
+Deliver equivalent operations from installed CLI/Desktop without duplicate databases, execution implementations or consumers.
+
+#### M3: qualify all thirteen plugin families per implementation (W10, parallel)
+
+Section 18.5 owns the full implementation list. Each concrete Provider follows one delivery card: Manifest/Port → strict configuration/credential references → dependency installation/failure recovery → composition wiring → invocation/cancellation → doctor → disable/removal/upgrade → contract and real qualification.
+
+- [ ] Execution group: six Agents; Local/Docker/Podman/remote containers; four Hosts; three Repository forms. Check session semantics, actual targets, mounts, leases and cleanup separately.
+- [ ] Collaboration group: four Trackers; three Verification forms; Feishu/Slack/mail/Gmail/desktop notifications; four Trigger forms. Check actual identity, business outcomes, authorized sending, deduplication and retry.
+- [ ] Data/governance group: four Context/Memory forms; Keychain/OAuth/OIDC/enterprise authentication; four Artifact/Report forms; three Security/Policy forms; Observability. Check read authorization, credential lifecycle, evidence integrity, required gates and export failure.
+- [ ] Retain installation, wiring, contract, configuration and live status per implementation. Doctor separately reports binary presence, configuration completeness, authentication, target reachability and business validation; unknown stays unknown.
+- [ ] Read existing configuration/credential references first. Missing configuration blocks only that live qualification and produces required fields, official setup entry and the next command. Generic HTTP/OTLP testing cannot establish a vendor-native implementation.
+
+Deliver the complete explicitly requested implementation matrix with independent account/remote-infrastructure qualification states. Illustrative SDK gaps do not create unrequested all-vendor development commitments.
+
+#### M4: end-to-end and benefit evidence (W11)
+
+- [ ] A real local Claude managed session generates all five candidate types through production validation, publication/proposal, retrieval and feedback; do not start from hand-written validated data.
+- [ ] A new task using another configured Agent consumes shared versioned assets. Raw sessions, private credentials and project permissions are not propagated with shared assets.
+- [ ] Fix tasks, inputs and environment and compare no assets, old assets and new assets. Separately measure retrieval relevance, explicit adoption, task success, repeated exploration, recurrence, elapsed time and known token/cost.
+- [ ] Inject source invalidation, wrong applicability, revoked authorization and asset withdrawal; prove later tasks stop consuming them. Retain failures and unknowns in comparisons.
+
+Deliver five asset-chain receipts, a cross-Agent report, and benefit/misuse evidence. Framework availability does not prove learning improves outcomes; consumption results must demonstrate it.
+
+#### M5: release, recovery and storage reclamation (W12)
+
+- [ ] Run existing section 18.9 per-package commands and Desktop/Electron checks. Preserve coverage thresholds, test positive/negative critical branches, and identify package/commit/statistical boundaries for all coverage numbers.
+- [ ] In temporary projects test first install, upgrade, configuration/database migration, expired authentication, offline operation, interrupted publication, failed upgrade and recovery, retaining idempotent recovery receipts.
+- [ ] Synchronize versions, protocols, command registration and bilingual documentation, then commit/push slices; verify exact-commit CI and publish reviewable PRs, preserving human merge decisions.
+- [ ] Preserve unintegrated code and acceptance evidence before archiving finished, unreferenced workspaces; report archived directory size separately from observed available-space changes.
+
+Deliver installable software, the configuration qualification matrix, recovery records, asset/benefit reports, known limits, exact CI and safe cleanup evidence. Declare whole-system completion only when all required M0–M5 gates close.
+
+#### Parallelism and estimation
+
+Main owns contracts, shared entry points, versions and integration. Separate workers own knowledge, lessons, skills/tools, Providers and Desktop; reviewers are independent of authors. Reuse existing subagents/isolated workspaces, keep one writer per file, and build against frozen dependency contracts. Serialize integration before assigning another task that needs the same files.
+
+Each card follows counterexample → minimal fix → focused checks → specification/quality review → package checks → versions/docs → commit CI. Review existing implementation before estimating remaining effort. Report real Claude, remote accounts, environment availability and human merging as separate waits; do not invent fixed completion dates without execution evidence. Progress reports list closed gates, current blockers, the next card and evidence rather than code volume or total test count.

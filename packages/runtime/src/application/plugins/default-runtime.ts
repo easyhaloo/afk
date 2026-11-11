@@ -35,6 +35,12 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
   const runtime = new PluginRuntime();
   const invalidSettings: string[] = [];
   let auditArtifacts: { provider: string; timeoutMs?: number } | undefined;
+  let auditEvidence: ReturnType<typeof createLocalEncryptedEvidenceStore> | undefined;
+  const initializeAuditEvidence = () => auditEvidence ??= createLocalEncryptedEvidenceStore(homeDir).catch(() => {
+    auditEvidence = undefined;
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });
+    throw new Error('Audit evidence storage could not be initialized');
+  });
   let configuration: PluginConfiguration;
   try { configuration = readPluginConfiguration(homeDir); }
   catch (error) {
@@ -181,6 +187,10 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
         activate(context) {
           context.registerLifecycle({
             ...module,
+            async onInit(context) {
+              await module.onInit?.(context);
+              if (auditArtifacts) await initializeAuditEvidence();
+            },
             async onBeforeAgent(context) { fragments.delete(context.worktreePath); await module.onBeforeAgent?.(context); },
             async onCleanup(context) {
               if (fragments.has(context.worktreePath)) {
@@ -200,7 +210,10 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
   await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });
   if (auditArtifacts) {
     try {
-      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: await createLocalEncryptedEvidenceStore(homeDir), captureEvents: true });
+      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: {
+        async get(ref) { return (await initializeAuditEvidence()).get(ref); },
+        async put(input) { return (await initializeAuditEvidence()).put(input); },
+      }, captureEvents: true });
     } catch {
       invalidSettings.push('Audit evidence storage could not be initialized');
       runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,6 +62,89 @@ async function installedCredentialFixture(plugins: unknown[], requires = ['conte
 }
 
 describe('createDefaultPluginRuntime', () => {
+  it('keeps inventory and artifact diagnostics read-only when the home does not exist', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'default-plugins-readonly-'));
+    directories.push(root);
+    const homeDir = join(root, 'missing-home');
+    const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot: root });
+    runtimes.push(runtime);
+    expect(runtime.listPlugins()).toContain('artifact.test-report-local');
+    expect(await runtime.health('artifact.test-report-local')).toEqual([
+      expect.objectContaining({ pluginId: 'artifact.test-report-local', status: 'degraded' }),
+    ]);
+    expect(await runtime.diagnostics('artifact.test-report-local')).toEqual([]);
+    await expect(lstat(homeDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('does not initialize selected audit storage during inventory or health with a read-only home', async () => {
+    const { homeDir, workspaceRoot } = await fixture();
+    const root = join(homeDir, '.afk');
+    await writeFile(join(root, 'plugins.yml'), JSON.stringify({
+      plugins: [{ id: 'artifact.test-report-local', builtin: true, config: { root: join(root, 'reports') } }],
+      integrations: { evidence: { provider: 'test-report-local' } },
+    }));
+    const before = await readdir(homeDir, { recursive: true });
+    await chmod(root, 0o500);
+    await chmod(homeDir, 0o500);
+    try {
+      const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+      runtimes.push(runtime);
+      expect(runtime.listPlugins()).toContain('artifact.test-report-local');
+      expect(await runtime.health('artifact.test-report-local')).toEqual([
+        expect.objectContaining({ status: 'degraded' }),
+      ]);
+      expect((await runtime.diagnostics()).filter(diagnostic => diagnostic.severity === 'error')).toEqual([]);
+      expect(await readdir(homeDir, { recursive: true })).toEqual(before);
+      expect((await lstat(root)).mode & 0o777).toBe(0o500);
+      expect((await lstat(homeDir)).mode & 0o777).toBe(0o500);
+    } finally {
+      await chmod(homeDir, 0o700);
+      await chmod(root, 0o700);
+    }
+  });
+
+  it('initializes private audit storage only on controlled workflow init and reuses its key after restart', async () => {
+    const { runtime, homeDir, workspaceRoot, lifecycle } = await fixture({ integrations: { evidence: { provider: 'test-report-local' } } });
+    const evidenceRoot = join(homeDir, '.afk', 'evidence');
+    await expect(lstat(evidenceRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    await lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot });
+    const key = await readFile(join(evidenceRoot, 'encryption.key'));
+    expect(key).toHaveLength(32);
+    expect((await lstat(evidenceRoot)).mode & 0o777).toBe(0o700);
+    expect((await lstat(join(evidenceRoot, 'encryption.key'))).mode & 0o777).toBe(0o600);
+    const restarted = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+    runtimes.push(restarted);
+    const context = { traceId: 'lazy-evidence', runId: 'lazy-evidence', workItemId: 'github:acme/api#42', profileId: 'local', attempt: 1, actor: { kind: 'system' as const, id: 'test' } };
+    await Promise.all([runtime, restarted].map((current, index) => createPluginRunObserver(current, join(workspaceRoot, 'audit')).record(
+      { ...context, runId: `${context.runId}-${index}` }, { kind: 'qa.passed' },
+    )));
+    expect(await readFile(join(evidenceRoot, 'encryption.key'))).toEqual(key);
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    for (const index of [0, 1]) {
+      const store = new JsonlEventStore({ root: join(workspaceRoot, 'audit') });
+      const events: RunEvent[] = [];
+      for await (const event of store.read(`${context.runId}-${index}`)) events.push(event);
+      expect(events[0].evidence).toHaveLength(1);
+      expect(events[1].data).toMatchObject({ kind: 'effect.completed', outcome: 'succeeded' });
+      expect(JSON.parse(Buffer.from(await evidence.get(events[0].evidence![0])).toString('utf8'))).toMatchObject({ kind: 'qa.passed' });
+      expect(await store.verify(`${context.runId}-${index}`)).toMatchObject({ valid: true, lastSequence: 2 });
+    }
+  });
+
+  it('blocks controlled workflow init with a safe error when lazy audit storage cannot initialize', async () => {
+    const { runtime, homeDir, workspaceRoot, lifecycle } = await fixture({ integrations: { evidence: { provider: 'test-report-local' } } });
+    const evidenceRoot = join(homeDir, '.afk', 'evidence');
+    await rm(evidenceRoot, { recursive: true, force: true });
+    await writeFile(evidenceRoot, 'secret=private-storage-detail');
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Audit evidence storage could not be initialized');
+    const diagnostics = await runtime.diagnostics();
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'config.evidence-invalid', severity: 'error' }));
+    expect(JSON.stringify(diagnostics)).not.toMatch(/private-storage-detail|secret=|ENOTDIR/);
+    expect(JSON.stringify(diagnostics)).not.toContain(homeDir);
+    expect(await readFile(evidenceRoot, 'utf8')).toBe('secret=private-storage-detail');
+  });
+
   it('captures and exports evidence through the configured default runtime and keeps the key across restarts', async () => {
     const { runtime, homeDir, workspaceRoot } = await fixture({ integrations: { evidence: { provider: 'test-report-local', timeoutMs: 1000 } } });
     const root = join(workspaceRoot, 'audit');

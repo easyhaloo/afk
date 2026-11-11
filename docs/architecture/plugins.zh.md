@@ -974,6 +974,8 @@ lifecycle 策略闸门。
   也都需要外部实现。
 - 应检查所选 Provider 的凭据、health 和各操作能力标记。出现在注册表里，或 health
   为 `unknown`，不表示外部操作已经可用。
+- JumpServer 的只读 health 发现 `jms` 时返回 `unknown`，分别标明二进制已找到、认证和目标访问尚未验证；缺失二进制为 `degraded`。该探针不登录、不列资产、不执行远程命令，也不回显本机二进制路径。
+- inventory / doctor 不创建本地报告目录或初始化审计加密存储。报告 health 只检查已有目录，缺失根目录为 degraded；受管 lifecycle init 或真实 evidence 读写才按需初始化私有存储。初始化失败保留诊断，后续操作可重试；事件导出保持既有 best-effort 语义。
 - 没有文档的本地 retrieval、缺失的 memory 文件、空 repository 集合、空合规规则
   都不提供已配置的领域内容；输入需要真实配置，不会自动发现。
 - 受管执行锁通过 `ps -o lstart=` 校验进程身份。禁止执行 `ps` 的受限容器或沙箱会让

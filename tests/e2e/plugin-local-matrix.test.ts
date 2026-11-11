@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -91,6 +91,44 @@ async function sandbox(credential?: string) {
 }
 
 type Sandbox = Awaited<ReturnType<typeof sandbox>>;
+
+it.each([0o700, 0o500])('keeps built CLI inventory and doctor read-only with selected audit artifacts and home mode %s', async mode => {
+  const test = await sandbox();
+  const system = join(test.home, '.afk');
+  const reports = join(system, 'reports');
+  const settings = join(system, 'plugins.yml');
+  await test.configure('artifact.test-report-local', { root: reports });
+  await writeFile(settings, JSON.stringify({
+    plugins: [{ id: 'artifact.test-report-local', builtin: true, config: { root: reports } }],
+    integrations: { evidence: { provider: 'test-report-local' } },
+  }));
+  const before = (await readdir(test.home, { recursive: true })).sort();
+  const configuration = await readFile(settings);
+  await chmod(system, mode);
+  await chmod(test.home, mode);
+  try {
+    const listed = JSON.parse((await test.cli('list', '--json')).stdout);
+    expect(listed.some((plugin: { id: string }) => plugin.id === 'artifact.test-report-local')).toBe(true);
+    const diagnosis = JSON.parse((await test.cli('doctor', '--plugin', 'artifact.test-report-local', '--json')).stdout);
+    expect(diagnosis.health).toEqual([expect.objectContaining({ pluginId: 'artifact.test-report-local', status: 'degraded' })]);
+    expect((await readdir(test.home, { recursive: true })).sort()).toEqual(before);
+    expect(await readFile(settings)).toEqual(configuration);
+    if (process.platform !== 'win32') {
+      expect((await lstat(test.home)).mode & 0o777).toBe(mode);
+      expect((await lstat(system)).mode & 0o777).toBe(mode);
+    }
+    expect(await test.calls()).toEqual([]);
+  } finally {
+    await chmod(test.home, 0o700);
+    await chmod(system, 0o700);
+  }
+  const receipt = JSON.parse((await test.invoke('artifact.provider', 'test-report-local', 'put', {
+    name: 'readiness-report.txt', mediaType: 'text/plain', bytes: Buffer.from(content).toString('base64'),
+  })).stdout);
+  expect(receipt.name).toBe('readiness-report.txt');
+  expect(await readFile(join(reports, receipt.name), 'utf8')).toBe(content);
+  expect(await test.optionalFile(join(system, 'evidence', 'encryption.key'))).toBeNull();
+});
 const verifyCommand = [process.execPath, '-e', 'require("node:fs").writeFileSync(process.env.PLUGIN_MATRIX_OUTPUT + "/verification.json", JSON.stringify({ cwd: process.cwd(), result: "verified" })); process.stdout.write("matrix verified");'];
 const message = { title: 'Matrix "title"', body: 'body with $HOME; $(touch injected)\nnext line', urgency: 'high' };
 const compliance = { rules: [

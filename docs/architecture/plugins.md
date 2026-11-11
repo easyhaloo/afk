@@ -1163,6 +1163,10 @@ does not execute the managed action or enforce its lifecycle policy gates.
 
 ## Operational limits
 
+JumpServer's read-only health returns `unknown` when `jms` is present, identifying binary availability separately from unverified authentication and target access. A missing binary remains `degraded`. The probe does not log in, list assets, execute remote commands or return the local executable path.
+
+Inventory and doctor do not create the local report root or initialize audit encryption storage. Report health inspects the existing directory; a missing root is degraded. A managed lifecycle init or actual evidence read/write initializes the private audit store on demand. Initialization failures remain visible and permit a later operation to retry; event export retains its existing best-effort semantics.
+
 - Trusted local modules execute with the host process's filesystem, environment
   and network access. `trusted: true`, npm `--ignore-scripts`, entry containment
   and an entry hash do not establish a security sandbox or publisher trust.

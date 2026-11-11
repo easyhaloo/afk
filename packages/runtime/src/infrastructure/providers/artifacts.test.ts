@@ -112,6 +112,44 @@ describe('assertSafeArtifactName / resolveWithinRoot', () => {
 });
 
 describe('TestReportProvider', () => {
+  it('checks a missing root without creating it and initializes it only on put', async () => {
+    const parent = await tempRoot('afk-report-health-');
+    const root = join(parent, 'missing', 'reports');
+    const { fs: adapter, calls } = recordingFs();
+    const provider = new TestReportProvider({ root, fs: adapter });
+    expect(await provider.health()).toMatchObject({ status: 'degraded' });
+    expect(calls.map(call => call.method)).toEqual(['lstat']);
+    await expect(fs.lstat(join(parent, 'missing'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await provider.put({ name: 'report.json', mediaType: 'application/json', bytes: bytesOf('durable report') });
+    expect(await fs.readFile(join(root, 'report.json'), 'utf8')).toBe('durable report');
+    expect((await provider.health()).status).toBe('ok');
+  });
+
+  it('reports unreadable roots safely without trying to initialize them', async () => {
+    const mkdir = vi.fn(async () => { throw new Error('private mkdir failure'); });
+    const provider = new TestReportProvider({ root: '/private/report-root', fs: {
+      ...nodeArtifactFileSystem, mkdir,
+      lstat: async () => { throw Object.assign(new Error('secret=private-health-detail'), { code: 'EACCES' }); },
+    } });
+    const result = await provider.health();
+    expect(result.status).toBe('unavailable');
+    expect(JSON.stringify(result)).not.toMatch(/private|secret|EACCES/);
+    expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  it('rejects file and symlink roots during read-only health checks', async () => {
+    const root = await tempRoot('afk-report-health-');
+    const file = join(root, 'file');
+    const linked = join(root, 'linked');
+    await fs.writeFile(file, 'unchanged');
+    await fs.symlink(root, linked);
+    for (const target of [file, linked]) {
+      expect((await new TestReportProvider({ root: target }).health()).status).toBe('unavailable');
+    }
+    expect(await fs.readFile(file, 'utf8')).toBe('unchanged');
+    expect((await fs.lstat(linked)).isSymbolicLink()).toBe(true);
+  });
+
   it('persists bytes and reads them back', async () => {
     const root = await tempRoot('afk-report-');
     const provider = new TestReportProvider({ root });

@@ -14,7 +14,7 @@ import { buildEvidencePack, readEvidenceSource, type EvidenceSourceInput } from 
 import { assertKnowledgeDirectory, readKnowledgeAuthorization, readKnowledgeGrant } from './knowledge.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
 import { successfulRunEvidenceFromEvents } from './runtime.js';
-import { validateLearningCandidate, type LearningValidationChecker, type LearningValidationDependencies, type LearningValidationResult } from './validation.js';
+import { lessonQaConfigurationSchema, validateLearningCandidate, type LearningValidationChecker, type LearningValidationDependencies, type LearningValidationResult } from './validation.js';
 
 const savedPath = z.string().min(1).max(4096).refine(value => isAbsolute(value) && resolve(value) === value && !/[\0\r\n]/.test(value));
 const relativePath = z.string().min(1).max(4096).refine(value => !isAbsolute(value) && !/[\\\0\r\n]/.test(value)
@@ -28,6 +28,8 @@ const sourceSchema = z.object({ id: learningIdentitySchema, kind: z.enum(['audit
 const checkerIdentitySchema = z.object({ scope: learningScopeSchema, checkerId: learningIdentitySchema,
   providerId: learningIdentitySchema, version: learningIdentitySchema }).strict();
 const checkerSchema = checkerIdentitySchema.extend({ authorizationFile: savedPath,
+  allowLessonValidation: z.boolean().optional(),
+  qa: lessonQaConfigurationSchema.extend({ root: savedPath }).optional(),
   target: z.object({ ref: learningIdentitySchema, root: savedPath, path: relativePath }).strict(),
   evidence: z.array(z.object({ digest: learningDigestSchema, sources: z.array(sourceSchema).min(1).max(64)
     .refine(sources => new Set(sources.map(source => source.id)).size === sources.length) }).strict()).min(1).max(64)
@@ -152,7 +154,8 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
       const after = readPinned(entry.authorizationFile);
       if (before.fingerprint !== after.fingerprint || grant.policy.scope !== candidate.proposal.applicability.project
         || entry.scope !== grant.policy.scope || candidate.proposal.targetRef !== entry.target.ref
-        || !grant.policy.targets.some(target => target.ref === entry.target.ref && target.kinds.some(kind => kind === candidate.proposal.kind))) {
+        || !grant.policy.targets.some(target => target.ref === entry.target.ref && (candidate.proposal.kind === 'lesson'
+          ? entry.allowLessonValidation === true : target.kinds.some(kind => kind === candidate.proposal.kind)))) {
         throw new Error('knowledge_authorization_unavailable');
       }
       checkBudget(operation);
@@ -289,7 +292,8 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
         if (canonicalLearningJson(observed) !== canonicalLearningJson(final)) return undefined;
         authorization(candidate, operation);
         return { id: checkerId, version: identity.version, mode: 'independent-assertions', provider: bound.semantic,
-          configurationDigest: current.configurationDigest, target: observed.target };
+          configurationDigest: current.configurationDigest, target: observed.target,
+          ...(current.entry.qa ? { qa: current.entry.qa } : {}) };
       },
       readCommitSnapshot: (candidate, checkerId) => {
         checkBudget(options);
@@ -304,10 +308,14 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
           current.entry.target.root, DISTILLATION_LIMITS.evidenceBytes));
         const checker: LearningValidationChecker = { id: checkerId, version: identity.version,
           configurationDigest: current.configurationDigest, mode: 'independent-assertions', provider: selected.semantic,
+          ...(current.entry.qa ? { qa: current.entry.qa } : {}),
           target: { scope: current.entry.scope, ref: current.entry.target.ref, revision: `sha256:${snapshotDigest}`, snapshotDigest } };
+        const qa = candidate.proposal.kind === 'lesson' ? current.entry.qa : undefined;
+        const qaAuditDigest = qa ? bytesDigest(readSnapshotFile(new JsonlEventStore({ root: qa.root }).pathFor(qa.runId),
+          qa.root, DISTILLATION_LIMITS.evidenceBytes)) : undefined;
         checkBudget(options);
         return { authorization: { allowed: true, authorizationDigest: current.authorizationDigest },
-          source: { current: sourceCurrent, evidenceDigest: stored.digest }, checker };
+          source: { current: sourceCurrent, evidenceDigest: stored.digest }, checker, qaAuditDigest };
       },
     };
     const remainingMs = Math.floor(deadline - performance.now());

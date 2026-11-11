@@ -1084,7 +1084,9 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 
 可选配置 `validation: { configurationFile }` 指向私有 checker 配置的规范绝对路径。配置为 `{ version: 1, checkers: [...] }`；每项声明 `scope/checkerId/providerId/version/authorizationFile/target`，`target` 为 `{ ref, root, path }`。按准确项目与 checker ID 唯一选择已注册的 Verification Provider。受管来源从账本扫描身份、审计链和已记录会话恢复；未注册导入需可信配置提供匹配证据摘要的来源清单，客户端不能补充该清单。
 
-验证器必须支持 `learning-validation-v1` 独立断言协议及稳定身份，普通 test-runner 不具备该资格。当前支持 fact / process；lesson / skill / tool 在专属验证器完成前返回 blocked。预算从用例入口开始计时，包含开库及锁等待；获 SQLite 写锁后同步复核来源、授权、目标、checker 和 deadline，失效则回滚，无晋级或收据。动作接线与临时权威快照的真实验证 → Wiki 发布 → 上下文读取 → 来源失效撤回已有集成测试；这不证明 CLI / Desktop 或真实模型闭环已交付。
+验证器必须支持 `learning-validation-v1` 独立断言协议及稳定身份，普通 test-runner 不具备该资格。fact/process 使用领域断言；lesson 还要求保存配置显式设置 `allowLessonValidation: true` 和 `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`，并保留当前授权的项目、目标与撤销检查。先核验原始来源身份及独立 QA 的完整审计链、系统事件与修复版本，再独立观察根因、修复、预防及适用范围；QA 成功不能替代语义验证。oracle 的快照摘要与 QA 的 Git revision 分别绑定。该许可仅用于 lesson 验证，knowledge 发布仍限 fact/process；skill/tool 在专属验证器完成前返回 blocked。
+
+预算从用例入口开始计时，包含开库及锁等待；获 SQLite 写锁后同步复核来源、授权、目标、checker、deadline 及 lesson 的实际 QA 审计字节摘要，失效则回滚，无晋级或收据。状态顺序以审计 sequence 为准，不要求 occurredAt 单调。动作接线与临时权威快照的真实验证 → Wiki 发布 → 上下文读取 → 来源失效撤回已有集成测试；这不证明真实模型或五类资产完整闭环已交付。
 
 ### 知识发布与读取接线
 

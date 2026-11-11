@@ -91,10 +91,10 @@ describe("desktop learning service", () => {
     await expect(service.validate({ ...selection, checkerId: "verify" })).rejects.toThrow("学习操作失败");
   });
 
-  it("preserves a genuine blocked validation code without fabricating success", async () => {
+  it.each(["insufficient_evidence", "qa_unconfigured", "qa_not_independent", "audit_unavailable", "audit_changed", "qa_unverified"] as const)("preserves blocked validation code %s without fabricating success", async code => {
     const { service, dispatchSystemAction } = fixture();
-    dispatchSystemAction.mockImplementation(async action => action === "learning.candidates" ? [candidate()] : { status: "blocked", code: "insufficient_evidence" });
-    expect(await service.validate({ ...selection, checkerId: "verify" })).toEqual({ status: "blocked", code: "insufficient_evidence" });
+    dispatchSystemAction.mockImplementation(async action => action === "learning.candidates" ? [candidate()] : { status: "blocked", code });
+    expect(await service.validate({ ...selection, checkerId: "verify" })).toEqual({ status: "blocked", code });
   });
 
   it("refuses late scope drift after an async validation result", async () => {

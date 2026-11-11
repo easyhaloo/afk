@@ -5,14 +5,19 @@ import type { ProviderOperationOptions, VerificationProvider, VerificationResult
 import type { CandidateStore, LearningCandidate } from './candidate-store.js';
 import { candidateProposalSchema, DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
+import { verifyLessonQaEvidence, type LessonQaConfiguration, type LessonQaBlockedCode, type LessonQaEvidenceResult } from './lesson-validation.js';
 
 const protocol = 'learning-validation-v1';
 const inputSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
   expectedVersion: z.number().int().positive().safe(), checkerId: learningIdentitySchema }).strict();
 const targetSchema = z.object({ scope: learningScopeSchema, ref: learningIdentitySchema,
   revision: learningIdentitySchema, snapshotDigest: learningDigestSchema }).strict();
+export const lessonQaConfigurationSchema = z.object({ scope: learningScopeSchema, workItemId: learningIdentitySchema,
+  runId: learningIdentitySchema, targetRevision: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+  root: z.string().min(1).max(4096), auditDigest: learningDigestSchema }).strict();
 const checkerSchema = z.object({ id: learningIdentitySchema, version: learningIdentitySchema,
-  configurationDigest: learningDigestSchema, mode: z.literal('independent-assertions'), target: targetSchema }).strict();
+  configurationDigest: learningDigestSchema, mode: z.literal('independent-assertions'), target: targetSchema,
+  qa: lessonQaConfigurationSchema.optional() }).strict();
 const authorizationSchema = z.object({ allowed: z.boolean(), authorizationDigest: learningDigestSchema }).strict();
 const reconciliationSchema = z.object({ current: z.boolean(), evidenceDigest: learningDigestSchema }).strict();
 const valueSchema = z.union([z.string().max(4096), z.array(z.string().max(1024)).max(64)]);
@@ -29,6 +34,7 @@ export interface LearningValidationChecker {
   mode: 'independent-assertions';
   target: z.infer<typeof targetSchema>;
   provider: VerificationProvider;
+  qa?: LessonQaConfiguration;
 }
 
 export interface LearningValidationDependencies {
@@ -43,9 +49,10 @@ export interface LearningValidationCommitSnapshot {
   authorization: z.infer<typeof authorizationSchema>;
   source: z.infer<typeof reconciliationSchema>;
   checker: LearningValidationChecker;
+  qaAuditDigest?: string;
 }
 
-type ValidationCode = 'invalid_input' | 'candidate_unavailable' | 'scope_mismatch' | 'stale_candidate'
+type ValidationCode = LessonQaBlockedCode | 'invalid_input' | 'candidate_unavailable' | 'scope_mismatch' | 'stale_candidate'
   | 'unsupported_kind' | 'evidence_unavailable' | 'insufficient_evidence' | 'source_unavailable'
   | 'unauthorized' | 'authorization_changed' | 'checker_unavailable' | 'checker_changed' | 'target_mismatch'
   | 'verification_failed' | 'invalid_receipt' | 'output_limit' | 'binding_mismatch' | 'insufficient_coverage'
@@ -96,7 +103,7 @@ export async function validateLearningCandidate(
     if (!candidate) fail('candidate_unavailable');
     if (candidate.proposal.applicability.project !== request.scope) fail('scope_mismatch');
     if (candidate.version !== request.expectedVersion || candidate.state !== 'candidate') fail('stale_candidate');
-    if (candidate.proposal.kind !== 'fact' && candidate.proposal.kind !== 'process') fail('unsupported_kind');
+    if (candidate.proposal.kind !== 'fact' && candidate.proposal.kind !== 'process' && candidate.proposal.kind !== 'lesson') fail('unsupported_kind');
     const proposal = candidateProposalSchema.safeParse(candidate.proposal);
     if (!proposal.success || candidate.digest !== digest(proposal.data)) fail('insufficient_evidence');
     return candidate;
@@ -163,9 +170,17 @@ export async function validateLearningCandidate(
     } catch { checkAbort(); fail('checker_unavailable'); }
     if (checker.target.scope !== request.scope
       || (loaded.candidate.proposal.targetRef && loaded.candidate.proposal.targetRef !== checker.target.ref)) fail('target_mismatch');
+    let qa: Extract<LessonQaEvidenceResult, { status: 'verified' }> | undefined;
+    if (loaded.candidate.proposal.kind === 'lesson') {
+      const result = await verifyLessonQaEvidence({ candidateId: loaded.candidate.id, expectedVersion: loaded.candidate.version },
+        { store: dependencies.store, qa: checker.qa }, operation);
+      checkAbort();
+      if (result.status !== 'verified') fail(result.code);
+      qa = result;
+    }
     const current = load();
     if (!same(loaded, current)) fail('stale_candidate');
-    return { ...current, authorization, checker, provider: selected.provider,
+    return { ...current, authorization, checker, qa, provider: selected.provider,
       verify: selected.provider.verify, doctor, providerId: selected.provider.id, capabilities: canonicalLearningJson(selected.provider.capabilities) };
   };
 
@@ -176,7 +191,8 @@ export async function validateLearningCandidate(
     const binding = { scope: request.scope, candidateId: candidate.id, candidateVersion: candidate.version,
       candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest, target: before.checker.target,
       checkerId: before.checker.id, checkerVersion: before.checker.version, configurationDigest: before.checker.configurationDigest,
-      authorizationDigest: before.authorization.authorizationDigest, executionId: randomUUID() };
+      authorizationDigest: before.authorization.authorizationDigest, executionId: randomUUID(),
+      ...(before.qa ? { qa: before.qa.binding, qaEvidence: before.qa.evidence } : {}) };
     const assertions: Array<{ node: string; expected: z.infer<typeof valueSchema>; evidence: z.infer<typeof referenceSchema>[] }> = [];
     const add = (node: string, expected: z.infer<typeof valueSchema>, ids = candidate.proposal.evidenceIds) => {
       assertions.push({ node, expected, evidence: ids.map(id => {
@@ -199,6 +215,26 @@ export async function validateLearningCandidate(
       });
       add('process.exceptions', payload.exceptions);
       add('process.completion', payload.completion);
+    } else if (candidate.proposal.kind === 'lesson') {
+      const payload = candidate.proposal.payload;
+      add('lesson.trigger', payload.trigger);
+      add('lesson.rootCause', payload.rootCause);
+      add('lesson.rootCauseStatus', payload.rootCauseStatus);
+      add('lesson.attempts', payload.attempts);
+      add('lesson.fix', payload.fix);
+      add('lesson.prevention', payload.prevention);
+      const applicability = candidate.proposal.applicability;
+      add('lesson.project', applicability.project);
+      add('lesson.environments', applicability.environments);
+      add('lesson.versions', applicability.versions);
+      add('lesson.applicabilityPreconditions', applicability.preconditions);
+      add('lesson.exclusions', applicability.exclusions);
+      add('lesson.invalidationConditions', applicability.invalidationConditions);
+      const qa = before.qa!;
+      const qaRefs = qa.evidence.map(ref => ({ id: ref.id, digest: ref.digest, locator: ref.locator }));
+      assertions.filter(assertion => assertion.node === 'lesson.fix' || assertion.node === 'lesson.prevention')
+        .forEach(assertion => { assertion.evidence.push(...qaRefs); });
+      assertions.push({ node: 'lesson.fixTargetRevision', expected: qa.binding.targetRevision, evidence: qaRefs });
     }
     let verification: VerificationResult | undefined;
     try {
@@ -211,6 +247,7 @@ export async function validateLearningCandidate(
     if (!same(before.candidate, after.candidate) || !same(before.source, after.source)
       || !same(before.evidence, after.evidence)) fail('stale_candidate');
     if (!same(before.authorization, after.authorization)) fail('authorization_changed');
+    if (!same(before.qa ?? null, after.qa ?? null)) fail('audit_changed');
     if (!same(before.checker.target, after.checker.target)) fail('target_mismatch');
     if (!same(before.checker, after.checker) || before.provider !== after.provider || before.verify !== after.verify || before.doctor !== after.doctor
       || before.providerId !== after.providerId || before.capabilities !== after.capabilities) fail('checker_changed');
@@ -246,7 +283,7 @@ export async function validateLearningCandidate(
         const { provider, ...configuration } = snapshot.checker;
         checker = checkerSchema.parse(configuration);
         commit = { authorization: authorizationSchema.parse(snapshot.authorization),
-          source: reconciliationSchema.parse(snapshot.source), checker: { ...checker, provider } };
+          source: reconciliationSchema.parse(snapshot.source), checker: { ...checker, provider }, qaAuditDigest: snapshot.qaAuditDigest };
       } catch { checkAbort(); fail('commit_guard_unavailable'); }
       checkAbort();
       if (!commit.authorization.allowed) fail('unauthorized');
@@ -256,8 +293,14 @@ export async function validateLearningCandidate(
       if (!same(checker, before.checker) || commit.checker.provider !== before.provider
         || commit.checker.provider.id !== before.providerId || commit.checker.provider.verify !== before.verify
         || commit.checker.provider.doctor !== before.doctor || canonicalLearningJson(commit.checker.provider.capabilities) !== before.capabilities) fail('checker_changed');
+      if (before.qa && commit.qaAuditDigest !== before.qa.binding.auditDigest) fail('audit_changed');
       const current = load();
       if (!same(current.candidate, candidate) || !same(current.source, before.source) || !same(current.evidence, evidence)) fail('stale_candidate');
+      if (before.qa) {
+        const qaRunId = before.qa.binding.qaRunId;
+        if (current.source.request.sourceRunId === qaRunId || dependencies.store.listAnalysisAttempts(candidate.requestKey)
+          .some(attempt => attempt.analysisRunId === qaRunId || attempt.sessionId === qaRunId)) fail('qa_not_independent');
+      }
       checkAbort();
     };
     let validated: LearningCandidate;

@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
+import type { RunEventData } from '@afk/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { TestRunnerVerificationProvider } from '../../infrastructure/verification/index.js';
@@ -21,7 +23,7 @@ const bytesDigest = (content: string | Buffer) => createHash('sha256').update(co
 const cleanups: Array<() => void> = [];
 afterEach(() => { cleanups.splice(0).reverse().forEach(clean => clean()); vi.unstubAllEnvs(); });
 
-async function fixture(kind: 'fact' | 'process' = 'fact', managed = false) {
+async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'validation-runtime-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, 'ledger', 'candidates.sqlite');
@@ -56,11 +58,14 @@ async function fixture(kind: 'fact' | 'process' = 'fact', managed = false) {
     targetRef: 'wiki:approval', applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] } };
   const proposal: CandidateProposal = kind === 'fact'
     ? { ...common, kind, payload: { subject: 'release', rule: 'approval required', classification: 'fact' } }
+    : kind === 'lesson' ? { ...common, kind, payload: { trigger: 'duplicate approval', rootCause: 'check then write race',
+      rootCauseStatus: 'confirmed', attempts: ['retry without serialization'], fix: 'Serialize approval read and write',
+      prevention: ['Run competing approval regression'] } }
     : { ...common, kind, payload: { entry: 'draft', systems: ['release-service'], preconditions: ['authenticated'],
       steps: [{ id: 'approve', action: 'approve', stateChange: 'draft -> approved', evidenceIds: [refs[0].id] },
         { id: 'publish', action: 'publish', stateChange: 'approved -> published', evidenceIds: [refs[0].id] }],
       exceptions: ['denied -> draft'], completion: 'published' } };
-  const source = registered ?? store.submitRequest({ request: { version: 1, scope, sourceId: 'run:run-1', sourceRunId: 'run-1',
+  const source = registered ?? store.submitRequest({ request: { version: 1, scope, sourceId: 'run:run-1', sourceRunId: 'run-1', workItemId: `${scope}#1`,
     evidenceDigest: pack.digest, analyzerVersion: 'fixture-1', reason: 'completed' }, evidence: refs }, pack);
   const candidateId = store.completeRequest(source.key, { version: 1, candidates: [proposal], warnings: [] }).candidateIds[0];
   const vault = join(root, 'vault');
@@ -76,14 +81,38 @@ async function fixture(kind: 'fact' | 'process' = 'fact', managed = false) {
   persistGrant();
   const targetRoot = join(root, 'business');
   mkdirSync(targetRoot);
+  let targetRevision = 'a'.repeat(40);
+  if (kind === 'lesson') {
+    execFileSync('git', ['init', '--quiet', targetRoot]);
+    execFileSync('git', ['-C', targetRoot, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+      '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${join(root, 'empty-hooks')}`, 'commit', '--quiet', '--allow-empty', '-m', 'QA fixture']);
+    targetRevision = execFileSync('git', ['-C', targetRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  }
+  const qaRunId = 'independent-qa';
+  const appendQa = async (data: RunEventData[]) => events.append(data.map((entry, index) => ({ id: `qa-${index}-${entry.kind}`,
+    schemaVersion: 1 as const, type: entry.kind, occurredAt: '2026-11-11T00:00:00Z',
+    context: { runId: qaRunId, traceId: qaRunId, workItemId: `${scope}#1`, profileId: 'qa', attempt: 1,
+      actor: { kind: 'system' as const, id: 'fixture' } }, correlationId: qaRunId, data: entry })));
+  if (kind === 'lesson') await appendQa([{ kind: 'qa.started' }, { kind: 'decision.made', command: 'experience.qa-target', accepted: true,
+    reason: JSON.stringify({ target: { project: scope, revision: targetRevision, dirty: false } }) },
+  { kind: 'qa.passed' }, { kind: 'commit.recorded', phase: 'qa', branch: 'qa', commitSha: targetRevision },
+  { kind: 'run.finished', outcome: 'succeeded' }]);
+  const qaPath = events.pathFor(qaRunId);
   const targetPath = join(targetRoot, 'approval.json');
   const oracle = { subject: 'release', approvalRequired: true, entry: 'draft', systems: ['release-service'],
-    preconditions: ['authenticated'], actions: ['approve', 'publish'], approvedState: 'approved', authority: [refs[0].locator] };
+    preconditions: ['authenticated'], actions: ['approve', 'publish'], approvedState: 'approved', authority: [refs[0].locator],
+    lesson: { trigger: 'duplicate approval', rootCause: 'check then write race', rootCauseStatus: 'confirmed',
+      attempts: ['retry without serialization'], fix: 'Serialize approval read and write', prevention: ['Run competing approval regression'],
+      project: scope, environments: [] as string[], versions: [] as string[], applicabilityPreconditions: [] as string[],
+      exclusions: [] as string[], invalidationConditions: [] as string[],
+      fixTargetRevision: targetRevision } };
   const persistOracle = () => writeFileSync(targetPath, JSON.stringify(oracle));
   persistOracle();
   const configurationFile = join(root, 'checkers.json');
   const config: ValidationConfiguration = { version: 1, checkers: [{ scope, checkerId: 'approval-policy', providerId: 'semantic-policy',
     version: '2026.11.1', authorizationFile, target: { ref: 'wiki:approval', root: targetRoot, path: 'approval.json' },
+    ...(kind === 'lesson' ? { allowLessonValidation: true, qa: { scope, workItemId: `${scope}#1`, runId: qaRunId, targetRevision,
+      root: auditRoot, auditDigest: bytesDigest(readFileSync(qaPath)) } } : {}),
     ...(managed ? {} : { evidence: [{ digest: pack.digest, sources: [audit] }] }) }] };
   const persistConfig = () => writeFileSync(configurationFile, JSON.stringify(config), { mode: 0o600 });
   persistConfig();
@@ -115,6 +144,7 @@ async function fixture(kind: 'fact' | 'process' = 'fact', managed = false) {
         values[`process.steps.${index}.stateChange`] = `${previous} -> ${state}`;
       });
       values['process.completion'] = state;
+      for (const [field, value] of Object.entries(policy.lesson)) values[`lesson.${field}`] = value as string | string[];
       const envelope = JSON.parse(request.target);
       const assertions = envelope.assertions.map((assertion: { node: string }) => ({ ...assertion,
         actual: values[assertion.node], status: 'observed' }));
@@ -128,7 +158,7 @@ async function fixture(kind: 'fact' | 'process' = 'fact', managed = false) {
   }) };
   const input = { scope, candidateId, expectedVersion: 1, checkerId: 'approval-policy' };
   return { root, store, input, options, candidateId, source, pack, auditPath, targetPath, config, grant, oracle, provider, requests, bindings,
-    configurationFile, authorizationFile, persistConfig, persistGrant, persistOracle, transcripts,
+    configurationFile, authorizationFile, persistConfig, persistGrant, persistOracle, transcripts, qaPath, appendQa,
     before: (callback: typeof beforeVerify) => { beforeVerify = callback; },
     during: (callback: typeof duringVerify) => { duringVerify = callback; },
     doctorIdentity: (change: Partial<typeof doctorBinding>) => { doctorBinding = { ...doctorBinding, ...change }; } };
@@ -152,6 +182,174 @@ async function holdOpeningLock(file: string) {
 }
 
 describe('persisted learning validation runtime', () => {
+  it('validates a lesson only with saved independent QA and independent semantic observations', async () => {
+    const setup = await fixture('lesson');
+    const result = await validateConfiguredLearningCandidate(setup.input, setup.options);
+    expect(result.status).toBe('validated');
+    const envelope = JSON.parse(setup.requests[0].target);
+    expect(envelope.binding.qa).toMatchObject({ scope, workItemId: `${scope}#1`, qaRunId: 'independent-qa',
+      targetRevision: setup.config.checkers[0].qa!.targetRevision, auditSequence: 5 });
+    expect(envelope.binding.qaEvidence).toHaveLength(5);
+    expect(envelope.binding.target.revision).toMatch(/^sha256:/);
+    expect(envelope.binding.target.revision).not.toBe(envelope.binding.qa.targetRevision);
+    expect(envelope.assertions.map((entry: { node: string }) => entry.node)).toEqual(expect.arrayContaining([
+      'lesson.trigger', 'lesson.rootCause', 'lesson.rootCauseStatus', 'lesson.attempts', 'lesson.fix', 'lesson.prevention',
+      'lesson.project', 'lesson.environments', 'lesson.versions', 'lesson.applicabilityPreconditions', 'lesson.exclusions',
+      'lesson.invalidationConditions', 'lesson.fixTargetRevision',
+    ]));
+    const receipt = setup.store.getValidation(setup.candidateId)!;
+    expect(receipt.passed).toBe(true);
+    expect(setup.store.getCandidate(setup.candidateId)?.version).toBe(2);
+  });
+
+  it.each(['rootCause', 'fix', 'prevention', 'fixTargetRevision', 'exclusions'] as const)('rejects false lesson %s despite actual QA passing', async field => {
+    const setup = await fixture('lesson');
+    if (field === 'prevention' || field === 'exclusions') setup.oracle.lesson[field] = ['different observed constraint'];
+    else setup.oracle.lesson[field] = 'different observed fact';
+    setup.persistOracle();
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('assertion_failed'));
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+    expect(setup.store.getCandidate(setup.candidateId)?.version).toBe(1);
+  });
+
+  it('blocks an unconfigured QA prerequisite before semantic execution', async () => {
+    const setup = await fixture('lesson');
+    delete setup.config.checkers[0].qa;
+    setup.persistConfig();
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('qa_unconfigured'));
+    expect(setup.provider.verify).not.toHaveBeenCalled();
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it.each([undefined, false])('requires explicit private lesson validation permission (%s)', async allowed => {
+    const setup = await fixture('lesson');
+    setup.config.checkers[0].allowLessonValidation = allowed;
+    setup.persistConfig();
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('unauthorized'));
+    expect(setup.provider.verify).not.toHaveBeenCalled();
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it.each(['qa', 'passed', 'binding', 'allowLessonValidation'])('rejects caller supplied %s before reading private configuration', async key => {
+    const setup = await fixture('lesson');
+    expect(await validateConfiguredLearningCandidate({ ...setup.input, [key]: setup.config.checkers[0].qa }, setup.options))
+      .toEqual(blocked('invalid_input'));
+    expect(setup.options.resolveProvider).not.toHaveBeenCalled();
+  });
+
+  it('rejects a hash-valid late QA invalidation during semantic execution', async () => {
+    const setup = await fixture('lesson');
+    setup.during(async () => { await setup.appendQa([{ kind: 'qa.failed' }]); });
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('audit_changed'));
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('blocks a missing semantic checker even with verified QA', async () => {
+    const setup = await fixture('lesson');
+    setup.provider.doctor = undefined;
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('checker_unavailable'));
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('does not validate a lesson after null-reason cancellation during semantic execution', async () => {
+    const setup = await fixture('lesson');
+    const controller = new AbortController();
+    setup.during(() => { controller.abort(null); });
+    expect(await validateConfiguredLearningCandidate(setup.input, { ...setup.options, signal: controller.signal })).toEqual(blocked('cancelled'));
+    expect(setup.store.getCandidate(setup.candidateId)?.version).toBe(1);
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it.each(['qa', 'qa-missing', 'qa-symlink', 'config', 'permission', 'grant', 'source', 'target', 'unchanged'] as const)
+    ('checks current lesson %s under the actual SQLite write lock', async changed => {
+      const setup = await fixture('lesson');
+      const originalAudit = readFileSync(setup.qaPath);
+      await setup.appendQa([{ kind: 'qa.failed' }]);
+      const invalidatedAudit = readFileSync(setup.qaPath);
+      writeFileSync(setup.qaPath, originalAudit);
+      const configuration = structuredClone(setup.config);
+      if (changed === 'permission') configuration.checkers[0].allowLessonValidation = false;
+      else configuration.checkers[0].qa!.targetRevision = 'b'.repeat(40);
+      const mutations = {
+        qa: { path: setup.qaPath, content: invalidatedAudit },
+        config: { path: setup.configurationFile, content: JSON.stringify(configuration) },
+        permission: { path: setup.configurationFile, content: JSON.stringify(configuration) },
+        grant: { path: setup.authorizationFile, content: JSON.stringify({ ...setup.grant, revoked: true }) },
+        source: { path: setup.auditPath, content: 'changed source during write lock wait' },
+        target: { path: setup.targetPath, content: JSON.stringify({ ...setup.oracle, lesson: { ...setup.oracle.lesson, rootCause: 'unrelated cause' } }) },
+      };
+      const alias = join(setup.root, 'qa-alias.jsonl');
+      writeFileSync(alias, originalAudit);
+      const coordination = new SharedArrayBuffer(12);
+      const state = new Int32Array(coordination);
+      const worker = new Worker(`
+        const { parentPort, workerData } = require('node:worker_threads');
+        const { DatabaseSync } = require('node:sqlite');
+        const { writeFileSync, rmSync, symlinkSync } = require('node:fs');
+        const database = new DatabaseSync(workerData.file);
+        const state = new Int32Array(workerData.coordination);
+        parentPort.postMessage('ready');
+        Atomics.wait(state, 0, 0);
+        database.exec('BEGIN IMMEDIATE');
+        Atomics.store(state, 1, 1);
+        Atomics.notify(state, 1);
+        Atomics.wait(state, 0, 1, 70);
+        if (workerData.mutation) writeFileSync(workerData.mutation.path, workerData.mutation.content);
+        if (workerData.changed === 'qa-missing') rmSync(workerData.qaPath);
+        if (workerData.changed === 'qa-symlink') {
+          rmSync(workerData.qaPath);
+          symlinkSync(workerData.alias, workerData.qaPath);
+        }
+        Atomics.store(state, 2, 1);
+        Atomics.wait(state, 0, 1, 100);
+        database.exec('COMMIT');
+        database.close();
+      `, { eval: true, workerData: { file: setup.options.file, coordination, changed, qaPath: setup.qaPath, alias,
+        mutation: changed === 'unchanged' || changed === 'qa-missing' || changed === 'qa-symlink' ? undefined : mutations[changed] } });
+      cleanups.push(() => { void worker.terminate(); });
+      await new Promise<void>((resolve, reject) => { worker.once('message', () => resolve()); worker.once('error', reject); });
+      const recordValidation = CandidateStore.prototype.recordValidation;
+      const record = vi.spyOn(CandidateStore.prototype, 'recordValidation').mockImplementation(function (this: CandidateStore, ...args) {
+        Atomics.store(state, 0, 1);
+        Atomics.notify(state, 0);
+        if (Atomics.wait(state, 1, 0, 1000) === 'timed-out') throw new Error('writer lock not acquired');
+        return recordValidation.apply(this, args);
+      });
+      try {
+        const result = await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs: 2000 });
+        expect(record).toHaveBeenCalledTimes(1);
+        expect(Atomics.load(state, 2)).toBe(1);
+        if (changed === 'unchanged') expect(result.status).toBe('validated');
+        else {
+          expect(result.status).toBe('blocked');
+          expect(result).not.toEqual(blocked('timed_out'));
+          if (changed === 'qa') expect(result).toEqual(blocked('audit_changed'));
+          if (changed === 'qa-missing' || changed === 'qa-symlink') expect(result).toEqual(blocked('commit_guard_unavailable'));
+          expect(JSON.stringify(result)).not.toContain(setup.root);
+          expect(setup.store.getCandidate(setup.candidateId)?.version).toBe(1);
+          expect(setup.store.getCandidateVersions(setup.candidateId)).toHaveLength(1);
+          expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+        }
+      } finally { record.mockRestore(); }
+    });
+
+  it.each(['scope', 'workItemId', 'runId', 'targetRevision', 'auditDigest', 'root'] as const)
+    ('rejects an invalid saved QA %s before semantic verification', async field => {
+      const setup = await fixture('lesson');
+      const qa = setup.config.checkers[0].qa!;
+      if (field === 'scope') qa.scope = 'github:other/repository';
+      if (field === 'workItemId') qa.workItemId = `${scope}#2`;
+      if (field === 'runId') qa.runId = 'run-1';
+      if (field === 'targetRevision') qa.targetRevision = 'b'.repeat(40);
+      if (field === 'auditDigest') qa.auditDigest = '0'.repeat(64);
+      if (field === 'root') qa.root = join(setup.root, 'missing');
+      setup.persistConfig();
+      const result = await validateConfiguredLearningCandidate(setup.input, setup.options);
+      expect(result.status).toBe('blocked');
+      expect(setup.provider.verify).not.toHaveBeenCalled();
+      expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+    });
+
   it.each([NaN, 0, -1, Infinity, -Infinity, DISTILLATION_LIMITS.timeoutMs + 1, 1.5, '100', null])('rejects invalid timeout %s before opening the ledger or resolving a checker', async timeoutMs => {
     const setup = await fixture();
     const open = vi.spyOn(storage, 'openSqlite');

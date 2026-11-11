@@ -76,6 +76,11 @@ describe("desktop learning wire contract", () => {
     }
   });
 
+  it.each(["qa_unconfigured", "qa_not_independent", "audit_unavailable", "audit_changed", "qa_unverified"])("preserves the safe lesson rejection code %s across the renderer contract", code => {
+    expect(parseLearningValidationResult({ status: "blocked", code })).toEqual({ status: "blocked", code });
+    expect(() => parseLearningValidationResult({ status: "blocked", code, audit: "/private/qa.jsonl" })).toThrow();
+  });
+
   it("bounds reconciliation DTOs and refuses raw blocked keys and diagnostic text", () => {
     expect(parseLearningReconciliation({ results: [{ publication }], blocked: [{ code: "knowledge_grant_unavailable" }] }).results).toHaveLength(1);
     expect(() => parseLearningReconciliation({ results: Array.from({ length: 101 }, () => ({ publication })), blocked: [] })).toThrow();

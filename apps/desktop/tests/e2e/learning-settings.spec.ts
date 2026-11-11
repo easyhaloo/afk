@@ -176,6 +176,38 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
     }
   });
 
+  test("shows missing independent lesson QA without validating or publishing", async () => {
+    const fixture = await createLearningFixture("lesson");
+    let app: ElectronApplication | undefined;
+    try {
+      const before = await fixture.inspect();
+      const navigation = fixture.navigation();
+      const launched = await launchLearning(fixture);
+      app = launched.app;
+      const { page } = launched;
+      const selection = { scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1, checkerId: fixture.checkerId };
+      expect(await page.evaluate(input => window.afkDesktop.learning.validate(input), selection))
+        .toEqual({ status: "blocked", code: "qa_unconfigured" });
+      await page.locator(".sidebar-bottom .settings-entry").click();
+      const learning = page.getByRole("region", { name: "学习治理", exact: true });
+      await learning.getByRole("button", { name: "学习项目", exact: true }).click();
+      await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
+      await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
+      await learning.getByRole("button", { name: `选择候选 ${fixture.candidateId}`, exact: true }).click();
+      await learning.getByRole("textbox", { name: "验证器 ID", exact: true }).fill(fixture.checkerId);
+      await learning.getByRole("button", { name: "验证候选", exact: true }).click();
+      await expect(learning.getByRole("status").filter({ hasText: "qa_unconfigured" })).toBeVisible();
+      await expect(learning.getByRole("button", { name: "准备知识预览", exact: true })).toBeDisabled();
+      await expect(learning.getByRole("button", { name: "选择候选 " + fixture.candidateId, exact: true })).toContainText("待验证 · v1");
+      expect(fixture.calls()).toEqual([]);
+      expect(await fixture.inspect()).toEqual(before);
+      expect(existsSync(fixture.asset)).toBe(false);
+      expect(fixture.navigation()).toEqual(navigation);
+    } finally {
+      try { await app?.close(); } finally { fixture.cleanup(); }
+    }
+  });
+
   test("rejects a checker observation that disagrees with the candidate instead of accepting passed:true", async () => {
     const fixture = await createLearningFixture();
     let app: ElectronApplication | undefined;

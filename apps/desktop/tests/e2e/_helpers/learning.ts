@@ -48,6 +48,7 @@ import { knowledgeFixture } from ${JSON.stringify(source("packages/runtime/src/a
 import { JsonlEventStore } from ${JSON.stringify(source("packages/runtime/src/infrastructure/observability/jsonl-event-store.ts"))};
 const fixture = knowledgeFixture();
 fixture.store.close();
+const lesson = process.argv[1] === 'lesson';
 const home = process.env.HOME;
 const workspace = join(process.env.TMPDIR, 'workspace');
 const targetRoot = join(fixture.root, 'authority');
@@ -70,8 +71,13 @@ try {
   const request = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:approval-source',
     sourceRunId: 'approval-source', evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
     evidence: pack.entries.map(entry => entry.ref) }, pack);
+  const proposal = lesson ? { ...fixture.candidate.proposal, kind: 'lesson', payload: {
+    trigger: 'Publication started before approval', rootCause: 'The approval guard was missing', rootCauseStatus: 'confirmed',
+    attempts: ['Require approval before publication'], fix: 'Check approval before publishing',
+    prevention: ['Keep an independent approval regression'],
+  } } : fixture.candidate.proposal;
   const completed = store.completeRequest(request.key, { version: 1, warnings: [],
-    candidates: [{ ...fixture.candidate.proposal, evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
+    candidates: [{ ...proposal, evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
   candidate = store.getCandidate(completed.candidateIds[0]);
   assert.equal(candidate.state, 'candidate');
   assert.equal(candidate.version, 1);
@@ -85,6 +91,7 @@ writeFileSync(authorityFile, JSON.stringify({ subject: 'approval', rule: 'Approv
 writeFileSync(callsFile, '', { mode: 0o600 });
 const configurationFile = join(fixture.root, 'checkers.json');
 writeFileSync(configurationFile, JSON.stringify({ version: 1, checkers: [{ ...identity,
+  ...(lesson ? { allowLessonValidation: true } : {}),
   authorizationFile: fixture.authorizationFile, target: { ref: 'wiki:approval', root: targetRoot, path: 'approval.json' },
   evidence: [{ digest: pack.digest, sources: [audit] }] }] }), { mode: 0o600 });
 const manifest = { id: 'verification.approval-desktop-e2e', version: '1.0.0', apiVersion: 1,
@@ -119,7 +126,7 @@ console.log(JSON.stringify({ root: fixture.root, home, workspace, vault: fixture
   configurationFile, authorizationFile: fixture.authorizationFile, wikiScript: fixture.wikiScript }));
 `;
 
-export async function createLearningFixture() {
+export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact') {
   const temporary = mkdtempSync(path.join(realpathSync(tmpdir()), "afk-desktop-learning-"));
   const home = path.join(temporary, "home");
   const env: Record<string, string> = {
@@ -163,7 +170,7 @@ export async function createLearningFixture() {
       }
     }
     env.PATH = [bin, "/usr/bin", "/bin"].join(path.delimiter);
-    const fixture = await node(seedScript) as FixtureMetadata;
+    const fixture = await node(seedScript, [kind]) as FixtureMetadata;
     const binary = path.join(repository, "apps/cli/dist/index.js");
     if (!existsSync(binary)) throw new Error("Build the CLI before running the Desktop learning E2E; this test does not build it.");
     const command = async (...args: string[]) => {

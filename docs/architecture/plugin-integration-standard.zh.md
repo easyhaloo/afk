@@ -233,8 +233,12 @@ QA 和新证据。HTTP 知识库检索不隐含远程写回。
 - `verify` 接收 `target` 内的 JSON envelope：`{ protocol: "learning-validation-v1", binding, candidate, evidence, assertions }`。这是专属协议；不能交给把 target 当目录的普通执行器。
 - `binding` 绑定项目、候选及版本/摘要、证据摘要、真实目标及快照摘要、checker/配置/授权摘要和唯一 execution ID；报告必须原样返回该 binding。
 - 每条 assertion 返回 `{ node, expected, actual, status, evidence }`；`actual` 必须独立观察，不能复制 expected；`status` 为 `observed/unknown/inferred`。缺失、未知、推断、断言失败或无匹配证据均不能晋级。
-- fact 验证 subject/rule/authority；process 验证 entry/systems/preconditions、每步 action/stateChange、exceptions/completion。其他 kind 未有对应实现时明确 blocked。
+- fact 验证 subject/rule/authority；process 验证 entry/systems/preconditions、每步 action/stateChange、exceptions/completion。lesson 另遵守以下 QA 及领域检查；skill/tool 未有对应实现时明确 blocked。
+- lesson 的可信 checker 配置必须显式设置 `allowLessonValidation: true`，并提供 `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`。`targetRevision` 为完整 Git revision，`auditDigest` 为受信审计原始字节摘要；客户端不可提供或覆盖这些字段。此许可仅允许验证，不能发布 lesson。
+- lesson 先验证同项目、同工作项的独立 QA：原始证据身份、hash chain、系统权威事件、修复版本及完整成功周期必须匹配。状态顺序采用审计 sequence；不保证事件发生时间单调。
+- lesson 的 `binding` 额外包含 `qa` 与 `qaEvidence`；逐项独立观察 trigger/rootCause/rootCauseStatus/attempts/fix/prevention、适用范围及 fixTargetRevision。QA 成功和 `passed: true` 均不能代替这些断言。oracle 快照 revision 与 QA Git revision 分别绑定。
 - 截止时间覆盖开库、解析、执行和提交；最终获写锁后复核身份、授权、来源、目标和 deadline。取消、漂移和超时不得留下 validated 状态或验证收据。
+- lesson 最终获写锁后同步重读 QA 审计摘要；追加、删除、替换或配置变化阻断提交。错误码增加 `qa_unconfigured/qa_not_independent/audit_unavailable/audit_changed/qa_unverified`；错误结果仅含安全分类，不携带审计正文或路径。
 
 ## 9. 生命周期闸门与最小验收
 

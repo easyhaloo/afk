@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ import { CandidateStore } from './candidate-store.js';
 import type { CandidateProposal } from './contracts.js';
 import { buildEvidencePack } from './evidence.js';
 import { canonicalLearningJson } from './requests.js';
+import type { LessonQaConfiguration } from './lesson-validation.js';
 import { validateLearningCandidate, type LearningValidationChecker, type LearningValidationDependencies } from './validation.js';
 
 const scope = 'github:acme/api';
@@ -25,6 +26,7 @@ type Report = { protocol: string; binding: {
   scope: string; candidateId: string; candidateVersion: number; candidateDigest: string; evidenceDigest: string;
   target: LearningValidationChecker['target']; checkerId: string; checkerVersion: string;
   configurationDigest: string; authorizationDigest: string; executionId: string;
+  qa?: unknown;
 }; assertions: Assertion[] };
 
 async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observed = true,
@@ -51,7 +53,7 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
         steps: [{ id: 'approve', action: 'approve', stateChange: 'draft -> approved', evidenceIds: [refs[0].id] },
           { id: 'publish', action: 'publish', stateChange: 'approved -> published', evidenceIds: [refs[0].id] }],
         exceptions: ['denied -> draft'], completion: 'published' } }) });
-  const source = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:run-1', sourceRunId: 'run-1',
+  const source = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:run-1', sourceRunId: 'run-1', workItemId: `${scope}#1`,
     evidenceDigest: pack.digest, analyzerVersion: 'fixture-1', reason: 'completed' }, evidence: refs }, snapshot ? pack : undefined);
   const processed = store.completeRequest(source.key, { version: 1, candidates: [proposal], warnings: [] });
   const candidate = store.getCandidate(processed.candidateIds[0])!;
@@ -78,6 +80,7 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
       actual[`process.steps.${index}.action`] = action;
       actual[`process.steps.${index}.stateChange`] = `${previous} -> ${state}`;
     });
+    for (const [field, value] of Object.entries(policy.lesson ?? {})) actual[`lesson.${field}`] = value as string | string[];
     return { ...actual, 'process.completion': state };
   };
   let alter: (report: Report) => Report = report => report;
@@ -130,7 +133,103 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
 
 function blocked(code: string) { return { status: 'blocked', code }; }
 
+async function lessonFixture() {
+  const payload = { trigger: 'duplicate retry', rootCause: 'check then write race', rootCauseStatus: 'confirmed' as const,
+    attempts: ['retry failed'], fix: 'Serialize read and write', prevention: ['Run competing retry regression'] };
+  const fixture = await setup('fact', true, true, proposal => ({ ...proposal, kind: 'lesson', payload }));
+  const events = new JsonlEventStore({ root: join(dirname(fixture.oracle), 'qa') });
+  const revision = 'a'.repeat(40);
+  const qa: LessonQaConfiguration = { scope, workItemId: `${scope}#1`, runId: 'independent-qa', targetRevision: revision,
+    root: events.root, auditDigest: '' };
+  await events.append([{ kind: 'qa.started' as const }, { kind: 'decision.made' as const, command: 'experience.qa-target', accepted: true,
+    reason: JSON.stringify({ target: { project: scope, revision, dirty: false } }) },
+  { kind: 'commit.recorded' as const, phase: 'qa' as const, commitSha: revision, branch: 'qa' }, { kind: 'qa.passed' as const },
+  { kind: 'run.finished' as const, outcome: 'succeeded' as const }].map((data, index) => ({ id: `qa-${index}`,
+    schemaVersion: 1 as const, type: data.kind, occurredAt: '2026-11-11T00:00:00Z', context: { runId: qa.runId,
+      traceId: qa.runId, workItemId: qa.workItemId, profileId: 'qa', attempt: 1, actor: { kind: 'system' as const, id: 'fixture' } },
+    correlationId: qa.runId, data })));
+  const qaPath = events.pathFor(qa.runId);
+  qa.auditDigest = createHash('sha256').update(readFileSync(qaPath)).digest('hex');
+  writeFileSync(fixture.oracle, JSON.stringify({ ...JSON.parse(readFileSync(fixture.oracle, 'utf8')),
+    lesson: { ...payload, project: scope, environments: [], versions: [], applicabilityPreconditions: [], exclusions: [],
+      invalidationConditions: [], fixTargetRevision: revision } }));
+  const resolveChecker = fixture.deps.resolveChecker;
+  fixture.deps.resolveChecker = async (...args) => ({ ...(await resolveChecker(...args))!, qa: structuredClone(qa) });
+  const readCommitSnapshot = fixture.deps.readCommitSnapshot;
+  fixture.deps.readCommitSnapshot = (...args) => {
+    const snapshot = readCommitSnapshot(...args);
+    return { ...snapshot, checker: { ...snapshot.checker, qa: structuredClone(qa) },
+      qaAuditDigest: createHash('sha256').update(readFileSync(qaPath)).digest('hex') };
+  };
+  return { ...fixture, qa, qaPath };
+}
+
 describe('validateLearningCandidate production boundary', () => {
+  it.each(['analysisRunId', 'sessionId', 'distinct'] as const)('rechecks late analysis identity under the validation write lock: %s', async field => {
+    const fixture = await lessonFixture();
+    const callId = 'pending-analysis';
+    fixture.store.startAnalysisAttempt({ requestKey: fixture.source.key, callId, day: '2026-11-12',
+      startedAt: '2026-11-12T00:00:00Z', limit: 5 });
+    const recordValidation = fixture.store.recordValidation.bind(fixture.store);
+    vi.spyOn(fixture.store, 'recordValidation').mockImplementation((...args) => {
+      fixture.store.recordAnalysisIdentity(callId, {
+        analysisRunId: field === 'analysisRunId' ? fixture.qa.runId : 'separate-analysis',
+        sessionId: field === 'sessionId' ? fixture.qa.runId : 'separate-session',
+      });
+      return recordValidation(...args);
+    });
+    const result = await validateLearningCandidate(fixture.input, fixture.deps);
+    expect(fixture.provider.verify).toHaveBeenCalledOnce();
+    if (field === 'distinct') {
+      expect(result.status).toBe('validated');
+      expect(fixture.store.getCandidate(fixture.candidate.id)?.version).toBe(2);
+    } else {
+      expect(result).toEqual(blocked('qa_not_independent'));
+      expect(fixture.store.getCandidate(fixture.candidate.id)?.version).toBe(1);
+      expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+    }
+  });
+
+  it('binds actual QA evidence to the lesson semantic receipt without confusing the oracle revision', async () => {
+    const fixture = await lessonFixture();
+    expect((await validateLearningCandidate(fixture.input, fixture.deps)).status).toBe('validated');
+    const envelope = JSON.parse(fixture.requests[0].target);
+    expect(envelope.binding.qa).toMatchObject({ targetRevision: fixture.qa.targetRevision, auditDigest: fixture.qa.auditDigest });
+    expect(envelope.binding.target.revision).toBe('revision-1');
+    expect(envelope.binding.qaEvidence).toHaveLength(5);
+    const fix = envelope.assertions.find((entry: Assertion) => entry.node === 'lesson.fix');
+    expect(fix.evidence).toHaveLength(fixture.candidate.proposal.evidenceIds.length + 5);
+  });
+
+  it.each(['missing', 'changed', 'unreadable'] as const)('requires a synchronous commit-time QA digest: %s', async mode => {
+    const fixture = await lessonFixture();
+    const readCommitSnapshot = fixture.deps.readCommitSnapshot;
+    fixture.deps.readCommitSnapshot = (...args) => {
+      if (mode === 'unreadable') throw new Error(fixture.qaPath);
+      return { ...readCommitSnapshot(...args), qaAuditDigest: mode === 'missing' ? undefined : '0'.repeat(64) };
+    };
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked(mode === 'unreadable' ? 'commit_guard_unavailable' : 'audit_changed'));
+    expect(fixture.store.getCandidate(fixture.candidate.id)?.version).toBe(1);
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+
+  it('rejects a semantic report that substitutes the oracle revision for the QA Git revision', async () => {
+    const fixture = await lessonFixture();
+    fixture.alter(report => ({ ...report, binding: { ...report.binding, qa: { targetRevision: 'revision-1' } } }));
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked('binding_mismatch'));
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+
+  it.each(['missing-root-cause', 'missing-qa-evidence'] as const)('requires lesson semantic coverage: %s', async defect => {
+    const fixture = await lessonFixture();
+    fixture.alter(report => ({ ...report, assertions: defect === 'missing-root-cause'
+      ? report.assertions.filter(assertion => assertion.node !== 'lesson.rootCause')
+      : report.assertions.map(assertion => assertion.node === 'lesson.fix' ? { ...assertion, evidence: assertion.evidence.slice(0, 1) } : assertion) }));
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked(defect === 'missing-root-cause'
+      ? 'insufficient_coverage' : 'insufficient_evidence'));
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+
   it.each(['fact', 'process'] as const)('runs independent %s assertions from an actual snapshot and stores auditable bindings', async kind => {
     const fixture = await setup(kind);
     const result = await validateLearningCandidate(fixture.input, fixture.deps);
@@ -334,11 +433,9 @@ describe('validateLearningCandidate production boundary', () => {
     expect(fixture.store.getCandidate(fixture.candidate.id)?.state).toBe('candidate');
   });
 
-  it.each(['lesson', 'skill', 'tool'] as const)('explicitly blocks %s before selecting or running a checker', async kind => {
+  it.each(['skill', 'tool'] as const)('explicitly blocks %s before selecting or running a checker', async kind => {
     const fixture = await setup('fact', true, true, proposal => {
       const cases = (['normal', 'recovery', 'refusal'] as const).map(kind => ({ kind, input: 'example', expected: 'verified' }));
-      if (kind === 'lesson') return { ...proposal, kind, payload: { trigger: 'failure', rootCause: 'missing lock',
-        rootCauseStatus: 'confirmed', attempts: [], fix: 'use lock', prevention: ['regression'] } };
       if (kind === 'skill') return { ...proposal, kind, payload: { newReason: 'no existing skill', triggers: ['review'],
         prohibitedConditions: [], inputs: [], branches: [], recovery: [], completion: 'reviewed', patch: 'review', evaluationCases: cases } };
       return { ...proposal, kind, payload: { existingTools: [], inputSchema: {}, outputSchema: {}, dependencies: [],
@@ -422,7 +519,7 @@ describe('validateLearningCandidate production boundary', () => {
   it.each(['ref', 'revision', 'snapshotDigest', 'scope'])('rejects a correctly shaped receipt for the wrong target %s', async key => {
     const fixture = await setup();
     fixture.alter(report => ({ ...report, binding: { ...report.binding,
-      target: { ...(report.binding.target as object), [key]: key === 'snapshotDigest' ? 'a'.repeat(64) : key === 'scope' ? 'github:other/api' : 'different' } } }));
+      target: { ...report.binding.target, [key]: key === 'snapshotDigest' ? 'a'.repeat(64) : key === 'scope' ? 'github:other/api' : 'different' } } }));
     expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked('binding_mismatch'));
   });
 

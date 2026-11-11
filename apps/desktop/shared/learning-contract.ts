@@ -39,7 +39,8 @@ const PHASES = ["prepared", "applied", "committed", "conflict", "superseded"] as
 const VALIDATION_CODES = ["invalid_input", "candidate_unavailable", "scope_mismatch", "stale_candidate", "unsupported_kind",
   "evidence_unavailable", "insufficient_evidence", "source_unavailable", "unauthorized", "authorization_changed", "checker_unavailable",
   "checker_changed", "target_mismatch", "verification_failed", "invalid_receipt", "output_limit", "binding_mismatch", "insufficient_coverage",
-  "assertion_failed", "cancelled", "timed_out", "storage_failed", "commit_guard_unavailable"] as const satisfies readonly Extract<LearningValidationResult, { status: "blocked" }>["code"][];
+  "assertion_failed", "cancelled", "timed_out", "storage_failed", "commit_guard_unavailable", "qa_unconfigured", "qa_not_independent",
+  "audit_unavailable", "audit_changed", "qa_unverified"] as const satisfies readonly Extract<LearningValidationResult, { status: "blocked" }>["code"][];
 const BLOCKED_CODES = ["publication_recovery_blocked", "knowledge_grant_unavailable", "knowledge_target_ambiguous", "knowledge_configuration_unavailable"] as const;
 
 function checked<Result>(operation: () => Result): Result {

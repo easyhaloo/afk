@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript、Zod、Node SQLite、现有插件运行时与 Agent Provider、Vitest、已有 Python Wiki 工具、Electron / React / Playwright。
 
-**Status:** 实施中；2026-11-11 计划复核。当前本地提交基线为 `f99e9aa2`，保存的对应 CI `43014598002` 为 success，含 Linux Electron 102 项；该结论不覆盖当前工作树中未提交的只读诊断、lesson、提案运行、Desktop 错误边界及冻结容器实现。最近真实 Claude 提炼因 `MISSING_RESULT` 失败，五类资产与产品完整闭环未交付。第 13、17.11、17.12 节保留阶段记录；第 18 节为统一开发计划、实施顺序及验收口径，第 18.12 节列剩余交付清单，第 18.13 节给出可派发任务及里程碑。对应 [English plan](2026-11-09-session-distillation.md)，已有基础见 [前一阶段计划](2026-11-08-runtime-learning-and-validation.zh.md)。
+**Status:** 实施中；2026-11-12 复核。只读诊断切片已提交推送 `d94b2607`，对应 CI `43027634218` success，六项选中 job 通过、两项路径过滤 job skipped；不能据此验收后续切片。lesson 提交时身份竞态、容器 helper 输出管道收尾及 Desktop QA 边界均已独立复核通过，进入集成；真实 Electron 学习四场景本地通过。lesson 发布 guard、知识接线及技能工具提案仍在开发。最近真实 Claude 提炼仍因 `MISSING_RESULT` 失败，完整五资产系统尚未交付。第 13、17.11、17.12 节保留阶段记录；第 18 节为统一计划，第 18.12 节列剩余门槛，第 18.13 节列任务卡。对应 [English plan](2026-11-09-session-distillation.md)，已有基础见 [前一阶段计划](2026-11-08-runtime-learning-and-validation.zh.md)。
 
 ---
 
@@ -1166,6 +1166,10 @@ pnpm --filter afk-control-electron e2e
 本清单承接 W00–W12，不重开已审查实现。先集成现有补丁，再补缺口；真实模型、外部服务、安装产物与自动化 fixture 分开记账。每个工作包保留负责人、依赖、提交、反例、审查结论及最终收据。
 
 本次核实：`64044a27` 的 CI `43007899210` 因插件清单版本不一致和隔离 HOME 未传递 XAUTHORITY 失败；相关共享包、Wiki Python 与文档检查通过。修复提交 `f99e9aa2` 的 CI `43014598002` 已 success：共享包与 CLI、元数据、Wiki Python、文档及 Linux Electron 检查均通过，Electron 为 102 项；两项路径条件未命中的 advisory/PRD job 为 skipped。该 CI 不覆盖后续未提交的只读诊断、lesson 或冻结执行实现。
+
+2026-11-12 更新：只读诊断及 JumpServer unknown 已在 `d94b2607` 推送，精确提交 CI `43027634218` success，六项选中 job 全通过、advisory/PRD 两项 skipped。lesson 的独立质量审查发现获 SQLite 写锁后遗漏晚到 analysisRunId/sessionId 的 P1；现已增加持锁实时独立性检查，永久三例先红后绿、相关三文件 334 项通过，仍待独立修复复核。原独立探针修后为 17 pass / 2 fail，两个 worker 冲突已触发 guard 拒绝，但探针异常时未赋计时值；保留原结果，审查者须修正计时仪表并保留业务与等待断言。容器 helper 继承输出管道的 P2 已由作者修复，独立复核仍待完成。Desktop 四场景 Electron exit0，包括真实 Main 返回 qa_unconfigured、界面阻断、候选 v1 不变及验证器零调用；不代表其余四种 QA 码均有真实 Electron 覆盖。
+
+本轮后续复核：审查者仅将独立探针的计时赋值移入 finally，原业务、100ms writer 等待、guard 调用次数和重开 ledger 断言不变，19 项独立执行全通过，lesson P1 关闭。容器 P2 原22项、原P1 16项、原生CLI 16项及真实Docker 3项独立执行共57项通过；五个本轮自有 operation 的容器和镜像清空，基础镜像保留。Desktop 五文件规格与质量通过，范围不扩展为五资产完整发布。上述结论允许相应切片进入集成，不涵盖正在实现的 lesson 发布 guard 与知识接线。
 
 #### 第一阶段：核实基线并完成可信执行（W00 / W01 / W02）
 

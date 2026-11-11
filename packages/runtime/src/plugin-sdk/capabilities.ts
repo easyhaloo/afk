@@ -121,6 +121,18 @@ export interface ContextQuery {
   readonly scope: string;
   readonly prompt: string;
   readonly limit?: number;
+  readonly applicability?: {
+    readonly version?: string;
+    readonly environment?: string;
+  };
+  readonly target?: {
+    readonly project: string;
+    readonly revision?: string;
+    readonly dirty?: boolean;
+    readonly productVersions?: Readonly<Record<string, string>>;
+    readonly runtimeVersions?: Readonly<Record<string, string>>;
+    readonly conditions?: Readonly<Record<string, boolean>>;
+  };
 }
 
 export interface ContextFragment {

@@ -114,6 +114,17 @@ a concrete configured builtin factory. Configured GitHub/GitLab participate in
 the same managed assembly through their registered tracker/backlog contracts;
 they are selected by project rather than treated as independent issue adapters.
 
+The Docker adapter also provides an internal frozen-execution primitive: capture
+a bounded input tree, build against a pinned image ID and execute as nonroot with
+a read-only root/input, no network, zero capabilities and bounded isolated scratch.
+Receipts bind actual inputs, commands, images and output. Ownership is reported
+before allocation; uncertain cleanup retains an ownership-carrying error rather
+than claiming release. Timeout, cancellation and output limits also terminate
+this invocation's output pipes. The primitive trusts the host runtime, daemon,
+administrators and base image. Ordinary development containers do not acquire
+equivalent isolation; Podman/remote equivalents, skill/tool semantic validation
+and product wiring require separate qualification.
+
 Observability is an additional extension surface, not a thirteenth family in
 this matrix. `observability.provider`, `observe.event-store`, `observe.evidence`,
 `observe.tracing`, and `observe.metrics` expose event/evidence/tracer/metrics

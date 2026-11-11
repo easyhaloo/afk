@@ -100,6 +100,13 @@ OAuth/OIDC 或远程制品上传；这些需要已安装工厂或具体的 confi
 Configured GitHub/GitLab 通过已注册的 tracker/backlog 契约参与相同的 managed
 assembly，按项目匹配采用，与独立 issue 适配器区分。
 
+Docker 适配器另有内部冻结执行原语：先捕获受限输入树，以固定镜像 ID 构建输入，
+在非 root、只读根和输入、无网络、零 capability 及有界独立 scratch 中执行。
+执行收据绑定实际输入、命令、镜像与输出；分配前报告资源所有权，清理无法确认时
+保留所有权错误，不宣称资源已经释放。超时、取消与输出上限也结束本调用的输出管道。
+该原语信任宿主 runtime、daemon、管理员与基础镜像；普通开发容器不自动获得同等隔离，
+Podman/远程等价实现、技能工具语义验证及产品接线仍需各自验收。
+
 Observability 是额外扩展面，不计入上表十二类：`observability.provider`、
 `observe.event-store`、`observe.evidence`、`observe.tracing`、`observe.metrics`
 提供 event/evidence/tracer/metrics 契约。已启用的通用及专用 tracing、metrics、

@@ -23,6 +23,7 @@ import type { ContainerProvider } from './types.js';
 import { EnvVarAllowlist } from './env-allowlist.js';
 import { homedir } from 'os';
 import { join } from 'path';
+import { executeFrozenContainer, type FrozenExecutionOptions, type FrozenExecutionResult } from './frozen-execution.js';
 
 const CONTAINER_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'persistent-filesystem',
@@ -73,6 +74,10 @@ export class ContainerSandboxProvider implements SandboxProvider {
   async createWorktree(options: { iid: number; baseBranch: string }): Promise<WorktreeInfo> {
     const wt = await this.worktreeManager.create(options.iid, options.baseBranch);
     return { iid: wt.iid, path: wt.path, branch: wt.branch };
+  }
+
+  executeFrozen(options: FrozenExecutionOptions): Promise<FrozenExecutionResult> {
+    return executeFrozenContainer(this.provider, options);
   }
 
   async create(options: SandboxOptions): Promise<Sandbox> {

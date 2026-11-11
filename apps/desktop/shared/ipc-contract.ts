@@ -3,6 +3,7 @@ import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 import type { DesktopPluginApi } from "./plugin-contract.js";
 import type { DesktopExperienceApi } from "./experience-contract.js";
+import type { DesktopLearningApi } from "./learning-contract.js";
 
 export type DesktopUpdateStatus = { state: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; message?: string; };
 
@@ -190,6 +191,7 @@ export type ExecutionAttachInput = {
 };
 
 export type DesktopApi = {
+  learning: DesktopLearningApi;
   experiences: DesktopExperienceApi;
   plugins: DesktopPluginApi;
   update: { getStatus: () => Promise<DesktopUpdateStatus>; check: () => Promise<DesktopUpdateStatus>; download: () => Promise<DesktopUpdateStatus>; install: () => Promise<boolean>; onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void; };
@@ -271,6 +273,13 @@ export const IPC_CHANNELS = {
   experiencesList: "afk:experiences-list",
   experiencesVerify: "afk:experiences-verify",
   experiencesRevoke: "afk:experiences-revoke",
+  learningProjects: "learning:projects",
+  learningJobs: "learning:jobs",
+  learningCandidates: "learning:candidates",
+  learningValidate: "learning:validate",
+  learningKnowledgePrepare: "learning:knowledge-prepare",
+  learningKnowledgePublish: "learning:knowledge-publish",
+  learningKnowledgeReconcile: "learning:knowledge-reconcile",
   pluginsList: "afk:plugins-list",
   pluginsInstall: "afk:plugins-install",
   pluginsSetEnabled: "afk:plugins-set-enabled",

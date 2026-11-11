@@ -6,7 +6,8 @@ import { buildEvidencePack } from '../learning/evidence.js';
 import { createBuiltinAgentPlugins } from './builtin-providers.js';
 import { createConfiguredPlugins } from './configured.js';
 import { builtinPluginManifests } from './builtin-manifests.js';
-import { createLearningPlugin } from './learning.js';
+import { createLearningPlugin, learningPluginManifest } from './learning.js';
+import { validatePluginConfig } from './configuration.js';
 import { PluginRuntime } from './runtime.js';
 import { createPluginRunObserver } from './observability.js';
 import { CandidateStore } from '../learning/candidate-store.js';
@@ -35,6 +36,47 @@ async function fixture(config: unknown = {}) {
 }
 
 describe('optional learning plugin', () => {
+  it('routes validation through saved configuration and rejects client-supplied execution authority', async () => {
+    const config = { enabled: true, validation: { configurationFile: '/private/learning-checkers.json' } };
+    validatePluginConfig(learningPluginManifest.configSchema, config);
+    const { runtime, homeDir } = await fixture(config);
+    const request = { scope: 'github:acme/api', candidateId: 'a'.repeat(64), expectedVersion: 1, checkerId: 'approval-policy' };
+    expect(await runtime.dispatchSystemAction('learning.validate', request)).toEqual({ status: 'blocked', code: 'candidate_unavailable' });
+    for (const extra of [{ passed: true }, { target: '/private/arbitrary' }, { command: ['sh', '-c', 'true'] }]) {
+      expect(await runtime.dispatchSystemAction('learning.validate', { ...request, ...extra })).toEqual({ status: 'blocked', code: 'invalid_input' });
+    }
+    expect(existsSync(join(homeDir, '.afk', 'learning', 'candidates.sqlite'))).toBe(false);
+    await runtime.close();
+    await expect(runtime.dispatchSystemAction('learning.validate', request)).rejects.toThrow();
+    for (const validation of [{}, { configurationFile: 'relative.json' }, { configurationFile: '/private/checkers.json', passed: true }]) {
+      expect(() => createLearningPlugin({ config: { validation } })).toThrow();
+    }
+  });
+
+  it('provides isolated copies of saved execution context for the exact project only', async () => {
+    const context = { applicability: { environment: 'ci', version: 'asset-v2' },
+      target: { project: 'github:acme/api', runtimeVersions: { node: '22.16' }, conditions: { approved: true } } };
+    const config = { executionContexts: [context] };
+    validatePluginConfig(learningPluginManifest.configSchema, config);
+    const { runtime } = await fixture(config);
+    expect(await runtime.dispatchSystemAction('learning.context', { scope: 'github:other/api' })).toEqual({});
+    const selected = await runtime.dispatchSystemAction('learning.context', { scope: context.target.project }) as typeof context;
+    selected.target.runtimeVersions.node = '99';
+    const settings = await runtime.dispatchSystemAction('learning.settings', {}) as typeof config;
+    settings.executionContexts[0].target.conditions.approved = false;
+    expect(await runtime.dispatchSystemAction('learning.context', { scope: context.target.project })).toEqual(context);
+  });
+
+  it('rejects ambiguous, unbounded or fabricated saved execution targets', () => {
+    const context = { target: { project: 'github:acme/api' } };
+    for (const executionContexts of [[context, context], Array.from({ length: 65 }, () => context),
+      [{ applicability: { environment: 'ci' } }], [{ target: { project: 'not-a-project' } }],
+      [{ target: { ...context.target, revision: 'a'.repeat(40) } }], [{ target: { ...context.target, dirty: false } }],
+      [{ target: { ...context.target, conditions: { approved: 'true' } } }]]) {
+      expect(() => createLearningPlugin({ config: { executionContexts } })).toThrow();
+    }
+  });
+
   it('takes managed execution through independent QA and automatic intake to durable candidates', async () => {
     const { runtime, homeDir } = await fixture({ enabled: true });
     vi.stubEnv('HOME', homeDir);

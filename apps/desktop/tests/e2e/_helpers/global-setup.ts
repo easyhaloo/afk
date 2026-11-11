@@ -6,6 +6,10 @@ export default function globalSetup() {
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
     stdio: "inherit",
   });
+  execFileSync("pnpm", ["--filter", "afk", "build"], {
+    cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    stdio: "inherit",
+  });
   execFileSync(process.execPath, ["scripts/build-main.mjs", "--e2e"], {
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
     stdio: "inherit",

@@ -79,7 +79,8 @@ export interface ValidationReceipt extends CandidateValidation { candidateId: st
 export type PublicationInput = z.infer<typeof publicationSchema>;
 export interface PublicationRecord extends PublicationInput {
   candidateId: string; candidateVersion: number; candidateDigest: string; evidenceDigest: string;
-  phase: 'prepared' | 'applied' | 'committed' | 'conflict'; observedDigest?: string | null; blockedReason?: string;
+  phase: 'prepared' | 'applied' | 'committed' | 'conflict' | 'superseded'; supersededBy?: string;
+  observedDigest?: string | null; blockedReason?: string;
 }
 
 function digest(input: unknown): string {
@@ -389,13 +390,14 @@ export class CandidateStore {
     });
   }
 
-  recordValidation(id: string, expectedVersion: number, input: CandidateValidation): LearningCandidate {
+  recordValidation(id: string, expectedVersion: number, input: CandidateValidation, beforeCommit?: () => void): LearningCandidate {
     versionSchema.parse(expectedVersion);
     const parsed = validationSchema.parse(input);
     return this.write(() => {
       const current = this.requireCandidate(id, expectedVersion);
       if (current.digest !== parsed.candidateDigest || current.evidenceDigest !== parsed.evidenceDigest) throw new Error('Validation candidate or evidence digest differs');
       if (current.state !== 'candidate') throw new Error('Validation requires candidate state');
+      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Validation beforeCommit guard must be synchronous and return no value');
       const next = parsed.passed ? this.move(current, 'validated') : current;
       const receipt: ValidationReceipt = { ...parsed, candidateId: id, candidateVersion: current.version, validatedVersion: next.version };
       this.insertImmutable('validation', digest([id, current.version, parsed.validatorVersion]), receipt);
@@ -414,22 +416,62 @@ export class CandidateStore {
     const parsed = publicationSchema.parse(input);
     return this.write(() => {
       const current = this.requireCandidate(id, expectedVersion);
-      const receipt = this.getValidation(id);
-      if (current.state !== 'validated' || !receipt?.passed || receipt.validatedVersion !== current.version
-        || receipt.candidateDigest !== current.digest || receipt.evidenceDigest !== current.evidenceDigest
-        || receipt.validatorVersion !== parsed.validatorVersion) throw new Error('Publication requires a matching validation receipt');
-      this.assertPublicationTarget(current, parsed);
+      this.assertPublicationValidation(current, parsed);
       const record: PublicationRecord = { ...parsed, candidateId: id, candidateVersion: current.version,
         candidateDigest: current.digest, evidenceDigest: current.evidenceDigest, phase: 'prepared' };
       const existing = this.read<PublicationRecord>('publication', parsed.key);
       if (existing) {
-        const { phase: _phase, observedDigest: _observed, blockedReason: _reason, ...identity } = existing;
+        const { phase: _phase, observedDigest: _observed, blockedReason: _reason, supersededBy: _successor, ...identity } = existing;
         if (canonicalLearningJson(identity) !== canonicalLearningJson({ ...record, phase: undefined })) throw new Error('Publication same key has different content');
         return existing;
       }
       if (this.listUnfinishedPublications().some(entry => entry.candidateId === id)) throw new Error('Candidate has an unfinished publication');
       this.put('publication', parsed.key, record);
       return record;
+    });
+  }
+
+  supersedePreparedPublication(oldKey: string, newInput: PublicationInput): PublicationRecord {
+    learningIdentitySchema.parse(oldKey);
+    const parsed = publicationSchema.parse(newInput);
+    if (parsed.key === oldKey) throw new Error('Superseding publication requires a different key');
+    return this.write(() => {
+      const old = this.getPublication(oldKey);
+      if (!old) throw new Error('Publication not found');
+      if (old.phase === 'superseded') {
+        if (old.supersededBy !== parsed.key) throw new Error('Publication already superseded by a different key');
+      } else if (old.phase !== 'prepared') throw new Error('Supersession requires a prepared publication phase');
+      if (old.observedDigest != null) throw new Error('Supersession refuses observed publication writes');
+      if (old.blockedReason) throw new Error('Supersession refuses a blocked publication');
+      if (old.targetRef !== parsed.targetRef || old.validatorVersion !== parsed.validatorVersion) {
+        throw new Error('Supersession must preserve validator and target identity');
+      }
+      const current = this.requireCandidate(old.candidateId, old.candidateVersion);
+      this.assertPublicationValidation(current, old);
+      if (current.digest !== old.candidateDigest || current.evidenceDigest !== old.evidenceDigest) {
+        throw new Error('Publication candidate or evidence identity changed');
+      }
+      const source = this.requireRequest(current.requestKey);
+      if (source.blockedReason || source.request.evidenceDigest !== current.evidenceDigest
+        || !this.getProcessingReceipt(current.requestKey)?.candidateIds.includes(current.id)) {
+        throw new Error('Publication source provenance is no longer valid');
+      }
+      this.assertPublicationTarget(current, parsed);
+      const next: PublicationRecord = { ...parsed, candidateId: current.id, candidateVersion: current.version,
+        candidateDigest: current.digest, evidenceDigest: current.evidenceDigest, phase: 'prepared' };
+      const existing = this.getPublication(parsed.key);
+      if (old.phase === 'superseded') {
+        if (!existing) throw new Error('Superseded publication successor not found');
+        const { phase: _phase, observedDigest: _observed, blockedReason: _reason, supersededBy: _successor, ...identity } = existing;
+        if (canonicalLearningJson(identity) !== canonicalLearningJson({ ...next, phase: undefined })) {
+          throw new Error('Superseded publication same key has different content');
+        }
+        return existing;
+      }
+      if (existing) throw new Error('Superseding publication key already exists');
+      this.put('publication', oldKey, { ...old, phase: 'superseded', supersededBy: parsed.key });
+      this.put('publication', parsed.key, next);
+      return next;
     });
   }
 
@@ -441,6 +483,7 @@ export class CandidateStore {
       const publication = this.read<PublicationRecord>('publication', key);
       if (!publication) throw new Error('Publication not found');
       if (publication.phase === phase && publication.observedDigest === observedDigest) return publication;
+      if (publication.phase === 'committed' && phase === 'applied' && publication.observedDigest === observedDigest) return publication;
       if (!((publication.phase === 'prepared' && phase === 'applied') || (publication.phase === 'applied' && phase === 'committed'))) throw new Error('Invalid publication phase');
       const current = this.requireCandidate(publication.candidateId);
       this.assertPublicationTarget(current, publication);
@@ -459,8 +502,13 @@ export class CandidateStore {
   }
 
   getPublication(key: string): PublicationRecord | undefined { return this.read('publication', learningIdentitySchema.parse(key)); }
+  listPublications(candidateId?: string): PublicationRecord[] {
+    const id = candidateId === undefined ? undefined : learningDigestSchema.parse(candidateId);
+    return this.all<PublicationRecord>('publication').filter(entry => id === undefined || entry.candidateId === id);
+  }
+
   listUnfinishedPublications(): PublicationRecord[] {
-    return this.all<PublicationRecord>('publication').filter(entry => entry.phase === 'prepared' || entry.phase === 'applied');
+    return this.listPublications().filter(entry => entry.phase === 'prepared' || entry.phase === 'applied');
   }
 
   close(): void {
@@ -483,6 +531,14 @@ export class CandidateStore {
     if (publication.originalDigest !== (proposal.payload.targetSkill ? proposal.payload.originalDigest : null)) {
       throw new Error('Publication original digest differs from validated skill version');
     }
+  }
+
+  private assertPublicationValidation(candidate: LearningCandidate, publication: PublicationInput): void {
+    const receipt = this.getValidation(candidate.id);
+    if (candidate.state !== 'validated' || !receipt?.passed || receipt.validatedVersion !== candidate.version
+      || receipt.candidateDigest !== candidate.digest || receipt.evidenceDigest !== candidate.evidenceDigest
+      || receipt.validatorVersion !== publication.validatorVersion) throw new Error('Publication requires a matching validation receipt');
+    this.assertPublicationTarget(candidate, publication);
   }
 
   private requireCandidate(id: string, expectedVersion?: number): LearningCandidate {

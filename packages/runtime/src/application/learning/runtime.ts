@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { simpleGit } from 'simple-git';
 import type { RunEvent } from '@afk/core';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
@@ -11,7 +12,7 @@ import type { ContextFragment, ContextQuery, ContextSource, ProviderOperationOpt
 import type { PluginRuntime } from '../plugins/runtime.js';
 import type { FailureDiagnostic } from '../workflows/failure-diagnostic.js';
 import { writeReferenceContext } from '../workflows/context-file.js';
-import { ExperienceStore, type ExperienceRecord } from './experience-store.js';
+import { ExperienceStore, experienceContextMatches, experienceQueryContextSchema, type ExperienceQueryContext, type ExperienceRecord } from './experience-store.js';
 
 export function experienceStorePath(homeDir = homedir()): string {
   return join(homeDir, '.afk', 'learning', 'experience.sqlite');
@@ -75,10 +76,12 @@ export class ExperienceContextProvider implements ContextSource {
   async gather(query: ContextQuery, options?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
     checkAbort(options);
     parseCanonicalProject(query.scope);
+    if ((query.target && !Object.hasOwn(query, 'target')) || (query.applicability && !Object.hasOwn(query, 'applicability'))) return [];
     if (!existsSync(this.file)) return [];
     const store = new ExperienceStore({ file: this.file });
     try {
-      return store.recall({ scope: query.scope, prompt: query.prompt.slice(0, 2000), limit: query.limit ?? 5, maxChars: 8000 }).map(record => ({
+      return store.recall({ scope: query.scope, prompt: query.prompt.slice(0, 2000), limit: query.limit ?? 5, maxChars: 8000,
+        applicability: query.applicability, target: query.target }).map(record => ({
         origin: `experience:${record.id}; verification:run:${record.verifiedEvidence!.runId}; expires:${record.expiresAt}`,
         content: `Trigger: ${record.trigger}\nRoot cause: ${record.rootCause}\nValidated correction: ${record.action}\nEvidence: ${record.verifiedEvidence!.evidence.join(', ')}`,
       }));
@@ -86,17 +89,73 @@ export class ExperienceContextProvider implements ContextSource {
   }
 }
 
+export async function resolveExperienceQueryContext(input: {
+  workItemId: string; worktreePath: string; plugins?: PluginRuntime;
+} & ExperienceQueryContext): Promise<ExperienceQueryContext> {
+  const scope = experienceScope(input.workItemId);
+  if ((input.target && !Object.hasOwn(input, 'target')) || (input.applicability && !Object.hasOwn(input, 'applicability'))) {
+    throw new Error('Execution context must use own properties');
+  }
+  const explicit = experienceQueryContextSchema.parse({ applicability: input.applicability, target: input.target });
+  const configured = input.plugins?.listSystemActions().includes('learning.context')
+    ? experienceQueryContextSchema.parse(await input.plugins.dispatchSystemAction('learning.context', { scope })) : {};
+  if (configured.target && configured.target.project !== scope) throw new Error('Configured execution target belongs to another project');
+  const context = experienceQueryContextSchema.parse({
+    applicability: explicit.applicability || configured.applicability
+      ? { ...configured.applicability, ...explicit.applicability } : undefined,
+    target: explicit.target || configured.target ? { ...configured.target, ...explicit.target } : undefined,
+  });
+  if (context.target && context.target.project !== scope) throw new Error('Execution target belongs to another project');
+  let revision: string | undefined;
+  let dirty: boolean | undefined;
+  try {
+    const git = simpleGit(input.worktreePath);
+    const root = await fs.realpath(input.worktreePath);
+    if (await fs.realpath((await git.revparse(['--show-toplevel'])).trim()) === root) {
+      const before = (await git.revparse('HEAD')).trim().toLowerCase();
+      const status = await git.status(['--untracked-files=all']);
+      const after = (await git.revparse('HEAD')).trim().toLowerCase();
+      if (before === after && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(after)) {
+        revision = after;
+        dirty = !status.isClean();
+      }
+    }
+  } catch {}
+  return { applicability: context.applicability, target: { ...context.target, project: scope, revision, dirty } };
+}
+
 export async function prepareExperienceContext(input: {
   workItemId: string; worktreePath: string; prompt: string; plugins?: PluginRuntime;
-}): Promise<string | undefined> {
+} & ExperienceQueryContext): Promise<string | undefined> {
   const scope = experienceScope(input.workItemId);
   const directory = join(await fs.realpath(input.worktreePath), '.afk');
   try {
     if (await fs.realpath(directory) !== directory) throw new Error('Experience context directory must not be a symbolic link');
     await fs.rm(join(directory, 'experience-context.md'), { force: true });
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const provider = input.plugins ? input.plugins.getContextProvider('context.experience') : new ExperienceContextProvider();
-  const fragments = provider ? await provider.gather({ scope, prompt: input.prompt, limit: 5 }) : [];
+  const context = await resolveExperienceQueryContext(input);
+  const query: ContextQuery = { scope, prompt: input.prompt.slice(0, 2000), limit: 5, ...context };
+  for (const value of [query.applicability, query.target?.conditions, query.target?.productVersions, query.target?.runtimeVersions, query.target, query]) {
+    if (value) Object.freeze(value);
+  }
+  const providers = input.plugins
+    ? [input.plugins.getContextProvider('context.experience'), input.plugins.getContextProvider('context.knowledge')]
+    : [new ExperienceContextProvider()];
+  const groups = await Promise.all(providers.map(provider => provider ? provider.gather(query) : []));
+  const selected: ContextFragment[] = [];
+  for (let index = 0; index < 5 && selected.length < 5; index++) {
+    for (const group of groups) {
+      const fragment = group[index];
+      if (fragment?.content && selected.length < 5) selected.push({ ...fragment, origin: fragment.origin.slice(0, 1000) });
+    }
+  }
+  let remaining = 7600;
+  const fragments = selected.map((fragment, index) => {
+    const available = Math.floor(remaining / (selected.length - index)) - fragment.origin.length - 16;
+    const content = fragment.content.slice(0, available);
+    remaining -= fragment.origin.length + content.length + 16;
+    return { ...fragment, content };
+  });
   if (fragments.length) return writeReferenceContext(input.worktreePath, 'experience-context.md', fragments);
   return undefined;
 }
@@ -105,6 +164,24 @@ export async function verifyExperienceRun(input: {
   scope: string; runId: string; evidence: readonly string[]; root?: string; workItemId?: string;
 }): Promise<string[]> {
   return (await successfulRunEvidence(input)).evidence;
+}
+
+export async function verifyApplicableExperience(input: {
+  id: string; scope: string; runId: string; evidence: readonly string[]; context: ExperienceQueryContext;
+  root?: string; file?: string;
+}): Promise<ExperienceRecord> {
+  const context = experienceQueryContextSchema.parse(input.context);
+  const audit = await successfulRunEvidence(input);
+  const target = audit.qaTarget;
+  if (!target?.target?.revision || target.target.dirty !== false || target.target.project !== input.scope
+    || target.target.revision !== audit.qaCommit || !experienceContextMatches(context, target)) {
+    throw new Error('Experience applicability requires a trusted QA target matching the exact QA revision');
+  }
+  const store = new ExperienceStore({ file: input.file ?? experienceStorePath() });
+  try {
+    if (!store.get(input.id, input.scope)) throw new Error('Experience does not belong to verification scope');
+    return store.verify(input.id, { runId: input.runId, evidence: audit.evidence }, context);
+  } finally { store.close(); }
 }
 
 export async function verifyAdoptionRun(input: {
@@ -129,7 +206,7 @@ export async function verifyAdoptionRun(input: {
 
 async function successfulRunEvidence(input: Parameters<typeof verifyExperienceRun>[0]): Promise<{
   evidence: string[]; workflowName?: string; publishedChange?: string; completionEvent: string;
-  implementationCommit?: string; qaCommit?: string; changeUrl?: string;
+  implementationCommit?: string; qaCommit?: string; changeUrl?: string; qaTarget?: ExperienceQueryContext;
 }> {
   parseCanonicalProject(input.scope);
   const events = new JsonlEventStore({ root: input.root ?? process.env.AFK_EVENT_STORE_DIR });
@@ -142,7 +219,7 @@ async function successfulRunEvidence(input: Parameters<typeof verifyExperienceRu
 
 export function successfulRunEvidenceFromEvents(input: Omit<Parameters<typeof verifyExperienceRun>[0], 'root'>, history: readonly RunEvent[]): {
   evidence: string[]; workflowName?: string; publishedChange?: string; completionEvent: string;
-  implementationCommit?: string; qaCommit?: string; changeUrl?: string;
+  implementationCommit?: string; qaCommit?: string; changeUrl?: string; qaTarget?: ExperienceQueryContext;
 } {
   parseCanonicalProject(input.scope);
   let verified = false;
@@ -155,12 +232,19 @@ export function successfulRunEvidenceFromEvents(input: Omit<Parameters<typeof ve
   let implementationCommit: string | undefined;
   let qaCommit: string | undefined;
   let changeUrl: string | undefined;
+  let qaTarget: ExperienceQueryContext | undefined;
+  let qaTargetTrusted = false;
   for (const event of history) {
     if (event.context.runId !== input.runId) throw new Error('Verification evidence belongs to another run');
     if (event.context.purpose === 'learning') throw new Error('Learning runs cannot verify ordinary execution experience');
     if (experienceScope(event.context.workItemId) !== input.scope) throw new Error('Verification run belongs to another project');
     if (input.workItemId !== undefined && event.context.workItemId !== input.workItemId) throw new Error('Verification run belongs to another work item');
     const data = event.data;
+    const trustedActor = ['system', 'cli'].includes(event.context.actor.kind);
+    if (data.kind === 'qa.started') qaTargetTrusted = trustedActor;
+    if (!trustedActor && (data.kind === 'qa.passed' || data.kind === 'run.finished'
+      || data.kind === 'human_gate.opened' || data.kind === 'change.merge_verified'
+      || (data.kind === 'commit.recorded' && data.phase === 'qa'))) qaTargetTrusted = false;
     if (data.kind === 'workflow.recorded') workflowName = data.name.slice(0, 128);
     if (data.kind === 'commit.recorded') {
       const commit = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(data.commitSha) ? data.commitSha.toLowerCase() : undefined;
@@ -172,9 +256,16 @@ export function successfulRunEvidenceFromEvents(input: Omit<Parameters<typeof ve
       verified = completed = false;
       publishedChange = undefined;
       changeUrl = qaCommit = undefined;
+      qaTarget = undefined;
+    }
+    if (data.kind === 'decision.made' && data.command === 'experience.qa-target' && qaStarted && !verified) {
+      qaTarget = undefined;
+      if (data.accepted && data.reason && data.reason.length <= 16384 && trustedActor) {
+        try { qaTarget = experienceQueryContextSchema.parse(JSON.parse(data.reason)); } catch {}
+      }
     }
     if (data.kind === 'qa.passed' && qaStarted) verified = true;
-    if (data.kind === 'qa.failed') verified = completed = false;
+    if (data.kind === 'qa.failed') { verified = completed = qaStarted = false; qaTarget = undefined; }
     if (data.kind === 'change.published' && verified) {
       publishedChange = data.changeId;
       changeUrl = undefined;
@@ -196,5 +287,5 @@ export function successfulRunEvidenceFromEvents(input: Omit<Parameters<typeof ve
   }
   if (!verified || !completed || failed || !completionEvent) throw new Error('Experience verification requires a successful independent QA run');
   return { evidence: [...new Set([...input.evidence, `run:${input.runId}#qa.passed`])], workflowName, publishedChange, completionEvent,
-    implementationCommit, qaCommit, changeUrl };
+    implementationCommit, qaCommit, changeUrl, qaTarget: qaTargetTrusted ? qaTarget : undefined };
 }

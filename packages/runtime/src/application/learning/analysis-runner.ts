@@ -10,7 +10,7 @@ import { DISTILLATION_LIMITS } from './contracts.js';
 
 const requiredFlags = ['--safe-mode', '--tools', '--permission-mode', '--permission-prompts',
   '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--setting-sources',
-  '--settings', '--no-session-persistence', '--no-chrome', '--session-id'];
+  '--settings', '--no-session-persistence', '--no-chrome', '--session-id', '--system-prompt'];
 
 export interface AnalysisExecutionInput {
   provider: AgentProvider;
@@ -63,7 +63,8 @@ export async function executeAnalysis(input: AnalysisExecutionInput): Promise<An
       } finally { probe.kill('SIGTERM'); }
     }
     catch { throw controller.signal.aborted ? cancellationError() : new Error('analysis_unsupported'); }
-    if (requiredFlags.some(flag => !help.includes(flag))) throw new Error('analysis_unsupported');
+    const supported = new Set(help.match(/--[a-z][a-z0-9-]*/g) ?? []);
+    if (requiredFlags.some(flag => !supported.has(flag))) throw new Error('analysis_unsupported');
     if (controller.signal.aborted) throw cancellationError();
     directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'learning-analysis-'));
     if (controller.signal.aborted) throw cancellationError();

@@ -55,6 +55,8 @@ import { SqliteLocalConfigStore } from "@afk/runtime/storage";
 import { createPluginService } from "../services/plugin-service.js";
 import { createGoogleAuthService } from "../services/google-auth-service.js";
 import { createExperienceService } from "../services/experience-service.js";
+import { createLearningService } from "../services/learning-service.js";
+import { parseLearningQuery, parseLearningValidate, parseKnowledgePrepare, parseKnowledgePublish } from "../../shared/learning-contract.js";
 import { parseExperienceQuery, parseExperienceSelection, parseExperienceVerify, parseNoInput } from "../../shared/experience-contract.js";
 import { parsePluginEnabled, parsePluginId, parsePluginInstall } from "../../shared/plugin-contract.js";
 
@@ -213,6 +215,10 @@ const googleAuthService = createGoogleAuthService({
   openExternal: url => shell.openExternal(url),
 });
 const experienceService = createExperienceService({ projects: async () => (await workItemInventoryService.list()).projects.map(project => `${project.platform}:${project.projectKey}`) });
+const learningService = createLearningService({
+  projects: async () => (await workItemInventoryService.list()).projects.map(project => `${project.platform}:${project.projectKey}`),
+  withRuntime: operation => pluginService.withRuntime(operation),
+});
 const workItemExecutionService = createWorkItemExecutionService({
   launchExecution: (input, workspace) => pluginService.launchWorker(() => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace)),
   getWorkItem: async (workItemId) => {
@@ -386,6 +392,13 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandler(IPC_CHANNELS.experiencesList, parseExperienceQuery, input => experienceService.list(input));
   registerHandler(IPC_CHANNELS.experiencesVerify, parseExperienceVerify, input => experienceService.verify(input));
   registerHandler(IPC_CHANNELS.experiencesRevoke, parseExperienceSelection, input => experienceService.revoke(input));
+  registerHandler(IPC_CHANNELS.learningProjects, parseNoInput, () => learningService.projects());
+  registerHandler(IPC_CHANNELS.learningJobs, parseLearningQuery, input => learningService.jobs(input));
+  registerHandler(IPC_CHANNELS.learningCandidates, parseLearningQuery, input => learningService.candidates(input));
+  registerHandler(IPC_CHANNELS.learningValidate, parseLearningValidate, input => learningService.validate(input));
+  registerHandler(IPC_CHANNELS.learningKnowledgePrepare, parseKnowledgePrepare, input => learningService.knowledge.prepare(input));
+  registerHandler(IPC_CHANNELS.learningKnowledgePublish, parseKnowledgePublish, input => learningService.knowledge.publish(input));
+  registerHandler(IPC_CHANNELS.learningKnowledgeReconcile, parseLearningQuery, input => learningService.knowledge.reconcile(input));
   registerHandler(IPC_CHANNELS.appearanceSave, (v: unknown) => v, (appearance) => saveAppearance(appearance));
   registerHandlerMulti(IPC_CHANNELS.workflowSave, [
     (v) => backlogWorkspace(v, "workflowSave"),

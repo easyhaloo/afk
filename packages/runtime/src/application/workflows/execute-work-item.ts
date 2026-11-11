@@ -539,6 +539,8 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
                 await record('published', { changeId: change.id, changeUrl: change.url });
               },
               onCommit: (commitSha, branch) => audit({ kind: 'commit.recorded', phase: 'qa', commitSha, branch }),
+              onExperienceTarget: context => audit({ kind: 'decision.made', command: 'experience.qa-target',
+                accepted: true, reason: JSON.stringify(context) }),
               onSession: audit,
             })))(management, config, request);
           const qaResult = await qa.process(request.backlogId).catch(async error => {

@@ -58,7 +58,7 @@ describe('log path contract', () => {
     // Test files may juggle HOME and AFK_LOG_DIR freely — only production
     // code is held to the rule.
     const offenders = files
-      .filter(({ file, contents }) => !file.endsWith('.test.ts') && /logDir|logPath|LogDir|LogPath|LOG_DIR/.test(contents) && /process\.env\.HOME/.test(contents))
+      .filter(({ file, contents }) => !/(?:^|\/)tests\/|\.(?:test|spec)\.tsx?$/.test(file) && /logDir|logPath|LogDir|LogPath|LOG_DIR/.test(contents) && /process\.env\.HOME/.test(contents))
       .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });

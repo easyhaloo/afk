@@ -42,7 +42,8 @@ async function main(): Promise<void> {
     await dispatchCommand(cmd, extraArgs, { ...composition, pluginRuntime });
   } finally {
     const pluginRuntime = await runtimePromise?.catch(() => undefined);
-    await pluginRuntime?.dispose();
+    try { await pluginRuntime?.dispose(); }
+    catch { throw new Error('Plugin runtime cleanup failed'); }
   }
 }
 

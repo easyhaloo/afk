@@ -50,6 +50,22 @@ it.skipIf(process.env.AFK_REAL_DISTILLATION_E2E !== '1')('distills audited fixtu
     const request = { version: 1, scope, sourceId: queryLearningState({ directory, scope }).jobs[0].sourceId,
       sourceRunId: context.runId, workItemId: context.workItemId, evidenceDigest: evidence.digest, analyzerVersion: '1', reason: 'completed' };
     const provider = new ClaudeCodeProvider();
+    const createExecution = provider.createExecution.bind(provider);
+    provider.createExecution = async options => {
+      const execution = await createExecution(options);
+      const waitForResult = execution.waitForResult.bind(execution);
+      execution.waitForResult = async options => {
+        const result = await waitForResult(options);
+        if (result.status !== 'completed' || result.tools?.length) {
+          const code = result.error?.code;
+          console.error(JSON.stringify({ code: 'live_execution_failed', status: result.status, exitCode: result.exitCode,
+            errorCode: ['MISSING_RESULT', 'AGENT_ERROR', 'NON_ZERO_EXIT', 'SPAWN_ERROR', 'STDIN_ERROR'].includes(code) ? code : 'unknown',
+            toolCount: result.tools?.length ?? 0, usageKnown: result.usage !== undefined }));
+        }
+        return result;
+      };
+      return execution;
+    };
     const buildCommand = provider.buildCommand.bind(provider);
     provider.buildCommand = options => {
       const command = buildCommand(options);

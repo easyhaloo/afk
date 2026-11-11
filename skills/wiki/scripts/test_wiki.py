@@ -416,6 +416,114 @@ raise SystemExit(bool(findings))
         self.assertEqual((recovery / "originals/0").read_bytes(), before["知识/入口.md"])
         self.assertEqual(failure["unrestored"], [])
 
+    @unittest.skipUnless(os.name == "posix", "descriptor inheritance requires POSIX")
+    def test_linter_inherits_the_vault_publication_lock(self):
+        import fcntl
+        specification = importlib.util.spec_from_file_location("wiki_lock_test", CLI)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        lock_path = self.vault / ".learning-publication.lock"
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        self.addCleanup(lambda: os.close(descriptor))
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.write(".tools/wiki-lint.py", """import json, os, pathlib
+descriptor = int(os.environ['LEARNING_PUBLICATION_LOCK_FD'])
+actual = os.fstat(descriptor)
+expected = (pathlib.Path(__file__).parent.parent / '.learning-publication.lock').stat()
+assert (actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino)
+print(json.dumps({'findings': []}))
+""")
+        with patch.dict(os.environ, {"LEARNING_PUBLICATION_LOCK_FD": str(descriptor)}):
+            self.assertEqual(module.lint(self.vault)["findings"], [])
+
+    @unittest.skipUnless(os.name == "posix", "descriptor inheritance requires POSIX")
+    def test_ingest_preview_and_apply_inherit_the_real_vault_lock(self):
+        import fcntl
+        specification = importlib.util.spec_from_file_location("wiki_stage_lock_test", CLI)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        descriptor = os.open(self.vault / ".learning-publication.lock", os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        self.addCleanup(lambda: os.close(descriptor))
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        marker = self.workspace / "linter-targets"
+        self.write(".tools/wiki-lint.py", f"""import json, os, pathlib, sys
+owner = pathlib.Path(__file__).parent.parent
+target = pathlib.Path(sys.argv[sys.argv.index('--vault') + 1])
+actual = os.fstat(int(os.environ['LEARNING_PUBLICATION_LOCK_FD']))
+expected = (owner / '.learning-publication.lock').stat()
+assert (actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino)
+if target != owner:
+    assert (target / '知识/新知识.md').is_file()
+with pathlib.Path({str(marker)!r}).open('a') as stream:
+    stream.write(json.dumps(str(target)) + '\\n')
+print(json.dumps({{'findings': []}}))
+""")
+        self.new_knowledge()
+        before = self.snapshot()
+        for apply in (False, True):
+            with self.subTest(apply=apply):
+                arguments = ["ingest", "--vault", str(self.vault), "--plan", str(self.plan_file), "--json"]
+                if apply:
+                    arguments.append("--apply")
+                output = io.StringIO()
+                with patch.dict(os.environ, {"LEARNING_PUBLICATION_LOCK_FD": str(descriptor)}), contextlib.redirect_stdout(output):
+                    exit_code = module.main(arguments)
+                self.assertEqual(exit_code, 0, output.getvalue())
+                self.assertEqual(json.loads(output.getvalue())["status"], "applied" if apply else "preview")
+                if not apply:
+                    self.assertEqual(self.snapshot(), before)
+        targets = [Path(json.loads(line)) for line in marker.read_text().splitlines()]
+        self.assertEqual(len(targets), 5)
+        self.assertEqual([target == self.vault for target in targets], [True, False, True, False, True])
+        self.assertTrue((self.vault / "知识/新知识.md").is_file())
+
+    @unittest.skipUnless(os.name == "posix", "descriptor inheritance requires POSIX")
+    def test_stage_lock_cannot_replace_the_backend_owner_lock(self):
+        specification = importlib.util.spec_from_file_location("wiki_stage_wrong_lock_test", CLI)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        (self.vault / ".learning-publication.lock").touch(mode=0o600)
+        stage = self.workspace / "stage"
+        stage.mkdir()
+        descriptor = os.open(stage / ".learning-publication.lock", os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        self.addCleanup(lambda: os.close(descriptor))
+        marker = self.workspace / "stage-linter-started"
+        self.write(".tools/wiki-lint.py", f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('{{\"findings\": []}}')\n")
+        with patch.dict(os.environ, {"LEARNING_PUBLICATION_LOCK_FD": str(descriptor)}):
+            with self.assertRaises(module.WikiError):
+                module.lint(stage, backend_root=self.vault)
+        self.assertFalse(marker.exists())
+
+    @unittest.skipUnless(os.name == "posix", "descriptor inheritance requires POSIX")
+    def test_linter_rejects_an_unrelated_publication_descriptor(self):
+        specification = importlib.util.spec_from_file_location("wiki_wrong_lock_test", CLI)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        lock_path = self.vault / ".learning-publication.lock"
+        lock_path.touch(mode=0o600)
+        descriptor = os.open(self.workspace / "other-lock", os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        self.addCleanup(lambda: os.close(descriptor))
+        marker = self.workspace / "linter-started"
+        self.write(".tools/wiki-lint.py", f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('{{\"findings\": []}}')\n")
+        with patch.dict(os.environ, {"LEARNING_PUBLICATION_LOCK_FD": str(descriptor)}):
+            with self.assertRaises(module.WikiError):
+                module.lint(self.vault)
+        self.assertFalse(marker.exists())
+
+    @unittest.skipUnless(os.name == "posix", "descriptor validation requires POSIX")
+    def test_oversized_publication_descriptor_preserves_json_errors(self):
+        marker = self.workspace / "unexpected-linter"
+        self.write(".tools/wiki-lint.py", f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('{{\"findings\": []}}')\n")
+        for descriptor in ("2147483648", "9999999999"):
+            with self.subTest(descriptor=descriptor):
+                result = subprocess.run([sys.executable, "-B", str(CLI), "lint", "--vault", str(self.vault), "--json"],
+                                        capture_output=True, text=True,
+                                        env={**os.environ, "LEARNING_PUBLICATION_LOCK_FD": descriptor})
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(json.loads(result.stdout)["error"], "Invalid inherited publication lock descriptor")
+                self.assertEqual(result.stderr, "")
+        self.assertFalse(marker.exists())
+
     def test_failure_does_not_rollback_over_an_intervening_edit(self):
         specification = importlib.util.spec_from_file_location("wiki_concurrent_test", CLI)
         module = importlib.util.module_from_spec(specification)

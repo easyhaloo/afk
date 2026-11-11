@@ -226,6 +226,16 @@ QA 和新证据。HTTP 知识库检索不隐含远程写回。
 交换及采纳由 CLI 提供。共享账本限 1000 条、逻辑数据/收据 8 MiB、单条 32 KiB、每条
 256 来源，默认有效期 90 天；来源饱和仍撤回复发建议并禁止继续提升。
 
+### 8.1 候选独立验证协议
+
+- `learning.validate` 输入严格为 `{ scope, candidateId, expectedVersion, checkerId }`；不接受 `passed/report/command/target`。验证配置、授权和目标由宿主读取。
+- `doctor()` 必须且只能包含一项 `{ check: "learning-validation-v1", ok: true, detail }`；`detail` 为 `{ scope, checkerId, providerId, version }` 的 JSON，身份必须与可信配置一致。
+- `verify` 接收 `target` 内的 JSON envelope：`{ protocol: "learning-validation-v1", binding, candidate, evidence, assertions }`。这是专属协议；不能交给把 target 当目录的普通执行器。
+- `binding` 绑定项目、候选及版本/摘要、证据摘要、真实目标及快照摘要、checker/配置/授权摘要和唯一 execution ID；报告必须原样返回该 binding。
+- 每条 assertion 返回 `{ node, expected, actual, status, evidence }`；`actual` 必须独立观察，不能复制 expected；`status` 为 `observed/unknown/inferred`。缺失、未知、推断、断言失败或无匹配证据均不能晋级。
+- fact 验证 subject/rule/authority；process 验证 entry/systems/preconditions、每步 action/stateChange、exceptions/completion。其他 kind 未有对应实现时明确 blocked。
+- 截止时间覆盖开库、解析、执行和提交；最终获写锁后复核身份、授权、来源、目标和 deadline。取消、漂移和超时不得留下 validated 状态或验证收据。
+
 ## 9. 生命周期闸门与最小验收
 
 required init、before-agent、after-agent、before-publish 及逆序 cleanup 保留执行顺序和

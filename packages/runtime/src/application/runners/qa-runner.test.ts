@@ -12,8 +12,10 @@ import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
 import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { PluginRuntime } from '../plugins/runtime.js';
+import { createLearningPlugin } from '../plugins/learning.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import type { Step } from '../../domain/templates/types.js';
+import type { ContextQuery } from '../../plugin-sdk/capabilities.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
@@ -493,6 +495,48 @@ describe('QARunner runtime binding', () => {
 });
 
 describe('QARunner execution boundary', () => {
+  it.each(['explicit', 'saved'] as const)('shares %s trusted context with knowledge, experience and independent QA audit', async source => {
+    const current = fixture();
+    const queries: ContextQuery[] = [];
+    const plugins = new PluginRuntime();
+    await plugins.activate({ manifest: { id: 'qa.context', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['context.provider'] },
+      activate(context) {
+        for (const id of ['context.experience', 'context.knowledge']) context.registerContextProvider(id, {
+          id, capabilities: { 'read-only': true, summarize: false, search: true },
+          async gather(query) { queries.push(query); return [{ origin: `${id}:qa-evidence`, content: 'bounded context' }]; },
+        });
+      } });
+    const experienceContext = { applicability: { version: 'asset-2', environment: 'sandbox-ci' },
+      target: { project: 'github:acme/wiki', productVersions: { sqlite: '3.45' } } };
+    if (source === 'saved') await plugins.activate(createLearningPlugin({ config: { executionContexts: [experienceContext] } }));
+    const onExperienceTarget = vi.fn(async (_context: unknown) => {});
+    try {
+      const runner = new QARunner(current.providers, config, { plugins, experienceContext: source === 'explicit' ? experienceContext : undefined, onExperienceTarget,
+        sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+      await withLogContext({ runId: 'qa-context', workItemId: 'github:acme/wiki#60' }, () => runner.process('60'));
+      expect(queries).toHaveLength(2);
+      expect(queries[0]).toBe(queries[1]);
+      expect(queries[0]).toMatchObject({ scope: 'github:acme/wiki', ...experienceContext });
+      expect(onExperienceTarget).toHaveBeenCalledWith(expect.objectContaining(experienceContext));
+      const content = await readFile(join(worktreePath, '.afk/experience-context.md'), 'utf8');
+      expect(content).toContain('context.knowledge:qa-evidence');
+      expect(content).toContain('context.experience:qa-evidence');
+    } finally { await plugins.dispose(); }
+  });
+
+  it.each(['workItemId', 'canonical-id'] as const)('prefers the backlog %s over a foreign QA logger identity', async identitySource => {
+    const current = fixture();
+    const item = await current.providers.backlog.get('60');
+    current.providers.backlog.get.mockResolvedValue({ ...item,
+      ...(identitySource === 'workItemId' ? { workItemId: 'github:acme/wiki#60' } : { id: 'github:acme/wiki#60' }) });
+    const onExperienceTarget = vi.fn(async (_context: unknown) => {});
+    const runner = new QARunner(current.providers, config, { onExperienceTarget,
+      sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+    const result = await withLogContext({ runId: 'foreign-qa-context', workItemId: 'github:foreign/private#88' }, () => runner.process('60'));
+    expect(result.success).toBe(true);
+    expect(onExperienceTarget).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ project: 'github:acme/wiki' }) }));
+  });
+
   it('resolves the configured agent provider when none is injected', () => {
     const original = createAgentProvider('codex');
     const codex = {

@@ -333,6 +333,29 @@ describe('executeWorkItem', () => {
     expect(events.every(event => event.executionId === 'attempt-1' && event.workItemId === workItemId)).toBe(true);
   });
 
+  it('persists the trusted QA target between QA start and pass for later applicability verification', async () => {
+    const { deps, current } = await setup();
+    const target = { target: { project: 'github:acme/api', revision: 'a'.repeat(40), dirty: false,
+      productVersions: { sqlite: '3.45' } } };
+    deps.createQA = undefined;
+    const processQA = vi.spyOn(QARunner.prototype, 'process').mockImplementation(async function (this: QARunner) {
+      const callback = (this as unknown as { onExperienceTarget?: (context: typeof target) => Promise<void> }).onExperienceTarget;
+      if (!callback) throw new Error('Trusted QA target audit callback is missing');
+      await callback(target);
+      current.state = 'merge_ready';
+      return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' };
+    });
+    try {
+      expect(await executeWorkItem(input, deps)).toMatchObject({ status: 'merge_ready' });
+      const events = vi.mocked(deps.recordAudit!).mock.calls;
+      expect(events.map(([, event]) => event.kind)).toEqual([
+        'qa.started', 'decision.made', 'qa.passed', 'change.published', 'human_gate.opened',
+      ]);
+      expect(events[1]).toEqual([expect.objectContaining({ actor: { kind: 'system', id: 'execute' } }),
+        { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(target) }]);
+    } finally { processQA.mockRestore(); }
+  });
+
   it.each([
     [{ managed: false }, /unmanaged/],
     [{ executionEligible: false }, /ineligible/],

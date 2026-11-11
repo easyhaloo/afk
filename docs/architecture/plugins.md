@@ -1241,16 +1241,38 @@ Implementation workflows execute the compiled Agent/System plan. The specialized
 
 ### Session-distillation plugin kernel
 
-`learning.distiller` uses the existing `workflow.action` protocol and defaults to disabled. Configuration is `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000 }`; unknown fields are rejected. Currently only Claude Code qualifies for the `analysis` profile; other Providers return `analysis_unsupported`.
+Desktop's fixed `learning` API provides project/job/candidate queries, independent validation and knowledge prepare/publish/reconcile. Main checks projects against work-item inventory, rechecks scope and candidate versions around operations, and projects bounded metadata; raw evidence, configuration and publication recovery paths stay outside IPC. Each operation owns a short-lived Runtime and prevents plugin file/enablement changes until disposal completes. This entry point does not start a distillation Worker; queries do not call a model. UI and complete Electron learning acceptance remain separate plan gates.
+
+`learning.distiller` uses the existing `workflow.action` protocol and defaults to disabled. It declares and registers `context.provider` only when saved `knowledge` configuration is present, so dependency checks cannot count an unconfigured knowledge provider. Base configuration is `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000, executionContexts: [] }`; optional `knowledge` configuration is described below and unknown fields are rejected. Currently only Claude Code qualifies for the `analysis` profile; other Providers return `analysis_unsupported`.
+
+`executionContexts` stores trusted conditions for at most 64 unique projects, for example:
+
+```json
+{
+  "executionContexts": [{
+    "applicability": { "environment": "ci", "version": "knowledge-v2" },
+    "target": {
+      "project": "github:acme/api",
+      "productVersions": { "sqlite": "3.45" },
+      "runtimeVersions": { "node": "22.16" },
+      "conditions": { "transactional": true }
+    }
+  }]
+}
+```
+
+Default implementation and QA obtain these conditions through the configuration action and supply experience/knowledge consumption. Explicit context fields from trusted callers take precedence. Projects must match the work item and prepared repository; Git revision/dirty are observed from the actual worktree and cannot be configured. Version maps and conditions are bounded to 32 entries each; unknown fields, duplicate projects and invalid scopes are rejected. Prompts do not supply these conditions; inherited target/applicability properties are rejected at consumption boundaries. Disabling automatic learning still permits valid asset reads; disabling the plugin removes this action.
 
 | Standard action | Input | Behavior |
 | --- | --- | --- |
-| `learning.settings` | `{}` | Return the current instance configuration |
+| `learning.settings` | `{}` | Return an independent copy of instance configuration |
+| `learning.context` | `{ scope }` | Return a copy of trusted execution conditions for the exact project, or `{}` when absent; no model call |
 | `learning.distill` | `{ request, pack }` | Validate the evidence snapshot and persist a private inbox request without calling the model |
 | `learning.capture` | `{ scope, runId, eventRoot? }` | Reconcile verified audit for the exact project/run and atomically save requests with the scan cursor |
-| `learning.reconcile` | `{ scope?, runId?, eventRoot? }` | Recover missed events and return scanned/submitted/invalidated/blocked results without calling the model |
+| `learning.reconcile` | `{ scope?, runId?, eventRoot? }` | Reconcile missed sources and recover configured, authorized knowledge publication/withdrawal; return source results without calling the model |
 | `learning.jobs` | `{ scope }` | Query exact-project requests, blocking reasons and analysis attempts |
 | `learning.candidates` | `{ scope }` | Query exact-project candidates; model output cannot grant validation or publication state |
+| `learning.validate` | `{ scope, candidateId, expectedVersion, checkerId }` | Resolve verifier, grant and actual target from trusted configuration; run independent assertions and reject client results, commands or target overrides |
 | `learning.worker.once` | `{}` | Process eligible requests across projects through one global consumer, then exit |
 
 The Worker uses the existing durable delivery queue, atomically reserving the UTC daily budget and recording an attempt before execution. Completed-request replay makes no extra model call. Unfinished prior attempts retain unknown outcomes and block automatic retry; absent usage is not zero. Plugin disposal cancels Workers owned by that instance.
@@ -1267,4 +1289,24 @@ Reconciliation returns `checkedSources` with the exact audit root and run identi
 
 Normal admission is capped at 2,000 records/32 MiB. Source invalidation atomically blocks its request and conflicts derived candidates with immutable version history; transient source blocking and invalidation may use a safety reserve capped at twice the normal record/byte limits. Repeated invalidation is idempotent, and ordinary work, model calls, validation and publication cannot borrow the reserve. The SQLite main file has a 128 MiB physical cap for payloads and page overhead. Exhaustion of the safety reserve or actual disk capacity rolls back the transaction and reports storage failure.
 
-The Worker supports startup/periodic reconciliation, active cancellation and controlled retry. Native analysis currently requires Darwin and `/usr/bin/sandbox-exec`; unsupported platforms fail before launching analysis. The process guard denies descendants and detects Worker loss. A live local Claude kernel test verified authentication, candidate generation, replay deduplication, source invalidation and nonexecution of transcript injection, malicious Hooks and MCP. Asset publication and installed CLI/Desktop loops remain in the [session-distillation plan](../superpowers/plans/2026-11-09-session-distillation.md); this kernel result does not establish complete product delivery.
+The Worker supports startup/periodic reconciliation, active cancellation and controlled retry. Native analysis currently requires Darwin and `/usr/bin/sandbox-exec`; unsupported platforms fail before launching analysis. The process guard denies descendants and detects Worker loss. Earlier live local Claude kernel evidence covered authentication, candidate generation, replay deduplication, source invalidation and nonexecution of transcript injection, malicious Hooks and MCP. The latest production-analysis and live-distillation reruns on November 11, 2026 still failed; historical success does not establish current model-service availability. Production-Main deterministic-checker E2E now covers an unvalidated candidate through verification, Wiki publication, Context retrieval, source invalidation and actual withdrawal, without a live model. Complete delivery remains in the [session-distillation plan](../superpowers/plans/2026-11-09-session-distillation.md).
+
+### Candidate verification integration
+
+Optional `validation: { configurationFile }` selects a canonical absolute path to private checker configuration. Its shape is `{ version: 1, checkers: [...] }`; each checker declares `scope/checkerId/providerId/version/authorizationFile/target`, with `target: { ref, root, path }`. Exact scope/checker identity selects a registered Verification Provider. Managed sources are reconstructed from ledger scan registration, audit integrity and recorded sessions. Unregistered imports need trusted configuration with a matching evidence-digest source manifest; clients cannot supply it.
+
+Verifiers must implement the independent-assertion `learning-validation-v1` protocol and stable identity; ordinary test-runner providers do not qualify. Current support is fact/process; lesson/skill/tool remain blocked pending dedicated validators. The budget starts at use-case entry, including opening the ledger and waiting for locks. After acquiring the SQLite writer lock, synchronous checks reread source, grant, target, checker and deadline; failure rolls back without promotion or receipts. Integration tests cover the real action, temporary authoritative snapshot verification, Wiki publication, context reading and invalidation withdrawal. These do not establish CLI/Desktop or live-model delivery.
+
+### Knowledge publication and reading integration
+
+Optional knowledge configuration contains wikiScript (the trusted Wiki CLI canonical absolute path) and grants (1–64 distinct private grant-file paths). Saved plugin configuration resolves paths; actions accept scope, candidate, version and logical targets without overriding the vault, grants or script. Revoked grant metadata remains readable; writes and withdrawal check current authorization separately. Multiple grants for the same scope/logical target cannot route. Unavailable grants and orphaned publications produce individual blockers.
+
+| Standard action | Input | Behavior |
+| --- | --- | --- |
+| learning.knowledge.prepare | { scope, candidateId, expectedVersion, targetRef? } | Wiki preview for a candidate with a current validation receipt; persist immutable plan and prepared receipt |
+| learning.knowledge.publish | { scope, key } | Check current authorization, candidate, source and targets before publication/recovery |
+| learning.knowledge.reconcile | { scope? } | Reconcile all phases, including actual withdrawal of committed content; return per-record results and blockers |
+
+Automatic source reconciliation and startup/periodic Worker reconciliation share these use cases. Invalidated sources require actual content withdrawal; permission refusal or human edits preserve recovery state and report knowledge_publication_degraded. Prepared/applied phases retain full-plan, navigation and optimistic-hash checks. Committed assets continue to check authorization, provenance, validation and content; ordinary index/backlink growth must not invalidate existing facts.
+
+context.knowledge reads only currently authorized, unrevoked and applicable publications within count/byte limits; missing required trusted applicability fields exclude the asset. Plugin disposal cancels active Wiki subprocesses, and retained Provider references cannot bypass shutdown. These actions do not establish completion of the new validation entry point, installed CLI, Desktop or cross-Agent product loop.

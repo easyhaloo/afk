@@ -1028,16 +1028,38 @@ workflow/commit/change 引用；仅实现成功仍不能产生已验证建议。
 
 ### 会话提炼插件内核
 
-`learning.distiller` 使用既有 `workflow.action` 协议，默认关闭。配置为 `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000 }`；未知字段拒绝。当前仅 Claude Code 提供合格的 `analysis` 配置，其他 Provider 返回 `analysis_unsupported`。
+Desktop 的 `learning` 固定接口提供项目、任务、候选查询、独立验证及知识 prepare / publish / reconcile。Main 根据工作项库存核对项目，在操作前后检查范围及候选版本，只向 Renderer 投影有界元数据；原始证据、配置和发布恢复路径不进入 IPC。操作使用自有短生命周期 Runtime，释放结束前阻止插件文件和启用状态变更。该入口不启动提炼 Worker；查询不调用模型。界面及完整 Electron 学习闭环仍按开发计划单独验收。
+
+`learning.distiller` 使用既有 `workflow.action` 协议，默认关闭。仅在保存了 `knowledge` 配置时声明并注册 `context.provider`，避免依赖检查把未配置的知识能力计为可用。基础配置为 `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000, executionContexts: [] }`；可选 `knowledge` 配置见下文，未知字段拒绝。当前仅 Claude Code 提供合格的 `analysis` 配置，其他 Provider 返回 `analysis_unsupported`。
+
+`executionContexts` 保存最多 64 个项目的可信条件，每个项目只能出现一次，例如：
+
+```json
+{
+  "executionContexts": [{
+    "applicability": { "environment": "ci", "version": "knowledge-v2" },
+    "target": {
+      "project": "github:acme/api",
+      "productVersions": { "sqlite": "3.45" },
+      "runtimeVersions": { "node": "22.16" },
+      "conditions": { "transactional": true }
+    }
+  }]
+}
+```
+
+默认实现引擎与 QA 从配置动作取得条件，传给经验 / 知识消费；受信调用方显式提供的上下文字段优先。项目必须与任务和准备的仓库一致，Git revision / dirty 由实际工作树观察，保存配置禁止声明它们。版本映射和条件分别最多 32 项；未知字段、重复项目及无效 scope 拒绝。提示词不提供这些条件；原型继承的 target / applicability 在消费入口拒绝。关闭自动学习不妨碍读取有效资产，停用插件则不再提供此动作。
 
 | 标准动作 | 输入 | 行为 |
 | --- | --- | --- |
-| `learning.settings` | `{}` | 返回当前实例配置 |
+| `learning.settings` | `{}` | 返回当前实例配置的独立副本 |
+| `learning.context` | `{ scope }` | 返回准确项目的可信执行条件副本，未配置为 `{}`；不调用模型 |
 | `learning.distill` | `{ request, pack }` | 校验证据快照并写入私有收件箱，不直接调用模型 |
 | `learning.capture` | `{ scope, runId, eventRoot? }` | 从准确项目及运行的完整审计补查证据，原子保存请求与扫描位置 |
-| `learning.reconcile` | `{ scope?, runId?, eventRoot? }` | 补查遗漏事件，返回扫描、提交、失效和阻断结果；不调用模型 |
+| `learning.reconcile` | `{ scope?, runId?, eventRoot? }` | 补查遗漏来源，并恢复已配置、已授权的知识发布 / 撤回；返回来源结果，不调用模型 |
 | `learning.jobs` | `{ scope }` | 查询准确项目的请求、阻断原因和调用尝试 |
 | `learning.candidates` | `{ scope }` | 查询准确项目的候选；模型输出不授予验证或发布状态 |
+| `learning.validate` | `{ scope, candidateId, expectedVersion, checkerId }` | 从可信配置取得验证器、授权和实际目标，执行独立断言；拒绝客户端结果、命令和目标覆盖 |
 | `learning.worker.once` | `{}` | 一个全局消费者处理各项目待处理请求后退出 |
 
 Worker 通过已有持久队列投递；启动前原子预留 UTC 日预算并记录调用尝试。完成请求重放不重复调用模型，未完成的旧尝试保持结果未知并阻断自动重试；用量缺失不补零。插件释放会取消本实例拥有的 Worker。
@@ -1054,4 +1076,24 @@ Worker 通过已有持久队列投递；启动前原子预留 UTC 日预算并�
 
 普通准入上限为 2,000 条记录 / 32 MiB。来源失效在同一事务内阻断请求、使派生候选进入冲突并保存不可变版本；来源暂态阻断和失效可使用安全预留，总记录 / 字节不超过普通上限两倍。重复失效幂等，普通工作、模型调用、验证和发布不能借用预留。SQLite 主文件物理上限为 128 MiB，包含 payload 与页开销；安全预留或实际磁盘耗尽时整体回滚并报告存储失败。
 
-Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原生分析要求 Darwin 及 `/usr/bin/sandbox-exec`，其他平台在启动分析前明确阻断；进程 guard 拒绝后代进程并检测 Worker 消失。真实本地 Claude 内核测试已验证认证、候选生成、重放去重、来源失效，以及转录注入、恶意 Hook 和 MCP 不执行。资产发布和安装版 CLI / Desktop 闭环仍按[会话提炼计划](../superpowers/plans/2026-11-09-session-distillation.zh.md)推进；内核结果不代表完整产品交付。
+Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原生分析要求 Darwin 及 `/usr/bin/sandbox-exec`，其他平台在启动分析前明确阻断；进程 guard 拒绝后代进程并检测 Worker 消失。此前真实本地 Claude 内核测试保留了认证、候选生成、重放去重、来源失效，以及转录注入、恶意 Hook 和 MCP 不执行的阶段证据；2026-11-11 最近生产分析与真实提炼重跑仍失败，历史通过不能代表当前模型服务可用。生产 Main 的确定性 checker E2E 已覆盖未验证候选到验证、Wiki 发布、上下文读取、来源失效和实际撤回，该结果不涉及真实模型。完整交付继续按[会话提炼计划](../superpowers/plans/2026-11-09-session-distillation.zh.md)推进。
+
+### 候选验证接线
+
+可选配置 `validation: { configurationFile }` 指向私有 checker 配置的规范绝对路径。配置为 `{ version: 1, checkers: [...] }`；每项声明 `scope/checkerId/providerId/version/authorizationFile/target`，`target` 为 `{ ref, root, path }`。按准确项目与 checker ID 唯一选择已注册的 Verification Provider。受管来源从账本扫描身份、审计链和已记录会话恢复；未注册导入需可信配置提供匹配证据摘要的来源清单，客户端不能补充该清单。
+
+验证器必须支持 `learning-validation-v1` 独立断言协议及稳定身份，普通 test-runner 不具备该资格。当前支持 fact / process；lesson / skill / tool 在专属验证器完成前返回 blocked。预算从用例入口开始计时，包含开库及锁等待；获 SQLite 写锁后同步复核来源、授权、目标、checker 和 deadline，失效则回滚，无晋级或收据。动作接线与临时权威快照的真实验证 → Wiki 发布 → 上下文读取 → 来源失效撤回已有集成测试；这不证明 CLI / Desktop 或真实模型闭环已交付。
+
+### 知识发布与读取接线
+
+可选配置 knowledge 包含 wikiScript（可信 Wiki CLI 的规范绝对路径）与 grants（1–64 个不重复的私有授权文件路径）。路径由保存的插件配置解析，动作只接受项目、候选、版本及逻辑目标，不能覆盖 vault、授权文件或脚本。授权元数据可在撤销后读取；写入和撤回分别检查当前权限。同项目相同逻辑目标的多重授权拒绝路由，授权缺失和孤立发布记录逐项报告阻断。
+
+| 标准动作 | 输入 | 行为 |
+| --- | --- | --- |
+| learning.knowledge.prepare | { scope, candidateId, expectedVersion, targetRef? } | 对已经具备当前验证收据的候选进行 Wiki preview，保存不可变计划与 prepared 收据 |
+| learning.knowledge.publish | { scope, key } | 核对当前授权、候选、来源及目标，执行发布或恢复 |
+| learning.knowledge.reconcile | { scope? } | 补查全部发布阶段，包含 committed 内容的实际撤回；返回逐项结果和阻断 |
+
+自动来源补查与 Worker 启动 / 周期补查共用以上恢复用例。来源失效必须撤回资产正文，权限拒绝或人工修改保留现场并报告 knowledge_publication_degraded。prepared / applied 阶段仍校验完整计划、导航和乐观 hash；committed 资产持续校验授权、来源、验证收据与正文，正常索引 / 回链增长不能使既有事实失效。
+
+context.knowledge 只读取当前授权、未撤销且适用的发布内容，有数量与字节上限；缺少所需可信适用性字段时不返回该资产。插件释放取消在途 Wiki 子进程，旧 Provider 引用不能绕过关闭。这里的动作接线不代表新增验证入口、安装版 CLI、Desktop 或完整跨 Agent 闭环已交付。

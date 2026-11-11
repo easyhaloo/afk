@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { openSqlite, requireNodeSqlite, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 import { createRequire } from 'node:module';
-import { CandidateStore } from './candidate-store.js';
+import { CandidateStore, type PublicationInput } from './candidate-store.js';
 import { buildEvidencePack } from './evidence.js';
 import { request, evidence, output } from './ledger-data.fixture.spec.js';
 
@@ -470,7 +470,265 @@ describe('private learning ledger', () => {
     expect(restarted.getCandidate(candidate.id)?.state).toBe('published');
     expect(restarted.getValidation(candidate.id)?.validatorVersion).toBe('validator:1');
     expect(restarted.listUnfinishedPublications()).toEqual([]);
+    expect(restarted.listPublications()).toMatchObject([{ key: publication.key, phase: 'committed' }]);
+    expect(restarted.listPublications(candidate.id)).toHaveLength(1);
+    expect(restarted.listPublications('f'.repeat(64))).toEqual([]);
+    expect(() => restarted.listPublications('../candidate')).toThrow();
     expect(restarted.advancePublication(publication.key, 'committed', 'd'.repeat(64)).phase).toBe('committed');
+    expect(restarted.advancePublication(publication.key, 'applied', 'd'.repeat(64)).phase).toBe('committed');
+    expect(() => restarted.advancePublication(publication.key, 'applied', 'e'.repeat(64))).toThrow(/phase/i);
+    expect(restarted.getCandidate(candidate.id)?.version).toBe(3);
+  });
+
+  describe('prepared publication supersession', () => {
+    function prepared() {
+      const store = open();
+      const candidate = store.getCandidate(store.completeRequest(store.submitRequest(input).key, output).candidateIds[0]!)!;
+      store.recordValidation(candidate.id, 1, { candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest,
+        validatorVersion: 'validator:1', passed: true, results: ['passed'] });
+      const original: PublicationInput = { key: 'publish:old', validatorVersion: 'validator:1', targetRef: 'wiki:rules/approval',
+        originalDigest: 'c'.repeat(64), targetDigest: 'd'.repeat(64), recoveryRef: 'backup:approval/old' };
+      const old = store.preparePublication(candidate.id, 2, original);
+      const replacement: PublicationInput = { ...original, key: 'publish:new', originalDigest: 'e'.repeat(64),
+        targetDigest: 'f'.repeat(64), recoveryRef: 'backup:approval/new' };
+      return { store, candidate, original, old, replacement };
+    }
+
+    function rows() {
+      const database = new sqlite.DatabaseSync(file);
+      try { return database.prepare('SELECT * FROM learning_ledger ORDER BY kind, key').all(); }
+      finally { database.close(); }
+    }
+
+    function replace(kind: string, key: string, value: unknown) {
+      const database = new sqlite.DatabaseSync(file);
+      try { database.prepare('UPDATE learning_ledger SET payload = ? WHERE kind = ? AND key = ?').run(JSON.stringify(value), kind, key); }
+      finally { database.close(); }
+    }
+
+    it.each([undefined, null])('atomically replaces an unobserved plan (%s) without changing candidate or validation history', observedDigest => {
+      const { store, candidate, original, old, replacement } = prepared();
+      if (observedDigest === null) replace('publication', old.key, { ...old, observedDigest });
+      const before = rows().filter(row => row.kind !== 'publication');
+      const prior = store.getPublication(old.key)!;
+      const successor = store.supersedePreparedPublication(old.key, replacement);
+      expect(successor).toEqual({ ...old, ...replacement });
+      const superseded = { ...prior, phase: 'superseded', supersededBy: replacement.key };
+      expect(store.getPublication(old.key)).toEqual(superseded);
+      expect(store.preparePublication(candidate.id, 2, original)).toEqual(superseded);
+      expect(store.listUnfinishedPublications()).toEqual([successor]);
+      expect(store.listPublications(candidate.id)).toHaveLength(2);
+      expect(rows().filter(row => row.kind !== 'publication')).toEqual(before);
+      store.close();
+      const restarted = open();
+      expect(restarted.supersedePreparedPublication(old.key, replacement)).toEqual(successor);
+      expect(restarted.getPublication(old.key)).toEqual(superseded);
+      expect(restarted.getCandidateVersions(candidate.id)).toHaveLength(2);
+      expect(rows().filter(row => row.kind !== 'publication')).toEqual(before);
+      expect(() => restarted.advancePublication(old.key, 'applied', old.targetDigest)).toThrow(/phase/i);
+      restarted.advancePublication(replacement.key, 'applied', replacement.targetDigest);
+      expect(restarted.supersedePreparedPublication(old.key, replacement).phase).toBe('applied');
+      restarted.advancePublication(replacement.key, 'committed', replacement.targetDigest);
+      expect(restarted.getCandidate(candidate.id)?.state).toBe('published');
+      expect(restarted.listUnfinishedPublications()).toEqual([]);
+    });
+
+    it.each(['applied', 'committed', 'conflict'] as const)('rejects an old %s plan without changing the ledger', phase => {
+      const { store, old, replacement } = prepared();
+      store.advancePublication(old.key, 'applied', phase === 'conflict' ? 'a'.repeat(64) : old.targetDigest);
+      if (phase === 'committed') store.advancePublication(old.key, 'committed', old.targetDigest);
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/phase|prepared/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it('rejects observed writes even when the stored phase is still prepared', () => {
+      const { store, old, replacement } = prepared();
+      replace('publication', old.key, { ...old, observedDigest: old.targetDigest });
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/observ|writ/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it.each([
+      { validatorVersion: 'validator:other' }, { targetRef: 'wiki:rules/billing' },
+    ])('rejects a replacement with changed validated identity %j', change => {
+      const { store, old, replacement } = prepared();
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, { ...replacement, ...change })).toThrow(/validator|target|identity/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it.each([
+      { key: 'publish:old' }, { key: '' }, { targetDigest: 'invalid' }, { originalDigest: 'invalid' },
+      { recoveryRef: '../outside' }, { unexpected: true }, { phase: 'prepared' }, { supersededBy: 'publish:third' },
+    ])('strictly rejects invalid replacement input %j', change => {
+      const { store, old, replacement } = prepared();
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, { ...replacement, ...change } as PublicationInput)).toThrow();
+      expect(rows()).toEqual(before);
+    });
+
+    it('rejects missing old publications and invalid old keys', () => {
+      const { store, replacement } = prepared();
+      const before = rows();
+      expect(() => store.supersedePreparedPublication('publish:missing', replacement)).toThrow(/not found/i);
+      expect(() => store.supersedePreparedPublication('', replacement)).toThrow();
+      expect(rows()).toEqual(before);
+    });
+
+    it.each(['source_invalidated', 'source_unstable', 'source_provenance', 'candidate_changed', 'candidate_digest', 'evidence_digest'])(
+      'rejects supersession after %s without changing the ledger', change => {
+        const { store, candidate, old, replacement } = prepared();
+        const attempt = () => {
+          const before = rows();
+          expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/source|version|validation|identity|content/i);
+          expect(rows()).toEqual(before);
+        };
+        const current = store.getCandidate(candidate.id)!;
+        if (change === 'source_invalidated') store.invalidateRequestSource(candidate.requestKey);
+        else if (change === 'source_unstable') store.setRequestBlocked(candidate.requestKey, 'source_unstable');
+        else if (change === 'source_provenance') {
+          const unrelated = store.submitRequest({ ...input, request: { ...request, sourceId: 'run:unrelated' } });
+          replace('candidate', candidate.id, { ...current, requestKey: unrelated.key });
+        } else if (change === 'candidate_changed') store.transitionCandidate(candidate.id, 2, 'revoked');
+        else replace('candidate', candidate.id, { ...current,
+          ...(change === 'candidate_digest' ? { digest: 'e'.repeat(64) } : { evidenceDigest: 'e'.repeat(64) }) });
+        attempt();
+      });
+
+    it.each(['source_invalidated', 'candidate_changed'])('revalidates %s on an otherwise exact replay', change => {
+      const { store, candidate, old, replacement } = prepared();
+      store.supersedePreparedPublication(old.key, replacement);
+      if (change === 'source_invalidated') store.invalidateRequestSource(candidate.requestKey);
+      else store.transitionCandidate(candidate.id, 2, 'revoked');
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/version|validation|source/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it.each([
+      { candidateDigest: 'e'.repeat(64) }, { evidenceDigest: 'e'.repeat(64) },
+      { validatorVersion: 'validator:other' }, { validatedVersion: 1 }, { passed: false },
+    ])('rejects a mismatched validation receipt %j', change => {
+      const { store, candidate, old, replacement } = prepared();
+      const receipt = store.getValidation(candidate.id)!;
+      const database = new sqlite.DatabaseSync(file);
+      try { database.prepare("UPDATE learning_ledger SET payload = ? WHERE kind = 'validation'").run(JSON.stringify({ ...receipt, ...change })); }
+      finally { database.close(); }
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/validation/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it.each([{ candidateVersion: 1 }, { candidateDigest: 'e'.repeat(64) }, { evidenceDigest: 'e'.repeat(64) }])(
+      'rejects stale old publication provenance %j', change => {
+        const { store, old, replacement } = prepared();
+        replace('publication', old.key, { ...old, ...change });
+        const before = rows();
+        expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/version|content|identity/i);
+        expect(rows()).toEqual(before);
+      });
+
+    it('rejects a different successor or changed input on replay', () => {
+      const { store, old, replacement } = prepared();
+      store.supersedePreparedPublication(old.key, replacement);
+      const before = rows();
+      for (const change of [{ key: 'publish:third' }, { originalDigest: null },
+        { targetDigest: 'a'.repeat(64) }, { recoveryRef: 'backup:another' }]) {
+        expect(() => store.supersedePreparedPublication(old.key, { ...replacement, ...change })).toThrow(/supersed|content|identity/i);
+        expect(rows()).toEqual(before);
+      }
+    });
+
+    it('rejects an occupied new key even when its immutable identity matches', () => {
+      const { store, old, replacement } = prepared();
+      const database = new sqlite.DatabaseSync(file);
+      try {
+        database.prepare("INSERT INTO learning_ledger(kind, key, payload, bytes) VALUES ('publication', ?, ?, 1)")
+          .run(replacement.key, JSON.stringify({ ...old, ...replacement }));
+      } finally { database.close(); }
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/exist|key|collision/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it('rejects another candidate publication occupying the new key', () => {
+      const { store, original, old, replacement } = prepared();
+      const otherRequest = store.submitRequest({ ...input, request: { ...request, sourceId: 'run:other', sourceRunId: 'other' } });
+      const other = store.getCandidate(store.completeRequest(otherRequest.key, output).candidateIds[0]!)!;
+      store.recordValidation(other.id, 1, { candidateDigest: other.digest, evidenceDigest: other.evidenceDigest,
+        validatorVersion: original.validatorVersion, passed: true, results: ['passed'] });
+      store.preparePublication(other.id, 2, replacement);
+      const before = rows();
+      expect(() => store.supersedePreparedPublication(old.key, replacement)).toThrow(/exist|key|collision/i);
+      expect(rows()).toEqual(before);
+    });
+
+    it.each(['old update', 'new insert', 'capacity'])('rolls back both publication writes on %s failure', failure => {
+      const { store, old, replacement } = prepared();
+      const database = new sqlite.DatabaseSync(file);
+      try {
+        if (failure === 'old update') database.exec(`CREATE TRIGGER reject_superseded BEFORE UPDATE ON learning_ledger
+          WHEN NEW.kind = 'publication' AND json_extract(NEW.payload, '$.phase') = 'superseded'
+          BEGIN SELECT RAISE(ABORT, 'injected supersession failure'); END;`);
+        if (failure === 'new insert') database.exec(`CREATE TRIGGER reject_successor BEFORE INSERT ON learning_ledger
+          WHEN NEW.kind = 'publication' AND NEW.key = 'publish:new'
+          BEGIN SELECT RAISE(ABORT, 'injected supersession failure'); END;`);
+        const before = rows();
+        const writer = failure === 'capacity' ? open({ records: before.length }) : store;
+        expect(() => writer.supersedePreparedPublication(old.key, replacement)).toThrow(/injected supersession failure|capacity/i);
+        expect(rows()).toEqual(before);
+        if (failure !== 'capacity') database.exec(`DROP TRIGGER ${failure === 'old update' ? 'reject_superseded' : 'reject_successor'}`);
+        expect(store.supersedePreparedPublication(old.key, replacement).phase).toBe('prepared');
+      } finally { database.close(); }
+    });
+  });
+
+  it('runs the validation guard with the SQLite writer lock held before candidate or receipt writes', () => {
+    const store = open();
+    const completed = store.completeRequest(store.submitRequest(input).key, output);
+    const candidate = store.getCandidate(completed.candidateIds[0]!)!;
+    const competing = new sqlite.DatabaseSync(file);
+    competing.exec('PRAGMA busy_timeout = 0');
+    let guarded = false;
+    try {
+      const result = store.recordValidation(candidate.id, 1, { candidateDigest: candidate.digest,
+        evidenceDigest: candidate.evidenceDigest, validatorVersion: 'guarded-1', passed: true, results: ['checked'] }, () => {
+        guarded = true;
+        expect(store.getCandidate(candidate.id)).toEqual(candidate);
+        expect(store.getValidation(candidate.id)).toBeUndefined();
+        expect(() => competing.exec('BEGIN IMMEDIATE')).toThrow(/locked|busy/i);
+      });
+      expect(guarded).toBe(true);
+      expect(result.state).toBe('validated');
+      expect(store.getValidation(candidate.id)?.validatedVersion).toBe(2);
+    } finally { competing.close(); }
+  });
+
+  it('rolls back a rejected validation guard and preserves the legacy unguarded call', () => {
+    const store = open();
+    const completed = store.completeRequest(store.submitRequest(input).key, output);
+    const candidate = store.getCandidate(completed.candidateIds[0]!)!;
+    const validation = { candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest,
+      validatorVersion: 'guarded-1', passed: true, results: ['checked'] };
+    const rejection = new Error('guard rejected');
+    expect(() => store.recordValidation(candidate.id, 1, validation, () => { throw rejection; })).toThrow(rejection);
+    expect(store.getCandidate(candidate.id)).toEqual(candidate);
+    expect(store.getCandidateVersions(candidate.id)).toHaveLength(1);
+    expect(store.getValidation(candidate.id)).toBeUndefined();
+    expect(store.recordValidation(candidate.id, 1, validation).state).toBe('validated');
+  });
+
+  it('rejects a Promise returned by the synchronous validation guard without persisting a receipt', () => {
+    const store = open();
+    const completed = store.completeRequest(store.submitRequest(input).key, output);
+    const candidate = store.getCandidate(completed.candidateIds[0]!)!;
+    expect(() => store.recordValidation(candidate.id, 1, { candidateDigest: candidate.digest,
+      evidenceDigest: candidate.evidenceDigest, validatorVersion: 'guarded-1', passed: true, results: ['checked'] }, async () => {})).toThrow(/synchronous/i);
+    expect(store.getCandidate(candidate.id)).toEqual(candidate);
+    expect(store.getCandidateVersions(candidate.id)).toHaveLength(1);
+    expect(store.getValidation(candidate.id)).toBeUndefined();
   });
 
   it('records publication conflicts on third party changes without publishing or overwriting', () => {
@@ -484,6 +742,7 @@ describe('private learning ledger', () => {
     expect(store.advancePublication(publication.key, 'applied', 'e'.repeat(64)).phase).toBe('conflict');
     expect(store.getCandidate(candidate.id)?.state).toBe('conflict');
     expect(() => store.advancePublication(publication.key, 'applied', 'd'.repeat(64))).toThrow(/phase|conflict/i);
+    expect(store.listPublications(candidate.id)).toMatchObject([{ key: publication.key, phase: 'conflict' }]);
   });
 
   it.each([undefined, 'skill:afk-qa'])('binds skill publication to the validated payload target and original digest (top-level %s)', targetRef => {

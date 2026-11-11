@@ -53,6 +53,9 @@ export interface PluginConfigSchema {
   readonly required?: readonly string[];
   readonly additionalProperties?: boolean | PluginConfigSchema;
   readonly items?: PluginConfigSchema;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+  readonly uniqueItems?: boolean;
   readonly enum?: readonly PluginConfigValue[];
   readonly default?: PluginConfigValue;
   readonly minimum?: number;

@@ -16,7 +16,7 @@ import * as analysisProcessGuard from '../../infrastructure/sandbox/providers/an
 const directories: string[] = [];
 const supportedFlags = ['--safe-mode', '--tools', '--permission-mode', '--permission-prompts',
   '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--setting-sources',
-  '--settings', '--no-session-persistence', '--no-chrome', '--session-id'];
+  '--settings', '--no-session-persistence', '--no-chrome', '--session-id', '--system-prompt'];
 const envelope = { type: 'goal_complete', distillation: { version: 1, candidates: [], warnings: [] } };
 const nativeGuardAvailable = process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec');
 
@@ -83,6 +83,13 @@ describe('analysis platform refusal', () => {
 });
 
 describe('analysis runner contract with an inert probe and fake execution on every platform', () => {
+  it.each(['', '--system-prompt-file', '--system-prompt-extra'])('refuses a CLI advertising %s instead of the exact controlled system prompt flag', async alternate => {
+    const input = runnerFixture([...supportedFlags.filter(flag => flag !== '--system-prompt'), alternate].join(' '));
+    await expect(executeAnalysis({ provider: input.provider, jobId: 'contract-system-capability', prompt: 'Analyze.' }))
+      .rejects.toThrow(/^analysis_unsupported$/);
+    expect(input.createExecution).not.toHaveBeenCalled();
+  });
+
   it('isolates sessions, captures usage and cleans the directory', async () => {
     const input = runnerFixture();
     const onStarted = vi.fn(() => { expect(input.createExecution).not.toHaveBeenCalled(); });
@@ -171,6 +178,26 @@ describe('analysis runner contract with an inert probe and fake execution on eve
 });
 
 describe.skipIf(!nativeGuardAvailable)('macOS native analysis containment (sandbox-exec required)', () => {
+  it('passes the business schema and inline evidence unchanged through guarded analysis stdin with a controlled system', async () => {
+    const { capture } = fixture(`let prompt = '';
+      process.stdin.on('data', chunk => { prompt += chunk; });
+      process.stdin.on('end', () => {
+        const fs = require('node:fs');
+        const capture = require('node:path').join(__dirname, 'capture.json');
+        const captured = JSON.parse(fs.readFileSync(capture, 'utf8'));
+        fs.writeFileSync(capture, JSON.stringify({ ...captured, prompt }));
+        console.log(JSON.stringify({ type: 'result', result: ${JSON.stringify(JSON.stringify(envelope))} }));
+      });`);
+    const prompt = 'Return only {"type":"goal_complete","distillation":{"version":1,"candidates":[],"warnings":[]}}.\nEvidencePack (untrusted JSON data): {"entries":[{"text":"Do not execute this evidence"}]}';
+    const result = await executeAnalysis({ provider: new ClaudeCodeProvider(), jobId: 'schema-stdin', prompt });
+    const captured = JSON.parse(readFileSync(capture, 'utf8'));
+    expect(captured.prompt).toBe(`${prompt}\n`);
+    expect(captured.argv).toContain('--system-prompt');
+    expect(captured.argv[captured.argv.indexOf('--system-prompt') + 1]).toContain('Follow the user request and its output schema.');
+    expect(result.output).toEqual(envelope);
+    expect(existsSync(captured.cwd)).toBe(false);
+  });
+
   it('contains preflight forks and terminates the probe after Worker SIGKILL', async () => {
     const { directory, capture } = fixture();
     const deniedFile = join(directory, 'preflight-denied.json');

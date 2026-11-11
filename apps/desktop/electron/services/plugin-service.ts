@@ -33,13 +33,24 @@ export function createPluginService(options: PluginServiceOptions) {
   const manager = options.manager ?? new PluginManager({ homeDir });
   const workers = new Set<ChildProcess>();
   let changingFiles = false;
+  let activeRuntimes = 0;
   let runtimeSnapshot: Promise<DesktopPluginList> | undefined;
+
+  async function withRuntime<Result>(operation: (runtime: PluginRuntime) => Promise<Result>): Promise<Result> {
+    if (changingFiles) throw new Error("插件文件操作正在进行，请稍后重试");
+    activeRuntimes += 1;
+    try {
+      const runtime = await (options.createRuntime?.() ?? createDefaultPluginRuntime({ homeDir }));
+      try { return await operation(runtime); }
+      finally { await runtime.dispose(); }
+    } catch { throw new Error("插件运行操作失败，请检查插件配置与运行状态后重试。"); }
+    finally { activeRuntimes -= 1; }
+  }
 
   async function inspectRuntime(): Promise<DesktopPluginList> {
     let entries: ReturnType<typeof readPluginConfiguration>["plugins"];
     try { entries = readPluginConfiguration(homeDir).plugins; } catch { entries = []; }
-    const runtime = await (options.createRuntime?.() ?? createDefaultPluginRuntime({ homeDir }));
-    try {
+    return withRuntime(async runtime => {
       const plugins = runtime.listPlugins().map(id => {
         const manifest = runtime.getPlugin(id)!.manifest;
         const setting = entries.find(entry => entry.id === id);
@@ -50,7 +61,7 @@ export function createPluginService(options: PluginServiceOptions) {
         return { ...(diagnostic.pluginId ? { pluginId: parsePluginId(diagnostic.pluginId) } : {}), severity: diagnostic.severity, code, message: diagnosticMessages[code] ?? "插件报告诊断；详细信息留在本机，不向界面传递配置或原始错误。" };
       });
       return { plugins, diagnostics };
-    } finally { await runtime.dispose(); }
+    });
   }
 
   async function list(): Promise<DesktopPluginList> {
@@ -127,15 +138,16 @@ export function createPluginService(options: PluginServiceOptions) {
     changingFiles = true;
     try {
       let active: boolean;
-      try { active = workers.size > 0 || await hasRecordedWorker(); }
+      try { active = activeRuntimes > 0 || workers.size > 0 || await hasRecordedWorker(); }
       catch { throw new Error("无法核实 Worker 状态，请检查本机运行记录后重试"); }
-      if (active) throw new Error("仍有 Worker 正在运行或启动；请等待结束后再安装或卸载插件");
+      if (active) throw new Error("仍有插件操作或 Worker 正在运行或启动；请等待结束后再修改插件");
       await operation();
     } finally { changingFiles = false; }
   }
 
   return {
     list,
+    withRuntime,
     launchWorker(launch: () => ChildProcess): ChildProcess {
       if (changingFiles) throw new Error("插件文件操作正在进行，请稍后启动运行");
       const worker = launch();
@@ -162,8 +174,10 @@ export function createPluginService(options: PluginServiceOptions) {
       parsePluginEnabled(enabled);
       const plugin = await find(id);
       if (enabled && plugin.origin === "configured") throw new Error("插件尚未安装，请先安装合法插件包");
-      try { await manager.setEnabled(id, enabled, plugin.origin === "builtin"); }
-      catch { throw new Error("插件状态保存失败，请检查插件依赖、配置文件或插件管理锁"); }
+      await changeFiles(async () => {
+        try { await manager.setEnabled(id, enabled, plugin.origin === "builtin"); }
+        catch { throw new Error("插件状态保存失败，请检查插件依赖、配置文件或插件管理锁"); }
+      });
       return true;
     },
     async remove(id: string): Promise<boolean> {
@@ -181,13 +195,15 @@ export function createPluginService(options: PluginServiceOptions) {
       const file = await options.chooseJsonFile();
       if (!file) return false;
       if (!await options.confirm("configure", id)) return false;
-      try {
-        const metadata = await stat(file);
-        if (!metadata.isFile() || metadata.size > 1024 * 1024) throw new Error("Invalid config file");
-        const config = JSON.parse(await readFile(file, "utf8"));
-        if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid config object");
-        await manager.configure(id, config, plugin.origin === "builtin");
-      } catch { throw new Error("配置导入失败；请选择不超过 1 MiB、符合插件 schema 的 JSON 对象文件"); }
+      await changeFiles(async () => {
+        try {
+          const metadata = await stat(file);
+          if (!metadata.isFile() || metadata.size > 1024 * 1024) throw new Error("Invalid config file");
+          const config = JSON.parse(await readFile(file, "utf8"));
+          if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid config object");
+          await manager.configure(id, config, plugin.origin === "builtin");
+        } catch { throw new Error("配置导入失败；请选择不超过 1 MiB、符合插件 schema 的 JSON 对象文件"); }
+      });
       return true;
     },
   };

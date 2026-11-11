@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Zod, Node SQLite, existing plugin runtime and Agent Providers, Vitest, existing Python Wiki utilities, Electron / React / Playwright.
 
-**Status:** In progress; reviewed 2026-11-11. T01–T06 are committed and pushed in `2c807ece`; WAL repair `23e21fbe` has successful CI `42799416559`. Recall repair `d18e7d5f` is committed and pushed; saved CI `42958399025` concluded success, including Desktop unit and Electron E2E tests. That evidence covers that commit only. The aggregate tree still contains uncommitted work; the latest real Claude distillation run failed with `analysis_failed`, and the five-asset product loop is not delivered. Sections 13, 17.11 and 17.12 retain historical snapshots; section 18 is the current unified plan and acceptance contract. See the [Chinese plan](2026-11-09-session-distillation.zh.md) and [previous phase](2026-11-08-runtime-learning-and-validation.md).
+**Status:** In progress; reviewed 2026-11-11. The validation, knowledge publication, trusted context and Desktop integration slice is committed as `64044a27`. Saved CI `42958399025` succeeded for the earlier recall repair `d18e7d5f`; it does not establish success for `64044a27` or the current working tree. The aggregate tree still contains uncommitted lesson, proposal runtime and frozen container execution work. The latest real Claude distillation failed with `MISSING_RESULT`; the complete five-asset product loop is not delivered. Sections 13, 17.11 and 17.12 preserve historical snapshots; section 18 defines the unified plan, execution order and acceptance contract, and section 18.12 lists remaining delivery work. See the [Chinese plan](2026-11-09-session-distillation.zh.md) and [previous phase](2026-11-08-runtime-learning-and-validation.md).
 
 ---
 
@@ -1160,3 +1160,64 @@ This is an execution view of section 18.3, not another task namespace. W00–W12
 - Reconcile partial publication using receipts/journals; a CLI exit code does not imply rollback. Failed withdrawal must remain visible in queries/UI and prevent further consumption.
 - Changes to source, target, checker, policy or authorization invalidate the applicability of earlier verification to a new publication. Reverification produces a new receipt rather than rewriting history.
 - Whole-system completion requires all batches A–E closed. Local units, fixture E2E, historical CI and an open PR establish only their own boundaries. Unmet external prerequisites require an explicitly limited delivery, not a whole-system completion claim.
+
+### 18.12 Remaining delivery checklist and gates (reviewed 2026-11-11)
+
+This checklist continues W00–W12 without reopening reviewed implementations. Integrate existing patches before filling gaps. Record real models, external services, installed artifacts and automated fixtures separately. Each work package retains its owner, dependencies, commit, counterexamples, review conclusions and final receipts.
+
+Verified in this pass: CI `43007899210` for `64044a27` completed. Shared Packages And CLI, Wiki Python and documentation checks passed. Plugin metadata failed because the root manifest remained at 1.2.3 while the other manifest was 1.2.4; Desktop E2E failed because the isolated HOME launcher omitted XAUTHORITY. The manifest synchronization and explicit XAUTHORITY allowlist pass local checks; the new actual Electron environment-isolation regression failed before the fix and passed afterward, with all three related E2E cases passing. The corrective commit still requires matching Linux CI; local Darwin success does not establish Linux success.
+
+#### Phase one: establish the baseline and trusted execution (W00 / W01 / W02)
+
+- [ ] Record the actual CI outcome for `64044a27`; earlier CI cannot qualify this commit. Freeze the files and digests of pending implementations so tests from different snapshots cannot be combined into release evidence.
+- [ ] Run bounded Claude diagnosis using a build containing exact CLI flag preflight. Check the request, native exit, structured result and parser boundary. Close W00 only after actual valid distillation; retain tool, Hook, MCP and environment isolation.
+- [ ] Independently review frozen container execution: immutable input, fixed local image, no candidate-controlled Dockerfile, no network, bounded output/time, exact cancellation reasons and late resource cleanup. Authors repair findings before the original counterexamples are rerun and integrated.
+- [ ] Connect Repository leases, clean baseline, frozen inputs, real Sandbox execution, trusted oracle and verification receipts. Reject candidate-supplied executable commands, success flags or replacement verification targets.
+- [ ] Check inbox durability, unique consumption, cancellation, backlog, budgets, database lock waits and restart recovery. Unknown cost remains unknown; failures do not trigger unlimited retries.
+
+Exit gate: safe analysis succeeds live; a request does not execute repeatedly at model cost; receipts identify actual input, command, target and environment; cleanup failures have recoverable records.
+
+#### Phase two: close each asset loop (W03 / W04 / W05 / W06)
+
+| Asset | Remaining implementation | Required counterexamples | Delivery evidence |
+| --- | --- | --- | --- |
+| fact | Authoritative business-source observers, conflicts and change detection | Model claims, incomplete sources, contradictory rules, foreign project evidence | Independent observation, Wiki version, actual consumer reference, invalidation/withdrawal |
+| process | Check nodes, actors, preconditions, branches and results | Terminal-only success, missing intermediate nodes, wrong permission/order | Node-level evidence, published path, applicability in a new task |
+| lesson | Real audit, repair commit and independent QA; domain checks for root cause, action and exclusions | Passing QA unrelated to the root cause, foreign QA, late failure, repair drift | Exact repair/QA binding, domain assertions, reuse feedback and recurrence revocation |
+| skill | Existing catalog deduplication, managed patches, frozen old/new behavior comparison, PR/install tracking | Broadened triggers, elevated permissions, refusal/recovery regressions | Comparison receipts, human merge state, installed version, new-task invocation |
+| tool | Reuse existing tools; validate execution contract, dependencies, effects, idempotency and recovery | Malicious arguments, two inputs, timeout, cancellation, partial writes, repeated invocation | Isolated execution receipts, managed change, installation and execution results |
+
+Exit gate: each type progresses from source through validation, publication/proposal, consumption, feedback and invalidation. Record proposal, PR, merge, installation and reuse separately; before human merge, code remains a proposal. Neither passing QA nor container exit zero alone proves semantic correctness.
+
+#### Phase three: product entry points and governance (W07 / W08 / W09)
+
+- [ ] Installed CLI and Electron share application use cases for import, paginated queries, validation, preview, publication, revocation, feedback, one-shot and continuous consumption. Freeze strict DTOs before new writes.
+- [ ] Execute three actual templates: successful retrospective/knowledge; failure/repair/independent QA; skill or tool optimization/behavior comparison. Required Hook failure blocks execution/publication; learning events cannot recursively trigger themselves.
+- [ ] Unify session correlation, context budgets, source references, timeouts, cancellation, recovery and diagnostics. Cross-task/Agent reuse shares authorized assets; cross-project imports become candidates again.
+- [ ] Turn environment diagnosis and remediation into reviewable tasks; retain knowledge only after verification. Workspace cleanup checks active processes, sessions, leases and unintegrated edits and reclaims only owned, unreferenced resources.
+- [ ] Check late responses after project switches, CLI/Desktop concurrency, refresh failure after successful operations, no recall after withdrawal, and retained historical receipts.
+
+Exit gate: operation works outside the source checkout without duplicate execution implementations or consumers. UI explicitly distinguishes unconfigured, blocked, partially successful and withdrawn states.
+
+#### Phase four: qualify individual Providers (W10, parallel to phases one–three)
+
+Cover all 13 families in section 18.5, checking concrete Providers individually. The 2026-11-11 read-only inventory lists 63 capability surfaces: 58 existing implementation surfaces and five illustrative native vendor gaps. These are neither 63 unique plugins nor additional vendor commitments.
+
+- [ ] Remove directory creation from local report health checks and audit-key initialization from configured inventory composition. list/doctor must not write with missing directories or read-only HOME; actual managed operations initialize on demand.
+- [ ] Separate binary presence, configuration completeness, authentication state, target reachability and business validation, preserving unknown. Exit zero, static healthy and an executable on PATH do not establish business readiness.
+- [ ] Explicitly configure existing Context, Repository, Verification and Policy Providers for local projects and retain real tool/Git receipts instead of reimplementing existing adapters.
+- [ ] Check installation, configuration, dependencies, registration, invocation, cancellation, disable, removal and upgrade. Track implementation, wiring, automation, configuration and live status for each.
+- [ ] Preserve protocol boundaries for generic HTTP upload, remote workspace and knowledge base integrations. Add required signing/authentication/object-model support before claiming a particular vendor. OTLP/HTTP compatibility does not imply native Prometheus, Langfuse or cloud SDK support.
+- [ ] Missing external configuration blocks only that Provider's live qualification. Report missing fields, official setup entry and the next command; reuse existing credential references and never put secrets in arguments, plans or logs. Notification sends require explicit authorization.
+
+Exit gate: all explicitly requested implementations have production wiring and contract checks; each live qualification has independent evidence. Missing accounts and unimplemented vendor features remain visible open items.
+
+#### Phase five: measure benefits and deliver (W11 / W12)
+
+- [ ] Fix the task set, input, environment and versions and compare no assets, old assets and new assets. Another Agent explicitly adopts an asset in a new task with correlated results/feedback.
+- [ ] Report retrieval relevance, explicit adoption, task success, recurrence, elapsed time, known token/cost, validation failure and misuse separately. Do not promise improvement percentages or substitute asset counts for outcomes.
+- [ ] Use temporary repositories/vaults for source drift, expired authentication, interrupted publication, forced termination/recovery, failed withdrawal, failed plugin upgrade and migration recovery. Do not damage real knowledge stores to inject faults.
+- [ ] Run section 18.9 per-package typecheck/build/test, coverage, architecture and documentation checks plus separate Desktop units/Electron E2E. Final receipts bind exact commits/configuration; distinguish skips, fixtures and live runs.
+- [ ] Update CLI/skill versions and bilingual protocols, commit/push and follow the corresponding CI. Preserve human PR merge decisions; retain evidence before archiving integrated, unreferenced workspaces and reporting storage changes.
+
+Final delivery package: bilingual plan/integration standard, per-implementation matrix across 13 families, five-asset receipts, real Claude/cross-Agent reuse report, installation/upgrade/recovery record, benefit report, known limits, reviewable PR and matching commit CI. Declare whole-system delivery only after every required item closes; local operation with outstanding external qualifications is an explicitly limited delivery.

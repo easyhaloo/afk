@@ -6,7 +6,7 @@ import { createLearningFixture, type LearningFixture } from "./_helpers/learning
 
 async function launchLearning(fixture: LearningFixture) {
   const display: Record<string, string> = {};
-  for (const name of ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SystemRoot"]) {
+  for (const name of ["DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SystemRoot"]) {
     if (process.env[name]) display[name] = process.env[name]!;
   }
   const app = await electron.launch({
@@ -32,6 +32,29 @@ async function launchLearning(fixture: LearningFixture) {
 }
 
 test.describe("production Main learning IPC with a deterministic saved oracle (no live model)", () => {
+  test("preserves display authentication while isolating unrelated parent environment", async () => {
+    const fixture = await createLearningFixture();
+    const previousAuthority = process.env.XAUTHORITY;
+    const previousUnrelated = process.env.AFK_E2E_UNRELATED_SECRET;
+    process.env.XAUTHORITY = previousAuthority ?? path.join(path.dirname(E2E_ENTRY), "unused-xauthority");
+    process.env.AFK_E2E_UNRELATED_SECRET = "must-not-reach-electron";
+    let app: ElectronApplication | undefined;
+    try {
+      app = (await launchLearning(fixture)).app;
+      const environment = await app.evaluate(() => ({ authority: process.env.XAUTHORITY,
+        unrelated: process.env.AFK_E2E_UNRELATED_SECRET, home: process.env.HOME }));
+      expect(environment.authority).toBe(process.env.XAUTHORITY);
+      expect(environment.unrelated).toBeUndefined();
+      expect(environment.home).toBe(fixture.env.HOME);
+    } finally {
+      if (previousAuthority === undefined) delete process.env.XAUTHORITY;
+      else process.env.XAUTHORITY = previousAuthority;
+      if (previousUnrelated === undefined) delete process.env.AFK_E2E_UNRELATED_SECRET;
+      else process.env.AFK_E2E_UNRELATED_SECRET = previousUnrelated;
+      try { await app?.close(); } finally { fixture.cleanup(); }
+    }
+  });
+
   test.setTimeout(120_000);
 
   test("uses Settings to validate, publish and withdraw actual Wiki content after source invalidation", async () => {

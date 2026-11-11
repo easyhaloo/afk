@@ -411,6 +411,23 @@ describe('local experience ledger', () => {
     expect(store.list({ scope: best.scope, limit: 0 })).toEqual([]);
   });
 
+  it('recalls single-word root causes and actions behind an opaque trigger', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'network.failure',
+      rootCause: 'network timeout', action: 'configure proxy' }));
+    expect(store.recall({ scope: record.scope, prompt: 'network' })).toEqual([]);
+    verify(store, record.id);
+    for (const prompt of ['network', 'timeout', 'proxy']) {
+      expect(store.recall({ scope: record.scope, prompt }).map(entry => entry.id), prompt).toEqual([record.id]);
+    }
+    for (const prompt of ['net', 'No network', 'network is absent']) {
+      expect(store.recall({ scope: record.scope, prompt }), prompt).toEqual([]);
+    }
+    expect(store.recall({ scope: 'github:owner/other', prompt: 'network' })).toEqual([]);
+    store.revoke(record.id);
+    expect(store.recall({ scope: record.scope, prompt: 'network' })).toEqual([]);
+  });
+
   it('keeps CLI option and error identifiers intact beside Chinese prose', () => {
     const { store } = fixture();
     const option = store.recordFailure(failure({ trigger: 'afk experience record --root-cause',

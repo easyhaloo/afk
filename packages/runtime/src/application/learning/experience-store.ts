@@ -477,7 +477,7 @@ export class ExperienceStore {
         const affirmative = recallTerms(positive.filter(clause => !recallNegativeCue.test(clause)
           || record.trigger.toLowerCase().includes(clause.toLowerCase())).join('\n'));
         const affirmativeScore = [...affirmative].filter(term => words.has(term)).length;
-        const matched = affirmativeScore >= 2 || terms.some(term => trigger.has(term))
+        const matched = affirmativeScore >= Math.min(2, terms.length) || terms.some(term => trigger.has(term))
           && (score >= 2 || [...affirmative].some(term => trigger.has(term)));
         return { record, score: matched ? score : 0 };
       }).filter(candidate => candidate.score > 0)

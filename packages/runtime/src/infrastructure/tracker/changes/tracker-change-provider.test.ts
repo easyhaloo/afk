@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { BacklogItem, QABacklogProvider } from '../../../domain/backlog/index.js';
+import { confirmBacklogMerge } from '../../../domain/backlog/commands.js';
 import type { TrackerProvider } from '../../../domain/tracker/types.js';
 import { renderChangeDescription, TrackerChangeProvider } from './tracker-change-provider.js';
 
@@ -294,5 +295,142 @@ describe('TrackerChangeProvider', () => {
     });
     expect(tracker.listMRs).toHaveBeenCalledWith({ state: 'all' });
     expect(tracker.getMR).toHaveBeenCalledWith(9);
+  });
+
+  it('takes the change that landed when the branch carries a probe as well', async () => {
+    // One source branch can carry more than one change: the probe was left
+    // behind on the branch and targets another branch. The change that
+    // landed is the change of the item — the order the listing answers in
+    // must not decide it.
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 48, state: 'closed', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'master' },
+        { id: 47, state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+      ]),
+      getMR: vi.fn(async (id: number) => ({
+        id,
+        state: id === 47 ? 'merged' : 'closed',
+        sourceBranch: 'afk/backlog-3-qa',
+        targetBranch: id === 47 ? 'prd/27' : 'master',
+        url: `https://gitlab.example/fang/services/k-base/-/merge_requests/${id}`,
+      })),
+    } as unknown as TrackerProvider;
+    const backlog = { id: '3', branchName: 'afk/backlog-3' } as BacklogItem;
+
+    await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog, { preferredTargetBranch: 'prd/27' }))
+      .resolves.toMatchObject({ id: '47', state: 'merged', targetBranch: 'prd/27' });
+  });
+
+  it('takes the change that targets the expected branch when both are open', async () => {
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 50, state: 'opened', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'master' },
+        { id: 49, state: 'opened', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+      ]),
+      getMR: vi.fn(async (id: number) => ({
+        id,
+        state: 'opened',
+        sourceBranch: 'afk/backlog-3-qa',
+        targetBranch: id === 49 ? 'prd/27' : 'master',
+        url: `https://gitlab.example/fang/services/k-base/-/merge_requests/${id}`,
+      })),
+    } as unknown as TrackerProvider;
+    const backlog = { id: '3', branchName: 'afk/backlog-3' } as BacklogItem;
+
+    await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog, { preferredTargetBranch: 'prd/27' }))
+      .resolves.toMatchObject({ id: '49', state: 'open', targetBranch: 'prd/27' });
+  });
+
+  it('keeps the only change the branch carries', async () => {
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 47, state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+      ]),
+      getMR: vi.fn().mockResolvedValue({
+        id: 47,
+        state: 'merged',
+        sourceBranch: 'afk/backlog-3-qa',
+        targetBranch: 'prd/27',
+        url: 'https://gitlab.example/fang/services/k-base/-/merge_requests/47',
+      }),
+    } as unknown as TrackerProvider;
+    const backlog = { id: '3', branchName: 'afk/backlog-3' } as BacklogItem;
+
+    await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog, { preferredTargetBranch: 'prd/27' }))
+      .resolves.toMatchObject({ id: '47', state: 'merged' });
+    expect(tracker.getMR).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists the changes of both branches of an item', async () => {
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 47, state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+        { id: 46, state: 'merged', sourceBranch: 'afk/backlog-3', targetBranch: 'master' },
+      ]),
+      getMR: vi.fn(async (id: number) => ({
+        id,
+        state: 'merged',
+        sourceBranch: id === 47 ? 'afk/backlog-3-qa' : 'afk/backlog-3',
+        targetBranch: id === 47 ? 'prd/27' : 'master',
+        url: `https://gitlab.example/fang/services/k-base/-/merge_requests/${id}`,
+      })),
+    } as unknown as TrackerProvider;
+    const backlog = { id: '3', branchName: 'afk/backlog-3' } as BacklogItem;
+
+    await expect(new TrackerChangeProvider(tracker).listForBacklog(backlog)).resolves.toMatchObject([
+      { id: '47', sourceBranch: 'afk/backlog-3-qa' },
+      { id: '46', sourceBranch: 'afk/backlog-3' },
+    ]);
+  });
+
+  it('keeps the listed state when the provider cannot read a change back', async () => {
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 47, state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+      ]),
+      getMR: vi.fn().mockRejectedValue(new Error('provider unavailable')),
+    } as unknown as TrackerProvider;
+    const backlog = { id: '3', branchName: 'afk/backlog-3' } as BacklogItem;
+
+    // The candidate is lost neither way: a change nobody could read back
+    // still counts, with the state the listing gave it.
+    await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog, { preferredTargetBranch: 'prd/27' }))
+      .resolves.toMatchObject({ id: '47', state: 'merged', targetBranch: 'prd/27' });
+  });
+
+  it('never merges a change that a person has already merged', async () => {
+    // The merge gate belongs to a person. The association has to land on the
+    // change that was merged, and the confirmation has to leave it alone.
+    const tracker = {
+      listMRs: vi.fn().mockResolvedValue([
+        { id: 48, state: 'closed', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'master' },
+        { id: 47, state: 'merged', sourceBranch: 'afk/backlog-3-qa', targetBranch: 'prd/27' },
+      ]),
+      getMR: vi.fn(async (id: number) => ({
+        id,
+        state: id === 47 ? 'merged' : 'closed',
+        sourceBranch: 'afk/backlog-3-qa',
+        targetBranch: id === 47 ? 'prd/27' : 'master',
+        url: `https://gitlab.example/fang/services/k-base/-/merge_requests/${id}`,
+      })),
+      mergeMR: vi.fn(),
+    } as unknown as TrackerProvider;
+    const changes = new TrackerChangeProvider(tracker);
+    const merge = vi.fn();
+    const item = { id: '3', branchName: 'afk/backlog-3', state: 'merge_ready', executionMode: 'hitl' } as BacklogItem;
+    const provider = {
+      get: async () => item,
+      transition: async (_id: string, state: string) => { item.state = state as typeof item.state; },
+    } as unknown as QABacklogProvider;
+
+    await expect(confirmBacklogMerge(provider, {
+      findForBacklog: (backlog, options) => changes.findForBacklog(backlog, options),
+      listForBacklog: (backlog) => changes.listForBacklog(backlog),
+      merge,
+      get: (id: string) => changes.get(id),
+    }, '3', 'prd/27')).resolves.toMatchObject({ state: 'done' });
+
+    expect(merge).not.toHaveBeenCalled();
+    expect(tracker.mergeMR).not.toHaveBeenCalled();
   });
 });

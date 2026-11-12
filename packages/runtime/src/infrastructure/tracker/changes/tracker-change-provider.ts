@@ -1,6 +1,7 @@
 import type { BacklogItem } from '../../../domain/backlog/index.js';
+import { scopeChangeCandidates, selectChangeAssociation, type ChangeAssociationOptions } from '../../../domain/backlog/change-association.js';
 import type { ChangeProvider, ChangeRequest, CreateChangeInput } from './provider.js';
-import type { TrackerProvider } from '../../../domain/tracker/types.js';
+import type { TrackerProvider, TrackedMR } from '../../../domain/tracker/types.js';
 import { parseWorkItemId } from '../../../domain/work-item/identity.js';
 import { resolveGitLabProjectKey } from '../../../shared/gitlab-project.js';
 import { closesIssue } from './closing-reference.js';
@@ -116,11 +117,70 @@ export class TrackerChangeProvider implements ChangeProvider {
     return { id: String(mr.id), state: mr.state === 'opened' ? 'open' : mr.state, sourceBranch: mr.sourceBranch, targetBranch: mr.targetBranch, mergeable: mr.mergeable, mergeState: mr.mergeState, url: mr.url, ...(mr.description ? { description: mr.description } : {}) };
   }
 
-  async findForBacklog(backlog: BacklogItem): Promise<ChangeRequest | null> {
+  /**
+   * The change request of a backlog item.
+   *
+   * A branch can carry more than one change — a probe that was aimed at
+   * another branch, a retry, a change that was opened by mistake — so the
+   * change is picked by the rule of the association, not by the order a
+   * listing happens to answer in.
+   */
+  async findForBacklog(backlog: BacklogItem, options: ChangeAssociationOptions = {}): Promise<ChangeRequest | null> {
+    const { scope } = await this.candidatesForBacklog(backlog);
+    return selectChangeAssociation(scope, options);
+  }
+
+  /**
+   * Every change request that shares a branch of a backlog item.
+   *
+   * The changes of the branch that carries the item come first; the changes
+   * on the other branch of the item follow, because a person reading a failed
+   * reconciliation has to see them too.
+   */
+  async listForBacklog(backlog: BacklogItem): Promise<ChangeRequest[]> {
+    const { scope, others } = await this.candidatesForBacklog(backlog);
+    return [...scope, ...others];
+  }
+
+  /**
+   * The changes that carry the work of a backlog item.
+   *
+   * The verification branch is where the change of an item is published; the
+   * branch of the item itself is the fallback for a change that was published
+   * without one. The changes on the branch that was not taken are kept
+   * apart: they are not the item's change, but they are the alternatives a
+   * person has to know about.
+   */
+  private async candidatesForBacklog(backlog: BacklogItem): Promise<{ scope: ChangeRequest[]; others: ChangeRequest[] }> {
     const changes = await this.tracker.listMRs({ state: 'all' });
-    const change = changes.find(candidate => candidate.sourceBranch === `${backlog.branchName}-qa`)
-      ?? changes.find(candidate => candidate.sourceBranch === backlog.branchName);
-    return change ? this.get(String(change.id)) : null;
+    const { scope, others } = scopeChangeCandidates(changes, backlog.branchName);
+    return {
+      scope: await Promise.all(scope.map(candidate => this.readCandidate(candidate))),
+      others: await Promise.all(others.map(candidate => this.readCandidate(candidate))),
+    };
+  }
+
+  /**
+   * The state a candidate really has.
+   *
+   * A listing answers in groups of states and can under-report a change that
+   * has landed, so the readback of the provider is the truth. A readback
+   * that fails leaves the listed state standing rather than losing the
+   * candidate altogether — and says so, because a state nobody read back
+   * must not pass for a state that was read.
+   */
+  private async readCandidate(candidate: TrackedMR): Promise<ChangeRequest> {
+    try {
+      return await this.get(String(candidate.id));
+    } catch (error) {
+      logger.warn({ changeRequestId: candidate.id, error }, 'failed to read the state of a change request; the listed state stands');
+      return {
+        id: String(candidate.id),
+        state: candidate.state === 'opened' ? 'open' : candidate.state,
+        sourceBranch: candidate.sourceBranch,
+        targetBranch: candidate.targetBranch,
+      };
+    }
   }
 
   async verifyIssueAssociation(change: ChangeRequest, canonicalWorkItemId: string): Promise<void> {

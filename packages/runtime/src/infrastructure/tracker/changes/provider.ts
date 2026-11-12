@@ -1,4 +1,5 @@
 import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { ChangeAssociationOptions } from '../../../domain/backlog/change-association.js';
 import type { ChangeMergeState } from '../../../domain/tracker/types.js';
 import type { VerificationEvidence } from './verification-evidence.js';
 
@@ -35,7 +36,22 @@ export interface CreateChangeInput {
 export interface ChangeProvider {
   create(input: CreateChangeInput): Promise<ChangeRequest>;
   get(id: string): Promise<ChangeRequest>;
-  findForBacklog(backlog: BacklogItem): Promise<ChangeRequest | null>;
+  /**
+   * The change request of a backlog item.
+   *
+   * One branch can carry several changes, so the association is a decision
+   * with a rule rather than the first change a listing happens to return. The
+   * caller that knows where the work was headed says so in the options.
+   */
+  findForBacklog(backlog: BacklogItem, options?: ChangeAssociationOptions): Promise<ChangeRequest | null>;
+  /**
+   * Every change request that shares a branch of a backlog item.
+   *
+   * It is optional because a provider that knows one change per item has
+   * nothing to list. Where it is there, a failed reconciliation can name the
+   * changes it had to choose between.
+   */
+  listForBacklog?(backlog: BacklogItem): Promise<ChangeRequest[]>;
   verifyIssueAssociation(change: ChangeRequest, canonicalWorkItemId: string): Promise<void>;
   /**
    * Refresh the body of a change request that already exists.

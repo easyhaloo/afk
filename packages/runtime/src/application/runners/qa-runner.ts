@@ -718,7 +718,7 @@ export class QARunner {
       // is an optional pre-publish hook, not a gate for the lookup. Without it
       // a standalone `afk qa` re-run would try to create a second MR for the
       // same source branch and the provider would reject it (409).
-      const existing = await this.providers.changes.findForBacklog(backlog);
+      const existing = await this.providers.changes.findForBacklog(backlog, { preferredTargetBranch: targetBranch });
       if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
         throw new Error(`existing change request ${existing.id} does not match QA branch and target`);
       }

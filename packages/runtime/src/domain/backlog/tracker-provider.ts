@@ -11,7 +11,7 @@ import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabi
 import { isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 import { latestOpenRework, nextReworkAttempt, parseReworkRecord, renderReworkRecord, reworkRecordId, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import { planReworkRevision, type ReworkRevisionInput } from './rework-revision.js';
-import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
+import type { LabelDelta, TrackerProvider, TrackedIssue, TrackedMR } from '../tracker/types.js';
 import { canonicalProjectKey, formatWorkItemId, parseWorkItemId, type WorkItemId, type WorkItemScope } from '../work-item/identity.js';
 import { planBacklogCreate, renderBacklogDescription, type BacklogCreatePlan } from './creation.js';
 import { applyExecutionBaseBranch, parseExecutionBaseBranch } from './execution-base.js';
@@ -28,6 +28,7 @@ import {
   type BacklogRelationUpdate,
 } from './metadata-codec.js';
 import { projectBacklogItem } from './projection.js';
+import { scopeChangeCandidates, selectChangeAssociation, type ChangeAssociationCandidate } from './change-association.js';
 import { idempotencyMarkerIn, legacyIdempotencyLabel, withIdempotencyMarker } from './idempotency.js';
 import { findDependencyCycle, type BacklogGraphSource } from './graph.js';
 
@@ -137,8 +138,11 @@ export class TrackerBacklogProvider implements BacklogProvider {
     // including completed children and dependencies.
     const issues = await this.tracker.listIssues({ state: 'all' });
     const changes = await this.tracker.listMRs({ state: 'all' });
+    // The listing is shared by every item, so the state of a change is read
+    // back once and reused by the items that share it.
+    const readback = new Map<number, TrackedMR>();
     const items = (await Promise.all(issues.map(issue =>
-      this.withChangeRequest(toBacklogItem(issue, this.scopeOf(this.tracker)), issue.labels, changes)))).filter(item =>
+      this.withChangeRequest(toBacklogItem(issue, this.scopeOf(this.tracker)), issue.labels, changes, readback)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
       (options.kind === undefined || item.kind === options.kind) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
@@ -249,17 +253,44 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (state === 'done') await target.tracker.updateIssue(target.issueId, { state: 'closed' });
   }
 
-  private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: Awaited<ReturnType<TrackerProvider['listMRs']>>): Promise<BacklogItem> {
-    // A change request that is waiting for a person, and one that is on its
-    // way back for another round, both have to be visible: the first is the
-    // merge gate, the second is where a conflict went.
+  /**
+   * The change request an item shows.
+   *
+   * A change request that is waiting for a person, and one that is on its
+   * way back for another round, both have to be visible: the first is the
+   * merge gate, the second is where a conflict went.
+   *
+   * Which change is shown depends on what the item is waiting for. A finished
+   * item shows the change that landed — that is the fact its books are
+   * about. An item that waits for a person shows the change that is still
+   * alive: a branch that was reworked carries the change of the earlier
+   * round that has landed and the change of the current round that is open,
+   * and only the second one is the merge gate. The rule that picks the
+   * change lives in one place, so this display and the reconciliation of a
+   * merged change can never disagree about which change belongs to the item.
+   */
+  private async withChangeRequest(
+    item: BacklogItem,
+    labels: readonly string[],
+    changes: Awaited<ReturnType<TrackerProvider['listMRs']>>,
+    readback?: Map<number, TrackedMR>,
+  ): Promise<BacklogItem> {
     if (!labels.includes(STATE_LABELS.merge_ready)
       && !labels.includes(STATE_LABELS.done)
       && !labels.includes(STATE_LABELS.rework)) return item;
-    const candidate = changes.find(change => change.sourceBranch === `${item.branchName}-qa`)
-      ?? changes.find(change => change.sourceBranch === item.branchName);
-    if (!candidate) return item;
-    const change = await this.tracker.getMR(candidate.id);
+    const candidates = scopeChangeCandidates(changes, item.branchName).scope;
+    if (candidates.length === 0) return item;
+    // The state of a candidate is read back from the provider: a listing can
+    // under-report a change that has landed, and an item must not show a
+    // change that is still open as one that has landed.
+    const read = await Promise.all(candidates.map(candidate => this.readChange(candidate, readback)));
+    const selected = selectChangeAssociation(read.map(changeCandidate), {
+      intent: item.state === 'done' ? 'landed' : 'alive',
+      ...(item.executionBase ? { preferredTargetBranch: item.executionBase } : {}),
+    });
+    if (!selected) return item;
+    const change = read.find(candidate => String(candidate.id) === selected.id);
+    if (!change) return item;
     const state: BacklogChangeRequest['state'] = change.state === 'opened' ? 'open' : change.state;
     return {
       ...item,
@@ -272,6 +303,27 @@ export class TrackerBacklogProvider implements BacklogProvider {
         ...(change.mergeState ? { mergeState: change.mergeState } : {}),
       },
     };
+  }
+
+  /**
+   * The state a candidate really has.
+   *
+   * A readback that fails leaves the listed state standing rather than
+   * losing the candidate altogether: an item whose change cannot be read
+   * completely is still an item, and the change it carries is still worth
+   * showing.
+   */
+  private async readChange(candidate: TrackedMR, readback?: Map<number, TrackedMR>): Promise<TrackedMR> {
+    const cached = readback?.get(candidate.id);
+    if (cached) return cached;
+    let read: TrackedMR;
+    try {
+      read = await this.tracker.getMR(candidate.id);
+    } catch {
+      read = candidate;
+    }
+    readback?.set(candidate.id, read);
+    return read;
   }
 
   async setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
@@ -746,4 +798,20 @@ function toBacklogItem(issue: TrackedIssue, scope: BacklogMetadataScope): Backlo
     state: issue.state,
     webUrl: issue.url,
   }, scope);
+}
+
+/**
+ * A listed change request as a candidate of the association.
+ *
+ * The provider states a change request as `opened`, the association calls
+ * that state `open`; the two names are mapped here so the rule of the
+ * association never has to know the vocabulary of a platform.
+ */
+function changeCandidate(change: TrackedMR): ChangeAssociationCandidate {
+  return {
+    id: String(change.id),
+    state: change.state === 'opened' ? 'open' : change.state,
+    sourceBranch: change.sourceBranch,
+    targetBranch: change.targetBranch,
+  };
 }

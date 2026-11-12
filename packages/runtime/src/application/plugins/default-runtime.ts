@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { capabilitySelectionSchema as selectionSchema, createDefaultBuiltinProviderPlugins } from './builtin-manifests.js';
 import { loadInstalledPlugins } from './loader.js';
-import { PluginRuntime } from './runtime.js';
+import { PluginRuntime, type Plugin } from './runtime.js';
 import { invokeCapability } from './operations.js';
 import { createConfiguredPlugins } from './configured.js';
 import { readPluginConfiguration, type PluginConfiguration } from './configuration.js';
@@ -35,6 +35,7 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const runtime = new PluginRuntime();
   const invalidSettings: string[] = [];
+  let requiredIntegrations: Plugin | undefined;
   let auditArtifacts: { provider: string; timeoutMs?: number } | undefined;
   let auditEvidence: ReturnType<typeof createLocalEncryptedEvidenceStore> | undefined;
   const initializeAuditEvidence = () => auditEvidence ??= createLocalEncryptedEvidenceStore(homeDir).catch(() => {
@@ -158,6 +159,8 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
       const fragments = new Map<string, ContextFragment[]>();
       const module = createCapabilityLifecycle(runtime, {
         policies: selection.policies.map(policy => ({ ...policy, input: context => ({ ...policy.input, context: { ...policy.input.context, worktreePath: context.worktreePath } }) })),
+        verifications: selection.verifications.map(({ provider, ...request }) => ({ provider,
+          request: context => ({ ...request, target: context.worktreePath }) })),
         contexts: selection.contexts.map(source => ({
           ...source, query: () => source.query,
           async consume(received, context) {
@@ -192,12 +195,15 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
         })),
         notifications: selection.notifications.map(notification => ({ ...notification, message: (_context, artifacts) => ({ ...notification.message, body: [notification.message.body, ...artifacts.map(artifact => artifact.artifact.uri)].join('\n') }) })),
       });
-      plugins.push({
+      const integration: Plugin = {
         manifest: { id: 'workflow.integrations', version: '0.1.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true },
         activate(context) {
           context.registerLifecycle({
             ...module,
             async onInit(context) {
+              for (const verification of selection.verifications) {
+                if (!runtime.getVerificationProvider(verification.provider)) throw new Error('Configured verification provider is unavailable');
+              }
               await module.onInit?.(context);
               if (auditArtifacts) await initializeAuditEvidence();
             },
@@ -214,10 +220,16 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
           });
           context.onDispose(() => fragments.clear());
         },
-      });
+      };
+      plugins.push(integration);
+      if (selection.policies.length || selection.verifications.length) requiredIntegrations = integration;
     }
   }
   await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });
+  if (requiredIntegrations && runtime.getPlugin(requiredIntegrations.manifest.id) !== requiredIntegrations) {
+    invalidSettings.push('Configured capability gates are unavailable');
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.integrations-unavailable', message: 'Configured capability gates are unavailable' });
+  }
   if (auditArtifacts) {
     try {
       setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: localEvidence, captureEvents: true });

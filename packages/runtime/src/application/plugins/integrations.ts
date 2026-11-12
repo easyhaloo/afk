@@ -17,6 +17,7 @@ export interface PublishedCapabilityArtifact {
 
 export interface CapabilityLifecycleSelection {
   readonly policies?: readonly { readonly provider: string; readonly input: ContextValue<PolicyCheckInput> }[];
+  readonly verifications?: readonly { readonly provider: string; readonly request: ContextValue<VerificationRequest> }[];
   readonly contexts?: readonly {
     readonly provider: string;
     readonly query: ContextValue<ContextQuery>;
@@ -35,6 +36,7 @@ export interface CapabilityLifecycleSelection {
 
 export function createCapabilityLifecycle(runtime: PluginRuntime, selection: CapabilityLifecycleSelection): LifecycleModule {
   const policies = [...selection.policies ?? []];
+  const verifications = [...selection.verifications ?? []];
   const contexts = [...selection.contexts ?? []];
   const artifacts = [...selection.artifacts ?? []];
   const notifications = [...selection.notifications ?? []];
@@ -46,11 +48,22 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
       if (!decision.allowed) throw new Error('Execution denied by capability policy');
     }
   };
+  const verify = async (context: LifecycleContext) => {
+    for (const verification of verifications) {
+      const result = verificationResultSchema.parse(await invokeCapability(runtime, {
+        capability: 'verification.provider', provider: verification.provider, operation: 'verify', input: await verification.request(context),
+      }));
+      if (!result.passed) throw new Error('Capability verification failed');
+    }
+  };
   return {
     name: 'capability-integrations',
     order: -100,
     failureMode: 'required',
-    onBeforePublish: evaluatePolicies,
+    async onBeforePublish(context) {
+      await evaluatePolicies(context);
+      await verify(context);
+    },
     async onBeforeAgent(context) {
       await evaluatePolicies(context);
       for (const source of contexts) {
@@ -62,6 +75,7 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
     },
     async onAfterAgent(context) {
       await evaluatePolicies(context);
+      await verify(context);
       const published: PublishedCapabilityArtifact[] = [];
       for (const sink of artifacts) {
         const descriptor = await sink.artifact(context);

@@ -273,6 +273,14 @@ required init、before-agent、after-agent、before-publish 及逆序 cleanup �
 失败策略。插件模板需通过宿主验证；专用 QA/冲突模板只接受一个 inline Agent 步骤。
 不提供通用逐工具拦截 API；插件不能修改 Core 状态、放宽预算或关闭人工合并闸门。
 
+根配置 `integrations.verifications` 显式选择已注册验证 Provider，默认空、最多 32 项。
+条目为 `{ provider, command?, timeoutMs? }`，禁止未知字段、客户端 `target` 和 `passed`；
+命令使用无 shell 展开的有效 argv，期限为正整数。宿主在 required init 检查 Provider，
+在 after-agent 和每次 before-publish 中先执行策略、再验证，并绑定实际 worktree。
+失败阻断该阶段的后续副作用；命令期限由 Provider 执行，学习资产仍需类型专属验证。
+保存策略或验证选择时，宿主必须确认所需门禁模块实际加载；禁用、缺失或替换该模块
+不得静默跳过已配置检查，必须在初始化时阻断。
+
 - Manifest、配置、依赖/冲突、唯一注册名及可选操作声明正确；激活失败回滚，dispose 幂等。
 - 信任边界校验输入/结果；取消、超时、资源及输出有界；缺失凭据/工具/协议有安全诊断。
 - 原始认证响应、秘密及未授权内容不进入 Renderer、上下文、事件、Artifact 或普通结果。

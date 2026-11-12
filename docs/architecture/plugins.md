@@ -686,7 +686,7 @@ trusted code from mutating global state, reading files or crashing the process.
 | Host operations | Runtime → `getHostProvider(name)` → shared Application host use cases → CLI `host` or a Desktop adapter. `jumpserver` is the CLI default; another provider must be selected explicitly. |
 | Linear/Jira managed import/sync | `IssueTrackerPort` supplies the source issue; `importManagedIssue` creates an idempotent canonical source-host backlog item and `syncManagedIssue` explicitly maps its state back to the bound source. Execution uses the managed repository's tracker/backlog. |
 | Repository lifecycle | `RepositoryLifecycleService.run` wraps the callback with prepare/checkout/publish/cleanup; public `repository.provider/run` dispatches a registered action with the workspace handle/path. |
-| Other capability operations | Typed getters and CLI `invoke` call the permitted operations. Root `integrations` selects policy, context, artifact and notification consumers for implementation and QA; credentials remain private SDK operations and resident triggers run through `listen`. |
+| Other capability operations | Typed getters and CLI `invoke` call the permitted operations. Root `integrations` selects policy, verification, context, artifact and notification consumers for implementation and QA; credentials remain private SDK operations and resident triggers run through `listen`. |
 | Lifecycle modules and system actions | `getLifecycleModules()` feeds engine and QA hooks; registered system actions serve workflow steps and trigger callbacks. Core transitions, audit, retry and the human merge gate remain mandatory. |
 | Templates and surfaces | Registry entries are available to explicit consumers. Registration alone does not replace existing command dispatch, template storage or Desktop rendering. |
 
@@ -917,7 +917,7 @@ successful verification or an accepted policy. Downstream dependencies must
 observe that failed step. These checks supplement independent QA and the human
 merge gate; they do not replace either.
 
-### Configure policy gates and the agent context reference
+### Configure policy and verification gates and the agent context reference
 
 `integrations` is a root key in `~/.afk/plugins.yml`, alongside `plugins`; it is
 not a plugin entry's `config`. These selections refer to registered provider
@@ -929,6 +929,10 @@ integrations:
     - provider: secret-scan
       input:
         action: pre-execution
+  verifications:
+    - provider: test-runner
+      command: [npm, test]
+      timeoutMs: 120000
   contexts:
     - provider: context.code
       query:
@@ -942,6 +946,26 @@ Policy entries contain `{ provider, input }`; context entries contain
 providers; their concrete filesystem roots, settings and transports are still
 constructed by the configured factory. Do not add constructor fields to
 `integrations` or assume it creates a missing provider.
+
+`verifications` defaults to an empty list, with at most 32 entries containing
+only `{ provider, command?, timeoutMs? }`. The command is an argv array without
+shell expansion: its first item must be a nonblank executable and no argument
+may contain NUL. `timeoutMs` must be a positive integer. Omitted commands and
+timeouts use the selected Provider's defaults. Configuration cannot supply
+`target` or `passed`; the host binds the target to the actual execution worktree.
+A missing or disabled saved selection fails required initialization.
+When policies or verifiers are selected, a disabled, missing or replaced
+integration-gate module also fails initialization. Remove the corresponding
+saved selections to stop those gates; disabling the module alone cannot bypass them.
+
+Selected verifiers run after policy checks in `after-agent` and on every
+`before-publish` invocation. A false `passed`, exception or malformed result
+blocks that phase. An after-agent failure prevents subsequent artifact uploads
+and notifications; a publication failure blocks the corresponding push or
+change-request operation. Unselected verifiers do not run automatically, and a
+new Runtime reloads saved selections. Providers enforce command timeouts; this
+configuration does not add a global session-cancellation protocol. Ordinary
+executor success does not grant independent validation for learning assets.
 
 The managed policy lifecycle hook must use `failureMode: required`, so a denied
 decision, missing selected provider or failed evaluation blocks execution.

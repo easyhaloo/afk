@@ -551,7 +551,7 @@ CLI 操作白名单；具体 Provider 仍由消费者显式选择。
 | 主机操作 | Runtime → `getHostProvider(name)` → 共享 Application 主机用例 → CLI `host` 或 Desktop adapter；CLI 默认 `jumpserver`，其他 Provider 需显式选择。 |
 | Linear/Jira 受管导入/同步 | `IssueTrackerPort` 读取来源 issue；`importManagedIssue` 幂等创建规范源码托管 backlog 项，`syncManagedIssue` 按显式映射向绑定来源回写状态。执行使用受管仓库的 tracker/backlog。 |
 | 仓库生命周期 | `RepositoryLifecycleService.run` 在 prepare/checkout/publish/cleanup 中执行 callback；公开 `repository.provider/run` 把工作区句柄/路径交给注册 action。 |
-| 其他能力操作 | 类型化 getter 与 CLI `invoke` 调用许可操作；根 `integrations` 为实现阶段和 QA 选择策略、上下文、制品和通知消费者。凭据保留为 SDK 私下操作，常驻 trigger 由 `listen` 驱动。 |
+| 其他能力操作 | 类型化 getter 与 CLI `invoke` 调用许可操作；根 `integrations` 为实现阶段和 QA 选择策略、验证、上下文、制品和通知消费者。凭据保留为 SDK 私下操作，常驻 trigger 由 `listen` 驱动。 |
 | Lifecycle / system action | `getLifecycleModules()` 接入引擎与 QA hook，注册 system action 供 workflow step 和 trigger callback 使用；Core 状态转换、审计、重试和人工合并闸门继续有效。 |
 | Template / surface | 注册表向显式消费者提供条目；注册本身不替换现有命令派发、模板存储或 Desktop 渲染。 |
 
@@ -747,7 +747,7 @@ Verification 省略 `target` 时使用本次 attempt 的 worktree；显式指定
 step 失败；Promise 正常返回一个否定结果不等于验证成功或策略通过。
 下游依赖需要看到该失败状态；这些检查补充独立 QA 和人工合并闸门，不替代它们。
 
-### 配置策略闸门和 Agent 上下文指针
+### 配置策略、验证闸门和 Agent 上下文指针
 
 `integrations` 与 `plugins` 同属 `~/.afk/plugins.yml` 顶层，不是某个插件的 `config`。
 这里选的是已注册 Provider 名称，例如 `secret-scan` 不等于插件 ID `policy.secret-scan`：
@@ -758,6 +758,10 @@ integrations:
     - provider: secret-scan
       input:
         action: pre-execution
+  verifications:
+    - provider: test-runner
+      command: [npm, test]
+      timeoutMs: 120000
   contexts:
     - provider: context.code
       query:
@@ -770,6 +774,20 @@ integrations:
 `{ provider, query: { scope, prompt, limit? } }`。此片段只选择现有 Provider；
 具体文件系统根、参数和 transport 仍由 configured factory 构造。
 不要把 constructor 字段塞入 `integrations`，也不能假定它会创建不存在的 Provider。
+
+`verifications` 默认为空，最多 32 项；每项仅接受 `{ provider, command?, timeoutMs? }`。
+`command` 是无 shell 展开的 argv 数组，首项必须为非空程序名且所有参数禁止 NUL；
+`timeoutMs` 必须为正整数。省略命令或期限时使用所选 Provider 的默认值。
+配置不能提供 `target` 或 `passed`；宿主将目标绑定到当前执行 worktree。
+保存配置选中的 Provider 缺失或禁用时，required init 阻断执行。
+已选择策略或验证时，集成门禁模块被禁用、缺失或被替换同样阻断初始化；
+停止这些门禁需同时移除相应保存选择，不能仅禁用模块。
+
+所选验证在 `after-agent` 和每次 `before-publish` 中运行，顺序为策略检查、验证、
+后续副作用。`passed: false`、异常或非法结果均阻断该阶段；after-agent 验证失败时
+不会继续上传制品或发送通知，发布前失败阻止相应 push 或变更请求操作。
+未选择的验证器不会自动执行，重启后重新读取保存选择。命令超时由 Provider 实现；
+此配置不增加全局会话取消协议。普通执行器通过不授予五类学习资产的独立验证资格。
 
 受管策略 lifecycle hook 必须采用 `failureMode: required`，使拒绝结果、所选 Provider
 缺失或执行异常阻止执行。`failureMode` 是 hook 的强制策略，不是上面 YAML 额外添加的字段；

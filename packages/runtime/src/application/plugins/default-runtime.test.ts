@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -427,6 +427,100 @@ describe('createDefaultPluginRuntime', () => {
     const { runtime, lifecycle } = await fixture(configuration);
     expect((await runtime.diagnostics()).some(diagnostic => diagnostic.severity === 'error')).toBe(true);
     await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow();
+  });
+
+  it('runs saved verifications against the execution worktree after agent work and before publishing', async () => {
+    const command = [process.execPath, '-e', "require('node:fs').appendFileSync('verification-marker', process.cwd() + '\\n')"];
+    const { runtime, lifecycle, context, homeDir, workspaceRoot } = await fixture({ integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } });
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify');
+    const worktreePath = join(homeDir, 'verification-execution');
+    await mkdir(worktreePath);
+    await lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot });
+    await lifecycle.run('after-agent', { ...context, worktreePath });
+    await lifecycle.run('before-publish', { ...context, worktreePath });
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(verify).toHaveBeenCalledWith({ command, timeoutMs: 5000, target: worktreePath });
+    const actualWorktree = await realpath(worktreePath);
+    expect((await readFile(join(worktreePath, 'verification-marker'), 'utf8')).trim().split('\n')).toEqual([actualWorktree, actualWorktree]);
+    await expect(lstat(join(workspaceRoot, 'verification-marker'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each(['after-agent', 'before-publish'] as const)('blocks %s when the saved verification actually fails', async phase => {
+    const { lifecycle, context } = await fixture({ integrations: { verifications: [{ provider: 'test-runner',
+      command: [process.execPath, '-e', 'process.exit(7)'] }] } });
+    await expect(lifecycle.run(phase, context)).rejects.toThrow('Capability verification failed');
+  });
+
+  it('does not invoke an unselected registered verifier', async () => {
+    const { runtime, lifecycle, context } = await fixture({ integrations: {} });
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify');
+    await lifecycle.run('after-agent', context);
+    await lifecycle.run('before-publish', context);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('blocks initialization when a saved verification provider is missing or disabled=%s', async disabled => {
+    const { lifecycle, workspaceRoot } = await fixture({
+      plugins: disabled ? [{ id: 'verification.test-runner', builtin: true, enabled: false }] : [],
+      integrations: { verifications: [{ provider: disabled ? 'test-runner' : 'missing-verifier' }] },
+    });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Configured verification provider is unavailable');
+  });
+
+  it.each([
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: { verifications: [{ provider: 'missing-verifier' }] } },
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }, { id: 'verification.test-runner', builtin: true, enabled: false }], integrations: { verifications: [{ provider: 'test-runner' }] } },
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: { verifications: [{ provider: 'test-runner', command: [process.execPath, '-e', 'process.exit(7)'] }] } },
+    { plugins: [{ id: 'workflow.integrations' }], integrations: { verifications: [{ provider: 'test-runner' }] } },
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: { policies: [{ provider: 'secret-scan', input: { action: 'pre-execution' } }] } },
+  ])('rejects a missing required integration gate despite saved selections: %j', async configuration => {
+    const { runtime, lifecycle, workspaceRoot } = await fixture(configuration);
+    const verify = runtime.getVerificationProvider('test-runner');
+    const execute = verify && vi.spyOn(verify, 'verify');
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Configured capability gates are unavailable');
+    if (execute) expect(execute).not.toHaveBeenCalled();
+    expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ code: 'config.integrations-unavailable', severity: 'error' }));
+  });
+
+  it('allows a disabled integration module when no required gates are selected', async () => {
+    const { lifecycle, workspaceRoot } = await fixture({ plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: {} });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).resolves.toBeUndefined();
+  });
+
+  it('rejects a replacement plugin that omits the required integration gate', async () => {
+    const { homeDir, workspaceRoot } = await fixture();
+    const directory = join(homeDir, '.afk', 'plugins', 'workflow.integrations', 'dist');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'index.js'), `export default {
+      manifest: { id: 'workflow.integrations', version: '1.0.0', apiVersion: 1, provides: [], trusted: true },
+      activate() {}
+    };`);
+    await writeFile(join(homeDir, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [{ id: 'workflow.integrations' }],
+      integrations: { verifications: [{ provider: 'test-runner' }] } }));
+    const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+    runtimes.push(runtime);
+    expect(runtime.getPlugin('workflow.integrations')).toBeDefined();
+    const lifecycle = new LifecycleDispatcher(runtime.getLifecycleModules());
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Configured capability gates are unavailable');
+  });
+
+  it('rejects more than 32 saved verification selections', async () => {
+    const { lifecycle, workspaceRoot } = await fixture({ integrations: { verifications: Array.from({ length: 33 }, () => ({ provider: 'test-runner' })) } });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow();
+  });
+
+  it.each([
+    { provider: 'test-runner', target: '/untrusted-target' },
+    { provider: 'test-runner', passed: true },
+    { provider: 'test-runner', command: [] },
+    { provider: 'test-runner', command: ['tool', '\0'] },
+    { provider: 'test-runner', timeoutMs: 0 },
+  ])('rejects invalid saved verification selection before execution: %j', async verification => {
+    const { lifecycle, workspaceRoot } = await fixture({ integrations: { verifications: [verification] } });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow();
   });
 
   it('writes selected context into the execution worktree and removes it on cleanup', async () => {

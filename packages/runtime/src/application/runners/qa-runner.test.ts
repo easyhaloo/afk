@@ -6,12 +6,13 @@ import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js
 import { retryBacklog } from '../../domain/backlog/commands.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
 import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { PluginRuntime } from '../plugins/runtime.js';
+import { createDefaultPluginRuntime } from '../plugins/default-runtime.js';
 import { createLearningPlugin } from '../plugins/learning.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import type { Step } from '../../domain/templates/types.js';
@@ -196,6 +197,47 @@ describe.each(['pre-merge-qa-verification', 'merge-conflict-resolution'])('QARun
 });
 
 describe('QARunner plugin publication policies', () => {
+  it.each([0, 1, 2, 3])('enforces saved command verification through managed QA publication (failure invocation=%s)', async failureInvocation => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-saved-verification-'));
+    const current = fixture();
+    const completion = join(root, 'agent-completed');
+    const receipt = join(root, 'verification.jsonl');
+    const completed = current.execution.waitForResult.getMockImplementation()!;
+    current.execution.waitForResult.mockImplementationOnce(async () => {
+      await writeFile(completion, 'actual QA completion');
+      return completed();
+    });
+    const command = [process.execPath, '-e', `const fs = require('node:fs');
+      if (fs.readFileSync(${JSON.stringify(completion)}, 'utf8') !== 'actual QA completion') process.exit(11);
+      fs.appendFileSync(${JSON.stringify(receipt)}, JSON.stringify({cwd:process.cwd()}) + '\\n');
+      const invocation = fs.readFileSync(${JSON.stringify(receipt)}, 'utf8').trim().split('\\n').length;
+      if (invocation === ${failureInvocation}) process.exit(7);`];
+    await mkdir(join(root, '.afk'));
+    await writeFile(join(root, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [],
+      integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } }));
+    const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      const result = await runner.process('60');
+      expect(result).toMatchObject({ success: failureInvocation === 0 });
+      if (failureInvocation) expect(result.summary).toContain('Capability verification failed');
+      const receipts = (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      expect(receipts).toEqual(Array.from({ length: failureInvocation || 3 }, () => ({ cwd: expect.any(String) })));
+      for (const observed of receipts) expect(observed.cwd).toBe(await realpath(worktreePath));
+      expect(current.branches.commit).toHaveBeenCalledTimes(failureInvocation === 1 ? 0 : 1);
+      expect(current.branches.push).toHaveBeenCalledTimes(failureInvocation === 0 || failureInvocation === 3 ? 1 : 0);
+      expect(current.changes.create).toHaveBeenCalledTimes(failureInvocation === 0 ? 1 : 0);
+      expect(current.changes.merge).not.toHaveBeenCalled();
+      expect(current.branches.cleanup).toHaveBeenCalledWith(worktreePath, { preserve: failureInvocation !== 0 });
+      expect(current.sandbox.close).toHaveBeenCalledOnce();
+    } finally {
+      await plugins.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('gathers plugin context before the QA prompt and completes lifecycle before publication', async () => {
     const current = fixture();
     const contextFile = join(worktreePath, '.afk', 'plugin-context.md');

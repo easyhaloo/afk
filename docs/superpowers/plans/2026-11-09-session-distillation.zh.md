@@ -1377,8 +1377,12 @@ pnpm --filter afk-control-electron e2e
 - [x] Runtime 首次完整运行 4179 pass / 12 skip / 1 fail，失败为已有 host descendant cancellation；原文件单独 31/31 通过，随后完整复跑 4180 pass / 12 skip。保留首次失败，未改生产或放宽断言，不声称已解释偶发根因。
 - [x] EvidenceStore 独立规格：正式 93 + 独立 14 项及两项类型通过。补公开 SDK `setPluginAuditEvidence` 导出，重建后五场景黑盒覆盖默认关闭、选中消费且本地先持久、脱敏加密、项目隔离及错误回读保留本地权威。
 - [x] Context 最终独立规格 delta 两组各 21 项通过。EvidenceStore 运行期选择失效阻断本地审计的 P2 已修复；原两反例和原 125 项保留，含新增正式用例 128/128 通过，独立 builtSDK 注销 / 歧义 / 能力失效三场景及两 root 类型通过。显式非法选择仍拒绝，原 RED 保留。
-- [ ] 提交精确冻结的 CLI 0.2.56 批次并核对该提交 CI。运行期失效修复只增量重建对应模块，随后本地 110 项规格回归和产物黑盒通过；先前完整聚合结果不冒充该最后增量的全量验收，精确提交 CI 单独核对。
+- [x] 精确冻结的 CLI 0.2.56 批次已提交并推送为 `e9a4e59c93370dfa7ebbe09a85570c811b87e122`；PR #295 保持草稿、未合并。
+- [x] 精确提交 CI `43158891111` 已完成 success，head SHA 与 `e9a4e59c93370dfa7ebbe09a85570c811b87e122` 一致；六个 job 通过，PRD 与 advisory PTY 两项按路径规则 skipped。本地增量与历史完整运行的边界继续保留，最终 CI 独立记录。
 - [ ] 下一批 W05 / W06 专属验证共享用例复用提案执行与真实 CandidateStore CAS；保存配置、`learning.validate` 分派、代码发布 / 安装和消费仍需接线及独立审查。
+- [ ] 下一批 W10 Verification 保存配置与共享生命周期接线：独立规格发现禁用 `workflow.integrations` 可跳过保存门禁的 P1，已补原 RED 并修复实际加载身份检查，保存策略同样受保护；独立最终复核进行中。default-runtime / integrations / QARunner 定向 172/172 通过，Runtime 完整 4284 pass / 13 skip；CLI 608 pass / 2 skip，built E2E 三文件 105/105。构建产物在真实 Git worktree、LocalSandbox 和 Node 子进程完成四项 QA 场景，Agent 协议输出及远端发布仍为 fixture。持久类型检查曾与清空 dist 的构建并发而失败，构建结束后原配置复跑通过；临时扩大到整个已有 QA 测试暴露其旧类型错误，已恢复原检查范围且保留失败日志，不以放宽断言通过。发行归档、完整会话取消及 CLI 0.2.57 提交尚未完成。
+- [ ] W05 / W06 新共享用例作者 66 项、独立 QUALITY 初始 91 项通过后，补充身份反例发现 P1：省略可选来源 run 身份可与验证 run 相同且晋级。原反例与真实 SQLite 收据保留，已交作者修复；未进入集成提交，不宣称该版本通过最终审查。
+- [x] W10 保存 Verification 选择及门禁防绕过切片通过最终独立双审：规格保留原主 probe 在 init 提前拒绝的旧断言失败，以新增直接拒绝反例 10/10 闭环；质量正式 91 + 原独立 29 + 新反例 12，共 132/132。六文件冻结一致；本次提交范围 Runtime 4219 pass / 12 skip，不含另行开发且尚未合格的 proposal-validation 测试。CLI / built E2E、类型与构建结果沿上项记录；尚未证明发行归档、全局取消或完整 W10。
 - [ ] W00 实际 Claude 合法提炼、W10 受管 Repository / 自动 Verification、W07–W09 产品治理、W11 收益和 W12 发布恢复保持未完成。
 
 每张任务卡记录唯一工作包、作者 / 审查者、依赖摘要、提交、配置资格、执行证据、开放缺陷与完成门槛；同一变更不以不同报表重复计完成率。缺配置生成明确字段和已核验官方获取入口，继续其他任务；不要求用户重复提供本地已有配置。

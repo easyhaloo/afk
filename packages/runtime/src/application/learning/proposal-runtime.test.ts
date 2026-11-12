@@ -9,7 +9,7 @@ import { compareProposalActual, prepareAssetProposal, type ProposalInventory } f
 import { verifyRepositoryAssetProposal, ProposalRuntimeCleanupError, type ProposalRuntimeOptions, type ProposalRuntimeResult } from './proposal-runtime.js';
 import { canonicalLearningJson } from './requests.js';
 import { output } from './ledger-data.fixture.spec.js';
-import { MultiRepositoryProvider } from '../../infrastructure/providers/repositories.js';
+import { MultiRepositoryProvider, RepositoryPreparationCleanupError } from '../../infrastructure/providers/repositories.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { DockerContainerProvider } from '../../infrastructure/sandbox/container/docker.js';
 import { executeFrozenContainer } from '../../infrastructure/sandbox/container/frozen-execution.js';
@@ -94,6 +94,85 @@ function fixture() {
 }
 
 describe('repository frozen proposal production orchestration', () => {
+  it.each([false, true])('preserves allocation cleanup recovery when caller cancellation is %s', async cancelled => {
+    const { options, prepared, repository, engine, workspace } = fixture();
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    const failure = new Error('Snapshot unavailable');
+    const cleanup = new Error('Cleanup unavailable');
+    const recovery = new RepositoryPreparationCleanupError({ id: workspace.id, runId: workspace.runId,
+      repository: workspace.repository, path: workspace.path! }, failure, cleanup);
+    vi.mocked(repository.prepare!).mockImplementation(async () => {
+      if (cancelled) controller.abort(null);
+      throw recovery;
+    });
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toBe(recovery);
+    expect(recovery.errors).toEqual([failure, cleanup]);
+    expect(recovery.allocation.path).toBe(workspace.path);
+    expect(engine.startFrozenContainer).not.toHaveBeenCalled();
+  });
+
+  it('binds actual normal-case inputs and evaluates configured assertions without a counting oracle', async () => {
+    const { options, prepared, engine, repository } = fixture();
+    for (const configured of options.harness!.cases) {
+      const check = prepared.checks.find(entry => entry.id === configured.checkId)!;
+      if (check.kind !== 'normal') continue;
+      configured.argv = ['node', '/workspace/asset.js', check.input];
+      configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: check.kind, input: check.input,
+        assertions: [{ id: 'exit', source: 'exit-code', expected: 0 },
+          { id: 'value', source: 'stdout-json', path: ['value'], expected: JSON.parse(check.input).key }] };
+    }
+    vi.mocked(engine.startFrozenContainer).mockImplementation(async () => {
+      const command = vi.mocked(engine.createFrozenContainer).mock.calls.at(-1)![2];
+      const input = command[2];
+      return { code: 0, stdout: JSON.stringify({ value: input ? JSON.parse(input).key : 'ignored' }), stderr: '' };
+    });
+    const inspect = vi.mocked(engine.inspectFrozenContainer).getMockImplementation()!;
+    vi.mocked(engine.inspectFrozenContainer).mockImplementation(async (...args) => {
+      const inspected = await inspect(...args);
+      const started = vi.mocked(engine.startFrozenContainer).mock.calls.length;
+      const created = vi.mocked(engine.createFrozenContainer).mock.calls.length;
+      return { ...inspected, status: started === created ? 'exited' : 'created', exitCode: 0 };
+    });
+    options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Control experiments are not configured' }));
+    const result = await verifyRepositoryAssetProposal(prepared, options);
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') throw new Error('Missing unsupported result');
+    expect(result.observations).toHaveLength(4);
+    for (const observation of result.observations) {
+      expect(observation.receipt.semantic?.passed).toBe(true);
+      expect(observation.receipt.actual).toEqual(observation.receipt.semantic?.assertions);
+      expect(observation.receiptDigest).toBe(digest(observation.receipt));
+    }
+    expect(options.harness!.observe).toHaveBeenCalledOnce();
+    expect(repository.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('blocks unsupported control experiments before allocating a repository', async () => {
+    const { options, prepared, repository, engine } = fixture();
+    const check = prepared.checks.find(entry => entry.kind === 'permission-denied')!;
+    const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
+    configured.argv = ['node', '/workspace/asset.js', check.input];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: check.kind, input: check.input,
+      assertions: [{ id: 'exit', source: 'exit-code', expected: 0 }, { id: 'claimed', source: 'stdout', expected: 'cancelled' }] };
+    expect(await verifyRepositoryAssetProposal(prepared, options)).toMatchObject({ status: 'blocked', code: 'oracle_unsupported' });
+    expect(repository.prepare).not.toHaveBeenCalled();
+    expect(engine.buildFrozenImage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { status: 'inferred', actual: { value: 'observed' }, assertions: 1 },
+    { actual: { value: 'observed' }, assertions: 1 },
+    { status: 'observed', actual: { value: 'observed' }, assertions: 1, passed: true },
+    { status: 'unsupported', reason: 'Unavailable', actual: { value: 'observed' } },
+    null,
+  ])('rejects malformed runtime oracle result before producing qualification: %j', async actual => {
+    const { options, prepared, repository } = fixture();
+    options.harness!.observe = vi.fn(async () => actual) as unknown as NonNullable<typeof options.harness>['observe'];
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow();
+    expect(repository.cleanup).toHaveBeenCalledOnce();
+  });
+
   it.each(['missing-registration', 'operation', 'context'] as const)('rejects %s frozen evidence before invoking the oracle', async drift => {
     const { options, prepared, repository } = fixture();
     const execute = options.sandbox.executeFrozen;
@@ -654,6 +733,95 @@ function managedFixture() {
 }
 
 describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real temporary Git and Docker production orchestration', () => {
+  it.each(['cancellation', 'timeout'] as const)('binds actual host %s control to the proposal observation', async kind => {
+    const { options, prepared, owned } = managedFixture();
+    if (prepared.proposal.kind !== 'tool') throw new Error('Expected tool');
+    const proposal = { ...prepared.proposal, targetRef: undefined,
+      payload: { ...prepared.proposal.payload, existingTools: [], source: 'setInterval(()=>{},1000);', timeoutMs: 5000 } };
+    options.inventory = { skills: [], tools: [], toolSearches: ['cli', 'script', 'plugin'] };
+    options.artifactPath = 'new.js';
+    const changed = prepareAssetProposal(proposal, options.inventory);
+    for (const configured of options.harness!.cases) {
+      configured.checkDigest = digest(changed.checks.find(entry => entry.id === configured.checkId)!);
+      configured.argv = ['node', '-e', 'process.exit(0)'];
+    }
+    const check = changed.checks.find(entry => entry.kind === kind)!;
+    const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
+    configured.argv = ['node', '/workspace/new.js', check.input];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input,
+      control: { kind, afterMs: 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
+        { id: 'trigger', source: 'control', path: ['kind'], expected: kind }] };
+    options.harness!.cases = [configured, ...options.harness!.cases.filter(entry => entry !== configured)];
+    options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Remaining experiments are not configured' }));
+    const operations: string[] = [];
+    options.recordOwnership = async ownership => { operations.push(ownership.operationId); };
+    const result = await verifyRepositoryAssetProposal(changed, options);
+    if (result.status !== 'blocked') throw new Error('Remaining experiments must stay blocked');
+    expect(result.observations).toHaveLength(1);
+    const observation = result.observations[0];
+    expect(observation.receipt.passed).toBe(true);
+    expect(observation.execution.evidence.control).toMatchObject({ kind, operationId: observation.receipt.binding.operationId,
+      containerId: observation.execution.evidence.containerId, exitCode: 137 });
+    expect(observation.receipt.semantic?.assertions.map(entry => entry.actual)).toEqual([137, kind]);
+    expect([...owned].every(path => !existsSync(path))).toBe(true);
+    for (const operation of operations) assertNoDockerResources(operation);
+    realEvidence.push({ kind: `host-typed-${kind}-assertions`, operations, result, cleanup: 'confirmed' });
+  }, 120_000);
+
+  it('observes actual input refusal as nonzero behavior and preserves the failed baseline', async () => {
+    const { options, prepared, owned } = managedFixture();
+    const proposal = prepared.proposal;
+    if (proposal.kind !== 'tool') throw new Error('Expected tool');
+    proposal.payload.source = 'const input=JSON.parse(process.argv[2]);if(!/^[a-z]+$/.test(input.key)){process.stderr.write("Invalid input");process.exit(2)}console.log(JSON.stringify({value:input.key}));';
+    const changed = prepareAssetProposal(proposal, options.inventory);
+    const check = changed.checks.find(entry => entry.kind === 'refusal')!;
+    const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
+    configured.argv = ['node', '/workspace/asset.js', check.input];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: 'refusal', input: check.input,
+      assertions: [{ id: 'exit', source: 'exit-code', expected: 2 }, { id: 'reason', source: 'stderr', expected: 'Invalid input' }] };
+    options.harness!.cases = [configured, ...options.harness!.cases.filter(entry => entry !== configured)];
+    options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Remaining experiments are not configured' }));
+    const operations: string[] = [];
+    options.recordOwnership = async ownership => { operations.push(ownership.operationId); };
+    const result = await verifyRepositoryAssetProposal(changed, options);
+    if (result.status !== 'blocked') throw new Error('Remaining experiments must stay blocked');
+    expect(result.observations.map(entry => [entry.execution.exitCode, entry.receipt.passed])).toEqual([[0, false], [2, true]]);
+    expect(result.observations[1].receipt.semantic?.assertions.map(entry => entry.actual)).toEqual([2, 'Invalid input']);
+    expect([...owned].every(path => !existsSync(path))).toBe(true);
+    for (const operation of operations) assertNoDockerResources(operation);
+    realEvidence.push({ kind: 'host-typed-refusal-assertions', operations, result, cleanup: 'confirmed' });
+  }, 120_000);
+
+  it('compares actual input-dependent output against the constant baseline with host assertions', async () => {
+    const { options, prepared, owned } = managedFixture();
+    const proposal = prepared.proposal;
+    if (proposal.kind !== 'tool') throw new Error('Expected tool');
+    proposal.payload.source = 'console.log(JSON.stringify({value:JSON.parse(process.argv[2]).key}));';
+    const changed = prepareAssetProposal(proposal, options.inventory);
+    for (const configured of options.harness!.cases) {
+      const check = changed.checks.find(entry => entry.id === configured.checkId)!;
+      if (check.kind !== 'normal') continue;
+      configured.argv = ['node', '/workspace/asset.js', check.input];
+      configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: check.kind, input: check.input,
+        assertions: [{ id: 'exit', source: 'exit-code', expected: 0 },
+          { id: 'value', source: 'stdout-json', path: ['value'], expected: JSON.parse(check.input).key }] };
+    }
+    options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Remaining experiments are not implemented by this fixture' }));
+    const operations: string[] = [];
+    options.recordOwnership = async ownership => { operations.push(ownership.operationId); };
+    const result = await verifyRepositoryAssetProposal(changed, options);
+    if (result.status !== 'blocked') throw new Error('Remaining experiments must stay blocked');
+    expect(result.code).toBe('oracle_unsupported');
+    expect(result.observations.map(entry => entry.receipt.passed)).toEqual([false, true, false, true]);
+    expect(result.observations.filter(entry => entry.receipt.binding.version === 'proposed').map(entry => JSON.parse(entry.execution.stdout).value))
+      .toEqual(['alpha', 'beta']);
+    expect(result.observations.every(entry => entry.receipt.semantic?.deliveredInputDigest === entry.receipt.binding.inputDigest)).toBe(true);
+    expect(options.harness!.observe).toHaveBeenCalledOnce();
+    expect([...owned].every(path => !existsSync(path))).toBe(true);
+    for (const operation of operations) assertNoDockerResources(operation);
+    realEvidence.push({ kind: 'host-typed-normal-input-assertions', operations, result, cleanup: 'confirmed' });
+  }, 120_000);
+
   it('rejects a binding revoked while durable registration waits without executing the captured source', async () => {
     const { options, prepared, owned } = managedFixture();
     const publish = vi.spyOn(options.repository, 'publish');

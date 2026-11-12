@@ -221,6 +221,17 @@ export abstract class CliContainerProvider implements ContainerProvider {
     return this.frozenRun(['start', '--attach', containerId], options);
   }
 
+  async killFrozenContainer(operationId: string, containerId: string, options: FrozenCommandOptions): Promise<void> {
+    this.frozenOwner(operationId);
+    if (!/^[a-f0-9]{64}$/.test(containerId)) throw new Error('Invalid frozen container identifier');
+    const deadline = performance.now() + options.timeoutMs;
+    const inspected = await this.inspectFrozenContainer(containerId, options);
+    if (inspected.id !== containerId || inspected.operationId !== operationId || inspected.name !== `afk-frozen-${operationId}`
+      || inspected.status !== 'running') throw new Error('Frozen control requires exact running ownership identity');
+    const result = await this.frozenRun(['kill', '--signal=KILL', containerId], { ...options, timeoutMs: Math.floor(deadline - performance.now()) });
+    if (result.code !== 0) throw new Error('Frozen container host kill failed');
+  }
+
   async cleanupFrozenOperation(operationId: string, options: FrozenCommandOptions): Promise<void> {
     const owner = this.frozenOwner(operationId);
     const allocationUnconfirmed = this.unconfirmedFrozenAllocations.has(operationId);

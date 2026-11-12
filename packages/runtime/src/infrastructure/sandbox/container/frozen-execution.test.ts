@@ -159,6 +159,151 @@ describe('frozen execution preflight', () => {
   });
 });
 
+function controlFixture() {
+  const test = fixture();
+  const state = { status: 'created', exitCode: 0 };
+  let finish = (_code: number) => {};
+  vi.mocked(test.engine.inspectFrozenContainer).mockImplementation(async () => ({ ...test.inspect(), ...state }));
+  vi.mocked(test.engine.startFrozenContainer).mockImplementation((_identifier, options) => new Promise((resolve, reject) => {
+    state.status = 'running';
+    const abort = () => { clearTimeout(timer); reject(options.signal?.reason); };
+    finish = code => {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
+      state.status = 'exited'; state.exitCode = code;
+      resolve({ stdout: 'candidate claims cancelled', stderr: '', code });
+    };
+    const timer = setTimeout(() => finish(0), 150);
+    options.signal?.addEventListener('abort', abort, { once: true });
+  }));
+  test.engine.killFrozenContainer = vi.fn(async () => { finish(137); });
+  vi.mocked(test.engine.cleanupFrozenOperation).mockImplementation(async () => { finish(137); });
+  return { ...test, state };
+}
+
+describe('frozen host control experiments', () => {
+  it.each(['cancellation', 'timeout'] as const)('records actual running, host %s and confirmed SIGKILL exit', async kind => {
+    const { provider, engine, options } = controlFixture();
+    const result = await executeFrozenContainer(provider, { ...options, control: { kind, afterMs: 10 } });
+    expect(engine.killFrozenContainer).toHaveBeenCalledOnce();
+    expect(result.exitCode).toBe(137);
+    expect(result.evidence.control).toMatchObject({ kind, afterMs: 10, signal: 'SIGKILL',
+      trigger: kind === 'timeout' ? 'host-deadline' : 'host-cancellation',
+      operationId: result.evidence.operationId, containerId: result.evidence.containerId, exitCode: 137 });
+    expect(result.evidence.control!.triggeredMs - result.evidence.control!.runningObservedMs).toBeGreaterThanOrEqual(10);
+    expect(result.evidence.control!.terminatedMs).toBeGreaterThanOrEqual(result.evidence.control!.triggeredMs);
+    expect(result.cleanup).toEqual({ containerRemoved: true, imageRemoved: true });
+  });
+
+  it('rejects unsupported control before ownership or allocation', async () => {
+    const { provider, engine, options } = fixture();
+    const onOwnership = vi.fn();
+    await expect(executeFrozenContainer(provider, { ...options, onOwnership, control: { kind: 'timeout', afterMs: 10 } })).rejects.toThrow(/control.*support/i);
+    expect(onOwnership).not.toHaveBeenCalled();
+    expect(engine.buildFrozenImage).not.toHaveBeenCalled();
+  });
+
+  it.each([{ kind: 'timeout', afterMs: 0 }, { kind: 'timeout', afterMs: 500 },
+    { kind: 'timeout', afterMs: 1.5 }, { kind: 'other', afterMs: 10 }, { kind: 'timeout', afterMs: 10, passed: true }])('rejects invalid control %j', async control => {
+    const { provider, engine, options } = controlFixture();
+    await expect(executeFrozenContainer(provider, { ...options, control: control as FrozenExecutionOptions['control'] })).rejects.toThrow(/control/i);
+    expect(engine.buildFrozenImage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an ordinary exit even when stdout claims cancellation', async () => {
+    const { provider, engine, options } = controlFixture();
+    vi.mocked(engine.startFrozenContainer).mockResolvedValueOnce({ stdout: '{"cancelled":true}', stderr: '', code: 0 });
+    await expect(executeFrozenContainer(provider, { ...options, control: { kind: 'cancellation', afterMs: 10 } })).rejects.toThrow(/before|running/i);
+    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+    expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
+  });
+
+  it('requires independently observed running rather than candidate stdout', async () => {
+    const { provider, engine, options, inspect } = controlFixture();
+    vi.mocked(engine.inspectFrozenContainer).mockImplementation(async () => inspect());
+    await expect(executeFrozenContainer(provider, { ...options, control: { kind: 'timeout', afterMs: 10 } })).rejects.toThrow(/before|running/i);
+    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+  });
+
+  it('bounds time waiting for running and never kills a container still in created state', async () => {
+    const { provider, engine, options, inspect } = controlFixture();
+    vi.mocked(engine.inspectFrozenContainer).mockImplementation(async () => inspect());
+    await expect(executeFrozenContainer(provider, { ...options, timeoutMs: 60, control: { kind: 'timeout', afterMs: 10 } })).rejects.toThrow(/deadline/i);
+    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+    expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the hard deadline independent from the experiment timer', async () => {
+    const { provider, engine, options, state, inspect } = controlFixture();
+    let runningInspections = 0;
+    vi.mocked(engine.inspectFrozenContainer).mockImplementation(async () => {
+      if (state.status === 'running' && runningInspections++ === 0) await new Promise(resolve => setTimeout(resolve, 40));
+      return { ...inspect(), ...state };
+    });
+    await expect(executeFrozenContainer(provider, { ...options, timeoutMs: 60, control: { kind: 'timeout', afterMs: 40 } })).rejects.toThrow(/deadline/i);
+    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+  });
+
+  it.each([null, undefined])('preserves exact external reason %j when an inspection rejects on abort', async reason => {
+    const { provider, engine, options, state, inspect } = controlFixture();
+    const controller = new AbortController();
+    Object.defineProperty(controller.signal, 'reason', { value: reason });
+    vi.mocked(engine.inspectFrozenContainer).mockImplementation(async () => {
+      if (state.status === 'running') { controller.abort(reason); throw new Error('inspection aborted'); }
+      return { ...inspect(), ...state };
+    });
+    await expect(executeFrozenContainer(provider, { ...options, signal: controller.signal, control: { kind: 'timeout', afterMs: 10 } })).rejects.toBe(reason);
+    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+  });
+
+  it('retains the user output bound while allowing bounded policy inspections', async () => {
+    const { provider, engine, options } = controlFixture();
+    await executeFrozenContainer(provider, { ...options, maxOutputBytes: 16, control: { kind: 'timeout', afterMs: 10 } });
+    expect(engine.startFrozenContainer).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ maxOutputBytes: 16 }));
+    expect(vi.mocked(engine.inspectFrozenContainer).mock.calls.some(([, bounds]) => bounds.maxOutputBytes === 256 * 1024)).toBe(true);
+  });
+
+  it.each(['running', 'exited'] as const)('rejects policy drift at %s', async phase => {
+    const { provider, engine, options, state, inspect } = controlFixture();
+    vi.mocked(engine.inspectFrozenContainer).mockImplementation(async () => ({ ...inspect(), ...state,
+      network: state.status === phase ? 'bridge' : 'none' }));
+    await expect(executeFrozenContainer(provider, { ...options, control: { kind: 'timeout', afterMs: 10 } })).rejects.toThrow(/policy|identity/i);
+    expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
+  });
+
+  it('refuses successful kill without an independently confirmed killed exit', async () => {
+    const { provider, engine, options } = controlFixture();
+    vi.mocked(engine.killFrozenContainer!).mockResolvedValueOnce();
+    await expect(executeFrozenContainer(provider, { ...options, control: { kind: 'timeout', afterMs: 10 } })).rejects.toThrow(/exit|terminat/i);
+  });
+
+  it.each(['waiting', 'kill', 'cleanup'] as const)('never converts external cancellation at %s into control success', async phase => {
+    const { provider, engine, options } = controlFixture();
+    const controller = new AbortController();
+    const reason = new Error('external validation cancelled');
+    if (phase === 'kill') vi.mocked(engine.killFrozenContainer!).mockImplementationOnce(async () => { controller.abort(reason); });
+    if (phase === 'cleanup') vi.mocked(engine.cleanupFrozenOperation).mockImplementationOnce(async () => { controller.abort(reason); });
+    const pending = executeFrozenContainer(provider, { ...options, signal: controller.signal, control: { kind: 'timeout', afterMs: 20 } });
+    const assertion = expect(pending).rejects.toBe(reason);
+    if (phase === 'waiting') setTimeout(() => controller.abort(reason), 5);
+    await assertion;
+    expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
+  });
+
+  it('propagates attach/output failure instead of manufacturing a controlled observation', async () => {
+    const { provider, engine, options } = controlFixture();
+    vi.mocked(engine.startFrozenContainer).mockRejectedValueOnce(new Error('output limit exceeded'));
+    await expect(executeFrozenContainer(provider, { ...options, control: { kind: 'timeout', afterMs: 10 } })).rejects.toThrow(/output/i);
+    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+  });
+
+  it('rejects cleanup failure after a real controlled exit', async () => {
+    const { provider, engine, options } = controlFixture();
+    vi.mocked(engine.cleanupFrozenOperation).mockRejectedValueOnce(new Error('cleanup unavailable'));
+    await expect(executeFrozenContainer(provider, { ...options, control: { kind: 'timeout', afterMs: 10 } })).rejects.toBeInstanceOf(FrozenCleanupError);
+  });
+});
+
 describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen execution', () => {
   const baseImageId = process.env.AFK_TEST_FROZEN_IMAGE ?? '';
   const provider = new DockerContainerProvider();
@@ -262,5 +407,17 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen e
     expect(new Set(results.map(result => result.evidence.imageId)).size).toBe(2);
     expect(results.every(result => result.cleanup.containerRemoved && result.cleanup.imageRemoved)).toBe(true);
     expect(execFileSync('docker', ['image', 'inspect', '--format', '{{.Id}}', baseImageId], { encoding: 'utf8' }).trim()).toBe(baseImageId);
+  }, 60_000);
+
+  it.each(['cancellation', 'timeout'] as const)('performs host %s on a running container and descendants with no remaining resources', async kind => {
+    const result = await execute({ input: captureFrozenInput(directory()), baseImageId, timeoutMs: 5000,
+      control: { kind, afterMs: 200 }, argv: ['node', '-e',
+        'require("child_process").spawn("node",["-e","setInterval(()=>{},1000)"],{stdio:"ignore"});console.log("not a control receipt");setInterval(()=>{},1000)'] });
+    expect(result.exitCode).toBe(137);
+    expect(result.evidence.control).toMatchObject({ kind, signal: 'SIGKILL', containerId: result.evidence.containerId,
+      operationId: result.evidence.operationId, exitCode: 137 });
+    expect(result.evidence.control!.triggeredMs - result.evidence.control!.runningObservedMs).toBeGreaterThanOrEqual(200);
+    expect(() => execFileSync('docker', ['container', 'inspect', result.evidence.containerId], { stdio: 'pipe' })).toThrow();
+    expect(() => execFileSync('docker', ['image', 'inspect', result.evidence.imageId], { stdio: 'pipe' })).toThrow();
   }, 60_000);
 });

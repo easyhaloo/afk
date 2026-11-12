@@ -28,6 +28,34 @@ class HostProbe extends DockerContainerProvider {
 }
 
 describe('frozen Docker CLI adapter', () => {
+  it('sends SIGKILL only to the exact independently inspected running owned container', async () => {
+    const provider = new ScriptedDocker();
+    vi.spyOn(provider, 'inspectFrozenContainer').mockResolvedValue({ id: containerId, operationId,
+      name: `afk-frozen-${operationId}`, status: 'running' } as Awaited<ReturnType<typeof provider.inspectFrozenContainer>>);
+    await provider.killFrozenContainer(operationId, containerId, bounds);
+    expect(provider.calls.map(call => call.argv)).toEqual([['docker', 'kill', '--signal=KILL', containerId]]);
+    expect(provider.inspectFrozenContainer).toHaveBeenCalledWith(containerId, expect.objectContaining({ maxOutputBytes: bounds.maxOutputBytes }));
+  });
+
+  it.each([{ operationId: 'another' }, { id: 'another' }, { name: 'unowned' }, { status: 'exited' }])('refuses control with mismatched ownership/state %j', async drift => {
+    const provider = new ScriptedDocker();
+    vi.spyOn(provider, 'inspectFrozenContainer').mockResolvedValue({ id: containerId, operationId,
+      name: `afk-frozen-${operationId}`, status: 'running', ...drift } as Awaited<ReturnType<typeof provider.inspectFrozenContainer>>);
+    await expect(provider.killFrozenContainer(operationId, containerId, bounds)).rejects.toThrow(/identity|ownership|running/i);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it('propagates host kill failure and rejects malformed container identifiers before inspection', async () => {
+    const provider = new ScriptedDocker();
+    const inspect = vi.spyOn(provider, 'inspectFrozenContainer').mockResolvedValue({ id: containerId, operationId,
+      name: `afk-frozen-${operationId}`, status: 'running' } as Awaited<ReturnType<typeof provider.inspectFrozenContainer>>);
+    provider.response = () => ({ code: 1, stdout: '', stderr: 'daemon rejected kill' });
+    await expect(provider.killFrozenContainer(operationId, containerId, bounds)).rejects.toThrow(/kill/i);
+    inspect.mockClear();
+    await expect(provider.killFrozenContainer(operationId, '--all', bounds)).rejects.toThrow(/identity|identifier/i);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
   it.each(['timeout', 'output', 'abort-null', 'abort-undefined', 'exited-parent'] as const)('finishes owned stdio and child teardown after %s while a helper retains inherited pipes', async mode => {
     const provider = new HostProbe();
     const root = mkdtempSync(join(tmpdir(), 'container-cli-helper-'));

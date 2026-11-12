@@ -21,6 +21,8 @@
     "packages/runtime/src/application/learning/lesson-publication-guard.test.ts",
     "packages/runtime/src/application/learning/run-evidence.test.ts",
     "packages/runtime/src/application/learning/proposals.test.ts",
-    "packages/runtime/src/application/learning/proposal-runtime.test.ts"
+    "packages/runtime/src/application/learning/proposal-runtime.test.ts",
+    "packages/runtime/src/application/learning/proposal-semantics.test.ts",
+    "packages/runtime/src/application/learning/proposal-validation.test.ts"
   ]
 }

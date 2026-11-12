@@ -179,5 +179,6 @@ export interface FrozenContainerOperations {
   createFrozenContainer(operationId: string, imageId: string, argv: readonly string[], options: FrozenCommandOptions): Promise<string>;
   inspectFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<FrozenContainerInspection>;
   startFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<{ stdout: string; stderr: string; code: number }>;
+  killFrozenContainer?(operationId: string, containerId: string, options: FrozenCommandOptions): Promise<void>;
   cleanupFrozenOperation(operationId: string, options: FrozenCommandOptions): Promise<void>;
 }

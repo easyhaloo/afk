@@ -6,14 +6,22 @@ import { z } from 'zod';
 import type { ProviderOperationOptions, RepositoryPrepareRequest, RepositoryProvider, RepositoryWorkspace } from '../../plugin-sdk/capabilities.js';
 import { buildFrozenContext, captureFrozenInput, replaceFrozenFile, type CapturedFrozenInput } from '../../infrastructure/sandbox/container/frozen-input.js';
 import { FrozenCleanupError, type FrozenExecutionOptions, type FrozenExecutionOwnership, type FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
+import { RepositoryPreparationCleanupError } from '../../infrastructure/providers/repositories.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
 import { DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { compareProposalActual, prepareAssetProposal, type PreparedAssetProposal, type ProposalInventory } from './proposals.js';
+import { observeProposalExperiment, prepareProposalExperiment, type PreparedProposalExperiment,
+  type ProposalSemanticConfiguration, type ProposalSemanticObservation } from './proposal-semantics.js';
 
 const bindingSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
   candidateVersion: z.number().int().positive().safe(), evidenceDigest: learningDigestSchema }).strict();
 const ownershipSchema = z.object({ operationId: z.string().uuid(), engine: z.literal('docker'), containerName: learningIdentitySchema,
   baseImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/), inputDigest: learningDigestSchema, contextDigest: learningDigestSchema }).strict();
+const oracleResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('observed'), actual: z.unknown().refine(value => value !== undefined),
+    assertions: z.number().int().positive().safe() }).strict(),
+  z.object({ status: z.literal('unsupported'), reason: learningIdentitySchema }).strict(),
+]);
 export type ProposalRuntimeBinding = z.infer<typeof bindingSchema>;
 
 export interface ProposalRuntimeCase {
@@ -21,6 +29,7 @@ export interface ProposalRuntimeCase {
   checkDigest: string;
   argv: string[];
   expected: unknown;
+  experiment?: ProposalSemanticConfiguration;
 }
 
 export interface ProposalRuntimeHarness {
@@ -64,6 +73,7 @@ export interface ProposalRuntimeObservation {
     expected: unknown;
     assertions: number;
     passed: boolean;
+    semantic?: ProposalSemanticObservation;
   };
   receiptDigest: string;
 }
@@ -90,7 +100,8 @@ export class ProposalRuntimeLeaseError extends AggregateError {
 type ProposalOperationOutcome = { failed: true; error: unknown } | { failed: false; value: ProposalRuntimeResult };
 
 function proposalFailure(error: unknown, signal: AbortSignal): unknown {
-  if (error instanceof FrozenCleanupError || error instanceof ProposalRuntimeCleanupError || error instanceof ProposalRuntimeLeaseError) return error;
+  if (error instanceof FrozenCleanupError || error instanceof ProposalRuntimeCleanupError || error instanceof ProposalRuntimeLeaseError
+    || error instanceof RepositoryPreparationCleanupError) return error;
   return signal.aborted ? signal.reason : error;
 }
 
@@ -211,10 +222,17 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   if (new Set(cases.map(entry => entry.checkId)).size !== cases.length || prepared.checks.some(check => !cases.some(entry => entry.checkId === check.id && entry.checkDigest === digest(check)))) {
     return { status: 'blocked', code: 'oracle_unavailable', observations: [] };
   }
+  const experiments = new Map<string, PreparedProposalExperiment>();
   for (const check of cases) {
     compareProposalActual(check.expected, check.expected);
     if (!Array.isArray(check.argv) || !check.argv[0]?.trim() || check.argv.length > 128 || check.argv.some(argument => typeof argument !== 'string' || argument.includes('\0'))
       || Buffer.byteLength(canonicalLearningJson(check.argv)) > 32 * 1024) throw new Error('Invalid configured proposal command');
+    if (check.experiment !== undefined) {
+      const experiment = prepareProposalExperiment(prepared.kind, artifactPath, prepared.checks.find(entry => entry.id === check.checkId)!, check.experiment);
+      if (experiment.status === 'unsupported') return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
+      if (canonicalLearningJson(check.argv) !== canonicalLearningJson(experiment.experiment.argv)) throw new Error('Configured semantic command does not deliver the bound input');
+      experiments.set(check.checkId, freezeJson(experiment.experiment));
+    }
   }
   const harness = { id: configured.id, revision: configured.revision, observe: configured.observe.bind(configured) };
   const baseImageId = supplied.baseImageId;
@@ -279,9 +297,10 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
       const observe = async (check: ProposalRuntimeCase, version: 'original' | 'proposed') => {
         await current();
         const captured = version === 'original' ? original : proposed;
+        const experiment = experiments.get(check.checkId);
         const registration: { ownership?: FrozenExecutionOwnership; recorded: boolean } = { recorded: false };
         const execution = freezeJson(await executeFrozen({ input: captured, baseImageId, argv: check.argv, timeoutMs: prepared.execution.timeoutMs,
-          maxOutputBytes: DISTILLATION_LIMITS.outputBytes, signal,
+          maxOutputBytes: DISTILLATION_LIMITS.outputBytes, signal, ...(experiment?.control ? { control: experiment.control } : {}),
           onOwnership: async ownership => {
             await current();
             const claimed = freezeJson(ownershipSchema.parse(ownership));
@@ -314,19 +333,19 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           imageId: execution.evidence.imageId, baseImageId, contextDigest: execution.evidence.contextDigest, executionDigest: digest(execution), argv: execution.evidence.argv,
           inputTreeDigest: execution.evidence.inputDigest, commandDigest: execution.evidence.commandDigest,
           policyDigest: execution.evidence.policyDigest, cwd: execution.evidence.cwd });
-        const actual = await harness.observe(execution, check, { signal });
+        const semantic = experiment ? observeProposalExperiment(experiment, execution) : undefined;
+        const actual = semantic ? { status: 'observed' as const, actual: semantic.assertions, assertions: semantic.assertions.length }
+          : oracleResultSchema.parse(await harness.observe(execution, check, { signal }));
         await current();
         if (actual.status === 'unsupported') {
-          learningIdentitySchema.parse(actual.reason);
           unverified = { checkId: check.checkId, checkDigest: check.checkDigest, version, execution, reason: actual.reason,
             binding: receiptBinding, receiptDigest: digest({ status: 'unsupported', binding: receiptBinding, reason: actual.reason }) };
           unsupported = true;
           return undefined;
         }
-        if (!Number.isSafeInteger(actual.assertions) || actual.assertions < 1) throw new Error('Proposal oracle requires actual business assertions');
-        const passed = compareProposalActual(actual.actual, check.expected) && execution.exitCode === 0;
+        const passed = semantic ? semantic.passed : compareProposalActual(actual.actual, check.expected) && execution.exitCode === 0;
         const receipt: ProposalRuntimeObservation['receipt'] = freezeJson({ version: 1, binding: receiptBinding, actual: JSON.parse(canonicalLearningJson(actual.actual)),
-          expected: check.expected, assertions: actual.assertions, passed });
+          expected: check.expected, assertions: actual.assertions, passed, ...(semantic ? { semantic } : {}) });
         const observation = { execution, receipt, receiptDigest: digest(receipt) };
         observations.push(observation);
         return observation;

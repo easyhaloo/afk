@@ -267,6 +267,32 @@ QA 和新证据。HTTP 知识库检索不隐含远程写回。
 - QA、来源、规则或授权失效立即禁止新消费；补查只将对应 lesson 置为冲突并安排撤回，同请求其他候选不因 QA 单独变化而失效。未配置知识发布时仍执行候选资格补查。
 - 撤回复用持久恢复日志并保持幂等；权限不足或人工编辑返回阻断，保留现场，不能覆盖人工正文。
 
+### 8.3 技能 / 工具提案实验基础
+
+当前为内部验证基础，尚未接生产 `learning.validate` 的 skill/tool 分派；旧 callback
+collector 不具备完整语义资格。新增实验使用 `proposal-semantic-v1`：
+
+- 保存配置提供 `{ protocol, adapter, kind, input, assertions, control? }`，拒绝未知字段。
+  当前 adapter 为 `node-json-argv-v1`；kind/input 必须与候选对应 check 完全一致。
+  宿主固定调用本次冻结资产，原始 input 字节作为独立 argv 投递；不使用 shell 展开。
+- assertion 为 `{ id, source, path?, expected }`；id 唯一。source 为
+  `stdout-json/stderr-json/stdout/stderr/exit-code/control`。宿主从实际结果计算
+  `actual/status/passed`；JSON 数组 path 仅允许规范且在范围内的整数索引。
+- normal 必须包含 exit0 和输出断言；refusal 必须包含指定非零退出和拒绝输出断言。
+  malformed JSON 可作为拒绝实验输入。候选声明的 expected 不充当独立 oracle。
+- cancellation/timeout 的 control 为 `{ kind, afterMs }`，afterMs 为正整数且短于
+  硬执行期限。宿主必须观察 running，触发真实控制，确认同 operation/container 的
+  SIGKILL、attach/inspect 均为137及成功清理；外部取消和硬预算耗尽仍为失败。
+  此证据仅证明强制终止，不证明优雅取消或业务恢复。
+- 收据绑定 experimentDigest、原始输入摘要、实际 argv、类型化断言和宿主控制事实；
+  验证端重新计算并比较，不仅核对收据 hash、passed 或 assertions 数量。
+- 当前 recovery、permission-denied 和 skill interpreter 未具备完整实现；对应类型
+  必须保持 unsupported。baseline 在控制触发前退出尚不支持继续 proposed 比较。
+  混用旧 callback 的基础测试通过，不代表全部语义合格或允许生产发布。
+- 受管 prepare 无法安全回收分配时保留自有资源，并抛出携带不可变 allocation 身份、
+  原始失败及清理失败的专用错误。调用者不得以同时取消覆盖该错误；公开结果使用
+  安全分类，不输出私有恢复路径。全局取消后的持久恢复仍须单独实现及验收。
+
 ## 9. 生命周期闸门与最小验收
 
 required init、before-agent、after-agent、before-publish 及逆序 cleanup 保留执行顺序和

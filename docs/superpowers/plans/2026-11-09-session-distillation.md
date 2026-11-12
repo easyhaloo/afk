@@ -1,6 +1,6 @@
 # Session Distillation and Reusable Assets Implementation Plan
 
-**Latest integration status:** Section 18.15 supersedes matching earlier snapshots below and in 18.1/18.13/18.14; historical blockers are not current defects.
+**Latest integration status:** Section 18.16 updates the current baseline and remaining development order; section 18.15 preserves acceptance history. Both supersede matching earlier snapshots. Historical blockers are not current defects.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1386,3 +1386,57 @@ Each card records one work package, author/reviewers, dependency hashes, commit,
 - [ ] After the W05/W06 author suite passed 66 cases and initial independent QUALITY passed 91, an added identity counterexample found P1: omitted optional source-run identity permits the same verification run to promote. Preserve original counterexample and actual SQLite receipts; the author is repairing it. These files are excluded from the integration commit and do not have final review approval.
 - [x] W10 saved Verification selection and gate-bypass repair pass final independent specification and quality reviews. Preserve the original main probe's old assertion failure caused by earlier init rejection; ten direct rejection probes establish closure. Quality passes 91 formal plus 29 original independent and twelve added cases, 132/132 total. Six-file freeze matches. Runtime tests scoped to this commit pass 4219/twelve skips, excluding the separate unqualified proposal-validation tests. CLI/built E2E, types and builds retain the evidence above; this does not qualify release archives, global cancellation or all W10.
 - [ ] Actual Claude distillation, managed Repository/automatic Verification, W07–W09 product/governance, W11 benefit evidence and W12 release/recovery remain unfinished.
+
+### 18.16 Current baseline and remaining complete development plan
+
+This is the 2026-11-12 continuation of W00–W12, the architecture in 18.2, the complete Provider inventory in 18.5 and the integration standard. It adds no scheduler. Updating the plan neither completes implementation nor starts another model call or resets a spent diagnostic attempt.
+
+#### Verified starting point
+
+- [x] `ddcecd50927740ffbbe5ea82996287476c794f10` is committed and pushed, CLI 0.2.57. Saved Verification selection, policy-first execution and required-module bypass protection have exact-commit CI `43168885190` success: six successful jobs and two path-based skips. This does not qualify the uncommitted 0.2.58 batch or all Providers.
+- [x] Source-identity P1 has independent specification and quality approval. The original skill/tool counterexamples for non-observed oracle results now independently pass. These close their specific findings, not the complete proposal specification.
+- [ ] Two proposal blockers remain: seven experiments repeating the same command and constant output do not prove semantic coverage; snapshot failure after Repository allocation can leak an owned workspace. Require actual behavior evidence and independent safe-cleanup rechecks before production wiring.
+- [ ] The latest actual Claude call exited 1 without valid distillation. One model launch occurred, raw output was not retained and user settings were unchanged. Diagnostics were unavailable. Offline reproduction found a system temporary-path alias violating the canonical writer contract; this explains a report-unavailability mechanism, not the Claude failure. Repair the diagnostic path and add offline regression without resetting the spent attempt or blindly retrying.
+
+#### Six delivery phases
+
+| Phase | Packages / dependencies | Required development | Closing evidence |
+| --- | --- | --- | --- |
+| A Reliability and independent verification | W00–W02; parallel with Provider inventory | Diagnostic path; independent/source identity; strict oracle results; allocation-failure recovery; queue, lease, budget and CAS guards | Original counterexamples pass, independent dual review, no promotion under authorization/source drift; W00 stays open until actual Claude succeeds |
+| B Five asset loops | W03–W06; relevant verification contracts | fact/process publication; independent QA for lessons; old/new skill behavior; tool inputs, side effects, recovery and managed changes; invalidation/withdrawal | Each kind reaches source→candidate→independent verification→authorized publication/proposal→consumption→feedback→invalidation; code merge and installation are separate |
+| C Product and governance | W07–W09; consume stable B use cases | Installed CLI, Electron, pagination/safe errors; three templates, required Hooks, cancellation, context budgets, session identity and environment diagnostics | Operates outside source checkout; shared ledger/consumer; no late-response project crossover; cancellation preserves unrelated processes |
+| D Complete plugin integration | W10; parallel with A–C | Every concrete implementation in all 13 families: install, dependencies, configuration, registration, operations, diagnostics, disable, uninstall and upgrade; prioritize managed Repository selection | Separate implementation/wiring/automation/configuration/live qualifications per Provider; actual selected workspace; missing accounts remain unqualified |
+| E Actual reuse and benefit | W11; W00 and B–D | Local Claude origin, another Agent/new task consumption; five-asset failure exercises; fixed no-asset/old-asset/new-asset comparison | At least 30 retrieval assertions; three recurring-detour scenarios, at least two independent runs per group; success, recurrence, duration and known cost reported |
+| F Installation, delivery and reclamation | W12; E, with earlier qualified cleanup allowed | Per-package checks, coverage, archive install, migration/failed-upgrade rollback, bilingual guide, commit/CI/PR, safe cleanup | Runnable install, executable recovery, required checks pass, no open P0/P1 or core acceptance blockers; human merge decision; actual reclaimed space |
+
+#### Next executable cards
+
+1. **Close semantic verification.** Preserve the failing constant-output/ignored-input case. Extend existing Case/Observation contracts with actual input delivery, independent assertions and control outcomes. Observe normal/refusal/recovery branches and state; observe actual termination/resource release for cancellation/deadlines; observe rejection at a specified permission boundary. Stdout alone is insufficient. Return unsupported when readonly/network-disabled execution cannot exercise a side effect. Skills require a supported actual interpreter or remain blocked.
+2. **Close allocation leakage.** Reproduce allocation success followed by snapshot failure. Reuse ownership and locking to release only owned clean allocations. Preserve dirty/foreign/user-modified workspaces. Cleanup failure retains recoverable identity and safe diagnostics. Independently rerun the original leak case and normal cleanup.
+3. **Freeze production validation.** Client fields remain `scope/candidateId/expectedVersion/checkerId`; saved configuration selects checker, grants, target and experiments. Receipts bind independent identity, actual input, target revision, source, control outcomes and configuration. Recheck after cleanup and synchronously under the database write lock before CAS. Validation grants do not grant publication.
+4. **Wire production use cases.** Dispatch shared `learning.validate` by asset type; CLI/IPC reuse the same DTO/application logic. Then connect managed change requests, human merge status, managed installation, version rollback and later consumption. Wiki fact/process grants cannot authorize skill/tool code writes.
+5. **Qualify before committing.** Run each affected package's typecheck/build/tests; add persistent test type roots and behavior E2E; synchronize bilingual standards and freeze the 0.2.58 batch. Exclude unqualified files from qualified commits. Update review evidence after exact-commit CI passes.
+
+#### Agents and parallel ownership
+
+Events and the existing Worker drive execution; models start on demand. The distiller proposes candidates, a development Agent produces managed patches, independent verification observes behavior, and Core owns promotion, authorization and recovery. No resident model controls the state machine. The main agent owns contracts, versions, shared entry points and integration. Sidecars own disjoint semantic-verification, Repository lifecycle, knowledge/lesson, Provider, Desktop and acceptance files. Authors, specification reviewers and quality reviewers remain separate. Freeze contracts before parallel consumption; do not rebuild shared outputs concurrently with checks depending on them.
+
+#### Final deliverables
+
+- [ ] Runnable installed CLI/Desktop with five assets, three templates, Hooks, session/context/environment governance and cross-task/cross-Agent sharing.
+- [ ] Per-implementation qualification matrix for all 13 plugin families, integration standard and dependency/install/upgrade/uninstall receipts; new plugin IDs have no `afk` prefix.
+- [ ] Actual five-asset lifecycle report, per-package tests/coverage and fixed-evaluation benefit report; live service, fixture and skipped evidence distinguished.
+- [ ] Migration, publication interruption, source invalidation, withdrawal and failed-upgrade recovery evidence; missing service configuration and unknown costs disclosed.
+- [ ] Exact commit/CI, unmerged PR, installation package/guide, workspace-reference audit, preserved evidence and disk-reclamation report.
+
+Close phases by evidence, not dates or total test counts. Track account, actual-Claude and human-merge waits separately while independent development continues.
+
+#### 18.16 Implementation delta: input, assertions and host control
+
+- [x] The semantic foundation now uses the existing proposal runtime: fixed artifact argv delivers original input; the host recalculates JSON-member, raw-output, exit-code and control-fact assertions. Independent review found array length treated as a JSON member; the root fix and formal counterexamples are implemented, with final semantic review in progress.
+- [x] Author actual local Git/managed Repository/fixed Docker tests pass: one two-input old/new comparison, one actual refusal and two host cancellation/timeout cases. Remaining experiments stay blocked; four focused cases do not qualify a complete candidate. The initial control E2E failed because the new proposal's recovery digest was not synchronized; the corrected fixture passes both cases in a new evidence directory, preserving the original failure.
+- [x] Allocation-failure cleanup passes independent production Store-path verification; persistent executor failure preserves resources when safe deletion cannot be confirmed. A separate caller-cancellation finding dropped recovery errors; immutable RepositoryPreparationCleanupError is now preserved first. Independent original 21 cases, two new cases, five selected formal cases and strict types pass. Non-cancelled validation returns storage_failed without private paths.
+- [x] Canonical diagnostic temporary paths pass independent eight-case offline review plus actual reruns of five launcher and 87 classifier checks. Actual Claude failure, old ready and spent attempt remain unchanged; no new model call occurred.
+- [x] Lower host control passes 30 independent cases, including five actual Docker cases, plus 73 formal passes/seven skips and strict five-root types. Qualification covers observed execution, forced termination and owned cleanup, not business recovery or permission semantics.
+- [ ] The 0.2.58 batch is uncommitted. Final semantic dual review, aggregate checks/build and exact-commit CI remain. Legacy callback foundation is not removed; production skill/tool dispatch, an actual skill interpreter, recovery/permission experiments, baseline early-exit comparison and durable recovery after global cancellation remain open.
+- [x] Semantic v2 passes bounded independent specification and quality review; the original array-member counterexample is closed. Full Runtime passes 4382/nineteen skips, CLI 608/two skips and built E2E 105/105. Runtime build/declarations/types, CLI build/types, persistent test types, architecture and documentation checks pass. A separate independent actual normal run first exceeded its deadline, then passed an isolated rerun with the same limit; preserve the first failure rather than claiming every run was green. Two reviewers accidentally shared a report filename, invalidating the older report digest; raw test logs/JSON remain and a separately located traceable report is being reconstructed without backfilling the original hash. This supersedes matching pending checks above; commit/exact CI and complete domain qualification remain open.

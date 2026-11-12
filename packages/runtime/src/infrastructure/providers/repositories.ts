@@ -69,9 +69,22 @@ export interface MultiRepositoryProviderOptions {
   readonly git?: CommandExecutor;
   readonly managed?: {
     readonly workspaceRoot: string;
-    readonly store?: Pick<RepositoryStore, 'ensureCheckout' | 'ownsCheckout' | 'withCheckoutLock'>;
+    readonly store?: Pick<RepositoryStore, 'ensureCheckout' | 'ownsCheckout' | 'withCheckoutLock'>
+      & Partial<Pick<RepositoryStore, 'removeCheckout'>>;
     readonly leases?: Pick<RepositoryLeases, 'run'>;
   };
+}
+
+export class RepositoryPreparationCleanupError extends AggregateError {
+  readonly allocation: Readonly<Pick<RepositoryWorkspace, 'id' | 'repository' | 'runId'> & { path: string }>;
+
+  constructor(allocation: RepositoryPreparationCleanupError['allocation'], failure: unknown, cleanupError: unknown) {
+    super([failure, cleanupError], `repository preparation and cleanup failed; allocation requires recovery: ${allocation.path}`, { cause: failure });
+    this.name = 'RepositoryPreparationCleanupError';
+    this.allocation = Object.freeze({ id: allocation.id, repository: Object.freeze({ ...allocation.repository }),
+      runId: allocation.runId, path: allocation.path });
+    Object.defineProperty(this, 'allocation', { writable: false, configurable: false });
+  }
 }
 
 export class MultiRepositoryProvider implements RepositoryProvider {
@@ -116,18 +129,82 @@ export class MultiRepositoryProvider implements RepositoryProvider {
       this.lifecycle = new ConfiguredRepositoryLifecycle({
         repositories: [...this.byName.values()].map(config => ({ url: config.name, ref: config.baseBranch })),
         operations: ['prepare', 'checkout', 'publish', 'cleanup'],
-      }, async (operation, input, workspace, operationOptions) => {
+      }, async (operation, input, workspace, operationOptions, onAllocation) => {
         const repository = workspace?.repository ?? (input as RepositoryPrepareRequest).repository;
         const config = this.byName.get(repository.url)!;
+        let preparationFailure: { error: unknown } | undefined;
         return leases.run([config.leaseKey!], async () => {
           checkAbort(operationOptions);
           if (operation === 'prepare') {
+            try {
             await fs.mkdir(root, { recursive: true });
             const parent = await fs.realpath(root);
             const path = join(parent, randomUUID());
+            const allocation = { id: randomUUID(), repository, runId: (input as RepositoryPrepareRequest).runId, path };
+            let reserved = false;
+            let directoryIdentity: { dev: number; ino: number } | undefined;
+            const identity = async () => {
+              const directory = await fs.lstat(path);
+              const marker = await fs.lstat(join(path, '.git'));
+              if (!directory.isDirectory() || directory.isSymbolicLink() || !marker.isFile() || marker.isSymbolicLink()) {
+                throw new Error('refusing replaced repository allocation');
+              }
+              if (directory.dev !== directoryIdentity?.dev || directory.ino !== directoryIdentity.ino) {
+                throw new Error('refusing replaced repository allocation');
+              }
+              return JSON.stringify([directory.dev, directory.ino, marker.dev, marker.ino, await fs.readFile(join(path, '.git'), 'utf8')]);
+            };
+            let allocatedIdentity: string | undefined;
+            onAllocation?.(async failure => {
+              try {
+                await leases.run([config.leaseKey!], async () => {
+                  const directory = await fs.lstat(path).catch(error => {
+                    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+                    throw error;
+                  });
+                  if (!directory) {
+                    if (reserved) throw new Error('repository allocation disappeared before cleanup');
+                    return;
+                  }
+                  if (!allocatedIdentity && directoryIdentity && directory.dev === directoryIdentity.dev && directory.ino === directoryIdentity.ino
+                    && directory.isDirectory() && !directory.isSymbolicLink() && (await fs.readdir(path)).length === 0) {
+                    await fs.rmdir(path);
+                    return;
+                  }
+                  const beforeRemove = async () => {
+                    if (!allocatedIdentity || await identity() !== allocatedIdentity || await fs.realpath(path) !== path
+                      || await fs.realpath(root) !== parent) throw new Error('refusing replaced repository allocation');
+                    if (!await store.ownsCheckout(path)) throw new Error('refusing unowned repository allocation');
+                  };
+                  if (store.removeCheckout) {
+                    await store.removeCheckout(path, { force: false, beforeRemove });
+                  } else {
+                    await store.withCheckoutLock(path, async () => {
+                      await beforeRemove();
+                      if ((await this.run(path, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching', '--ignore-submodules=none'])).stdout.trim()) {
+                        throw new Error('refusing cleanup of dirty repository allocation');
+                      }
+                      const entries = (await this.run(path, ['worktree', 'list', '--porcelain', '-z'])).stdout.split('\0');
+                      if (entries.some(entry => entry.startsWith(`worktree ${path}${sep}`))) throw new Error('refusing workspace with nested worktrees');
+                      await beforeRemove();
+                      await this.run(path, ['worktree', 'remove', path]);
+                    });
+                  }
+                });
+              } catch (cleanupError) {
+                throw new RepositoryPreparationCleanupError(allocation, failure, cleanupError);
+              }
+            });
+            await fs.mkdir(path);
+            reserved = true;
+            directoryIdentity = await fs.lstat(path);
             await store.ensureCheckout(config.remoteUrl!, path, config.baseBranch!);
-            return { id: randomUUID(), repository, runId: (input as RepositoryPrepareRequest).runId,
-              path, snapshot: await this.snapshotPath(path, operationOptions) };
+            allocatedIdentity = await identity();
+            return { ...allocation, snapshot: await this.snapshotPath(path, operationOptions) };
+            } catch (error) {
+              preparationFailure = { error };
+              throw error;
+            }
           }
           const path = workspace!.path!;
           const realPath = await fs.realpath(path);
@@ -154,6 +231,11 @@ export class MultiRepositoryProvider implements RepositoryProvider {
             await this.run(path, ['worktree', 'remove', path], operationOptions);
             return { removed: true };
           });
+        }).catch(error => {
+          if (preparationFailure && preparationFailure.error !== error) {
+            throw new AggregateError([preparationFailure.error, error], 'repository preparation and lease release failed', { cause: preparationFailure.error });
+          }
+          throw error;
         });
       }, true);
       this.capabilities = { ...this.lifecycle.capabilities, clone: true, push: true };
@@ -438,7 +520,8 @@ type LifecycleInput = (RepositoryPrepareRequest | RepositoryWorkspaceRequest) & 
   readonly merge?: false;
 };
 type LifecycleRequest = (operation: RepositoryLifecycleOperation | 'snapshot', input: LifecycleInput,
-  workspace: RepositoryWorkspace | undefined, options?: ProviderOperationOptions) => Promise<unknown>;
+  workspace: RepositoryWorkspace | undefined, options?: ProviderOperationOptions,
+  onAllocation?: (rollback: (failure: unknown) => Promise<void>) => void) => Promise<unknown>;
 type OwnedWorkspace = { workspace: RepositoryWorkspace; checkout: boolean; safeCommit: string; busy: boolean };
 
 class ConfiguredRepositoryLifecycle {
@@ -474,13 +557,21 @@ class ConfiguredRepositoryLifecycle {
       throw new Error('repository workspace already prepared for this run');
     }
     this.preparing.add(key);
+    let rollback: ((failure: unknown) => Promise<void>) | undefined;
+    let workspace: RepositoryWorkspace | undefined;
     try {
       const request = { repository, runId: input.runId };
-      const workspace = validateWorkspace(await this.request('prepare', request, undefined, options), request, this.localPaths);
+      workspace = validateWorkspace(await this.request('prepare', request, undefined, options, release => { rollback = release; }), request, this.localPaths);
       if (this.owned.has(workspace.id)) throw new Error('repository workspace response reused an owned identifier');
       this.owned.set(workspace.id, { workspace, checkout: false, safeCommit: workspace.snapshot.commit, busy: false });
       checkAbort(options);
       return workspace;
+    } catch (error) {
+      if (rollback) {
+        await rollback(error);
+        if (workspace && this.owned.get(workspace.id)?.workspace === workspace) this.owned.delete(workspace.id);
+      }
+      throw error;
     } finally { this.preparing.delete(key); }
   }
 

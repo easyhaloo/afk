@@ -14,7 +14,7 @@
  * or signal files — completion is detected purely via the stream-json output.
  */
 
-import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { randomUUID } from 'crypto';
 import { realpathSync } from 'fs';
 import type { AgentToolCallSummary } from '@afk/core';
@@ -37,6 +37,9 @@ import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
 import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
+import { spawnGuardedAnalysis } from './analysis-process-guard.js';
+
+const OUTPUT_DRAIN_TIMEOUT_MS = 1000;
 
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
@@ -48,11 +51,14 @@ export class StreamingAgentExecution implements AgentExecution {
   private readonly signalType: 'goal_complete';
   private readonly worktreePath: string;
   private readonly parseLine?: (line: string) => AgentEvent[];
+  private readonly analysisParentGuard: boolean;
   /** Mutable metadata so providers can update fields (e.g. threadId) after start. */
   private _mutableMetadata: AgentExecutionMetadata;
 
   private proc: ChildProcess | null = null;
   private done = false;
+  private killed = false;
+  private readonly signalledDescendants = new Map<number, string>();
   private interruptAcked = false;
   private exitCode: number | undefined;
   private error: ExecutionResult['error'] | undefined;
@@ -63,6 +69,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private stdoutTail = '';
   private stderrBuffer = '';
   private lastResultOutput = '';
+  private outputDrainTimer?: ReturnType<typeof setTimeout>;
 
   constructor(opts: {
     command: AgentCommand;
@@ -72,6 +79,7 @@ export class StreamingAgentExecution implements AgentExecution {
     sessionId?: string;
     metadata: AgentExecutionMetadata;
     parseLine?: (line: string) => AgentEvent[];
+    analysisParentGuard?: boolean;
   }) {
     this.id = randomUUID();
     this.sessionId = opts.sessionId;
@@ -82,6 +90,7 @@ export class StreamingAgentExecution implements AgentExecution {
     this.signalType = opts.signalType;
     this.worktreePath = opts.worktreePath;
     this.parseLine = opts.parseLine;
+    this.analysisParentGuard = opts.analysisParentGuard ?? false;
   }
 
   /**
@@ -94,7 +103,7 @@ export class StreamingAgentExecution implements AgentExecution {
     // prompt already contains the `/goal ` prefix (from the template).
     const argv = this.command.argv;
 
-    this.proc = spawn(this.command.argv[0]!, this.command.argv.slice(1), {
+    const spawnOptions: SpawnOptions = {
       cwd: this.command.cwd ?? this.worktreePath,
       env: { ...process.env, ...this.command.env },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -102,10 +111,18 @@ export class StreamingAgentExecution implements AgentExecution {
       // and can spawn a real agent child. Put the whole tree in one process
       // group so timeout/interrupt cleanup cannot leave the agent orphaned.
       detached: process.platform !== 'win32',
-    });
+    };
+    this.proc = this.analysisParentGuard
+      ? spawnGuardedAnalysis(argv, spawnOptions)
+      : spawn(argv[0]!, argv.slice(1), spawnOptions);
 
     // Send prompt via stdin
     if (this.proc.stdin) {
+      this.proc.stdin.on('error', () => {
+        this.error ??= { code: 'STDIN_ERROR', message: 'Agent input pipe closed before prompt delivery' };
+        this.done = true;
+        this.terminateProcess();
+      });
       this.proc.stdin.write(`${this.prompt}\n`);
       this.proc.stdin.end();
     }
@@ -127,24 +144,21 @@ export class StreamingAgentExecution implements AgentExecution {
       });
     }
 
-    this.proc.on('exit', (code, signal) => {
-      if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
-      this.stdoutBuffer = '';
+    this.proc.on('exit', code => {
       this.exitCode = code ?? undefined;
-      if (signal) {
-        this.error = { code: signal, message: `Process killed by ${signal}` };
-      } else if (code !== 0) {
-        this.error = {
-          code: 'NON_ZERO_EXIT',
-          message: this.stderrBuffer.trim() || this.stdoutTail.trim() || `Process exited with code ${code}`,
-        };
+      this.updateExitError();
+      if (!this.done) {
+        this.outputDrainTimer = setTimeout(() => this.finishOutput(), OUTPUT_DRAIN_TIMEOUT_MS);
+        this.outputDrainTimer.unref();
       }
-      this.done = true;
     });
+
+    this.proc.on('close', () => this.finishOutput());
 
     this.proc.on('error', (err: Error) => {
       this.error = { code: 'SPAWN_ERROR', message: err.message };
       this.done = true;
+      this.closeOutput();
     });
   }
 
@@ -340,6 +354,8 @@ export class StreamingAgentExecution implements AgentExecution {
       await this.sleep(500);
     }
 
+    this.updateExitError();
+
     // Determine final status
     if (this.interruptAcked) {
       return {
@@ -413,14 +429,17 @@ export class StreamingAgentExecution implements AgentExecution {
       this.interruptAcked = true;
       this.done = true;
     }
+    this.closeOutput();
   }
 
   async kill(): Promise<void> {
-    if (this.done) return;
+    if (!this.proc || this.killed) return;
+    this.killed = true;
     this.done = true;
     try {
       this.signalProcess('SIGKILL');
     } catch { /* ignore */ }
+    this.closeOutput();
   }
 
   async captureOutput(_options?: CaptureOptions): Promise<string> {
@@ -474,15 +493,41 @@ export class StreamingAgentExecution implements AgentExecution {
     }
   }
 
+  private updateExitError(): void {
+    const signal = this.proc?.signalCode;
+    if (signal) {
+      this.error = { code: signal, message: `Process killed by ${signal}` };
+    } else if (this.exitCode !== undefined && this.exitCode !== 0) {
+      this.error = { code: 'NON_ZERO_EXIT',
+        message: this.stderrBuffer.trim() || this.stdoutTail.trim() || `Process exited with code ${this.exitCode}` };
+    }
+  }
+
+  private finishOutput(): void {
+    if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
+    this.stdoutBuffer = '';
+    this.updateExitError();
+    this.done = true;
+    this.closeOutput();
+  }
+
+  private closeOutput(): void {
+    clearTimeout(this.outputDrainTimer);
+    this.outputDrainTimer = undefined;
+    this.proc?.stdout?.destroy();
+    this.proc?.stderr?.destroy();
+  }
+
   private completeFromBufferedSignal(): void {
     if (this.done) return;
     try {
       JSON.parse(this.stdoutBuffer);
       this.handleLine(this.stdoutBuffer);
-      if (this.done) return;
+      return;
     } catch {
       // The buffer may instead contain a provider's raw completion marker.
     }
+    if (/^\s*[{["]/.test(this.stdoutBuffer)) return;
     const extracted = extractGoalComplete(this.stdoutBuffer);
     if (!extracted) return;
     this.structuredOutput = extracted;
@@ -490,10 +535,7 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   private terminateProcess(): void {
-    if (this.exitCode !== undefined) return;
-    try {
-      this.signalProcess('SIGKILL');
-    } catch { /* process already exited */ }
+    void this.kill();
   }
 
   private signalProcess(signal: NodeJS.Signals): void {
@@ -502,13 +544,14 @@ export class StreamingAgentExecution implements AgentExecution {
 
     // Claude may start shell commands in their own process groups. Capture
     // descendants before signalling the agent group so they cannot be orphaned.
-    const descendants = this.findDescendantPids(pid);
+    const parentRunning = this.proc?.exitCode === null && this.proc.signalCode === null;
+    const descendants = this.findDescendantPids(parentRunning ? pid : undefined);
     for (const descendant of descendants) {
       try {
         process.kill(descendant, signal);
       } catch { /* process already exited */ }
     }
-    if (process.platform !== 'win32') {
+    if (process.platform !== 'win32' && (!this.analysisParentGuard || parentRunning)) {
       try {
         process.kill(-pid, signal);
         return;
@@ -516,20 +559,22 @@ export class StreamingAgentExecution implements AgentExecution {
         // Fall back to the direct child when the group has already exited.
       }
     }
-    this.proc?.kill(signal);
+    if (parentRunning) this.proc?.kill(signal);
   }
 
-  private findDescendantPids(rootPid: number): number[] {
+  private findDescendantPids(rootPid: number | undefined): number[] {
     if (process.platform === 'win32') return [];
 
     try {
-      const output = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+      const output = execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], { encoding: 'utf8', timeout: 1000 });
       const children = new Map<number, number[]>();
+      const starts = new Map<number, string>();
       for (const line of output.split('\n')) {
-        const [pidText, parentText] = line.trim().split(/\s+/);
-        const pid = Number(pidText);
-        const parent = Number(parentText);
-        if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        if (!match) continue;
+        const pid = Number(match[1]);
+        const parent = Number(match[2]);
+        starts.set(pid, match[3]!);
         const siblings = children.get(parent) ?? [];
         siblings.push(pid);
         children.set(parent, siblings);
@@ -542,7 +587,11 @@ export class StreamingAgentExecution implements AgentExecution {
           descendants.push(child);
         }
       };
-      visit(rootPid);
+      if (rootPid !== undefined) visit(rootPid);
+      for (const [pid, start] of this.signalledDescendants) {
+        if (starts.get(pid) === start && !descendants.includes(pid)) descendants.push(pid);
+      }
+      for (const pid of descendants) this.signalledDescendants.set(pid, starts.get(pid)!);
       return descendants;
     } catch {
       return [];

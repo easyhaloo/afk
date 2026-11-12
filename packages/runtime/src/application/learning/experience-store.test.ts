@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ExperienceStore, type RecordFailureInput } from './experience-store.js';
+import { ExperienceStore, experienceContextMatches, type RecordFailureInput } from './experience-store.js';
 import { openSqlite, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 
 const directories: string[] = [];
@@ -42,6 +42,174 @@ afterEach(() => {
 });
 
 describe('local experience ledger', () => {
+  it('recalls a verified diagnostic by root-cause terms without requiring its opaque trigger code', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'agent_process_failed',
+      rootCause: 'the agent process failed with exit code 23: simulated agent process failure',
+      action: 'Check deterministic subprocess exit status and use bounded retries' }));
+    const query = { scope: record.scope, prompt: 'simulated agent matrix' };
+    expect(store.recall(query)).toEqual([]);
+    verify(store, record.id);
+    expect(store.recall(query).map(entry => entry.id)).toEqual([record.id]);
+    expect(store.recall({ ...query, scope: 'github:other/wiki' })).toEqual([]);
+    expect(store.recall({ ...query, prompt: 'unrelated browser rendering' })).toEqual([]);
+    for (const prompt of ['No simulated agent process failure; only rename matrix heading.',
+      'The simulated agent process failure is absent; only rename matrix heading.',
+      'No simulated agent process failure; only document subprocess exit status.',
+      'The simulated agent process failure is absent; only rename the agent process heading.']) {
+      expect(store.recall({ ...query, prompt }), prompt).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['server crashes', 'No error handler is installed'],
+    ['worker crashes', 'No fault tolerance is configured'],
+  ])('recalls %s when the query states its actual missing protection', (trigger, rootCause) => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger, rootCause, action: 'install the missing protection' }));
+    verify(store, record.id);
+    for (const condition of [rootCause, rootCause.replace(' is ', ' ')]) {
+      expect(store.recall({ scope: record.scope, prompt: `${trigger}; ${condition}` }).map(entry => entry.id)).toEqual([record.id]);
+    }
+  });
+
+  it('rejects an explicitly absent error even when its root cause describes an absent single-writer case', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'SQLITE_BUSY during transaction commit',
+      rootCause: 'SQLITE_BUSY is absent with one writer but recurs with concurrent writers',
+      action: 'Serialize concurrent writers before retrying the transaction' }));
+    verify(store, record.id);
+    expect(store.recall({ scope: record.scope, prompt: 'SQLITE_BUSY is absent; only rename heading.' })).toEqual([]);
+  });
+
+  it('does not confuse an absent fault with an absent fault handler', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'server crashes', rootCause: 'No server error handler is installed',
+      action: 'install the missing protection' }));
+    verify(store, record.id);
+    for (const prompt of ['No server error; only update error handler documentation.',
+      'The server error is absent; only update error handler documentation.']) {
+      expect(store.recall({ scope: record.scope, prompt }), prompt).toEqual([]);
+    }
+  });
+
+  it('recalls missing error-log files described with either absence wording', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'error log file is absent', rootCause: 'the error log file was deleted',
+      action: 'restore the error log file before retrying logging' }));
+    verify(store, record.id);
+    for (const prompt of ['No error log file; restore logging.', 'The error log file is absent; restore logging.']) {
+      expect(store.recall({ scope: record.scope, prompt }).map(entry => entry.id), prompt).toEqual([record.id]);
+    }
+  });
+
+  it('requires own trusted applicability fields and never accepts inherited conditions or versions', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure());
+    const context = { target: { project: record.scope, dirty: false, productVersions: { sqlite: '3.45' }, conditions: { writer: true } } };
+    store.verify(record.id, { runId: 'qa-own', evidence: ['run:qa-own#test'] }, context);
+    const query = { scope: record.scope, prompt: 'sqlite locked', ...context };
+    expect(store.recall(query).map(entry => entry.id)).toEqual([record.id]);
+    for (const target of [
+      { ...context.target, conditions: {} },
+      { ...context.target, conditions: Object.create({ writer: true }) },
+      { ...context.target, productVersions: Object.create({ sqlite: '3.45' }) },
+      Object.assign(Object.create({ project: record.scope }), { dirty: false, productVersions: { sqlite: '3.45' }, conditions: { writer: true } }),
+    ]) {
+      expect(experienceContextMatches(context, { target })).toBe(false);
+      expect(store.recall({ ...query, target })).toEqual([]);
+    }
+    expect(experienceContextMatches({ applicability: { environment: 'ci' } },
+      { applicability: Object.create({ environment: 'ci' }) })).toBe(false);
+    expect(experienceContextMatches(context, Object.create(context))).toBe(false);
+  });
+
+  it('binds structured applicability to independent verification and fails closed without exact trusted fields', () => {
+    const { store, file } = fixture();
+    const record = store.recordFailure(failure({ action: 'use busy timeout; validated only on SQLite 3.45',
+      source: { runId: 'failure-bounded', workItemId: 'github:owner/wiki#42' } }));
+    const context = { applicability: { version: 'asset-2', environment: 'ci' }, target: { project: record.scope,
+      revision: 'a'.repeat(40), dirty: false, productVersions: { sqlite: '3.45' }, conditions: { writer: true } } };
+    const proof = { runId: 'qa-bounded', evidence: ['run:qa-bounded#qa.passed'] };
+    store.verify(record.id, proof, context);
+    const query = { scope: record.scope, prompt: 'sqlite locked on Node 22.16', ...context };
+    expect(store.recall(query).map(entry => entry.id)).toEqual([record.id]);
+    for (const target of [undefined, { ...context.target, revision: undefined }, { ...context.target, dirty: true },
+      { ...context.target, project: 'github:other/payments' }, { ...context.target, productVersions: {} },
+      { ...context.target, productVersions: { sqlite: '3.46' } }, { ...context.target, conditions: { writer: false } },
+      { ...context.target, revision: 'b'.repeat(40) }]) {
+      expect(store.recall({ ...query, target })).toEqual([]);
+    }
+    expect(store.recall({ ...query, applicability: undefined })).toEqual([]);
+    expect(store.recall({ ...query, applicability: { ...context.applicability, environment: 'production' } })).toEqual([]);
+    expect(store.recall({ ...query, applicability: { ...context.applicability, version: 'asset-3' } })).toEqual([]);
+    expect(() => store.verify(record.id, proof)).toThrow('applicability');
+    expect(JSON.parse(store.export({ scope: record.scope })).experiences).toEqual([]);
+    expect(() => store.copy({ id: record.id, scope: record.scope, targetScope: 'github:other/payments' })).toThrow('applicability');
+    store.close();
+    const reopened = fixture(file).store;
+    expect(reopened.recall(query).map(entry => entry.id)).toEqual([record.id]);
+    reopened.revoke(record.id);
+    expect(reopened.recall(query)).toEqual([]);
+  });
+
+  it('uses trusted project over prompt mentions and separates product, runtime and knowledge asset versions', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'HTTP429 TS2322 SQLITE_BUSY', action: 'retry with busy timeout' }));
+    const target = { project: record.scope, revision: 'a'.repeat(40), dirty: false,
+      productVersions: { sqlite: '3.45' }, runtimeVersions: { node: '22.16' } };
+    store.verify(record.id, { runId: 'qa-versions', evidence: ['run:qa-versions#qa.passed'] }, { target });
+    const query = { scope: record.scope, prompt: 'HTTP429 TS2322 SQLITE_BUSY in github:other/payments on Node 99', target };
+    expect(store.recall(query).map(entry => entry.id)).toEqual([record.id]);
+    expect(store.recall({ ...query, applicability: { version: '99' } }).map(entry => entry.id)).toEqual([record.id]);
+    expect(store.recall({ ...query, target: { ...target, runtimeVersions: undefined } })).toEqual([]);
+    expect(store.recall({ ...query, target: { ...target, productVersions: { sqlite: '22.16' }, runtimeVersions: { node: '3.45' } } })).toEqual([]);
+    expect(store.recall({ ...query, target: { ...target, project: 'github:other/payments' } })).toEqual([]);
+  });
+
+  it('retains constraints after recurrence and cannot reverify them as unrestricted', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure());
+    const context = { target: { project: record.scope, revision: 'a'.repeat(40), dirty: false } };
+    store.verify(record.id, { runId: 'qa-first', evidence: ['run:qa-first#test'] }, context);
+    store.recordFailure(failure({ source: { runId: 'recurrence', workItemId: '43' }, evidence: ['run:recurrence#failure'] }));
+    expect(store.recall({ scope: record.scope, prompt: 'sqlite', ...context })).toEqual([]);
+    expect(() => store.verify(record.id, { runId: 'qa-next', evidence: ['run:qa-next#test'] })).toThrow('applicability');
+    store.verify(record.id, { runId: 'qa-next', evidence: ['run:qa-next#test'] }, context);
+    expect(store.recall({ scope: record.scope, prompt: 'sqlite', ...context }).map(entry => entry.id)).toEqual([record.id]);
+    clock = new Date('2027-11-08T10:00:00.000Z');
+    expect(store.recall({ scope: record.scope, prompt: 'sqlite', ...context })).toEqual([]);
+  });
+
+  it('adds applicability storage to v2 without changing legacy records or version-one exchange', () => {
+    const { store, file } = fixture();
+    const record = verify(store, store.recordFailure(failure()).id);
+    const exchange = store.export({ scope: record.scope });
+    store.close();
+    const database = openSqlite({ file, schema: '', version: 3 });
+    databases.push(database);
+    database.exec('DROP TABLE experience_applicability; PRAGMA user_version = 2;');
+    const migrated = fixture(file).store;
+    expect(migrated.get(record.id, record.scope)).toEqual(record);
+    expect(migrated.export({ scope: record.scope })).toBe(exchange);
+    expect(migrated.recall({ scope: record.scope, prompt: 'sqlite' })).toEqual([record]);
+    expect(database.prepare('PRAGMA user_version').get()?.user_version).toBe(3);
+  });
+
+  it('does not infer applicability from a legacy action or promote invalid structured assertions', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ action: 'set timeout; validated only on SQLite 3.45' }));
+    const proof = { runId: 'qa-invalid', evidence: ['run:qa-invalid#test'] };
+    for (const target of [{ project: record.scope, revision: 'invalid', dirty: false },
+      { project: 'github:other/payments', revision: 'a'.repeat(40), dirty: false }]) {
+      expect(() => store.verify(record.id, proof, { target })).toThrow();
+      expect(store.get(record.id, record.scope)?.status).toBe('candidate');
+    }
+    verify(store, record.id);
+    expect(store.recall({ scope: record.scope, prompt: 'sqlite', target: { project: record.scope,
+      revision: 'a'.repeat(40), dirty: false, productVersions: { sqlite: '3.45' } } })).toEqual([]);
+  });
+
   it('persists candidates on disk and idempotently deduplicates a fingerprint with provenance', () => {
     const { store, file } = fixture();
     const first = store.recordFailure(failure());
@@ -138,7 +306,7 @@ describe('local experience ledger', () => {
     const legacy = { ...corrected };
     delete legacy.failureIdentity;
     const payload = JSON.stringify(legacy);
-    const database = openSqlite({ file, schema: '', version: 2 });
+    const database = openSqlite({ file, schema: '', version: 3 });
     databases.push(database);
     database.prepare('UPDATE experiences SET payload = ?, bytes = ? WHERE id = ?').run(payload, Buffer.byteLength(payload), record.id);
     expect(() => store.export({ scope: original.scope })).toThrow('Original failure identity is unavailable');
@@ -176,14 +344,14 @@ describe('local experience ledger', () => {
     const proof = { runId: 'legacy-qa', evidence: ['evidence://legacy-proof'] };
     const verified = store.verify(candidate.id, proof);
     store.close();
-    const database = openSqlite({ file, schema: '', version: 2 });
+    const database = openSqlite({ file, schema: '', version: 3 });
     databases.push(database);
-    database.exec('DROP TABLE experience_verifications; PRAGMA user_version = 1;');
+    database.exec('DROP TABLE experience_verifications; DROP TABLE experience_applicability; PRAGMA user_version = 1;');
     const migrated = fixture(file).store;
     expect(migrated.verify(candidate.id, proof)).toEqual(verified);
     migrated.recordFailure(failure({ source: { runId: 'after-migration', workItemId: '42' }, evidence: ['evidence://after-migration'] }));
     expect(() => migrated.verify(candidate.id, proof)).toThrow('fresh');
-    expect(database.prepare('PRAGMA user_version').get()?.user_version).toBe(2);
+    expect(database.prepare('PRAGMA user_version').get()?.user_version).toBe(3);
     expect(database.prepare('SELECT COUNT(*) AS count FROM experience_verifications').get()?.count).toBe(1);
   });
 
@@ -198,7 +366,7 @@ describe('local experience ledger', () => {
     expect(() => store.verify(candidate.id, { runId: 'qa-0', evidence: ['evidence://qa-0'] })).toThrow('fresh');
     expect(store.get(candidate.id, candidate.scope)).toEqual(recurrence);
     expect(store.recall({ scope: candidate.scope, prompt: 'sqlite' })).toEqual([]);
-    const database = openSqlite({ file, schema: '', version: 2 });
+    const database = openSqlite({ file, schema: '', version: 3 });
     databases.push(database);
     expect(database.prepare('SELECT COUNT(*) AS count FROM experience_verifications').get()?.count).toBe(256);
   });
@@ -243,6 +411,180 @@ describe('local experience ledger', () => {
     expect(store.list({ scope: best.scope, limit: 0 })).toEqual([]);
   });
 
+  it('recalls single-word root causes and actions behind an opaque trigger', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'network.failure',
+      rootCause: 'network timeout', action: 'configure proxy' }));
+    expect(store.recall({ scope: record.scope, prompt: 'network' })).toEqual([]);
+    verify(store, record.id);
+    for (const prompt of ['network', 'timeout', 'proxy']) {
+      expect(store.recall({ scope: record.scope, prompt }).map(entry => entry.id), prompt).toEqual([record.id]);
+    }
+    for (const prompt of ['net', 'No network', 'network is absent']) {
+      expect(store.recall({ scope: record.scope, prompt }), prompt).toEqual([]);
+    }
+    expect(store.recall({ scope: 'github:owner/other', prompt: 'network' })).toEqual([]);
+    store.revoke(record.id);
+    expect(store.recall({ scope: record.scope, prompt: 'network' })).toEqual([]);
+  });
+
+  it('keeps CLI option and error identifiers intact beside Chinese prose', () => {
+    const { store } = fixture();
+    const option = store.recordFailure(failure({ trigger: 'afk experience record --root-cause',
+      rootCause: 'required option omitted', action: 'provide the established cause' }));
+    const error = store.recordFailure(failure({ trigger: 'ERR_MODULE_NOT_FOUND',
+      rootCause: '包尚未构建', action: '先构建工作区包再导入' }));
+    for (const record of [option, error]) verify(store, record.id);
+    expect(store.recall({ scope: option.scope, prompt: '缺少--root-cause选项' }).map(record => record.id)).toEqual([option.id]);
+    expect(store.recall({ scope: option.scope, prompt: '--root-dir' })).toEqual([]);
+    expect(store.recall({ scope: error.scope, prompt: '导入时出现ERR_MODULE_NOT_FOUND怎么办？' }).map(record => record.id)).toEqual([error.id]);
+    expect(store.recall({ scope: error.scope, prompt: 'ERR_MODULE_NOT_FOUND_EXTRA' })).toEqual([]);
+    const numeric = store.recordFailure(failure({ trigger: 'ERR_TLS_3.45', rootCause: 'handshake rejected', action: 'inspect the certificate' }));
+    verify(store, numeric.id);
+    expect(store.recall({ scope: numeric.scope, prompt: 'ERR_TLS_3.45' }).map(record => record.id)).toEqual([numeric.id]);
+  });
+
+  it('honors denied failures and explicit exclusions without discarding an applicable correction', () => {
+    const { store } = fixture();
+    const busy = store.recordFailure(failure({ trigger: 'SQLITE_BUSY committing a transaction',
+      rootCause: 'writer keeps the transaction open', action: 'close the writer before retrying' }));
+    const refused = store.recordFailure(failure({ trigger: 'ECONNREFUSED connecting to the service',
+      rootCause: 'endpoint port is wrong', action: 'correct the endpoint port' }));
+    const permission = store.recordFailure(failure({ trigger: '权限校验失败',
+      rootCause: '凭据没有项目读取权限', action: '授予项目读取权限' }));
+    const missing = store.recordFailure(failure({ trigger: 'configuration file is absent', rootCause: 'file was deleted', action: 'restore the file' }));
+    const cancelled = store.recordFailure(failure({ trigger: '任务取消后资源泄漏', rootCause: '取消分支跳过清理步骤', action: '取消后释放资源' }));
+    const scheduled = store.recordFailure(failure({ trigger: '任务调度延迟', rootCause: '调度器暂停', action: '恢复调度器' }));
+    for (const record of [busy, refused, permission, missing, cancelled, scheduled]) verify(store, record.id);
+    for (const prompt of ['SQLITE_BUSY is absent; only rename a heading.', 'No SQLITE_BUSY; only rename a heading.',
+      'SQLITE_BUSY is not present; only rename a heading.', 'SQLITE_BUSY is not applicable; only rename a heading.',
+      'SQLITE_BUSY did not occur; only rename a heading.', '没有发生SQLITE_BUSY；只改标题。',
+      '任务没有取消，也没有资源泄漏；只调整界面颜色。',
+      'Exclude SQLITE_BUSY corrections.', '不要采用SQLITE_BUSY的修复。',
+      'Do not retry the writer; SQLITE_BUSY committing a transaction.']) {
+      expect(store.recall({ scope: busy.scope, prompt }), prompt).toEqual([]);
+    }
+    for (const prompt of ['ECONNREFUSED is absent; investigate SQLITE_BUSY.',
+      'Exclude ECONNREFUSED corrections; fix SQLITE_BUSY.', '不要采用ECONNREFUSED的修复；请排查SQLITE_BUSY。',
+      'SQLITE_BUSY is not resolved yet.']) {
+      expect(store.recall({ scope: busy.scope, prompt }).map(record => record.id), prompt).toEqual([busy.id]);
+    }
+    expect(store.recall({ scope: permission.scope, prompt: '凭据没有读取权限，如何修复权限校验失败？' })
+      .map(record => record.id)).toEqual([permission.id]);
+  });
+
+  it('uses project mentions only to narrow the supplied scope, including explicit project exclusions', () => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger: 'SQLITE_BUSY', rootCause: 'writer contention', action: 'close the writer' }));
+    verify(store, record.id);
+    for (const prompt of ['Fix SQLITE_BUSY in github:other/payments.', 'Fix SQLITE_BUSY in GitHub:other/payments.',
+      'Fix SQLITE_BUSY in gitlab:owner/wiki.',
+      'Fix SQLITE_BUSY in github:other/payments; github:owner/wiki must remain unchanged.',
+      '不要修改github:owner/wiki；排查SQLITE_BUSY。',
+      'Fix SQLITE_BUSY in github:owner/wiki and github:other/payments.']) {
+      expect(store.recall({ scope: record.scope, prompt }), prompt).toEqual([]);
+    }
+    for (const prompt of ['Fix SQLITE_BUSY in github:owner/wiki.',
+      'Fix SQLITE_BUSY in github:owner/wiki#42.',
+      'Fix SQLITE_BUSY in github:owner/wiki; do not change github:other/payments.',
+      '不要修改github:other/payments；修复github:owner/wiki中的SQLITE_BUSY。']) {
+      expect(store.recall({ scope: record.scope, prompt }).map(entry => entry.id), prompt).toEqual([record.id]);
+    }
+    const numbered = store.recordFailure(failure({ scope: 'github:owner/wiki3.45', trigger: 'SQLITE_BUSY',
+      rootCause: 'writer contention', action: 'close the writer' }));
+    verify(store, numbered.id);
+    expect(store.recall({ scope: numbered.scope, prompt: 'Fix SQLITE_BUSY in github:owner/wiki3.45#42.' })
+      .map(entry => entry.id)).toEqual([numbered.id]);
+  });
+
+  it('requires explicit stored version bounds rather than treating query or trigger versions as validation', () => {
+    const { store, file } = fixture();
+    const bounded = store.recordFailure(failure({ trigger: 'SQLite 3.45 WAL checkpoint stalls',
+      rootCause: 'long reader blocks checkpoint', action: 'close the long reader; validated only on SQLite 3.45' }));
+    const unknown = store.recordFailure(failure({ trigger: 'SQLite 3.46 WAL checkpoint stalls',
+      rootCause: 'slow checkpoint', action: 'inspect the checkpoint' }));
+    const target = { project: bounded.scope, dirty: false, productVersions: { sqlite: '3.45' } };
+    store.verify(bounded.id, { runId: 'qa-bounded', evidence: ['run:qa-bounded#test'] }, { target });
+    verify(store, unknown.id);
+    for (const [prompt, version] of [['SQLite 3.46 WAL checkpoint stalls', '3.46'], ['SQLite3.46 WAL checkpoint stalls', '3.46'],
+      ['SQLite version 3.46 WAL checkpoint stalls', '3.46'], ['SQLite 3.45.1 WAL checkpoint stalls', '3.45.1'],
+      ['SQLite 3.45-beta WAL checkpoint stalls', '3.45-beta'], ['SQLite 3.45+vendor WAL checkpoint stalls', '3.45+vendor'],
+      ['SQLite WAL checkpoint stalls; use fixes for version 3 only.', '3'],
+      ['SQLite 3.46 已升级，不采用 3.45 checkpoint 修复。', '3.46'], ['Upgrade SQLite 3.45 to 3.46; checkpoint stalls.', '3.46']]) {
+      expect(store.recall({ scope: bounded.scope, prompt, target: { ...target, productVersions: { sqlite: version } } }), prompt).toEqual([]);
+    }
+    expect(store.recall({ scope: bounded.scope, prompt: 'SQLite 3.45 WAL checkpoint stalls', target }).map(record => record.id)).toEqual([bounded.id]);
+    expect(store.recall({ scope: bounded.scope, prompt: 'SQLite WAL checkpoint' }).map(record => record.id)).toEqual([unknown.id]);
+    expect(store.recall({ scope: bounded.scope, prompt: 'SQLite 3.45 WAL checkpoint stalls',
+      target: { ...target, productVersions: { sqlite: '3.46' } } })).toEqual([]);
+    expect(store.recall({ scope: bounded.scope, prompt: 'SQLite 3.45 WAL checkpoint stalls',
+      target: { ...target, productVersions: {} } }).some(record => record.id === bounded.id)).toBe(false);
+    expect(store.recall({ scope: bounded.scope, prompt: 'SQLite 3.45 WAL checkpoint stalls',
+      target: { ...target, productVersions: Object.create({ sqlite: '3.45' }) } }).some(record => record.id === bounded.id)).toBe(false);
+    store.close();
+    const reopened = fixture(file).store;
+    expect(reopened.recall({ scope: bounded.scope, prompt: 'SQLite 3.45 WAL checkpoint stalls', target }).map(record => record.id)).toEqual([bounded.id]);
+    expect(reopened.recall({ scope: bounded.scope, prompt: 'SQLite 3.46 WAL checkpoint stalls',
+      target: { ...target, productVersions: { sqlite: '3.46' } } })).toEqual([]);
+    expect(JSON.parse(reopened.export({ scope: bounded.scope })).version).toBe(1);
+  });
+
+  it.each([
+    ['SQLITE_BUSY', 'close the writer', 'SQLITE_BUSY; fix only github:other/payments and do not edit its README', false],
+    ['SQLITE_BUSY', 'close the writer', 'Fix SQLITE_BUSY in github:owner/wiki and do not change github:other/payments', true],
+    ['HTTP429', 'back off before retrying', 'HTTP429', true],
+    ['HTTP 429', 'back off before retrying', 'HTTP 429', true],
+    ['TS2322', 'correct the type annotation', 'TS2322', true],
+    ['SQLITE_BUSY', 'close the writer', 'SQLITE_BUSY on Node 22.16', true],
+    ['SQLite 3.45 WAL checkpoint stalls', 'close the reader; validated only on SQLite 3.45',
+      'SQLite 3.45 WAL checkpoint stalls on Node 22.16', true, '3.45'],
+    ['SQLite 3.45 WAL checkpoint stalls', 'close the reader; validated only on SQLite 3.45',
+      'SQLite 3.45 WAL checkpoint stalls on Node (22.16)', true, '3.45'],
+    ['SQLite 3.45 WAL checkpoint stalls', 'close the reader; validated only on SQLite 3.45',
+      'SQLite 3.46 WAL checkpoint stalls on Node 22.16', false, '3.46'],
+    ['configuration file is absent', 'restore the file', 'configuration file is absent', true],
+    ['No space left on device', 'free disk space', 'No space left on device', true],
+    ['ORA-00942 table or view does not exist', 'grant access to the table', 'ORA-00942 table or view does not exist', true],
+    ['SQLITE_BUSY during transaction commit', 'close the writer transaction before retrying the commit',
+      'SQLITE_BUSY during transaction commit; do not change transaction metrics', true],
+    ['SQLITE_BUSY', 'close the writer', 'SQLITE_BUSY; do not update the writer profile picture', true],
+    ['任务取消后资源泄漏', '取消后关闭句柄并释放资源', '任务取消后资源泄漏；不要修改资源列表的颜色', true],
+    ['SQLITE_BUSY', 'close the writer', 'SQLITE_BUSY is not the issue; only update documentation', false],
+    ['SQLITE_BUSY', 'close the writer', 'SQLITE_BUSY did not recur; only rename heading', false],
+    ['任务取消后资源泄漏', '取消后关闭句柄并释放资源', '任务没有取消且没有资源泄漏；只修改任务标题', false],
+  ])('checks matching boundaries for %s / %s / %s', (trigger, action, prompt, applicable, version?: string) => {
+    const { store } = fixture();
+    const record = store.recordFailure(failure({ trigger, action, rootCause: 'independent observed cause' }));
+    const target = version ? { project: record.scope, dirty: false, productVersions: { sqlite: '3.45' } } : undefined;
+    store.verify(record.id, { runId: 'run-independent-qa', evidence: ['evidence://regression-passed'] }, target ? { target } : undefined);
+    const queryTarget = target && { ...target, revision: 'b'.repeat(40), productVersions: { sqlite: version! }, runtimeVersions: { node: '22.16' } };
+    expect(store.recall({ scope: record.scope, prompt, target: queryTarget }).map(entry => entry.id)).toEqual(applicable ? [record.id] : []);
+  });
+
+  it('does not let a different record decide whether a failure symptom is positive', () => {
+    const { store } = fixture();
+    const missing = store.recordFailure(failure({ trigger: 'configuration file is absent', action: 'restore the file' }));
+    verify(store, missing.id);
+    const prompt = 'configuration file is absent';
+    expect(store.recall({ scope: missing.scope, prompt }).map(entry => entry.id)).toEqual([missing.id]);
+    const other = store.recordFailure(failure({ trigger: 'configuration file', action: 'inspect the file' }));
+    verify(store, other.id);
+    expect(store.recall({ scope: missing.scope, prompt }).map(entry => entry.id)).toContain(missing.id);
+  });
+
+  it('withholds an explicitly restricted legacy lesson without structured applicability', () => {
+    const { store } = fixture();
+    const restricted = store.recordFailure(failure({ trigger: 'SQLite 3.45 WAL checkpoint stalls',
+      action: 'close the reader; validated only on SQLite 3.45' }));
+    const ordinary = store.recordFailure(failure({ trigger: 'SQLITE_BUSY', action: 'close the writer' }));
+    for (const record of [restricted, ordinary]) verify(store, record.id);
+    for (const prompt of ['SQLite 3.45 WAL checkpoint stalls', 'SQLite 3.46 WAL checkpoint stalls',
+      'SQLite 3.45 WAL checkpoint stalls on Node 22.16']) {
+      expect(store.recall({ scope: restricted.scope, prompt }).map(entry => entry.id)).not.toContain(restricted.id);
+    }
+    expect(store.recall({ scope: ordinary.scope, prompt: 'SQLITE_BUSY on Node 22.16' }).map(entry => entry.id)).toEqual([ordinary.id]);
+  });
+
   it('validates untrusted inputs without writes and redacts credentials before SQLite persistence', () => {
     const { store, file } = fixture();
     for (const input of [failure({ evidence: [] }), failure({ evidence: ['transcript\ncontent'] }), failure({ scope: '' }),
@@ -283,7 +625,7 @@ describe('local experience ledger', () => {
     const protectedRecord = store.recordFailure(failure({ trigger: 'important verified record' }));
     verify(store, protectedRecord.id);
     for (let index = 0; index < 1005; index++) store.recordFailure(failure({ trigger: `failure-${index}` }));
-    const database = openSqlite({ file, schema: '', version: 2 });
+    const database = openSqlite({ file, schema: '', version: 3 });
     databases.push(database);
     expect(database.prepare('SELECT COUNT(*) AS count FROM experiences').get()?.count).toBe(1000);
     expect(store.list({ scope: protectedRecord.scope, status: 'verified' }).map(record => record.id)).toContain(protectedRecord.id);
@@ -370,7 +712,7 @@ describe('local experience ledger', () => {
     expect(store.get(first.id, first.scope)?.evidence).toHaveLength(8);
     expect(() => store.verify(first.id, { runId: 'fresh-qa', evidence: ['evidence://fresh-proof'] })).toThrow('saturated');
     expect(JSON.parse(store.export({ scope: first.scope })).experiences).toEqual([]);
-    const database = openSqlite({ file, schema: '', version: 2 });
+    const database = openSqlite({ file, schema: '', version: 3 });
     databases.push(database);
     expect(database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE source_hash NOT LIKE 'metric:%'").get()?.count).toBe(256);
     expect(database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE source_hash LIKE 'metric:%'").get()?.count).toBe(1);

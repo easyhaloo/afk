@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../io/logger.js';
-import type { MetricsProvider, TracerProvider, EventStoreProvider } from '../../plugin-sdk/capabilities.js';
+import type { EvidenceRecord, EvidenceStoreProvider, MetricsProvider, TracerProvider, EventStoreProvider, ProviderAbortSignal } from '../../plugin-sdk/capabilities.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
 import { createRunObserver } from './run-observer-factory.js';
+import { createLocalEncryptedEvidenceStore } from './local-evidence-store.js';
 
 const roots: string[] = [];
 
@@ -30,12 +31,181 @@ function provider() {
   return {
     id: 'capture',
     capabilities: { span: true, event: true, baggage: false, counter: true, gauge: true, histogram: true },
-    startSpan: vi.fn<TracerProvider['startSpan']>(async () => undefined),
-    addEvent: vi.fn<TracerProvider['addEvent']>(async () => undefined),
-    endSpan: vi.fn<NonNullable<TracerProvider['endSpan']>>(async () => undefined),
-    record: vi.fn<MetricsProvider['record']>(async () => undefined),
+    startSpan: vi.fn<Parameters<TracerProvider['startSpan']>, ReturnType<TracerProvider['startSpan']>>(async () => undefined),
+    addEvent: vi.fn<Parameters<TracerProvider['addEvent']>, ReturnType<TracerProvider['addEvent']>>(async () => undefined),
+    endSpan: vi.fn<Parameters<NonNullable<TracerProvider['endSpan']>>, ReturnType<NonNullable<TracerProvider['endSpan']>>>(async () => undefined),
+    record: vi.fn<Parameters<MetricsProvider['record']>, ReturnType<MetricsProvider['record']>>(async () => undefined),
   };
 }
+
+async function sdkEvidence() {
+  const root = await directory();
+  const evidence = await createLocalEncryptedEvidenceStore(root);
+  const records = new Map<string, EvidenceRecord>();
+  const sdk: EvidenceStoreProvider = {
+    id: 'private', capabilities: { put: true, get: true, classify: false },
+    put: vi.fn(async record => {
+      records.set(record.id, { ...record, bytes: Buffer.from(record.bytes) });
+      return { name: record.id, uri: `evidence://${record.id}` };
+    }),
+    get: vi.fn(async id => records.get(id)!),
+  };
+  const events = join(root, 'events');
+  const history = async () => {
+    const result = [];
+    for await (const event of new JsonlEventStore({ root: events }).read(context.runId)) result.push(event);
+    return result;
+  };
+  return { root, events, evidence, sdk, history };
+}
+
+describe('explicit SDK evidence mirror boundaries', () => {
+  it.each(['github:org/other#1', 'gitlab:org/repo#1', 'not-a-work-item'])('keeps foreign or invalid scope %s local', async workItemId => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence } }).record({ ...context, workItemId }, { kind: 'qa.passed' });
+    expect(sdk.put).not.toHaveBeenCalled();
+    expect(sdk.get).not.toHaveBeenCalled();
+    expect(await history()).toHaveLength(1);
+  });
+
+  it('does not send arbitrary existing, sensitive or restricted evidence references', async () => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const foreign = await evidence.put({ bytes: Buffer.from('foreign-private-attachment'), mediaType: 'text/plain', classification: 'sensitive', redactionStatus: 'restricted' });
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence } }).record(context, { kind: 'qa.passed' }, { evidence: [foreign] });
+    expect(sdk.put).toHaveBeenCalledTimes(1);
+    const sent = vi.mocked(sdk.put).mock.calls[0][0];
+    expect(Buffer.from(sent.bytes).toString()).not.toContain('foreign-private-attachment');
+    expect(sent.classification).toBe('internal');
+    const source = (await history())[0];
+    expect(source.evidence).toHaveLength(2);
+    expect(source.evidence![0]).toEqual(foreign);
+    expect(await evidence.get(foreign)).toEqual(Buffer.from('foreign-private-attachment'));
+  });
+
+  it.each(['hash', 'size', 'sourceEventId', 'kind', 'occurredAt', 'classification', 'mediaType', 'restricted'] as const)('rejects invalid local capture %s before sending private bytes', async mode => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const local = {
+      get: async (ref: Parameters<typeof evidence.get>[0]) => mode === 'hash' ? Buffer.from('wrong bytes') : evidence.get(ref),
+      put: async (input: Parameters<typeof evidence.put>[0]) => {
+        if (mode === 'classification') return evidence.put({ ...input, classification: 'sensitive' });
+        if (mode === 'mediaType') return evidence.put({ ...input, mediaType: 'text/plain' });
+        if (mode === 'restricted') return evidence.put({ ...input, redactionStatus: 'restricted' });
+        if (['sourceEventId', 'kind', 'occurredAt'].includes(mode)) {
+          const value = JSON.parse(Buffer.from(input.bytes).toString());
+          value[mode] = 'foreign';
+          return evidence.put({ ...input, bytes: Buffer.from(JSON.stringify(value)) });
+        }
+        return evidence.put(input);
+      },
+    };
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence: local, maxBytes: mode === 'size' ? 1 : 65_536 } }).record(context, { kind: 'qa.passed' });
+    expect(sdk.put).not.toHaveBeenCalled();
+    expect(sdk.get).not.toHaveBeenCalled();
+    expect((await history()).at(-1)?.data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed' });
+  });
+
+  it.each(['id', 'mediaType', 'classification', 'bytes', 'oversized', 'put-error', 'get-error', 'receipt'] as const)('preserves local evidence when SDK %s is invalid', async mode => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const warning = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    if (mode === 'put-error') vi.mocked(sdk.put).mockRejectedValue(new Error('token=provider-private'));
+    if (mode === 'receipt') vi.mocked(sdk.put).mockResolvedValue({ uri: 'https://example.test/private', name: 'foreign-id' });
+    const get = vi.mocked(sdk.get).getMockImplementation()!;
+    vi.mocked(sdk.get).mockImplementation(async id => {
+      if (mode === 'get-error') throw new Error('token=provider-private');
+      const record = await get(id);
+      return mode === 'id' ? { ...record, id: 'foreign-id' }
+        : mode === 'mediaType' ? { ...record, mediaType: 'text/plain' }
+        : mode === 'classification' ? { ...record, classification: 'public' }
+        : mode === 'bytes' ? { ...record, bytes: Buffer.from('substituted') }
+        : mode === 'oversized' ? { ...record, bytes: Buffer.alloc(65_537) }
+        : record;
+    });
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence } }).record(context, { kind: 'qa.passed' });
+    const source = (await history())[0];
+    expect(JSON.parse(Buffer.from(await evidence.get(source.evidence![0])).toString())).toMatchObject({ kind: 'qa.passed', sourceEventId: source.id });
+    expect((await history()).at(-1)?.data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed' });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('provider-private');
+    expect(await new JsonlEventStore({ root: events }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  });
+
+  it.each(['before', 'put', 'get', 'timeout'] as const)('keeps local success on cancellation at %s', async stage => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const controller = new AbortController();
+    let receivedSignal: ProviderAbortSignal | undefined;
+    let release: (() => void) | undefined;
+    if (stage === 'before') controller.abort(null);
+    if (stage === 'put' || stage === 'timeout') vi.mocked(sdk.put).mockImplementation(async (_record, operation) => {
+      receivedSignal = operation?.signal;
+      if (stage === 'put') controller.abort(null);
+      await new Promise<void>(resolve => { release = resolve; });
+      return { name: 'late', uri: 'file:///late' };
+    });
+    if (stage === 'get') vi.mocked(sdk.get).mockImplementation(async (_id, operation) => {
+      receivedSignal = operation?.signal;
+      controller.abort(null);
+      await new Promise<void>(resolve => { release = resolve; });
+      return {} as EvidenceRecord;
+    });
+    const started = performance.now();
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence, signal: controller.signal, timeoutMs: 20 } }).record(context, { kind: 'qa.passed' });
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect((await history()).at(-1)?.data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed' });
+    expect(await evidence.get((await history())[0].evidence![0])).toBeInstanceOf(Uint8Array);
+    if (stage === 'before') expect(sdk.put).not.toHaveBeenCalled();
+    else expect(receivedSignal?.aborted).toBe(true);
+    release?.();
+    await Promise.resolve();
+    if (stage !== 'get') expect(sdk.get).not.toHaveBeenCalled();
+  });
+
+  it('never calls the SDK when authoritative event persistence fails', async () => {
+    const { events, evidence, sdk } = await sdkEvidence();
+    await fs.writeFile(events, 'not a directory');
+    await expect(createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence } }).record(context, { kind: 'qa.passed' })).rejects.toThrow();
+    expect(sdk.put).not.toHaveBeenCalled();
+    expect(sdk.get).not.toHaveBeenCalled();
+  });
+
+  it.each(['put', 'get'] as const)('preserves source success when local evidence %s fails', async operation => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const local = {
+      put: operation === 'put' ? async () => { throw new Error('token=local-private'); } : evidence.put.bind(evidence),
+      get: operation === 'get' ? async () => { throw new Error('token=local-private'); } : evidence.get.bind(evidence),
+    };
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence: local } }).record(context, { kind: 'qa.passed' });
+    const stored = await history();
+    expect(stored[0].data).toMatchObject({ kind: 'qa.passed' });
+    expect(sdk.put).not.toHaveBeenCalled();
+    expect(sdk.get).not.toHaveBeenCalled();
+    expect(stored).toHaveLength(operation === 'put' ? 1 : 2);
+    expect(JSON.stringify(stored)).not.toContain('local-private');
+  });
+
+  it('binds records to their project, run, work item and source event', async () => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const observer = createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo', 'github:org/other'], evidence } });
+    await observer.record(context, { kind: 'qa.passed' });
+    await observer.record({ ...context, runId: 'run-2' }, { kind: 'qa.passed' });
+    await observer.record({ ...context, workItemId: 'github:org/other#1' }, { kind: 'qa.passed' });
+    expect(new Set(vi.mocked(sdk.put).mock.calls.map(([record]) => record.id)).size).toBe(3);
+    expect((await history()).filter(event => event.data.kind === 'effect.completed').every(event => event.data.kind === 'effect.completed' && event.data.outcome === 'succeeded')).toBe(true);
+  });
+
+  it('pins source scope and identity before asynchronous local persistence', async () => {
+    const { events, evidence, sdk, history } = await sdkEvidence();
+    const changing = { ...context };
+    const local = {
+      get: evidence.get.bind(evidence),
+      async put(input: Parameters<typeof evidence.put>[0]) {
+        changing.workItemId = 'github:org/foreign#1';
+        return evidence.put(input);
+      },
+    };
+    await createRunObserver(events, [], { evidenceStore: { provider: sdk, scopes: ['github:org/repo'], evidence: local } }).record(changing, { kind: 'qa.passed' });
+    expect((await history())[0].context.workItemId).toBe('github:org/repo#1');
+    expect((await history()).at(-1)?.context.workItemId).toBe('github:org/repo#1');
+  });
+});
 
 describe('observability exporters', () => {
   it('awaits spans and low-cardinality metrics without duplicating a shared provider', async () => {
@@ -76,7 +246,7 @@ describe('observability exporters', () => {
   it('mirrors only durable events and preserves the authoritative local sequence', async () => {
     const root = await directory();
     const store = new JsonlEventStore({ root });
-    const append = vi.fn<EventStoreProvider['append']>(async events => {
+    const append = vi.fn<Parameters<EventStoreProvider['append']>, ReturnType<EventStoreProvider['append']>>(async events => {
       expect(await store.verify(context.runId)).toMatchObject({ valid: true, lastSequence: events[0].sequence });
     });
     const observer = createRunObserver(root, [{ provider: { id: 'mirror', capabilities: { append: true, read: false, verify: false }, append }, signals: ['events'] }]);

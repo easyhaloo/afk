@@ -117,6 +117,8 @@ export interface ContainerProvider {
   readonly engine: ContainerEngine;
   readonly binary: string;
 
+  readonly frozen?: FrozenContainerOperations;
+
   /** True if the binary is on PATH and the daemon/rootless state is usable. */
   isAvailable(): Promise<boolean>;
 
@@ -137,4 +139,45 @@ export interface ContainerProvider {
 
   /** Read container state + mount table. */
   inspect(containerId: string): Promise<ContainerInspectInfo>;
+}
+
+export interface FrozenCommandOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs: number;
+  readonly maxOutputBytes: number;
+}
+
+export interface FrozenContainerInspection {
+  readonly id: string;
+  readonly imageId: string;
+  readonly operationId: string;
+  readonly name: string;
+  readonly status: string;
+  readonly exitCode: number;
+  readonly user: string;
+  readonly readOnlyRoot: boolean;
+  readonly network: string;
+  readonly capDrop: readonly string[];
+  readonly securityOptions: readonly string[];
+  readonly privileged: boolean;
+  readonly pidMode: string;
+  readonly ipcMode: string;
+  readonly binds: readonly string[];
+  readonly mounts: readonly { readonly type: string; readonly destination: string }[];
+  readonly tmpfs: Readonly<{ [path: string]: string }>;
+  readonly memory: number;
+  readonly memorySwap: number;
+  readonly nanoCpus: number;
+  readonly pidsLimit: number;
+  readonly entrypoint: readonly string[];
+  readonly command: readonly string[];
+  readonly workdir: string;
+}
+
+export interface FrozenContainerOperations {
+  buildFrozenImage(operationId: string, baseImageId: string, context: Buffer, options: FrozenCommandOptions): Promise<string>;
+  createFrozenContainer(operationId: string, imageId: string, argv: readonly string[], options: FrozenCommandOptions): Promise<string>;
+  inspectFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<FrozenContainerInspection>;
+  startFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<{ stdout: string; stderr: string; code: number }>;
+  cleanupFrozenOperation(operationId: string, options: FrozenCommandOptions): Promise<void>;
 }

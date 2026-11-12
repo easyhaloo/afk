@@ -79,6 +79,9 @@ Provider `health` 状态为 `ok/degraded/unavailable`，`doctor` 返回 `check/o
 
 公共调用 Envelope：
 
+`context.provider/gather` 在 `scope/prompt/limit?` 外接受可选的 `applicability` 与 `target`；沿用共享上下文验证，版本、环境、项目、revision 和条件必须通过校验后原样交给 Provider。省略条件不放宽知识资产自身的适用性要求。
+Envelope 字段必须为自身数据属性；Context 的上述顶层字段拒绝继承属性和 getter/setter，在联合协议解析前检查。合法的 null-prototype 数据对象仍可调用。
+
 ```json
 {
   "capability": "verification.provider",
@@ -189,8 +192,8 @@ interval timer 不补跑停机时段。
 ## 7. Artifact 与审计证据协议
 
 `integrations.evidence` 为 `{provider,timeoutMs?}`，超时须为 1..60000 整数。
-仅配置根级 `integrations.evidence` 并选择已启用、可写的 Artifact Provider 时，默认
-Runtime 才初始化持久化本地加密证据存储并启用 `captureEvents: true`；未配置时不自动采集。
+根级 `integrations.evidence` 选择已启用、可写的 Artifact Provider 时，默认
+Runtime 初始化持久化本地加密证据存储并启用该出口的 `captureEvents: true`；未配置此出口时不自动为它采集。
 选择或初始化失败必须通过必需的初始化闸门阻止受管执行。本地 key 以互斥方式
 初始化并复用已有 key，不能因重启或并发丢失解密能力。SDK 提供
 `createLocalEncryptedEvidenceStore`、`createPluginRunObserver`、`setPluginAuditArtifacts`
@@ -202,6 +205,20 @@ QA、发布、失败、运行结束事件先生成有界脱敏摘要并存本地
 `artifact.upload` 的 `effect.completed` 关联源事件/序号、本地 URI/hash、远端引用及成功/
 失败原因；其回执不递归上传。上传异常/超时不替代本地审计，本地追加失败仍阻止操作。
 既有 after-agent 报告 hook 与此独立。
+
+SDK EvidenceStore 使用独立根配置，不复用 ArtifactSink 选择：
+
+```json
+{"evidenceStore":{"provider":"private","scopes":["github:org/repo"],"timeoutMs":2000,"maxBytes":65536}}
+```
+
+- `provider` 指向已启用、同时支持 `put/get` 的 `observe.evidence` 或 `observability.provider`；同名双注册必须是同一对象。
+- `scopes` 为 1..32 个互异规范项目，不接受通配符或工作项 ID；`timeoutMs` 为 1..60000，默认 2000；`maxBytes` 为 1..1048576，默认 65536。未知配置字段拒绝。
+- 默认关闭。仅为显式项目导出新事件的有界脱敏摘要；已有附件不从此出口导出。默认 Runtime 复用本地加密存储；选择或初始化失败安装 required 初始化闸门。
+- 已接受的保存选择在运行期因注销、歧义或能力失效而不可用时，新旧 observer 均停止该出口并继续本地审计；显式提交的非法选择仍拒绝，不自动切换 Provider。
+- 本地证据和源事件先持久化，再执行 SDK `put/get`；校验身份、分类、媒体类型、长度和 digest。未选择的 EvidenceStore 不收到此出口的字节。
+- `effect.completed/evidence.mirror` 保存安全结果；回读内容不替换本地权威。失败、取消、超时保留本地事件和证据，不继续标记成功。
+- 配置按 Runtime 初始化快照生效；不提供热重载、持久重试队列或已发送副本撤回。宿主等待有界，但不能强杀忽略 signal 的进程内可信插件。
 
 Observability 仅镜像已本地持久化的事件，同一对象重复注册去重。每条记录使用独立 span，
 运行/工作项身份放 trace 属性；metric 使用低基数属性，持久化延迟为 histogram。
@@ -226,11 +243,43 @@ QA 和新证据。HTTP 知识库检索不隐含远程写回。
 交换及采纳由 CLI 提供。共享账本限 1000 条、逻辑数据/收据 8 MiB、单条 32 KiB、每条
 256 来源，默认有效期 90 天；来源饱和仍撤回复发建议并禁止继续提升。
 
+### 8.1 候选独立验证协议
+
+- `learning.validate` 输入严格为 `{ scope, candidateId, expectedVersion, checkerId }`；不接受 `passed/report/command/target`。验证配置、授权和目标由宿主读取。
+- `doctor()` 必须且只能包含一项 `{ check: "learning-validation-v1", ok: true, detail }`；`detail` 为 `{ scope, checkerId, providerId, version }` 的 JSON，身份必须与可信配置一致。
+- `verify` 接收 `target` 内的 JSON envelope：`{ protocol: "learning-validation-v1", binding, candidate, evidence, assertions }`。这是专属协议；不能交给把 target 当目录的普通执行器。
+- `binding` 绑定项目、候选及版本/摘要、证据摘要、真实目标及快照摘要、checker/配置/授权摘要和唯一 execution ID；报告必须原样返回该 binding。
+- 每条 assertion 返回 `{ node, expected, actual, status, evidence }`；`actual` 必须独立观察，不能复制 expected；`status` 为 `observed/unknown/inferred`。缺失、未知、推断、断言失败或无匹配证据均不能晋级。
+- fact 验证 subject/rule/authority；process 验证 entry/systems/preconditions、每步 action/stateChange、exceptions/completion。lesson 另遵守以下 QA 及领域检查；skill/tool 未有对应实现时明确 blocked。
+- lesson 的可信 checker 配置必须显式设置 `allowLessonValidation: true`，并提供 `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`。`targetRevision` 为完整 Git revision，`auditDigest` 为受信审计原始字节摘要；客户端不可提供或覆盖这些字段。此许可仅允许验证，不能发布 lesson。
+- lesson 先验证同项目、同工作项的独立 QA：原始证据身份、hash chain、系统权威事件、修复版本及完整成功周期必须匹配。状态顺序采用审计 sequence；不保证事件发生时间单调。
+- lesson 的 `binding` 额外包含 `qa` 与 `qaEvidence`；逐项独立观察 trigger/rootCause/rootCauseStatus/attempts/fix/prevention、适用范围及 fixTargetRevision。QA 成功和 `passed: true` 均不能代替这些断言。oracle 快照 revision 与 QA Git revision 分别绑定。
+- 截止时间覆盖开库、解析、执行和提交；最终获写锁后复核身份、授权、来源、目标和 deadline。取消、漂移和超时不得留下 validated 状态或验证收据。
+- lesson 最终获写锁后同步重读 QA 审计摘要；追加、删除、替换或配置变化阻断提交。错误码增加 `qa_unconfigured/qa_not_independent/audit_unavailable/audit_changed/qa_unverified`；错误结果仅含安全分类，不携带审计正文或路径。
+
+### 8.2 Lesson 发布、读取与撤回协议
+
+- 验证许可与发布许可分别检查；目标授权必须显式包含 `lesson`，不能从 `fact/process` 推导。
+- 沿用 `learning.knowledge.prepare/publish/reconcile`；调用方不提供验证收据、授权文件或 Wiki 执行参数。
+- 发布核对当前候选、原始来源、独立 QA、语义断言收据、保存配置、目标授权及规则；读取已发布资产时执行相同资格检查。
+- 发布准备、导航替换及 `applied/committed` 晋级在取得数据库写锁后同步复核依赖；守卫抛错或返回异步结果必须回滚，不得成功返回陈旧计划。
+- 正文包含候选版本、验证执行及 QA 修复版本的引用；只向权限、项目、版本与适用条件匹配的任务提供。
+- QA、来源、规则或授权失效立即禁止新消费；补查只将对应 lesson 置为冲突并安排撤回，同请求其他候选不因 QA 单独变化而失效。未配置知识发布时仍执行候选资格补查。
+- 撤回复用持久恢复日志并保持幂等；权限不足或人工编辑返回阻断，保留现场，不能覆盖人工正文。
+
 ## 9. 生命周期闸门与最小验收
 
 required init、before-agent、after-agent、before-publish 及逆序 cleanup 保留执行顺序和
 失败策略。插件模板需通过宿主验证；专用 QA/冲突模板只接受一个 inline Agent 步骤。
 不提供通用逐工具拦截 API；插件不能修改 Core 状态、放宽预算或关闭人工合并闸门。
+
+根配置 `integrations.verifications` 显式选择已注册验证 Provider，默认空、最多 32 项。
+条目为 `{ provider, command?, timeoutMs? }`，禁止未知字段、客户端 `target` 和 `passed`；
+命令使用无 shell 展开的有效 argv，期限为正整数。宿主在 required init 检查 Provider，
+在 after-agent 和每次 before-publish 中先执行策略、再验证，并绑定实际 worktree。
+失败阻断该阶段的后续副作用；命令期限由 Provider 执行，学习资产仍需类型专属验证。
+保存策略或验证选择时，宿主必须确认所需门禁模块实际加载；禁用、缺失或替换该模块
+不得静默跳过已配置检查，必须在初始化时阻断。
 
 - Manifest、配置、依赖/冲突、唯一注册名及可选操作声明正确；激活失败回滚，dispose 幂等。
 - 信任边界校验输入/结果；取消、超时、资源及输出有界；缺失凭据/工具/协议有安全诊断。

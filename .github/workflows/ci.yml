@@ -121,8 +121,7 @@ jobs:
                 desktop=true
                 desktop_e2e=true
                 ;;
-              packages/*)
-                # Shared package changes can affect the desktop application.
+              packages/*|apps/cli/*)
                 desktop=true
                 desktop_e2e=true
                 ;;
@@ -282,6 +281,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup knowledge verification Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare knowledge verification search dependency
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            cargo install --locked ripgrep --version 14.1.1
+          fi
+          rg --version
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -395,6 +406,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Setup knowledge verification Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare knowledge verification search dependency
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            cargo install --locked ripgrep --version 14.1.1
+          fi
+          rg --version
 
       - name: Install Xvfb and Electron Linux deps
         run: |

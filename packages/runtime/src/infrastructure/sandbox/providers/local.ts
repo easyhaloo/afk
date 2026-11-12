@@ -85,6 +85,7 @@ export class LocalSandbox implements Sandbox {
   private readonly branch?: string;
   private readonly workspaceRoot: string;
   private readonly runtimeRunId?: string;
+  private readonly analysisParentGuard: boolean;
   private _closed = false;
   private sessionCreated = false;
 
@@ -96,6 +97,7 @@ export class LocalSandbox implements Sandbox {
     tmux?: TmuxClient;
     workspaceRoot?: string;
     runtimeRunId?: string;
+    analysisParentGuard?: boolean;
   }) {
     this.id = opts.id;
     this.worktreePath = opts.worktreePath;
@@ -105,6 +107,7 @@ export class LocalSandbox implements Sandbox {
     this.branch = opts.branch;
     this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
     this.runtimeRunId = opts.runtimeRunId;
+    this.analysisParentGuard = opts.analysisParentGuard ?? false;
   }
 
   async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
@@ -121,6 +124,7 @@ export class LocalSandbox implements Sandbox {
         sessionId: this.sessionName,
         metadata: options.metadata,
         parseLine: options.parseLine,
+        analysisParentGuard: this.analysisParentGuard,
       });
       execution.start();
       return execution;

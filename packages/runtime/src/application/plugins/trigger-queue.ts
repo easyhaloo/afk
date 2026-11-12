@@ -86,6 +86,7 @@ export class DurableTriggerQueue {
   private closing?: Promise<void>;
   private started = false;
   private faulted = false;
+  private stopDispatch = false;
 
   constructor(
     file: string,
@@ -193,12 +194,13 @@ export class DurableTriggerQueue {
     this.wake();
   }
 
-  close(): Promise<void> {
+  close(options: { drain?: boolean } = {}): Promise<void> {
+    if (options.drain === false) this.stopDispatch = true;
     return this.closing ??= (async () => {
       if (this.timer) clearTimeout(this.timer);
       try {
         await this.running;
-        if (this.started && !this.faulted) await this.drain();
+        if (this.started && !this.faulted && !this.stopDispatch) await this.drain();
       } finally {
         try { this.database.prepare('DELETE FROM trigger_queue_owner WHERE nonce = ?').run(this.nonce); }
         finally { this.database.close(); }
@@ -233,6 +235,7 @@ export class DurableTriggerQueue {
 
   private async drain(): Promise<void> {
     for (;;) {
+      if (this.stopDispatch) return;
       const delivery = transaction(this.database, () => {
         const row = this.database.prepare("SELECT deliveryId, providerId, body, attempts FROM trigger_deliveries WHERE status = 'pending' AND nextAttemptAt <= ? ORDER BY nextAttemptAt, deliveryId LIMIT 1").get(Date.now());
         if (!row) return undefined;

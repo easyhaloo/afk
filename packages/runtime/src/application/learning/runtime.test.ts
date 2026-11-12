@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { ObservationContext, RunEventData } from '@afk/core';
+import { simpleGit } from 'simple-git';
+import type { ObservationContext, RunEvent, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { PluginRuntime } from '../plugins/runtime.js';
+import { PluginManager } from '../plugins/manager.js';
+import { createDefaultPluginRuntime } from '../plugins/default-runtime.js';
 import { createFailureDiagnostic } from '../workflows/failure-diagnostic.js';
 import { ExperienceStore } from './experience-store.js';
-import { ExperienceContextProvider, experienceScope, experienceStorePath, prepareExperienceContext, recordExecutionExperience, recordSuccessfulExperience, verifyAdoptionRun, verifyExperienceRun } from './runtime.js';
+import { ExperienceContextProvider, experienceScope, experienceStorePath, prepareExperienceContext, recordExecutionExperience, recordSuccessfulExperience, successfulRunEvidenceFromEvents, verifyAdoptionRun, verifyExperienceRun, verifyApplicableExperience, resolveExperienceQueryContext } from './runtime.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -29,14 +32,180 @@ const failure = (workItemId = 'github:acme/wiki#42') => ({
   source: { runId: 'failed', workItemId },
 });
 
-async function recordRun(root: string, runId: string, kinds: readonly RunEventData[], workItemId = 'github:acme/wiki#42') {
-  const context: ObservationContext = { traceId: runId, runId, workItemId, profileId: 'local', attempt: 1, actor: { kind: 'system', id: 'test' } };
+async function recordRun(root: string, runId: string, kinds: readonly RunEventData[], workItemId = 'github:acme/wiki#42', actorKind: ObservationContext['actor']['kind'] = 'system') {
+  const context: ObservationContext = { traceId: runId, runId, workItemId, profileId: 'local', attempt: 1, actor: { kind: actorKind, id: 'test' } };
   await new JsonlEventStore({ root }).append(kinds.map((data, index) => ({
     id: `${runId}-${index}`, schemaVersion: 1, type: data.kind, occurredAt: new Date().toISOString(), context, correlationId: runId, data,
   })));
 }
 
 describe('runtime experience loop', () => {
+  it('consumes version-constrained experience from saved configuration through the default plugin runtime', async () => {
+    const { root, file, store } = await fixture();
+    const record = store.recordFailure(failure());
+    const context = { applicability: { version: 'knowledge-v2', environment: 'ci' },
+      target: { project: record.scope, productVersions: { sqlite: '3.45' }, runtimeVersions: { node: '22.16' },
+        conditions: { transactional: true } } };
+    store.verify(record.id, { runId: 'qa-saved-context', evidence: ['run:qa-saved-context#regression'] }, context);
+    store.close();
+    const manager = new PluginManager({ homeDir: root });
+    await manager.configure('learning.distiller', { enabled: false, executionContexts: [context] }, true);
+    await manager.configure('context.experience', {}, true);
+    const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
+    try {
+      const path = await prepareExperienceContext({ plugins, workItemId: 'github:acme/wiki#99',
+        worktreePath: root, prompt: 'sqlite retry; prompt claims Node 99' });
+      expect(path).toBe('.afk/experience-context.md');
+      expect(await fs.readFile(join(root, path!), 'utf8')).toContain(record.id);
+      expect(await plugins.dispatchSystemAction('learning.context', { scope: record.scope })).toEqual(context);
+      expect(await plugins.dispatchSystemAction('learning.context', { scope: 'github:other/wiki' })).toEqual({});
+      const reader = new ExperienceStore({ file });
+      try {
+        expect(reader.recall({ scope: record.scope, prompt: 'sqlite retry' })).toEqual([]);
+      } finally { reader.close(); }
+      await expect(plugins.dispatchSystemAction('learning.context', { scope: record.scope, target: context.target })).rejects.toThrow();
+    } finally { await plugins.dispose(); }
+  });
+
+  it.each(['applicability', 'target'] as const)('does not promote inherited %s through the experience provider', async field => {
+    const { file, store } = await fixture();
+    try {
+      const record = store.recordFailure(failure());
+      const context = { applicability: { environment: 'ci' },
+        target: { project: record.scope, productVersions: { sqlite: '3.45' } } };
+      store.verify(record.id, { runId: 'qa-own-properties', evidence: ['run:qa-own-properties#regression'] }, context);
+      const query = { scope: record.scope, prompt: 'sqlite retry', ...context };
+      const provider = new ExperienceContextProvider(file);
+      expect(await provider.gather(query)).toHaveLength(1);
+      const inherited = Object.assign(Object.create({ [field]: context[field] }), query);
+      delete inherited[field];
+      expect(await provider.gather(inherited)).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it.each(['applicability', 'target'] as const)('rejects inherited %s before resolving execution context', async field => {
+    const { root, store } = await fixture();
+    store.close();
+    const context = { applicability: { environment: 'ci' }, target: { project: 'github:acme/wiki' } };
+    const input = Object.assign(Object.create({ [field]: context[field] }),
+      { workItemId: 'github:acme/wiki#42', worktreePath: root, ...context });
+    delete input[field];
+    await expect(resolveExperienceQueryContext(input)).rejects.toThrow(/own properties/i);
+  });
+
+  it('uses actual clean Git revision and trusted configuration without interpreting prompt versions', async () => {
+    const { root, store } = await fixture();
+    store.close();
+    const checkout = join(root, 'checkout');
+    await fs.mkdir(checkout);
+    const git = simpleGit(checkout);
+    await git.init();
+    await git.addConfig('user.name', 'T07');
+    await git.addConfig('user.email', 't07@example.test');
+    await fs.writeFile(join(checkout, 'source.txt'), 'source');
+    await git.add('.');
+    await git.commit('fixture');
+    const context = await resolveExperienceQueryContext({ workItemId: 'github:acme/wiki#42', worktreePath: checkout,
+      applicability: { version: 'knowledge-v2', environment: 'ci' },
+      target: { project: 'github:acme/wiki', revision: 'f'.repeat(40), runtimeVersions: { node: '22.16' } } });
+    expect(context).toMatchObject({ applicability: { version: 'knowledge-v2', environment: 'ci' },
+      target: { project: 'github:acme/wiki', revision: await git.revparse('HEAD'), dirty: false, runtimeVersions: { node: '22.16' } } });
+    await fs.writeFile(join(checkout, 'source.txt'), 'modified');
+    expect((await resolveExperienceQueryContext({ workItemId: 'github:acme/wiki#42', worktreePath: checkout })).target?.dirty).toBe(true);
+    await expect(resolveExperienceQueryContext({ workItemId: 'github:acme/wiki#42', worktreePath: checkout,
+      target: { project: 'github:other/payments' } })).rejects.toThrow('project');
+    const missing = await resolveExperienceQueryContext({ workItemId: 'github:acme/wiki#42', worktreePath: root });
+    expect(missing.target?.revision).toBeUndefined();
+    expect(missing.target?.runtimeVersions).toBeUndefined();
+  });
+
+  it('requires an intact independent QA cycle, trusted target snapshot and exact QA revision before persisting constraints', async () => {
+    const { root, file, store } = await fixture();
+    const record = store.recordFailure(failure());
+    const context = { applicability: { environment: 'ci' }, target: { project: record.scope,
+      revision: 'a'.repeat(40), dirty: false, productVersions: { sqlite: '3.45' } } };
+    const snapshot: RunEventData = { kind: 'decision.made', command: 'experience.qa-target', accepted: true,
+      reason: JSON.stringify({ ...context, target: { ...context.target, runtimeVersions: { node: '22.16' } } }) };
+    const commit: RunEventData = { kind: 'commit.recorded', phase: 'qa', commitSha: context.target.revision, branch: 'qa' };
+    const request = { root, file, scope: record.scope, id: record.id, runId: 'qa-proof', context, evidence: ['run:qa-proof#test'] };
+    await recordRun(root, 'qa-proof', [{ kind: 'qa.started' }, snapshot, commit, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]);
+    const verified = await verifyApplicableExperience(request);
+    expect(store.recall({ scope: record.scope, prompt: 'sqlite', ...context }).map(entry => entry.id)).toEqual([verified.id]);
+    const transferable = store.recordFailure({ ...failure(), trigger: 'transferable sqlite retry' });
+    const requirements = { applicability: context.applicability, target: { project: record.scope, dirty: false, productVersions: { sqlite: '3.45' } } };
+    await verifyApplicableExperience({ ...request, id: transferable.id, context: requirements });
+    expect(store.recall({ scope: record.scope, prompt: 'transferable sqlite retry', ...requirements,
+      target: { ...requirements.target, revision: 'b'.repeat(40) } }).map(entry => entry.id)).toEqual([transferable.id]);
+    expect(store.recall({ scope: record.scope, prompt: 'sqlite', ...context,
+      target: { ...context.target, revision: 'b'.repeat(40) } }).some(entry => entry.id === verified.id)).toBe(false);
+    for (const [runId, events] of [
+      ['missing', [{ kind: 'qa.started' }, commit, { kind: 'qa.passed' }]],
+      ['stale', [{ kind: 'qa.started' }, snapshot, { kind: 'qa.started' }, commit, { kind: 'qa.passed' }]],
+      ['wrong-revision', [{ kind: 'qa.started' }, snapshot, { ...commit, commitSha: 'b'.repeat(40) }, { kind: 'qa.passed' }]],
+      ['late-snapshot', [{ kind: 'qa.started' }, commit, { kind: 'qa.passed' }, snapshot]],
+      ['missing-revision', [{ kind: 'qa.started' }, { ...snapshot, reason: JSON.stringify({ ...context,
+        target: { project: record.scope, dirty: false, productVersions: { sqlite: '3.45' } } }) }, commit, { kind: 'qa.passed' }]],
+      ['dirty-revision', [{ kind: 'qa.started' }, { ...snapshot, reason: JSON.stringify({ ...context,
+        target: { ...context.target, dirty: true } }) }, commit, { kind: 'qa.passed' }]],
+    ] as [string, RunEventData[]][]) {
+      await recordRun(root, runId, [...events, { kind: 'run.finished', outcome: 'succeeded' }]);
+      await expect(verifyApplicableExperience({ ...request, runId, evidence: [`run:${runId}#test`] })).rejects.toThrow('target');
+    }
+    await expect(verifyApplicableExperience({ ...request, context: { ...context, target: { ...context.target, productVersions: { sqlite: '3.46' } } } })).rejects.toThrow('target');
+    await recordRun(root, 'agent-asserted', [{ kind: 'qa.started' }, snapshot, commit, { kind: 'qa.passed' },
+      { kind: 'run.finished', outcome: 'succeeded' }], 'github:acme/wiki#42', 'agent');
+    await expect(verifyApplicableExperience({ ...request, runId: 'agent-asserted' })).rejects.toThrow('target');
+    const history: RunEvent[] = [];
+    for await (const event of new JsonlEventStore({ root }).read('qa-proof')) history.push(event);
+    for (const kind of ['qa.started', 'commit.recorded', 'qa.passed', 'run.finished']) {
+      const asserted = history.map(event => event.data.kind === kind
+        ? { ...event, context: { ...event.context, actor: { kind: 'agent' as const, id: 'model' } } } : event);
+      expect(successfulRunEvidenceFromEvents(request, asserted).qaTarget, kind).toBeUndefined();
+    }
+    store.close();
+  });
+
+  it('merges knowledge and experience using one trusted query and one bounded reference file', async () => {
+    const { root, store } = await fixture();
+    store.close();
+    const plugins = new PluginRuntime();
+    const experience = vi.fn(async (_query: import('../../plugin-sdk/capabilities.js').ContextQuery) => [{ origin: 'experience:verified', content: 'sqlite correction', score: 1 }]);
+    const knowledge = vi.fn(async (_query: import('../../plugin-sdk/capabilities.js').ContextQuery) => Array.from({ length: 8 }, (_, index) => ({ origin: `knowledge:asset-${index}; qa:run:proof`, content: 'trusted material '.repeat(500), score: 1 })));
+    await plugins.activate({ manifest: { id: 'test.context', version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) {
+        for (const [id, gather] of [['context.experience', experience], ['context.knowledge', knowledge]] as const)
+          context.registerContextProvider(id, { id, capabilities: { 'read-only': true, summarize: false, search: true }, gather });
+      } });
+    try {
+      const request = { plugins, workItemId: 'github:acme/wiki#99', worktreePath: root, prompt: 'sqlite Node 99',
+        applicability: { version: 'asset-2', environment: 'ci' }, target: { project: 'github:acme/wiki', productVersions: { sqlite: '3.45' } } };
+      await prepareExperienceContext(request);
+      expect(experience.mock.calls[0][0]).toEqual(knowledge.mock.calls[0][0]);
+      expect(knowledge.mock.calls[0][0]).toMatchObject({ scope: 'github:acme/wiki', applicability: request.applicability, target: request.target });
+      const content = await fs.readFile(join(root, '.afk/experience-context.md'), 'utf8');
+      expect(content).toContain('Source: experience:verified');
+      expect(content).toContain('Source: knowledge:asset-0; qa:run:proof');
+      expect(content.match(/\nSource:/g)?.length).toBeLessThanOrEqual(5);
+      expect(content.length).toBeLessThanOrEqual(8000);
+      await expect(prepareExperienceContext({ ...request, target: { project: 'github:foreign/wiki' } })).rejects.toThrow('project');
+      expect(knowledge).toHaveBeenCalledTimes(1);
+      await expect(fs.readFile(join(root, '.afk/experience-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally { await plugins.dispose(); }
+  });
+
+  it('uses the same successful-run gate for frozen history and refuses learning-purpose or mismatched run evidence', async () => {
+    const { root, store } = await fixture();
+    try {
+      await recordRun(root, 'proof', [{ kind: 'qa.started' }, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]);
+      const history: RunEvent[] = [];
+      for await (const event of new JsonlEventStore({ root }).read('proof')) history.push(event);
+      const input = { scope: 'github:acme/wiki', runId: 'proof', workItemId: 'github:acme/wiki#42', evidence: [] };
+      expect(successfulRunEvidenceFromEvents(input, history)).toMatchObject({ completionEvent: 'run.finished', evidence: ['run:proof#qa.passed'] });
+      expect(() => successfulRunEvidenceFromEvents(input, history.map(event => ({ ...event, context: { ...event.context, purpose: 'learning' as const } })))).toThrow('Learning runs');
+      expect(() => successfulRunEvidenceFromEvents({ ...input, runId: 'other' }, history)).toThrow('another run');
+    } finally { store.close(); }
+  });
+
   it('links a successful route to bounded redacted published-change and implementation/QA commit evidence', async () => {
     const { root, file, store } = await fixture();
     const implementationCommit = 'a'.repeat(40);

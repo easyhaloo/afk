@@ -1,14 +1,20 @@
 import { Command, InvalidArgumentError, Option } from 'commander';
 import { constants, promises as fs } from 'node:fs';
-import { ExperienceStore, experienceScope, experienceStorePath, verifyAdoptionRun, verifyExperienceRun } from '@afk/runtime/execution';
+import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState,
+  candidateProposalSchema, candidateStateSchema, verifyAdoptionRun, verifyExperienceRun,
+  type LearningCandidate, type LearningJob, type LearningState, type LearningValidationResult,
+  type publishConfiguredKnowledge, type reconcileConfiguredKnowledge } from '@afk/runtime/execution';
+import type { PluginRuntime } from '@afk/runtime/plugin-sdk';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
 type Store = Pick<ExperienceStore, 'recordFailure' | 'list' | 'get' | 'recall' | 'verify' | 'revoke' | 'export' | 'import' | 'copy' | 'metrics' | 'adopt' | 'close'>;
 
 export interface ExperienceCommandComposition extends CommandRegistrationContext {
+  createRuntime?: () => Promise<PluginRuntime>;
   createStore?: () => Store;
   verifyRun?: typeof verifyExperienceRun;
   verifyAdoptionRun?: typeof verifyAdoptionRun;
+  queryLearningState?: typeof queryLearningState;
 }
 
 function parseScope(value: string): string {
@@ -27,6 +33,30 @@ function parseLimit(value: string): number {
   const count = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count < 0 || count > 100) throw new InvalidArgumentError('limit must be an integer from 0 to 100');
   return count;
+}
+
+function parseOffset(value: string): number {
+  const offset = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(offset) || offset < 0) throw new InvalidArgumentError('offset must be a non-negative safe integer');
+  return offset;
+}
+
+function parseCandidateId(value: string): string {
+  if (!/^[a-f0-9]{64}$/.test(value) || value.length !== 64) throw new InvalidArgumentError('candidate ID must be 64 lowercase hexadecimal characters');
+  return value;
+}
+
+function parseVersion(value: string): number {
+  const version = parseOffset(value);
+  if (version < 1) throw new InvalidArgumentError('version must be a positive safe integer');
+  return version;
+}
+
+function learningCode(value?: string): string | undefined {
+  return value && ['analysis_cancelled', 'analysis_failed', 'analysis_invalid_output', 'analysis_outcome_unknown',
+    'analysis_output_limit', 'analysis_timed_out', 'analysis_unsupported', 'attempts_exhausted', 'budget_exhausted',
+    'evidence_unavailable', 'learning_disabled', 'source_invalidated', 'source_limit', 'source_not_allowed', 'source_unstable', 'storage_blocked'].includes(value)
+    ? value : undefined;
 }
 
 function collectEvidence(value: string, previous: string[] = []): string[] {
@@ -58,6 +88,22 @@ export function registerExperienceCommands(program: Command, composition: Experi
     try { await operation(store); }
     finally { store.close(); }
   };
+  const withRuntime = async <Result>(failure: string, operation: (plugins: PluginRuntime) => Promise<Result>): Promise<Result> => {
+    const owned = !composition.pluginRuntime && !composition.createRuntime;
+    let plugins: PluginRuntime | undefined;
+    try {
+      plugins = composition.pluginRuntime ?? await (composition.createRuntime
+        ? composition.createRuntime() : import('../composition-root.js').then(module => module.createCliPluginRuntime()));
+      if (!plugins) throw new Error(failure);
+      return await operation(plugins);
+    } catch { throw new Error(failure); }
+    finally {
+      if (owned) {
+        try { await plugins?.dispose(); }
+        catch { throw new Error(failure); }
+      }
+    }
+  };
   const requireScopedRecord = (store: Store, id: string, scope: string): void => {
     const record = store.get(id, scope);
     if (!record || record.scope !== scope) throw new Error('Experience not found in scope');
@@ -66,6 +112,111 @@ export function registerExperienceCommands(program: Command, composition: Experi
     const output = json ? JSON.stringify(records, null, 2) : records.map(record => `${record.id} [${record.status}] ${record.trigger}\n  ${record.action}`).join('\n');
     process.stdout.write(`${output}\n`);
   };
+
+  const queryLearning = async <Kind extends keyof LearningState>(kind: Kind, scope: string): Promise<LearningState[Kind]> => {
+    try {
+      const records = composition.pluginRuntime
+        ? await composition.pluginRuntime.dispatchSystemAction(`learning.${kind}`, { scope }) as LearningState[Kind]
+        : (composition.queryLearningState ?? queryLearningState)({ directory: learningDirectory(), scope })[kind];
+      if (kind === 'jobs') {
+        return (records as LearningJob[]).filter(record => record.scope === scope).map(record => {
+          const { jobId, sourceId, sourceRunId, workItemId, status, reasonCode, attempts } = record;
+          if (!['pending', 'blocked', 'failed', 'processed'].includes(status)) throw new Error('Invalid learning status');
+          return { jobId: parseCandidateId(jobId), scope, sourceId, sourceRunId, workItemId, status, reasonCode: learningCode(reasonCode),
+            attempts: attempts.map(({ requestKey, callId, day, startedAt, ownerPid, host, status, analysisRunId, sessionId, finishedAt, errorCode, usage }) => ({
+              requestKey, callId, day, startedAt, ownerPid, host, status, analysisRunId, sessionId, finishedAt, errorCode: learningCode(errorCode),
+              ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
+            })) };
+        }) as LearningState[Kind];
+      }
+      return (records as LearningCandidate[]).filter(record => record.proposal.applicability.project === scope)
+        .map(({ id, requestKey, version, state, digest, evidenceDigest, proposal }) => ({ id: parseCandidateId(id), requestKey,
+          version, state: candidateStateSchema.parse(state), digest, evidenceDigest, proposal: candidateProposalSchema.parse(proposal) })) as LearningState[Kind];
+    } catch { throw new Error('Learning query failed'); }
+  };
+  const learningId = (record: LearningJob | LearningCandidate): string => 'jobId' in record ? record.jobId : record.id;
+  const emitLearning = (records: (LearningJob | LearningCandidate)[], json?: boolean, single = false): void => {
+    const output = json ? JSON.stringify(single ? records[0] : records, null, 2) : records.map(record => {
+      const reason = 'reasonCode' in record && record.reasonCode ? ` ${record.reasonCode}` : '';
+      return `${learningId(record)} [${'status' in record ? record.status : record.state}]${reason}`;
+    }).join('\n');
+    process.stdout.write(`${output}\n`);
+  };
+
+  for (const kind of ['jobs', 'candidates'] as const) {
+    experience.command(kind)
+      .description(`Read scoped learning ${kind}, ordered by full ${kind === 'jobs' ? 'jobId' : 'id'} ascending`)
+      .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+      .option('--limit <count>', 'Maximum records to return (0..100)', parseLimit, 100)
+      .option('--offset <count>', 'Records to skip in ID order', parseOffset, 0)
+      .option('--json', 'Emit existing learning DTOs as JSON')
+      .action(async options => {
+        const records = await queryLearning(kind, options.scope);
+        records.sort((first, second) => learningId(first) < learningId(second) ? -1 : learningId(first) > learningId(second) ? 1 : 0);
+        emitLearning(records.slice(options.offset).slice(0, options.limit), options.json);
+      });
+  }
+
+  experience.command('inspect')
+    .description('Read one learning candidate in its exact project scope')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit the existing candidate DTO as JSON')
+    .action(async (candidateId, options) => {
+      const records = await queryLearning('candidates', options.scope);
+      const record = records.find(candidate => candidate.id === candidateId);
+      if (!record) throw new Error('Candidate not found in scope');
+      emitLearning([record], options.json, true);
+    });
+
+  experience.command('validate')
+    .description('Independently validate a learning candidate using a saved checker binding')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--expected-version <version>', 'Current candidate version', parseVersion)
+    .requiredOption('--checker <id>', 'Saved checker identity', parseText)
+    .option('--json', 'Emit the validation result as JSON')
+    .action(async (candidateId, options) => withRuntime('Learning validation failed', async active => {
+        const result = await active.dispatchSystemAction('learning.validate', { scope: options.scope, candidateId,
+          expectedVersion: options.expectedVersion, checkerId: options.checker }) as LearningValidationResult;
+        process.stdout.write(`${options.json ? JSON.stringify(result) : result.status === 'validated'
+          ? `${result.candidateId} [validated] version ${result.validatedVersion}` : `[blocked] ${result.code}`}\n`);
+        if (result.status === 'blocked') process.exitCode = 1;
+    }));
+
+  const knowledge = experience.command('knowledge').description('Preview, publish and recover authorized knowledge');
+  knowledge.command('prepare')
+    .description('Prepare an immutable publication preview for a validated candidate')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--expected-version <version>', 'Current candidate version', parseVersion)
+    .option('--target <ref>', 'Authorized logical target reference', parseText)
+    .option('--json', 'Emit compact JSON')
+    .action(async (candidateId, options) => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.prepare', { scope: options.scope, candidateId,
+        expectedVersion: options.expectedVersion, ...(options.target ? { targetRef: options.target } : {}) });
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+    }));
+  knowledge.command('publish')
+    .description('Apply the exact prepared publication through its current authorization guards')
+    .argument('<key>', '64 lowercase hexadecimal publication key', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit compact JSON')
+    .action(async (key, options) => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.publish', { scope: options.scope, key }) as Awaited<ReturnType<typeof publishConfiguredKnowledge>>;
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      if (result.publication.phase !== 'committed') process.exitCode = 1;
+    }));
+  knowledge.command('reconcile')
+    .description('Recover publications and withdraw invalid assets in one project')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit compact JSON')
+    .action(async options => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.reconcile', { scope: options.scope }) as Awaited<ReturnType<typeof reconcileConfiguredKnowledge>>;
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      if (result.blocked.length || result.results.some(entry => entry.withdrawal?.status === 'rollback_blocked'
+        || (entry.publication.phase !== 'committed' && entry.withdrawal?.status !== 'withdrawn'))) process.exitCode = 1;
+    }));
 
   experience.command('list')
     .description('List experiences in one canonical project scope')

@@ -36,6 +36,7 @@ import { createFailureDiagnostic } from './failure-diagnostic.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
+  purpose?: ObservationContext['purpose'];
   executionId?: string;
   manifestPath?: string;
   template?: string;
@@ -420,6 +421,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
   const context: ObservationContext = {
     traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
     attempt: 1, actor: { kind: 'system', id: 'execute' },
+    purpose: input.purpose,
   };
   return withLogContext(context, () => executeWorkItemObserved(input, dependencies, context));
 }
@@ -431,6 +433,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => {
     await recordAudit(context, data);
+    if (context.purpose === 'learning') return;
     if (data.kind === 'qa.failed') {
       try {
         recordExecutionExperience({ runId: context.runId, workItemId, sourceEvent: 'qa.failed',
@@ -495,6 +498,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
             new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createPluginRunObserver(dependencies.plugins) })))(providers, config, request);
           const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
+            purpose: input.purpose,
             executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
             observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
           if (!implementationResult.success) {
@@ -535,6 +539,8 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
                 await record('published', { changeId: change.id, changeUrl: change.url });
               },
               onCommit: (commitSha, branch) => audit({ kind: 'commit.recorded', phase: 'qa', commitSha, branch }),
+              onExperienceTarget: context => audit({ kind: 'decision.made', command: 'experience.qa-target',
+                accepted: true, reason: JSON.stringify(context) }),
               onSession: audit,
             })))(management, config, request);
           const qaResult = await qa.process(request.backlogId).catch(async error => {

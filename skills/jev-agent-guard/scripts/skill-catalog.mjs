@@ -12,18 +12,27 @@ function frontmatter(source) {
   return match?.[1] ?? '';
 }
 
+function toolScalar(value) {
+  const quoted = value.match(/^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(?:\s+#.*)?$/);
+  return quoted ? quoted[1].slice(1, -1) : value.replace(/(?:^|\s+)#.*$/, '').trim();
+}
+
 function field(source, name) {
   const lines = source.split(/\r?\n/);
   const index = lines.findIndex(line => line.startsWith(`${name}:`));
   if (index < 0) return '';
   const value = lines[index].slice(name.length + 1).trim();
-  if (value !== '>-' && value !== '|') return value.replace(/^['"]|['"]$/g, '');
+  const toolField = name === 'allowed-tools' || name === 'disallowed-tools';
+  const toolList = toolField && (value === '' || value.startsWith('#'));
+  if (value !== '>-' && value !== '|' && !toolList) return toolField ? toolScalar(value) : value.replace(/^['"]|['"]$/g, '');
   const continuation = [];
   for (const line of lines.slice(index + 1)) {
-    if (line && !/^\s/.test(line)) break;
+    if (toolList && /^\s*#/.test(line)) continue;
+    if (line && !/^\s/.test(line) && !(toolList && /^-\s+/.test(line))) break;
     if (line.trim()) continuation.push(line.trim());
   }
-  return continuation.join(' ');
+  return toolList ? continuation.filter(line => /^-\s+/.test(line))
+    .map(line => toolScalar(line.replace(/^-\s+/, ''))) : continuation.join(' ');
 }
 
 export function extractContract(source) {
@@ -55,8 +64,17 @@ export function listSkillMetadata(roots) {
       const file = path.join(root, item.name, 'SKILL.md');
       try {
         if (fs.statSync(file).size > 65536) continue;
-        const { name, description } = extractContract(fs.readFileSync(file, 'utf8'));
-        if (/^[a-z0-9][a-z0-9-]{0,63}$/.test(name) && !skills.has(name)) skills.set(name, { name, description, file });
+        const source = fs.readFileSync(file, 'utf8');
+        const { name, description } = extractContract(source);
+        const metadata = frontmatter(source);
+        if (/^[a-z0-9][a-z0-9-]{0,63}$/.test(name) && !skills.has(name)) skills.set(name, {
+          name, description, file,
+          'disable-model-invocation': !/^(?:false)?(?:\s+#.*)?$/i.test(field(metadata, 'disable-model-invocation')),
+          'user-invocable': !/^false(?:\s+#.*)?$/i.test(field(metadata, 'user-invocable')),
+          'allowed-tools': field(metadata, 'allowed-tools'),
+          'disallowed-tools': field(metadata, 'disallowed-tools'),
+          source: { root: path.resolve(root), file: fs.realpathSync(file) },
+        });
       } catch { continue; }
     }
   }
@@ -78,7 +96,8 @@ export function skillRoots(host, projectRoot, env = process.env) {
 export async function recommendSkill(prompt, catalog, choose) {
   const cleaned = prompt.slice(0, 2000).replace(/\b(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+/gi, '');
   const terms = [...new Set((cleaned.toLowerCase().match(/[\p{L}\p{N}-]{3,}/gu) ?? []).slice(0, 32))];
-  const ranked = catalog.map(skill => ({ skill, score: terms.filter(term => `${skill.name} ${skill.description}`.toLowerCase().includes(term)).length }))
+  const ranked = catalog.filter(skill => !skill['disable-model-invocation'])
+    .map(skill => ({ skill, score: terms.filter(term => `${skill.name} ${skill.description}`.toLowerCase().includes(term)).length }))
     .filter(item => item.score > 0).sort((left, right) => right.score - left.score).slice(0, 5);
   if (!ranked.length) return null;
   if (ranked.length === 1 || ranked[0].score > ranked[1].score) return ranked[0].skill.name;

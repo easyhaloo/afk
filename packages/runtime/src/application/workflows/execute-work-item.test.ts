@@ -77,6 +77,23 @@ function lockProbe(status: 'alive' | 'dead' | 'unknown', pid = 8420) {
 }
 
 describe('executeWorkItem', () => {
+  it.each([undefined, 'execution', 'learning'] as const)('preserves QA failure audit and captures experience only for ordinary purpose (%s)', async purpose => {
+    const { deps, process, directory } = await setup();
+    vi.stubEnv('HOME', directory);
+    process.mockResolvedValueOnce({ success: false, rework: true, summary: 'Independent QA requires a correction.' } as any);
+    expect((await executeWorkItem({ ...input, purpose }, deps)).status).toBe('rework');
+    const audit = vi.mocked(deps.recordAudit!).mock.calls;
+    expect(audit.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
+    expect(audit.every(([context]) => context.purpose === purpose)).toBe(true);
+    if (purpose === 'learning') {
+      await expect(lstat(experienceStorePath())).rejects.toMatchObject({ code: 'ENOENT' });
+    } else {
+      const experiences = new ExperienceStore({ file: experienceStorePath() });
+      try { expect(experiences.list({ scope: 'github:acme/api' })).toMatchObject([{ source: { runId: 'attempt-1' } }]); }
+      finally { experiences.close(); }
+    }
+  });
+
   it('creates its default manifest in AFK home and executes in the canonical loop workspace', async () => {
     const { deps, run } = await setup();
     delete deps.readManifest;
@@ -254,15 +271,17 @@ describe('executeWorkItem', () => {
     expect((await deps.loadExecution('attempt-1')).summary.status).toBe('awaiting_merge');
   });
 
-  it('writes implementation, independent QA, and the confirmed PR to one replayable execution stream', async () => {
+  it.each([undefined, 'execution', 'learning'] as const)('writes one replayable execution stream and captures ordinary success only (%s)', async purpose => {
     const { deps, run, current, directory } = await setup();
+    vi.stubEnv('HOME', directory);
     vi.stubEnv('AFK_EVENT_STORE_DIR', join(directory, 'events'));
     const store = new JsonlEventStore({ root: join(directory, 'events') });
     const observer = new RunObserver({ events: store });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    run.mockImplementation(async (options: { observationRunId: string; observationWorkItemId: string }) => {
+    run.mockImplementation(async (options: { observationRunId: string; observationWorkItemId: string; purpose?: 'execution' | 'learning' }) => {
       const context = { traceId: options.observationRunId, runId: options.observationRunId,
         workItemId: options.observationWorkItemId, profileId: 'test', attempt: 1,
+        purpose: options.purpose,
         actor: { kind: 'system' as const, id: 'implementation' } };
       await observer.record(context, { kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId,
         profileId: context.profileId, attempt: 1, status: 'pending' } });
@@ -271,19 +290,27 @@ describe('executeWorkItem', () => {
       current.state = 'verification';
       return { success: true };
     });
-    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
+    await expect(executeWorkItem({ ...input, purpose }, deps)).resolves.toMatchObject({ status: 'merge_ready' });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ purpose }));
     const queried = await loadWorkItemExecution('attempt-1', createExecutionQueryPorts(store));
     expect(queried.timeline.integrity.lastSequence).toBe(7);
     expect(queried.summary).toMatchObject({ workItemId, status: 'awaiting_merge', pr: { id: '5', url: 'https://github.com/acme/api/pull/5' } });
     expect(queried.timeline.events.map(event => event.data.kind)).toEqual([
       'run.requested', 'run.started', 'implementation.completed', 'qa.started', 'qa.passed', 'change.published', 'human_gate.opened',
     ]);
+    expect(queried.timeline.events.every(event => event.context.purpose === purpose)).toBe(true);
     expect((await replayRun('attempt-1', store)).state).toMatchObject({ run: { status: 'awaiting_human' }, terminal: false });
-    await expect(verifyExperienceRun({ root: join(directory, 'events'), scope: 'github:acme/api',
-      runId: 'attempt-1', evidence: ['run:attempt-1#regression'] })).resolves.toContain('run:attempt-1#qa.passed');
-    const experiences = new ExperienceStore({ file: experienceStorePath() });
-    try { expect(experiences.list({ scope: 'github:acme/api', status: 'verified' })).toContainEqual(expect.objectContaining({ kind: 'success', source: { runId: 'attempt-1', workItemId } })); }
-    finally { experiences.close(); }
+    const verification = verifyExperienceRun({ root: join(directory, 'events'), scope: 'github:acme/api',
+      runId: 'attempt-1', evidence: ['run:attempt-1#regression'] });
+    if (purpose === 'learning') {
+      await expect(verification).rejects.toThrow(/Learning runs cannot verify/);
+      await expect(lstat(experienceStorePath())).rejects.toMatchObject({ code: 'ENOENT' });
+    } else {
+      await expect(verification).resolves.toContain('run:attempt-1#qa.passed');
+      const experiences = new ExperienceStore({ file: experienceStorePath() });
+      try { expect(experiences.list({ scope: 'github:acme/api', status: 'verified' })).toContainEqual(expect.objectContaining({ kind: 'success', source: { runId: 'attempt-1', workItemId } })); }
+      finally { experiences.close(); }
+    }
   });
 
   it('records intent, claims through WorkflowRunner once, verifies independently, and only then succeeds', async () => {
@@ -304,6 +331,29 @@ describe('executeWorkItem', () => {
     const events = (await readFile(join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     expect(events.map(event => event.phase)).toEqual(['requested', 'implementing', 'verifying', 'merge_ready']);
     expect(events.every(event => event.executionId === 'attempt-1' && event.workItemId === workItemId)).toBe(true);
+  });
+
+  it('persists the trusted QA target between QA start and pass for later applicability verification', async () => {
+    const { deps, current } = await setup();
+    const target = { target: { project: 'github:acme/api', revision: 'a'.repeat(40), dirty: false,
+      productVersions: { sqlite: '3.45' } } };
+    deps.createQA = undefined;
+    const processQA = vi.spyOn(QARunner.prototype, 'process').mockImplementation(async function (this: QARunner) {
+      const callback = (this as unknown as { onExperienceTarget?: (context: typeof target) => Promise<void> }).onExperienceTarget;
+      if (!callback) throw new Error('Trusted QA target audit callback is missing');
+      await callback(target);
+      current.state = 'merge_ready';
+      return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' };
+    });
+    try {
+      expect(await executeWorkItem(input, deps)).toMatchObject({ status: 'merge_ready' });
+      const events = vi.mocked(deps.recordAudit!).mock.calls;
+      expect(events.map(([, event]) => event.kind)).toEqual([
+        'qa.started', 'decision.made', 'qa.passed', 'change.published', 'human_gate.opened',
+      ]);
+      expect(events[1]).toEqual([expect.objectContaining({ actor: { kind: 'system', id: 'execute' } }),
+        { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(target) }]);
+    } finally { processQA.mockRestore(); }
   });
 
   it.each([

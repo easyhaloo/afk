@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ObservationContext, RunEventDraft } from '@afk/core';
-import { JsonlEventStore } from './jsonl-event-store.js';
+import { JsonlEventStore, verifyRunEventHistory } from './jsonl-event-store.js';
 
 const roots: string[] = [];
 const context: ObservationContext = {
@@ -59,6 +59,17 @@ afterEach(async () => {
 });
 
 describe('JsonlEventStore', () => {
+  it('verifies an immutable in-memory history with the same chain rules as the file reader', async () => {
+    const store = new JsonlEventStore({ root: await root() });
+    await store.append([draft('one', 'run.started'), draft('two', 'run.started')]);
+    const history = [];
+    for await (const event of store.read(context.runId)) history.push(event);
+    expect(verifyRunEventHistory(context.runId, history)).toEqual(await store.verify(context.runId));
+    expect(verifyRunEventHistory('another-run', history)).toMatchObject({ valid: false, reason: 'run_id_mismatch' });
+    expect(verifyRunEventHistory(context.runId, [history[0], { ...history[1], sequence: 4 }])).toMatchObject({ valid: false, reason: 'sequence_gap' });
+    expect(verifyRunEventHistory(context.runId, [{ ...history[0], data: { kind: 'qa.failed' } }])).toMatchObject({ valid: false, reason: 'integrity_mismatch' });
+  });
+
   it('prunes a terminal run with artifact receipts only after every receipt passes retention', async () => {
     const store = new JsonlEventStore({ root: await root(), now: () => new Date('2026-10-13T00:00:00.000Z') });
     await terminal(store, 'uploaded', '2026-10-11T00:00:00.000Z');

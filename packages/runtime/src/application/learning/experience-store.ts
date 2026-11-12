@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { redactUtf8 } from '../../infrastructure/observability/local-evidence-store.js';
 import { openSqlite, transaction, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
+import type { ContextQuery } from '../../plugin-sdk/capabilities.js';
 
 const MAX_RECORDS = 1000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -11,6 +12,86 @@ const MAX_RECEIPTS = 256;
 const DAY = 24 * 60 * 60 * 1000;
 const MAX_EXCHANGE_BYTES = 1024 * 1024;
 const MAX_ADOPTIONS = 64;
+const recallSegmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+
+function recallTerms(value: string): Set<string> {
+  const normalized = value.toLowerCase();
+  const identifier = /[\p{Script=Latin}\p{N}_]+(?:[./:-][\p{Script=Latin}\p{N}_]+)*/gu;
+  const identifiers = normalized.match(identifier) ?? [];
+  const words = [...recallSegmenter.segment(normalized.replace(identifier, ' '))]
+    .filter(part => part.isWordLike).map(part => part.segment);
+  return new Set([...identifiers, ...words].filter(term => term.length >= 2
+    && !['the', 'and', 'for', 'with', 'this', 'that', 'please', 'fix', 'is', 'are', 'was', 'were', 'not', 'no', 'only'].includes(term)));
+}
+
+const recallExclusion = /\b(?:exclude|excluding|except|avoid|ignore|do\s+not|don't)\b|不要|不采用|不使用|排除/iu;
+const recallProjectMention = /\b(?:github|gitlab):[\w.-]+(?:\/[\w.-]+)+(?:#[1-9]\d*)?/giu;
+const recallNegativeCue = /\bis\s+absent\b|\bno\s+|没有/iu;
+const recallRequiresContext = /\b(?:validated|verified|tested)\s+only\s+(?:on|for)\b|仅在[^;；。\n]+?(?:验证|测试)/iu;
+const recallClauseBoundary = /[;；。！？!?\n,，]|\.(?=\s|$)|\s+(?:but|however|instead)\s+|但是|而是/iu;
+
+function recallDenialDescription(value: string): string | undefined {
+  return /\bno\s+(.+)$/u.exec(value)?.[1] ?? /^(.+?)\s+is\s+absent\b/u.exec(value)?.[1];
+}
+
+function recallProjectMatches(scope: string, clauses: string[]): boolean {
+  for (const clause of clauses) {
+    const mentions = [...clause.matchAll(recallProjectMention)];
+    for (const [index, mention] of mentions.entries()) {
+      const previous = mentions[index - 1];
+      const prefix = clause.slice(previous ? previous.index! + previous[0].length : 0, mention.index);
+      const suffix = clause.slice(mention.index! + mention[0].length, mentions[index + 1]?.index);
+      const exclusion = recallExclusion.exec(prefix);
+      const excluded = Boolean(exclusion && recallTerms(prefix.slice(exclusion.index + exclusion[0].length)).size <= 1)
+        || /^\s*(?:(?:must|should)\s+remain\s+unchanged\b|保持不变)/iu.test(suffix);
+      const project = mention[0].replace(/^(?:github|gitlab):/iu, prefix => prefix.toLowerCase()).replace(/#[1-9]\d*$/, '');
+      try { parseCanonicalProject(project); } catch { return false; }
+      if (excluded ? project === scope : project !== scope) return false;
+    }
+  }
+  return true;
+}
+
+function recallDenied(record: ExperienceRecord, clauses: string[]): boolean {
+  const trigger = record.trigger.toLowerCase();
+  const identifiers = record.trigger.match(/\b[A-Z][A-Z\d_]*(?:-\d+)?\b/gu) ?? [];
+  for (const clause of clauses) {
+    const normalized = clause.toLowerCase();
+    if (trigger.includes(normalized)) continue;
+    const deniedDescription = recallDenialDescription(normalized);
+    if (deniedDescription) {
+      const deniedTerms = [...recallTerms(deniedDescription)];
+      const failureTerms = recallTerms(`${record.trigger} ${record.rootCause}`);
+      if (deniedTerms.length >= 2 && deniedTerms.some(term => /^(?:errors?|failures?|faults?|issues?|failed)$/u.test(term))
+        && deniedTerms.every(term => failureTerms.has(term))) {
+        const describedAbsence = [record.trigger, record.rootCause].flatMap(value => value.toLowerCase().split(recallClauseBoundary)).some(part => {
+          const description = recallDenialDescription(part);
+          const descriptionTerms = description === undefined ? undefined : recallTerms(description);
+          return descriptionTerms?.size === deniedTerms.length && deniedTerms.every(term => descriptionTerms.has(term));
+        });
+        if (!describedAbsence) return true;
+      }
+    }
+    for (const identifier of identifiers) {
+      const anchor = identifier.toLowerCase();
+      if (!recallTerms(clause).has(anchor)) continue;
+      if (normalized.includes(`no ${anchor}`) || normalized.includes(`没有发生${anchor}`)
+        || ['is absent', 'is not present', 'is not applicable', 'is not the issue', 'did not occur', 'did not recur']
+          .some(denial => normalized.includes(`${anchor} ${denial}`))) return true;
+    }
+    for (const denied of normalized.matchAll(/没有(?:发生)?([^，,；;。且]+)/gu)) {
+      if (trigger.includes(denied[1].trim())) return true;
+    }
+    const exclusion = recallExclusion.exec(clause);
+    if (exclusion) {
+      const excluded = [...recallTerms(clause.slice(exclusion.index + exclusion[0].length))];
+      if (excluded.some(term => /[_:/-]/u.test(term) && recallTerms(trigger).has(term))) return true;
+      const action = record.action.toLowerCase();
+      if (excluded.length >= 2 && excluded.every(term => action.includes(term))) return true;
+    }
+  }
+  return false;
+}
 
 function text(maxBytes: number) {
   return z.string().max(maxBytes).trim().min(1).refine(value => Buffer.byteLength(value) <= maxBytes, 'Text exceeds byte limit')
@@ -27,6 +108,30 @@ function redact(value: string): string {
 }
 
 const identity = text(512).refine(value => redact(value) === value, 'Identity must not contain credentials');
+const versionMapSchema = z.record(identity, identity).refine(value => Object.keys(value).length <= 32);
+function ownProperties(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, ownProperties(entry)]));
+}
+
+export const experienceQueryContextSchema = z.preprocess(ownProperties, z.object({
+  applicability: z.object({ version: identity.optional(), environment: identity.optional() }).strict().optional(),
+  target: z.object({ project: identity, revision: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/).optional(),
+    dirty: z.boolean().optional(), productVersions: versionMapSchema.optional(), runtimeVersions: versionMapSchema.optional(),
+    conditions: z.record(identity, z.boolean()).refine(value => Object.keys(value).length <= 32).optional(),
+  }).strict().optional(),
+}).strict());
+export type ExperienceQueryContext = Pick<ContextQuery, 'applicability' | 'target'>;
+
+export function experienceContextMatches(required: ExperienceQueryContext, actual: ExperienceQueryContext): boolean {
+  function matches(expected: unknown, observed: unknown): boolean {
+    if (!expected || typeof expected !== 'object') return expected === observed;
+    if (!observed || typeof observed !== 'object') return false;
+    return Object.entries(expected).every(([key, value]) => value === undefined
+      || (Object.hasOwn(observed, key) && matches(value, Reflect.get(observed, key))));
+  }
+  return matches(required, actual);
+}
 const sourceSchema = z.object({ runId: identity, workItemId: identity }).strict();
 const evidenceSchema = z.array(text(256).refine(value => !/[\r\n]/.test(value), 'Evidence must be a reference').transform(redact)).min(1).max(8)
   .transform(values => [...new Set(values)]);
@@ -95,6 +200,15 @@ CREATE TABLE experience_verifications (
   PRIMARY KEY(experience_id, run_hash)
 ) STRICT, WITHOUT ROWID;
 `;
+const applicabilityTableSchema = `
+CREATE TABLE experience_applicability (
+  experience_id TEXT PRIMARY KEY REFERENCES experiences(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  run_hash TEXT NOT NULL,
+  evidence_hash TEXT NOT NULL,
+  payload TEXT NOT NULL CHECK(length(payload) <= 16384)
+) STRICT, WITHOUT ROWID;
+`;
 
 const schema = `
 CREATE TABLE experiences (
@@ -116,6 +230,7 @@ CREATE TABLE experience_receipts (
   PRIMARY KEY(experience_id, source_hash)
 ) STRICT, WITHOUT ROWID;
 ${verificationHistorySchema}
+${applicabilityTableSchema}
 `;
 
 export class ExperienceStore {
@@ -127,7 +242,7 @@ export class ExperienceStore {
     const parsed = z.object({ file: text(4096), now: z.function().optional() }).strict().parse(options);
     this.now = options.now ?? (() => new Date());
     this.timestamp();
-    this.database = openSqlite({ file: parsed.file, schema, durability: 'FULL', version: 2,
+    this.database = openSqlite({ file: parsed.file, schema, durability: 'FULL', version: 3,
       migrations: [{ from: 1, to: 2, migrate: database => {
         database.exec(verificationHistorySchema);
         for (const row of database.prepare('SELECT payload FROM experiences').all()) {
@@ -135,7 +250,7 @@ export class ExperienceStore {
           if (record.verifiedEvidence) database.prepare('INSERT INTO experience_verifications VALUES (?, ?, ?)')
             .run(record.id, this.hash(record.verifiedEvidence.runId), this.hash([...record.verifiedEvidence.evidence].sort()));
         }
-      } }],
+      } }, { from: 2, to: 3, migrate: database => database.exec(applicabilityTableSchema) }],
     });
     try {
       const pageSize = Number(this.database.prepare('PRAGMA page_size').get()?.page_size);
@@ -216,7 +331,7 @@ export class ExperienceStore {
     this.assertOpen();
     const parsed = z.object({ scope: identity, limit: z.number().int().min(0).max(100).default(100) }).strict().parse(input);
     parseCanonicalProject(parsed.scope);
-    const records = this.database.prepare("SELECT payload FROM experiences WHERE scope = ? AND status <> 'revoked' AND expires_at > ? AND json_extract(payload, '$.provenanceSaturated') IS NOT 1 ORDER BY updated_at DESC, id LIMIT ?")
+    const records = this.database.prepare("SELECT payload FROM experiences WHERE scope = ? AND status <> 'revoked' AND expires_at > ? AND json_extract(payload, '$.provenanceSaturated') IS NOT 1 AND NOT EXISTS (SELECT 1 FROM experience_applicability WHERE experience_id = experiences.id) ORDER BY updated_at DESC, id LIMIT ?")
       .all(parsed.scope, this.timestamp(), parsed.limit).map(row => this.read(row)!);
     const document: ExperienceExchange = { version: 1, scope: parsed.scope, experiences: records.map(record => this.portable(record)) };
     const json = JSON.stringify(document);
@@ -335,19 +450,36 @@ export class ExperienceStore {
       .map(row => this.read(row)!);
   }
 
-  recall(input: { scope: string; prompt: string; limit?: number; maxChars?: number }): ExperienceRecord[] {
+  recall(input: { scope: string; prompt: string; limit?: number; maxChars?: number } & ExperienceQueryContext): ExperienceRecord[] {
     this.assertOpen();
+    if ((input.target && !Object.hasOwn(input, 'target')) || (input.applicability && !Object.hasOwn(input, 'applicability'))) return [];
+    const context = experienceQueryContextSchema.safeParse({ applicability: input.applicability, target: input.target });
+    if (!context.success) return [];
+    const { applicability: _applicability, target: _target, ...request } = input;
     const parsed = z.object({ scope: identity, prompt: text(8192), limit: z.number().int().min(0).max(100).default(5),
-      maxChars: z.number().int().min(0).max(MAX_RECORD_BYTES).default(8000) }).strict().parse(input);
-    const terms = [...new Set(redact(parsed.prompt).toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])]
-      .filter(term => !['the', 'and', 'for', 'with', 'this', 'that', 'please', 'fix'].includes(term));
-    if (!terms.length || !parsed.limit || parsed.maxChars < 2) return [];
-    const candidates = this.database.prepare('SELECT payload FROM experiences WHERE scope = ? AND status = ? AND expires_at > ?')
-      .all(parsed.scope, 'verified', this.timestamp()).map(row => this.read(row)!)
+      maxChars: z.number().int().min(0).max(MAX_RECORD_BYTES).default(8000) }).strict().parse(request);
+    const query = { ...parsed, ...context.data };
+    if (query.target && query.target.project !== parsed.scope) return [];
+    const prompt = redact(parsed.prompt);
+    const clauses = prompt.split(recallClauseBoundary).map(clause => clause.trim()).filter(Boolean);
+    if (!query.target && !recallProjectMatches(parsed.scope, clauses)) return [];
+    if (!parsed.limit || parsed.maxChars < 2) return [];
+    const records = this.database.prepare('SELECT payload FROM experiences WHERE scope = ? AND status = ? AND expires_at > ?')
+      .all(parsed.scope, 'verified', this.timestamp()).map(row => this.read(row)!);
+    const positive = clauses.map(clause => clause.slice(0, recallExclusion.exec(clause)?.index)).filter(Boolean);
+    const terms = [...recallTerms(positive.join('\n'))];
+    if (!terms.length) return [];
+    const candidates = records.filter(record => this.applicable(record, query) && !recallDenied(record, clauses))
       .map(record => {
-        const content = `${record.trigger} ${record.rootCause} ${record.action}`.toLowerCase();
-        const words = new Set(content.match(/[\p{L}\p{N}_]{2,}/gu) ?? []);
-        return { record, score: terms.filter(term => words.has(term)).length };
+        const words = recallTerms(`${record.trigger} ${record.rootCause} ${record.action}`);
+        const trigger = recallTerms(record.trigger);
+        const score = terms.filter(term => words.has(term)).length;
+        const affirmative = recallTerms(positive.filter(clause => !recallNegativeCue.test(clause)
+          || record.trigger.toLowerCase().includes(clause.toLowerCase())).join('\n'));
+        const affirmativeScore = [...affirmative].filter(term => words.has(term)).length;
+        const matched = affirmativeScore >= Math.min(2, terms.length) || terms.some(term => trigger.has(term))
+          && (score >= 2 || [...affirmative].some(term => trigger.has(term)));
+        return { record, score: matched ? score : 0 };
       }).filter(candidate => candidate.score > 0)
       .sort((left, right) => right.score - left.score || right.record.updatedAt.localeCompare(left.record.updatedAt) || left.record.id.localeCompare(right.record.id));
     const selected: ExperienceRecord[] = [];
@@ -366,11 +498,18 @@ export class ExperienceStore {
     return selected;
   }
 
-  verify(id: string, input: ExperienceVerification): ExperienceRecord {
+  verify(id: string, input: ExperienceVerification, context?: ExperienceQueryContext): ExperienceRecord {
     this.assertOpen();
     const parsed = verificationSchema.parse(input);
     return transaction(this.database, () => {
       const record = this.require(id);
+      const previousContext = this.database.prepare('SELECT payload FROM experience_applicability WHERE experience_id = ?').get(record.id);
+      if (previousContext && !context) throw new Error('Existing applicability requires fresh explicit verification context');
+      const required = context && experienceQueryContextSchema.parse(context);
+      if (required && required.target?.project !== record.scope) {
+        throw new Error('Experience applicability requires an explicit target in the same project');
+      }
+      const contextPayload = required && JSON.stringify(required);
       const now = this.timestamp();
       if (record.status === 'revoked') throw new Error('Revoked experience cannot be verified');
       if (Date.parse(record.expiresAt) <= Date.parse(now)) throw new Error('Expired experience cannot be verified');
@@ -389,7 +528,10 @@ export class ExperienceStore {
       const conflict = this.database.prepare("SELECT id FROM experiences WHERE (fingerprint = ? OR json_extract(payload, '$.failureFingerprint') = ?) AND id <> ?").get(fingerprint, fingerprint, record.id);
       if (conflict) throw new Error('Corrected experience already exists');
       if (record.status === 'verified' && record.verifiedEvidence?.runId === parsed.runId
-        && record.fingerprint === fingerprint && JSON.stringify(record.verifiedEvidence.evidence) === JSON.stringify(parsed.evidence)) return record;
+        && record.fingerprint === fingerprint && JSON.stringify(record.verifiedEvidence.evidence) === JSON.stringify(parsed.evidence)) {
+        if (contextPayload !== previousContext?.payload) throw new Error('Changing applicability requires fresh QA evidence');
+        return record;
+      }
       const runHash = this.hash(parsed.runId);
       const evidenceHash = this.hash([...parsed.evidence].sort());
       if (this.database.prepare('SELECT 1 FROM experience_verifications WHERE experience_id = ? AND (run_hash = ? OR evidence_hash = ?)')
@@ -397,7 +539,14 @@ export class ExperienceStore {
       const verifications = this.database.prepare('SELECT COUNT(*) AS count FROM experience_verifications WHERE experience_id = ?').get(record.id)!;
       if (Number(verifications.count) >= MAX_RECEIPTS) throw new Error(`Experience verification limit reached (${MAX_RECEIPTS})`);
       this.database.prepare('INSERT INTO experience_verifications VALUES (?, ?, ?)').run(record.id, runHash, evidenceHash);
-      return this.save({ ...corrected, fingerprint, status: 'verified', updatedAt: now, verifiedEvidence: { ...parsed, verifiedAt: now } });
+      const verified = this.save({ ...corrected, fingerprint, status: 'verified', updatedAt: now, verifiedEvidence: { ...parsed, verifiedAt: now } });
+      if (contextPayload) {
+        this.database.prepare(`INSERT INTO experience_applicability VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(experience_id) DO UPDATE SET fingerprint=excluded.fingerprint, run_hash=excluded.run_hash,
+          evidence_hash=excluded.evidence_hash, payload=excluded.payload`).run(record.id, this.fingerprint(verified), runHash, evidenceHash, contextPayload);
+        this.enforceBounds([record.id]);
+      }
+      return verified;
     });
   }
 
@@ -419,12 +568,26 @@ export class ExperienceStore {
     return z.date().parse(this.now()).toISOString();
   }
 
+  private applicable(record: ExperienceRecord, context: ExperienceQueryContext): boolean {
+    const row = this.database.prepare('SELECT * FROM experience_applicability WHERE experience_id = ?').get(record.id);
+    const products = Object.keys(context.target?.productVersions ?? {});
+    if (!row) return !products.length && !recallRequiresContext.test(record.action);
+    if (!record.verifiedEvidence || row.fingerprint !== this.fingerprint(record) || row.run_hash !== this.hash(record.verifiedEvidence.runId)
+      || row.evidence_hash !== this.hash([...record.verifiedEvidence.evidence].sort())) return false;
+    const required = experienceQueryContextSchema.parse(JSON.parse(String(row.payload)));
+    if (products.some(product => !Object.hasOwn(required.target?.productVersions ?? {}, product))) return false;
+    return experienceContextMatches(required, context);
+  }
+
   private fingerprint(input: Pick<ExperienceRecord, 'scope' | 'trigger' | 'rootCause' | 'action' | 'kind'>): string {
     const parts = [input.scope, input.trigger, input.rootCause, input.action];
     return this.hash(input.kind === 'success' ? [...parts, 'success'] : parts);
   }
 
   private portable(record: ExperienceRecord): ExperienceExchange['experiences'][number] {
+    if (this.database.prepare('SELECT 1 FROM experience_applicability WHERE experience_id = ?').get(record.id)) {
+      throw new Error('Version 1 exchange cannot represent structured applicability');
+    }
     const failureIdentity = this.originalFailure(record);
     if (record.kind !== 'success' && !failureIdentity) throw new Error('Original failure identity is unavailable; exchange cannot safely preserve recurrence');
     const receipts = this.database.prepare("SELECT source_hash, run_hash, evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' ORDER BY source_hash")
@@ -504,7 +667,8 @@ export class ExperienceStore {
     for (;;) {
       const stats = this.database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0)
         + (SELECT COUNT(*) * 384 FROM experience_receipts)
-        + (SELECT COUNT(*) * 256 FROM experience_verifications) AS bytes FROM experiences`).get()!;
+        + (SELECT COUNT(*) * 256 FROM experience_verifications)
+        + (SELECT COALESCE(SUM(length(CAST(payload AS BLOB)) + 256), 0) FROM experience_applicability) AS bytes FROM experiences`).get()!;
       if (Number(stats.count) <= MAX_RECORDS && Number(stats.bytes) <= MAX_BYTES) break;
       this.database.prepare(`DELETE FROM experiences WHERE id = (SELECT id FROM experiences WHERE id NOT IN (${protectedIds.map(() => '?').join(',')}) ORDER BY
         (expires_at > ?) ASC, CASE status WHEN 'candidate' THEN 0 WHEN 'revoked' THEN 1 ELSE 2 END, updated_at, id LIMIT 1)`)

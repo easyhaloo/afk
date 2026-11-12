@@ -18,7 +18,7 @@ export interface CommandResult {
 export type CommandExecutor = (request: CommandRequest) => Promise<CommandResult>;
 
 export function checkAbort(options?: ProviderOperationOptions): void {
-  if (options?.signal?.aborted) throw options.signal.reason ?? new Error('Operation aborted');
+  if (options?.signal?.aborted) throw options.signal.reason;
 }
 
 export interface HttpRequestOptions extends ProviderOperationOptions {
@@ -45,7 +45,7 @@ export async function requestHttp(
   const controller = new AbortController();
   const sources = [options?.signal, init.signal].filter(signal => signal !== undefined && signal !== null);
   const listeners = sources.map(signal => {
-    const abort = () => controller.abort(signal.reason ?? new Error('Operation aborted'));
+    const abort = () => controller.abort(signal.reason);
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
     return { signal, abort };

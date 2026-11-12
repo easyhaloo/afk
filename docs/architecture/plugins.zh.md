@@ -100,7 +100,14 @@ OAuth/OIDC 或远程制品上传；这些需要已安装工厂或具体的 confi
 Configured GitHub/GitLab 通过已注册的 tracker/backlog 契约参与相同的 managed
 assembly，按项目匹配采用，与独立 issue 适配器区分。
 
-Observability 是额外扩展面，不计入上表十二类：`observability.provider`、
+Docker 适配器另有内部冻结执行原语：先捕获受限输入树，以固定镜像 ID 构建输入，
+在非 root、只读根和输入、无网络、零 capability 及有界独立 scratch 中执行。
+执行收据绑定实际输入、命令、镜像与输出；分配前报告资源所有权，清理无法确认时
+保留所有权错误，不宣称资源已经释放。超时、取消与输出上限也结束本调用的输出管道。
+该原语信任宿主 runtime、daemon、管理员与基础镜像；普通开发容器不自动获得同等隔离，
+Podman/远程等价实现、技能工具语义验证及产品接线仍需各自验收。
+
+Observability 作为第十三类扩展面补充上表十二类：`observability.provider`、
 `observe.event-store`、`observe.evidence`、`observe.tracing`、`observe.metrics`
 提供 event/evidence/tracer/metrics 契约。已启用的通用及专用 tracing、metrics、
 event-store Provider 自动发现；同一对象的重复注册会去重。本地 JSONL 始终是审计权威。
@@ -161,7 +168,7 @@ integrations:
 ```
 
 可选 `timeoutMs` 为 1..60000 整数。仅当根配置 `integrations.evidence` 选择已启用、
-可写的 Artifact Provider 时，默认 Runtime 才初始化持久化本地加密证据存储并启用
+可写的 Artifact Provider 时，默认 Runtime 才为该 Artifact bridge 初始化持久化本地加密证据存储并启用
 `captureEvents: true`。选择或初始化失败会安装必需的初始化闸门，阻止受管执行；
 未选择时，此 bridge 不自动采集事件证据。审计 bridge 先在本地保存 QA、发布、失败和运行结束事件
 的有界摘要，源审计追加后上传引用的证据；校验内容 hash、拒绝 restricted 证据、对
@@ -172,6 +179,26 @@ integrations:
 `setPluginAuditArtifacts`、`PluginRunObserverOptions` 选择同一 bridge，
 `createLocalEncryptedEvidenceStore` 提供持久本地证据；key 初始化加锁并复用已有 key，
 文本脱敏保留 restricted 状态。
+
+SDK `EvidenceStoreProvider` 使用独立根配置显式选择，不改变以上 ArtifactSink 出口：
+
+```yaml
+evidenceStore:
+  provider: private
+  scopes: ["github:org/repo"]
+  timeoutMs: 2000
+  maxBytes: 65536
+```
+
+注册名须对应已启用且支持 `put/get` 的 `observe.evidence` 或 `observability.provider`。
+scope 为 1..32 个互异规范项目，禁止通配符；超时为 1..60000 ms，字节上限为 1..1048576，
+默认分别为 2000 和 65536。未知字段拒绝。默认关闭，选择失败通过 required 初始化闸门阻止执行。
+只为显式项目镜像新事件脱敏摘要：本地加密证据和事件先持久化，再 put/get 并核对身份与 hash。
+未选 store 不收到该出口字节，远端回读不替换本地正文；`evidence.mirror` 回执记录安全结果。
+失败、超时和取消保留本地权威。配置在新 Runtime 生效，无热重载、持久重试或远端副本撤回；
+已接受的保存选择在运行期失效时停止镜像，新建 observer 仍可本地记录；显式无效选择继续拒绝。
+取消不能强杀忽略 signal 的进程内可信插件。SDK 入口为 `setPluginAuditEvidence` 与
+`PluginRunObserverOptions.evidenceStore`，两个出口可独立启用。
 
 ## 标准 manifest 与 API v1
 
@@ -524,7 +551,7 @@ CLI 操作白名单；具体 Provider 仍由消费者显式选择。
 | 主机操作 | Runtime → `getHostProvider(name)` → 共享 Application 主机用例 → CLI `host` 或 Desktop adapter；CLI 默认 `jumpserver`，其他 Provider 需显式选择。 |
 | Linear/Jira 受管导入/同步 | `IssueTrackerPort` 读取来源 issue；`importManagedIssue` 幂等创建规范源码托管 backlog 项，`syncManagedIssue` 按显式映射向绑定来源回写状态。执行使用受管仓库的 tracker/backlog。 |
 | 仓库生命周期 | `RepositoryLifecycleService.run` 在 prepare/checkout/publish/cleanup 中执行 callback；公开 `repository.provider/run` 把工作区句柄/路径交给注册 action。 |
-| 其他能力操作 | 类型化 getter 与 CLI `invoke` 调用许可操作；根 `integrations` 为实现阶段和 QA 选择策略、上下文、制品和通知消费者。凭据保留为 SDK 私下操作，常驻 trigger 由 `listen` 驱动。 |
+| 其他能力操作 | 类型化 getter 与 CLI `invoke` 调用许可操作；根 `integrations` 为实现阶段和 QA 选择策略、验证、上下文、制品和通知消费者。凭据保留为 SDK 私下操作，常驻 trigger 由 `listen` 驱动。 |
 | Lifecycle / system action | `getLifecycleModules()` 接入引擎与 QA hook，注册 system action 供 workflow step 和 trigger callback 使用；Core 状态转换、审计、重试和人工合并闸门继续有效。 |
 | Template / surface | 注册表向显式消费者提供条目；注册本身不替换现有命令派发、模板存储或 Desktop 渲染。 |
 
@@ -720,7 +747,7 @@ Verification 省略 `target` 时使用本次 attempt 的 worktree；显式指定
 step 失败；Promise 正常返回一个否定结果不等于验证成功或策略通过。
 下游依赖需要看到该失败状态；这些检查补充独立 QA 和人工合并闸门，不替代它们。
 
-### 配置策略闸门和 Agent 上下文指针
+### 配置策略、验证闸门和 Agent 上下文指针
 
 `integrations` 与 `plugins` 同属 `~/.afk/plugins.yml` 顶层，不是某个插件的 `config`。
 这里选的是已注册 Provider 名称，例如 `secret-scan` 不等于插件 ID `policy.secret-scan`：
@@ -731,6 +758,10 @@ integrations:
     - provider: secret-scan
       input:
         action: pre-execution
+  verifications:
+    - provider: test-runner
+      command: [npm, test]
+      timeoutMs: 120000
   contexts:
     - provider: context.code
       query:
@@ -743,6 +774,20 @@ integrations:
 `{ provider, query: { scope, prompt, limit? } }`。此片段只选择现有 Provider；
 具体文件系统根、参数和 transport 仍由 configured factory 构造。
 不要把 constructor 字段塞入 `integrations`，也不能假定它会创建不存在的 Provider。
+
+`verifications` 默认为空，最多 32 项；每项仅接受 `{ provider, command?, timeoutMs? }`。
+`command` 是无 shell 展开的 argv 数组，首项必须为非空程序名且所有参数禁止 NUL；
+`timeoutMs` 必须为正整数。省略命令或期限时使用所选 Provider 的默认值。
+配置不能提供 `target` 或 `passed`；宿主将目标绑定到当前执行 worktree。
+保存配置选中的 Provider 缺失或禁用时，required init 阻断执行。
+已选择策略或验证时，集成门禁模块被禁用、缺失或被替换同样阻断初始化；
+停止这些门禁需同时移除相应保存选择，不能仅禁用模块。
+
+所选验证在 `after-agent` 和每次 `before-publish` 中运行，顺序为策略检查、验证、
+后续副作用。`passed: false`、异常或非法结果均阻断该阶段；after-agent 验证失败时
+不会继续上传制品或发送通知，发布前失败阻止相应 push 或变更请求操作。
+未选择的验证器不会自动执行，重启后重新读取保存选择。命令超时由 Provider 实现；
+此配置不增加全局会话取消协议。普通执行器通过不授予五类学习资产的独立验证资格。
 
 受管策略 lifecycle hook 必须采用 `failureMode: required`，使拒绝结果、所选 Provider
 缺失或执行异常阻止执行。`failureMode` 是 hook 的强制策略，不是上面 YAML 额外添加的字段；
@@ -974,6 +1019,8 @@ lifecycle 策略闸门。
   也都需要外部实现。
 - 应检查所选 Provider 的凭据、health 和各操作能力标记。出现在注册表里，或 health
   为 `unknown`，不表示外部操作已经可用。
+- JumpServer 的只读 health 发现 `jms` 时返回 `unknown`，分别标明二进制已找到、认证和目标访问尚未验证；缺失二进制为 `degraded`。该探针不登录、不列资产、不执行远程命令，也不回显本机二进制路径。
+- inventory / doctor 不创建本地报告目录或初始化审计加密存储。报告 health 只检查已有目录，缺失根目录为 degraded；受管 lifecycle init 或真实 evidence 读写才按需初始化私有存储。初始化失败保留诊断，后续操作可重试；事件导出保持既有 best-effort 语义。
 - 没有文档的本地 retrieval、缺失的 memory 文件、空 repository 集合、空合规规则
   都不提供已配置的领域内容；输入需要真实配置，不会自动发现。
 - 受管执行锁通过 `ps -o lstart=` 校验进程身份。禁止执行 `ps` 的受限容器或沙箱会让
@@ -1025,3 +1072,79 @@ workflow/commit/change 引用；仅实现成功仍不能产生已验证建议。
 实现工作流执行编译后的 Agent / System 计划。专用的 `pre-merge-qa-verification` 与 `merge-conflict-resolution` 模板分别只接受一个 inline Agent 步骤；多步骤、System 或文件提示词形态会在复核 Agent 启动前报错，不能静默省略检查。
 
 `observe` 和 `retro` 查看执行及会话证据，`experience` 管理从证据派生的建议。治理范围是 AFK 拥有的会话，不接管用户直接启动的任意 Agent 会话。Desktop 共享执行行为及项目内经验验证/撤销；交换和采纳由 CLI 提供。可执行保证是保留证据、按项目检索已验证经验、撤回无效经验，不能承诺模型永远不再犯错。[测试指南](../guides/testing.zh.md)分别说明验证层次。
+
+### 会话提炼插件内核
+
+Desktop 的 `learning` 固定接口提供项目、任务、候选查询、独立验证及知识 prepare / publish / reconcile。Main 根据工作项库存核对项目，在操作前后检查范围及候选版本，只向 Renderer 投影有界元数据；原始证据、配置和发布恢复路径不进入 IPC。操作使用自有短生命周期 Runtime，释放结束前阻止插件文件和启用状态变更。该入口不启动提炼 Worker；查询不调用模型。界面及完整 Electron 学习闭环仍按开发计划单独验收。
+
+`learning.distiller` 使用既有 `workflow.action` 协议，默认关闭。仅在保存了 `knowledge` 配置时声明并注册 `context.provider`，避免依赖检查把未配置的知识能力计为可用。基础配置为 `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000, executionContexts: [] }`；可选 `knowledge` 配置见下文，未知字段拒绝。当前仅 Claude Code 提供合格的 `analysis` 配置，其他 Provider 返回 `analysis_unsupported`。
+
+`executionContexts` 保存最多 64 个项目的可信条件，每个项目只能出现一次，例如：
+
+```json
+{
+  "executionContexts": [{
+    "applicability": { "environment": "ci", "version": "knowledge-v2" },
+    "target": {
+      "project": "github:acme/api",
+      "productVersions": { "sqlite": "3.45" },
+      "runtimeVersions": { "node": "22.16" },
+      "conditions": { "transactional": true }
+    }
+  }]
+}
+```
+
+默认实现引擎与 QA 从配置动作取得条件，传给经验 / 知识消费；受信调用方显式提供的上下文字段优先。项目必须与任务和准备的仓库一致，Git revision / dirty 由实际工作树观察，保存配置禁止声明它们。版本映射和条件分别最多 32 项；未知字段、重复项目及无效 scope 拒绝。提示词不提供这些条件；原型继承的 target / applicability 在消费入口拒绝。关闭自动学习不妨碍读取有效资产，停用插件则不再提供此动作。
+
+| 标准动作 | 输入 | 行为 |
+| --- | --- | --- |
+| `learning.settings` | `{}` | 返回当前实例配置的独立副本 |
+| `learning.context` | `{ scope }` | 返回准确项目的可信执行条件副本，未配置为 `{}`；不调用模型 |
+| `learning.distill` | `{ request, pack }` | 校验证据快照并写入私有收件箱，不直接调用模型 |
+| `learning.capture` | `{ scope, runId, eventRoot? }` | 从准确项目及运行的完整审计补查证据，原子保存请求与扫描位置 |
+| `learning.reconcile` | `{ scope?, runId?, eventRoot? }` | 补查遗漏来源，并恢复已配置、已授权的知识发布 / 撤回；返回来源结果，不调用模型 |
+| `learning.jobs` | `{ scope }` | 查询准确项目的请求、阻断原因和调用尝试 |
+| `learning.candidates` | `{ scope }` | 查询准确项目的候选；模型输出不授予验证或发布状态 |
+| `learning.validate` | `{ scope, candidateId, expectedVersion, checkerId }` | 从可信配置取得验证器、授权和实际目标，执行独立断言；拒绝客户端结果、命令和目标覆盖 |
+| `learning.worker.once` | `{}` | 一个全局消费者处理各项目待处理请求后退出 |
+
+Worker 通过已有持久队列投递；启动前原子预留 UTC 日预算并记录调用尝试。完成请求重放不重复调用模型，未完成的旧尝试保持结果未知并阻断自动重试；用量缺失不补零。插件释放会取消本实例拥有的 Worker。
+
+新请求、Evidence Pack 和扫描位置在同一 SQLite 事务提交，快照计入待处理及总字节上限，失败整体回滚。账本升级为 version 2，保留 version 1 请求及旧文件快照读取兼容，旧写入器拒绝打开升级后的账本。模型调用预算预留在事务内重新检查来源阻断；重试和补查清除状态时使用预期原因比较，不能覆盖新到的来源失效。
+
+分析使用独立临时目录和新会话，禁用工具、MCP、自动技能和 Hooks，不持久化会话；`retro` 也复用同一执行器。输入是有大小限制和来源摘要的脱敏 Evidence Pack；发现仅能引用该快照的精确证据 ID。`goal_complete` 是传输完成标记，不是验证凭据。
+
+启用后，Observer 在持久审计之后摄入完成、人工合并闸门、合并确认、晚到会话和 QA 失败事件。摄入失败记录降级，不改变原任务结果；Worker 单次入口启动前补查遗漏审计。重复终态及相同会话遥测不重复提交，新增会话证据形成新检查点；晚到失败使关联请求阻断、候选进入冲突。只读取明确记录且位于受管目录的会话；学习用途运行不再次触发学习。当前用户纠正由可信 CLI / UI 用例提交，转录中的授权声明不获得权限。
+
+补查记录受管审计目录，重启可发现自定义目录中的遗漏事件及已经删除的已知来源；没有受管扫描记录的显式导入不被当成缺失审计。目录归属冲突返回 `source_not_allowed`，不能撤销其他目录拥有的来源。并发追加及未完成尾行返回 `audit_unstable`，暂时阻断请求；完整复核后只清除 `source_unstable`。完整前缀中的失败或篡改仍立即失效，不能被部分尾行掩盖；`source_invalidated` 不自动清除。降级诊断按来源保留，不因另一个健康运行的定向补查而消失。
+
+补查返回 `checkedSources`，列出完成证据复核的准确审计目录及运行身份；未完成的新 QA 轮次不发出该确认。只有这些身份能清除对应摄入诊断，因此项目级修复也能清除该来源先前全局扫描产生的错误，同时保留其他来源的故障。路径解析错误在脱敏消息的同时保留暂态文件系统错误码。SQLite 辅助文件出现已解除链接的自有普通文件元数据时最多重查两次；主库、持续零链接状态和不安全替换仍拒绝。
+
+普通准入上限为 2,000 条记录 / 32 MiB。来源失效在同一事务内阻断请求、使派生候选进入冲突并保存不可变版本；来源暂态阻断和失效可使用安全预留，总记录 / 字节不超过普通上限两倍。重复失效幂等，普通工作、模型调用、验证和发布不能借用预留。SQLite 主文件物理上限为 128 MiB，包含 payload 与页开销；安全预留或实际磁盘耗尽时整体回滚并报告存储失败。
+
+Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原生分析要求 Darwin 及 `/usr/bin/sandbox-exec`，其他平台在启动分析前明确阻断；进程 guard 拒绝后代进程并检测 Worker 消失。此前真实本地 Claude 内核测试保留了认证、候选生成、重放去重、来源失效，以及转录注入、恶意 Hook 和 MCP 不执行的阶段证据；2026-11-11 最近生产分析与真实提炼重跑仍失败，历史通过不能代表当前模型服务可用。生产 Main 的确定性 checker E2E 已覆盖未验证候选到验证、Wiki 发布、上下文读取、来源失效和实际撤回，该结果不涉及真实模型。完整交付继续按[会话提炼计划](../superpowers/plans/2026-11-09-session-distillation.zh.md)推进。
+
+### 候选验证接线
+
+可选配置 `validation: { configurationFile }` 指向私有 checker 配置的规范绝对路径。配置为 `{ version: 1, checkers: [...] }`；每项声明 `scope/checkerId/providerId/version/authorizationFile/target`，`target` 为 `{ ref, root, path }`。按准确项目与 checker ID 唯一选择已注册的 Verification Provider。受管来源从账本扫描身份、审计链和已记录会话恢复；未注册导入需可信配置提供匹配证据摘要的来源清单，客户端不能补充该清单。
+
+验证器必须支持 `learning-validation-v1` 独立断言协议及稳定身份，普通 test-runner 不具备该资格。fact/process 使用领域断言；lesson 还要求保存配置显式设置 `allowLessonValidation: true` 和 `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`，并保留当前授权的项目、目标与撤销检查。先核验原始来源身份及独立 QA 的完整审计链、系统事件与修复版本，再独立观察根因、修复、预防及适用范围；QA 成功不能替代语义验证。oracle 的快照摘要与 QA 的 Git revision 分别绑定。该许可仅用于 lesson 验证，发布另需显式 lesson 目标授权；skill/tool 在专属验证器完成前返回 blocked。
+
+预算从用例入口开始计时，包含开库及锁等待；获 SQLite 写锁后同步复核来源、授权、目标、checker、deadline 及 lesson 的实际 QA 审计字节摘要，失效则回滚，无晋级或收据。状态顺序以审计 sequence 为准，不要求 occurredAt 单调。动作接线与临时权威快照的真实验证 → Wiki 发布 → 上下文读取 → 来源失效撤回已有集成测试；这不证明真实模型或五类资产完整闭环已交付。
+
+### 知识发布与读取接线
+
+可选配置 knowledge 包含 wikiScript（可信 Wiki CLI 的规范绝对路径）与 grants（1–64 个不重复的私有授权文件路径）。路径由保存的插件配置解析，动作只接受项目、候选、版本及逻辑目标，不能覆盖 vault、授权文件或脚本。授权元数据可在撤销后读取；写入和撤回分别检查当前权限。同项目相同逻辑目标的多重授权拒绝路由，授权缺失和孤立发布记录逐项报告阻断。
+
+lesson 目标的 kinds 必须显式包含 lesson；既有 fact/process 默认不扩大。准备、发布、读取及补查核对当前独立 QA、来源、配置与收据，正文保存验证及修复版本引用。授权规则和必须不存在的目录规则进入最终读取快照，普通文件摘要读取上限64MiB、私有 grant 上限1MiB。准备、导航替换及 applied/committed 晋级获得数据库写锁后再次同步复核；漂移回滚。QA 单独失效只使对应 lesson 冲突并安排撤回，不失效同请求的 fact/process；未配置 knowledge 时仍补查 lesson 资格。
+
+| 标准动作 | 输入 | 行为 |
+| --- | --- | --- |
+| learning.knowledge.prepare | { scope, candidateId, expectedVersion, targetRef? } | 对已经具备当前验证收据的候选进行 Wiki preview，保存不可变计划与 prepared 收据 |
+| learning.knowledge.publish | { scope, key } | 核对当前授权、候选、来源及目标，执行发布或恢复 |
+| learning.knowledge.reconcile | { scope? } | 补查全部发布阶段，包含 committed 内容的实际撤回；返回逐项结果和阻断 |
+
+自动来源补查与 Worker 启动 / 周期补查共用以上恢复用例。来源失效必须撤回资产正文，权限拒绝或人工修改保留现场并报告 knowledge_publication_degraded。prepared / applied 阶段仍校验完整计划、导航和乐观 hash；committed 资产持续校验授权、来源、验证收据与正文，正常索引 / 回链增长不能使既有事实失效。
+
+context.knowledge 只读取当前授权、未撤销且适用的发布内容，有数量与字节上限；缺少所需可信适用性字段时不返回该资产。插件释放取消在途 Wiki 子进程，旧 Provider 引用不能绕过关闭。这里的动作接线不代表新增验证入口、安装版 CLI、Desktop 或完整跨 Agent 闭环已交付。

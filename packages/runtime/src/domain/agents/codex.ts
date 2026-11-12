@@ -35,6 +35,7 @@ export class CodexProvider extends ProcessAgentProvider {
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 
   override async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
+    this.assertExecutionProfile(options);
     if (options.runtime?.kind === 'codex' && options.runtime.transport === 'app-server') {
       return CodexAppServerExecution.start(options, options.runtime);
     }

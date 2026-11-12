@@ -320,6 +320,26 @@ def generic_lint(root, max_age_days):
     return findings
 
 
+def publication_lock_fds(root):
+    value = os.environ.get("LEARNING_PUBLICATION_LOCK_FD")
+    if value is None:
+        return ()
+    try:
+        if os.name != "posix" or not re.fullmatch(r"[0-9]{1,10}", value) or int(value) < 3:
+            raise ValueError
+        descriptor = int(value)
+        opened = os.fstat(descriptor)
+        named = (root / ".learning-publication.lock").lstat()
+        if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(named.st_mode)
+                or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+                or opened.st_uid != os.getuid() or opened.st_nlink != 1 or opened.st_size != 0
+                or stat.S_IMODE(opened.st_mode) != 0o600):
+            raise ValueError
+        return (descriptor,)
+    except (OSError, ValueError, OverflowError):
+        raise WikiError("Invalid inherited publication lock descriptor") from None
+
+
 def lint(root, max_age_days=90, backend_root=None):
     if max_age_days < 1:
         raise WikiError("max-age-days must be positive")
@@ -328,7 +348,7 @@ def lint(root, max_age_days=90, backend_root=None):
     if backend.is_symlink() or backend.parent.is_symlink():
         raise WikiError("Vault linter cannot be a symbolic link")
     if backend.is_file():
-        result = subprocess.run([sys.executable, "-B", str(backend), "--vault", str(root), "--max-age-days", str(max_age_days), "--json"], capture_output=True, text=True, timeout=60)
+        result = subprocess.run([sys.executable, "-B", str(backend), "--vault", str(root), "--max-age-days", str(max_age_days), "--json"], capture_output=True, text=True, timeout=60, pass_fds=publication_lock_fds(owner))
         try:
             report = json.loads(result.stdout)
             findings = report["findings"]

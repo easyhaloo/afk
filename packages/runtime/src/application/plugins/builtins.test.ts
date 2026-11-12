@@ -26,6 +26,26 @@ describe('built-in plugins', () => {
     expect(resolveBinaryPath).toHaveBeenCalledOnce();
   });
 
+  it('reports binary presence without claiming authentication or contacting hosts', async () => {
+    const remoteOperation = vi.fn(async () => { throw new Error('Readiness must not contact a host'); });
+    const runtime = new PluginRuntime();
+    await runtime.activate(createJumpserverPlugin({ cli: {
+      resolveBinaryPath: async () => '/private/account/bin/jms',
+      listServers: remoteOperation,
+      listAssets: remoteOperation,
+      execAssetCommand: remoteOperation,
+      uploadFile: remoteOperation,
+    } as never }));
+    try {
+      const health = await runtime.health('host.jumpserver');
+      expect(health).toEqual([{ pluginId: 'host.jumpserver', status: 'unknown',
+        message: 'jms CLI is available; authentication and target access have not been verified',
+        details: { binaryAvailable: true, authenticated: 'unknown', targetReachable: 'unknown' } }]);
+      expect(JSON.stringify(health)).not.toContain('/private/account');
+      expect(remoteOperation).not.toHaveBeenCalled();
+    } finally { await runtime.dispose(); }
+  });
+
   it('projects the built-in agent, sandbox, and verification providers', async () => {
     const runtime = new PluginRuntime();
     const plugins = [

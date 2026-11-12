@@ -20,6 +20,22 @@ afterEach(async () => {
 });
 
 describe('RunObserver', () => {
+  it('runs derived intake after durable append and preserves the original result when intake fails', async () => {
+    const events = new JsonlEventStore({ root: await root() });
+    let called = false;
+    const logs: string[] = [];
+    const observer = new RunObserver({ events, log: pino({ level: 'warn' }, { write(line) { logs.push(line); } }), onPersisted: async () => {
+      expect(await events.verify('r')).toMatchObject({ valid: true, lastSequence: 1 });
+      called = true;
+      throw new Error('PRIVATE_INTAKE_ERROR');
+    } });
+    const receipt = await observer.record({ traceId: 't', runId: 'r', workItemId: 'github:acme/wiki#42', profileId: 'local', attempt: 1,
+      actor: { kind: 'system', id: 'test' } }, { kind: 'run.finished', outcome: 'succeeded' });
+    expect(called).toBe(true);
+    expect(receipt.lastSequence).toBe(1);
+    expect(logs.join('')).toContain('derived_intake_failed');
+    expect(logs.join('')).not.toContain('PRIVATE_INTAKE_ERROR');
+  });
   it('persists the audit fact before returning and emits low-cardinality metrics', async () => {
     const counters: Array<{ name: string; attributes?: Record<string, string | number | boolean> }> = [];
     const metrics: MetricsPort = {

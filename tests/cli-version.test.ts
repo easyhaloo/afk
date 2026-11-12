@@ -8,7 +8,7 @@ const exec = promisify(execFile);
 describe('CLI version metadata', () => {
   it.each(['--version', '-V'])('reports the package version for %s', async flag => {
     const manifest = JSON.parse(await readFile('apps/cli/package.json', 'utf8')) as { version: string };
-    const { stdout } = await exec('pnpm', ['--filter', 'afk', 'exec', 'tsx', 'src/index.ts', flag]);
+    const { stdout } = await exec(process.execPath, ['--import', 'tsx', 'apps/cli/src/index.ts', flag], { timeout: 10_000 });
     expect(stdout.trim()).toBe(manifest.version);
   });
 });

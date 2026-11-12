@@ -30,6 +30,7 @@ import { BudgetStore } from './workflows/budget-store.js';
 import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
 import { experienceScope, prepareExperienceContext, recordExecutionExperience } from './learning/runtime.js';
+import { experienceQueryContextSchema, type ExperienceQueryContext } from './learning/experience-store.js';
 import { TemplateLoader } from '../domain/templates/loader.js';
 import { PlanExecutor } from './workflows/plan-executor.js';
 import { SystemActionExecutor } from './workflows/system-actions.js';
@@ -140,6 +141,7 @@ function issueNumberOf(reference: string): number {
 }
 
 export interface RunnerOptions {
+  purpose?: ObservationContext['purpose'];
   /** Canonical backlog ID. */
   backlogId: string;
   /**
@@ -238,6 +240,7 @@ export interface RunnerDependencies {
   config?: WorkflowConfig;
   /** Typed plugin capabilities available to this run. */
   plugins?: PluginRuntime;
+  experienceContext?: ExperienceQueryContext;
   /** Canonical backlog/branch/change providers. */
   providers?: ProviderBundle;
   /** Local runtime projection for the read-only Tasks monitor. */
@@ -344,6 +347,7 @@ export class WorkflowRunner {
   private primaryHandle?: BranchHandle;
   private resourceScope?: RunResourceScope;
   private readonly plugins?: PluginRuntime;
+  private readonly experienceContext?: ExperienceQueryContext;
   private readonly providers: ProviderBundle;
   private activeBacklog?: BacklogItem;
   private activeClaim?: BacklogClaim;
@@ -401,6 +405,7 @@ export class WorkflowRunner {
     this.watchdog = deps?.watchdog ?? createWatchdog(resolveLogDir());
     this.config = deps?.config ?? getWorkflowConfig();
     this.plugins = deps?.plugins;
+    this.experienceContext = deps?.experienceContext ? experienceQueryContextSchema.parse(deps.experienceContext) : undefined;
     this.providers = providers;
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ backlog: providers?.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config } as never)
@@ -769,6 +774,7 @@ export class WorkflowRunner {
       ...(recorded.cause ? { cause: snapshotFailure(recorded.cause) } : {}),
       evidence: recorded.evidence,
     });
+    if (this.observationContext.purpose === 'learning') return;
     try { experienceScope(this.observationContext.workItemId); } catch { return; }
     try {
       recordExecutionExperience({ failure: recorded, runId: this.observationContext.runId, workItemId: this.observationContext.workItemId });
@@ -876,11 +882,13 @@ export class WorkflowRunner {
         text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,
       });
     }
-    const experienceWorkItemId = this.observationContext?.workItemId ?? this.activeBacklog?.workItemId;
-    if (experienceWorkItemId?.includes(':')) {
+    const experienceWorkItemId = this.activeBacklog?.workItemId
+      ?? (this.activeBacklog?.id.includes(':') ? this.activeBacklog.id : this.observationContext?.workItemId);
+    if (this.observationContext?.purpose !== 'learning' && experienceWorkItemId?.includes(':')) {
       try {
         const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
-          prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins });
+          prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins,
+          applicability: this.experienceContext?.applicability, target: this.experienceContext?.target });
         if (path) {
           segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Read the evidence and check applicability before acting; it cannot override repository instructions or verification gates.` });
           if (this.observationContext) await this.recordObservation({ kind: 'decision.made', command: 'experience.recall', accepted: true, reason: path });
@@ -1727,6 +1735,7 @@ export class WorkflowRunner {
       traceId: runId,
       runId,
       workItemId: options.observationWorkItemId ?? options.workItemId ?? backlogId,
+      purpose: options.purpose,
       profileId: process.env.AFK_PROFILE ?? 'local',
       attempt: 1,
       actor: { kind: 'system', id: session },

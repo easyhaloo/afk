@@ -27,7 +27,8 @@ import { formatExecutionFailure, formatExecutionFailureReport } from '../workflo
 import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
 import { assemblePrompt, buildExecutionPromptSegments, type PromptSegment } from '../workflows/execution-protocol.js';
 import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from '../workflows/backlog-context.js';
-import { prepareExperienceContext } from '../learning/runtime.js';
+import { prepareExperienceContext, resolveExperienceQueryContext } from '../learning/runtime.js';
+import { experienceQueryContextSchema, type ExperienceQueryContext } from '../learning/experience-store.js';
 import { measurePromptBudget } from '../../domain/agents/prompt-budget.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
@@ -71,6 +72,8 @@ export interface QARunnerDependencies {
   agentProvider?: AgentProvider;
   agentProviderRegistry?: AgentProviderRegistry;
   plugins?: PluginRuntime;
+  experienceContext?: ExperienceQueryContext;
+  onExperienceTarget?: (context: ExperienceQueryContext) => Promise<void>;
   agentRuntime?: AgentRuntimeSelection;
   tmux?: TmuxClient;
   executionMode?: ExecutionMode;
@@ -145,6 +148,8 @@ export class QARunner {
   private readonly onSession?: QARunnerDependencies['onSession'];
   private readonly agentProviderRegistry: AgentProviderRegistry;
   private readonly plugins?: PluginRuntime;
+  private readonly experienceContext?: ExperienceQueryContext;
+  private readonly onExperienceTarget?: QARunnerDependencies['onExperienceTarget'];
   private activeConflictExecution?: AgentExecution;
   private leaseFailure?: unknown;
 
@@ -165,6 +170,8 @@ export class QARunner {
     this.onCommit = deps.onCommit;
     this.onSession = deps.onSession;
     this.plugins = deps.plugins;
+    this.experienceContext = deps.experienceContext ? experienceQueryContextSchema.parse(deps.experienceContext) : undefined;
+    this.onExperienceTarget = deps.onExperienceTarget;
     this.agentProviderRegistry = deps.agentProviderRegistry ?? deps.plugins?.getAgentProviderRegistry() ?? defaultAgentProviderRegistry;
     if (!deps.agentProviderRegistry && !deps.plugins) ensureBuiltinAgentProviders(this.agentProviderRegistry);
     this.sandboxProvider = deps.sandboxProvider ?? (deps.plugins
@@ -373,11 +380,14 @@ export class QARunner {
         if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Plugin context must be a regular file');
         segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      const experienceWorkItemId = getLogContext()?.workItemId ?? backlog.workItemId;
+      const experienceWorkItemId = backlog.workItemId ?? (backlog.id.includes(':') ? backlog.id : getLogContext()?.workItemId);
       if (experienceWorkItemId?.includes(':')) {
+        const context = await resolveExperienceQueryContext({ workItemId: experienceWorkItemId, worktreePath, plugins: this.plugins,
+          applicability: this.experienceContext?.applicability, target: this.experienceContext?.target });
+        await this.onExperienceTarget?.(context);
         try {
           const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
-            prompt: `${backlog.title}\n${backlog.description ?? ''}`.slice(0, 2000), plugins: this.plugins });
+            prompt: `${backlog.title}\n${backlog.description ?? ''}`, plugins: this.plugins, ...context });
           if (path) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
         } catch {
           logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');

@@ -6,14 +6,17 @@ import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js
 import { retryBacklog } from '../../domain/backlog/commands.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
 import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { PluginRuntime } from '../plugins/runtime.js';
+import { createDefaultPluginRuntime } from '../plugins/default-runtime.js';
+import { createLearningPlugin } from '../plugins/learning.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import type { Step } from '../../domain/templates/types.js';
+import type { ContextQuery } from '../../plugin-sdk/capabilities.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
@@ -194,6 +197,47 @@ describe.each(['pre-merge-qa-verification', 'merge-conflict-resolution'])('QARun
 });
 
 describe('QARunner plugin publication policies', () => {
+  it.each([0, 1, 2, 3])('enforces saved command verification through managed QA publication (failure invocation=%s)', async failureInvocation => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-saved-verification-'));
+    const current = fixture();
+    const completion = join(root, 'agent-completed');
+    const receipt = join(root, 'verification.jsonl');
+    const completed = current.execution.waitForResult.getMockImplementation()!;
+    current.execution.waitForResult.mockImplementationOnce(async () => {
+      await writeFile(completion, 'actual QA completion');
+      return completed();
+    });
+    const command = [process.execPath, '-e', `const fs = require('node:fs');
+      if (fs.readFileSync(${JSON.stringify(completion)}, 'utf8') !== 'actual QA completion') process.exit(11);
+      fs.appendFileSync(${JSON.stringify(receipt)}, JSON.stringify({cwd:process.cwd()}) + '\\n');
+      const invocation = fs.readFileSync(${JSON.stringify(receipt)}, 'utf8').trim().split('\\n').length;
+      if (invocation === ${failureInvocation}) process.exit(7);`];
+    await mkdir(join(root, '.afk'));
+    await writeFile(join(root, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [],
+      integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } }));
+    const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      const result = await runner.process('60');
+      expect(result).toMatchObject({ success: failureInvocation === 0 });
+      if (failureInvocation) expect(result.summary).toContain('Capability verification failed');
+      const receipts = (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      expect(receipts).toEqual(Array.from({ length: failureInvocation || 3 }, () => ({ cwd: expect.any(String) })));
+      for (const observed of receipts) expect(observed.cwd).toBe(await realpath(worktreePath));
+      expect(current.branches.commit).toHaveBeenCalledTimes(failureInvocation === 1 ? 0 : 1);
+      expect(current.branches.push).toHaveBeenCalledTimes(failureInvocation === 0 || failureInvocation === 3 ? 1 : 0);
+      expect(current.changes.create).toHaveBeenCalledTimes(failureInvocation === 0 ? 1 : 0);
+      expect(current.changes.merge).not.toHaveBeenCalled();
+      expect(current.branches.cleanup).toHaveBeenCalledWith(worktreePath, { preserve: failureInvocation !== 0 });
+      expect(current.sandbox.close).toHaveBeenCalledOnce();
+    } finally {
+      await plugins.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('gathers plugin context before the QA prompt and completes lifecycle before publication', async () => {
     const current = fixture();
     const contextFile = join(worktreePath, '.afk', 'plugin-context.md');
@@ -493,6 +537,48 @@ describe('QARunner runtime binding', () => {
 });
 
 describe('QARunner execution boundary', () => {
+  it.each(['explicit', 'saved'] as const)('shares %s trusted context with knowledge, experience and independent QA audit', async source => {
+    const current = fixture();
+    const queries: ContextQuery[] = [];
+    const plugins = new PluginRuntime();
+    await plugins.activate({ manifest: { id: 'qa.context', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['context.provider'] },
+      activate(context) {
+        for (const id of ['context.experience', 'context.knowledge']) context.registerContextProvider(id, {
+          id, capabilities: { 'read-only': true, summarize: false, search: true },
+          async gather(query) { queries.push(query); return [{ origin: `${id}:qa-evidence`, content: 'bounded context' }]; },
+        });
+      } });
+    const experienceContext = { applicability: { version: 'asset-2', environment: 'sandbox-ci' },
+      target: { project: 'github:acme/wiki', productVersions: { sqlite: '3.45' } } };
+    if (source === 'saved') await plugins.activate(createLearningPlugin({ config: { executionContexts: [experienceContext] } }));
+    const onExperienceTarget = vi.fn(async (_context: unknown) => {});
+    try {
+      const runner = new QARunner(current.providers, config, { plugins, experienceContext: source === 'explicit' ? experienceContext : undefined, onExperienceTarget,
+        sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+      await withLogContext({ runId: 'qa-context', workItemId: 'github:acme/wiki#60' }, () => runner.process('60'));
+      expect(queries).toHaveLength(2);
+      expect(queries[0]).toBe(queries[1]);
+      expect(queries[0]).toMatchObject({ scope: 'github:acme/wiki', ...experienceContext });
+      expect(onExperienceTarget).toHaveBeenCalledWith(expect.objectContaining(experienceContext));
+      const content = await readFile(join(worktreePath, '.afk/experience-context.md'), 'utf8');
+      expect(content).toContain('context.knowledge:qa-evidence');
+      expect(content).toContain('context.experience:qa-evidence');
+    } finally { await plugins.dispose(); }
+  });
+
+  it.each(['workItemId', 'canonical-id'] as const)('prefers the backlog %s over a foreign QA logger identity', async identitySource => {
+    const current = fixture();
+    const item = await current.providers.backlog.get('60');
+    current.providers.backlog.get.mockResolvedValue({ ...item,
+      ...(identitySource === 'workItemId' ? { workItemId: 'github:acme/wiki#60' } : { id: 'github:acme/wiki#60' }) });
+    const onExperienceTarget = vi.fn(async (_context: unknown) => {});
+    const runner = new QARunner(current.providers, config, { onExperienceTarget,
+      sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+    const result = await withLogContext({ runId: 'foreign-qa-context', workItemId: 'github:foreign/private#88' }, () => runner.process('60'));
+    expect(result.success).toBe(true);
+    expect(onExperienceTarget).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ project: 'github:acme/wiki' }) }));
+  });
+
   it('resolves the configured agent provider when none is injected', () => {
     const original = createAgentProvider('codex');
     const codex = {

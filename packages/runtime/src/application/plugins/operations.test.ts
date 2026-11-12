@@ -83,6 +83,97 @@ async function fixture() {
 }
 
 describe('invokeCapability', () => {
+  it('forwards validated applicability and target context through the public dispatcher', async () => {
+    const current = await fixture();
+    const input = { scope: 'github:acme/lesson', prompt: 'retry', applicability: { version: 'fixture-v1', environment: 'test' },
+      target: { project: 'github:acme/lesson', revision: 'a'.repeat(40), dirty: false, conditions: { approved: true } } };
+    try {
+      await invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input });
+      expect(current.context.gather).toHaveBeenCalledWith(input);
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each([
+    { applicability: { version: 1 } },
+    { applicability: { version: 'fixture-v1', command: 'untrusted' } },
+    { target: { project: 'github:acme/lesson', revision: 'uncommitted' } },
+    { target: { project: 'github:acme/lesson', conditions: { approved: 'true' } } },
+  ])('rejects invalid applicability context before calling its provider: %j', async context => {
+    const current = await fixture();
+    try {
+      await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather',
+        input: { scope: 'github:acme/lesson', prompt: 'retry', ...context } })).rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(current.context.gather).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each(['scope', 'prompt', 'limit', 'applicability', 'target'] as const)(
+    'rejects inherited context %s before calling its provider', async field => {
+      const current = await fixture();
+      const query = { scope: 'github:acme/lesson', prompt: 'retry', limit: 1, applicability: { version: 'fixture-v1' },
+        target: { project: 'github:acme/lesson', revision: 'a'.repeat(40), dirty: false } };
+      const input = Object.assign(Object.create({ [field]: query[field] }),
+        Object.fromEntries(Object.entries(query).filter(([key]) => key !== field)));
+      try {
+        expect(Object.hasOwn(input, field)).toBe(false);
+        await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input }))
+          .rejects.toThrow('Invalid or unsupported capability invocation');
+        expect(current.context.gather).not.toHaveBeenCalled();
+      } finally { await current.runtime.close(); }
+    });
+
+  it.each(['scope', 'prompt', 'limit', 'applicability', 'target'] as const)(
+    'rejects inherited context %s getters without evaluating them', async field => {
+      const current = await fixture();
+      const getter = vi.fn(() => { throw new Error('SYNTHETIC_PRIVATE_CONTEXT'); });
+      const prototype = Object.defineProperty({}, field, { enumerable: true, get: getter });
+      const input = Object.assign(Object.create(prototype),
+        Object.fromEntries(Object.entries({ scope: 'github:acme/lesson', prompt: 'retry' }).filter(([key]) => key !== field)));
+      try {
+        await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input }))
+          .rejects.toThrow('Invalid or unsupported capability invocation');
+        expect(getter).not.toHaveBeenCalled();
+        expect(current.context.gather).not.toHaveBeenCalled();
+      } finally { await current.runtime.close(); }
+    });
+
+  it.each(['capability', 'input'] as const)('rejects inherited invocation %s before parsing context', async field => {
+    const current = await fixture();
+    const getter = vi.fn(() => { throw new Error('SYNTHETIC_PRIVATE_CONTEXT'); });
+    const query = Object.defineProperty({ scope: 'github:acme/lesson', prompt: 'retry' }, 'target', { get: getter });
+    const request = { capability: 'context.provider', provider: 'context', operation: 'gather', input: query };
+    const input = Object.assign(Object.create({ [field]: request[field] }),
+      Object.fromEntries(Object.entries(request).filter(([key]) => key !== field)));
+    try {
+      await expect(invokeCapability(current.runtime, input)).rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(getter).not.toHaveBeenCalled();
+      expect(current.context.gather).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it('rejects own context target getters without evaluating them', async () => {
+    const current = await fixture();
+    const getter = vi.fn(() => { throw new Error('SYNTHETIC_PRIVATE_CONTEXT'); });
+    const input = Object.defineProperty({ scope: 'github:acme/lesson', prompt: 'retry' }, 'target', { get: getter });
+    try {
+      await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input }))
+        .rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(getter).not.toHaveBeenCalled();
+      expect(current.context.gather).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it('accepts own context fields on null-prototype objects', async () => {
+    const current = await fixture();
+    const input = Object.assign(Object.create(null), { scope: 'github:acme/lesson', prompt: 'retry',
+      target: { project: 'github:acme/lesson', revision: 'a'.repeat(40), dirty: false } });
+    const request = Object.assign(Object.create(null), { capability: 'context.provider', provider: 'context', operation: 'gather', input });
+    try {
+      await invokeCapability(current.runtime, request);
+      expect(current.context.gather).toHaveBeenCalledWith(input);
+    } finally { await current.runtime.close(); }
+  });
+
   it('dispatches repository lifecycle and its execution callback in one resident runtime', async () => {
     const { runtime } = await fixture();
     const workspace = { id: 'owned', repository: { url: 'api' }, runId: 'run-1', snapshot: { commit: 'abc', branch: 'afk/run-1', dirty: false }, path: '/owned/api' };

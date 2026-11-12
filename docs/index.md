@@ -15,6 +15,7 @@
 | 使用 CLI、Desktop 与 Skills 工作流 | [Workflows (EN)](guides/workflows.md) · [工作流（中文）](guides/workflows.zh.md) |
 | 编写或运行测试 | [Testing (EN)](guides/testing.md) · [测试指南（中文）](guides/testing.zh.md) |
 | 使用与理解 Skills | [Skills Guide (EN)](guides/skills.md) · [Skills 指南（中文）](guides/skills.zh.md) |
+| 开发会话洞察、知识与技能 / 工具沉淀（实施中，完整闭环待验收） | [Implementation plan (EN)](superpowers/plans/2026-11-09-session-distillation.md) · [完整开发计划（中文）](superpowers/plans/2026-11-09-session-distillation.zh.md) |
 
 ## 当前架构说明
 

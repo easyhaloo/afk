@@ -12,6 +12,13 @@ const IPC_CHANNELS = {
   experiencesList: "afk:experiences-list",
   experiencesVerify: "afk:experiences-verify",
   experiencesRevoke: "afk:experiences-revoke",
+  learningProjects: "learning:projects",
+  learningJobs: "learning:jobs",
+  learningCandidates: "learning:candidates",
+  learningValidate: "learning:validate",
+  learningKnowledgePrepare: "learning:knowledge-prepare",
+  learningKnowledgePublish: "learning:knowledge-publish",
+  learningKnowledgeReconcile: "learning:knowledge-reconcile",
   pluginsList: "afk:plugins-list",
   pluginsInstall: "afk:plugins-install",
   pluginsSetEnabled: "afk:plugins-set-enabled",
@@ -84,6 +91,17 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: DesktopApi = {
+  learning: {
+    projects: () => ipcRenderer.invoke(IPC_CHANNELS.learningProjects),
+    jobs: input => ipcRenderer.invoke(IPC_CHANNELS.learningJobs, input),
+    candidates: input => ipcRenderer.invoke(IPC_CHANNELS.learningCandidates, input),
+    validate: input => ipcRenderer.invoke(IPC_CHANNELS.learningValidate, input),
+    knowledge: {
+      prepare: input => ipcRenderer.invoke(IPC_CHANNELS.learningKnowledgePrepare, input),
+      publish: input => ipcRenderer.invoke(IPC_CHANNELS.learningKnowledgePublish, input),
+      reconcile: input => ipcRenderer.invoke(IPC_CHANNELS.learningKnowledgeReconcile, input),
+    },
+  },
   experiences: {
     projects: () => ipcRenderer.invoke(IPC_CHANNELS.experiencesProjects),
     list: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesList, input),

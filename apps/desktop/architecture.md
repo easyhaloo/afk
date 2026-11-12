@@ -39,6 +39,22 @@ applications. Launch receipts come from
 `~/.afk/workspaces/<workspace-hash>/work-item-runs.json`; configuration and
 Electron user data live in `~/.afk/config.yml` and `~/.afk/desktop/`.
 
+Learning governance uses `shared/learning-contract.ts` and
+`electron/services/learning-service.ts` through fixed `learning:*` IPC channels.
+Main derives visible projects from the work-item inventory and dispatches the
+existing learning system actions through a PluginService-owned runtime for each
+complete operation, including candidate preflight, mutation and postflight. Each
+runtime is disposed before its operation lease is released. Installation,
+removal, configuration and enablement changes cannot overlap these operations.
+The renderer receives bounded metadata and version-bound results, without
+credentials, raw evidence, database access or a generic system-action bridge.
+These calls share Runtime's candidate ledger and do not start a distillation
+Worker or a model session when listing candidates and jobs.
+Publication and reconciliation receipts remain visible when a subsequent list
+refresh fails; stale lists and prepared keys become unavailable. Reconciliation
+results are independent of the bounded candidate display page. Source withdrawal
+retains historical commit metadata while showing its current recovery status.
+
 The work-item inventory service has one required application dependency in
 `apps/desktop/electron/work-items/application-adapter.ts`:
 

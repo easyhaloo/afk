@@ -1,0 +1,28 @@
+.learning-view .learning-toolbar, .learning-view .learning-detail { padding: 16px; }
+.learning-view .learning-toolbar, .learning-view .learning-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+.learning-view .learning-toolbar .select-menu { min-width: min(100%, 280px); }
+.learning-view .learning-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.learning-view .settings-section { overflow: visible; min-width: 0; }
+.learning-view .settings-section > p { margin: 0; padding: 12px 16px; overflow-wrap: anywhere; }
+.learning-view button, .learning-view input { font: inherit; color: var(--afk-text); background: var(--afk-panel); border: 1px solid var(--afk-border); border-radius: var(--radius-md); }
+.learning-view button { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 8px 12px; cursor: pointer; }
+.learning-view button:disabled, .learning-view input:disabled { opacity: .5; cursor: default; }
+.learning-view button:focus-visible, .learning-view input:focus-visible { outline: 2px solid var(--afk-accent); outline-offset: 2px; }
+.learning-view button[aria-pressed="true"] { border-color: var(--afk-accent); background: color-mix(in srgb, var(--afk-accent) 10%, var(--afk-panel)); }
+.learning-view .learning-list { list-style: none; padding: 0; margin: 0; }
+.learning-view .learning-list > li { padding: 14px 16px; border-top: 1px solid var(--afk-border); overflow-wrap: anywhere; }
+.learning-view .learning-list > li:first-child { border-top: 0; }
+.learning-view .learning-list b, .learning-view .learning-list span, .learning-view small, .learning-view code { display: block; }
+.learning-view small, .learning-view .learning-note { color: var(--afk-muted); line-height: 1.6; }
+.learning-view code { font-size: .85em; overflow-wrap: anywhere; }
+.learning-view .learning-candidate { display: block; width: 100%; text-align: start; }
+.learning-view .learning-detail { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.learning-view label { display: flex; flex-direction: column; gap: 6px; }
+.learning-view input { padding: 8px 10px; width: 100%; box-sizing: border-box; }
+.learning-view .learning-preview { border-top: 1px solid var(--afk-border); padding-top: 12px; }
+.learning-view .learning-preview h2 { margin: 0; font-size: 1em; }
+.learning-view .learning-preview p { color: var(--afk-muted); line-height: 1.6; }
+.learning-view dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; }
+.learning-view dd { margin: 0; overflow-wrap: anywhere; }
+.learning-view dt { color: var(--afk-muted); }
+@media (max-width: 900px) { .learning-view .learning-columns { grid-template-columns: minmax(0, 1fr); gap: 0; } }

@@ -89,6 +89,15 @@ Only the first half is recoverable — a manifest records its `workItemId`, so t
 
 The managed execution path validates the work item and its execution manifest, runs implementation, records branch and run evidence, performs independent QA, and prepares or verifies the provider-backed change request. A successful run does not merge code. The final merge is human-controlled; the work item reaches its terminal completed state only after merge and reconciliation.
 
+### Execution readiness versus publication readiness
+
+Two kinds of backlog edge gate different stages:
+
+- `depends-on::` — the upstream item must be `done` before this item may **start**. The execution path refuses to claim an item whose execution dependency is unmet.
+- `depends-on-contract::` — the upstream item owns a contract this item builds against. It never blocks execution: a slice may be implemented against the frozen request/response shape and a local mock. It blocks **publication**: once QA passes, the run refuses to publish the change request while any contract dependency is not `done`.
+
+The split exists because a cross-repository dependency usually has a stable contract long before the upstream implementation lands. Without it, every downstream slice waits for an upstream merge it does not actually need, and the only workaround is deleting the dependency label — which loses the edge and invites merging unverified calls.
+
 The provider backlog, runtime state, run-event audit trail, and evidence are separate projections with different authority:
 
 - Provider state is authoritative for backlog and change-request status.

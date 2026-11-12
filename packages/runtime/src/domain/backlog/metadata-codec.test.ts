@@ -90,9 +90,27 @@ describe('backlog metadata codec', () => {
     expect(decodeBacklogRelations(labels, scope)).toEqual(relations);
   });
 
+  it('reads a contract dependency without making it an execution dependency', () => {
+    const relations = decodeBacklogRelations(['depends-on::9', 'depends-on-contract::12'], scope);
+    expect(relations.dependsOn).toEqual(['github:org/repo#9']);
+    expect(relations.contractDependencies).toEqual(['github:org/repo#12']);
+  });
+
+  it('round-trips a contract dependency', () => {
+    const relations = { dependsOn: [], contractDependencies: ['github:org/repo#12' as const] };
+    const labels = encodeBacklogRelations(relations);
+    expect(labels).toEqual(['depends-on-contract::github:org/repo#12']);
+    expect(decodeBacklogRelations(labels, scope)).toEqual(relations);
+  });
+
+  it('keeps contractDependencies absent when no such edge exists', () => {
+    expect(decodeBacklogRelations(['depends-on::9'], scope).contractDependencies).toBeUndefined();
+  });
+
   it('recognizes every label that carries a relationship edge', () => {
     expect(isBacklogRelationLabel('parent::1')).toBe(true);
     expect(isBacklogRelationLabel('base::1')).toBe(true);
+    expect(isBacklogRelationLabel('depends-on-contract::1')).toBe(true);
     expect(isBacklogRelationLabel('depends-on::1')).toBe(true);
     expect(isBacklogRelationLabel('depends_on::1')).toBe(true);
     expect(isBacklogRelationLabel('team::api')).toBe(false);

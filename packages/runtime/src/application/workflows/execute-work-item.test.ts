@@ -702,3 +702,20 @@ describe('executeWorkItem', () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe('contract dependencies', () => {
+  it('runs while the contract dependency is still unmerged, and refuses to publish', async () => {
+    const { deps, get, current, run } = await setup({ contractDependencies: ['github:acme/api#7'] });
+    get.mockImplementation(async (id: string) => (id === '42'
+      ? current
+      : { ...item, id, state: 'ready' as const }));
+
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(/contract dependencies unresolved/);
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('publishes once the contract dependency is done', async () => {
+    const { deps } = await setup({ contractDependencies: ['github:acme/api#7'] });
+    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
+  });
+});

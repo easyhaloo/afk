@@ -8,3 +8,5 @@ export { assessScheduleScope, computeScheduleScope, type ScheduleScope, type Sch
 export { inspectWorkspaceDisk, type WorkspaceDiskReport } from './application/workflows/workspace-disk.js';
 export { ExperienceStore, type ExperienceRecord, type ExperienceStatus, type RecordFailureInput, type ExperienceVerification, type ExperienceExchange, type ExperienceMetrics } from './application/learning/experience-store.js';
 export { experienceStorePath, experienceScope, verifyExperienceRun, verifyAdoptionRun, recordSuccessfulExperience } from './application/learning/runtime.js';
+export { reclaimWorkspaces, type ReclaimWorkspacesOptions, type WorkspaceReclamationReport } from './application/workflows/workspace-gc.js';
+export { loadReclamationConfig, type ReclamationConfig } from './infrastructure/config/manager.js';

@@ -68,6 +68,15 @@ export interface WorktreeConfig {
   baseDir: string;
 }
 
+// ─── Resource reclamation (ADR-0038) ─────────────────────────────────────────
+
+export interface ReclamationConfig {
+  /** Dependency pool eviction budget in bytes. */
+  dependencyPoolBudget: number;
+  /** Heartbeat age beyond which a workspace counts as dead for reclamation. */
+  workspaceReclaimGrace: number;
+}
+
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
@@ -115,6 +124,30 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
 const DEFAULT_WORKTREE: WorktreeConfig = {
   baseDir: join(resolveWorkspaceRoot(), 'worktrees'),
 };
+
+const DEFAULT_RECLAMATION: ReclamationConfig = {
+  dependencyPoolBudget: 8 * 1024 ** 3,
+  workspaceReclaimGrace: 24 * 60 * 60 * 1000,
+};
+
+/** Load the resource reclamation policy (ADR-0038). */
+export function loadReclamationConfig(
+  projectRoot = homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): ReclamationConfig {
+  const file = readProjectConfig(projectRoot);
+  const dependencyPoolBudget = configNumber(file.dependencyPoolBudget)
+    ?? parseIntEnv('AFK_DEPENDENCY_POOL_BUDGET', DEFAULT_RECLAMATION.dependencyPoolBudget, env);
+  if (typeof dependencyPoolBudget !== 'number' || !Number.isSafeInteger(dependencyPoolBudget) || dependencyPoolBudget < 0) {
+    throw new Error('dependencyPoolBudget must be a non-negative integer');
+  }
+  const workspaceReclaimGrace = configNumber(file.workspaceReclaimGrace)
+    ?? parseEnvMs('AFK_WORKSPACE_RECLAIM_GRACE', DEFAULT_RECLAMATION.workspaceReclaimGrace, env);
+  if (typeof workspaceReclaimGrace !== 'number' || !Number.isFinite(workspaceReclaimGrace) || workspaceReclaimGrace <= 0) {
+    throw new Error('workspaceReclaimGrace must be a positive duration');
+  }
+  return { dependencyPoolBudget, workspaceReclaimGrace };
+}
 
 // ─── Loaders ──────────────────────────────────────────────────────────────────
 

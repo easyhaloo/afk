@@ -26,7 +26,18 @@ export async function recoverRepositoryLease(claim: ExpiredClaim, dependencies: 
   tmux?: Pick<TmuxClient, 'sessionStatus' | 'firstPaneId' | 'killSession' | 'sessionOwnership'>;
   dead?: (claim: ExpiredClaim) => boolean;
 } = {}): Promise<boolean> {
-  if (!(dependencies.dead ?? deadOwner)(claim) || JSON.parse(claim.owner).recovery !== 'registered-tmux') return false;
+  if (!(dependencies.dead ?? deadOwner)(claim)) return false;
+  const owner = JSON.parse(claim.owner) as { recovery?: string };
+  if (owner.recovery !== 'registered-tmux') {
+    // A dead local owner with no registered resource claiming this generation
+    // is the dead-owner recovery the claim layer already advertises (ADR-0038).
+    // Registered sessions still require verified termination before recovery.
+    const registry = dependencies.registry ?? getAfkResourceRegistry();
+    return !registry.listAllActive().some(resource => {
+      const ids = resource.metadata.repositoryClaims;
+      return Array.isArray(ids) && ids.includes(claim.claimId);
+    });
+  }
   const registry = dependencies.registry ?? getAfkResourceRegistry();
   const tmux = dependencies.tmux ?? new TmuxClient();
   for (const resource of registry.listAllActive()) {

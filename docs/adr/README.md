@@ -24,7 +24,7 @@ for the workflow.
 | [ADR-0024](0024-prd-baseline-branches.md) | PRD baseline branches | accepted | 2026-11-05 |
 | [ADR-0027](0027-scheduler-timer-re-evaluation-and-wait-reasons.md) | The scheduler re-evaluates on a timer, and says why it waits | accepted | 2026-11-05 |
 | [ADR-0030](0030-host-capability-plugin.md) | Shared host and capability plugins | accepted | 2026-11-06 |
-| [ADR-0028](0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted | 2026-11-05 |
+| [ADR-0037](0028-rework-attempt-budget-per-cycle.md) | The QA rework budget belongs to a cycle, not to the item's life | accepted | 2026-11-05 |
 | [ADR-0029](0029-worktree-claim-lifetime.md) | A worktree claim belongs to the attempt that took it | accepted | 2026-11-05 |
 | [ADR-0030](0030-afk-worktrees-are-invisible.md) | AFK's own worktrees are invisible to the user's repository | accepted | 2026-11-05 |
 | [ADR-0029](0029-jumpserver-assets-through-jms.md) | JumpServer assets are opened through the jms CLI | accepted | 2026-11-05 |
@@ -34,3 +34,4 @@ for the workflow.
 | [ADR-0034](0034-transient-failure-is-not-permanent-failure.md) | A temporary failure is not a permanent failure | accepted | 2026-11-06 |
 | [ADR-0035](0035-rework-records-are-revisable.md) | A rework record is correctable | accepted | 2026-11-06 |
 | [ADR-0036](0036-schedule-scope.md) | A schedule is judged against the range it depends on | accepted | 2026-11-06 |
+| [ADR-0038](0038-workspace-resource-reclamation.md) | Workspace resource reclamation | accepted | 2026-11-12 |

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile, lstat, utimes, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -106,6 +106,29 @@ describe('DependencyPool', () => {
       await mkdir(join(path, 'node_modules'), { recursive: true });
       await symlink(root, join(path, 'node_modules/external'));
       expect(await pool.capture(path)).toBe(false);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('prune removes crashed staging directories but keeps unpinned cache entries under budget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-deps-prune-'));
+    try {
+      const path = await project(root, 'project');
+      const pool = new DependencyPool(join(root, 'pool'));
+      await mkdir(join(path, 'node_modules/lib'), { recursive: true });
+      await writeFile(join(path, 'node_modules/lib/index.js'), 'value');
+      await pool.capture(path);
+      const stale = new Date(Date.now() - 2 * 3_600_000);
+      const hex = 'a'.repeat(64);
+      const staging = join(pool.root, `${hex}.run.tmp`);
+      await mkdir(staging, { recursive: true });
+      await utimes(staging, stale, stale);
+      const fresh = join(pool.root, `${'b'.repeat(64)}.in-flight.tmp`);
+      await mkdir(fresh, { recursive: true });
+      await pool.prune();
+      const entries = await readdir(pool.root);
+      expect(entries.some(name => name === staging.split('/').pop())).toBe(false);
+      expect(entries.some(name => name === fresh.split('/').pop())).toBe(true);
+      expect(entries.filter(name => /^[a-f0-9]{64}$/.test(name))).toHaveLength(1);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

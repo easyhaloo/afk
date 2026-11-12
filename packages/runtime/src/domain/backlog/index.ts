@@ -223,6 +223,18 @@ export interface BacklogManagementProvider {
    * only reads has nowhere to write the baseline to.
    */
   applyPrdBaseline?(id: string, branch: string): Promise<void>;
+  /**
+   * Replace the body of an item.
+   *
+   * The body carries the contract the item stands for — its acceptance
+   * criteria above all — so a contract that changes is written into it. Only
+   * the body changes: the state, the tags, the relationships and the role of
+   * the item stay exactly where they are.
+   *
+   * It is optional for the same reason as the other edits: a provider that
+   * only reads has nowhere to write the body to.
+   */
+  applyDescription?(id: string, description: string): Promise<void>;
   initialize(): Promise<void>;
 }
 
@@ -271,6 +283,8 @@ export interface BacklogProvider {
   applyExecutionBase(id: string, baseBranch: string): Promise<void>;
   /** Record the branch a PRD accumulates its slices on. */
   applyPrdBaseline(id: string, branch: string): Promise<void>;
+  /** Replace the body of an item. */
+  applyDescription(id: string, description: string): Promise<void>;
   initialize(): Promise<void>;
   isRunnable(item: BacklogItem): Promise<boolean>;
   /**
@@ -516,6 +530,15 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   async applyPrdBaseline(id: string, branch: string): Promise<void> {
     const item = await this.get(id);
     item.description = applyPrdBaselineBranch(item.description ?? '', branch);
+    this.items.set(id, item);
+  }
+
+  /**
+   * Replace the body of an item. Only the body changes.
+   */
+  async applyDescription(id: string, description: string): Promise<void> {
+    const item = await this.get(id);
+    item.description = description;
     this.items.set(id, item);
   }
 

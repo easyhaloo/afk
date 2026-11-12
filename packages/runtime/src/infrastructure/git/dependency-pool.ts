@@ -176,6 +176,24 @@ export class DependencyPool {
     });
   }
 
+  /**
+   * Reclaim crashed staging directories and run the budget-bounded LRU
+   * eviction. Safe to call at any time; never touches pinned entries.
+   */
+  async prune(now = Date.now()): Promise<void> {
+    await this.locks.withExclusiveOperation('dependencies/pool/operations', async () => {
+      for (const name of await readdir(this.root).catch(() => [])) {
+        if (!/^[a-f0-9]{64}\..+\.tmp$/.test(name)) continue;
+        const staging = join(this.root, name);
+        const metadata = await lstat(staging).catch(() => undefined);
+        if (metadata && now - metadata.mtimeMs > 3_600_000) {
+          await rm(staging, { recursive: true, force: true });
+        }
+      }
+      await this.pruneUnlocked();
+    });
+  }
+
   private async paths(entry: string): Promise<string[]> {
     const value = JSON.parse(await readFile(join(entry, 'complete.json'), 'utf8'));
     if (!Array.isArray(value.paths) || value.paths.some((path: unknown) => typeof path !== 'string' || isAbsolute(path)

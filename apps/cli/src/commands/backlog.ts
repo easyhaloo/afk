@@ -56,6 +56,7 @@ import {
   resolveExpectedTargetBranch,
   removeBacklogTag,
   retryBacklog,
+  reviseBacklogDescription,
   reviseBacklogRework,
   showBacklog,
   type BacklogChangeProvider,
@@ -65,9 +66,11 @@ import {
 import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider, ReworkRecord } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { applyExecutionBaseBranch } from '@afk/runtime/domain/backlog/index';
+import { planDescriptionRevision, expectedManagedSections, type DescriptionRevisionPlan } from '@afk/runtime/domain/backlog/revision';
 import { parsePrdBaselineBranch, prdBaselineBranchName, prdIssueNumber } from '@afk/runtime/domain/backlog/prd-baseline';
 import { parseExecutionPlan } from '@afk/runtime/domain/backlog/execution-plan';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
+import { logger } from '@afk/runtime/infrastructure/io/index';
 import { handleCommandError, success, warning, detail } from '../output.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import {
@@ -163,7 +166,11 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
     // that already carries the change is the other one: it needs a person
     // too, but for a different reason — the baseline moved, so a person has
     // to decide whether it keeps the commits.
-    const verdict = change.mergeState === 'conflict'
+    // The verdict is about the merge gate, and only a change that is still
+    // open has one: "can be merged" on a change that has already landed
+    // describes a decision nobody has to make, and a conflict on a change
+    // that was closed long ago describes a merge nobody is going to do.
+    const verdict = change.state !== 'open' ? '' : change.mergeState === 'conflict'
       ? ' — CONFLICTS with the target branch, it cannot be merged as it stands'
       : change.mergeState === 'baseline_advanced'
         ? ' — the target branch already carries this change, a person has to decide what to do with the baseline'
@@ -1183,6 +1190,102 @@ export async function runBacklogReworkRevise(
 }
 
 /**
+ * Replace the body of a backlog item.
+ *
+ * The body of an item is where its contract is written down — the acceptance
+ * criteria above all. A contract that changed but was not written into the
+ * body is a contract the reviewer never heard of, so a revision writes the
+ * new body over the old one.
+ *
+ * Only the body is written. The state, the tags, the relationships and the
+ * role of the item stay exactly where they are: a revision of a contract is
+ * not a change of the work's position in the backlog.
+ */
+export async function runBacklogRevise(
+  provider: BacklogManagementProvider,
+  id: string,
+  description: string,
+  options: BacklogReviseOptions = {},
+): Promise<void> {
+  const kind = 'backlog.revise';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!description.trim()) {
+      throw new Error('empty backlog description. Provide --description-file or --description-stdin.');
+    }
+    if (options.reason !== undefined && !options.reason.trim()) {
+      throw new Error('reason must not be empty');
+    }
+    const current = await showBacklog(provider, id);
+    const plan = planDescriptionRevision(current.description ?? '', description, expectedManagedSections(current));
+    reportManagedBody(plan);
+    if (options.dryRun) {
+      // A dry run reports the body that would be written and the diff that
+      // would come of it, and writes nothing at all.
+      if (options.json) {
+        emitSuccess(kind, { dryRun: true, plan, description });
+        return;
+      }
+      success(`Dry run: backlog ${id} body would be revised`);
+      detail(`sections: ${describeSections(plan)}`);
+      process.stdout.write(`\n${description}\n`);
+      return;
+    }
+    const result = await reviseBacklogDescription(provider, id, description);
+    logger.info({ backlogId: id, ...(options.reason ? { reason: options.reason } : {}) }, 'backlog body revised');
+    if (options.json) {
+      emitSuccess(kind, {
+        plan: result.plan,
+        ...(options.reason ? { reason: options.reason } : {}),
+        item: result.item,
+      });
+      return;
+    }
+    success(`Backlog ${id} body revised`);
+    detail(`sections: ${describeSections(result.plan)}`);
+    if (options.reason) detail(`reason: ${options.reason}`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+/** The options one body revision carries. */
+export interface BacklogReviseOptions extends JsonMode {
+  /** Why the body is being revised. */
+  reason?: string;
+  /** Report the revision without writing anything. */
+  dryRun?: boolean;
+}
+
+/**
+ * Report the AFK-managed parts of a body that a revision puts at stake.
+ *
+ * A missing managed section is not rebuilt: the body is written as it was
+ * given, and what the revision risks is reported instead.
+ */
+function reportManagedBody(plan: DescriptionRevisionPlan): void {
+  if (plan.missingManagedSections.length) {
+    warning(`body has no AFK-managed section: ${plan.missingManagedSections.join(', ')}`);
+  }
+  if (plan.droppedManagedSections.length) {
+    warning(`this revision removes AFK-managed section(s): ${plan.droppedManagedSections.join(', ')}`);
+  }
+  if (plan.dropsRetryMarker) {
+    warning('this revision removes the retry marker that identifies the record');
+  }
+}
+
+/** The sections a revision changed, in one line. */
+function describeSections(plan: DescriptionRevisionPlan): string {
+  if (!plan.sections.length) return 'none';
+  return plan.sections.map(section => `${section.heading || '(preamble)'} ${section.status}`).join(', ');
+}
+
+/**
  * Who is correcting a rework record.
  *
  * A correction that does not say who made it is a silent overwrite, so the
@@ -1779,7 +1882,67 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'baseline')!, 'backlog.baseline', argv);
 
+  backlog.command('revise')
+    .description('Replace the body of a backlog item (its contract and acceptance criteria)')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--description-file <path>', 'Markdown body file to write')
+    .option('--description-stdin', 'Read the body from stdin')
+    .option('--reason <text>', 'Why the body is being revised')
+    .option('--dry-run', 'Report the revision without writing anything')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const description = await readRevisionBody(options);
+        await runBacklogRevise(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          description,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.revise', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'revise')!, 'backlog.revise', argv);
+
   backlog.action(() => backlog.outputHelp());
+}
+
+/**
+ * Read the body a revision writes.
+ *
+ * The body is long and full of characters a shell would eat, so it comes
+ * from a file or from stdin — and the caller says which. A revision never
+ * guesses: an empty body would silently replace the contract of an item with
+ * nothing at all.
+ */
+async function readRevisionBody(options: { descriptionFile?: string; descriptionStdin?: boolean }): Promise<string> {
+  const { readFile } = await import('node:fs/promises');
+  if (options.descriptionFile && options.descriptionStdin) {
+    throw new Error('pass either --description-file or --description-stdin, not both');
+  }
+  if (options.descriptionFile) {
+    try {
+      return await readFile(options.descriptionFile, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`description file not found: ${options.descriptionFile}`);
+      }
+      throw error;
+    }
+  }
+  if (options.descriptionStdin) {
+    if (process.stdin.isTTY) throw new Error('--description-stdin needs the body on stdin');
+    return readFile('/dev/stdin', 'utf8');
+  }
+  throw new Error('a body is required: pass --description-file <path> or --description-stdin');
 }
 
 async function readDescription(path?: string): Promise<string> {

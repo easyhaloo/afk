@@ -5,7 +5,8 @@ import { readSignal, readSignalSync } from '../io/signal.js';
 import { TIMEOUTS } from '../../shared/constants.js';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
-import { composerIsEmpty, codexModalInPane, supportsComposerState } from './agent-composer.js';
+import { agentModalInPane, composerIsEmpty, supportsComposerState } from './agent-composer.js';
+import type { AgentModal } from './agent-composer.js';
 import { logger } from '../io/logger.js';
 
 export { normalizeTmuxSessionName };
@@ -265,7 +266,13 @@ export class TmuxClient {
     }
   }
 
-  /** Wait for an interactive provider to be ready for input. */
+  /**
+   * Wait for an interactive provider to be ready for input.
+   *
+   * A modal that is up when the goal is about to be typed takes the keyboard
+   * with it: the goal would be typed into the modal and lost with it. AFK
+   * answers the modal instead of waiting the timeout out.
+   */
   async waitForPrompt(
     worktreeDir: string,
     timeout: number = 30000,
@@ -273,51 +280,77 @@ export class TmuxClient {
     session?: string,
     window: string = 'main',
   ): Promise<boolean> {
-    if (provider !== 'claude-code') {
-      if (!session) return true;
-      const start = Date.now();
-      let sessionSeen = false;
-      while (Date.now() - start < timeout) {
-        if (!sessionSeen && await this.hasSession(session)) sessionSeen = true;
-        if (sessionSeen) {
-          if (!supportsComposerState(provider)) {
-            await this.sleep(500);
-            return true;
-          }
-          // The session exists, but the TUI may still be starting up. Sending
-          // the goal before the composer exists loses the keystrokes.
-          const pane = await this.capturePane(session, window);
-          if (composerIsEmpty(provider, pane)) return true;
-          // A modal covers the composer, so the placeholder is hidden and the
-          // composer never looks ready. The modal holds the keyboard, so the
-          // goal would be typed into the modal and lost with it. Answer it:
-          // Enter dismisses it, and the composer comes back.
-          const open = codexModalInPane(provider, pane);
-          if (open) {
-            logger.info({ session, window, provider, modal: open }, 'agent TUI opened a modal before the goal was typed; answering it');
-            await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, 'C-m']);
-          }
-        }
-        await this.sleep(500);
-      }
-      // A provider whose composer marker AFK cannot read must not fail the
-      // run: the session exists and the goal can still be submitted.
-      return sessionSeen;
-    }
-
     const { promises: fs } = await import('fs');
     const { join } = await import('path');
     const statusPath = join(workspaceDataDirectory(worktreeDir), 'claude-status.json');
     const start = Date.now();
+    let sessionSeen = false;
+    let answered: string | undefined;
+
     while (Date.now() - start < timeout) {
-      try {
-        await fs.access(statusPath);
-        return true;
-      } catch {
-        await this.sleep(500);
+      if (session) {
+        if (!sessionSeen && await this.hasSession(session)) sessionSeen = true;
+        if (sessionSeen) {
+          const pane = await this.capturePane(session, window);
+          // A modal covers the composer, so the composer never looks ready
+          // and the keyboard belongs to the modal. Answer it first.
+          const modal = agentModalInPane(provider, pane);
+          if (modal) {
+            await this.answerModal(session, window, provider, modal, answered === modal.name);
+            answered = modal.name;
+            await this.sleep(500);
+            continue;
+          }
+          if (provider !== 'claude-code') {
+            if (!supportsComposerState(provider)) {
+              await this.sleep(500);
+              return true;
+            }
+            // The session exists, but the TUI may still be starting up.
+            // Sending the goal before the composer exists loses the keystrokes.
+            if (composerIsEmpty(provider, pane)) return true;
+          }
+        }
       }
+      if (provider === 'claude-code') {
+        // Claude Code's statusline renders only once its TUI is up; a modal
+        // in the way keeps it from rendering at all.
+        try {
+          await fs.access(statusPath);
+          return true;
+        } catch {
+          /* the statusline has not rendered yet */
+        }
+      }
+      await this.sleep(500);
     }
-    return false;
+    // A provider whose composer marker AFK cannot read must not fail the
+    // run: the session exists and the goal can still be submitted.
+    return provider === 'claude-code' ? false : sessionSeen;
+  }
+
+  /**
+   * Answer a modal the agent TUI opened.
+   *
+   * The first answer selects the option AFK wants and confirms it. A retry
+   * only confirms: the selection has already moved, and moving it again
+   * wraps around to the option AFK does not want — Claude Code's trust
+   * question highlights "No, exit" by default.
+   */
+  private async answerModal(
+    session: string,
+    window: string,
+    provider: string,
+    modal: AgentModal,
+    retry: boolean,
+  ): Promise<void> {
+    const target = `${normalizeTmuxSessionName(session)}:${window}`;
+    const keys = retry ? [modal.confirm] : [...modal.select, modal.confirm];
+    logger.info({ session, window, provider, modal: modal.name, keys }, 'agent TUI opened a modal; answering it');
+    for (const key of keys) {
+      await this.exec(['send-keys', '-t', target, key]);
+      await this.sleep(100);
+    }
   }
 
   /**
@@ -362,6 +395,19 @@ export class TmuxClient {
   }
 
   /**
+   * Type text into the agent's composer and submit it.
+   *
+   * Used to ask an agent that finished its turn to report its result: the
+   * goal is already in the TUI, only the report is missing.
+   */
+  async sendText(session: string, window: string, text: string): Promise<void> {
+    const target = `${normalizeTmuxSessionName(session)}:${window}`;
+    await this.exec(['send-keys', '-t', target, '--', text]);
+    await this.sleep(300);
+    await this.exec(['send-keys', '-t', target, 'C-m']);
+  }
+
+  /**
    * Make sure the goal actually reached the agent.
    *
    * An agent TUI can open a modal of its own — Codex shows "Update available"
@@ -376,22 +422,25 @@ export class TmuxClient {
     provider: string,
   ): Promise<void> {
     const target = `${normalizeTmuxSessionName(session)}:${window}`;
-    let modal: string | undefined;
+    let answered: string | undefined;
     for (let attempt = 0; attempt < PROMPT_SUBMIT_ATTEMPTS; attempt += 1) {
       await this.sleep(PROMPT_SUBMIT_POLL_MS);
       const pane = await this.capturePane(session, window);
       if (composerIsEmpty(provider, pane)) return;
-      const open = codexModalInPane(provider, pane);
-      if (open && open !== modal) {
-        modal = open;
-        logger.info({ session, window, provider, modal: open }, 'agent TUI opened a modal; accepting it');
+      // A modal takes the keyboard: the Enter that submits the goal is
+      // swallowed by it, and the modal has to be answered the way it wants.
+      const modal = agentModalInPane(provider, pane);
+      if (modal) {
+        await this.answerModal(session, window, provider, modal, answered === modal.name);
+        answered = modal.name;
+        continue;
       }
       await this.exec(['send-keys', '-t', target, 'C-m']);
     }
     const pane = await this.capturePane(session, window);
     if (composerIsEmpty(provider, pane)) return;
     logger.warn(
-      { session, window, provider, modal },
+      { session, window, provider, modal: answered },
       'agent composer still holds the goal after repeated submit attempts',
     );
   }

@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
+import { simpleGit } from 'simple-git';
 import { SignalSchema } from '../../../domain/schemas.js';
 import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
 
@@ -422,6 +423,143 @@ describe('LocalSandboxProvider', () => {
         code: 'AGENT_TURN_FAILED',
         message: 'stream disconnected before completion: error sending request',
       });
+    });
+  });
+
+  describe('a turn that ended without a result', () => {
+    /** A git worktree the agent can commit into. */
+    const gitWorktree = async (): Promise<string> => {
+      const dir = await mkdtemp(join(tmpdir(), 'afk-local-git-'));
+      const git = simpleGit(dir);
+      await git.init();
+      await git.addConfig('user.email', 'afk@example.test', false, 'local');
+      await git.addConfig('user.name', 'AFK Test', false, 'local');
+      await writeFile(join(dir, 'README.md'), 'base\n');
+      await git.add('README.md');
+      await git.commit('base');
+      return dir;
+    };
+
+    /** The watcher of a turn that ended, and of a turn that is still running. */
+    const endedTurn = () => ({ check: vi.fn(async () => ({ message: 'the agent finished its turn', ended: true })) });
+
+    const execution = (worktreePath: string, tmux: unknown, turnWatcher: unknown, nudgeGraceMs = 0) =>
+      new LocalAgentExecution({
+        worktreePath,
+        sessionName: 'ended-turn-session',
+        command: { argv: ['claude'], cwd: worktreePath },
+        generation: 1,
+        prompt: 'do the work',
+        signalType: 'goal_complete',
+        metadata: { provider: 'claude-code', transport: 'process' },
+        tmux: tmux as never,
+        paneIntervalMs: 1,
+        pollIntervalMs: 1,
+        turnWatcher: turnWatcher as never,
+        nudgeGraceMs,
+      });
+
+    const tmuxFake = (
+      sendText?: (session: string, window: string, text: string) => Promise<void>,
+      capturePane?: () => string,
+    ) => ({
+      hasSession: vi.fn(async () => true),
+      capturePane: vi.fn(async () => (capturePane ? capturePane() : 'the terminal is still open')),
+      killSession: vi.fn(async () => {}),
+      sendKeys: vi.fn(async () => {}),
+      sendPrompt: vi.fn(async () => {}),
+      sendText: vi.fn(sendText ?? (async () => {})),
+    });
+
+    it('fails with the missing-result code instead of waiting for the idle timeout', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-missing-'));
+      const tmux = tmuxFake();
+
+      const result = await execution(worktreePath, tmux, endedTurn()).waitForResult({
+        completionTimeoutMs: 600_000,
+        idleTimeoutMs: 20,
+      });
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toMatchObject({ code: 'MISSING_RESULT' });
+      expect(result.error?.code).not.toBe('AGENT_IDLE');
+    });
+
+    it('asks the agent to report its result before calling the run a failure', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-nudge-'));
+      const tmux = tmuxFake();
+
+      await execution(worktreePath, tmux, endedTurn()).waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(tmux.sendText).toHaveBeenCalledWith(
+        'ended-turn-session',
+        'main',
+        expect.stringContaining('.afk-signal.json'),
+      );
+    });
+
+    it('completes when the nudged agent reports its result', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-nudged-'));
+      const tmux = tmuxFake(async () => {
+        await writeFile(
+          join(worktreePath, '.afk-signal.json'),
+          JSON.stringify({
+            type: 'goal_complete',
+            timestamp: new Date().toISOString(),
+            kind: 'task',
+            summary: 'the agent reported its result after the nudge',
+          }),
+        );
+      });
+
+      const result = await execution(worktreePath, tmux, endedTurn()).waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('completed');
+    });
+
+    it('keeps the agent\'s commit and waits for a person when there is one', async () => {
+      const worktreePath = await gitWorktree();
+      const tmux = tmuxFake();
+      const agent = execution(worktreePath, tmux, endedTurn());
+      // The baseline is taken before the goal is sent; the agent commits
+      // after it.
+      await agent.sendPrompt();
+      await writeFile(join(worktreePath, 'work.md'), 'done\n');
+      await simpleGit(worktreePath).add('work.md');
+      await simpleGit(worktreePath).commit('the agent did the work');
+
+      const result = await agent.waitForResult({ completionTimeoutMs: 600_000 });
+
+      expect(result.status).toBe('blocked');
+      expect(result.error).toMatchObject({ code: 'MISSING_RESULT' });
+      const log = await simpleGit(worktreePath).log();
+      expect(log.all.map(commit => commit.message)).toContain('the agent did the work');
+      await expect(readFile(join(worktreePath, 'work.md'), 'utf8')).resolves.toBe('done\n');
+    });
+
+    it('keeps waiting while the agent\'s turn is still running', async () => {
+      const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-running-'));
+      let pane = 0;
+      const tmux = tmuxFake(undefined, () => `the agent is still working ${pane++}`);
+      const watcher = { check: vi.fn(async () => undefined) };
+
+      const agent = execution(worktreePath, tmux, watcher);
+      setTimeout(() => {
+        void writeFile(
+          join(worktreePath, '.afk-signal.json'),
+          JSON.stringify({
+            type: 'goal_complete',
+            timestamp: new Date().toISOString(),
+            kind: 'task',
+            summary: 'the agent kept working and finished',
+          }),
+        );
+      }, 60);
+
+      const result = await agent.waitForResult({ completionTimeoutMs: 600_000, idleTimeoutMs: 40 });
+
+      expect(result.status).toBe('completed');
+      expect(tmux.sendText).not.toHaveBeenCalled();
     });
   });
 });

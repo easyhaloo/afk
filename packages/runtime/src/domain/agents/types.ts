@@ -204,6 +204,44 @@ export interface ExecutionDiagnostics {
   };
 }
 
+/**
+ * What an agent run says about its turn.
+ *
+ * A turn is the agent's own unit of work: the model answers, runs tools, and
+ * answers again until it hands the turn back. Some agents say in their own
+ * records when a turn ended or died; AFK reads that record instead of
+ * waiting out the idle timeout on a turn that is already over.
+ */
+export interface AgentTurnVerdict {
+  /** Why the turn is over. */
+  message: string;
+  /** The provider's own error code, when it gave one. */
+  code?: string;
+  /**
+   * True when the turn ended normally: the agent is back at its prompt and
+   * will produce nothing more.
+   */
+  ended?: boolean;
+}
+
+/**
+ * Watches one agent session for a turn that ended or died.
+ *
+ * The watcher reads the agent's own record of the turn — Codex writes a
+ * rollout, Claude Code writes a transcript — because nothing about the
+ * process says so: the TUI stays open, waiting for the next prompt.
+ */
+export interface AgentTurnWatcher {
+  /**
+   * Look at the agent's record of the turn.
+   *
+   * Returns undefined while the turn is still running. `sinceMs` is when
+   * this attempt started: a record from an earlier attempt in the same
+   * worktree is not this attempt's business.
+   */
+  check(workingDirectory: string, sinceMs?: number): Promise<AgentTurnVerdict | undefined>;
+}
+
 export interface ExecutionResult {
   version: 1;
   runId: string;

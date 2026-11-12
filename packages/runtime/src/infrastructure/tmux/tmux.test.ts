@@ -216,10 +216,50 @@ describe('TmuxClient prompt submission', () => {
     vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
     const capture = vi.spyOn(client, 'capturePane').mockResolvedValue('› the goal is still typed');
 
-    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'claude-code');
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'opencode');
 
     expect(countEnterPresses(exec as never)).toBe(2);
     expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('presses Enter again while the Claude Code composer still holds the goal', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    vi.spyOn(client as any, 'waitForPrompt').mockResolvedValue(true);
+    const capture = vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce('❯ Implement the work item.')
+      .mockResolvedValue('❯ ');
+
+    await client.sendPrompt('/w', 'sess', 'main', 'do the work', 'goal_complete', 'claude-code');
+
+    // Two Enter presses submit the goal; the third one covers a goal that
+    // the first two did not deliver.
+    expect(countEnterPresses(exec as never)).toBe(3);
+    expect(capture).toHaveBeenCalled();
+  });
+
+  it('chooses to trust the folder when Claude Code asks before the goal is typed', async () => {
+    const client = new TmuxClient();
+    const exec = vi.spyOn(client as any, 'exec').mockResolvedValue('');
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    const capture = vi.spyOn(client, 'capturePane')
+      .mockResolvedValueOnce([
+        ' Claude Code\'ll be able to read, edit, and execute files here.',
+        ' ❯ No, exit',
+        '   Yes, I trust this folder',
+        ' Enter to confirm · Esc to cancel',
+      ].join('\n'))
+      .mockResolvedValue('❯ ');
+
+    await expect(client.waitForPrompt('/w', 1000, 'claude-code', 'claude-session')).resolves.toBe(false);
+
+    // The default option is "No, exit": Enter alone would close the agent.
+    expect(exec).toHaveBeenCalledWith(['send-keys', '-t', 'claude-session:main', 'Down']);
+    expect(exec).toHaveBeenCalledWith(['send-keys', '-t', 'claude-session:main', 'C-m']);
+    expect(countEnterPresses(exec as never)).toBe(1);
+    expect(capture).toHaveBeenCalled();
   });
 });
 
@@ -261,4 +301,110 @@ describe('ControlModeConnection pipe failures', () => {
       connection.close();
     }
   });
+});
+
+describe('TmuxClient Claude Code goal delivery', () => {
+  const hasTmux = (() => {
+    try { execFileSync('tmux', ['-V'], { stdio: 'pipe' }); return true; } catch { return false; }
+  })();
+
+  /**
+   * A stand-in for the Claude Code TUI.
+   *
+   * It asks whether the folder may be trusted — the dialog every fresh
+   * worktree gets — and it only takes a goal once the folder was trusted.
+   * Enter alone answers "No, exit" and closes the agent, which is what
+   * turned a run into zero output.
+   */
+  const fakeClaudeCode = `
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+// The worktree path comes from the caller, exactly like the statusline
+// command AFK configures: the path it was given, not the resolved one.
+const statusPath = path.join(
+  os.homedir(), '.afk', 'workspaces',
+  crypto.createHash('sha256').update(path.resolve(process.argv[2])).digest('hex'),
+  'claude-status.json',
+);
+const write = text => process.stdout.write(text);
+
+write([
+  '',
+  " Claude Code'll be able to read, edit, and execute files here.",
+  '',
+  ' ❯ No, exit',
+  '   Yes, I trust this folder',
+  '',
+  ' Enter to confirm · Esc to cancel',
+  '',
+  '',
+].join('\n'));
+
+let phase = 'dialog';
+let trusted = false;
+let buffer = '';
+
+process.stdin.setRawMode?.(true);
+process.stdin.resume();
+process.stdin.on('data', chunk => {
+  buffer += chunk.toString('utf8');
+  for (;;) {
+    if (phase === 'done') return;
+    if (phase === 'dialog') {
+      const down = buffer.indexOf('\u001b[B');
+      const enter = buffer.indexOf('\r');
+      if (down >= 0 && (enter < 0 || down < enter)) {
+        buffer = buffer.slice(down + 3);
+        trusted = true;
+        continue;
+      }
+      if (enter < 0) return;
+      buffer = buffer.slice(enter + 1);
+      if (!trusted) {
+        write('\nClaude Code exited without trusting the folder.\n');
+        process.exit(0);
+      }
+      phase = 'composer';
+      // A real TUI redraws itself: the question is gone from the screen.
+      write('\u001b[2J\u001b[H');
+      write('❯ ');
+      fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+      fs.writeFileSync(statusPath, JSON.stringify({ model: { display_name: 'fake-claude' }, session_id: 'fake' }));
+      continue;
+    }
+    const enter = buffer.indexOf('\r');
+    const typed = enter >= 0 ? buffer.slice(0, enter) : buffer;
+    if (typed) {
+      write(typed);
+      buffer = enter >= 0 ? buffer.slice(enter + 1) : '';
+    }
+    if (enter < 0) return;
+    phase = 'done';
+    write('\n⏺ the agent received the goal and did the work\n');
+    write('❯ ');
+  }
+});
+`;
+
+  it.skipIf(!hasTmux)('delivers the goal to an agent that asks whether to trust the folder', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'afk-claude-trust-'));
+    const script = join(worktree, 'fake-claude-code.cjs');
+    await writeFile(script, fakeClaudeCode);
+    const client = new TmuxClient();
+    const session = `afk-claude-trust-${Date.now()}`;
+    try {
+      await client.createSession(session, worktree, `${process.execPath} ${script} ${worktree}`);
+      await client.sendPrompt(worktree, session, 'main', 'Implement the work item.', 'goal_complete', 'claude-code');
+
+      const pane = await client.capturePane(session, 'main', { lines: 80, history: 300 });
+      // The agent answered the trust question and took the goal.
+      expect(pane).not.toContain('exited without trusting the folder');
+      expect(pane).toContain('the agent received the goal and did the work');
+    } finally {
+      await client.killSession(session).catch(() => undefined);
+    }
+  }, 30_000);
 });

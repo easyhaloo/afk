@@ -291,7 +291,10 @@ export class TmuxClient {
       if (session) {
         if (!sessionSeen && await this.hasSession(session)) sessionSeen = true;
         if (sessionSeen) {
-          const pane = await this.capturePane(session, window);
+          // The visible screen only: an answered dialog scrolls into tmux
+          // history, and matching its text there would make AFK answer the
+          // same question forever while the goal waits behind it.
+          const pane = await this.capturePane(session, window, { history: 0 });
           // A modal covers the composer, so the composer never looks ready
           // and the keyboard belongs to the modal. Answer it first.
           const modal = agentModalInPane(provider, pane);

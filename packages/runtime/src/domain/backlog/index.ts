@@ -119,6 +119,12 @@ export interface BacklogItem {
    */
   baseBacklogId?: string;
   dependsOn: string[];
+  /**
+   * Work items whose contract this item builds against. They never block
+   * execution — an item may be implemented against a frozen contract and a
+   * mock — but publication waits until they reach done.
+   */
+  contractDependencies?: string[];
   /** The lifecycle position. An organizational parent has none. */
   state?: BacklogState;
   /**

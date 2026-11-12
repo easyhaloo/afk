@@ -2,7 +2,8 @@ import { Command, InvalidArgumentError, Option } from 'commander';
 import { constants, promises as fs } from 'node:fs';
 import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState,
   candidateProposalSchema, candidateStateSchema, verifyAdoptionRun, verifyExperienceRun,
-  type LearningCandidate, type LearningJob, type LearningState, type LearningValidationResult } from '@afk/runtime/execution';
+  type LearningCandidate, type LearningJob, type LearningState, type LearningValidationResult,
+  type publishConfiguredKnowledge, type reconcileConfiguredKnowledge } from '@afk/runtime/execution';
 import type { PluginRuntime } from '@afk/runtime/plugin-sdk';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
@@ -87,6 +88,22 @@ export function registerExperienceCommands(program: Command, composition: Experi
     try { await operation(store); }
     finally { store.close(); }
   };
+  const withRuntime = async <Result>(failure: string, operation: (plugins: PluginRuntime) => Promise<Result>): Promise<Result> => {
+    const owned = !composition.pluginRuntime && !composition.createRuntime;
+    let plugins: PluginRuntime | undefined;
+    try {
+      plugins = composition.pluginRuntime ?? await (composition.createRuntime
+        ? composition.createRuntime() : import('../composition-root.js').then(module => module.createCliPluginRuntime()));
+      if (!plugins) throw new Error(failure);
+      return await operation(plugins);
+    } catch { throw new Error(failure); }
+    finally {
+      if (owned) {
+        try { await plugins?.dispose(); }
+        catch { throw new Error(failure); }
+      }
+    }
+  };
   const requireScopedRecord = (store: Store, id: string, scope: string): void => {
     const record = store.get(id, scope);
     if (!record || record.scope !== scope) throw new Error('Experience not found in scope');
@@ -159,27 +176,47 @@ export function registerExperienceCommands(program: Command, composition: Experi
     .requiredOption('--expected-version <version>', 'Current candidate version', parseVersion)
     .requiredOption('--checker <id>', 'Saved checker identity', parseText)
     .option('--json', 'Emit the validation result as JSON')
-    .action(async (candidateId, options) => {
-      const owned = !composition.pluginRuntime && !composition.createRuntime;
-      let plugins: PluginRuntime | undefined;
-      try {
-        const active = composition.pluginRuntime ?? await (composition.createRuntime
-          ? composition.createRuntime() : import('../composition-root.js').then(module => module.createCliPluginRuntime()));
-        if (!active) throw new Error('Learning validation unavailable');
-        plugins = active;
+    .action(async (candidateId, options) => withRuntime('Learning validation failed', async active => {
         const result = await active.dispatchSystemAction('learning.validate', { scope: options.scope, candidateId,
           expectedVersion: options.expectedVersion, checkerId: options.checker }) as LearningValidationResult;
         process.stdout.write(`${options.json ? JSON.stringify(result) : result.status === 'validated'
           ? `${result.candidateId} [validated] version ${result.validatedVersion}` : `[blocked] ${result.code}`}\n`);
         if (result.status === 'blocked') process.exitCode = 1;
-      } catch { throw new Error('Learning validation failed'); }
-      finally {
-        if (owned) {
-          try { await plugins?.dispose(); }
-          catch { throw new Error('Learning validation failed'); }
-        }
-      }
-    });
+    }));
+
+  const knowledge = experience.command('knowledge').description('Preview, publish and recover authorized knowledge');
+  knowledge.command('prepare')
+    .description('Prepare an immutable publication preview for a validated candidate')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--expected-version <version>', 'Current candidate version', parseVersion)
+    .option('--target <ref>', 'Authorized logical target reference', parseText)
+    .option('--json', 'Emit compact JSON')
+    .action(async (candidateId, options) => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.prepare', { scope: options.scope, candidateId,
+        expectedVersion: options.expectedVersion, ...(options.target ? { targetRef: options.target } : {}) });
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+    }));
+  knowledge.command('publish')
+    .description('Apply the exact prepared publication through its current authorization guards')
+    .argument('<key>', '64 lowercase hexadecimal publication key', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit compact JSON')
+    .action(async (key, options) => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.publish', { scope: options.scope, key }) as Awaited<ReturnType<typeof publishConfiguredKnowledge>>;
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      if (result.publication.phase !== 'committed') process.exitCode = 1;
+    }));
+  knowledge.command('reconcile')
+    .description('Recover publications and withdraw invalid assets in one project')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit compact JSON')
+    .action(async options => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.reconcile', { scope: options.scope }) as Awaited<ReturnType<typeof reconcileConfiguredKnowledge>>;
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      if (result.blocked.length || result.results.some(entry => entry.withdrawal?.status === 'rollback_blocked'
+        || (entry.publication.phase !== 'committed' && entry.withdrawal?.status !== 'withdrawn'))) process.exitCode = 1;
+    }));
 
   experience.command('list')
     .description('List experiences in one canonical project scope')

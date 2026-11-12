@@ -19,7 +19,7 @@ export { startPluginListener } from '../application/plugins/listener.js';
 export type { PluginListenerOptions } from '../application/plugins/listener.js';
 export { currentTriggerDeliveryId } from '../application/plugins/trigger-queue.js';
 export type { TriggerQueueOptions, TriggerDeliveryStatus } from '../application/plugins/trigger-queue.js';
-export { createPluginRunObserver, setPluginAuditArtifacts } from '../application/plugins/observability.js';
+export { createPluginRunObserver, setPluginAuditArtifacts, setPluginAuditEvidence } from '../application/plugins/observability.js';
 export type { PluginRunObserverOptions } from '../application/plugins/observability.js';
 export { createLocalEncryptedEvidenceStore } from '../infrastructure/observability/local-evidence-store.js';
 export { importManagedIssue, syncManagedIssue, managedIssueStateMapSchema } from '../application/plugins/managed-issues.js';

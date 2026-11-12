@@ -1,12 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PluginRuntime } from './runtime.js';
-import { createPluginRunObserver, setPluginAuditArtifacts } from './observability.js';
+import { createPluginRunObserver, setPluginAuditArtifacts, setPluginAuditEvidence } from './observability.js';
 import { createHash } from 'node:crypto';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
+import type { EvidenceRecord, EvidenceStoreProvider } from '../../plugin-sdk/capabilities.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -121,4 +122,140 @@ it('inherits explicit runtime artifact selection and captures real evidence acro
     }
     expect(await store.verify('r')).toMatchObject({ valid: true, lastSequence: 5 });
   } finally { await runtime.dispose(); await other.dispose(); }
+});
+
+async function evidenceFixture() {
+  const root = await mkdtemp(join(tmpdir(), 'selected-sdk-evidence-'));
+  roots.push(root);
+  const runtime = new PluginRuntime();
+  const evidence = await createLocalEncryptedEvidenceStore(root);
+  const records = new Map<string, Omit<EvidenceRecord, 'bytes'>>();
+  const selected: EvidenceStoreProvider = {
+    id: 'private', capabilities: { put: true, get: true, classify: false },
+    put: vi.fn(async (record, operation) => {
+      if (operation?.signal?.aborted) throw new Error('cancelled');
+      const { bytes, ...metadata } = record;
+      records.set(record.id, metadata);
+      await writeFile(join(root, record.id), bytes);
+      return { uri: `file://${join(root, record.id)}`, name: record.id };
+    }),
+    get: vi.fn(async (id, operation) => {
+      if (operation?.signal?.aborted) throw new Error('cancelled');
+      return { ...records.get(id)!, bytes: await readFile(join(root, id)) };
+    }),
+  };
+  const unused = { ...selected, id: 'unused', put: vi.fn(selected.put), get: vi.fn(selected.get) };
+  await runtime.load({
+    manifest: { id: 'evidence.fixture', version: '1.0.0', apiVersion: 1, provides: ['observe.evidence'], trusted: true },
+    activate(context) {
+      context.registerCapability('observe.evidence', 'private', selected);
+      context.registerCapability('observe.evidence', 'unused', unused);
+    },
+  });
+  const context = { traceId: 't', runId: 'r', workItemId: 'github:org/repo#1', profileId: 'local', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+  return { root, runtime, evidence, selected, unused, context };
+}
+
+it('consumes only explicitly selected SDK evidence after authoritative encrypted persistence', async () => {
+  const { root, runtime, evidence, selected, unused, context } = await evidenceFixture();
+  try {
+    const events = join(root, 'events');
+    await createPluginRunObserver(runtime, events).record(context, { kind: 'qa.passed' });
+    expect(selected.put).not.toHaveBeenCalled();
+    expect(unused.put).not.toHaveBeenCalled();
+    await createPluginRunObserver(runtime, events, {
+      evidenceStore: { provider: 'private', scopes: ['github:org/repo'], evidence },
+    }).record(context, { kind: 'qa.failed', summary: 'password=fixture-private' });
+    expect(selected.put).toHaveBeenCalledTimes(1);
+    expect(selected.get).toHaveBeenCalledTimes(1);
+    expect(unused.put).not.toHaveBeenCalled();
+    expect(unused.get).not.toHaveBeenCalled();
+    const received = vi.mocked(selected.put).mock.calls[0][0];
+    expect(received.id).toMatch(/^[a-f0-9]{64}$/);
+    expect(Buffer.from(received.bytes).toString()).not.toContain('fixture-private');
+    expect(JSON.parse(Buffer.from(received.bytes).toString())).toMatchObject({ kind: 'qa.failed' });
+    const history = [];
+    const audit = new JsonlEventStore({ root: events });
+    for await (const event of audit.read('r')) history.push(event);
+    const source = history.find(event => event.type === 'qa.failed')!;
+    const ref = source.evidence![0];
+    expect(await evidence.get(ref)).toEqual(Buffer.from(received.bytes));
+    expect(await readFile(join(root, '.afk', 'evidence', `${ref.sha256}.bin`))).not.toEqual(Buffer.from(received.bytes));
+    expect(history.at(-1)?.data).toMatchObject({ kind: 'effect.completed', effectKind: 'evidence.mirror', outcome: 'succeeded' });
+    expect(await audit.verify('r')).toMatchObject({ valid: true, lastSequence: 3 });
+  } finally { await runtime.dispose(); }
+});
+
+it('revokes a previously created observer when its explicit runtime selection changes', async () => {
+  const { root, runtime, evidence, selected, context } = await evidenceFixture();
+  try {
+    setPluginAuditEvidence(runtime, { provider: 'private', scopes: ['github:org/repo'], evidence });
+    const observer = createPluginRunObserver(runtime, join(root, 'events'));
+    setPluginAuditEvidence(runtime, { provider: 'unused', scopes: ['github:org/other'], evidence });
+    await observer.record(context, { kind: 'qa.passed' });
+    expect(selected.put).not.toHaveBeenCalled();
+    expect(selected.get).not.toHaveBeenCalled();
+    expect(await new JsonlEventStore({ root: join(root, 'events') }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 1 });
+  } finally { await runtime.dispose(); }
+});
+
+it('does not retain permission after its selected provider is unloaded', async () => {
+  const { root, runtime, evidence, selected, context } = await evidenceFixture();
+  try {
+    const observer = createPluginRunObserver(runtime, join(root, 'events'), { evidenceStore: { provider: 'private', scopes: ['github:org/repo'], evidence } });
+    await runtime.dispose('evidence.fixture');
+    await observer.record(context, { kind: 'qa.passed' });
+    expect(selected.put).not.toHaveBeenCalled();
+    expect(selected.get).not.toHaveBeenCalled();
+  } finally { await runtime.dispose(); }
+});
+
+it.each(['unloaded', 'ambiguous', 'unavailable'] as const)('preserves new observers local audit when accepted evidence selection becomes %s', async mode => {
+  const { root, runtime, evidence, selected, unused, context } = await evidenceFixture();
+  const onFailure = vi.fn(() => { throw new Error('synthetic-diagnostic-failure'); });
+  const events = join(root, 'events');
+  try {
+    setPluginAuditEvidence(runtime, { provider: 'private', scopes: ['github:org/repo'], evidence, onFailure });
+    const existing = createPluginRunObserver(runtime, events);
+    if (mode === 'unloaded') await runtime.dispose('evidence.fixture');
+    else if (mode === 'unavailable') Object.assign(selected, { capabilities: { put: true, get: false, classify: false } });
+    else await runtime.load({
+      manifest: { id: 'evidence.ambiguous', version: '1.0.0', apiVersion: 1, provides: ['observability.provider'], trusted: true },
+      activate: setup => setup.registerObservabilityProvider('private', { ...selected }),
+    });
+    await existing.record(context, { kind: 'qa.passed' });
+    await createPluginRunObserver(runtime, events).record(context, { kind: 'qa.passed' });
+    expect(onFailure).toHaveBeenCalledWith('provider_unavailable');
+    expect(selected.put).not.toHaveBeenCalled();
+    expect(selected.get).not.toHaveBeenCalled();
+    expect(unused.put).not.toHaveBeenCalled();
+    expect(unused.get).not.toHaveBeenCalled();
+    expect(await new JsonlEventStore({ root: events }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  } finally { await runtime.dispose(); }
+});
+
+it.each(['same', 'different'] as const)('handles %s specialized and generic EvidenceStore registrations explicitly', async identity => {
+  const { root, runtime, evidence, selected, context } = await evidenceFixture();
+  try {
+    await runtime.load({
+      manifest: { id: 'evidence.generic', version: '1.0.0', apiVersion: 1, provides: ['observability.provider'], trusted: true },
+      activate: setup => setup.registerObservabilityProvider('private', identity === 'same' ? selected : { ...selected }),
+    });
+    const create = () => createPluginRunObserver(runtime, join(root, 'events'), { evidenceStore: { provider: 'private', scopes: ['github:org/repo'], evidence } });
+    if (identity === 'different') expect(create).toThrow('ambiguous');
+    else {
+      await create().record(context, { kind: 'qa.passed' });
+      expect(selected.put).toHaveBeenCalledTimes(1);
+      expect(selected.get).toHaveBeenCalledTimes(1);
+    }
+  } finally { await runtime.dispose(); }
+});
+
+it('rejects a selected EvidenceStore without both put and get capabilities', async () => {
+  const { root, runtime, evidence, selected } = await evidenceFixture();
+  try {
+    Object.assign(selected, { capabilities: { put: true, get: false, classify: false } });
+    expect(() => createPluginRunObserver(runtime, root, { evidenceStore: { provider: 'private', scopes: ['github:org/repo'], evidence } })).toThrow('unavailable');
+    expect(selected.put).not.toHaveBeenCalled();
+  } finally { await runtime.dispose(); }
 });

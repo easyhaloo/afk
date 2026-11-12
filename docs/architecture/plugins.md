@@ -125,8 +125,8 @@ administrators and base image. Ordinary development containers do not acquire
 equivalent isolation; Podman/remote equivalents, skill/tool semantic validation
 and product wiring require separate qualification.
 
-Observability is an additional extension surface, not a thirteenth family in
-this matrix. `observability.provider`, `observe.event-store`, `observe.evidence`,
+Observability is the thirteenth extension family, supplementing the twelve in
+the table. `observability.provider`, `observe.event-store`, `observe.evidence`,
 `observe.tracing`, and `observe.metrics` expose event/evidence/tracer/metrics
 contracts. Enabled generic and specialized tracing, metrics and event-store
 providers are discovered automatically; registrations of the same object are
@@ -201,7 +201,7 @@ integrations:
 
 Optional `timeoutMs` is an integer from 1 to 60000. Only when root
 `integrations.evidence` selects an enabled, writable Artifact provider does the
-default runtime initialize persistent local encrypted storage and enable
+default runtime initialize persistent local encrypted storage for this Artifact bridge and enable
 `captureEvents: true`. Selection or initialization failure installs a required
 initialization guard that blocks managed execution. Without this selection,
 the bridge does not automatically capture event evidence.
@@ -217,6 +217,34 @@ SDK consumers can select the same bridge with `createPluginRunObserver`,
 `setPluginAuditArtifacts` and `PluginRunObserverOptions`, using
 `createLocalEncryptedEvidenceStore` for persistent local evidence. Key initialization
 is locked and reuses an existing key; text redaction preserves restricted status.
+
+SDK `EvidenceStoreProvider` has a separate explicit root selection without changing
+the ArtifactSink export above:
+
+```yaml
+evidenceStore:
+  provider: private
+  scopes: ["github:org/repo"]
+  timeoutMs: 2000
+  maxBytes: 65536
+```
+
+The registered name must resolve to an enabled `observe.evidence` or
+`observability.provider` supporting both `put/get`. Scopes are 1..32 distinct
+canonical projects without wildcards. Timeout is 1..60000 ms, default 2000;
+the byte limit is 1..1048576, default 65536. Unknown fields are rejected.
+This outlet is off by default; invalid selection installs a required init guard.
+Only new redacted event summaries for selected projects are mirrored: persist
+encrypted local evidence and the event first, then put/get and validate identity
+and hashes. Unselected stores receive no bytes through this outlet. Remote reads
+never replace local content; `evidence.mirror` receipts contain safe outcomes.
+Failures, cancellation and timeouts preserve local authority.
+An accepted saved selection becoming unavailable at runtime stops mirroring while
+new observers still record locally; explicitly invalid selections remain rejected.
+Configuration takes effect in a new Runtime, without hot reload, durable retries or remote-copy
+withdrawal. Cancellation cannot kill a trusted in-process plugin ignoring its
+signal. SDK entry points are `setPluginAuditEvidence` and
+`PluginRunObserverOptions.evidenceStore`; both export selections are independent.
 
 ## Standard manifest and API v1
 

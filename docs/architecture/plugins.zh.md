@@ -107,7 +107,7 @@ Docker 适配器另有内部冻结执行原语：先捕获受限输入树，以�
 该原语信任宿主 runtime、daemon、管理员与基础镜像；普通开发容器不自动获得同等隔离，
 Podman/远程等价实现、技能工具语义验证及产品接线仍需各自验收。
 
-Observability 是额外扩展面，不计入上表十二类：`observability.provider`、
+Observability 作为第十三类扩展面补充上表十二类：`observability.provider`、
 `observe.event-store`、`observe.evidence`、`observe.tracing`、`observe.metrics`
 提供 event/evidence/tracer/metrics 契约。已启用的通用及专用 tracing、metrics、
 event-store Provider 自动发现；同一对象的重复注册会去重。本地 JSONL 始终是审计权威。
@@ -168,7 +168,7 @@ integrations:
 ```
 
 可选 `timeoutMs` 为 1..60000 整数。仅当根配置 `integrations.evidence` 选择已启用、
-可写的 Artifact Provider 时，默认 Runtime 才初始化持久化本地加密证据存储并启用
+可写的 Artifact Provider 时，默认 Runtime 才为该 Artifact bridge 初始化持久化本地加密证据存储并启用
 `captureEvents: true`。选择或初始化失败会安装必需的初始化闸门，阻止受管执行；
 未选择时，此 bridge 不自动采集事件证据。审计 bridge 先在本地保存 QA、发布、失败和运行结束事件
 的有界摘要，源审计追加后上传引用的证据；校验内容 hash、拒绝 restricted 证据、对
@@ -179,6 +179,26 @@ integrations:
 `setPluginAuditArtifacts`、`PluginRunObserverOptions` 选择同一 bridge，
 `createLocalEncryptedEvidenceStore` 提供持久本地证据；key 初始化加锁并复用已有 key，
 文本脱敏保留 restricted 状态。
+
+SDK `EvidenceStoreProvider` 使用独立根配置显式选择，不改变以上 ArtifactSink 出口：
+
+```yaml
+evidenceStore:
+  provider: private
+  scopes: ["github:org/repo"]
+  timeoutMs: 2000
+  maxBytes: 65536
+```
+
+注册名须对应已启用且支持 `put/get` 的 `observe.evidence` 或 `observability.provider`。
+scope 为 1..32 个互异规范项目，禁止通配符；超时为 1..60000 ms，字节上限为 1..1048576，
+默认分别为 2000 和 65536。未知字段拒绝。默认关闭，选择失败通过 required 初始化闸门阻止执行。
+只为显式项目镜像新事件脱敏摘要：本地加密证据和事件先持久化，再 put/get 并核对身份与 hash。
+未选 store 不收到该出口字节，远端回读不替换本地正文；`evidence.mirror` 回执记录安全结果。
+失败、超时和取消保留本地权威。配置在新 Runtime 生效，无热重载、持久重试或远端副本撤回；
+已接受的保存选择在运行期失效时停止镜像，新建 observer 仍可本地记录；显式无效选择继续拒绝。
+取消不能强杀忽略 signal 的进程内可信插件。SDK 入口为 `setPluginAuditEvidence` 与
+`PluginRunObserverOptions.evidenceStore`，两个出口可独立启用。
 
 ## 标准 manifest 与 API v1
 

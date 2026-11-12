@@ -5,13 +5,18 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CandidateStore } from '../../packages/runtime/src/application/learning/candidate-store.js';
 import { buildEvidencePack } from '../../packages/runtime/src/application/learning/evidence.js';
-import { knowledgeFixture } from '../../packages/runtime/src/application/learning/knowledge.fixture.spec.js';
+import { knowledgeFixture, page, wikiScript } from '../../packages/runtime/src/application/learning/knowledge.fixture.spec.js';
+import { createLessonPublicationFixture } from '../../packages/runtime/src/application/learning/lesson-publication.fixture.spec.js';
 import { JsonlEventStore } from '../../packages/runtime/src/infrastructure/observability/jsonl-event-store.js';
 
 const execute = promisify(execFile);
 const binary = resolve('apps/cli/dist/index.js');
 const fixtures: ReturnType<typeof knowledgeFixture>[] = [];
-afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup(); });
+const lessonCleanups: Array<() => void> = [];
+afterEach(() => {
+  for (const fixture of fixtures.splice(0)) fixture.cleanup();
+  for (const cleanup of lessonCleanups.splice(0).reverse()) cleanup();
+});
 
 async function setup() {
   const fixture = knowledgeFixture();
@@ -122,6 +127,53 @@ async function setup() {
 }
 
 describe('built CLI installed learning validation checker', () => {
+  it('prepares, publishes, recalls and withdraws a QA-validated lesson through the built CLI', async () => {
+    const current = await createLessonPublicationFixture({ registerCleanup: cleanup => lessonCleanups.push(cleanup),
+      versions: ['fixture-v1'], includeFact: true });
+    await fs.writeFile(join(current.vault, 'template.md'), page('{{title}}', '{{knowledge}}'));
+    await fs.writeFile(join(current.vault, 'index.md'), page('Index', '[[backlinks]]'));
+    await fs.writeFile(join(current.vault, 'backlinks.md'), page('Backlinks', '[[index]]'));
+    current.store.close();
+    const home = join(current.root, 'home');
+    const directory = join(home, '.afk', 'learning');
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    const ledgerFile = join(directory, 'candidates.sqlite');
+    await fs.copyFile(current.file, ledgerFile);
+    const env = { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config'), PATH: process.env.PATH,
+      AFK_LOG_DIR: join(current.root, 'logs'), NO_COLOR: '1', LANG: 'C', LC_ALL: 'C' };
+    const command = (...args: string[]) => execute(process.execPath, [binary, ...args], { cwd: current.root, env, timeout: 30_000 });
+    const configuration = join(current.root, 'learning-plugin-config.json');
+    await fs.writeFile(configuration, JSON.stringify({ enabled: true, dailyCalls: 0,
+      validation: { configurationFile: current.configurationFile }, knowledge: { wikiScript, grants: [current.authorizationFile] } }), { mode: 0o600 });
+    await command('plugin', 'configure', 'learning.distiller', '--builtin', '--file', configuration);
+    const prepared = JSON.parse((await command('experience', 'knowledge', 'prepare', current.candidate.id,
+      '--scope', current.scope, '--expected-version', String(current.candidate.version), '--json')).stdout);
+    expect(prepared).toMatchObject({ phase: 'prepared', candidateId: current.candidate.id });
+    const published = JSON.parse((await command('experience', 'knowledge', 'publish', prepared.key, '--scope', current.scope, '--json')).stdout);
+    expect(published).toMatchObject({ publication: { phase: 'committed', key: prepared.key } });
+    const target = join(current.vault, 'Retry.md');
+    expect(await fs.readFile(target, 'utf8')).toContain(current.revision);
+    const input = join(current.root, 'recall.json');
+    const recall = async (version: string) => {
+      await fs.writeFile(input, JSON.stringify({ scope: current.scope, prompt: 'duplicate retry', applicability: { version } }));
+      return JSON.parse((await command('plugin', 'invoke', 'context.provider', 'context.knowledge', 'gather', '--input', input, '--json')).stdout);
+    };
+    expect(await recall('fixture-v1')).toHaveLength(1);
+    expect(await recall('fixture-v2')).toEqual([]);
+    await current.append('independent-qa', [{ kind: 'qa.failed', reason: 'Retry fix regressed' }]);
+    expect(await recall('fixture-v1')).toEqual([]);
+    const reconcile = async () => JSON.parse((await command('experience', 'knowledge', 'reconcile', '--scope', current.scope, '--json')).stdout);
+    expect(await reconcile()).toMatchObject({ blocked: [], results: [{ withdrawal: { status: 'withdrawn' } }] });
+    expect(await fs.readFile(target, 'utf8')).toContain('knowledge_status: revoked');
+    expect(await reconcile()).toMatchObject({ blocked: [] });
+    const ledger = new CandidateStore({ file: ledgerFile });
+    try {
+      expect(ledger.getCandidate(current.candidate.id)?.state).toBe('conflict');
+      expect(ledger.getCandidate(current.candidateIds[1])?.state).toBe('candidate');
+      expect(ledger.getRequest(current.source.key)?.blockedReason).toBeUndefined();
+    } finally { ledger.close(); }
+  }, 60_000);
+
   it('rejects scope/version mismatches and persists a real independent checker receipt through the built CLI', async () => {
     const fixture = await setup();
     for (const [options, code] of [

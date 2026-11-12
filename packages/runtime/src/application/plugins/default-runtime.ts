@@ -16,8 +16,9 @@ import { assembleProviders } from '../../infrastructure/provider/assembly.js';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { importManagedIssue, syncManagedIssue, managedIssueStateMapSchema } from './managed-issues.js';
 import { CONTEXT_MAX_CHARS, writeReferenceContext } from '../workflows/context-file.js';
-import { setPluginAuditArtifacts } from './observability.js';
+import { setPluginAuditArtifacts, setPluginAuditEvidence } from './observability.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
+import { evidenceStoreSelectionSchema, type EvidenceMirrorOptions } from '../../infrastructure/observability/run-observer-factory.js';
 import { currentTriggerDeliveryId } from './trigger-queue.js';
 
 const identifier = z.string().min(1);
@@ -41,12 +42,21 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
     runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });
     throw new Error('Audit evidence storage could not be initialized');
   });
+  const localEvidence: EvidenceMirrorOptions['evidence'] = {
+    async get(ref) { return (await initializeAuditEvidence()).get(ref); },
+    async put(input) { return (await initializeAuditEvidence()).put(input); },
+  };
   let configuration: PluginConfiguration;
   try { configuration = readPluginConfiguration(homeDir); }
   catch (error) {
     configuration = { plugins: [] };
     invalidSettings.push('Plugin configuration could not be validated');
     runtime.recordDiagnostic({ severity: 'error', code: 'config.invalid', message: error instanceof Error ? error.message : 'Invalid plugin configuration' });
+  }
+  const evidenceSelection = configuration.evidenceStore === undefined ? undefined : evidenceStoreSelectionSchema.safeParse(configuration.evidenceStore);
+  if (evidenceSelection && !evidenceSelection.success) {
+    invalidSettings.push('Evidence store selection could not be validated');
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-store-invalid', message: 'Evidence store selection could not be validated' });
   }
   const builtins: import('./runtime.js').Plugin[] = [
     {
@@ -210,13 +220,25 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
   await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });
   if (auditArtifacts) {
     try {
-      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: {
-        async get(ref) { return (await initializeAuditEvidence()).get(ref); },
-        async put(input) { return (await initializeAuditEvidence()).put(input); },
-      }, captureEvents: true });
+      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: localEvidence, captureEvents: true });
     } catch {
       invalidSettings.push('Audit evidence storage could not be initialized');
       runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });
+    }
+  }
+  if (evidenceSelection?.success) {
+    try {
+      let reported = false;
+      setPluginAuditEvidence(runtime, { ...evidenceSelection.data, evidence: localEvidence,
+        onFailure() {
+          if (reported) return;
+          reported = true;
+          runtime.recordDiagnostic({ severity: 'warning', code: 'evidence.mirror-failed', message: 'Evidence mirroring failed; local audit remains authoritative' });
+        },
+      });
+    } catch {
+      invalidSettings.push('Evidence store selection is unavailable');
+      runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-store-invalid', message: 'Evidence store selection is unavailable' });
     }
   }
   if (invalidSettings.length) await runtime.activate({

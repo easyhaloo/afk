@@ -61,6 +61,131 @@ async function installedCredentialFixture(plugins: unknown[], requires = ['conte
   return { runtime, credential: await import(pathToFileURL(entry).href) };
 }
 
+async function installedEvidenceFixture(selection: unknown, artifacts = false, disabled = false) {
+  const { homeDir, workspaceRoot } = await fixture();
+  const directory = join(homeDir, '.afk', 'plugins', 'evidence.fixture', 'dist');
+  const remote = join(workspaceRoot, 'evidence-mirror');
+  const events = join(workspaceRoot, 'events');
+  await mkdir(directory, { recursive: true });
+  await mkdir(remote);
+  const entry = join(directory, 'index.js');
+  await writeFile(entry, `import { readFile, writeFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    export const calls = [];
+    const records = new Map();
+    export default {
+      manifest: { id: 'evidence.fixture', version: '1.0.0', apiVersion: 1, provides: ['observe.evidence'], trusted: true },
+      activate(context) {
+        context.registerCapability('observe.evidence', 'private', {
+          id: 'private', capabilities: { put: true, get: true, classify: false },
+          async put(record, operation) {
+            operation.signal.throwIfAborted();
+            const source = JSON.parse(Buffer.from(record.bytes).toString());
+            const history = await readFile(join(${JSON.stringify(events)}, Buffer.from('evidence-run').toString('base64url') + '.jsonl'), 'utf8');
+            if (!history.split('\\n').filter(Boolean).some(line => JSON.parse(line).id === source.sourceEventId)) throw new Error('source not durable');
+            const { bytes, ...metadata } = record;
+            records.set(record.id, metadata);
+            await writeFile(join(${JSON.stringify(remote)}, record.id), bytes);
+            calls.push({ operation: 'put', id: record.id });
+            return { name: record.id, uri: 'file://' + join(${JSON.stringify(remote)}, record.id) };
+          },
+          async get(id, operation) {
+            operation.signal.throwIfAborted();
+            calls.push({ operation: 'get', id });
+            return { ...records.get(id), bytes: await readFile(join(${JSON.stringify(remote)}, id)) };
+          }
+        });
+      }
+    };`);
+  await writeFile(join(homeDir, '.afk', 'plugins.yml'), JSON.stringify({
+    plugins: [{ id: 'evidence.fixture', enabled: !disabled }],
+    ...(selection === undefined ? {} : { evidenceStore: selection }),
+    ...(artifacts ? { integrations: { evidence: { provider: 'test-report-local' } } } : {}),
+  }));
+  const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+  runtimes.push(runtime);
+  const plugin = await import(pathToFileURL(entry).href);
+  const context = { traceId: 'evidence-trace', runId: 'evidence-run', workItemId: 'github:org/repo#1', profileId: 'test', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+  return { homeDir, workspaceRoot, events, remote, runtime, plugin, context };
+}
+
+it('selects an installed SDK EvidenceStore from saved configuration without an ArtifactSink selection', async () => {
+  const { homeDir, events, remote, runtime, plugin, context } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] });
+  await expect(lstat(join(homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await createPluginRunObserver(runtime, events).record(context, { kind: 'qa.failed', summary: 'password=configuration-private' });
+  expect(plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get']);
+  const mirrored = await readFile(join(remote, plugin.calls[0].id));
+  expect(mirrored.toString()).not.toContain('configuration-private');
+  const audit = new JsonlEventStore({ root: events });
+  const history = [];
+  for await (const event of audit.read(context.runId)) history.push(event);
+  const ref = history[0].evidence![0];
+  expect(await (await createLocalEncryptedEvidenceStore(homeDir)).get(ref)).toEqual(mirrored);
+  expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'succeeded' });
+  expect(await audit.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+});
+
+it('keeps registered but unselected SDK stores private and preserves ArtifactSink evidence configuration', async () => {
+  const unselected = await installedEvidenceFixture(undefined);
+  await createPluginRunObserver(unselected.runtime, unselected.events).record(unselected.context, { kind: 'qa.passed' });
+  expect(unselected.plugin.calls).toEqual([]);
+  expect(await readdir(unselected.remote)).toEqual([]);
+  await expect(lstat(join(unselected.homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+  const selected = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] }, true);
+  await createPluginRunObserver(selected.runtime, selected.events).record(selected.context, { kind: 'qa.passed' });
+  expect(selected.plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get']);
+  const history = [];
+  for await (const event of new JsonlEventStore({ root: selected.events }).read(selected.context.runId)) history.push(event);
+  expect(history[0].evidence).toHaveLength(1);
+  expect(history.filter(event => event.data.kind === 'effect.completed').map(event => event.data)).toEqual([
+    expect.objectContaining({ effectKind: 'artifact.upload', outcome: 'succeeded' }),
+    expect.objectContaining({ effectKind: 'evidence.mirror', outcome: 'succeeded' }),
+  ]);
+});
+
+it.each([false, true])('blocks an unavailable saved EvidenceStore selection with disabled=%s', async disabled => {
+  const { runtime, homeDir, workspaceRoot } = await installedEvidenceFixture({ provider: disabled ? 'private' : 'missing-private', scopes: ['github:org/repo'] }, false, disabled);
+  const lifecycle = new LifecycleDispatcher(runtime.getLifecycleModules());
+  expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ code: 'config.evidence-store-invalid' }));
+  await expect(lifecycle.run('init', { iid: 1, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow('Evidence store selection is unavailable');
+  await expect(lstat(join(homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it('reports one safe runtime diagnostic for repeated SDK failures while preserving local evidence', async () => {
+  const { runtime, events, context } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] });
+  const provider = runtime.getProvider<import('../../plugin-sdk/capabilities.js').EvidenceStoreProvider>('observe.evidence', 'private')!;
+  provider.put = async () => { throw new Error('token=private-provider-error'); };
+  const observer = createPluginRunObserver(runtime, events);
+  await observer.record(context, { kind: 'qa.passed' });
+  await observer.record(context, { kind: 'qa.passed' });
+  const diagnostics = await runtime.diagnostics();
+  expect(diagnostics.filter(entry => entry.code === 'evidence.mirror-failed')).toHaveLength(1);
+  expect(JSON.stringify(diagnostics)).not.toContain('private-provider-error');
+  const history: RunEvent[] = [];
+  for await (const event of new JsonlEventStore({ root: events }).read(context.runId)) history.push(event);
+  expect(history.filter(event => event.data.kind === 'qa.passed').every(event => event.evidence?.[0]?.uri.startsWith('evidence://'))).toBe(true);
+  expect(history.filter(event => event.data.kind === 'effect.completed').map(event => event.data)).toEqual([
+    expect.objectContaining({ effectKind: 'evidence.mirror', outcome: 'failed' }),
+    expect.objectContaining({ effectKind: 'evidence.mirror', outcome: 'failed' }),
+  ]);
+  expect(JSON.stringify(history)).not.toContain('private-provider-error');
+});
+
+it.each([
+  null, {}, { provider: 'private' }, { provider: 'private', scopes: [] },
+  { provider: 'private', scopes: ['github:org/repo', 'github:org/repo'] },
+  { provider: 'private', scopes: ['*'] }, { provider: 'private', scopes: ['github:org/repo#1'] },
+  { provider: 'private', scopes: ['github:org/repo'], maxBytes: 1024 * 1024 + 1 },
+  { provider: 'private', scopes: ['github:org/repo'], timeoutMs: 0 },
+  { provider: 'private', scopes: ['github:org/repo'], unknown: 'private-config-value' },
+])('rejects invalid explicit EvidenceStore selection without revealing configuration %#', async selection => {
+  const { runtime, context, lifecycle, homeDir } = await fixture({ evidenceStore: selection });
+  expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ code: 'config.evidence-store-invalid' }));
+  expect(JSON.stringify(await runtime.diagnostics())).not.toContain('private-config-value');
+  await expect(lifecycle.run('init', { iid: context.iid, projectName: undefined, baseBranch: context.baseBranch, params: {}, originalCwd: context.worktreePath })).rejects.toThrow('Evidence store selection');
+  await expect(lstat(join(homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 describe('createDefaultPluginRuntime', () => {
   it('keeps inventory and artifact diagnostics read-only when the home does not exist', async () => {
     const root = await mkdtemp(join(tmpdir(), 'default-plugins-readonly-'));
@@ -164,7 +289,7 @@ describe('createDefaultPluginRuntime', () => {
   it('blocks configured audit capture when its artifact provider cannot write', async () => {
     const { runtime, lifecycle } = await fixture({ integrations: { evidence: { provider: 'missing-artifacts' } } });
     expect(await runtime.diagnostics()).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'config.evidence-invalid' })]));
-    await expect(lifecycle.run('init', { iid: 42, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow('Audit evidence');
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow('Audit evidence');
   });
 
   it('propagates durable delivery identity to managed execution and deduplicates HTTP redelivery', async () => {

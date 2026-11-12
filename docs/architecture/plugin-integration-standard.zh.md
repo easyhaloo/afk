@@ -79,6 +79,9 @@ Provider `health` 状态为 `ok/degraded/unavailable`，`doctor` 返回 `check/o
 
 公共调用 Envelope：
 
+`context.provider/gather` 在 `scope/prompt/limit?` 外接受可选的 `applicability` 与 `target`；沿用共享上下文验证，版本、环境、项目、revision 和条件必须通过校验后原样交给 Provider。省略条件不放宽知识资产自身的适用性要求。
+Envelope 字段必须为自身数据属性；Context 的上述顶层字段拒绝继承属性和 getter/setter，在联合协议解析前检查。合法的 null-prototype 数据对象仍可调用。
+
 ```json
 {
   "capability": "verification.provider",
@@ -189,8 +192,8 @@ interval timer 不补跑停机时段。
 ## 7. Artifact 与审计证据协议
 
 `integrations.evidence` 为 `{provider,timeoutMs?}`，超时须为 1..60000 整数。
-仅配置根级 `integrations.evidence` 并选择已启用、可写的 Artifact Provider 时，默认
-Runtime 才初始化持久化本地加密证据存储并启用 `captureEvents: true`；未配置时不自动采集。
+根级 `integrations.evidence` 选择已启用、可写的 Artifact Provider 时，默认
+Runtime 初始化持久化本地加密证据存储并启用该出口的 `captureEvents: true`；未配置此出口时不自动为它采集。
 选择或初始化失败必须通过必需的初始化闸门阻止受管执行。本地 key 以互斥方式
 初始化并复用已有 key，不能因重启或并发丢失解密能力。SDK 提供
 `createLocalEncryptedEvidenceStore`、`createPluginRunObserver`、`setPluginAuditArtifacts`
@@ -202,6 +205,20 @@ QA、发布、失败、运行结束事件先生成有界脱敏摘要并存本地
 `artifact.upload` 的 `effect.completed` 关联源事件/序号、本地 URI/hash、远端引用及成功/
 失败原因；其回执不递归上传。上传异常/超时不替代本地审计，本地追加失败仍阻止操作。
 既有 after-agent 报告 hook 与此独立。
+
+SDK EvidenceStore 使用独立根配置，不复用 ArtifactSink 选择：
+
+```json
+{"evidenceStore":{"provider":"private","scopes":["github:org/repo"],"timeoutMs":2000,"maxBytes":65536}}
+```
+
+- `provider` 指向已启用、同时支持 `put/get` 的 `observe.evidence` 或 `observability.provider`；同名双注册必须是同一对象。
+- `scopes` 为 1..32 个互异规范项目，不接受通配符或工作项 ID；`timeoutMs` 为 1..60000，默认 2000；`maxBytes` 为 1..1048576，默认 65536。未知配置字段拒绝。
+- 默认关闭。仅为显式项目导出新事件的有界脱敏摘要；已有附件不从此出口导出。默认 Runtime 复用本地加密存储；选择或初始化失败安装 required 初始化闸门。
+- 已接受的保存选择在运行期因注销、歧义或能力失效而不可用时，新旧 observer 均停止该出口并继续本地审计；显式提交的非法选择仍拒绝，不自动切换 Provider。
+- 本地证据和源事件先持久化，再执行 SDK `put/get`；校验身份、分类、媒体类型、长度和 digest。未选择的 EvidenceStore 不收到此出口的字节。
+- `effect.completed/evidence.mirror` 保存安全结果；回读内容不替换本地权威。失败、取消、超时保留本地事件和证据，不继续标记成功。
+- 配置按 Runtime 初始化快照生效；不提供热重载、持久重试队列或已发送副本撤回。宿主等待有界，但不能强杀忽略 signal 的进程内可信插件。
 
 Observability 仅镜像已本地持久化的事件，同一对象重复注册去重。每条记录使用独立 span，
 运行/工作项身份放 trace 属性；metric 使用低基数属性，持久化延迟为 histogram。

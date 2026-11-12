@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { PluginRuntime } from './runtime.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import { RepositoryLifecycleService } from './repository-lifecycle.js';
+import { experienceQueryContextSchema } from '../learning/experience-store.js';
 
 const text = z.string().min(1).refine(value => value.trim().length > 0 && !value.includes('\0'));
 const timeout = z.number().int().positive().max(2_147_483_647);
@@ -25,6 +26,16 @@ const repositoryHandle = z.object({ workspaceId: text }).strict();
 const repositoryWorkspace = z.object({ id: text, repository: repositoryRef, runId: text, snapshot: repositorySnapshot, path: text.optional() });
 const repositoryPublication = z.object({ commit: text, branch: text, url: text.optional() });
 const repositoryCleanup = z.object({ removed: z.boolean() });
+const contextQuery = z.object({ scope: text, prompt: z.string(), limit: z.number().int().positive().optional(),
+  applicability: z.unknown().optional(), target: z.unknown().optional(),
+}).strict().transform(({ applicability, target, ...query }, context) => {
+  const parsed = experienceQueryContextSchema.safeParse({ applicability, target });
+  if (!parsed.success) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid context applicability' });
+    return z.NEVER;
+  }
+  return { ...query, ...parsed.data };
+});
 
 export const verificationRequestSchema = z.object({
   target: text,
@@ -76,7 +87,7 @@ const invocationSchema = z.union([
   operation('notification.provider', 'notify', z.object({
     title: text, body: z.string(), channel: text.optional(), urgency: z.enum(['low', 'normal', 'high']).optional(),
   }).strict()),
-  operation('context.provider', 'gather', z.object({ scope: text, prompt: z.string(), limit: z.number().int().positive().optional() }).strict()),
+  operation('context.provider', 'gather', contextQuery),
   operation('artifact.provider', 'put', z.object({
     name: text, mediaType: text,
     bytes: z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value),
@@ -156,7 +167,13 @@ function output<S extends z.ZodTypeAny>(schema: S, value: unknown): z.output<S> 
 }
 
 export async function invokeCapability(runtime: PluginRuntime, input: unknown): Promise<unknown> {
-  const parsed = invocationSchema.safeParse(input);
+  const fields = input && typeof input === 'object' ? Object.getOwnPropertyDescriptors(input) : undefined;
+  const ownEnvelope = fields && ['capability', 'provider', 'operation', 'input']
+    .every(key => Object.hasOwn(fields, key) && Object.hasOwn(fields[key], 'value'));
+  const query = ownEnvelope && fields.capability.value === 'context.provider' ? fields.input.value : undefined;
+  const unsafeContext = query && typeof query === 'object' && ['scope', 'prompt', 'limit', 'applicability', 'target']
+    .some(key => key in query && !Object.hasOwn(Object.getOwnPropertyDescriptor(query, key) ?? {}, 'value'));
+  const parsed = invocationSchema.safeParse(ownEnvelope && !unsafeContext ? input : undefined);
   if (!parsed.success) throw new Error('Invalid or unsupported capability invocation; credential operations are private');
   const request = parsed.data;
   switch (request.capability) {

@@ -39,6 +39,8 @@ import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 import { spawnGuardedAnalysis } from './analysis-process-guard.js';
 
+const OUTPUT_DRAIN_TIMEOUT_MS = 1000;
+
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
@@ -67,6 +69,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private stdoutTail = '';
   private stderrBuffer = '';
   private lastResultOutput = '';
+  private outputDrainTimer?: ReturnType<typeof setTimeout>;
 
   constructor(opts: {
     command: AgentCommand;
@@ -141,24 +144,21 @@ export class StreamingAgentExecution implements AgentExecution {
       });
     }
 
-    this.proc.on('exit', (code, signal) => {
-      if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
-      this.stdoutBuffer = '';
+    this.proc.on('exit', code => {
       this.exitCode = code ?? undefined;
-      if (signal) {
-        this.error = { code: signal, message: `Process killed by ${signal}` };
-      } else if (code !== 0) {
-        this.error = {
-          code: 'NON_ZERO_EXIT',
-          message: this.stderrBuffer.trim() || this.stdoutTail.trim() || `Process exited with code ${code}`,
-        };
+      this.updateExitError();
+      if (!this.done) {
+        this.outputDrainTimer = setTimeout(() => this.finishOutput(), OUTPUT_DRAIN_TIMEOUT_MS);
+        this.outputDrainTimer.unref();
       }
-      this.done = true;
     });
+
+    this.proc.on('close', () => this.finishOutput());
 
     this.proc.on('error', (err: Error) => {
       this.error = { code: 'SPAWN_ERROR', message: err.message };
       this.done = true;
+      this.closeOutput();
     });
   }
 
@@ -354,6 +354,8 @@ export class StreamingAgentExecution implements AgentExecution {
       await this.sleep(500);
     }
 
+    this.updateExitError();
+
     // Determine final status
     if (this.interruptAcked) {
       return {
@@ -427,6 +429,7 @@ export class StreamingAgentExecution implements AgentExecution {
       this.interruptAcked = true;
       this.done = true;
     }
+    this.closeOutput();
   }
 
   async kill(): Promise<void> {
@@ -436,6 +439,7 @@ export class StreamingAgentExecution implements AgentExecution {
     try {
       this.signalProcess('SIGKILL');
     } catch { /* ignore */ }
+    this.closeOutput();
   }
 
   async captureOutput(_options?: CaptureOptions): Promise<string> {
@@ -489,15 +493,41 @@ export class StreamingAgentExecution implements AgentExecution {
     }
   }
 
+  private updateExitError(): void {
+    const signal = this.proc?.signalCode;
+    if (signal) {
+      this.error = { code: signal, message: `Process killed by ${signal}` };
+    } else if (this.exitCode !== undefined && this.exitCode !== 0) {
+      this.error = { code: 'NON_ZERO_EXIT',
+        message: this.stderrBuffer.trim() || this.stdoutTail.trim() || `Process exited with code ${this.exitCode}` };
+    }
+  }
+
+  private finishOutput(): void {
+    if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
+    this.stdoutBuffer = '';
+    this.updateExitError();
+    this.done = true;
+    this.closeOutput();
+  }
+
+  private closeOutput(): void {
+    clearTimeout(this.outputDrainTimer);
+    this.outputDrainTimer = undefined;
+    this.proc?.stdout?.destroy();
+    this.proc?.stderr?.destroy();
+  }
+
   private completeFromBufferedSignal(): void {
     if (this.done) return;
     try {
       JSON.parse(this.stdoutBuffer);
       this.handleLine(this.stdoutBuffer);
-      if (this.done) return;
+      return;
     } catch {
       // The buffer may instead contain a provider's raw completion marker.
     }
+    if (/^\s*[{["]/.test(this.stdoutBuffer)) return;
     const extracted = extractGoalComplete(this.stdoutBuffer);
     if (!extracted) return;
     this.structuredOutput = extracted;

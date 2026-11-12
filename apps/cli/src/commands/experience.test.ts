@@ -107,6 +107,65 @@ function learningFixture(composition: ExperienceCommandComposition = {}) {
 }
 
 describe('read-only learning governance', () => {
+  it.each([
+    { command: ['prepare', 'b'.repeat(64), '--expected-version', '2', '--target', 'wiki:retry'],
+      action: 'prepare', input: { scope, candidateId: 'b'.repeat(64), expectedVersion: 2, targetRef: 'wiki:retry' },
+      result: { key: 'e'.repeat(64), phase: 'prepared' } },
+    { command: ['publish', 'e'.repeat(64)], action: 'publish', input: { scope, key: 'e'.repeat(64) },
+      result: { publication: { key: 'e'.repeat(64), phase: 'committed' } } },
+    { command: ['reconcile'], action: 'reconcile', input: { scope }, result: { results: [], blocked: [] } },
+  ])('dispatches scoped knowledge $action without legacy storage or disposing borrowed runtimes', async current => {
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue(current.result), dispose: vi.fn() };
+    const test = learningFixture({ pluginRuntime: plugins as unknown as NonNullable<ExperienceCommandComposition['pluginRuntime']> });
+    await test.parse('knowledge', ...current.command, '--scope', scope, '--json');
+    expect(plugins.dispatchSystemAction).toHaveBeenCalledOnce();
+    expect(plugins.dispatchSystemAction).toHaveBeenCalledWith(`learning.knowledge.${current.action}`, current.input);
+    expect(JSON.parse(test.printed())).toEqual(current.result);
+    expect(plugins.dispose).not.toHaveBeenCalled();
+    expect(runtime.ExperienceStore).not.toHaveBeenCalled();
+    expect(test.query).not.toHaveBeenCalled();
+  });
+
+  it.each(['dispatch', 'dispose', 'startup'] as const)('sanitizes knowledge %s failures and releases its owned runtime', async failure => {
+    const error = new Error('PRIVATE_TRANSCRIPT credential=PRIVATE_TOKEN');
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({ results: [], blocked: [] }), dispose: vi.fn().mockResolvedValue(undefined) };
+    if (failure === 'dispatch') plugins.dispatchSystemAction.mockRejectedValue(error);
+    if (failure === 'dispose') plugins.dispose.mockRejectedValue(error);
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    if (failure === 'startup') runtime.createCliPluginRuntime.mockRejectedValue(error);
+    const test = learningFixture();
+    await expect(test.parse('knowledge', 'reconcile', '--scope', scope)).rejects.toThrow(/^Learning knowledge operation failed$/);
+    expect(plugins.dispose).toHaveBeenCalledTimes(failure === 'startup' ? 0 : 1);
+    expect(test.printed()).not.toContain('PRIVATE_');
+  });
+
+  it.each([
+    ['prepare', 'invalid', '--expected-version', '2', '--scope', scope],
+    ['prepare', 'b'.repeat(64), '--expected-version', '0', '--scope', scope],
+    ['publish', 'e'.repeat(64), '--scope', 'other-project'],
+  ])('rejects invalid knowledge input before creating a runtime: %s', async (...args) => {
+    const test = learningFixture();
+    await expect(test.parse('knowledge', ...args)).rejects.toThrow();
+    expect(runtime.createCliPluginRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { command: ['publish', 'e'.repeat(64)], result: { publication: { phase: 'conflict' }, withdrawal: { status: 'withdrawn' } }, code: 1 },
+    { command: ['reconcile'], result: { results: [], blocked: [{ key: 'e'.repeat(64), code: 'publication_recovery_blocked' }] }, code: 1 },
+    { command: ['reconcile'], result: { results: [{ publication: { phase: 'conflict' }, withdrawal: { status: 'rollback_blocked' } }], blocked: [] }, code: 1 },
+    { command: ['reconcile'], result: { results: [{ publication: { phase: 'conflict' }, withdrawal: { status: 'withdrawn' } }], blocked: [] }, code: 0 },
+  ])('reports actual knowledge outcome with exit status $code', async current => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = 0;
+    try {
+      const dispatchSystemAction = vi.fn().mockResolvedValue(current.result);
+      const test = learningFixture({ pluginRuntime: { dispatchSystemAction } as unknown as NonNullable<ExperienceCommandComposition['pluginRuntime']> });
+      await test.parse('knowledge', ...current.command, '--scope', scope, '--json');
+      expect(JSON.parse(test.printed())).toEqual(current.result);
+      expect(process.exitCode).toBe(current.code);
+    } finally { process.exitCode = previousExitCode; }
+  });
+
   it('validates a candidate through the shared plugin action without opening the legacy store', async () => {
     const result = { status: 'validated', candidateId: 'b'.repeat(64), candidateVersion: 1, validatedVersion: 2,
       executionId: 'validation-execution', receiptDigest: 'e'.repeat(64) };

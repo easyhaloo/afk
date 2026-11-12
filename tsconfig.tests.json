@@ -10,6 +10,16 @@
   },
   "include": [
     "tests/**/*.ts",
-    "packages/runtime/src/application/learning/lesson-knowledge-publication.test.ts"
+    "apps/cli/src/commands/experience.test.ts",
+    "packages/runtime/src/application/plugins/operations.test.ts",
+    "packages/runtime/src/application/plugins/default-runtime.test.ts",
+    "packages/runtime/src/application/plugins/observability.test.ts",
+    "packages/runtime/src/infrastructure/observability/run-observer-factory.test.ts",
+    "packages/runtime/src/infrastructure/sandbox/providers/streaming.test.ts",
+    "packages/runtime/src/application/learning/lesson-knowledge-publication.test.ts",
+    "packages/runtime/src/application/learning/lesson-publication-guard.test.ts",
+    "packages/runtime/src/application/learning/run-evidence.test.ts",
+    "packages/runtime/src/application/learning/proposals.test.ts",
+    "packages/runtime/src/application/learning/proposal-runtime.test.ts"
   ]
 }

@@ -8,6 +8,7 @@ import {
   reconcileMergedBacklog,
   resolveExpectedTargetBranch,
   retryBacklog,
+  reviseBacklogDescription,
   reviseBacklogRework,
 } from './commands.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
@@ -35,6 +36,31 @@ describe('backlog commands', () => {
     const provider = new InMemoryBacklogProvider();
     await expect(adoptBacklog(provider, '42')).rejects.toThrow('does not support explicit issue adoption');
     await expect(adoptBacklog(new ManagementBacklogProvider(provider), '42')).rejects.toThrow('does not support explicit issue adoption');
+  });
+
+  it('replaces the body of an item and reports what the revision changed', async () => {
+    const provider = bodyProvider(backlogItem({
+      description: '## Acceptance Criteria\n\n- [ ] the old criterion\n',
+      tags: ['billing'],
+      state: 'ready',
+    }));
+
+    const result = await reviseBacklogDescription(provider, '42', '## Acceptance Criteria\n\n- [ ] the new criterion\n');
+
+    expect(provider.applyDescription).toHaveBeenCalledWith('42', '## Acceptance Criteria\n\n- [ ] the new criterion\n');
+    expect(result.plan.sections).toEqual([{ heading: 'Acceptance Criteria', status: 'modified' }]);
+    expect(result.item.description).toBe('## Acceptance Criteria\n\n- [ ] the new criterion\n');
+    // A revision of a contract is not a change of the work's position.
+    expect(result.item.tags).toEqual(['billing']);
+    expect(result.item.state).toBe('ready');
+  });
+
+  it('refuses a revision when the provider cannot write a body', async () => {
+    const provider: BacklogManagementProvider = {
+      get: vi.fn(), list: vi.fn(), addTag: vi.fn(), removeTag: vi.fn(), initialize: vi.fn(), create: vi.fn(),
+    };
+
+    await expect(reviseBacklogDescription(provider, '42', 'body')).rejects.toThrow('does not support description edits');
   });
 
   it('creates a backlog item and returns its canonical URL', async () => {
@@ -504,6 +530,27 @@ function backlogItem(overrides: Partial<BacklogItem> = {}): BacklogItem {
     branchName: 'afk/backlog-42',
     providerRef: 'stub:42',
     ...overrides,
+  };
+}
+
+/**
+ * A provider that can write a body and nothing else.
+ *
+ * It records what the revision asked of it, so a test can tell a body edit
+ * from a change of the item's position.
+ */
+function bodyProvider(item: BacklogItem): BacklogManagementProvider & { applyDescription: ReturnType<typeof vi.fn> } {
+  const current = { ...item };
+  return {
+    get: vi.fn(async () => ({ ...current })),
+    list: vi.fn(),
+    create: vi.fn(),
+    addTag: vi.fn(),
+    removeTag: vi.fn(),
+    initialize: vi.fn(),
+    applyDescription: vi.fn(async (_id: string, description: string) => {
+      current.description = description;
+    }),
   };
 }
 

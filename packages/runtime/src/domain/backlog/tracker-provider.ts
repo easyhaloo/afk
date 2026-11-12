@@ -561,6 +561,23 @@ export class TrackerBacklogProvider implements BacklogProvider {
     });
   }
 
+  /**
+   * Replace the body of an item.
+   *
+   * The body is the only place the contract of an item is written down: the
+   * acceptance criteria a reviewer checks the work against live there, and a
+   * contract that changed but was not written down is a contract the reviewer
+   * never heard of. So the body is replaced as it was given — the provider
+   * does not merge the new body into the old one, and it does not touch the
+   * labels, the state or the relationships of the issue.
+   */
+  async applyDescription(id: string, description: string): Promise<void> {
+    const target = this.resolveTarget(id);
+    const issue = await target.tracker.getIssue(target.issueId);
+    if ((issue.description ?? '') === description) return;
+    await target.tracker.updateIssue(target.issueId, { description });
+  }
+
   async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
     const target = this.resolveTarget(id);
     const issue = await target.tracker.getIssue(target.issueId);

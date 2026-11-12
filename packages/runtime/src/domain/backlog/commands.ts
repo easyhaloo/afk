@@ -13,8 +13,10 @@ import type { ReworkRecord } from './rework-record.js';
 import type { ReworkRevisionInput } from './rework-revision.js';
 import { assertFactStatement } from './rework-revision.js';
 import { resolveItemExecutionBase } from './creation.js';
+import { planDescriptionRevision, expectedManagedSections, type DescriptionRevisionPlan } from './revision.js';
 
 export { planBacklogCreate, resolveBacklogExecutionBase, resolveItemExecutionBase } from './creation.js';
+export { planDescriptionRevision, expectedManagedSections, type DescriptionRevisionPlan } from './revision.js';
 
 export type { BacklogManagementProvider } from './index.js';
 
@@ -120,6 +122,33 @@ export async function applyBacklogPrdBaseline(
   if (!branch?.trim()) throw new Error('PRD baseline branch is required');
   if (!provider.applyPrdBaseline) throw new Error('backlog provider does not support PRD baseline edits');
   await provider.applyPrdBaseline(id, branch.trim());
+}
+
+/**
+ * Replace the body of a backlog item.
+ *
+ * The body of an item is where the contract it carries is written down — the
+ * acceptance criteria above all. A contract that changed has to be written
+ * into the body of the item that carries it, or the reviewer checks the new
+ * work against the old contract.
+ *
+ * Only the body is written. The state, the tags, the relationships and the
+ * role of the item stay exactly where they are: a revision of a contract is
+ * not a change of the work's position in the backlog.
+ *
+ * The plan is returned with the result so a caller can report what the
+ * revision changed and which AFK-managed parts of the body were at stake.
+ */
+export async function reviseBacklogDescription(
+  provider: BacklogManagementProvider,
+  id: string,
+  description: string,
+): Promise<{ plan: DescriptionRevisionPlan; item: BacklogItem }> {
+  if (!provider.applyDescription) throw new Error('backlog provider does not support description edits');
+  const current = await provider.get(id);
+  const plan = planDescriptionRevision(current.description ?? '', description, expectedManagedSections(current));
+  await provider.applyDescription(id, description);
+  return { plan, item: await provider.get(id) };
 }
 
 /** What a caller needs to know about the change request of a backlog item. */

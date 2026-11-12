@@ -16,6 +16,7 @@ import {
   runBacklogRelationAdd,
   runBacklogRelationRemove,
   runBacklogRetry,
+  runBacklogRevise,
   runBacklogReworkRevise,
   runBacklogRole,
   runBacklogExecutionBase,
@@ -108,8 +109,21 @@ describe('hard-cutover command surface', () => {
     expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
   });
 
-  it('exposes backlog creation relationship options', () => {
+  it('exposes a body revision that names its body source and nothing else', () => {
     const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    const revise = backlog?.commands.find(command => command.name() === 'revise');
+
+    expect(revise).toBeDefined();
+    expect(revise?.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--id', '--project', '--platform', '--description-file', '--description-stdin', '--reason', '--dry-run', '--json',
+    ]));
+    // The body is the only thing a revision writes, so there is no option that
+    // moves the item in the backlog.
+    expect(revise?.options.map(option => option.long)).not.toEqual(expect.arrayContaining(['--title', '--state', '--tag', '--kind', '--mode']));
+  });
+
+  it('exposes backlog creation relationship options', () => {    const program = commandTree(registerBacklogCommands);
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const create = backlog?.commands.find(command => command.name() === 'create');
 
@@ -524,6 +538,13 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       const item = items.find(candidate => candidate.id === id);
       if (!item) throw new Error(`backlog ${id} not found`);
       item.executionMode = mode;
+    },
+    async applyDescription(id: string, description: string) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      // Only the body changes: the state, the tags and the relationships of
+      // the item stay exactly where they are.
+      item.description = description;
     },
     async initialize() { /* noop */ },
     async transition(id, state) {
@@ -1087,6 +1108,81 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       ok: false,
       kind: 'backlog.rework.revise',
       error: { message: expect.stringContaining('must state a fact, not an instruction') },
+    });
+  });
+
+  it('runBacklogRevise replaces the body of an item and leaves everything else alone', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const items = [{ ...stubItem, description: '## Acceptance Criteria\n\n- [ ] the old criterion\n' }];
+    try {
+      await runBacklogRevise(stubProvider(items), '42', '## Acceptance Criteria\n\n- [ ] the new criterion\n', {
+        json: true,
+        reason: 'the contract changed with the sibling slice',
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.revise',
+      data: {
+        reason: 'the contract changed with the sibling slice',
+        plan: { sections: [{ heading: 'Acceptance Criteria', status: 'modified' }] },
+        item: { description: '## Acceptance Criteria\n\n- [ ] the new criterion\n' },
+      },
+    });
+    // A revision of a contract is not a change of the work's position.
+    expect(envelope.data.item.tags).toEqual(['billing']);
+    expect(envelope.data.item.state).toBe('ready');
+  });
+
+  it('runBacklogRevise writes nothing on a dry run', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const items = [{ ...stubItem, description: '## Acceptance Criteria\n\n- [ ] the old criterion\n' }];
+    const provider = stubProvider(items);
+    const applyDescription = vi.spyOn(provider, 'applyDescription');
+    try {
+      await runBacklogRevise(provider, '42', '## Acceptance Criteria\n\n- [ ] the new criterion\n', {
+        json: true,
+        dryRun: true,
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope).toMatchObject({ ok: true, kind: 'backlog.revise', data: { dryRun: true } });
+    expect(envelope.data.description).toContain('the new criterion');
+    expect(applyDescription).not.toHaveBeenCalled();
+    expect(items[0].description).toBe('## Acceptance Criteria\n\n- [ ] the old criterion\n');
+  });
+
+  it('runBacklogRevise reports a body that is empty', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRevise(stubProvider([stubItem]), '42', '   ', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.revise',
+      error: { message: expect.stringContaining('empty backlog description') },
     });
   });
 

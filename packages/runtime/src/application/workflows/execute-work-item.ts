@@ -385,6 +385,26 @@ async function createContext(manifest: ResolvedExecutionManifest, input: Execute
   return { request, providers };
 }
 
+/**
+ * Contract dependencies gate publication, never execution.
+ *
+ * A slice may be implemented against a frozen contract and a mock while the
+ * owning slice is still unmerged (see `depends-on-contract::`); what it may not
+ * do is publish a change that calls an endpoint nobody has shipped. Execution
+ * therefore proceeds, and publication stops here.
+ */
+async function unresolvedContractDependencies(
+  item: BacklogItem,
+  backlog: { get(id: string): Promise<BacklogItem> },
+): Promise<string[]> {
+  const unresolved: string[] = [];
+  for (const id of item.contractDependencies ?? []) {
+    const dependency = await backlog.get(id);
+    if (dependency.state !== 'done') unresolved.push(id);
+  }
+  return unresolved;
+}
+
 function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest: ResolvedExecutionManifest, workItemId: string): void {
   const identity = parseWorkItemId(workItemId);
   if (inventoryItem.id !== workItemId
@@ -555,6 +575,14 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
             ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
             ...(qaResult.evidence ? { evidence: qaResult.evidence } : {}),
           });
+          if (qaResult.success) {
+            const unresolved = await unresolvedContractDependencies(item, providers.backlog);
+            if (unresolved.length) {
+              throw new Error(
+                `contract dependencies unresolved: ${unresolved.join(', ')} — publication waits for their implementation to land`,
+              );
+            }
+          }
           const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
           const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
           const published = change && change.id && change.url && change.url === qaResult.mrUrl

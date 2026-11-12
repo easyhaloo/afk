@@ -74,6 +74,48 @@ describe('TrackerBacklogProvider', () => {
     expect(t.updateIssue).not.toHaveBeenCalled();
   });
 
+  it('replaces the body of an item and nothing else about it', async () => {
+    const t = tracker({
+      id: 9, platform: 'github', projectId: 'org/repo',
+      labels: ['stage::ready-for-issues', 'mode::afk', 'kind::prd'],
+      state: 'opened', title: 'Contract', description: '## Acceptance Criteria\n\n- [ ] the old criterion\n',
+    });
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.applyDescription('9', '## Acceptance Criteria\n\n- [ ] the new criterion\n');
+
+    // Only the body is written: no label, no state and no title travel with it.
+    expect(t.updateIssue).toHaveBeenCalledTimes(1);
+    expect(t.updateIssue).toHaveBeenCalledWith(9, {
+      description: '## Acceptance Criteria\n\n- [ ] the new criterion\n',
+    });
+    expect(t.updateLabels).not.toHaveBeenCalled();
+    expect((await provider.get('9')).description).toBe('## Acceptance Criteria\n\n- [ ] the new criterion\n');
+  });
+
+  it('does not rewrite a body that is already the one it was given', async () => {
+    const t = tracker({
+      id: 11, platform: 'github', projectId: 'org/repo', labels: ['stage::ready-for-issues', 'mode::afk'],
+      state: 'opened', description: '## Acceptance Criteria\n\n- [ ] the same criterion\n',
+    });
+    const provider = new TrackerBacklogProvider(t);
+
+    await provider.applyDescription('11', '## Acceptance Criteria\n\n- [ ] the same criterion\n');
+
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it('reaches the body edit through every provider wrapper', async () => {
+    const t = tracker({
+      id: 12, platform: 'github', projectId: 'org/repo', labels: ['stage::ready-for-issues', 'mode::afk'],
+      state: 'opened', description: 'Old body',
+    });
+
+    await new ManagementBacklogProvider(new GitHubBacklogProvider(t)).applyDescription('12', 'New body');
+
+    expect(t.updateIssue).toHaveBeenCalledWith(12, { description: 'New body' });
+  });
+
   it('recognizes PRD anchors without allowing claims or adoption', async () => {
     const t = tracker({ id: 10, platform: 'github', projectId: 'org/repo', labels: ['kind::prd', 'mode::hitl'], state: 'opened' });
     const provider = new TrackerBacklogProvider(t);

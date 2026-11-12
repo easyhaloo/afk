@@ -11,6 +11,7 @@ import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { DependencyPool } from '../../infrastructure/git/dependency-pool.js';
+import { loadReclamationConfig } from '../../infrastructure/config/manager.js';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 
@@ -310,7 +311,7 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
     },
     repositoryStore,
     repositoryLeases: new RepositoryLeases(),
-    dependencies: new DependencyPool(),
+    dependencies: new DependencyPool(undefined, loadReclamationConfig().dependencyPoolBudget),
     git: {
       isRepository: async repoRoot => {
         try {

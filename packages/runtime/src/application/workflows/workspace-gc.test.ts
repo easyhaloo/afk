@@ -62,7 +62,7 @@ describe('reclaimWorkspaces', () => {
       const report = await reclaimWorkspaces({
         manifests: [manifestPath],
         manager,
-        leases: { active: async () => false } as never,
+        leases: { run: async (_keys: readonly string[], operation: () => Promise<void>) => operation() } as never,
         pool: new DependencyPool(poolRoot),
         store: new RepositoryStore(join(root, 'repos')),
         now: NOW,
@@ -107,26 +107,31 @@ describe('reclaimWorkspaces', () => {
 
       const fresh = await reclaimWorkspaces({
         manifests: [manifestPath], manager,
-        leases: { active: async () => false } as never,
+        leases: { run: async (_keys: readonly string[], operation: () => Promise<void>) => operation() } as never,
         pool: new DependencyPool(join(temporary, 'deps')),
         store: new RepositoryStore(join(root, 'repos')), now: NOW,
       });
       expect(fresh.reclaimed).toEqual([]);
       expect(fresh.skipped[0]?.reason).toContain('heartbeated within the grace period');
 
+      // With every record stale, only the unacquirable lease keeps the workspace.
+      const staleHeartbeat = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      await manager.finish('gc-test-run', { status: 'failed', errorSummary: 'test setup' });
+      await rm(join(temporary, 'runtime', 'archive', `${Buffer.from('gc-test-run').toString('base64url')}.json`), { force: true });
+      await manager.start(record(workspace, staleHeartbeat));
       const leased = await reclaimWorkspaces({
         manifests: [manifestPath], manager,
-        leases: { active: async () => true } as never,
+        leases: { run: async () => { throw new Error('repository is leased by another execution: github:gc-test/api'); } } as never,
         pool: new DependencyPool(join(temporary, 'deps')),
         store: new RepositoryStore(join(root, 'repos')), now: NOW,
       });
       expect(leased.reclaimed).toEqual([]);
-      expect(leased.skipped[0]?.reason).toBe('repository lease is active');
+      expect(leased.skipped[0]?.reason).toContain('repository lease could not be acquired');
 
       await rm(manifestPath);
       const unusable = await reclaimWorkspaces({
         manifests: [manifestPath], manager,
-        leases: { active: async () => false } as never,
+        leases: { run: async (_keys: readonly string[], operation: () => Promise<void>) => operation() } as never,
         pool: new DependencyPool(join(temporary, 'deps')),
         store: new RepositoryStore(join(root, 'repos')), now: NOW,
       });

@@ -19,7 +19,7 @@ export interface ReclaimWorkspacesOptions {
   /** Explicit manifest paths. Defaults to scanning the workspace data area. */
   manifests?: string[];
   manager?: TaskRuntimeManager;
-  leases?: RepositoryLeases;
+  leases?: Pick<RepositoryLeases, 'run'>;
   pool?: DependencyPool;
   store?: RepositoryStore;
   now?: Date;
@@ -87,10 +87,6 @@ export async function reclaimWorkspaces(options: ReclaimWorkspacesOptions = {}):
         continue;
       }
       const keys = manifest.repositories.map(repository => `${repository.platform}:${repository.projectKey}`);
-      if (await leases.active(keys)) {
-        report.skipped.push({ workItemId: manifest.workItemId, path: workspace, reason: 'repository lease is active' });
-        continue;
-      }
       const attributed = records.filter(record => {
         if (!record.workspace) return false;
         const recordLocation = relative(workspace, resolve(record.workspace));
@@ -103,19 +99,28 @@ export async function reclaimWorkspaces(options: ReclaimWorkspacesOptions = {}):
       }
       const bytes = await directoryBytes(workspace);
       const capturedDependencies: string[] = [];
-      for (const repository of manifest.repositories) {
-        try {
-          if (await pool.capture(repository.repoRoot)) capturedDependencies.push(repository.repoRoot);
-          await pool.release(repository.repoRoot);
-        } catch (error) {
-          report.diagnostics.push(`${repository.repoRoot}: dependency reclaim failed: ${String(error)}`);
-        }
-        try { await store.removeCheckout(repository.repoRoot); } catch { /* independent clones are removed with the workspace */ }
-      }
-      await fs.rm(workspace, { recursive: true, force: true });
-      for (const record of attributed.filter(entry => activeRecords.some(active => active.runId === entry.runId))) {
-        await manager.store.finish(record.runId, { status: 'failed', errorSummary: 'workspace reclaimed after the run stopped heartbeating (ADR-0038)' })
-          .catch(error => report.diagnostics.push(`${record.runId}: runtime record termination failed: ${String(error)}`));
+      try {
+        // Acquiring the lease proves no live competitor and, through the
+        // dead-owner recovery policy, clears expired claims of crashed runs.
+        await leases.run(keys, async () => {
+          for (const repository of manifest.repositories) {
+            try {
+              if (await pool.capture(repository.repoRoot)) capturedDependencies.push(repository.repoRoot);
+              await pool.release(repository.repoRoot);
+            } catch (error) {
+              report.diagnostics.push(`${repository.repoRoot}: dependency reclaim failed: ${String(error)}`);
+            }
+            try { await store.removeCheckout(repository.repoRoot); } catch { /* independent clones are removed with the workspace */ }
+          }
+          await fs.rm(workspace, { recursive: true, force: true });
+          for (const record of attributed.filter(entry => activeRecords.some(active => active.runId === entry.runId))) {
+            await manager.store.finish(record.runId, { status: 'failed', errorSummary: 'workspace reclaimed after the run stopped heartbeating (ADR-0038)' })
+              .catch(error => report.diagnostics.push(`${record.runId}: runtime record termination failed: ${String(error)}`));
+          }
+        });
+      } catch (error) {
+        report.skipped.push({ workItemId: manifest.workItemId, path: workspace, reason: `repository lease could not be acquired: ${String(error)}` });
+        continue;
       }
       await pool.prune(nowFor(options));
       report.reclaimed.push({ workItemId: manifest.workItemId, path: workspace, bytes, capturedDependencies });

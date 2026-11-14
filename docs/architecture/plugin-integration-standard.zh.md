@@ -77,7 +77,7 @@ Manifest 可选 `externalTools`，最多64项，`id` 唯一。每项定义：
 - 结果状态为 `available/missing/unsupported/outdated/unknown`；返回受限版本与固定原因，不返回原始输出或异常。
 - 整个清单共享默认3秒、最大5秒执行期限；另有固定1秒清理收口预算。默认宿主执行器等待原生close及临时目录清理；未确认时返回 `unknown` 并保留 `cleanup: unconfirmed`。协作Promise结束不等于真实backend物理关闭。
 
-以上为SDK合同；CLI/manager静态接线、配置后的实际程序绑定及按需安装分别验收。
+CLI/manager默认静态接线不导入入口或解析secret；`list --loaded`与`doctor --loaded`显式激活插件，`doctor --probe`仅执行内置白名单探测且不能与`--loaded`合用。自定义程序绑定只作静态投影；backend探测执行器尚未接线，不回退宿主。按需安装另行验收，来源URL不授予安装权限。
 
 ## 3. 能力接口与调用协议
 

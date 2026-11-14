@@ -281,7 +281,7 @@ export default function createPlugin({ configuration }) {
 
 API v1 Manifest支持可选的`externalTools`，由`listExternalTools`静态读取；`diagnoseExternalTools`仅在显式探测和可信调用方精确白名单同时满足时执行。目标位置区分host/backend，缺失backend不搜索宿主；清理未确认保留`unknown`与`cleanup: unconfirmed`。字段、执行期限和结果协议见[接入标准](plugin-integration-standard.zh.md#21-外部工具声明与诊断)。
 
-当前已集成的是SDK、声明校验、内置工具元数据及显式诊断。CLI/manager无副作用发现、配置后的自定义程序绑定与外部依赖安装仍独立推进；不能用SDK通过替代这些产品资格。来源URL只作说明，不触发下载或安装。
+CLI/manager默认采用静态发现；`plugin list`不激活插件，`plugin doctor`返回静态配置/依赖诊断。`--loaded`显式保留原激活后列表和健康检查；`doctor --probe`仅探测获准的内置宿主工具。自定义程序显示实际配置绑定但不自动探测；backend诊断执行器尚未接线，不回退宿主。外部依赖安装另行验收；来源URL只作说明，不触发下载或安装。字段与JSON结构见[执行入口](execution.zh.md#执行入口)。
 
 ## 安装与配置
 

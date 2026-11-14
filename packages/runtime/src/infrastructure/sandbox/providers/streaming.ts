@@ -70,6 +70,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private readonly stdoutDecoder = new StringDecoder('utf8');
   private readonly stderrDecoder = new StringDecoder('utf8');
   private stdoutBuffer = '';
+  private parsedStdoutLine?: string;
   private stdoutTail = '';
   private stderrBuffer = '';
   private outputSequence = 0;
@@ -457,10 +458,10 @@ export class StreamingAgentExecution implements AgentExecution {
     if (this.stopping) return this.stopping;
     const child = this.proc;
     this.done = true;
-    this.closeOutput();
     this.stopping = (async () => {
       const deadline = Date.now() + 1000;
       this.signalProcess('SIGKILL');
+      this.closeOutput();
       const signalled = new Set(this.signalledDescendants.keys());
       while (true) {
         const running = child.pid !== undefined && child.exitCode === null && child.signalCode === null;
@@ -527,7 +528,9 @@ export class StreamingAgentExecution implements AgentExecution {
     while ((newline = this.stdoutBuffer.indexOf('\n')) >= 0) {
       const line = this.stdoutBuffer.slice(0, newline);
       this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
-      if (line.trim()) this.handleLine(line);
+      const parsed = this.parsedStdoutLine;
+      this.parsedStdoutLine = undefined;
+      if (line.trim() && line.trimEnd() !== parsed) this.handleLine(line);
     }
   }
 
@@ -546,8 +549,9 @@ export class StreamingAgentExecution implements AgentExecution {
     this.stdoutBuffer += text;
     this.stdoutTail = (this.stdoutTail + text).slice(-4000);
     this.stderrBuffer += this.stderrDecoder.end();
-    if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
+    if (this.stdoutBuffer.trim() && this.stdoutBuffer.trimEnd() !== this.parsedStdoutLine) this.handleLine(this.stdoutBuffer);
     this.stdoutBuffer = '';
+    this.parsedStdoutLine = undefined;
     this.updateExitError();
     this.done = true;
     this.closeOutput();
@@ -562,9 +566,12 @@ export class StreamingAgentExecution implements AgentExecution {
 
   private completeFromBufferedSignal(): void {
     if (this.done) return;
+    const line = this.stdoutBuffer.trimEnd();
+    if (line === this.parsedStdoutLine) return;
     try {
-      JSON.parse(this.stdoutBuffer);
-      this.handleLine(this.stdoutBuffer);
+      JSON.parse(line);
+      this.parsedStdoutLine = line;
+      this.handleLine(line);
       return;
     } catch {
       // The buffer may instead contain a provider's raw completion marker.

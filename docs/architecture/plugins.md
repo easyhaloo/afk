@@ -334,7 +334,7 @@ are outside the activation batch and require factory-owned cleanup on failure.
 
 API v1 manifests accept optional `externalTools`, read statically through `listExternalTools`. `diagnoseExternalTools` executes only with explicit probing and a trusted caller's exact command/argv/location allowlist. Host and backend are distinct execution locations; missing backends never fall back to the host. Unconfirmed cleanup retains `unknown` and `cleanup: unconfirmed`. The [integration standard](plugin-integration-standard.zh.md#21-外部工具声明与诊断) defines fields, deadlines and result contracts.
 
-Integrated scope is the SDK, declaration validation, builtin tool metadata and explicit diagnosis. Side-effect-free CLI/manager discovery, configured custom executable bindings and external dependency installation remain separate work. Passing the SDK does not qualify these product paths. Source URLs are informational and never trigger downloads or installation.
+CLI/manager discovery is static by default: `plugin list` does not activate plugins and `plugin doctor` returns static configuration/dependency diagnostics. `--loaded` explicitly retains activation-based inventory and health checks; `doctor --probe` probes only approved builtin host tools. Custom executables show actual configured bindings without automatic probes. Backend diagnostic execution is not wired and never falls back to the host. External dependency installation remains separately qualified; source URLs are informational and never trigger downloads or installation. See [execution entry points](execution.md#execution-entry-points) for flags and JSON shapes.
 
 ## Installation and configuration
 

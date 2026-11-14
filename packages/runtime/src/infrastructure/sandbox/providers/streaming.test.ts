@@ -15,6 +15,58 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it.each(['newline', 'crlf', 'eof'] as const)('parses a complete buffered nonterminal record once before %s', async ending => {
+    const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } });
+    const parseLine = vi.fn(new ClaudeCodeProvider().parseLine.bind(new ClaudeCodeProvider()));
+    const execution = new StreamingAgentExecution({
+      command: command(`process.stdin.resume(); process.stdin.once('end', () => {
+        process.stdout.write(${JSON.stringify(usage)});
+        setTimeout(() => process.stdout.end(${JSON.stringify(ending === 'newline' ? '\n' : ending === 'crlf' ? '\r\n' : '')}), 150);
+      });`),
+      prompt: 'inert buffered-record fixture', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: { ...PROCESS_METADATA }, parseLine,
+    });
+    execution.start();
+    try {
+      const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+      await once(child, 'close', { signal: AbortSignal.timeout(5000) });
+      await execution.waitForResult({ completionTimeoutMs: 5000 });
+      expect(parseLine.mock.calls.filter(([line]) => line === usage)).toHaveLength(1);
+    } finally { await execution.kill(); }
+  });
+
+  it.each([false, true])('rejects malformed JSON with a raw completion suffix across chunks (split: %s)', async split => {
+    const prefix = JSON.stringify({ type: 'usage', usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } });
+    const suffix = '<goal_complete>{"summary":"inert suffix"}</goal_complete>';
+    const chunks = split ? [prefix, suffix] : [prefix + suffix];
+    const provider = new ClaudeCodeProvider();
+    const execution = new StreamingAgentExecution({
+      command: command(`process.stdin.resume(); process.stdin.once('end', () => {
+        const chunks = ${JSON.stringify(chunks)};
+        const write = () => {
+          const chunk = chunks.shift();
+          if (chunk === undefined) return;
+          process.stdout.write(chunk);
+          setTimeout(write, 150);
+        };
+        write();
+      });`),
+      prompt: 'inert malformed-frame fixture', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: { ...PROCESS_METADATA }, parseLine: provider.parseLine.bind(provider),
+    });
+    execution.start();
+    const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+    const received: number[] = [];
+    child.stdout.on('data', (chunk: Buffer) => received.push(chunk.length));
+    try {
+      await once(child, 'close', { signal: AbortSignal.timeout(5000) });
+      expect(received).toEqual(chunks.map(chunk => Buffer.byteLength(chunk)));
+      expect(await execution.waitForResult({ completionTimeoutMs: 5000 })).toMatchObject({
+        status: 'failed', error: { code: 'MISSING_RESULT' },
+      });
+    } finally { await execution.kill(); }
+  });
+
   describe('UTF-8 byte streaming', () => {
     async function receive(chunks: Buffer[], stream: 'stdout' | 'stderr' = 'stdout', exitCode = 0) {
       const provider = new ClaudeCodeProvider();

@@ -109,7 +109,7 @@ it.each([0o700, 0o500])('keeps built CLI inventory and doctor read-only with sel
   try {
     const listed = JSON.parse((await test.cli('list', '--json')).stdout);
     expect(listed.some((plugin: { id: string }) => plugin.id === 'artifact.test-report-local')).toBe(true);
-    const diagnosis = JSON.parse((await test.cli('doctor', '--plugin', 'artifact.test-report-local', '--json')).stdout);
+    const diagnosis = JSON.parse((await test.cli('doctor', '--plugin', 'artifact.test-report-local', '--loaded', '--json')).stdout);
     expect(diagnosis.health).toEqual([expect.objectContaining({ pluginId: 'artifact.test-report-local', status: 'degraded' })]);
     expect((await readdir(test.home, { recursive: true })).sort()).toEqual(before);
     expect(await readFile(settings)).toEqual(configuration);
@@ -235,7 +235,8 @@ describe('local plugin matrix: persisted lifecycle × public operation', () => {
     expect((await test.cli('disable', provider.id)).stdout).toBe(`Disabled ${provider.id}\n`);
     await expectRejected(test.run(), provider.id.startsWith('credential.') ? 'Matrix credential provider is not active' : 'Capability provider is not registered');
     expect(await test.effects()).toEqual(effects);
-    expect(JSON.parse((await test.cli('list', '--json')).stdout).some((entry: { id: string }) => entry.id === provider.id)).toBe(false);
+    expect(JSON.parse((await test.cli('list', '--json')).stdout)).toContainEqual(expect.objectContaining({ id: provider.id, enabled: false }));
+    expect(JSON.parse((await test.cli('list', '--loaded', '--json')).stdout).some((entry: { id: string }) => entry.id === provider.id)).toBe(false);
     await test.configure(provider.id, provider.config(test));
     await expectRejected(test.run(), provider.id.startsWith('credential.') ? 'Matrix credential provider is not active' : 'Capability provider is not registered');
     expect((await test.cli('enable', provider.id)).stdout).toBe(`Enabled ${provider.id}\n`);

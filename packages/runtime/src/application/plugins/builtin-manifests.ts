@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { ExternalToolDependency, PluginManifest } from '../../plugin-sdk/profile.js';
+import type { ExternalToolDependency, PluginManifest, PluginConfigValue } from '../../plugin-sdk/profile.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
 import {
   CodeContextProvider, CompliancePolicyProvider, DesktopNotificationProvider,
@@ -15,6 +15,7 @@ import type { Plugin } from './runtime.js';
 import { ExperienceContextProvider } from '../learning/runtime.js';
 import { createLearningPlugin } from './learning.js';
 import { verificationRequestSchema } from './operations.js';
+import { configuredPluginManifests } from './configured.js';
 
 const identifier = z.string().min(1);
 export const capabilitySelectionSchema = z.object({
@@ -26,40 +27,56 @@ export const capabilitySelectionSchema = z.object({
   notifications: z.array(z.object({ provider: identifier, message: z.object({ title: identifier, body: z.string(), channel: z.string().optional(), urgency: z.enum(['low', 'normal', 'high']).optional() }).strict() }).strict()).default([]),
 }).strict();
 
-export function createDefaultBuiltinProviderPlugins(homeDir: string, workspaceRoot: string): Plugin[] {
+function defaultSelections(homeDir: string, workspaceRoot: string) {
   return [
-    createJumpserverPlugin(), ...createHostPlugins(), ...createBuiltinAgentPlugins(),
-    ...createBuiltinSandboxPlugins({ worktreeManager: new WorktreeManager(workspaceRoot) }),
-    ...createBuiltinVerificationPlugins(),
-    createLearningPlugin({ homeDir }),
-    ...createBuiltinCapabilityPlugins({
-      notifications: [new DesktopNotificationProvider()],
-      contexts: [
-        new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite')),
-        new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
-        new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') }),
-      ],
-      credentials: [new SystemKeychainProvider()],
-      artifacts: [new TestReportProvider({ root: join(homeDir, '.afk', 'artifacts') })],
-      repositories: [new MultiRepositoryProvider({ repositories: [] })],
-      policies: [
-        new SecretScanPolicyProvider({ root: workspaceRoot }),
-        new LicensePolicyProvider({ allowlist: ['mit', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', 'isc'] }),
-        new CompliancePolicyProvider({ rules: [] }),
-      ],
-    }),
-  ].map(plugin => {
-    const externalTools = builtinExternalTools(plugin.manifest.id);
-    return externalTools.length ? { ...plugin, manifest: { ...plugin.manifest, externalTools } } : plugin;
+    { ids: ['host.jumpserver'], create: () => [createJumpserverPlugin()] },
+    { ids: ['host.ssh', 'host.aws-ssm', 'host.kubernetes-exec'], create: () => createHostPlugins() },
+    { ids: configuredPluginManifests().filter(manifest => manifest.provides.includes('agent.provider')).map(manifest => manifest.id), create: () => createBuiltinAgentPlugins() },
+    { ids: ['sandbox.local', 'sandbox.docker', 'sandbox.podman'], create: () => createBuiltinSandboxPlugins({ worktreeManager: new WorktreeManager(workspaceRoot) }) },
+    { ids: ['verification.test-runner', 'verification.static-scan', 'verification.browser-check'], create: () => createBuiltinVerificationPlugins() },
+    { ids: ['learning.distiller'], create: () => [createLearningPlugin({ homeDir })] },
+    { ids: ['notification.desktop', 'context.experience', 'context.code', 'context.retrieval', 'context.project-memory',
+        'credential.system-keychain', 'artifact.test-report-local', 'repository.multi-repository',
+        'policy.secret-scan', 'policy.license-policy', 'policy.compliance-policy'],
+      create: () => createBuiltinCapabilityPlugins({
+        notifications: [new DesktopNotificationProvider()],
+        contexts: [new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite')),
+          new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
+          new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') })],
+        credentials: [new SystemKeychainProvider()],
+        artifacts: [new TestReportProvider({ root: join(homeDir, '.afk', 'artifacts') })],
+        repositories: [new MultiRepositoryProvider({ repositories: [] })],
+        policies: [new SecretScanPolicyProvider({ root: workspaceRoot }),
+          new LicensePolicyProvider({ allowlist: ['mit', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', 'isc'] }),
+          new CompliancePolicyProvider({ rules: [] })],
+      }),
+    },
+  ];
+}
+
+export function createDefaultBuiltinProviderPlugins(homeDir: string, workspaceRoot: string): Plugin[] {
+  return defaultSelections(homeDir, workspaceRoot).flatMap(selection => {
+    const plugins = selection.create();
+    if (JSON.stringify(plugins.map(plugin => plugin.manifest.id)) !== JSON.stringify(selection.ids)) throw new Error('Builtin metadata and factory selection disagree');
+    return plugins.map(plugin => ({ ...plugin, manifest: withBuiltinExternalTools(plugin.manifest) }));
   });
 }
 
 export function builtinPluginManifests(homeDir: string, integrations?: unknown): readonly PluginManifest[] {
   if (integrations !== undefined && !capabilitySelectionSchema.safeParse(integrations).success) throw new Error('Invalid plugin integration configuration');
-  const manifests = createDefaultBuiltinProviderPlugins(homeDir, process.cwd()).map(plugin => plugin.manifest)
-    .concat({ id: 'workflow.capabilities', version: '0.1.0', apiVersion: 1, provides: ['workflow.action'], trusted: true });
+  const catalog = new Map(configuredPluginManifests().map(manifest => [manifest.id, manifest]));
+  const manifests = defaultSelections(homeDir, process.cwd()).flatMap(selection => selection.ids.map(id => {
+    const manifest = catalog.get(id);
+    if (!manifest) throw new Error(`Builtin metadata is unavailable for '${id}'`);
+    return manifest;
+  })).concat({ id: 'workflow.capabilities', version: '0.1.0', apiVersion: 1, provides: ['workflow.action'], trusted: true });
   if (integrations !== undefined) manifests.push({ id: 'workflow.integrations', version: '0.1.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true });
-  return manifests;
+  return manifests.map(withBuiltinExternalTools);
+}
+
+function withBuiltinExternalTools(manifest: PluginManifest): PluginManifest {
+  const externalTools = builtinExternalTools(manifest.id);
+  return externalTools.length ? { ...manifest, externalTools } : manifest;
 }
 
 export function builtinExternalTools(pluginId: string): readonly ExternalToolDependency[] {
@@ -85,4 +102,34 @@ export function builtinExternalTools(pluginId: string): readonly ExternalToolDep
     case 'verification.browser-check': return [{ ...tool('playwright', 'playwright', 'backend', 'https://playwright.dev/docs/intro', ['--version']), optional: true }];
     default: return [];
   }
+}
+
+
+export interface UnsupportedToolBinding {
+  readonly id: string;
+  readonly command: string;
+  readonly location: 'host' | 'backend';
+  readonly status: 'unsupported';
+  readonly reason: 'custom-binding';
+}
+
+export function configuredExternalTools(id: string, config: { readonly [key: string]: PluginConfigValue } = {}): {
+  readonly declarations: readonly ExternalToolDependency[];
+  readonly unsupported: readonly UnsupportedToolBinding[];
+} {
+  const bindings = new Map<string, string>();
+  if (['host.ssh', 'host.aws-ssm', 'host.kubernetes-exec'].includes(id) && typeof config.binary === 'string') {
+    const tool = builtinExternalTools(id)[0];
+    if (config.binary !== tool.command) bindings.set(tool.id, config.binary);
+  }
+  if (id === 'host.ssh' && typeof config.scpBinary === 'string' && config.scpBinary !== 'scp') bindings.set('scp', config.scpBinary);
+  if (id.startsWith('verification.') && Array.isArray(config.command)) bindings.set(id.slice('verification.'.length), String(config.command[0]));
+  if (id === 'sandbox.remote-container' && config.transport === 'cli' && typeof config.command === 'string') bindings.set('remote-container', config.command);
+  if (id === 'notification.email') bindings.set('sendmail', typeof config.sendmailPath === 'string' ? config.sendmailPath : '/usr/sbin/sendmail');
+  if (id === 'credential.system-keychain' && typeof config.command === 'string') bindings.set('system-keychain', config.command);
+  if (id === 'repository.special-git-backend' && typeof config.backend === 'string') bindings.set('special-git-backend', config.backend);
+  const unsupported = [...bindings].map(([toolId, command]) => ({ id: toolId, command: command.trim(),
+    location: id.startsWith('verification.') ? 'backend' as const : 'host' as const,
+    status: 'unsupported' as const, reason: 'custom-binding' as const }));
+  return { declarations: builtinExternalTools(id).filter(tool => !bindings.has(tool.id) && !(id.startsWith('verification.') && config.command !== undefined)), unsupported };
 }

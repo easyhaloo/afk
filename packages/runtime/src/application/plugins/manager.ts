@@ -170,10 +170,10 @@ export class PluginManager {
         try {
           if (entry.config === undefined) manifest = builtin;
           else {
-            const { createConfiguredPlugins, getConfiguredCredentialDependencies } = await import('./configured.js');
-            const [plugin] = await createConfiguredPlugins({ configurations: [entry], homeDir: this.homeDir, onTrigger: async () => {} });
-            manifest = plugin.manifest;
-            dependencies.set(entry.id, getConfiguredCredentialDependencies(plugin));
+            const { inspectConfiguredPlugins } = await import('./configured.js');
+            const [metadata] = inspectConfiguredPlugins({ configurations: [entry] });
+            manifest = metadata.manifest;
+            dependencies.set(entry.id, metadata.credentialDependencies);
           }
         } catch { throw new Error(`Invalid builtin plugin configuration for '${entry.id}'`); }
       } else {
@@ -358,8 +358,8 @@ export class PluginManager {
       if (!builtin && !installed) throw new Error(`Plugin '${id}' is not installed`);
       if (builtin) {
         try {
-          const { createConfiguredPlugins } = await import('./configured.js');
-          await createConfiguredPlugins({ configurations: [{ id, config }], homeDir: this.homeDir, onTrigger: async () => {} });
+          const { inspectConfiguredPlugins } = await import('./configured.js');
+          inspectConfiguredPlugins({ configurations: [{ id, config }] });
         } catch { throw new Error(`Invalid plugin settings for '${id}'`); }
       }
       if (installed) this.validateSettings(installed.manifest, config);

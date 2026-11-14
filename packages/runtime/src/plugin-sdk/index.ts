@@ -40,3 +40,8 @@ export type { RemoteContainerServiceOptions } from '../application/plugins/remot
 export { GoogleOAuthCredentialProvider, GoogleOAuthError } from '../infrastructure/providers/google-oauth.js';
 export type { GoogleAccount, GoogleOAuthOptions } from '../infrastructure/providers/google-oauth.js';
 export { configureGoogleAccountPlugins } from '../application/plugins/google-account-plugins.js';
+
+export { listPluginInventory, diagnosePluginInventory } from '../application/plugins/inventory.js';
+export type { PluginInventoryEntry } from '../application/plugins/inventory.js';
+export { inspectConfiguredPlugins, configuredPluginManifests } from '../application/plugins/configured.js';
+export type { ConfiguredPluginMetadata } from '../application/plugins/configured.js';

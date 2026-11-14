@@ -17,6 +17,8 @@ import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.j
 import { LocalSandboxProvider, ContainerSandboxProvider } from '../../infrastructure/sandbox/providers/index.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
 import type { RemoteContainerCliTransportOptions } from '../../infrastructure/sandbox/remote-container.js';
+import * as learning from './learning.js';
+import * as knowledgeRuntime from '../learning/knowledge-runtime.js';
 
 const environment = { TOKEN: 'fixture-token', HOOK: 'https://hooks.example.test/private-hook' };
 const subscription = { id: 'subscription', kind: 'webhook' };
@@ -632,4 +634,101 @@ describe('configured plugin composition', () => {
     await runtime.getArtifactProvider('object-storage')!.put({ name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) });
     expect(String(network.mock.calls[0]?.[0])).toBe('https://storage.example.test/bucket/file.txt');
   });
+});
+
+
+describe('static configured plugin metadata', () => {
+  it.each([false, true])('inspects learning capabilities with knowledge=%s', async knowledge => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const { listPluginInventory } = await import('./inventory.js');
+    const config = { enabled: false, ...(knowledge ? { knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } : {}) };
+    const [metadata] = inspectConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config }], environment: {} });
+    const expected = knowledge ? ['workflow.action', 'context.provider'] : ['workflow.action'];
+    expect(metadata.manifest.provides).toEqual(expected);
+    const rows = await listPluginInventory({ configuration: { plugins: [{ id: 'learning.distiller', builtin: true, config }] } });
+    expect(rows.find(row => row.id === 'learning.distiller')?.capabilities).toEqual(expected);
+  });
+
+  it.each([false, true])('preserves factory learning capabilities with knowledge=%s', async knowledge => {
+    const config = { enabled: false, ...(knowledge ? { knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } : {}) };
+    const actual = learning.createLearningPlugin({ config }).manifest;
+    const [configured] = await createConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config }], environment: {} });
+    expect(actual.provides).toEqual(knowledge ? ['workflow.action', 'context.provider'] : ['workflow.action']);
+    expect(configured.manifest.provides).toEqual(actual.provides);
+  });
+
+  it.each([false, true])('activates learning and agrees with context registration with knowledge=%s', async knowledge => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const config = { enabled: false, ...(knowledge ? { knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } : {}) };
+    const { runtime, plugins } = await load([{ id: 'learning.distiller', config }]);
+    const [metadata] = inspectConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config }] });
+    expect(runtime.listPlugins()).toEqual(['learning.distiller']);
+    expect(runtime.listCapabilities()).toEqual(metadata.manifest.provides);
+    expect(plugins[0].manifest.provides).toEqual(metadata.manifest.provides);
+    expect(runtime.listProviders('context.provider')).toEqual(knowledge ? ['context.knowledge'] : []);
+    expect(await runtime.dispatchSystemAction('learning.settings', {})).toMatchObject({ enabled: false });
+  });
+
+  it('keeps learning capability inspection passive without factories or credential resolution', async () => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const { listPluginInventory } = await import('./inventory.js');
+    const factory = vi.spyOn(learning, 'createLearningPlugin').mockImplementation(() => { throw new Error('Passive factory call'); });
+    const contextFactory = vi.spyOn(knowledgeRuntime, 'KnowledgeContextProvider').mockImplementation(() => { throw new Error('Passive context construction'); });
+    const resolve = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolve').mockImplementation(async () => { throw new Error('Passive credential resolution'); });
+    const configurations: readonly Configuration[] = [
+      { id: 'learning.distiller', config: { enabled: false, knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } },
+      { id: 'credential.google-oauth', config: {} },
+      { id: 'notification.slack', config: { webhook: { provider: 'credential.google-oauth', name: 'ordinary-reference' } } },
+      { id: 'artifact.report-platform', config: { endpoint: 'https://reports.invalid', token: { env: 'D01_UNSET' } } },
+    ];
+    const inspected = inspectConfiguredPlugins({ configurations, environment: {} });
+    expect(inspected.find(row => row.manifest.id === 'notification.slack')?.credentialDependencies).toEqual(['credential.google-oauth']);
+    const rows = await listPluginInventory({ configuration: { plugins: configurations.map(entry => ({ ...entry, builtin: true })) } });
+    expect(rows.filter(row => configurations.some(entry => entry.id === row.id)).every(row => row.configuration === 'valid')).toBe(true);
+    expect(factory).not.toHaveBeenCalled();
+    expect(contextFactory).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('validates shape and dependencies without environment reads or provider construction', async () => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const environment = {};
+    const rows = inspectConfiguredPlugins({ configurations: [
+      { id: 'artifact.report-platform', config: { endpoint: 'https://reports.invalid', token: { provider: 'credential.enterprise', name: 'report' } } },
+      { id: 'credential.enterprise', config: { values: { report: { env: 'STATIC_UNREAD' } } } },
+    ], environment });
+    expect(rows.map(row => row.manifest.id)).toEqual(['credential.enterprise', 'artifact.report-platform']);
+    expect(rows[1].credentialDependencies).toEqual(['credential.enterprise']);
+    expect(rows[1].manifest.requires).toEqual(['credential.provider']);
+    expect(JSON.stringify(rows)).not.toContain('STATIC_UNREAD');
+    expect(() => inspectConfiguredPlugins({ configurations: [{ id: 'host.ssh', config: { hosts: [] } }], environment })).toThrow('invalid configuration');
+    expect(() => inspectConfiguredPlugins({ configurations: [
+      { id: 'credential.enterprise', config: { values: { a: { provider: 'credential.oauth', name: 'a' } } } },
+      { id: 'credential.oauth', config: { tokenEndpoint: 'https://auth.invalid', clientId: 'test', clientSecret: { provider: 'credential.enterprise', name: 'b' } } },
+    ] })).toThrow('cyclic');
+  });
+});
+
+
+it('keeps final configured manifests aligned with the actual custom executable binding', async () => {
+  const { listPluginInventory, diagnosePluginInventory } = await import('./inventory.js');
+  const selected = { id: 'host.ssh', config: { hosts: [{ alias: 'fixture', address: 'fixture.invalid' }], binary: '/opt/d01-canary/ssh', scpBinary: '/opt/d01-canary/scp' } };
+  const hostExec = vi.fn(async (command: string) => {
+    if (command !== selected.config.binary) throw new Error('Wrong default executable');
+    return { code: 0, stdout: 'fixture', stderr: '' };
+  });
+  const { plugins, runtime } = await load([selected], { hostExec });
+  expect(plugins[0].manifest.externalTools).toEqual([]);
+  await runtime.getHostProvider('ssh')!.exec('fixture', ['printf', 'fixture']);
+  expect(hostExec).toHaveBeenCalledWith(selected.config.binary, expect.any(Array), undefined);
+  hostExec.mockClear();
+  const rows = (await listPluginInventory({ configuration: { plugins: [{ ...selected, builtin: true }] } })).filter(row => row.id === selected.id);
+  expect(rows[0].manifest).toEqual(plugins[0].manifest);
+  const execute = vi.fn(async () => { throw new Error('Unsupported custom bindings must never execute'); });
+  expect(await diagnosePluginInventory(rows, { probe: true, execute, executorLifecycle: 'trusted-cooperative' }))
+    .toEqual([expect.objectContaining({ command: selected.config.binary, status: 'unsupported' }), expect.objectContaining({ command: selected.config.scpBinary, status: 'unsupported' })]);
+  expect(hostExec).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
+  const [defaultPlugin] = await createConfiguredPlugins({ configurations: [{ id: 'host.ssh', config: { hosts: selected.config.hosts } }] });
+  expect(defaultPlugin.manifest.externalTools?.map(tool => tool.command)).toEqual(['ssh', 'scp']);
 });

@@ -512,14 +512,23 @@ it('metadata management avoids OAuth activation and graph generation honors disa
   expect(requests).toHaveLength(0);
 }, 60_000);
 
-it.each(['credential.oauth', 'credential.oidc'] as const)('%s rejects insecure endpoint configuration and missing environment references without HTTP', async id => {
+it.each(['credential.oauth', 'credential.oidc'] as const)('%s rejects insecure endpoints and defers missing environment references until activation without HTTP', async id => {
   const valid = id === 'credential.oauth'
     ? { tokenEndpoint: `${https}/token`, clientId: 'fixture', clientSecret: { env: 'MATRIX_CLIENT_SECRET' } }
     : { issuer: `${https}/oidc`, clientId: 'fixture', assertion: { env: 'MATRIX_ASSERTION' } };
   await configure(id, valid);
   const previous = await settings();
   await failure(configure(id, { ...valid, [id === 'credential.oauth' ? 'tokenEndpoint' : 'issuer']: http }), /configuration|settings/);
-  await failure(configure(id, { ...valid, [id === 'credential.oauth' ? 'clientSecret' : 'assertion']: { env: 'MATRIX_NOT_SET' } }), /configuration|settings/);
+  expect(await settings()).toBe(previous);
+  await configure(id, { ...valid, [id === 'credential.oauth' ? 'clientSecret' : 'assertion']: { env: 'MATRIX_NOT_SET' } });
+  const diagnosis = JSON.parse((await cli('doctor', '--plugin', id, '--json')).stdout);
+  expect(diagnosis.inventory).toContainEqual(expect.objectContaining({ id, configuration: 'valid' }));
+  expect(requests).toHaveLength(0);
+  const rejected = await failure(cli('doctor', '--plugin', id, '--loaded', '--json'));
+  expect(JSON.parse(rejected.stdout).diagnostics).toContainEqual(expect.objectContaining({
+    pluginId: id, severity: 'error', code: 'config.provider-invalid',
+  }));
+  await configure(id, valid);
   expect(await settings()).toBe(previous);
   expect(requests).toHaveLength(0);
 });

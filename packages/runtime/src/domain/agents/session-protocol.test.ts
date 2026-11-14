@@ -192,6 +192,36 @@ describe.each(providers)('$name explicit native session contract', ({ name, crea
     expect(await execution.captureSession()).toBeUndefined();
   });
 
+  it('preserves identity mismatch when stopping a process that continues writing stdout', async () => {
+    const host = fixtureHost();
+    let streaming!: StreamingAgentExecution;
+    host.startAgent.mockImplementationOnce(async start => {
+      const first = JSON.stringify(header('confirmed-native'));
+      const wrong = JSON.stringify(header('wrong-native'));
+      streaming = new StreamingAgentExecution({ ...start, worktreePath,
+        command: { argv: [process.execPath, '-e', `
+          process.stdin.resume();
+          process.stdout.on('error', () => process.exit(43));
+          process.stdin.once('end', () => {
+            process.stdout.write(${JSON.stringify(first + '\n' + wrong + '\n')});
+            const write = () => { process.stdout.write('progress\\n'); setImmediate(write); };
+            write();
+          });`], cwd: process.cwd() },
+      });
+      streaming.start();
+      return streaming;
+    });
+    const execution = await create().createExecution(host.options);
+    try {
+      const result = await execution.waitForResult({ completionTimeoutMs: 5000 });
+      expect(result, JSON.stringify(result)).toMatchObject({
+        status: 'failed', error: { code: 'NATIVE_SESSION_MISMATCH' },
+      });
+      expect(execution.sessionId).toBeUndefined();
+      expect(await execution.captureSession()).toBeUndefined();
+    } finally { await streaming.kill(); }
+  });
+
   it('uses executionMode as the authority for batch and interactive commands', () => {
     const provider = create();
     const host = fixtureHost();

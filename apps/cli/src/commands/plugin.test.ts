@@ -75,7 +75,7 @@ describe('plugin commands', () => {
     process.stdout.write = ((chunk: string | Uint8Array) => { output.push(String(chunk)); return true; }) as typeof process.stdout.write;
     const program = new Command().name('afk').exitOverride();
     registerPluginCommands(program, { pluginRuntime: runtime });
-    try { await program.parseAsync(['node', 'afk', 'plugin', 'list', '--json']); }
+    try { await program.parseAsync(['node', 'afk', 'plugin', 'list', '--loaded', '--json']); }
     finally { process.stdout.write = write; }
     expect(JSON.parse(output.join(''))).toEqual([{ id: 'agent.test', capabilities: ['agent.provider'], providers: ['test'] }]);
   });
@@ -298,5 +298,146 @@ describe('plugin auth commands', () => {
     const extra = await fixture();
     await expect(extra.parse('login', 'google', '--client', '/tmp/client.json', '--email', 'other@example.test')).rejects.toThrow("unknown option '--email'");
     expect(extra.googleAuth.login).not.toHaveBeenCalled();
+  });
+});
+
+describe('static plugin CLI inventory', () => {
+  it('lists configuration and external tools without runtime activation or secret resolution', async () => {
+    const createRuntime = vi.fn(async () => { throw new Error('must remain passive'); });
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const program = new Command().exitOverride();
+    registerPluginCommands(program, { createRuntime, readConfiguration: (): ReturnType<typeof readPluginConfiguration> => ({ plugins: [
+      { id: 'host.ssh', builtin: true, config: { hosts: [{ alias: 'a', address: 'example.invalid' }], binary: '/opt/custom/ssh' } },
+      { id: 'artifact.report-platform', builtin: true, config: { endpoint: 'https://reports.invalid', token: { env: 'STATIC_MISSING' } } },
+    ] }) });
+    try {
+      await program.parseAsync(['node', 'afk', 'plugin', 'list', '--json']);
+      const rows = JSON.parse(String(output.mock.calls[0][0]));
+      expect(rows.find((row: { id: string }) => row.id === 'host.ssh').externalTools).toContainEqual(expect.objectContaining({ command: '/opt/custom/ssh', status: 'unsupported', reason: 'custom-binding' }));
+      expect(rows.find((row: { id: string }) => row.id === 'artifact.report-platform').configuration).toBe('valid');
+      expect(createRuntime).not.toHaveBeenCalled();
+    } finally { output.mockRestore(); }
+  });
+});
+
+describe('static doctor composition', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it('keeps default doctor passive and backend probes off the host', async () => {
+    const createRuntime = vi.fn(async () => { throw new Error('Runtime activation forbidden'); });
+    const execute = vi.fn(async () => { throw new Error('Host execution forbidden'); });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Network forbidden'); }));
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    for (const flags of [[], ['--probe']]) {
+      const program = new Command().exitOverride();
+      registerPluginCommands(program, { createRuntime, readConfiguration: (): ReturnType<typeof readPluginConfiguration> => ({ plugins: [] }), toolDiagnostics: { execute, executorLifecycle: 'trusted-cooperative' } });
+      await program.parseAsync(['node', 'afk', 'plugin', 'doctor', '--plugin', 'agent.codex', '--json', ...flags]);
+      const report = JSON.parse(String(write.mock.calls.at(-1)![0]));
+      expect(report.externalTools).toEqual([expect.objectContaining({ location: 'backend', status: 'unknown', reason: flags.length ? 'backend-required' : 'not-requested' })]);
+      expect(report).not.toHaveProperty('health');
+    }
+    expect(createRuntime).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('runs only the known host version tuple through explicit doctor --probe', async () => {
+    const execute = vi.fn(async () => ({ stdout: 'Docker version 28.0.1', stderr: '' }));
+    const createRuntime = vi.fn(async () => { throw new Error('Runtime forbidden'); });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const program = new Command().exitOverride();
+    registerPluginCommands(program, { createRuntime, readConfiguration: (): ReturnType<typeof readPluginConfiguration> => ({ plugins: [] }), toolDiagnostics: { execute, executorLifecycle: 'trusted-cooperative' } });
+    await program.parseAsync(['node', 'afk', 'plugin', 'doctor', '--plugin', 'sandbox.docker', '--probe', '--json']);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ command: 'docker', args: ['--version'] }));
+    expect(JSON.parse(String(write.mock.calls[0][0])).externalTools).toEqual([expect.objectContaining({ status: 'available', version: '28.0.1' })]);
+    expect(createRuntime).not.toHaveBeenCalled();
+  });
+
+  it('retains loaded doctor as an explicit compatibility route', async () => {
+    const runtime = new PluginRuntime();
+    const health = vi.fn(async () => ({ status: 'degraded' as const }));
+    await runtime.activate({ manifest: { id: 'context.loaded', version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true }, activate() {}, health });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const program = new Command().exitOverride();
+    registerPluginCommands(program, { pluginRuntime: runtime });
+    try {
+      await program.parseAsync(['node', 'afk', 'plugin', 'doctor', '--loaded', '--json']);
+      expect(JSON.parse(String(write.mock.calls[0][0])).health).toEqual([expect.objectContaining({ status: 'degraded' })]);
+      expect(health).toHaveBeenCalledTimes(1);
+      await expect(program.parseAsync(['node', 'afk', 'plugin', 'doctor', '--loaded', '--probe'])).rejects.toThrow('--probe cannot be combined');
+    } finally { await runtime.dispose(); }
+  });
+
+  it('routes configured binaries to explicit unsupported and refuses installed argv on the CLI path', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'plugin-static-cli-'));
+    const directory = join(homeDir, '.afk', 'plugins', 'context.malicious');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'entry.js'), 'throw new Error("must not import");');
+    await writeFile(join(directory, 'install.json'), JSON.stringify({ id: 'context.malicious', version: '1.0.0', entry: 'entry.js', manifest: {
+      id: 'context.malicious', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['context.provider'],
+      externalTools: [{ id: 'node', command: 'node', location: 'host', source: { url: 'https://example.invalid/' }, version: { args: ['--eval', 'throw new Error("forbidden")'] } }],
+    } }));
+    const execute = vi.fn(async () => { throw new Error('Must not execute'); });
+    const createRuntime = vi.fn(async () => { throw new Error('Must not activate'); });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const readConfiguration = () => ({ plugins: [
+      { id: 'context.malicious', builtin: false },
+      { id: 'host.ssh', builtin: true, config: { hosts: [{ alias: 'a', address: 'a' }], binary: '/custom/ssh' } },
+    ] });
+    try {
+      for (const [id, reason] of [['context.malicious', 'not-approved'], ['host.ssh', 'custom-binding']]) {
+        const program = new Command().exitOverride();
+        registerPluginCommands(program, { homeDir, createRuntime, readConfiguration, toolDiagnostics: { execute, executorLifecycle: 'trusted-cooperative' } });
+        await program.parseAsync(['node', 'afk', 'plugin', 'doctor', '--plugin', id, '--probe', '--json']);
+        expect(JSON.parse(String(write.mock.calls.at(-1)![0])).externalTools).toContainEqual(expect.objectContaining({ reason }));
+      }
+      expect(execute).not.toHaveBeenCalled(); expect(createRuntime).not.toHaveBeenCalled();
+    } finally { await rm(homeDir, { recursive: true, force: true }); }
+  });
+});
+
+describe('proposed static manager CLI configuration wiring', () => {
+  it('saves unresolved environment references through the real CLI and shared manager without activation', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'static-configure-cli-'));
+    const file = join(homeDir, 'settings.json');
+    await writeFile(file, JSON.stringify({ webhook: { env: 'D01_UNRESOLVED_REFERENCE' } }));
+    const createRuntime = vi.fn(async () => { throw new Error('Configuration must not activate providers'); });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const program = new Command().exitOverride();
+    registerPluginCommands(program, { homeDir, createRuntime });
+    try {
+      await program.parseAsync(['node', 'afk', 'plugin', 'configure', 'notification.slack', '--builtin', '--file', file]);
+      expect(readPluginConfiguration(homeDir).plugins).toContainEqual(expect.objectContaining({ id: 'notification.slack', config: { webhook: { env: 'D01_UNRESOLVED_REFERENCE' } } }));
+      await program.parseAsync(['node', 'afk', 'plugin', 'list', '--json']);
+      const rows = JSON.parse(String(write.mock.calls.at(-1)![0]));
+      expect(rows.find((row: { id: string }) => row.id === 'notification.slack').configuration).toBe('valid');
+      expect(createRuntime).not.toHaveBeenCalled();
+    } finally { write.mockRestore(); await rm(homeDir, { recursive: true, force: true }); }
+  });
+});
+
+describe('whole doctor diagnosis deadline', () => {
+  it('shares the configured budget across real Commander inventory rows without converting expiry to cancellation', async () => {
+    const createRuntime = vi.fn(async () => { throw new Error('Doctor must stay passive'); });
+    const execute = vi.fn((request: import('@afk/runtime/plugin-sdk').VersionProbeRequest) => new Promise<never>((_resolve, reject) => {
+      request.signal.addEventListener('abort', () => setTimeout(() => reject(Object.assign(new Error('Cleanup unconfirmed'), { code: 'PROBE_CLEANUP_UNCONFIRMED' })), 5), { once: true });
+    }));
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const previousExitCode = process.exitCode;
+    const program = new Command().exitOverride();
+    registerPluginCommands(program, { createRuntime, readConfiguration: () => ({ plugins: [] }),
+      toolDiagnostics: { timeoutMs: 30, execute, executorLifecycle: 'trusted-cooperative' } });
+    try {
+      await program.parseAsync(['node', 'afk', 'plugin', 'doctor', '--probe', '--json']);
+      const tools = JSON.parse(String(output.mock.calls[0][0])).externalTools as { pluginId: string; reason?: string; cleanup?: string }[];
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(tools).toContainEqual(expect.objectContaining({ pluginId: 'host.ssh', reason: 'timeout', cleanup: 'unconfirmed' }));
+      for (const pluginId of ['host.aws-ssm', 'host.kubernetes-exec', 'sandbox.docker', 'sandbox.podman']) {
+        expect(tools).toContainEqual(expect.objectContaining({ pluginId, reason: 'timeout' }));
+      }
+      expect(tools.some(tool => tool.reason === 'cancelled')).toBe(false);
+      expect(tools).toContainEqual(expect.objectContaining({ pluginId: 'agent.codex', reason: 'backend-required' }));
+      expect(createRuntime).not.toHaveBeenCalled();
+    } finally { output.mockRestore(); process.exitCode = previousExitCode; }
   });
 });

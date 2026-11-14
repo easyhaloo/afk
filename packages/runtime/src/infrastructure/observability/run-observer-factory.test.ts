@@ -1,12 +1,13 @@
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../io/logger.js';
 import type { EvidenceRecord, EvidenceStoreProvider, MetricsProvider, TracerProvider, EventStoreProvider, ProviderAbortSignal } from '../../plugin-sdk/capabilities.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
 import { createRunObserver } from './run-observer-factory.js';
-import { createLocalEncryptedEvidenceStore } from './local-evidence-store.js';
+import { createLocalEncryptedEvidenceStore, type LocalEncryptedEvidenceStore } from './local-evidence-store.js';
 
 const roots: string[] = [];
 
@@ -38,9 +39,26 @@ function provider() {
   };
 }
 
-async function sdkEvidence() {
+function plainEvidence(): Pick<LocalEncryptedEvidenceStore, 'put' | 'get'> {
+  const records = new Map<string, Uint8Array>();
+  return {
+    async put(input) {
+      const bytes = Buffer.from(input.bytes);
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      records.set(sha256, bytes);
+      return { uri: `evidence://${sha256}`, sha256, mediaType: input.mediaType, classification: input.classification, redactionStatus: input.redactionStatus };
+    },
+    async get(ref) {
+      const bytes = records.get(ref.sha256);
+      if (!bytes) throw new Error('Missing fixture evidence');
+      return Buffer.from(bytes);
+    },
+  };
+}
+
+async function sdkEvidence(usePlainCapture = false) {
   const root = await directory();
-  const evidence = await createLocalEncryptedEvidenceStore(root);
+  const evidence = usePlainCapture ? plainEvidence() : await createLocalEncryptedEvidenceStore(root);
   const records = new Map<string, EvidenceRecord>();
   const sdk: EvidenceStoreProvider = {
     id: 'private', capabilities: { put: true, get: true, classify: false },
@@ -129,7 +147,7 @@ describe('explicit SDK evidence mirror boundaries', () => {
   });
 
   it.each(['before', 'put', 'get', 'timeout'] as const)('keeps local success on cancellation at %s', async stage => {
-    const { events, evidence, sdk, history } = await sdkEvidence();
+    const { events, evidence, sdk, history } = await sdkEvidence(true);
     const controller = new AbortController();
     let receivedSignal: ProviderAbortSignal | undefined;
     let release: (() => void) | undefined;
@@ -156,6 +174,34 @@ describe('explicit SDK evidence mirror boundaries', () => {
     release?.();
     await Promise.resolve();
     if (stage !== 'get') expect(sdk.get).not.toHaveBeenCalled();
+  });
+
+  it.each(['active', 'preaborted'] as const)('keeps capture deadline separate from provider cancellation when %s', async state => {
+    const { events, evidence, sdk, history } = await sdkEvidence(true);
+    const controller = new AbortController();
+    if (state === 'preaborted') controller.abort(null);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let late!: ReturnType<typeof evidence.put>;
+    const local = { get: evidence.get, put: (input: Parameters<typeof evidence.put>[0]) => {
+      late = held.then(() => evidence.put(input));
+      return late;
+    } };
+    const onFailure = vi.fn();
+    const receipt = await createRunObserver(events, [], { evidenceStore: {
+      provider: sdk, scopes: ['github:org/repo'], evidence: local, signal: controller.signal, timeoutMs: 20, onFailure,
+    } }).record(context, { kind: 'qa.passed' });
+    const stored = await history();
+    expect(receipt).toMatchObject({ lastSequence: 1, lastHash: stored[0].integrity.hash });
+    expect(stored[0].data).toEqual({ kind: 'qa.passed' });
+    expect(stored[0].evidence).toBeUndefined();
+    expect(stored.filter(event => event.data.kind === 'effect.completed' && event.data.effectKind === 'evidence.mirror')).toHaveLength(0);
+    expect(sdk.put).not.toHaveBeenCalled();
+    expect(sdk.get).not.toHaveBeenCalled();
+    expect(onFailure).not.toHaveBeenCalled();
+    release();
+    await late;
+    expect(await history()).toEqual(stored);
   });
 
   it('never calls the SDK when authoritative event persistence fails', async () => {

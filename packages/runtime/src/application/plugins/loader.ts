@@ -6,10 +6,11 @@ import type { Plugin, WorkflowPlugin } from './runtime.js';
 import { PluginRuntime } from './runtime.js';
 import { getConfiguredCredentialDependencies } from './configured.js';
 import { readPluginConfiguration, validatePluginConfig, type InstalledPluginEntry } from './configuration.js';
-import { readInstalledPlugin, resolveInstalledPluginEntry } from './manager.js';
-import { validateManifest, type PluginConfigValue } from '../../plugin-sdk/profile.js';
+import { PluginManager, readInstalledPlugin, resolveInstalledPluginEntry, type InstalledPluginRecord } from './manager.js';
+import { validateManifest, validatePluginId, type PluginConfigValue } from '../../plugin-sdk/profile.js';
 
 type LoadablePlugin = Plugin | WorkflowPlugin;
+const pendingRecoveries = new WeakMap<PluginRuntime, Map<string, InstalledPluginRecord>>();
 
 export type { InstalledPluginEntry } from './configuration.js';
 
@@ -62,22 +63,35 @@ export async function loadInstalledPlugins(
   const loaded: string[] = [];
   const seen = new Set<string>();
   const candidates: LoadablePlugin[] = [];
+  const manager = new PluginManager({ homeDir });
+  const activations = new Map<string, { record?: InstalledPluginRecord; entry?: InstalledPluginEntry; release: () => Promise<void> }>();
+  const failed = (id: string, error: unknown, code = 'load.failed'): void => {
+    warn(`Failed to load AFK plugin: ${id}`, error);
+    runtime.recordDiagnostic({ pluginId: id, severity: 'error', code, message: error instanceof Error ? error.message : String(error) });
+  };
 
-  for (const entry of entries) {
-    if (seen.has(entry.id)) {
-      runtime.recordDiagnostic({ pluginId: entry.id, severity: 'warning', code: 'config.duplicate', message: `Duplicate plugin entry '${entry.id}' was ignored` });
-      continue;
+  async function importCandidate(entry: InstalledPluginEntry): Promise<LoadablePlugin> {
+    validatePluginId(entry.id);
+    if (runtime.getPlugin(entry.id)) throw new Error(`Plugin '${entry.id}' already has an active runtime reference`);
+    const directory = join(homeDir, '.afk', 'plugins', entry.id);
+    const recovery = pendingRecoveries.get(runtime)?.get(entry.id);
+    if (!options.resolveEntry && (recovery || runtime.hasPendingCleanup(entry.id))) {
+      const record = recovery ?? await readInstalledPlugin(directory);
+      if (runtime.hasPendingCleanup(entry.id)) await runtime.dispose(entry.id);
+      if (record) await manager.restoreActivation(entry.id, record);
+      pendingRecoveries.get(runtime)?.delete(entry.id);
     }
-    seen.add(entry.id);
-    if (entry.enabled === false || entry.builtin) continue;
+    const activation = options.resolveEntry ? undefined : await manager.beginActivation(entry.id);
+    if (activation) activations.set(entry.id, activation);
     try {
-      const directory = join(homeDir, '.afk', 'plugins', entry.id);
-      const record = options.resolveEntry ? undefined : await readInstalledPlugin(directory);
+      const record = activation?.record;
+      // Recovery may have replaced this plugin's settings while acquiring its lease.
+      if (record) entry = activation?.entry ?? entry;
+      if (entry.enabled === false || entry.builtin) throw new Error('Plugin selection changed during activation');
       const modulePath = record ? await resolveInstalledPluginEntry(directory, record) : resolveEntry(homeDir, entry.id);
       if (!existsSync(modulePath)) {
-        warn(`Skipping missing plugin entry: ${entry.id}`);
         runtime.recordDiagnostic({ pluginId: entry.id, severity: 'warning', code: 'load.missing', message: `Plugin entry does not exist: ${modulePath}` });
-        continue;
+        throw new Error(`Plugin entry does not exist: ${modulePath}`);
       }
       const module = await import(pathToFileURL(modulePath).href);
       const factory = module.default ?? module.plugin;
@@ -89,25 +103,48 @@ export async function loadInstalledPlugins(
       const plugin = typeof factory === 'function'
         ? await factory({ configuration: entry.config ?? {}, homeDir, workspaceRoot: options.workspaceRoot ?? process.cwd() } satisfies PluginFactoryOptions)
         : factory;
-      if (!isLoadablePlugin(plugin)) {
-        warn(`Skipping malformed AFK plugin: ${entry.id}`);
-        runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'load.malformed', message: 'Plugin module does not export a supported plugin' });
-        continue;
-      }
-      if (pluginId(plugin) !== entry.id) {
-        warn(`Skipping AFK plugin with mismatched id: ${entry.id}`);
-        runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'load.id-mismatch', message: `Plugin manifest id does not match '${entry.id}'` });
-        continue;
-      }
+      if (!isLoadablePlugin(plugin)) throw new Error('Plugin module does not export a supported plugin');
+      if (pluginId(plugin) !== entry.id) throw new Error(`Plugin manifest id does not match '${entry.id}'`);
       if (record && (!('manifest' in plugin) || plugin.manifest.version !== record.version ||
         JSON.stringify([...plugin.manifest.provides].sort()) !== JSON.stringify([...record.manifest.provides].sort()))) {
         throw new Error('Installed plugin exports do not match its package manifest');
       }
       if ('manifest' in plugin) validatePluginConfig(plugin.manifest.configSchema, entry.config ?? {});
-      candidates.push(plugin);
+      return plugin;
     } catch (error) {
-      warn(`Failed to load AFK plugin: ${entry.id}`, error);
-      runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'load.failed', message: error instanceof Error ? error.message : String(error) });
+      await activation?.release();
+      throw error;
+    }
+  }
+
+  async function recover(id: string): Promise<LoadablePlugin | undefined> {
+    const activation = activations.get(id);
+    if (!activation) return undefined;
+    if (runtime.hasPendingCleanup(id)) throw new Error(`Plugin '${id}' cleanup is unconfirmed; managed ownership and pending recovery retained`);
+    await activation.release();
+    if (!activation.record) return undefined;
+    const restored = await manager.restoreActivation(id, activation.record);
+    pendingRecoveries.get(runtime)?.delete(id);
+    if (!restored) return undefined;
+    runtime.recordDiagnostic({ pluginId: id, severity: 'warning', code: 'load.recovered', message: 'Failed upgrade restored the previous installed plugin; retrying its activation' });
+    const entry = readPluginConfiguration(homeDir).plugins.find(candidate => candidate.id === id);
+    if (!entry || entry.enabled === false || entry.builtin) return undefined;
+    return importCandidate(entry);
+  }
+
+  for (const entry of entries) {
+    if (seen.has(entry.id)) {
+      runtime.recordDiagnostic({ pluginId: entry.id, severity: 'warning', code: 'config.duplicate', message: `Duplicate plugin entry '${entry.id}' was ignored` });
+      continue;
+    }
+    seen.add(entry.id);
+    if (entry.enabled === false || entry.builtin) continue;
+    try {
+      candidates.push(await importCandidate(entry));
+    } catch (error) {
+      failed(entry.id, error);
+      try { const previous = await recover(entry.id); if (previous) candidates.push(previous); }
+      catch (recoveryError) { failed(entry.id, recoveryError, 'load.recovery-failed'); }
     }
   }
 
@@ -126,15 +163,38 @@ export async function loadInstalledPlugins(
       if (requirements.some(capability => !runtime.listCapabilities().includes(capability))
         || getConfiguredCredentialDependencies(plugin).some(name => !runtime.getCredentialProvider(name))) { deferred.push(plugin); continue; }
       try {
-        await runtime.load(plugin);
+        const activation = activations.get(pluginId(plugin));
+        await runtime.load(plugin, activation?.release);
+        if (activation?.record) await manager.confirmActivation(pluginId(plugin), activation.record, activation.entry);
         loaded.push(pluginId(plugin));
       } catch (error) {
-        runtime.recordDiagnostic({ pluginId: pluginId(plugin), severity: 'error', code: 'load.failed', message: error instanceof Error ? error.message : 'Plugin activation failed' });
+        const id = pluginId(plugin);
+        failed(id, error);
+        const record = activations.get(id)?.record;
+        if (record) {
+          const recoveries = pendingRecoveries.get(runtime) ?? new Map<string, InstalledPluginRecord>();
+          recoveries.set(id, record);
+          pendingRecoveries.set(runtime, recoveries);
+        }
+        try {
+          if (runtime.getPlugin(id)) await runtime.dispose(id);
+          const previous = await recover(id);
+          if (previous) deferred.push(previous);
+        } catch (recoveryError) { failed(id, recoveryError, 'load.recovery-failed'); }
       }
       progressed = true;
     }
     if (!progressed) {
-      for (const plugin of deferred) runtime.recordDiagnostic({ pluginId: pluginId(plugin), severity: 'error', code: 'load.dependencies', message: 'Plugin dependencies are missing or cyclic' });
+      const recovered: LoadablePlugin[] = [];
+      for (const plugin of deferred) {
+        const id = pluginId(plugin);
+        runtime.recordDiagnostic({ pluginId: id, severity: 'error', code: 'load.dependencies', message: 'Plugin dependencies are missing or cyclic' });
+        try {
+          const previous = await recover(id);
+          if (previous) recovered.push(previous);
+        } catch (error) { failed(id, error, 'load.recovery-failed'); }
+      }
+      if (recovered.length) { pending = recovered; continue; }
       break;
     }
     pending = deferred;

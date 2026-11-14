@@ -4,6 +4,7 @@ import type {
 } from '../../plugin-sdk/capabilities.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import type { PluginRuntime, PluginSetupContext } from './runtime.js';
+import { withCancellation } from './cancellation.js';
 import {
   artifactRefSchema, contextFragmentsSchema, invokeCapability, notificationReceiptSchema, policyDecisionSchema, verificationResultSchema,
 } from './operations.js';
@@ -43,16 +44,18 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
   const evaluatePolicies = async (context: LifecycleContext) => {
     for (const policy of policies) {
       const decision = policyDecisionSchema.parse(await invokeCapability(runtime, {
-        capability: 'policy.provider', provider: policy.provider, operation: 'evaluate', input: await policy.input(context),
-      }));
+        capability: 'policy.provider', provider: policy.provider, operation: 'evaluate',
+        input: await withCancellation(() => policy.input(context), context.signal ? { signal: context.signal } : undefined),
+      }, context.signal ? { signal: context.signal } : undefined));
       if (!decision.allowed) throw new Error('Execution denied by capability policy');
     }
   };
   const verify = async (context: LifecycleContext) => {
     for (const verification of verifications) {
       const result = verificationResultSchema.parse(await invokeCapability(runtime, {
-        capability: 'verification.provider', provider: verification.provider, operation: 'verify', input: await verification.request(context),
-      }));
+        capability: 'verification.provider', provider: verification.provider, operation: 'verify',
+        input: await withCancellation(() => verification.request(context), context.signal ? { signal: context.signal } : undefined),
+      }, context.signal ? { signal: context.signal } : undefined));
       if (!result.passed) throw new Error('Capability verification failed');
     }
   };
@@ -68,9 +71,10 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
       await evaluatePolicies(context);
       for (const source of contexts) {
         const fragments = contextFragmentsSchema.parse(await invokeCapability(runtime, {
-          capability: 'context.provider', provider: source.provider, operation: 'gather', input: await source.query(context),
-        }));
-        await source.consume(fragments, context);
+          capability: 'context.provider', provider: source.provider, operation: 'gather',
+          input: await withCancellation(() => source.query(context), context.signal ? { signal: context.signal } : undefined),
+        }, context.signal ? { signal: context.signal } : undefined));
+        await withCancellation(() => source.consume(fragments, context), context.signal ? { signal: context.signal } : undefined);
       }
     },
     async onAfterAgent(context) {
@@ -78,19 +82,19 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
       await verify(context);
       const published: PublishedCapabilityArtifact[] = [];
       for (const sink of artifacts) {
-        const descriptor = await sink.artifact(context);
+        const descriptor = await withCancellation(() => sink.artifact(context), context.signal ? { signal: context.signal } : undefined);
         const artifact = artifactRefSchema.parse(await invokeCapability(runtime, {
           capability: 'artifact.provider', provider: sink.provider, operation: 'put',
           input: { ...descriptor, bytes: Buffer.from(descriptor.bytes).toString('base64') },
-        }));
-        await sink.publish(artifact, context);
+        }, context.signal ? { signal: context.signal } : undefined));
+        await withCancellation(() => sink.publish(artifact, context), context.signal ? { signal: context.signal } : undefined);
         published.push({ provider: sink.provider, artifact });
       }
       for (const notification of notifications) {
         const receipt = notificationReceiptSchema.parse(await invokeCapability(runtime, {
           capability: 'notification.provider', provider: notification.provider, operation: 'notify',
-          input: await notification.message(context, published),
-        }));
+          input: await withCancellation(() => notification.message(context, published), context.signal ? { signal: context.signal } : undefined),
+        }, context.signal ? { signal: context.signal } : undefined));
         if (!receipt.delivered) throw new Error('Capability notification was not delivered');
       }
     },
@@ -109,10 +113,11 @@ export function registerVerificationSystemActions(
   selection: readonly VerificationSystemActionSelection[],
 ): void {
   for (const action of selection) {
-    setup.registerSystemAction(action.name, async input => {
+    setup.registerSystemAction(action.name, async (input, options) => {
       const result = verificationResultSchema.parse(await invokeCapability(runtime, {
-        capability: 'verification.provider', provider: action.provider, operation: 'verify', input: await action.request(input),
-      }));
+        capability: 'verification.provider', provider: action.provider, operation: 'verify',
+        input: await withCancellation(() => action.request(input), options),
+      }, options));
       if (!result.passed) throw new Error('Capability verification failed');
       return result;
     });

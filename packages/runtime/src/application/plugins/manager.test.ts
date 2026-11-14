@@ -327,7 +327,8 @@ describe('PluginManager', () => {
     const record = (await readInstalledPlugin(directory))!;
     await fs.writeFile(join(directory, record.entry), 'throw new Error("damaged entry must not execute");');
     await expect(manager.install(source)).resolves.toMatchObject({ id: 'example.primary', version: '1.0.0' });
-    expect(await fs.readFile(join(directory, record.entry), 'utf8')).toBe(await fs.readFile(join(source, 'dist', 'index.js'), 'utf8'));
+    const repaired = (await readInstalledPlugin(directory))!;
+    expect(await fs.readFile(join(directory, repaired.entry), 'utf8')).toBe(await fs.readFile(join(source, 'dist', 'index.js'), 'utf8'));
     expect(readPluginConfiguration(homeDir).plugins.find(entry => entry.id === 'example.dependent')?.enabled).toBe(true);
     expect(await fs.stat(marker).then(() => true, () => false)).toBe(false);
   });
@@ -460,6 +461,8 @@ describe('PluginManager', () => {
     expect(await runtime.getContextProvider('example')!.gather({ scope: 'project', prompt: 'q' })).toEqual([{ origin: 'project', content: 'ready' }]);
     await manager.setEnabled(installed.id, false);
     expect(await loadInstalledPlugins(new PluginRuntime(), { homeDir })).toEqual([]);
+    await expect(manager.remove(installed.id)).rejects.toThrow(/active.*reference/);
+    await runtime.dispose();
     await manager.remove(installed.id);
     expect(await readInstalledPlugin(join(homeDir, '.afk', 'plugins', installed.id))).toBeUndefined();
     expect(readPluginConfiguration(homeDir).plugins[0].enabled).toBe(false);
@@ -467,7 +470,7 @@ describe('PluginManager', () => {
 
   it('keeps the previous plugin and settings when dependencies or settings fail', async () => {
     const { source, homeDir } = await fixture();
-    const npm = vi.fn(async () => { throw new Error('npm failed'); });
+    const npm = vi.fn(async (_args: readonly string[], _cwd: string) => { throw new Error('npm failed'); });
     const manager = new PluginManager({ homeDir, runNpm: npm });
     await manager.install(source);
     await manager.configure('context.example', { scope: 'original' });
@@ -501,8 +504,8 @@ describe('PluginManager', () => {
     const { source, homeDir } = await fixture();
     const manager = new PluginManager({ homeDir });
     await expect(manager.setEnabled('../bad', false)).rejects.toThrow('invalid plugin id');
-    await manager.install(source);
-    await fs.writeFile(join(homeDir, '.afk', 'plugins', 'context.example', 'package', 'dist', 'index.js'), 'throw new Error("should not execute")');
+    const record = await manager.install(source);
+    await fs.writeFile(join(homeDir, '.afk', 'plugins', 'context.example', record.entry), 'throw new Error("should not execute")');
     const runtime = new PluginRuntime();
     expect(await loadInstalledPlugins(runtime, { homeDir })).toEqual([]);
     expect(await runtime.diagnostics()).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'load.failed', message: expect.stringContaining('integrity') })]));

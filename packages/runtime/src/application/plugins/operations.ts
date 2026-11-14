@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { PluginRuntime } from './runtime.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
+import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import { withCancellation } from './cancellation.js';
 import { RepositoryLifecycleService } from './repository-lifecycle.js';
 import { experienceQueryContextSchema } from '../learning/experience-store.js';
 
@@ -166,7 +168,7 @@ function output<S extends z.ZodTypeAny>(schema: S, value: unknown): z.output<S> 
   return parsed.data;
 }
 
-export async function invokeCapability(runtime: PluginRuntime, input: unknown): Promise<unknown> {
+export async function invokeCapability(runtime: PluginRuntime, input: unknown, options?: ProviderOperationOptions): Promise<unknown> {
   const fields = input && typeof input === 'object' ? Object.getOwnPropertyDescriptors(input) : undefined;
   const ownEnvelope = fields && ['capability', 'provider', 'operation', 'input']
     .every(key => Object.hasOwn(fields, key) && Object.hasOwn(fields[key], 'value'));
@@ -176,40 +178,49 @@ export async function invokeCapability(runtime: PluginRuntime, input: unknown): 
   const parsed = invocationSchema.safeParse(ownEnvelope && !unsafeContext ? input : undefined);
   if (!parsed.success) throw new Error('Invalid or unsupported capability invocation; credential operations are private');
   const request = parsed.data;
+  if (request.capability === 'repository.provider') {
+    await withCancellation(() => undefined, options);
+    return dispatchCapability(runtime, request, options);
+  }
+  return withCancellation(() => dispatchCapability(runtime, request, options), options);
+}
+
+async function dispatchCapability(runtime: PluginRuntime, request: z.output<typeof invocationSchema>, options?: ProviderOperationOptions): Promise<unknown> {
+  const forwarded: [] | [ProviderOperationOptions] = options ? [options] : [];
   switch (request.capability) {
     case 'verification.provider':
-      return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(request.input));
+      return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(request.input, ...forwarded));
     case 'notification.provider':
-      return output(notificationReceiptSchema, await required(runtime.getNotificationProvider(request.provider)).notify(request.input));
+      return output(notificationReceiptSchema, await required(runtime.getNotificationProvider(request.provider)).notify(request.input, ...forwarded));
     case 'context.provider':
-      return output(contextFragmentsSchema, await required(runtime.getContextProvider(request.provider)).gather(request.input));
+      return output(contextFragmentsSchema, await required(runtime.getContextProvider(request.provider)).gather(request.input, ...forwarded));
     case 'artifact.provider':
       return output(artifactRefSchema, await required(runtime.getArtifactProvider(request.provider)).put({
         ...request.input, bytes: Buffer.from(request.input.bytes, 'base64'),
-      }));
+      }, ...forwarded));
     case 'repository.provider': {
       const provider = required(runtime.getRepositoryProvider(request.provider));
-      if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input));
+      if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input, ...forwarded));
       if (request.operation === 'run') {
         if (!runtime.listSystemActions().includes(request.input.action)) throw new Error('Repository execution action is not registered');
         const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId }, workspace => runtime.dispatchSystemAction(request.input.action, {
           input: request.input.input, repositoryWorkspace: workspace, worktreePath: workspace.path,
-        }));
+        }, options), options);
         return output(z.object({ value: z.unknown(), workspace: repositoryWorkspace, publication: repositoryPublication, cleanup: repositoryCleanup }), result);
       }
       const operation = request.operation;
       if (!provider.capabilities[operation] || !provider[operation]) throw new Error(`Repository provider does not support ${operation}`);
-      if (operation === 'prepare') return output(repositoryWorkspace, await provider.prepare!(request.input));
-      if (operation === 'checkout') return output(repositoryWorkspace, await provider.checkout!(request.input));
-      if (operation === 'publish') return output(repositoryPublication, await provider.publish!(request.input));
-      return output(repositoryCleanup, await provider.cleanup!(request.input));
+      if (operation === 'prepare') return output(repositoryWorkspace, await provider.prepare!(request.input, ...forwarded));
+      if (operation === 'checkout') return output(repositoryWorkspace, await provider.checkout!(request.input, ...forwarded));
+      if (operation === 'publish') return output(repositoryPublication, await provider.publish!(request.input, ...forwarded));
+      return output(repositoryCleanup, await provider.cleanup!(request.input, ...forwarded));
     }
     case 'policy.provider':
-      return output(policyDecisionSchema, await required(runtime.getPolicyProvider(request.provider)).evaluate(request.input));
+      return output(policyDecisionSchema, await required(runtime.getPolicyProvider(request.provider)).evaluate(request.input, ...forwarded));
     case 'trigger.provider': {
       const provider = required(runtime.getTriggerProvider(request.provider));
       if (request.operation === 'register') return output(z.void(), await provider.register(request.input));
-      return output(z.void(), await provider.unregister(request.input.triggerId));
+      return output(z.void(), await provider.unregister(request.input.triggerId, ...forwarded));
     }
     case 'tracker.issue': {
       const provider = required(runtime.getIssueTrackerProvider(request.provider));
@@ -260,10 +271,10 @@ export async function invokeCapability(runtime: PluginRuntime, input: unknown): 
         case 'listHosts': return output(z.array(hostRecord), await provider.listHosts());
         case 'resolve': return output(hostRecord, await provider.resolve(request.input.host));
         case 'exec': return output(z.object({ code: z.number().int(), stdout: z.string(), stderr: z.string() }),
-          await provider.exec(request.input.host, request.input.argv, { timeoutMs: request.input.timeoutMs }));
+          await provider.exec(request.input.host, request.input.argv, { timeoutMs: request.input.timeoutMs, ...options }));
         case 'upload':
           if (!provider.upload) throw new Error('Host provider does not support upload');
-          return output(z.void(), await provider.upload(request.input.host, request.input.source, request.input.destination, { timeoutMs: request.input.timeoutMs }));
+          return output(z.void(), await provider.upload(request.input.host, request.input.source, request.input.destination, { timeoutMs: request.input.timeoutMs, ...options }));
       }
     }
   }

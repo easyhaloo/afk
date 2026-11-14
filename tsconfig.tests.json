@@ -27,6 +27,10 @@
     "packages/runtime/src/application/plugins/builtin-manifests.test.ts",
     "packages/runtime/src/application/plugins/external-tools.test.ts",
     "packages/runtime/src/plugin-sdk/profile.test.ts",
-    "packages/runtime/src/infrastructure/sandbox/providers/analysis-process-guard.test.ts"
+    "packages/runtime/src/infrastructure/sandbox/providers/analysis-process-guard.test.ts",
+    "packages/runtime/src/application/plugins/capability-cancellation.test.ts",
+    "packages/runtime/src/application/plugins/activation-recovery.test.ts",
+    "packages/runtime/src/application/plugins/runtime.cleanup.test.ts",
+    "packages/runtime/src/application/plugins/manager.test.ts"
   ]
 }

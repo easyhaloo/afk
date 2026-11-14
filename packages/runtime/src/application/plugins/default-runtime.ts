@@ -97,14 +97,14 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
           if (result.status !== 'done' && result.status !== 'merge_ready') throw new Error(`Managed execution stopped: ${result.status}`);
           return result;
         });
-        context.registerSystemAction('capability.invoke', async context => {
+        context.registerSystemAction('capability.invoke', async (context, operation) => {
           const envelope = context && typeof context === 'object' ? context as { input?: unknown; worktreePath?: string } : undefined;
           let input = context && typeof context === 'object' && 'capability' in context ? context : envelope?.input ?? context;
           if (input && typeof input === 'object' && 'capability' in input && input.capability === 'verification.provider' && envelope?.worktreePath) {
             const request = input as { capability: string; input?: { target?: string } };
             input = { ...request, input: { target: envelope.worktreePath, ...request.input } };
           }
-          const result = await invokeCapability(runtime, input);
+          const result = await invokeCapability(runtime, input, operation);
           if (result && typeof result === 'object' && (
             ('passed' in result && result.passed === false) || ('allowed' in result && result.allowed === false)
             || ('delivered' in result && result.delivered === false) || ('code' in result && typeof result.code === 'number' && result.code !== 0)

@@ -105,6 +105,18 @@ function packageFixture({
 }
 
 describe('architecture guard migration baseline', () => {
+  it('ignores import-looking fixture strings while retaining real dependency checks', () => {
+    const example = "export const fixture = \"import helper from './dependency.mjs'; export { value } from 'node:fs'; void import('node:child_process');\";\n";
+    expect(fixture("import { legacy } from '../lib/legacy';\n" + example).run()).toContain('Architecture guard passed');
+    expect(packageFixture({ coreSource: example, applicationSource: example }).run()).toContain('Architecture guard passed');
+  });
+
+  it('rejects actual missing static, exported and dynamic module dependencies', () => {
+    for (const declaration of ["import './missing.js';", "export { value } from './missing.js';", "void import('./missing.js');", 'void import(`./missing.js`);', "export type Dependency = import('./missing.js').Value;"]) {
+      expect(fixture("import { legacy } from '../lib/legacy';\n" + declaration).run()).toContain("unresolved relative import './missing.js'");
+    }
+  });
+
   it('ignores development state containing Electron singleton symlinks', () => {
     const { root, run } = fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n");
     mkdirSync(join(root, '.dev', 'user-data'), { recursive: true });

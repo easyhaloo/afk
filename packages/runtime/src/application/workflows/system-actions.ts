@@ -1,4 +1,6 @@
 import type { PluginRuntime } from '../plugins/runtime.js';
+import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import { withCancellation } from '../plugins/cancellation.js';
 
 export type SystemActionName = 'publish-change' | 'queue-qa';
 export type SystemActionHandler = (context: unknown) => unknown | Promise<unknown>;
@@ -13,12 +15,17 @@ export interface SystemActionExecutorOptions {
 export class SystemActionExecutor {
   constructor(private readonly options: SystemActionExecutorOptions) {}
 
-  async execute(action: string, context: unknown): Promise<unknown> {
+  async execute(action: string, context: unknown, operation?: ProviderOperationOptions): Promise<unknown> {
+    await withCancellation(() => undefined, operation);
+    return this.dispatch(action, context, operation);
+  }
+
+  private dispatch(action: string, context: unknown, operation?: ProviderOperationOptions): unknown | Promise<unknown> {
     switch (action) {
       case 'publish-change': return this.options.publishChange(context);
       case 'queue-qa': return this.options.queueQA(context);
       default:
-        if (this.options.plugins) return this.options.plugins.dispatchSystemAction(action, context);
+        if (this.options.plugins) return operation ? this.options.plugins.dispatchSystemAction(action, context, operation) : this.options.plugins.dispatchSystemAction(action, context);
         throw new Error(`unknown system action '${action}'`);
     }
   }

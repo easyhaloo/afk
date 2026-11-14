@@ -23,11 +23,12 @@ const analysisGuardSource = String.raw`
     }
     setTimeout(() => process.exit(1), 1000).unref();
   };
+  child.stdio[3].on('error', stop);
   process.on('disconnect', stop);
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
   child.on('error', () => { stop(); process.exit(1); });
-  child.on('exit', code => process.exit(code ?? 1));
+  child.on('exit', code => process.exit(stopping && code === 0 ? 1 : code ?? 1));
   try { start = identity(); } catch {}
   if (!start) stop();
   if (!process.connected) stop();

@@ -169,15 +169,16 @@ export class FilesystemClaimLock {
         });
       },
       release: async () => {
-        if (released) return;
-        released = true;
         await serial(async () => {
+          if (released) return;
           await this.withOperationGate(keyPath, async () => {
-            const stored = (await inspectClaimLock(lockPath))?.claim;
-            if (stored?.claimId !== claimId) return;
-            await rm(lockPath, { recursive: true, force: true });
+            const snapshot = await inspectClaimLock(lockPath);
+            if (snapshot && !snapshot.claim) throw new Error(`cannot verify lease for ${request.key}`);
+            if (snapshot?.claim && snapshot.claim.claimId !== claimId) return;
+            if (snapshot) await rm(lockPath, { recursive: true });
             await syncDirectory(dirname(lockPath));
           });
+          released = true;
         });
       },
     };

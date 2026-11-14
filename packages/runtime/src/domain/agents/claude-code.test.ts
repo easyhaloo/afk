@@ -163,6 +163,60 @@ describe('ClaudeCodeProvider.parseLine — terminal result usage', () => {
   });
 });
 
+describe('ClaudeCodeProvider.parseLine — native error details', () => {
+  const provider = new ClaudeCodeProvider();
+
+  it.each([
+    { name: 'native string array', errors: ['first failure', 'second failure'], expected: 'first failure\nsecond failure' },
+    { name: 'mixed array', errors: [null, 42, false, {}, ['nested'], 'valid failure'], expected: 'valid failure' },
+    { name: 'empty array', errors: [], expected: 'agent returned an error' },
+    { name: 'missing array', errors: undefined, expected: 'agent returned an error' },
+    { name: 'non-array string', errors: 'invalid array', expected: 'agent returned an error' },
+    { name: 'non-array object', errors: {}, expected: 'agent returned an error' },
+    { name: 'array without strings', errors: [null, 42, {}], expected: 'agent returned an error' },
+    { name: 'empty string array', errors: [''], expected: 'agent returned an error' },
+  ])('preserves details or falls back for $name', ({ errors, expected }) => {
+    const events = provider.parseLine(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors }));
+    const error = events.find(event => event.type === 'error');
+    expect(error?.error?.message).toBe(expected);
+    expect(events.at(-1)).toEqual({ type: 'result', result: undefined });
+  });
+
+  it.each(['legacy failure', '', 0, false])('preserves legacy result precedence for %j', result => {
+    const events = provider.parseLine(JSON.stringify({ type: 'result', is_error: true, result, errors: ['native failure'] }));
+    expect(events.find(event => event.type === 'error')?.error?.message).toBe(String(result));
+  });
+
+  it('uses native errors when the legacy result is null and preserves usage and session events', () => {
+    const events = provider.parseLine(JSON.stringify({ ...JSON.parse(RESULT_EVENT), is_error: true,
+      result: null, errors: ['native failure'] }));
+    expect(events.map(event => event.type)).toEqual(['usage', 'session', 'error', 'result']);
+    expect(events[0]).toMatchObject({ usage: { inputTokens: 5252 + 20569, outputTokens: 31, totalTokens: 5252 + 20569 + 31 } });
+    expect(events[1]).toMatchObject({ sessionId: '47444657-0000-4000-8000-000000000000' });
+    expect(events.find(event => event.type === 'error')?.error?.message).toBe('native failure');
+    expect(events[3]).toEqual({ type: 'result', result: null });
+  });
+
+  it('returns AGENT_ERROR with native details from a real local Node stdout stream', async () => {
+    const nativeError = JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true,
+      errors: ['first native failure', 'second native failure'], session_id: '47444657-bbbb-4000-8000-000000000000',
+      usage: { input_tokens: 2, output_tokens: 3 } });
+    const execution = new StreamingAgentExecution({
+      command: command(`process.stdin.resume(); process.stdin.once('end', () => process.stdout.end(${JSON.stringify(nativeError + '\n')}));`),
+      prompt: 'synthetic native error', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: { provider: 'claude-code', transport: 'process' }, parseLine: provider.parseLine.bind(provider),
+    });
+    execution.start();
+    try {
+      await expect(execution.waitForResult({ completionTimeoutMs: 5_000 })).resolves.toMatchObject({
+        status: 'failed', exitCode: 0, error: { code: 'AGENT_ERROR', message: 'first native failure\nsecond native failure' },
+        usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+      });
+      expect(execution.metadata.threadId).toBe('47444657-bbbb-4000-8000-000000000000');
+    } finally { await execution.kill(); }
+  });
+});
+
 /**
  * The `/goal` condition of Claude Code's TUI is refused above 4,000
  * characters, and the refusal is silent: the TUI prints one line, the agent

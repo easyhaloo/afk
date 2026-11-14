@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { AgentExecution, AgentProvider } from '../../domain/agents/types.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
@@ -11,11 +11,13 @@ import { WorkflowRunner } from '../workflow-engine.js';
 import type { PreparedRepositorySet } from './multi-repository-preparer.js';
 import { resolveWorkflowRunRequest } from './run-request.js';
 import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { assertWorkspaceOwnershipAvailable, RunResourceScope, type ExecutionCleanupOwnership } from './resource-scope.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 let workspaceRoot: string;
-beforeEach(async () => { workspaceRoot = await mkdtemp(join(tmpdir(), 'afk-manifest-runner-')); });
+beforeEach(async () => { workspaceRoot = await mkdtemp(join(tmpdir(), 'afk-manifest-runner-')); vi.mocked(observer.record).mockClear(); });
 afterEach(async () => { await rm(workspaceRoot, { recursive: true, force: true }); });
+const projectKey = (name: string) => `fixture-${basename(workspaceRoot)}/${name}`;
 
 vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 vi.mock('simple-git', async importOriginal => ({
@@ -33,10 +35,10 @@ describe('execution manifest request to runner boundary', () => {
         schemaVersion: 1,
         workItemId: 'WI-2026-018',
         providerBacklogId: '42',
-        tracker: { platform: 'github', projectKey: 'acme/api' },
+        tracker: { platform: 'github', projectKey: projectKey('api') },
         workingBranch: 'afk/work-item-18',
         repositories: [{
-          platform: 'github', projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+          platform: 'github', projectKey: projectKey('api'), name: 'api', checkoutPath: 'repositories/api',
           baseBranch: '2025-11-8-show', workingBranch: 'afk/work-item-18', primary: true,
         }],
       }),
@@ -54,17 +56,17 @@ describe('execution manifest request to runner boundary', () => {
         schemaVersion: 1,
         workItemId: 'WI-2026-018',
         providerBacklogId: '42',
-        tracker: { platform: 'github', projectKey: 'acme/api' },
+        tracker: { platform: 'github', projectKey: projectKey('api') },
         workingBranch: 'afk/work-item-18',
         repositories: [{
-          platform: 'github', projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+          platform: 'github', projectKey: projectKey('api'), name: 'api', checkoutPath: 'repositories/api',
           baseBranch: 'main', workingBranch: 'afk/work-item-18', primary: true,
         }],
       }),
     });
     const claimedItem: BacklogItem = {
-      id: '42', title: 'Provider issue', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-      branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
+      id: '42', title: 'Provider issue', dependsOn: [], tags: [], state: 'in_progress', executionMode: 'afk',
+      branchName: 'afk/backlog-42', providerRef: `github:${projectKey('api')}#42`,
     };
     const release = vi.fn(async () => undefined);
     const claim: BacklogClaim = { item: claimedItem, claimId: 'claim-42', heartbeat: async () => undefined, release };
@@ -93,6 +95,7 @@ describe('execution manifest request to runner boundary', () => {
           repositories: preparedRepositories,
           primary: preparedRepositories[0],
           finish: vi.fn(async () => undefined),
+          release: vi.fn(async () => undefined),
         })),
       },
     }) as any;
@@ -112,11 +115,11 @@ describe('execution manifest request to runner boundary', () => {
     const events: string[] = [];
     const repositories = [
       {
-        platform: 'github' as const, projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+        platform: 'github' as const, projectKey: projectKey('api'), name: 'api', checkoutPath: 'repositories/api',
         repoRoot: '/workspace/repositories/api', baseBranch: 'main', workingBranch: 'afk/work-item-18', primary: true,
       },
       {
-        platform: 'github' as const, projectKey: 'acme/web', name: 'web', checkoutPath: 'repositories/web',
+        platform: 'github' as const, projectKey: projectKey('web'), name: 'web', checkoutPath: 'repositories/web',
         repoRoot: '/workspace/repositories/web', baseBranch: 'develop', workingBranch: 'afk/work-item-18', primary: false,
       },
     ];
@@ -130,9 +133,19 @@ describe('execution manifest request to runner boundary', () => {
       })),
       primary: undefined as never,
       finish,
+      release: vi.fn(async () => undefined),
     };
     prepared.primary = prepared.repositories[0];
-    const preparer = { prepare: vi.fn(async () => { events.push('prepared'); return prepared; }) };
+    let ownership: ExecutionCleanupOwnership | undefined;
+    const preparer = { prepare: vi.fn(async (_repositories: unknown, root: string, authority?: ExecutionCleanupOwnership) => {
+      ownership = authority;
+      expect(authority?.claims).toHaveLength(3);
+      expect(authority?.claims).toEqual(runner.resourceScope.ownershipClaims);
+      expect(() => authority!.assertClosed()).not.toThrow();
+      await expect(assertWorkspaceOwnershipAvailable(root, repositories)).rejects.toThrow('quarantined');
+      await assertWorkspaceOwnershipAvailable(root, repositories, authority!.claims);
+      events.push('prepared'); return prepared;
+    }) };
     const sandbox = sandboxWith(events);
     const sandboxProvider = providerWith(sandbox, events, 'docker');
     const agent = agentWith(events);
@@ -154,7 +167,9 @@ describe('execution manifest request to runner boundary', () => {
       sandboxProvider: 'docker', template: 'simple-loop', executionMode: 'batch',
     })).resolves.toMatchObject({ success: true });
 
-    expect(preparer.prepare).toHaveBeenCalledWith(repositories, workspaceRoot);
+    expect(preparer.prepare).toHaveBeenCalledWith(repositories, workspaceRoot, ownership);
+    expect(runner.resourceScope.ownershipClaims).toEqual([]);
+    await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories);
     expect(providers.branches.createBranch).not.toHaveBeenCalled();
     expect(sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({
       worktreePath: repositories[0].repoRoot,
@@ -172,6 +187,7 @@ describe('execution manifest request to runner boundary', () => {
     expect(events.indexOf('prepared')).toBeLessThan(events.indexOf('agent'));
     expect(finish).toHaveBeenCalledTimes(1);
     expect(finish).toHaveBeenCalledWith({ status: 'success' });
+    expect(prepared.release).not.toHaveBeenCalled();
     expect(observer.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       kind: 'workflow.recorded', name: 'simple-loop', version: 1,
       steps: expect.arrayContaining([expect.objectContaining({ kind: 'agent', dependsOn: [] })]),
@@ -181,7 +197,7 @@ describe('execution manifest request to runner boundary', () => {
   it.each([false, true])('finalizes both repositories before QA, with secondary push failure=%s', async failSecondary => {
     const events: string[] = [];
     const repositories = ['api', 'web'].map((name, index) => ({
-      platform: 'github' as const, projectKey: `acme/${name}`, name, checkoutPath: `repositories/${name}`,
+      platform: 'github' as const, projectKey: projectKey(name), name, checkoutPath: `repositories/${name}`,
       repoRoot: `/workspace/repositories/${name}`, baseBranch: 'main', workingBranch: 'afk/work-item-18', primary: index === 0,
     }));
     const preparedRepositories = repositories.map(repository => ({
@@ -191,24 +207,32 @@ describe('execution manifest request to runner boundary', () => {
       original: { branch: repository.baseBranch, head: 'head', status: '', workingBranchExisted: false },
     }));
     let finalization: Promise<void> | undefined;
-    const finish = vi.fn((_outcome: { status: string }) => {
+    const publicationError = new Error('secondary push failed');
+    let cleanupAllowed = false;
+    const finish = vi.fn((outcome: { status: string }) => {
+      if (cleanupAllowed && outcome.status === 'failed') {
+        events.push('retained-cleanup-confirmed');
+        return Promise.resolve();
+      }
       finalization ??= (async () => {
         events.push('push-api');
         events.push('push-web');
-        if (failSecondary) throw new Error('secondary push failed');
+        if (failSecondary) throw publicationError;
         events.push('checkout-cleaned');
       })();
       return finalization;
     });
     const providers = providersForRun();
+    const runtime = runtimeManager();
     vi.mocked(providers.backlog.transition).mockImplementation(async (_id, state) => { events.push(`transition-${state}`); });
     const runner = new WorkflowRunner(providers, {
       observer,
       agentProvider: agentWith(events), sandboxProvider: providerWith(sandboxWith(events), events),
       watchdog: { arm: vi.fn(), disarm: vi.fn() } as never,
-      runtimeManager: runtimeManager() as never,
+      runtimeManager: runtime as never,
       multiRepositoryPreparer: { prepare: vi.fn(async () => ({
         repositories: preparedRepositories, primary: preparedRepositories[0], finish,
+        release: vi.fn(async () => undefined),
       })) },
     }) as any;
     runner.runStep = vi.fn(async (step: { id: string }) => ({ stepId: step.id, status: 'completed' }));
@@ -216,18 +240,49 @@ describe('execution manifest request to runner boundary', () => {
       if (hooks.includes('after')) events.push('after-hooks');
     });
 
-    const result = await runner.run({
+    const operation = runner.run({
       backlogId: '42', session: 'worker-42', targetBranch: 'afk/work-item-18', baseBranch: 'main',
       repoRoot: repositories[0].repoRoot, workspaceRoot, repositories,
       template: 'issue-implementation', executionMode: 'batch',
     });
 
-    expect(result.success).toBe(!failSecondary);
-    expect(finish).toHaveBeenCalledTimes(1);
+    const result = await operation.catch((error: unknown) => error);
     expect(finish).toHaveBeenCalledWith({ status: 'success' });
     expect(events.indexOf('after-hooks')).toBeLessThan(events.indexOf('push-api'));
     expect(events.indexOf('push-api')).toBeLessThan(events.indexOf('push-web'));
     if (failSecondary) {
+      const failure = result as AggregateError & { cause: { implementationHandedOff: boolean; runError: unknown; recovery: { scope: RunResourceScope } } };
+      const retained = runner.resourceScope as RunResourceScope;
+      try {
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect(failure.errors).toEqual([publicationError]);
+        expect(failure.message).toContain('repository publication failed: secondary push failed');
+        expect(failure.message).toContain('workflow terminal cleanup failed: secondary push failed');
+        expect(failure.cause.implementationHandedOff).toBe(false);
+        expect(failure.cause.runError).toBeUndefined();
+        expect(failure.cause.recovery.scope).toBe(retained);
+        expect(finish.mock.calls.map(([outcome]) => outcome.status)).toEqual(['success', 'failed', 'failed']);
+        expect(retained.ownershipClaims).toHaveLength(3);
+        const claim = await vi.mocked(providers.backlog.claim).mock.results[0].value;
+        expect(claim!.release).not.toHaveBeenCalled();
+        await expect(assertWorkspaceOwnershipAvailable(workspaceRoot, repositories)).rejects.toThrow('quarantined');
+        await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories, retained.ownershipClaims);
+        expect(runtime.finish).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({
+          status: 'blocked', errorSummary: expect.stringContaining('cleanup ownership unconfirmed'),
+        }));
+        expect(observer.record).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'implementation.completed' }));
+        cleanupAllowed = true;
+        await failure.cause.recovery.scope.finish({ status: 'failed' });
+        expect(retained.ownershipClaims).toEqual([]);
+        expect(claim!.release).toHaveBeenCalledTimes(1);
+        await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories);
+        expect(events.filter(event => event === 'push-api')).toHaveLength(1);
+        expect(events.filter(event => event === 'push-web')).toHaveLength(1);
+        expect(events.filter(event => event === 'retained-cleanup-confirmed')).toHaveLength(1);
+      } finally {
+        cleanupAllowed = true;
+        await retained.finish({ status: 'failed' });
+      }
       expect(events).not.toContain('checkout-cleaned');
       expect(events).not.toContain('transition-verification');
       expect(events).toContain('transition-blocked');
@@ -236,6 +291,10 @@ describe('execution manifest request to runner boundary', () => {
       });
       expect(providers.backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
     } else {
+      expect(result).toMatchObject({ success: true });
+      expect(finish).toHaveBeenCalledTimes(1);
+      expect(runner.resourceScope.ownershipClaims).toEqual([]);
+      await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories);
       expect(events.indexOf('push-web')).toBeLessThan(events.indexOf('checkout-cleaned'));
       expect(events.indexOf('push-web')).toBeLessThan(events.indexOf('transition-verification'));
     }
@@ -243,7 +302,8 @@ describe('execution manifest request to runner boundary', () => {
 
   it('does not start branch, sandbox, watchdog, or agent resources when preparation fails', async () => {
     const events: string[] = [];
-    const preparer = { prepare: vi.fn(async () => { throw new Error('secondary preparation failed'); }) };
+    const preparationError = new Error('secondary preparation failed');
+    const preparer = { prepare: vi.fn(async () => { throw preparationError; }) };
     const sandboxProvider = providerWith(sandboxWith(events), events);
     const agent = agentWith(events);
     const watchdog = { arm: vi.fn(), disarm: vi.fn() };
@@ -257,15 +317,19 @@ describe('execution manifest request to runner boundary', () => {
       runtimeManager: runtimeManager() as never,
     });
     const repositories = [{
-      platform: 'github' as const, projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+      platform: 'github' as const, projectKey: projectKey('api'), name: 'api', checkoutPath: 'repositories/api',
       repoRoot: '/workspace/repositories/api', baseBranch: 'main', workingBranch: 'afk/work-item-18', primary: true,
     }];
 
     await expect(runner.run({
       backlogId: '42', session: 'afk-WI-2026-018', targetBranch: 'afk/work-item-18', baseBranch: 'main',
-      repoRoot: repositories[0].repoRoot, repositories, template: 'simple-loop', executionMode: 'batch',
-    })).rejects.toThrow('secondary preparation failed');
+      repoRoot: repositories[0].repoRoot, workspaceRoot, repositories, template: 'simple-loop', executionMode: 'batch',
+    })).rejects.toBe(preparationError);
 
+    expect(preparer.prepare).toHaveBeenCalledTimes(1);
+    const claim = await vi.mocked(providers.backlog.claim).mock.results[0].value;
+    expect(claim!.release).toHaveBeenCalledTimes(1);
+    await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories);
     expect(providers.branches.createBranch).not.toHaveBeenCalled();
     expect(sandboxProvider.create).not.toHaveBeenCalled();
     expect(watchdog.arm).not.toHaveBeenCalled();
@@ -300,8 +364,8 @@ describe('execution manifest request to runner boundary', () => {
 
 function providersForRun(): ProviderBundle {
   const item: BacklogItem = {
-    id: '42', title: 'Provider issue', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-    branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
+    id: '42', title: 'Provider issue', dependsOn: [], tags: [], state: 'in_progress', executionMode: 'afk',
+    branchName: 'afk/backlog-42', providerRef: `github:${projectKey('api')}#42`,
   };
   const claim: BacklogClaim = {
     item, claimId: 'claim-42', heartbeat: vi.fn(async () => undefined), release: vi.fn(async () => undefined),
@@ -336,7 +400,7 @@ function agentWith(events: string[]): AgentProvider {
   const execution: AgentExecution = {
     id: 'execution-1', metadata: { provider: 'claude-code', transport: 'process' },
     waitForEvent: vi.fn(async () => null),
-    waitForResult: vi.fn(async () => ({
+    waitForResult: vi.fn(async (): ReturnType<AgentExecution['waitForResult']> => ({
       version: 1, runId: 'execution-1', status: 'completed', provider: 'test', commits: [],
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
     })),

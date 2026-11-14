@@ -238,7 +238,35 @@ describe('ScheduleTriggerProvider', () => {
     // Simulate a tick: the registered callback actually fires the handler.
     timers.armed[0].callback();
     expect(onFire).toHaveBeenCalledTimes(1);
-    expect(onFire).toHaveBeenCalledWith(expect.objectContaining({ id: 'tick' }));
+    expect(onFire).toHaveBeenCalledWith(expect.objectContaining({ id: 'tick' }), expect.objectContaining({ id: expect.any(String), scheduledAt: expect.any(Number) }));
+  });
+
+  it('identifies observed interval callbacks without eager ticks or retrospective backfill', async () => {
+    const timers = fakeTimers();
+    const ticks: Array<{ id: string; scheduledAt: number }> = [];
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const provider = new ScheduleTriggerProvider({ onFire: (_trigger, tick) => { ticks.push(tick); }, setInterval: timers.setInterval, clearInterval: timers.clearInterval });
+    try {
+      await provider.register({ id: 'tick', kind: 'schedule', schedule: '250' });
+      expect(ticks).toEqual([]);
+      now.mockReturnValue(1250);
+      timers.armed[0].callback();
+      timers.armed[0].callback();
+      expect(ticks.map(tick => tick.scheduledAt)).toEqual([1250, 1250]);
+      expect(ticks[0].id).not.toBe(ticks[1].id);
+      now.mockReturnValue(1_000_000);
+      expect(ticks).toHaveLength(2);
+      timers.armed[0].callback();
+      expect(ticks).toHaveLength(3);
+      expect(ticks[2].scheduledAt).toBe(1_000_000);
+      await provider.unregister('tick');
+      await provider.register({ id: 'tick', kind: 'schedule', schedule: '250' });
+      timers.armed[0].callback();
+      expect(ticks).toHaveLength(3);
+      timers.armed[1].callback();
+      expect(ticks).toHaveLength(4);
+      expect(new Set(ticks.map(tick => tick.id)).size).toBe(4);
+    } finally { await provider.dispose(); now.mockRestore(); }
   });
 
   it('clears the timer on unregister', async () => {

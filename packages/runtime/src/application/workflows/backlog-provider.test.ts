@@ -10,17 +10,18 @@ import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import { planReworkRevision } from '../../domain/backlog/rework-revision.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { RunObserver } from '../../observability/run-observer.js';
+import { assertWorkspaceOwnershipAvailable, type ExecutionCleanupOwnership } from './resource-scope.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
 vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
 const item: BacklogItem = {
-  id: '42', title: 'Item', dependsOn: [], state: 'in_progress', executionMode: 'afk',
+  id: '42', title: 'Item', dependsOn: [], tags: [], state: 'in_progress', executionMode: 'afk',
   branchName: 'afk/backlog-42', providerRef: 'github:org/repo#42',
 };
 
-function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
+function providers(claim: ProviderBundle['backlog']['claim']): ProviderBundle {
   return {
     backlog: {
       claim, transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
@@ -32,7 +33,7 @@ function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
   } as unknown as ProviderBundle;
 }
 
-function claimed(itemToClaim = item): { claim: BacklogClaim; release: ReturnType<typeof vi.fn> } {
+function claimed(itemToClaim = item): { claim: BacklogClaim; release: BacklogClaim['release'] } {
   const release = vi.fn(async () => {});
   return {
     claim: {
@@ -88,17 +89,30 @@ describe('WorkflowRunner backlog provider mode', () => {
 
   it('passes the resolved base to primary repository preparation', async () => {
     const child = { ...item, baseBacklogId: '1' };
-    const { claim } = claimed(child);
+    const { claim, release } = claimed(child);
     const bundle = providers(vi.fn(async () => claim));
     vi.mocked(bundle.backlog.get).mockImplementation(async id => id === '1'
       ? { ...item, id: '1', branchName: 'afk/backlog-1', providerRef: 'github:org/repo#1' } : child);
     const subject = runner(bundle) as any;
-    const prepare = vi.fn().mockRejectedValue(new Error('stop at repository preparation'));
+    const preparationError = new Error('stop at repository preparation');
+    let ownership: ExecutionCleanupOwnership | undefined;
+    const prepare = vi.fn(async (_repositories: unknown, root: string, authority?: ExecutionCleanupOwnership) => {
+      ownership = authority;
+      expect(authority?.claims).toEqual(subject.resourceScope.ownershipClaims);
+      expect(authority?.claims).toHaveLength(1);
+      expect(() => authority!.assertClosed()).not.toThrow();
+      await expect(assertWorkspaceOwnershipAvailable(root, [])).rejects.toThrow('quarantined');
+      await assertWorkspaceOwnershipAvailable(root, [], authority!.claims);
+      throw preparationError;
+    });
     subject.multiRepositoryPreparer = { prepare };
     await expect(subject.run({ backlogId: '42', session: 'worker', targetBranch: 'master', baseBranch: 'master',
       repositories: [{ primary: true, baseBranch: 'master' }, { primary: false, baseBranch: 'develop' }] }))
-      .rejects.toThrow('stop at repository preparation');
-    expect(prepare).toHaveBeenCalledWith([{ primary: true, baseBranch: 'afk/backlog-1' }, { primary: false, baseBranch: 'develop' }], expect.any(String));
+      .rejects.toBe(preparationError);
+    expect(prepare).toHaveBeenCalledWith([{ primary: true, baseBranch: 'afk/backlog-1' }, { primary: false, baseBranch: 'develop' }], expect.any(String), ownership);
+    expect(subject.resourceScope.ownershipClaims).toEqual([]);
+    expect(release).toHaveBeenCalledTimes(1);
+    await assertWorkspaceOwnershipAvailable(prepare.mock.calls[0][1], []);
   });
 
   it('runs a phase through a provider that exposes only createExecution', async () => {
@@ -237,7 +251,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     // The record as it reads after a correction: the statement about the
     // current situation is the new one, the evidence is the old one.
     subject.activeRework = planReworkRevision({
-      id: 'r1-2', cycle: 1, attempt: 2, source: 'qa', status: 'open', createdAt: '2026-08-05T00:00:00.000Z',
+      id: 'r1-2', version: 1, cycle: 1, attempt: 2, source: 'qa', status: 'open', createdAt: '2026-08-05T00:00:00.000Z',
       summary: 'integration QA found a shortcut regression',
       failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
       requiredChecks: [{ command: 'pnpm vitest run', expected: 'passes' }],
@@ -449,7 +463,8 @@ describe('WorkflowRunner backlog provider mode', () => {
     vi.useFakeTimers();
     try {
       const { claim, release } = claimed();
-      claim.heartbeat = vi.fn(async () => { throw new Error('lease lost'); });
+      const leaseError = new Error('lease lost');
+      claim.heartbeat = vi.fn(async () => { throw leaseError; });
       const bundle = providers(vi.fn(async () => claim));
       const subject = runner(bundle) as any;
       subject.runBody = vi.fn(async () => {
@@ -457,10 +472,14 @@ describe('WorkflowRunner backlog provider mode', () => {
         return { success: true };
       });
 
-      await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main', claimHeartbeatIntervalMs: 1 })).resolves.toEqual({ success: false });
+      await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main', claimHeartbeatIntervalMs: 1 })).rejects.toBe(leaseError);
       expect(bundle.backlog.transition).toHaveBeenCalledWith('42', 'blocked', expect.anything());
+      expect(bundle.backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'claim heartbeat failed: lease lost' });
+      expect(bundle.backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
       expect(bundle.backlog.transition).not.toHaveBeenCalledWith('42', 'verification', undefined);
       expect(release).toHaveBeenCalledTimes(1);
+      expect(subject.resourceScope.ownershipClaims).toEqual([]);
+      expect(subject.implementationHandedOff).toBe(false);
     } finally {
       vi.useRealTimers();
     }

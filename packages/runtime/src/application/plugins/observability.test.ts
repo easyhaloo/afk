@@ -8,9 +8,42 @@ import { createHash } from 'node:crypto';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
 import type { EvidenceRecord, EvidenceStoreProvider } from '../../plugin-sdk/capabilities.js';
+import { observeRun } from '@afk/application';
+import { replay } from '@afk/core';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+
+it('queries durable delivery summaries through normal observation without exporting or learning those summaries', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'delivery-intake-'));
+  roots.push(root);
+  const runtime = new PluginRuntime();
+  const capture = vi.fn(async () => ({ blocked: [] }));
+  const append = vi.fn(async () => { throw new Error('PROVIDER_CANARY'); });
+  await runtime.load({
+    manifest: { id: 'observability.accounting', version: '1.0.0', apiVersion: 1, provides: ['observe.event-store', 'workflow.action'], trusted: true },
+    activate(setup) {
+      setup.registerCapability('observe.event-store', 'selected', { id: 'PRIVATE_ID_CANARY', capabilities: { append: true }, append });
+      setup.registerSystemAction('learning.settings', () => ({ enabled: true }));
+      setup.registerSystemAction('learning.capture', capture);
+    },
+  });
+  try {
+    const context = { traceId: 't', runId: 'r', workItemId: 'github:org/repo#1', profileId: 'local', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+    const observer = createPluginRunObserver(runtime, root);
+    await observer.record(context, { kind: 'run.requested', run: { id: 'r', workItemId: context.workItemId, profileId: 'local', attempt: 1, status: 'pending' } });
+    await observer.record(context, { kind: 'run.started' });
+    await observer.record(context, { kind: 'qa.failed' });
+    const observed = await observeRun('r', new JsonlEventStore({ root }));
+    const summaries = observed.events.filter(event => event.data.kind === 'effect.completed' && event.data.effectKind === 'observability.delivery');
+    expect(summaries).toHaveLength(3);
+    expect(observed.integrity).toMatchObject({ valid: true, lastSequence: 6 });
+    expect(observed.state.run?.status).toBe('running');
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(observed)).not.toContain('CANARY');
+  } finally { await runtime.dispose(); }
+});
 
 it('discovers generic and specialized registrations and exports each provider only once', async () => {
   const root = await mkdtemp(join(tmpdir(), 'registered-observer-'));
@@ -156,6 +189,60 @@ async function evidenceFixture() {
   return { root, runtime, evidence, selected, unused, context };
 }
 
+it.each(['succeeded', 'put-failed', 'mismatch', 'cancelled'] as const)('queries the actual terminal SDK evidence %s receipt without recursive export or learning', async mode => {
+  const { root, runtime, evidence, selected, unused, context } = await evidenceFixture();
+  const events = join(root, 'events');
+  const controller = new AbortController();
+  let release: (() => void) | undefined;
+  const capture = vi.fn(async () => ({ blocked: [] }));
+  const append = vi.fn(async () => { throw new Error('EXPORT_CANARY'); });
+  try {
+    const initial = createPluginRunObserver(runtime, events);
+    await initial.record(context, { kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId, profileId: context.profileId, attempt: 1, status: 'pending' } });
+    await initial.record(context, { kind: 'run.started' });
+    if (mode === 'put-failed') vi.mocked(selected.put).mockRejectedValue(new Error('EVIDENCE_CANARY'));
+    if (mode === 'mismatch') vi.mocked(selected.get).mockResolvedValue({ id: 'foreign', mediaType: 'application/json', classification: 'internal', bytes: Buffer.from('EVIDENCE_CANARY') });
+    if (mode === 'cancelled') vi.mocked(selected.put).mockImplementation(async (record, operation) => {
+      controller.abort(new Error('CANCEL_CANARY'));
+      await new Promise<void>(resolve => { release = resolve; });
+      expect(operation?.signal?.aborted).toBe(true);
+      return { name: record.id, uri: `evidence://${record.id}` };
+    });
+    await runtime.load({
+      manifest: { id: 'evidence.terminal', version: '1.0.0', apiVersion: 1, provides: ['observe.event-store', 'workflow.action'], trusted: true },
+      activate(setup) {
+        setup.registerCapability('observe.event-store', 'terminal', { id: 'terminal', capabilities: { append: true }, append });
+        setup.registerSystemAction('learning.settings', () => ({ enabled: true }));
+        setup.registerSystemAction('learning.capture', capture);
+      },
+    });
+    setPluginAuditEvidence(runtime, { provider: 'private', scopes: ['github:org/repo'], evidence, signal: controller.signal });
+    const receipt = await createPluginRunObserver(runtime, events).record(context, { kind: 'run.finished', outcome: 'succeeded' });
+    const read = async () => { const history = []; for await (const event of new JsonlEventStore({ root: events }).read(context.runId)) history.push(event); return history; };
+    const history = await read();
+    expect(history.map(event => event.data.kind === 'effect.completed' ? event.data.effectKind : event.data.kind))
+      .toEqual(['run.requested', 'run.started', 'run.finished', 'evidence.mirror', 'observability.delivery']);
+    expect(receipt).toMatchObject({ lastSequence: 3, lastHash: history[2].integrity.hash });
+    expect(history[3]).toMatchObject({ causationId: history[2].id, data: { outcome: mode === 'succeeded' ? 'succeeded' : 'failed' } });
+    expect(JSON.parse(history[3].data.kind === 'effect.completed' ? history[3].data.summary! : '{}'))
+      .toMatchObject({ sourceEventId: history[2].id, sourceSequence: 3, ...(mode === 'cancelled' ? { reason: 'cancelled' } : {}) });
+    expect(await evidence.get(history[2].evidence![0])).toBeInstanceOf(Uint8Array);
+    expect(selected.put).toHaveBeenCalledTimes(1);
+    expect(selected.get).toHaveBeenCalledTimes(mode === 'succeeded' || mode === 'mismatch' ? 1 : 0);
+    expect(unused.put).not.toHaveBeenCalled();
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(history)).not.toContain('CANARY');
+    if (release) { release(); await Promise.resolve(); await Promise.resolve(); expect(await read()).toEqual(history); expect(selected.get).not.toHaveBeenCalled(); }
+    const observed = await observeRun(context.runId, new JsonlEventStore({ root: events }));
+    expect(observed.integrity).toMatchObject({ valid: true, lastSequence: 5 });
+    expect(observed.state).toMatchObject({ terminal: true, sequence: 5, run: { status: 'succeeded' } });
+    expect(replay(observed.events)).toEqual(observed.state);
+    expect(() => replay([...observed.events, { ...history[3], sequence: 6, type: 'qa.passed', data: { kind: 'qa.passed' } }]))
+      .toThrow('after terminal event');
+  } finally { release?.(); await runtime.dispose(); }
+});
+
 it('consumes only explicitly selected SDK evidence after authoritative encrypted persistence', async () => {
   const { root, runtime, evidence, selected, unused, context } = await evidenceFixture();
   try {
@@ -230,7 +317,7 @@ it.each(['unloaded', 'ambiguous', 'unavailable'] as const)('preserves new observ
     expect(selected.get).not.toHaveBeenCalled();
     expect(unused.put).not.toHaveBeenCalled();
     expect(unused.get).not.toHaveBeenCalled();
-    expect(await new JsonlEventStore({ root: events }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+    expect(await new JsonlEventStore({ root: events }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: mode === 'ambiguous' ? 3 : 2 });
   } finally { await runtime.dispose(); }
 });
 

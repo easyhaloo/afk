@@ -9,6 +9,7 @@ import { guardedRestoreSession, type AgentProviderRegistry } from '../../domain/
 import type { AgentExecution, AgentExecutionOptions, AgentProvider, ExecutionResult, SessionSnapshot } from '../../domain/agents/types.js';
 import type { SandboxProviderDeps, SandboxProviderRegistry } from './registry.js';
 import type { Sandbox } from './types.js';
+import { remoteExecutionRuntimeSchema } from './remote-container.js';
 
 export interface RemoteContainerServerOptions {
   readonly enabled?: boolean;
@@ -51,7 +52,8 @@ const startOptions = z.object({
   }).strict(),
   generation: z.number().int().nonnegative().max(2147483646), prompt: z.string(), signalType: z.literal('goal_complete'),
   executionMode: z.literal('batch').optional(),
-}).strict();
+  runtime: remoteExecutionRuntimeSchema.optional(),
+}).strict().refine(value => value.runtime?.kind !== 'codex' || value.metadata.provider === 'codex', 'runtime does not match provider');
 const requests = {
   'workspace.create': z.object({
     iid: z.number().int().positive().safe(),
@@ -63,7 +65,7 @@ const requests = {
   }).strict(),
   'sandbox.close': z.object({ sandboxId: identifier }).strict(),
   'agent.start': z.object({ sandboxId: identifier, options: startOptions }).strict(),
-  'agent.resume': executionReference.extend({ options: z.object({ snapshot: sessionSchema }).strict() }).strict(),
+  'agent.resume': executionReference.extend({ options: z.object({ snapshot: sessionSchema, prompt: z.string().optional() }).strict() }).strict(),
   'agent.event.next': executionReference.strict(),
   'agent.wait': executionReference.extend({ options: z.object({
     completionTimeoutMs: positive.optional(), contextHighTokens: positive.optional(), idleTimeoutMs: positive.optional(),
@@ -85,9 +87,10 @@ interface ExecutionEntry {
   readonly agent: AgentProvider;
   readonly options: AgentExecutionOptions;
   readonly timer: ReturnType<typeof setTimeout>;
-  state: 'running' | 'stopped' | 'terminal' | 'superseded';
+  state: 'running' | 'interrupted' | 'stopped' | 'terminal' | 'superseded';
   result?: Promise<ExecutionResult>;
   snapshot?: SessionSnapshot;
+  sessionInvalidated?: boolean;
   failure?: Error;
   stopReason?: 'interrupt' | 'kill' | 'timeout';
 }
@@ -176,10 +179,10 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
     return entry;
   }
 
-  function execution(reference: { sandboxId: string; executionId: string }): ExecutionEntry {
+  function execution(reference: { sandboxId: string; executionId: string }, cleanupRetry = false): ExecutionEntry {
     const entry = sandbox(reference.sandboxId).executions.get(reference.executionId);
     if (!entry || entry.state === 'superseded') throw new HttpFailure(404, 'EXECUTION_MISSING', 'execution was not found or was superseded');
-    if (entry.failure) throw entry.failure;
+    if (entry.failure && !cleanupRetry) throw entry.failure;
     return entry;
   }
 
@@ -187,11 +190,11 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
     const id = randomUUID();
     const timer = setTimeout(() => {
       const running = entry.executions.get(id);
-      if (running?.state !== 'running') return;
+      if (!running || (running.state !== 'running' && running.state !== 'interrupted')) return;
       running.stopReason = 'timeout';
       void value.kill().then(() => {
-        if (running.state === 'running') running.state = 'stopped';
-      }).catch(error => { running.failure = error; });
+        if (running.state === 'running' || running.state === 'interrupted') running.state = 'stopped';
+      }).catch(error => { if (running.state === 'running' || running.state === 'interrupted') running.failure = error; });
     }, executionTimeoutMs);
     timer.unref();
     entry.executions.set(id, { execution: value, agent, options: start, state: 'running', timer });
@@ -239,7 +242,7 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
           if (closed) { await value.close(); throw new HttpFailure(503, 'SERVER_CLOSED', 'server is closing'); }
           const id = randomUUID();
           sandboxes.set(id, { sandbox: value, executions: new Map(), busy: false });
-          return { id, workspacePath: value.workspacePath };
+          return { id, worktreePath: value.worktreePath, workspacePath: value.workspacePath };
         } finally { creatingSandboxes--; }
       }
       case 'sandbox.close': {
@@ -252,14 +255,15 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
         const entry = sandbox(input.sandboxId);
         const agent = agents.get(input.options.metadata.provider);
         if (!agent) throw new HttpFailure(403, 'AGENT_DENIED', 'agent provider is not explicitly allowed');
-        if (entry.busy || [...entry.executions.values()].some(job => job.state === 'running')) throw new HttpFailure(409, 'AGENT_BUSY', 'sandbox already has an active agent');
+        if (entry.busy || [...entry.executions.values()].some(job => job.state === 'running' || job.state === 'interrupted')) throw new HttpFailure(409, 'AGENT_BUSY', 'sandbox already has an active agent');
         if (entry.executions.size >= maxExecutions) throw new HttpFailure(429, 'EXECUTION_LIMIT', 'execution limit reached');
         entry.busy = true;
         try {
           const start: AgentExecutionOptions = {
-            sandbox: entry.sandbox, worktreePath: entry.sandbox.workspacePath, sessionId: randomUUID(),
+            sandbox: entry.sandbox, worktreePath: entry.sandbox.worktreePath, sessionId: randomUUID(),
             generation: input.options.generation, goal: input.options.prompt, prompt: input.options.prompt,
             signalType: 'goal_complete', executionMode: 'batch',
+            runtime: input.options.runtime,
           };
           const value = await agent.createExecution(start);
           if (closed || entry.closing || !sandboxes.has(input.sandboxId)) { await value.kill(); throw new HttpFailure(409, 'SANDBOX_CLOSED', 'sandbox closed during agent start'); }
@@ -276,12 +280,20 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
         const job = execution(input);
         job.result ??= job.execution.waitForResult({
           ...input.options, completionTimeoutMs: Math.min(input.options?.completionTimeoutMs ?? executionTimeoutMs, executionTimeoutMs),
-        }).then(value => {
-          clearTimeout(job.timer);
-          if (job.state !== 'superseded') job.state = 'terminal';
+        }).then(async value => {
+          if (value.status !== 'context_high') {
+            await job.execution.kill();
+            clearTimeout(job.timer);
+            if (job.state !== 'superseded') job.state = 'terminal';
+          }
+          const metadata = { ...job.execution.metadata, provider: job.agent.name };
+          if (value.status === 'failed' && !value.sessionId && !metadata.threadId) {
+            job.sessionInvalidated = true;
+            job.snapshot = undefined;
+          }
           if (job.stopReason && value.status !== 'completed') {
             return {
-              ...value, provider: job.agent.name,
+              ...value, provider: job.agent.name, metadata, sessionInvalidated: job.sessionInvalidated ?? false,
               status: job.stopReason === 'timeout' ? 'timed_out' as const : 'aborted' as const,
               ...(job.stopReason === 'timeout' ? {
                 error: { code: 'EXECUTION_TIMEOUT', message: 'server execution deadline exceeded' },
@@ -289,7 +301,7 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
               } : {}),
             };
           }
-          return { ...value, provider: job.agent.name };
+          return { ...value, provider: job.agent.name, metadata, sessionInvalidated: job.sessionInvalidated ?? false };
         }).catch(error => { job.result = undefined; throw error; });
         return job.result;
       }
@@ -299,22 +311,28 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
       }
       case 'agent.capture-session': {
         const job = execution(requests[operation].parse(body));
-        if (!job.agent.capabilities.has('resume')) return null;
+        if (job.sessionInvalidated || !job.agent.capabilities.has('resume')) return null;
         const captured = await job.execution.captureSession() ?? (job.agent.captureSession && job.execution.sessionId
           ? await job.agent.captureSession({ sessionId: job.execution.sessionId, worktreePath: job.options.worktreePath }) : undefined);
-        job.snapshot = captured === undefined ? undefined : sessionSchema.parse(captured);
+        if (job.sessionInvalidated) return null;
+        job.snapshot = captured === undefined ? undefined : sessionSchema.parse(JSON.parse(JSON.stringify(captured)));
         return job.snapshot ?? null;
       }
       case 'agent.interrupt':
       case 'agent.kill': {
         const input = requests[operation].parse(body);
-        const job = execution(input);
-        if (operation === 'agent.kill') await job.execution.kill();
-        else await job.execution.interrupt(requests['agent.interrupt'].parse(body).reason);
-        clearTimeout(job.timer);
+        const job = execution(input, operation === 'agent.kill');
+        if (operation === 'agent.kill') {
+          await job.execution.kill();
+          clearTimeout(job.timer);
+          job.failure = undefined;
+        } else {
+          job.stopReason ??= 'interrupt';
+          await job.execution.interrupt(requests['agent.interrupt'].parse(body).reason);
+        }
         if (job.state !== 'terminal' && job.state !== 'superseded') {
           job.stopReason ??= operation === 'agent.kill' ? 'kill' : 'interrupt';
-          job.state = 'stopped';
+          job.state = operation === 'agent.kill' ? 'stopped' : 'interrupted';
         }
         return { ok: true };
       }
@@ -322,18 +340,23 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
         const input = requests[operation].parse(body);
         const entry = sandbox(input.sandboxId);
         const job = execution(input);
-        if (entry.busy || [...entry.executions.values()].some(value => value.state === 'running')) throw new HttpFailure(409, 'AGENT_BUSY', 'interrupt or finish the agent before resuming');
+        if (entry.busy || job.state === 'running' || [...entry.executions.values()].some(value => value !== job && (value.state === 'running' || value.state === 'interrupted'))) throw new HttpFailure(409, 'AGENT_BUSY', 'interrupt or finish the agent before resuming');
         if (!job.agent.capabilities.has('resume')) throw new HttpFailure(409, 'RESUME_UNSUPPORTED', 'agent does not support resume');
         if (!job.snapshot || !isDeepStrictEqual(job.snapshot, input.options.snapshot)) throw new HttpFailure(403, 'SNAPSHOT_DENIED', 'resume requires an unmodified snapshot captured by this execution');
+        const snapshot = job.snapshot;
         if (entry.executions.size >= maxExecutions) throw new HttpFailure(429, 'EXECUTION_LIMIT', 'execution limit reached');
         entry.busy = true;
         try {
-          const start = { ...job.options, sessionId: input.options.snapshot.sessionId, generation: input.options.snapshot.generation + 1 };
+          await job.execution.kill();
+          clearTimeout(job.timer);
+          job.state = 'stopped';
+          const start = { ...job.options, sessionId: snapshot.sessionId, generation: snapshot.generation + 1, resume: snapshot,
+            ...(input.options.prompt !== undefined ? { prompt: input.options.prompt, goal: input.options.prompt } : {}) };
           let value: AgentExecution;
           if (job.agent.restoreSession) {
-            await guardedRestoreSession(job.agent, { snapshot: input.options.snapshot, worktreePath: start.worktreePath });
+            await guardedRestoreSession(job.agent, { snapshot, worktreePath: start.worktreePath });
             value = await job.agent.createExecution(start);
-          } else value = await job.execution.resume(input.options);
+          } else value = await job.execution.resume({ snapshot, prompt: input.options.prompt });
           if (closed || entry.closing || !sandboxes.has(input.sandboxId)) { await value.kill(); throw new HttpFailure(409, 'SANDBOX_CLOSED', 'sandbox closed during resume'); }
           clearTimeout(job.timer);
           job.state = 'superseded';

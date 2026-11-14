@@ -45,6 +45,7 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk plugin import-issue <provider> <issue> --project <platform:projectKey> [--mode <hitl|afk>] [--json]`: import a Linear/Jira issue into the target repository's real managed backlog with stable source provenance and idempotency. Defaults to `hitl`; the returned canonical work item uses existing execution, QA and publication. `sync-issue <provider> <issue> <canonical-work-item> --states <json-file> [--json]` checks the binding and updates only the explicitly mapped external lifecycle state. Workflow actions `work-item.import` and `work-item.sync` expose the same behavior.
 - `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`: dispatch explicitly allowed operations with validated JSON input and output. Output is JSON with or without `--json`; negative verification/policy/delivery results or a nonzero remote code set exit status `1`. Credential reads and merge operations are excluded. CLI verification input requires an explicit `target`. Repository lifecycle handles belong to one Runtime instance; `repository.provider/run` keeps prepare, checkout, the registered callback action, publication and cleanup in one invocation.
 - `afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`: activate configured triggers and keep an authenticated HTTP host and Runtime alive until SIGINT/SIGTERM, then close/dispose them. Defaults to `127.0.0.1:8374` with a durable SQLite queue at `~/.afk/triggers/deliveries.sqlite`; the environment token requires at least 16 characters without CR/LF. Authenticated webhook receipts are persisted before HTTP 202, deduplicated and retried with bounded backoff; failed deliveries remain inspectable and replayable. Startup rejects error diagnostics; an unregistered action disposes its trigger. Ordinary runtime construction does not arm timers. See [Capability plugins](plugins.md).
+- Scheduled ticks under `plugin listen` use that same selected queue, owned before timer activation. Persisted tick identity, action and input survive retry/restart without being rewritten by current configuration. Listener close and Runtime disposal each wait at most five seconds; an unsettled action retains consumer ownership. No missed-interval backfill or exactly-once external side effect is promised.
 - `afk plugin deliveries --token-env <name> [--url <listener>]` and `afk plugin replay <delivery-id> --token-env <name> [--url <listener>]`: inspect the running queue and replay one failed delivery through authenticated HTTP. HTTPS or loopback HTTP is required; redirects are refused. Delivery status does not expose payloads. Managed execution derives a stable ID from the delivery and canonical work item; interrupted executions retain their audit/journal for reconciliation instead of starting duplicate jobs.
 - Delivery inspection accepts `--offset <number> --limit <1-100>` for older receipts. `afk plugin prune-deliveries --token-env <name> [--url <listener>]` explicitly removes successful receipts older than the deduplication window (seven days by default); pending/failed records remain. The queue refuses new receipts with HTTP 503 at its count/byte limit rather than evicting retained work.
 - `afk plugin serve-container --repository <path> --workspace-root <path> --sandbox <provider> --agent <providers...> --token-env <name> [--host <address>] [--port <number>] [--allow-remote]`: explicitly host remote-container sandbox/agent operations through shared registries. All five unbracketed flags are required; workspace root must already exist and bounds execution worktrees, agents form an explicit allowlist, and the environment token must be at least 32 bytes. Defaults to `127.0.0.1:8375`; non-loopback binding/clients require `--allow-remote`. SIGINT/SIGTERM close the service and dispose the runtime. Backend assembly and trust boundaries are documented in [Capability plugins](plugins.md).
@@ -101,6 +102,22 @@ The provider backlog, runtime state, run-event audit trail, and evidence are sep
 
 ## Failure and recovery
 
+### Context handoff
+
+The default runner constructs the shared handoff coordinator. In batch mode,
+`context_high` captures the active execution's output and repository revision,
+writes a recovery document, and awaits execution cleanup before starting a
+successor. Cleanup failure prevents the next start. The runner persists a
+handoff reservation before native resume or fresh startup; a failed native
+startup can fall back within that same reservation. Exhausted budgets retain a
+terminal recovery document and block the work item.
+
+Recovery document paths and historical-document patterns use the same encoded
+canonical work-item identity. Numeric legacy identities retain their existing
+file names. Cancellation is registered before the first asynchronous execution
+creation: an execution returned after cancellation is stopped before the phase
+rejects, and its late result cannot complete the work or start another round.
+
 ### Failure diagnosis
 
 A failed run carries a **structured failure diagnosis**, not a free-text reason. The diagnosis separates four things that used to be one string:
@@ -115,6 +132,8 @@ A failed run carries a **structured failure diagnosis**, not a free-text reason.
 The agent's own report is the cause when there is one. The provider's captured stdout/stderr is evidence: it is kept as a truncated tail (4 KiB, last 40 lines) and its error lines are lifted into the cause, so a pre-commit hook's rejection is not replaced by the tail of a `pnpm` log.
 
 Timeouts are first-class failures. An idle timeout, a completion timeout and a hard timeout each have their own code, and carry the budget that ran out, the last known activity and the basis of the judgement.
+
+Batch execution counts arriving stdout and stderr chunks as activity, including repeated bytes after the captured output tail reaches its limit. When normalized usage reaches `contextHighTokens` while execution is still active, it returns `context_high` and leaves the process available for the coordinator to capture and stop. Completion, cancellation and known failure retain their outcomes; an exhausted completion deadline takes priority over context rotation. A Provider without intermediate usage cannot trigger proactive rotation before usage is observed.
 
 Whether repeating an attempt is meaningful is read from the diagnosis, not re-derived from a flattened string. The agent error-code vocabulary stays as it was: `AGENT_TURN_FAILED`, `AGENT_GONE` and `AGENT_IDLE` are facts about the agent run rather than verdicts on the work, and a timeout is a fact about the work.
 

@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { RunResourceScope } from './resource-scope.js';
 import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '../../domain/branches/types.js';
 import { simpleGit } from 'simple-git';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FilesystemClaimLock, type ClaimLease } from '../../domain/backlog/claim.js';
 
 function strategy(): BranchStrategy {
   return {
@@ -14,6 +18,162 @@ function strategy(): BranchStrategy {
 }
 
 describe('RunResourceScope', () => {
+  it('retains failed ownership rollback leases while completing independent releases and preserving the acquisition error', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'scope-rollback-retry-'));
+    vi.stubEnv('AFK_STATE_DIR', join(root, 'state'));
+    const acquisitionError = new Error('ownership acquisition interrupted');
+    const releaseError = Object.assign(new Error('rollback release I/O failed'), { code: 'EIO' });
+    const acquired: Array<{ key: string; lease: ClaimLease; release: Mock<[], Promise<void>> }> = [];
+    const acquire = FilesystemClaimLock.prototype.acquire;
+    const spy = vi.spyOn(FilesystemClaimLock.prototype, 'acquire').mockImplementation(async function(this: FilesystemClaimLock, request) {
+      if (acquired.length === 2) throw acquisitionError;
+      const lease = (await acquire.call(this, request))!;
+      const release = vi.fn(lease.release);
+      if (acquired.length === 1) release.mockRejectedValueOnce(releaseError);
+      lease.release = release;
+      acquired.push({ key: request.key, lease, release });
+      return lease;
+    });
+    const scope = new RunResourceScope({ repoRoot: root, baseBranch: 'main', ownership: { workspaceRoot: root,
+      repositories: [{ platform: 'github', projectKey: 'fixture/first' }, { platform: 'github', projectKey: 'fixture/second' }], owner: 'original' } });
+    try {
+      await expect(scope.acquireOwnership()).rejects.toMatchObject({ errors: [acquisitionError, releaseError] });
+      expect(scope.ownershipClaims).toEqual([acquired[1].lease.claimId]);
+      expect(await new FilesystemClaimLock().inspect(acquired[0].key)).toBeNull();
+      expect(acquired[0].release).toHaveBeenCalledTimes(1);
+      await scope.finish({ status: 'failed' });
+      expect(scope.ownershipClaims).toHaveLength(0);
+      expect(await new FilesystemClaimLock().inspect(acquired[1].key)).toBeNull();
+      expect(acquired[0].release).toHaveBeenCalledTimes(1);
+      expect(acquired[1].release).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+      for (const entry of acquired) await entry.lease.release();
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['sandbox', 'step', 'external', 'primary', 'claim'] as const)('retains exclusion and heartbeat until retry confirms %s cleanup', async stage => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'scope-cleanup-retry-'));
+    vi.stubEnv('AFK_STATE_DIR', join(root, 'state'));
+    const failure = new Error(`${stage} cleanup unconfirmed`);
+    const branch = strategy();
+    const claim = vi.fn(async () => {});
+    const close = vi.fn(async () => {});
+    const step = vi.fn(async () => {});
+    const external = vi.fn(async () => {});
+    const heartbeat = vi.fn(async () => {});
+    const ownership = { workspaceRoot: root, owner: 'original' };
+    const scope = new RunResourceScope({ repoRoot: root, baseBranch: 'main', branchStrategy: branch,
+      branchConfig: { type: 'named', branch: 'owned' }, ownership, onCleanup: claim });
+    const next = new RunResourceScope({ repoRoot: root, baseBranch: 'main', ownership: { ...ownership, owner: 'next' } });
+    const operation = { sandbox: close, step, external, primary: vi.mocked(branch.cleanup), claim }[stage];
+    operation.mockRejectedValueOnce(failure);
+    try {
+      await scope.acquireOwnership();
+      if (stage === 'primary') scope.adoptPrimary({ branch: 'owned', path: root, isNewBranch: true });
+      scope.registerSandbox({ close });
+      scope.registerStepHandle({ branch: 'step', path: join(root, 'step'), isNewBranch: true }, step);
+      scope.registerExternalResource({ finish: external });
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      scope.registerHeartbeat(heartbeat, 10);
+      await expect(scope.finish({ status: 'success' })).rejects.toBe(failure);
+      expect(scope.ownershipClaims.length).toBeGreaterThan(0);
+      await expect(next.acquireOwnership()).rejects.toThrow(/quarantin/);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(heartbeat).toHaveBeenCalledTimes(2);
+      if (stage === 'sandbox' || stage === 'step' || stage === 'primary') expect(external).not.toHaveBeenCalled();
+      if (stage !== 'claim') expect(claim).not.toHaveBeenCalled();
+      expect(step).toHaveBeenCalledTimes(1);
+      await scope.finish({ status: 'failed' });
+      await next.acquireOwnership();
+      await scope.finish({ status: 'failed' });
+      expect(operation).toHaveBeenCalledTimes(2);
+      if (stage !== 'step') expect(step).toHaveBeenCalledTimes(1);
+      if (stage !== 'external') expect(external).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(heartbeat).toHaveBeenCalledTimes(2);
+    } finally {
+      await scope.finish({ status: 'failed' }).catch(() => {});
+      await next.finish({ status: 'failed' });
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retains claim, steps and external workspace until a failed execution stop is confirmed on retry', async () => {
+    const release = vi.fn(async () => {});
+    const workspace = { finish: vi.fn(async () => {}) };
+    const step = vi.fn(async () => {});
+    const sandbox = { close: vi.fn(async () => {}) };
+    const kill = vi.fn(async () => {});
+    kill.mockRejectedValueOnce(new Error('owned stop failed'));
+    const scope = new RunResourceScope({ repoRoot: '/repo', baseBranch: 'main', onCleanup: release });
+    scope.registerExecution({ kill });
+    scope.registerSandbox(sandbox);
+    scope.registerStepHandle({ branch: 'task', path: '/repo/task', isNewBranch: true }, step);
+    scope.registerExternalResource(workspace);
+    await expect(scope.finish({ status: 'failed' })).rejects.toThrow('owned stop failed');
+    expect(release).not.toHaveBeenCalled();
+    expect(workspace.finish).not.toHaveBeenCalled();
+    expect(step).not.toHaveBeenCalled();
+    expect(sandbox.close).toHaveBeenCalledTimes(1);
+    await scope.finish({ status: 'failed' });
+    await scope.finish({ status: 'failed' });
+    expect(kill).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(workspace.finish).toHaveBeenCalledTimes(1);
+    expect(step).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps durable workspace and repository exclusion beyond heartbeat expiry until legitimate cleanup retry', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'scope-retained-'));
+    const other = await fs.mkdtemp(join(tmpdir(), 'scope-contender-'));
+    vi.stubEnv('AFK_STATE_DIR', join(root, 'state'));
+    const ownership = { workspaceRoot: root, repositories: [{ platform: 'github', projectKey: 'acme/owned' }], owner: 'run-42' };
+    const first = new RunResourceScope({ repoRoot: root, baseBranch: 'main', ownership });
+    const next = new RunResourceScope({ repoRoot: root, baseBranch: 'main', ownership: { ...ownership, owner: 'run-43' } });
+    const elsewhere = new RunResourceScope({ repoRoot: other, baseBranch: 'main', ownership: { ...ownership, workspaceRoot: other, owner: 'run-44' } });
+    const kill = vi.fn(async () => {});
+    kill.mockRejectedValueOnce(new Error('still running'));
+    first.registerExecution({ kill });
+    try {
+      await first.acquireOwnership();
+      await expect(first.finish({ status: 'failed' })).rejects.toThrow('still running');
+      const now = Date.now();
+      vi.spyOn(Date, 'now').mockReturnValue(now + 600_001);
+      await expect(next.acquireOwnership()).rejects.toThrow(/owned|quarantin/);
+      await expect(elsewhere.acquireOwnership()).rejects.toThrow(/owned|quarantin/);
+      await first.finish({ status: 'failed' });
+      await next.acquireOwnership();
+      await next.finish({ status: 'success' });
+    } finally {
+      vi.restoreAllMocks();
+      await first.finish({ status: 'failed' });
+      await next.finish({ status: 'failed' });
+      await elsewhere.finish({ status: 'failed' });
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it('waits for all independent execution stops before reporting the first failure', async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const scope = new RunResourceScope({ repoRoot: '/repo', baseBranch: 'main' });
+    scope.registerExecution({ kill: async () => { throw new Error('first stop failed'); } });
+    scope.registerExecution({ kill: async () => pending });
+    let settled = false;
+    const stopping = scope.stopExecutions().catch(error => { settled = true; return error; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    finish();
+    expect(await stopping).toEqual(new Error('first stop failed'));
+  });
+
   it('finishes successfully only once and cleans owned resources', async () => {
     const branch = strategy();
     const sandbox = { close: vi.fn(async () => {}) };
@@ -72,6 +232,8 @@ describe('RunResourceScope', () => {
     (branch.finalize as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('finalize failed'));
 
     await expect(scope.finish({ status: 'success' })).rejects.toThrow('finalize failed');
+    expect(release).not.toHaveBeenCalled();
+    await expect(scope.finish({ status: 'success' })).rejects.toThrow('lease release failed');
     expect(release).toHaveBeenCalledTimes(1);
   });
 

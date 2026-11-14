@@ -37,6 +37,37 @@ const requested = () => event(1, {
 });
 
 describe('Run reducer', () => {
+  it.each(['succeeded', 'failed', 'cancelled'] as const)('accepts completed evidence mirror facts after terminal %s without reopening business transitions', terminalOutcome => {
+    const finished = replay([requested(), event(2, { kind: 'run.started' }), event(3, { kind: 'run.finished', outcome: terminalOutcome })]);
+    for (const outcome of ['succeeded', 'failed'] as const) {
+      const receipt = event(4, { kind: 'effect.completed', effectKind: 'evidence.mirror', idempotencyKey: 'mirror', outcome });
+      const mirrored = evolve(finished, receipt);
+      expect(mirrored).toEqual({ ...finished, sequence: 4 });
+      expect(decide(mirrored, { type: 'start', runId: context.runId })).toMatchObject({ accepted: false, reason: 'run_terminal' });
+      expect(() => evolve(finished, { ...receipt, sequence: 5 })).toThrow(RunEventSequenceError);
+      expect(() => evolve(finished, { ...receipt, context: { ...context, runId: 'foreign' } })).toThrow(RunEventTransitionError);
+      for (const data of [
+        { kind: 'run.started' as const }, { kind: 'qa.passed' as const },
+        { kind: 'run.finished' as const, outcome: 'succeeded' as const },
+        { kind: 'effect.started' as const, effectKind: 'evidence.mirror', idempotencyKey: 'mirror' },
+        { kind: 'effect.completed' as const, effectKind: 'evidence.mirror.other', idempotencyKey: 'other', outcome },
+        { kind: 'effect.completed' as const, effectKind: 'publish', idempotencyKey: 'publish', outcome },
+      ]) expect(() => evolve(mirrored, event(5, data))).toThrow(RunEventTransitionError);
+    }
+  });
+
+  it.each(['succeeded', 'failed', 'cancelled'] as const)('accepts only completed observability metadata after terminal %s without changing its result', outcome => {
+    const finished = replay([requested(), event(2, { kind: 'run.started' }), event(3, { kind: 'run.finished', outcome })]);
+    const delivery = evolve(finished, event(4, { kind: 'effect.completed', effectKind: 'observability.delivery', idempotencyKey: 'delivery', outcome: 'failed' }));
+    expect(delivery).toEqual({ ...finished, sequence: 4 });
+    expect(decide(delivery, { type: 'start', runId: context.runId })).toMatchObject({ accepted: false, reason: 'run_terminal' });
+    for (const data of [
+      { kind: 'run.started' as const }, { kind: 'qa.passed' as const },
+      { kind: 'effect.started' as const, effectKind: 'observability.delivery', idempotencyKey: 'delivery' },
+      { kind: 'effect.completed' as const, effectKind: 'publish', idempotencyKey: 'publish', outcome: 'succeeded' as const },
+    ]) expect(() => evolve(delivery, event(5, data))).toThrow(RunEventTransitionError);
+  });
+
   it('replays a recorded workflow without changing scheduling state', () => {
     const state = replay([requested(), event(2, {
       kind: 'workflow.recorded', name: 'issue-implementation', version: 1,

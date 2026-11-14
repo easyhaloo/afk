@@ -41,6 +41,7 @@ export interface ConfiguredTriggerEvent {
   readonly pluginId: string;
   readonly trigger: TriggerDescriptor;
   readonly payload?: unknown;
+  readonly tick?: import('../../infrastructure/providers/triggers.js').ScheduledTriggerTick;
 }
 
 export interface ConfiguredPluginsOptions {
@@ -273,7 +274,7 @@ export async function createConfiguredPlugins(options: ConfiguredPluginsOptions)
       return capability(provider, { notifications: [provider] });
     }),
     'trigger.webhook': define(secret => z.object({ secret, triggers: webhookDescriptors }).strict(), config => trigger(new WebhookTriggerProvider({ secret: config.secret, onEvent: (event, descriptor) => fire('trigger.webhook', descriptor, event) }), config.triggers)),
-    'trigger.schedule': define(z.object({ triggers: scheduleDescriptors }).strict(), config => trigger(new ScheduleTriggerProvider({ onFire: descriptor => fire('trigger.schedule', descriptor) }), config.triggers)),
+    'trigger.schedule': define(z.object({ triggers: scheduleDescriptors }).strict(), config => trigger(new ScheduleTriggerProvider({ onFire: (trigger, tick) => options.onTrigger!({ pluginId: 'trigger.schedule', trigger, tick }) }), config.triggers)),
     'trigger.git-push': define(z.object({ includeDeleted: z.boolean().optional(), triggers: webhookDescriptors }).strict(), config => trigger(new GitPushTriggerProvider({ includeDeleted: config.includeDeleted, onPush: (payload, descriptor) => fire('trigger.git-push', descriptor, payload) }), config.triggers)),
     'trigger.issue-event': define(z.object({ triggers: webhookDescriptors }).strict(), config => trigger(new IssueEventTriggerProvider({ onIssue: (payload, descriptor) => fire('trigger.issue-event', descriptor, payload) }), config.triggers)),
     'learning.distiller': define(learningConfigurationSchema, config => ({ provider: {}, plugin: createLearningPlugin({ homeDir: options.homeDir, config }) })),

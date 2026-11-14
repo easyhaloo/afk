@@ -2,7 +2,7 @@ import pino from 'pino';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MetricsPort } from '@afk/core';
 import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
 import { RunObserver } from './run-observer.js';
@@ -20,6 +20,59 @@ afterEach(async () => {
 });
 
 describe('RunObserver', () => {
+  it('surfaces a diagnostic append failure unchanged while leaving the source audit intact', async () => {
+    const events = new JsonlEventStore({ root: await root() });
+    const original = new Error('DIAGNOSTIC_LOCAL_APPEND_FAILED');
+    const actual = events.append.bind(events);
+    const append = vi.spyOn(events, 'append').mockImplementationOnce(actual).mockRejectedValue(original);
+    const log = pino({ enabled: false });
+    vi.spyOn(log, 'info').mockImplementation(() => { throw new Error('LOG_CANARY'); });
+    const observer = new RunObserver({ events, log });
+    await expect(observer.record({ traceId: 't', runId: 'r', workItemId: 'github:acme/wiki#42', profileId: 'local', attempt: 1,
+      actor: { kind: 'cli', id: 'test' } }, { kind: 'qa.passed' })).rejects.toBe(original);
+    expect(append).toHaveBeenCalledTimes(2);
+    expect(await events.verify('r')).toMatchObject({ valid: true, lastSequence: 1 });
+  });
+
+  it('counts repeated synchronous info and derived-intake warn failures in durable safe summaries', async () => {
+    const path = await root();
+    const events = new JsonlEventStore({ root: path });
+    const log = pino({ enabled: false });
+    const info = vi.spyOn(log, 'info').mockImplementation(() => { throw new Error('LOG_SECRET_CANARY'); });
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => { throw new Error('WARN_SECRET_CANARY'); });
+    const intake = vi.fn(async () => { throw new Error('INTAKE_SECRET_CANARY'); });
+    const context = { traceId: 't', runId: 'r', workItemId: 'github:acme/wiki#42', profileId: 'local', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+    const observer = new RunObserver({ events, log, onPersisted: intake });
+    await expect(observer.record(context, { kind: 'qa.passed' })).resolves.toMatchObject({ lastSequence: 1 });
+    await expect(observer.record(context, { kind: 'qa.passed' })).resolves.toMatchObject({ lastSequence: 3 });
+    const history = [];
+    for await (const event of new JsonlEventStore({ root: path }).read('r')) history.push(event);
+    const summaries = history.filter(event => event.data.kind === 'effect.completed' && event.data.effectKind === 'observability.delivery');
+    expect(summaries).toHaveLength(2);
+    for (const event of summaries) {
+      expect(JSON.parse(event.data.kind === 'effect.completed' ? event.data.summary! : '{}')).toMatchObject({ retry: 'none', counts: { logging: { failed: 2 } } });
+    }
+    expect(info).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(intake).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(history)).not.toContain('CANARY');
+    expect(await events.verify('r')).toMatchObject({ valid: true, lastSequence: 4 });
+  });
+
+  it('propagates the original local append failure without logging, intake or diagnostics writes', async () => {
+    const events = new JsonlEventStore({ root: await root() });
+    const original = new Error('LOCAL_ORIGINAL');
+    const append = vi.spyOn(events, 'append').mockRejectedValue(original);
+    const log = pino({ enabled: false });
+    const info = vi.spyOn(log, 'info').mockImplementation(() => { throw new Error('LOG_CANARY'); });
+    const onPersisted = vi.fn();
+    const observer = new RunObserver({ events, log, onPersisted });
+    await expect(observer.record({ traceId: 't', runId: 'r', workItemId: 'github:acme/wiki#42', profileId: 'local', attempt: 1,
+      actor: { kind: 'cli', id: 'test' } }, { kind: 'qa.passed' })).rejects.toBe(original);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(info).not.toHaveBeenCalled();
+    expect(onPersisted).not.toHaveBeenCalled();
+  });
   it('runs derived intake after durable append and preserves the original result when intake fails', async () => {
     const events = new JsonlEventStore({ root: await root() });
     let called = false;

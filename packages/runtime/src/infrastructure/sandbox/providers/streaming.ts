@@ -17,6 +17,7 @@
 import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { randomUUID } from 'crypto';
 import { realpathSync } from 'fs';
+import { StringDecoder } from 'node:string_decoder';
 import type { AgentToolCallSummary } from '@afk/core';
 import type {
   AgentCommand,
@@ -56,8 +57,9 @@ export class StreamingAgentExecution implements AgentExecution {
   private _mutableMetadata: AgentExecutionMetadata;
 
   private proc: ChildProcess | null = null;
+  private readonly processOwner = randomUUID();
   private done = false;
-  private killed = false;
+  private stopping?: Promise<void>;
   private readonly signalledDescendants = new Map<number, string>();
   private interruptAcked = false;
   private exitCode: number | undefined;
@@ -65,9 +67,12 @@ export class StreamingAgentExecution implements AgentExecution {
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
   private readonly tools = new Map<string, AgentToolCallSummary>();
+  private readonly stdoutDecoder = new StringDecoder('utf8');
+  private readonly stderrDecoder = new StringDecoder('utf8');
   private stdoutBuffer = '';
   private stdoutTail = '';
   private stderrBuffer = '';
+  private outputSequence = 0;
   private lastResultOutput = '';
   private outputDrainTimer?: ReturnType<typeof setTimeout>;
 
@@ -105,7 +110,7 @@ export class StreamingAgentExecution implements AgentExecution {
 
     const spawnOptions: SpawnOptions = {
       cwd: this.command.cwd ?? this.worktreePath,
-      env: { ...process.env, ...this.command.env },
+      env: { ...process.env, ...this.command.env, AFK_EXECUTION_OWNER: this.processOwner },
       stdio: ['pipe', 'pipe', 'pipe'],
       // A provider command may be a shell wrapper (Claude's macOS shim is one)
       // and can spawn a real agent child. Put the whole tree in one process
@@ -129,7 +134,8 @@ export class StreamingAgentExecution implements AgentExecution {
 
     if (this.proc.stdout) {
       this.proc.stdout.on('data', (chunk: Buffer) => {
-        const text = chunk.toString('utf-8');
+        this.outputSequence++;
+        const text = this.stdoutDecoder.write(chunk);
         this.stdoutBuffer += text;
         this.stdoutTail = (this.stdoutTail + text).slice(-4000);
         this.drainStdoutLines();
@@ -139,8 +145,9 @@ export class StreamingAgentExecution implements AgentExecution {
 
     if (this.proc.stderr) {
       this.proc.stderr.on('data', (chunk: Buffer) => {
+        this.outputSequence++;
         // Stream-json errors may appear on stderr; treat as text events
-        this.stderrBuffer += chunk.toString('utf-8');
+        this.stderrBuffer += this.stderrDecoder.write(chunk);
       });
     }
 
@@ -295,6 +302,7 @@ export class StreamingAgentExecution implements AgentExecution {
     idleTimeoutMs?: number;
   }): Promise<ExecutionResult> {
     const completionTimeoutMs = options?.completionTimeoutMs ?? 600_000;
+    const contextHighTokens = options?.contextHighTokens ?? Infinity;
     const idleTimeoutMs = options?.idleTimeoutMs;
     const start = Date.now();
     const activity = new ActivityWatch();
@@ -303,7 +311,7 @@ export class StreamingAgentExecution implements AgentExecution {
     while (true) {
       if (this.done) break;
       if (Date.now() - start >= completionTimeoutMs) {
-        this.kill();
+        await this.kill();
         return {
           version: 1,
           runId: this.id,
@@ -322,12 +330,24 @@ export class StreamingAgentExecution implements AgentExecution {
           },
         };
       }
+      if (!this.error && this.exitCode === undefined && this.usage && this.usage.totalTokens >= contextHighTokens) {
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'context_high',
+          provider: 'batch',
+          sessionId: this.sessionId,
+          usage: this.usage,
+          tools: this.tools.size ? [...this.tools.values()] : undefined,
+          commits: [],
+        };
+      }
       // The idle watchdog: a process that is alive but says nothing is not
       // working, and its output is what it says it with.
       if (idleTimeoutMs !== undefined && idleTimeoutMs > 0) {
-        activity.observe(`${this.stdoutTail.length}:${this.tools.size}`);
+        activity.observe(String(this.outputSequence));
         if (activity.idleMs() >= idleTimeoutMs) {
-          this.kill();
+          await this.kill();
           return {
             version: 1,
             runId: this.id,
@@ -415,7 +435,7 @@ export class StreamingAgentExecution implements AgentExecution {
       tools: this.tools.size ? [...this.tools.values()] : undefined,
       commits: [],
     };
-    this.terminateProcess();
+    await this.kill();
     return completed;
   }
 
@@ -433,13 +453,31 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   async kill(): Promise<void> {
-    if (!this.proc || this.killed) return;
-    this.killed = true;
+    if (!this.proc) return;
+    if (this.stopping) return this.stopping;
+    const child = this.proc;
     this.done = true;
-    try {
-      this.signalProcess('SIGKILL');
-    } catch { /* ignore */ }
     this.closeOutput();
+    this.stopping = (async () => {
+      const deadline = Date.now() + 1000;
+      this.signalProcess('SIGKILL');
+      const signalled = new Set(this.signalledDescendants.keys());
+      while (true) {
+        const running = child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+        const descendants = this.findDescendantPids(running ? child.pid : undefined);
+        if (!running && descendants.length === 0) return;
+        if (descendants.some(pid => !signalled.has(pid))) {
+          this.signalProcess('SIGKILL');
+          for (const pid of descendants) signalled.add(pid);
+        }
+        if (Date.now() >= deadline) throw new Error('Agent process family did not exit after SIGKILL');
+        await this.sleep(20);
+      }
+    })().catch(error => {
+      this.stopping = undefined;
+      throw error;
+    });
+    return this.stopping;
   }
 
   async captureOutput(_options?: CaptureOptions): Promise<string> {
@@ -504,6 +542,10 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   private finishOutput(): void {
+    const text = this.stdoutDecoder.end();
+    this.stdoutBuffer += text;
+    this.stdoutTail = (this.stdoutTail + text).slice(-4000);
+    this.stderrBuffer += this.stderrDecoder.end();
     if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
     this.stdoutBuffer = '';
     this.updateExitError();
@@ -535,7 +577,9 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   private terminateProcess(): void {
-    void this.kill();
+    void this.kill().catch(() => {
+      this.error ??= { code: 'PROCESS_STOP_FAILED', message: 'Agent process termination could not be confirmed' };
+    });
   }
 
   private signalProcess(signal: NodeJS.Signals): void {
@@ -549,9 +593,11 @@ export class StreamingAgentExecution implements AgentExecution {
     for (const descendant of descendants) {
       try {
         process.kill(descendant, signal);
-      } catch { /* process already exited */ }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('Agent descendant could not be stopped');
+      }
     }
-    if (process.platform !== 'win32' && (!this.analysisParentGuard || parentRunning)) {
+    if (process.platform !== 'win32' && parentRunning) {
       try {
         process.kill(-pid, signal);
         return;
@@ -566,35 +612,47 @@ export class StreamingAgentExecution implements AgentExecution {
     if (process.platform === 'win32') return [];
 
     try {
-      const output = execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], { encoding: 'utf8', timeout: 1000 });
+      const output = execFileSync('ps', ['eww', '-U', String(process.getuid!()), '-o', 'pid=,ppid=,lstart=,stat=,command='],
+        { encoding: 'utf8', timeout: 1000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } });
       const children = new Map<number, number[]>();
       const starts = new Map<number, string>();
+      const tagged = new Set<number>();
+      const owner = `AFK_EXECUTION_OWNER=${this.processOwner}`;
       for (const line of output.split('\n')) {
-        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(\S+)\s+(.*)$/);
         if (!match) continue;
         const pid = Number(match[1]);
         const parent = Number(match[2]);
+        if (match[4]!.startsWith('Z')) continue;
         starts.set(pid, match[3]!);
+        if (match[5]!.split(/\s+/).includes(owner)) tagged.add(pid);
         const siblings = children.get(parent) ?? [];
         siblings.push(pid);
         children.set(parent, siblings);
       }
+      if (!starts.has(process.pid)) throw new Error('Incomplete process ownership observation');
 
       const descendants: number[] = [];
       const visit = (parent: number): void => {
         for (const child of children.get(parent) ?? []) {
-          visit(child);
+          if (descendants.includes(child)) continue;
           descendants.push(child);
+          visit(child);
         }
       };
       if (rootPid !== undefined) visit(rootPid);
       for (const [pid, start] of this.signalledDescendants) {
-        if (starts.get(pid) === start && !descendants.includes(pid)) descendants.push(pid);
+        if (starts.get(pid) === start) tagged.add(pid);
+      }
+      for (const pid of tagged) {
+        if (pid === this.proc?.pid) continue;
+        if (!descendants.includes(pid)) descendants.push(pid);
+        visit(pid);
       }
       for (const pid of descendants) this.signalledDescendants.set(pid, starts.get(pid)!);
       return descendants;
     } catch {
-      return [];
+      throw new Error('Agent process ownership could not be inspected');
     }
   }
 }

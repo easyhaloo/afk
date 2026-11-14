@@ -230,3 +230,21 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
     }
   });
 });
+
+test("keeps the lesson checker available while a production snapshot is loading", async () => {
+  const fixture = await createLearningFixture("lesson");
+  let app: ElectronApplication | undefined;
+  try {
+    const launched = await launchLearning(fixture);
+    app = launched.app;
+    const result = await launched.page.evaluate(async input => {
+      const snapshot = window.afkDesktop.snapshot("");
+      const validation = window.afkDesktop.learning.validate(input);
+      return (await Promise.all([snapshot, validation]))[1];
+    }, { scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1, checkerId: fixture.checkerId });
+    expect(result).toEqual({ status: "blocked", code: "qa_unconfigured" });
+    expect(fixture.calls()).toEqual([]);
+  } finally {
+    try { await app?.close(); } finally { fixture.cleanup(); }
+  }
+});

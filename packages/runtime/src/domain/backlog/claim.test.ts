@@ -4,11 +4,99 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FilesystemClaimLock } from './claim.js';
 
+const releaseFault = vi.hoisted(() => ({ target: '', remaining: 0, sync: false, removed: false, directoryOpens: 0,
+  error: Object.assign(new Error('claim release I/O failed'), { code: 'EIO' }) }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (String(args[0]) === releaseFault.target && releaseFault.remaining > 0) {
+        releaseFault.remaining--;
+        throw releaseFault.error;
+      }
+      await actual.rm(...args);
+      if (String(args[0]) === releaseFault.target) releaseFault.removed = true;
+    },
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      if (String(args[0]) === releaseFault.target.slice(0, -'/lock'.length)) {
+        releaseFault.directoryOpens++;
+        if (releaseFault.sync && releaseFault.removed) {
+          releaseFault.sync = false;
+          handle.sync = async () => { throw releaseFault.error; };
+        }
+      }
+      return handle;
+    },
+  };
+});
+
 describe('FilesystemClaimLock', () => {
   const stateRoots: string[] = [];
 
   afterEach(async () => {
+    releaseFault.target = '';
+    releaseFault.remaining = 0;
+    releaseFault.sync = false;
+    releaseFault.removed = false;
+    releaseFault.directoryOpens = 0;
     await Promise.all(stateRoots.splice(0).map(stateRoot => rm(stateRoot, { recursive: true, force: true })));
+  });
+
+  it.each(['remove', 'sync'] as const)('confirms release only after a transient %s failure is retried', async stage => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'afk-claim-release-'));
+    stateRoots.push(stateRoot);
+    const store = new FilesystemClaimLock(stateRoot);
+    const key = 'fixture/normal/42';
+    const lease = (await store.acquire({ key, owner: 'first', ttlMs: 60_000 }))!;
+    releaseFault.target = join(stateRoot, 'claims', ...key.split('/'), 'lock');
+    releaseFault.remaining = stage === 'remove' ? 1 : 0;
+    releaseFault.sync = stage === 'sync';
+    await expect(lease.release()).rejects.toBe(releaseFault.error);
+    if (stage === 'remove') {
+      expect((await store.inspect(key))?.claimId).toBe(lease.claimId);
+      await lease.heartbeat();
+    }
+    const opensBeforeRetry = releaseFault.directoryOpens;
+    await lease.release();
+    expect(releaseFault.directoryOpens).toBeGreaterThan(opensBeforeRetry);
+    expect(await store.inspect(key)).toBeNull();
+    const successor = (await store.acquire({ key, owner: 'successor', ttlMs: 60_000 }))!;
+    expect(successor).not.toBeNull();
+    await lease.release();
+    expect((await store.inspect(key))?.claimId).toBe(successor.claimId);
+    await successor.release();
+  });
+
+  it('serializes a concurrent release retry after the first removal fails', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'afk-claim-release-concurrent-'));
+    stateRoots.push(stateRoot);
+    const store = new FilesystemClaimLock(stateRoot);
+    const key = 'fixture/normal/43';
+    const lease = (await store.acquire({ key, owner: 'first', ttlMs: 60_000 }))!;
+    releaseFault.target = join(stateRoot, 'claims', ...key.split('/'), 'lock');
+    releaseFault.remaining = 1;
+    const results = await Promise.allSettled([lease.release(), lease.release()]);
+    expect(results).toEqual([{ status: 'rejected', reason: releaseFault.error }, { status: 'fulfilled', value: undefined }]);
+    expect(await store.inspect(key)).toBeNull();
+  });
+
+  it('keeps a successor token intact when retrying release after a directory sync error', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'afk-claim-release-successor-'));
+    stateRoots.push(stateRoot);
+    const store = new FilesystemClaimLock(stateRoot);
+    const key = 'fixture/normal/44';
+    const original = (await store.acquire({ key, owner: 'first', ttlMs: 60_000 }))!;
+    releaseFault.target = join(stateRoot, 'claims', ...key.split('/'), 'lock');
+    releaseFault.sync = true;
+    await expect(original.release()).rejects.toBe(releaseFault.error);
+    expect(await store.inspect(key)).toBeNull();
+    const successor = (await store.acquire({ key, owner: 'successor', ttlMs: 60_000 }))!;
+    await original.release();
+    expect((await store.inspect(key))?.claimId).toBe(successor.claimId);
+    await successor.heartbeat();
+    await successor.release();
   });
 
   it('invalidates an interrupted generation without allowing its release to erase the next lease', async () => {

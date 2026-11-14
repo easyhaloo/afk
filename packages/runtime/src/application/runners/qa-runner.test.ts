@@ -1,5 +1,5 @@
 import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
-import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll, type Mocked } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js';
@@ -17,6 +17,8 @@ import { createLearningPlugin } from '../plugins/learning.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import type { Step } from '../../domain/templates/types.js';
 import type { ContextQuery } from '../../plugin-sdk/capabilities.js';
+import type { AgentCapability, AgentExecution, AgentExecutionMetadata, AgentRuntimeSelection } from '../../domain/agents/types.js';
+import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
@@ -67,7 +69,7 @@ function fixture() {
     resolveRework: vi.fn(async () => {}),
   };
   const changes = {
-    findForBacklog: vi.fn(async () => null),
+    findForBacklog: vi.fn(async (): Promise<ChangeRequest | null> => null),
     create: vi.fn(async ({ sourceBranch, targetBranch }: any) => ({ id: 'pr-60', sourceBranch, targetBranch, url: 'https://example.test/pr/60', mergeState: 'mergeable' })),
     get: vi.fn(async () => ({ id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', mergeState: 'mergeable', url: 'https://example.test/pr/60' })),
     merge: vi.fn(async () => {}),
@@ -80,11 +82,11 @@ function fixture() {
     push: vi.fn(async () => {}),
     cleanup: vi.fn(async () => {}),
   };
-  const execution = {
+  const execution: Mocked<Omit<AgentExecution, 'metadata'>> & { metadata: AgentExecutionMetadata; telemetryPath?: string } = {
     id: 'execution-60',
     metadata: { provider: 'claude-code', transport: 'process' },
-    waitForEvent: vi.fn(async () => null),
-    waitForResult: vi.fn(async () => ({
+    waitForEvent: vi.fn<Parameters<AgentExecution['waitForEvent']>, ReturnType<AgentExecution['waitForEvent']>>(async () => null),
+    waitForResult: vi.fn<Parameters<AgentExecution['waitForResult']>, ReturnType<AgentExecution['waitForResult']>>(async () => ({
       version: 1,
       runId: 'execution-60',
       status: 'completed',
@@ -92,10 +94,10 @@ function fixture() {
       structuredOutput: { type: 'goal_complete', kind: 'qa', result: 'PASS', summary: 'all integration checks passed' },
       commits: [],
     })),
-    interrupt: vi.fn(async () => {}),
+    interrupt: vi.fn<Parameters<AgentExecution['interrupt']>, ReturnType<AgentExecution['interrupt']>>(async () => {}),
     kill: vi.fn(async () => {}),
     captureOutput: vi.fn(async () => ''),
-    captureSession: vi.fn(async () => undefined),
+    captureSession: vi.fn<Parameters<AgentExecution['captureSession']>, ReturnType<AgentExecution['captureSession']>>(async () => undefined),
     resume: vi.fn(),
   };
   const sandbox = {
@@ -108,7 +110,7 @@ function fixture() {
   const sandboxProvider = { create: vi.fn(async () => sandbox) };
   const agentProvider = {
     name: 'claude-code',
-    capabilities: new Set(['streaming', 'structured-output']),
+    capabilities: new Set<AgentCapability>(['streaming', 'structured-output']),
     createExecution: vi.fn(async () => execution),
   };
   return { providers: { backlog, changes, branches } as any, changes, branches, sandboxProvider: sandboxProvider as any, agentProvider: agentProvider as any, sandbox, execution };
@@ -311,7 +313,7 @@ describe('QARunner plugin publication policies', () => {
   it('evaluates required policy against the actual QA worktree and blocks its branch push', async () => {
     const current = fixture();
     const onBeforePublish = vi.fn(async (_context: LifecycleContext) => { throw new Error('QA policy denied'); });
-    const onCleanup = vi.fn(async () => {});
+    const onCleanup = vi.fn(async (_context: LifecycleContext) => {});
     const plugins = await policyRuntime({ name: 'deny-publication', failureMode: 'required', onBeforePublish, onCleanup });
     try {
       const runner = new QARunner(current.providers, config, {
@@ -325,7 +327,9 @@ describe('QARunner plugin publication policies', () => {
       }));
       expect(current.branches.push).not.toHaveBeenCalled();
       expect(current.changes.create).not.toHaveBeenCalled();
-      expect(onCleanup).toHaveBeenCalledWith(onBeforePublish.mock.calls[0]![0]);
+      const publishedContext = onBeforePublish.mock.calls[0]![0];
+      expect(onCleanup).toHaveBeenCalledWith(expect.objectContaining({ ...publishedContext, signal: expect.any(AbortSignal) }));
+      expect(onCleanup.mock.calls[0]![0].signal).not.toBe(publishedContext.signal);
       expect(current.branches.cleanup).toHaveBeenCalledWith(worktreePath, { preserve: true });
     } finally {
       await plugins.dispose();
@@ -400,7 +404,7 @@ describe('QARunner plugin publication policies', () => {
 function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttempts = 3) {
   const issue: TrackedIssue = { id: 60, platform, title: 'search mode', description: 'support /s', labels: ['stage::qa', 'mode::afk'], state: 'opened', projectId: 'org/repo', url: '' };
   const comments: Array<{ id: string; body: string }> = [];
-  const tracker = {
+  const tracker: Partial<TrackerProvider> = {
     platform, projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue, labels: [...issue.labels] })),
     listIssues: vi.fn(async () => [issue]),
@@ -413,7 +417,7 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     updateIssueComment: vi.fn(async (_id, commentId, body) => {
       comments.find(comment => comment.id === commentId)!.body = body;
     }),
-  } satisfies Partial<TrackerProvider>;
+  };
   const createRunner = () => {
     const f = fixture();
     const backlog = new TrackerBacklogProvider(tracker as TrackerProvider, { atomicClaim: vi.fn() });
@@ -442,12 +446,12 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
 describe('QARunner runtime binding', () => {
   it('resolves and probes the reviewer from an isolated plugin registry', async () => {
     const plugins = new PluginRuntime();
-    const provider = { name: 'codex', capabilities: new Set(), createExecution: vi.fn() };
+    const provider = { name: 'codex', capabilities: new Set<AgentCapability>(), createExecution: vi.fn() };
     await plugins.activate({
       manifest: { id: 'agent.codex', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['agent.provider'] },
       activate(context) { context.registerAgentProvider('codex', provider); },
     });
-    const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+    const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
     try {
       const runner = new QARunner(fixture().providers, {
         ...config, agentDefault: 'codex', agents: { codex: codexConfig },
@@ -471,7 +475,7 @@ describe('QARunner runtime binding', () => {
   /** Register a Codex provider AFK can resolve by name. */
   function withCodexProvider<T>(body: (provider: { name: 'codex' }) => T): T {
     const original = createAgentProvider('codex');
-    const codex = { name: 'codex' as const, capabilities: new Set(), createExecution: vi.fn() };
+    const codex = { name: 'codex' as const, capabilities: new Set<AgentCapability>(), createExecution: vi.fn() };
     registerAgentProvider(codex);
     try {
       return body(codex);
@@ -498,7 +502,7 @@ describe('QARunner runtime binding', () => {
 
   it('probes a runtime the reviewer resolved itself before the agent starts', async () => {
     await withCodexProvider(async () => {
-      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
       const runner = new QARunner(fixture().providers, {
         ...config, agentDefault: 'codex', agents: { codex: codexConfig },
       } as any, { prepareRuntime });
@@ -511,7 +515,7 @@ describe('QARunner runtime binding', () => {
 
   it('does not probe a runtime the caller already probed', async () => {
     await withCodexProvider(async () => {
-      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
       const injected = { kind: 'codex', transport: 'exec', auth: 'unknown', provider: 'afk-zyuncs', profile: 'afk', startupTimeoutMs: 30_000 };
       const runner = new QARunner(fixture().providers, {
         ...config, agentDefault: 'codex', agents: { codex: codexConfig },
@@ -583,7 +587,7 @@ describe('QARunner execution boundary', () => {
     const original = createAgentProvider('codex');
     const codex = {
       name: 'codex' as const,
-      capabilities: new Set(),
+      capabilities: new Set<AgentCapability>(),
       createExecution: vi.fn(),
     };
     registerAgentProvider(codex);
@@ -775,6 +779,7 @@ describe('QARunner execution boundary', () => {
     const previousLogDir = process.env.AFK_LOG_DIR;
     process.env.AFK_LOG_DIR = logRoot;
     try {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const runner = new QARunner(f.providers, { ...config, qaTimeout: 25 }, {
         sandboxProvider: f.sandboxProvider,
         agentProvider: f.agentProvider,
@@ -782,7 +787,14 @@ describe('QARunner execution boundary', () => {
         mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       });
 
-      await expect(runner.process('60')).resolves.toMatchObject({
+      const result = runner.process('60');
+      let settled = false;
+      void result.finally(() => { settled = true; });
+      while (!settled) {
+        await vi.advanceTimersByTimeAsync(0);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      await expect(result).resolves.toMatchObject({
         success: false,
         failureCode: 'agent_completion_timeout',
       });
@@ -791,6 +803,7 @@ describe('QARunner execution boundary', () => {
       const snapshots = await readdir(join(logRoot, 'qa'));
       expect(snapshots).toEqual([expect.stringMatching(/^timeout-60-\d+\.log$/)]);
     } finally {
+      vi.useRealTimers();
       if (previousLogDir === undefined) delete process.env.AFK_LOG_DIR;
       else process.env.AFK_LOG_DIR = previousLogDir;
       await rm(logRoot, { recursive: true, force: true });
@@ -1211,7 +1224,12 @@ describe('QARunner execution boundary', () => {
       mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
-    const result = await runner.process('60');
+    const schedule = globalThis.setTimeout;
+    const clock = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, timeout?: number, ...args: unknown[]) =>
+      schedule(callback, timeout === 1500 ? 0 : timeout, ...args)) as typeof setTimeout);
+    let result;
+    try { result = await runner.process('60'); }
+    finally { clock.mockRestore(); }
 
     expect(result).toMatchObject({ success: true });
     expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
@@ -1564,6 +1582,7 @@ describe('QARunner workspace independence', () => {
     expect(prepareRepositories.prepare).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ repoRoot: '/workspace/repo' })]),
       '/workspace',
+      expect.objectContaining({ claims: expect.arrayContaining([expect.any(String)]), assertClosed: expect.any(Function) }),
     );
     expect(order).toEqual(['prepare', 'createVerificationWorktree', 'cleanup', 'release']);
     expect(workspace.finish).not.toHaveBeenCalled();

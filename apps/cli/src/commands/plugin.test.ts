@@ -7,6 +7,34 @@ import { PluginRuntime, PluginManager, GoogleOAuthError, builtinPluginManifests,
 import { registerPluginCommands } from './plugin.js';
 
 describe('plugin commands', () => {
+  it('returns a failing status when a repository refuses removal', async () => {
+    const runtime = new PluginRuntime();
+    const cleanup = vi.fn(async () => ({ removed: false }));
+    await runtime.activate({ manifest: { id: 'repository.fixture', version: '1.0.0', apiVersion: 1,
+      provides: ['repository.provider'], trusted: true }, activate(context) {
+      context.registerRepositoryProvider('fixture', { id: 'fixture', capabilities: { read: true, clone: false, push: false, cleanup: true },
+        snapshot: async () => ({ commit: 'abc', branch: 'main', dirty: false }), cleanup });
+    } });
+    const directory = await mkdtemp(join(tmpdir(), 'repository-refused-'));
+    const input = join(directory, 'input.json');
+    await writeFile(input, JSON.stringify({ workspaceId: 'owned' }));
+    const exitCode = process.exitCode;
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const program = new Command().exitOverride();
+    registerPluginCommands(program, { pluginRuntime: runtime });
+    try {
+      await program.parseAsync(['node', 'afk', 'plugin', 'invoke', 'repository.provider', 'fixture', 'cleanup', '--input', input]);
+      expect(cleanup).toHaveBeenCalledWith({ workspaceId: 'owned' });
+      expect(JSON.parse(String(output.mock.calls[0][0]))).toEqual({ removed: false });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = exitCode;
+      output.mockRestore();
+      await runtime.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('validates invoke input and returns a failing status for a failed capability result', async () => {
     const runtime = new PluginRuntime();
     const verify = vi.fn(async () => ({ passed: false, durationMs: 1, output: 'test failed' }));

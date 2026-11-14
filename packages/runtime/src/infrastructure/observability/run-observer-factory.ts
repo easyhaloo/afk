@@ -5,7 +5,7 @@ import type { EvidenceRef, EventStorePort, MetricsPort, RunEventDraft, TracerPor
 import type { ArtifactSink, EvidenceStoreProvider, EventStoreProvider, MetricsProvider, TracerProvider, TraceContext, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { logger } from '../io/logger.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
-import { RunObserver, type RunObserverDependencies } from '../../observability/run-observer.js';
+import { RunObserver, recordObservationDelivery, type RunObserverDependencies } from '../../observability/run-observer.js';
 import { captureEventEvidence, createArtifactAudit, type ArtifactAuditOptions } from './artifact-audit.js';
 import { redactUtf8 } from './local-evidence-store.js';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
@@ -38,7 +38,7 @@ export interface ObservabilityProviderSelection {
   readonly provider: object;
   readonly signals: readonly ('events' | 'tracing' | 'metrics')[];
 }
-type ExportScope = { context: TraceContext; pending: Promise<void>; controller: AbortController; deadline: number };
+type ExportScope = { context: TraceContext; pending: Promise<void>; controller: AbortController; deadline: number; warned: boolean };
 
 export interface RunObserverOptions {
   readonly artifacts?: ArtifactAuditOptions;
@@ -124,7 +124,8 @@ async function prepareEvidenceMirror(source: RunEventDraft, options: EvidenceMir
       } catch {
         if (controller.signal.aborted) reason = options.signal?.aborted ? 'cancelled' : 'timed_out';
         try { options.onFailure?.(reason); } catch {}
-        logger.warn({ reason }, 'Evidence mirror failed; local audit remains authoritative');
+        try { logger.warn({ reason }, 'Evidence mirror failed; local audit remains authoritative'); }
+        catch { recordObservationDelivery('logging', 'failed'); }
       } finally {
         clearTimeout(timeout);
         options.signal?.removeEventListener('abort', abort);
@@ -140,7 +141,8 @@ async function prepareEvidenceMirror(source: RunEventDraft, options: EvidenceMir
         }]);
       } catch {
         try { options.onFailure?.('local_receipt_failed'); } catch {}
-        logger.warn({ reason: 'local_receipt_failed' }, 'Evidence mirror receipt failed; source audit remains authoritative');
+        try { logger.warn({ reason: 'local_receipt_failed' }, 'Evidence mirror receipt failed; source audit remains authoritative'); }
+        catch { recordObservationDelivery('logging', 'failed'); }
       }
     },
   };
@@ -161,18 +163,21 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
   const metricsProviders = providersFor('metrics');
   const eventStores = providersFor('events');
   const scopes = new AsyncLocalStorage<ExportScope>();
-  const warned = new Set<ObservationProvider>();
-  const enqueue = (provider: ObservationProvider, operation: (options: ProviderOperationOptions) => Promise<void>) => {
+  const enqueue = (signal: 'events' | 'tracing' | 'metrics', operation: (options: ProviderOperationOptions) => Promise<void>) => {
     const scope = scopes.getStore();
     if (!scope) return;
     scope.pending = scope.pending.then(async () => {
-      if (scope.controller.signal.aborted) return;
+      if (scope.controller.signal.aborted) {
+        recordObservationDelivery(signal, 'dropped');
+        return;
+      }
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const remaining = scope.deadline - performance.now();
         if (remaining <= 0) {
           scope.controller.abort();
-          throw new Error('Observability export timed out');
+          recordObservationDelivery(signal, 'dropped');
+          return;
         }
         await Promise.race([
           Promise.resolve().then(() => operation({ signal: scope.controller.signal })),
@@ -183,10 +188,13 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
             }, remaining);
           }),
         ]);
+        recordObservationDelivery(signal, 'succeeded');
       } catch {
-        if (!warned.has(provider)) {
-          warned.add(provider);
-          logger.warn({ provider_id: provider.id }, 'Observability export failed; local audit remains authoritative');
+        recordObservationDelivery(signal, scope.controller.signal.aborted ? 'timed_out' : 'failed');
+        if (!scope.warned) {
+          scope.warned = true;
+          try { logger.warn({ code: 'observability_export_failed' }, 'Observability export failed; local audit remains authoritative'); }
+          catch { recordObservationDelivery('logging', 'failed'); }
         }
       } finally {
         clearTimeout(timer);
@@ -198,11 +206,14 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
       const scope: ExportScope = {
         context: { traceId: context.traceId, spanId: randomBytes(8).toString('hex'), parentSpanId: context.spanId },
         pending: Promise.resolve(),
-        controller: new AbortController(), deadline: performance.now() + 5_000,
+        controller: new AbortController(), deadline: performance.now() + 5_000, warned: false,
       };
       return scopes.run(scope, async () => {
         const activeTracers = tracers.filter(provider => provider.capabilities?.span && typeof provider.startSpan === 'function');
-        for (const provider of activeTracers) enqueue(provider, options => provider.startSpan!(name, scope.context, {
+        for (const provider of tracers) {
+          if (!provider.capabilities?.span || typeof provider.startSpan !== 'function') recordObservationDelivery('tracing', 'skipped');
+        }
+        for (const provider of activeTracers) enqueue('tracing', options => provider.startSpan!(name, scope.context, {
           ...options, attributes: { run_id: context.runId, work_item_id: context.workItemId, profile_id: context.profileId, attempt: context.attempt, actor_kind: context.actor.kind },
         }));
         let failed = true;
@@ -212,7 +223,8 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
           return result;
         } finally {
           for (const provider of activeTracers) {
-            if (typeof provider.endSpan === 'function') enqueue(provider, options => provider.endSpan!(scope.context, { ...options, error: failed }));
+            if (typeof provider.endSpan === 'function') enqueue('tracing', options => provider.endSpan!(scope.context, { ...options, error: failed }));
+            else recordObservationDelivery('tracing', 'skipped');
           }
           await scope.pending;
         }
@@ -223,16 +235,16 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
       if (!scope) return;
       for (const provider of tracers) {
         if (provider.capabilities?.event && typeof provider.addEvent === 'function') {
-          enqueue(provider, options => provider.addEvent!(scope.context, name, { ...options, attributes }));
-        }
+          enqueue('tracing', options => provider.addEvent!(scope.context, name, { ...options, attributes }));
+        } else recordObservationDelivery('tracing', 'skipped');
       }
     },
   };
   const sample = (kind: 'counter' | 'histogram' | 'gauge', name: string, value: number, attributes?: Readonly<Record<string, string | number | boolean>>) => {
     for (const provider of metricsProviders) {
       if (provider.capabilities?.[kind] && typeof provider.record === 'function') {
-        enqueue(provider, options => provider.record!({ name, value, kind, attributes }, options));
-      }
+        enqueue('metrics', options => provider.record!({ name, value, kind, attributes }, options));
+      } else recordObservationDelivery('metrics', 'skipped');
     }
   };
   const metrics: MetricsPort = {
@@ -244,10 +256,11 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
     async append(drafts) {
       const receipt = await events.append(drafts);
       for (const provider of eventStores) {
-        if (provider.capabilities?.append && typeof provider.append === 'function') enqueue(provider, options => provider.append!(drafts.map((draft, index) => ({
+        if (provider.capabilities?.append && typeof provider.append === 'function') enqueue('events', options => provider.append!(drafts.map((draft, index) => ({
           runId: draft.context.runId, sequence: receipt.firstSequence + index, type: draft.type,
           payload: { id: draft.id, data: draft.data, context: draft.context, occurredAt: draft.occurredAt, causationId: draft.causationId, evidence: draft.evidence },
         })), options));
+        else recordObservationDelivery('events', 'skipped');
       }
       return receipt;
     },
@@ -275,5 +288,5 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
       }
       return receipt;
     },
-  }, tracer, metrics, onPersisted: options.onPersisted });
+  }, auditEvents: events, tracer, metrics, onPersisted: options.onPersisted });
 }

@@ -34,6 +34,34 @@ async function setup() {
   return { root, evidence, ref, provider, store, read };
 }
 
+it.each(['capture', 'upload'] as const)('keeps %s warning throws safe and accounts them without recursive evidence export', async stage => {
+  const { root, evidence, ref, provider, read } = await setup();
+  vi.spyOn(logger, 'warn').mockImplementation(() => { throw new Error('WARNING_CANARY'); });
+  if (stage === 'capture') vi.spyOn(evidence, 'put').mockRejectedValue(new Error('CAPTURE_CANARY'));
+  else vi.mocked(provider.put).mockRejectedValue(new Error('UPLOAD_CANARY'));
+  await expect(createRunObserver(root, [], { artifacts: { provider, evidence, captureEvents: stage === 'capture' } })
+    .record(context, { kind: 'qa.passed' }, stage === 'upload' ? { evidence: [ref] } : {})).resolves.toMatchObject({ lastSequence: 1 });
+  const history = await read();
+  const summary = history.at(-1)!;
+  expect(summary.data).toMatchObject({ effectKind: 'observability.delivery' });
+  expect(JSON.parse(summary.data.kind === 'effect.completed' ? summary.data.summary! : '{}')).toMatchObject({ counts: { logging: { failed: 1 } } });
+  if (stage === 'upload') expect(history[1].data).toMatchObject({ effectKind: 'artifact.upload', outcome: 'failed' });
+  expect(provider.put).toHaveBeenCalledTimes(stage === 'upload' ? 1 : 0);
+  expect(JSON.stringify(history)).not.toContain('CANARY');
+});
+
+it('preserves the original source append error after capture and its warning both fail', async () => {
+  const { root, evidence, provider } = await setup();
+  const original = new Error('ORIGINAL_APPEND');
+  const append = vi.spyOn(JsonlEventStore.prototype, 'append').mockRejectedValue(original);
+  vi.spyOn(evidence, 'put').mockRejectedValue(new Error('CAPTURE_CANARY'));
+  vi.spyOn(logger, 'warn').mockImplementation(() => { throw new Error('WARN_CANARY'); });
+  await expect(createRunObserver(root, [], { artifacts: { provider, evidence, captureEvents: true } })
+    .record(context, { kind: 'qa.passed' })).rejects.toBe(original);
+  expect(append).toHaveBeenCalledTimes(1);
+  expect(provider.put).not.toHaveBeenCalled();
+});
+
 it('uploads actual decrypted evidence only after local persistence and audits remote hash and provenance', async () => {
   const { root, evidence, ref, provider, store, read } = await setup();
   const bytes = await evidence.get(ref);
@@ -317,7 +345,12 @@ it('persists the original audit when local capture fails without logging secret 
   const warning = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
   vi.spyOn(evidence, 'put').mockRejectedValue(new Error('token=private-value'));
   await expect(createRunObserver(root, [], { artifacts: { provider, evidence, captureEvents: true } }).record(context, { kind: 'qa.passed' })).resolves.toMatchObject({ lastSequence: 1 });
-  expect(await read()).toMatchObject([{ type: 'qa.passed' }]);
+  const events = await read();
+  expect(events).toHaveLength(2);
+  expect(events[0]).toMatchObject({ type: 'qa.passed' });
+  expect(events[1].data).toMatchObject({ effectKind: 'observability.delivery', outcome: 'failed' });
+  expect(JSON.parse(events[1].data.kind === 'effect.completed' ? events[1].data.summary! : '{}').evidenceCaptureFailures)
+    .toEqual({ failed: 1, timed_out: 0, cancelled: 0 });
   expect(provider.put).not.toHaveBeenCalled();
   expect(warning).toHaveBeenCalledWith({ reason: 'evidence_capture_failed' }, expect.any(String));
   expect(JSON.stringify(warning.mock.calls)).not.toContain('private-value');
@@ -336,17 +369,29 @@ it('does not capture event evidence unless capture is explicitly enabled', async
 it.each(['timeout', 'abort'] as const)('persists the source audit after capture %s and ignores a late local write', async mode => {
   const { root, evidence, provider, ref, read } = await setup();
   let finish!: (value: EvidenceRef) => void;
-  const put = vi.spyOn(evidence, 'put').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  let entered!: () => void;
+  const captureEntered = new Promise<void>(resolve => { entered = resolve; });
+  const put = vi.spyOn(evidence, 'put').mockImplementation(() => {
+    entered();
+    return new Promise(resolve => { finish = resolve; });
+  });
   const controller = new AbortController();
   vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
   vi.useFakeTimers();
   const recording = createRunObserver(root, [], { artifacts: { provider, evidence, captureEvents: true, timeoutMs: 50, signal: controller.signal } }).record(context, { kind: 'qa.passed' });
-  await vi.waitFor(() => expect(put).toHaveBeenCalled());
+  await captureEntered;
+  expect(put).toHaveBeenCalled();
   if (mode === 'abort') controller.abort();
   else await vi.advanceTimersByTimeAsync(50);
   await expect(recording).resolves.toMatchObject({ lastSequence: 1 });
+  const stored = await read();
+  expect(stored).toHaveLength(2);
+  expect(stored[0]).toMatchObject({ type: 'qa.passed' });
+  expect(stored[1].data).toMatchObject({ effectKind: 'observability.delivery', outcome: 'failed' });
+  expect(JSON.parse(stored[1].data.kind === 'effect.completed' ? stored[1].data.summary! : '{}').evidenceCaptureFailures)
+    .toEqual({ failed: 0, timed_out: mode === 'timeout' ? 1 : 0, cancelled: mode === 'abort' ? 1 : 0 });
   finish(ref);
   await Promise.resolve();
-  expect(await read()).toMatchObject([{ type: 'qa.passed' }]);
+  expect(await read()).toEqual(stored);
   expect(provider.put).not.toHaveBeenCalled();
 });

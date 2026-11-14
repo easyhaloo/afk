@@ -36,6 +36,7 @@ export class CodexProvider extends ProcessAgentProvider {
 
   override async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
     this.assertExecutionProfile(options);
+    if (options.sandbox.startProviderExecution) return super.createExecution(options);
     if (options.runtime?.kind === 'codex' && options.runtime.transport === 'app-server') {
       return CodexAppServerExecution.start(options, options.runtime);
     }

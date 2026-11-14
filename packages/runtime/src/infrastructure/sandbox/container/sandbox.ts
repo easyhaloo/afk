@@ -21,7 +21,7 @@
 
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { isAbsolute, join, relative } from 'path';
+import { isAbsolute, join, posix, relative } from 'path';
 import { workspaceDataDirectory } from '../../workspace.js';
 import { clearSignal, readSignal } from '../../io/index.js';
 import type { Sandbox, SandboxOptions } from '../types.js';
@@ -37,6 +37,8 @@ import type {
 import type { ContainerProvider, ContainerExecResult } from './types.js';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { ActivityWatch } from '../../../domain/agents/activity.js';
+import { extractClaudeToolEvents, extractCodexToolEvents } from '../../../domain/agents/tool-telemetry.js';
+import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { EnvVarAllowlist } from './env-allowlist.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 
@@ -66,7 +68,6 @@ export class ContainerSandbox implements Sandbox {
   }) {
     this.id = opts.id ?? randomUUID();
     this.worktreePath = opts.worktreePath;
-    this.workspacePath = '/workspace';
     this.containerName = opts.containerName ?? `afk-${this.id.slice(0, 8)}`;
     this._provider = undefined as unknown as ContainerProvider;
     this._image = opts.image;
@@ -81,9 +82,11 @@ export class ContainerSandbox implements Sandbox {
     if (relativeWorktreePath === '..' || relativeWorktreePath.startsWith(parentPrefix) || isAbsolute(relativeWorktreePath)) {
       throw new Error(`container worktree must be inside workspace root: ${this.worktreePath}`);
     }
-    this._workdir = opts.workdir ?? (relativeWorktreePath
+    this._workdir = posix.normalize(opts.workdir ?? (relativeWorktreePath
       ? `/workspace/${relativeWorktreePath.replaceAll('\\', '/')}`
-      : '/workspace');
+      : '/workspace'));
+    if (!posix.isAbsolute(this._workdir)) throw new Error('container workdir must be absolute');
+    this.workspacePath = this._workdir;
     this.runtimeRunId = opts.runtimeRunId;
   }
 
@@ -247,8 +250,8 @@ export class ContainerSandbox implements Sandbox {
  */
 export class ContainerAgentExecution implements AgentExecution {
   readonly id: string;
-  readonly sessionId?: string;
   readonly metadata: AgentExecutionMetadata;
+  get sessionId(): string | undefined { return this.metadata.threadId; }
   private readonly worktreePath: string;
   private readonly signalType: 'goal_complete';
   private readonly generation: number;
@@ -274,8 +277,7 @@ export class ContainerAgentExecution implements AgentExecution {
     parseLine?: (line: string) => AgentEvent[];
   }) {
     this.id = opts.execId;
-    this.sessionId = opts.sessionName;
-    this.metadata = opts.metadata;
+    this.metadata = { ...opts.metadata };
     this.worktreePath = opts.worktreePath;
     this.signalType = opts.signalType;
     this.generation = opts.generation;
@@ -328,27 +330,27 @@ export class ContainerAgentExecution implements AgentExecution {
         });
       }
 
-      const signal = await readSignal(this.worktreePath).catch(() => undefined);
-      if (signal?.type === this.signalType) {
-        this._done = true;
-        return this.result('completed', { structuredOutput: signal });
-      }
-
       const exitCode = await readExitCode(this.exitPath);
       if (exitCode !== undefined) {
         this._done = true;
         const [stdout, stderr] = await Promise.all([readOptional(this.outputPath), readOptional(this.errorPath)]);
-        const structuredOutput = this.readStructuredOutput(stdout ?? '');
+        const { structuredOutput, ...telemetry } = this.readStructuredOutput(stdout ?? '');
         if (exitCode !== 0) {
           return this.result('failed', {
+            ...telemetry,
             exitCode,
             error: { code: 'NON_ZERO_EXIT', message: stderr?.trim() || stdout?.trim() || `process exited with code ${exitCode}` },
           });
         }
-        if (structuredOutput && typeof structuredOutput === 'object' && (structuredOutput as { type?: unknown }).type === this.signalType) {
-          return this.result('completed', { exitCode, structuredOutput });
+        if (telemetry.error) return this.result('failed', { ...telemetry, exitCode });
+        const signal = !this.parseLine && !structuredOutput
+          ? await readSignal(this.worktreePath).catch(() => undefined) : undefined;
+        const completion = structuredOutput ?? (signal?.type === this.signalType ? signal : undefined);
+        if (completion) {
+          return this.result('completed', { ...telemetry, exitCode, structuredOutput: completion });
         }
         return this.result('failed', {
+          ...telemetry,
           exitCode,
           error: { code: 'MISSING_RESULT', message: `container execution ended without ${this.signalType} result` },
         });
@@ -424,19 +426,35 @@ export class ContainerAgentExecution implements AgentExecution {
     };
   }
 
-  private readStructuredOutput(stdout: string): unknown {
-    for (const line of stdout.split(/\r?\n/)) {
+  private readStructuredOutput(stdout: string): Pick<ExecutionResult, 'structuredOutput' | 'usage' | 'tools' | 'error'> {
+    const lines = stdout.split(/\r?\n/);
+    const output: Pick<ExecutionResult, 'structuredOutput' | 'usage' | 'tools' | 'error'> = {
+      tools: this.metadata.provider === 'claude-code' ? extractClaudeToolEvents(lines)
+        : this.metadata.provider === 'codex' ? extractCodexToolEvents(lines) : undefined,
+    };
+    for (const line of lines) {
       if (!line.trim()) continue;
-      const events = this.parseLine?.(line) ?? [];
+      const events: AgentEvent[] = this.parseLine ? this.parseLine(line) : [{ type: 'result', result: line }];
       for (const event of events) {
-        if (event.type !== 'result') continue;
-        const parsed = parseGoalComplete(String(event.result ?? ''));
-        if (parsed) return parsed;
+        switch (event.type) {
+          case 'usage': output.usage = event.usage; break;
+          case 'session': this.metadata.threadId = event.sessionId; break;
+          case 'error': output.error ??= { code: 'AGENT_ERROR', message: event.error.message }; break;
+          case 'result': {
+            let parsed = event.result;
+            if (typeof parsed === 'string') {
+              const marker = extractGoalComplete(parsed);
+              try { parsed = marker ?? JSON.parse(parsed); } catch { parsed = undefined; }
+            }
+            if (parsed && typeof parsed === 'object' && (parsed as { type?: unknown }).type === this.signalType) {
+              output.structuredOutput = parsed;
+            }
+            break;
+          }
+        }
       }
-      const parsed = parseGoalComplete(line);
-      if (parsed) return parsed;
     }
-    return undefined;
+    return output;
   }
 }
 
@@ -454,16 +472,6 @@ async function readExitCode(path: string): Promise<number | undefined> {
   if (raw === undefined) return undefined;
   const parsed = Number.parseInt(raw.trim(), 10);
   return Number.isInteger(parsed) ? parsed : undefined;
-}
-
-function parseGoalComplete(value: string): unknown {
-  const match = value.match(/<goal_complete>([\s\S]*?)<\/goal_complete>/);
-  if (!match) return undefined;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return undefined;
-  }
 }
 
 function sleep(ms: number): Promise<void> {

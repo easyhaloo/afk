@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { resolve } from 'node:path';
+import { z } from 'zod';
 import { WebhookTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider } from '../../infrastructure/providers/triggers.js';
 import type { PluginRuntime } from './runtime.js';
 import { DurableTriggerQueue, InvalidTriggerDelivery, TriggerDeliveryConflict, TriggerQueueFull, type TriggerQueueOptions } from './trigger-queue.js';
@@ -10,6 +12,51 @@ export interface PluginListenerOptions {
   readonly port?: number;
   readonly queuePath?: string;
   readonly queueOptions?: TriggerQueueOptions;
+  readonly warn?: (message: string) => void;
+}
+
+const runtimeQueues = new WeakMap<PluginRuntime, { path: string; queue: DurableTriggerQueue }>();
+const scheduledDelivery = z.object({
+  action: z.string().min(1), input: z.unknown(), triggerId: z.string().min(1),
+  tick: z.object({ id: z.string().min(1), scheduledAt: z.number().int().nonnegative() }).strict(),
+}).strict();
+
+export function pluginTriggerQueue(runtime: PluginRuntime, options: Pick<PluginListenerOptions, 'queuePath' | 'queueOptions' | 'warn'> = {}): DurableTriggerQueue | undefined {
+  const existing = runtimeQueues.get(runtime);
+  if (existing) {
+    if (options.queuePath !== undefined && resolve(options.queuePath) !== existing.path) throw new Error('Runtime trigger queue path differs from listener queue path');
+    return existing.queue;
+  }
+  if (options.queuePath === undefined) return undefined;
+  const queue = new DurableTriggerQueue(options.queuePath, async delivery => {
+    const payload = parsePayload(Buffer.from(delivery.body));
+    if (delivery.providerId === 'trigger.schedule') {
+      const scheduled = scheduledDelivery.parse(payload);
+      try { await runtime.dispatchSystemAction(scheduled.action, scheduled.input); }
+      catch {
+        runtime.recordDiagnostic({ pluginId: delivery.providerId, severity: 'error', code: 'trigger.action-failed', message: 'Configured trigger action failed' });
+        try { options.warn?.(`Trigger action failed for ${delivery.providerId}`); } catch {}
+        throw new Error('Configured trigger action failed');
+      }
+      return;
+    }
+    const provider = runtime.getTriggerProvider(delivery.providerId);
+    if (provider instanceof WebhookTriggerProvider) await provider.handleAuthenticatedPayload(payload);
+    else if (provider instanceof GitPushTriggerProvider || provider instanceof IssueEventTriggerProvider) await provider.handle(payload);
+    else throw new Error('Trigger provider is not available');
+  }, options.queueOptions, () => {
+    runtime.recordDiagnostic({ severity: 'error', code: 'trigger.delivery-failed', message: 'A durable trigger delivery failed; inspect queue status' });
+  });
+  runtimeQueues.set(runtime, { path: resolve(options.queuePath), queue });
+  return queue;
+}
+
+export function closePluginTriggerQueue(runtime: PluginRuntime): Promise<void> {
+  const entry = runtimeQueues.get(runtime);
+  if (!entry) return Promise.resolve();
+  const release = () => { if (runtimeQueues.get(runtime) === entry) runtimeQueues.delete(runtime); };
+  void entry.queue.close({ drain: false }).then(release, release);
+  return entry.queue.close({ drain: false, timeoutMs: 5000 });
 }
 
 function equalSecret(left: string, right: string): boolean {
@@ -50,15 +97,7 @@ export async function startPluginListener(runtime: PluginRuntime, options: Plugi
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error('Invalid listener port');
   const active = new Set<Promise<void>>();
   let closing: Promise<void> | undefined;
-  const queue = options.queuePath === undefined ? undefined : new DurableTriggerQueue(options.queuePath, async delivery => {
-    const provider = runtime.getTriggerProvider(delivery.providerId);
-    const payload = parsePayload(Buffer.from(delivery.body));
-    if (provider instanceof WebhookTriggerProvider) await provider.handleAuthenticatedPayload(payload);
-    else if (provider instanceof GitPushTriggerProvider || provider instanceof IssueEventTriggerProvider) await provider.handle(payload);
-    else throw new Error('Trigger provider is not available');
-  }, options.queueOptions, () => {
-    runtime.recordDiagnostic({ severity: 'error', code: 'trigger.delivery-failed', message: 'A durable trigger delivery failed; inspect queue status' });
-  });
+  const queue = pluginTriggerQueue(runtime, options);
   const handle = async (request: IncomingMessage, response: ServerResponse) => {
     response.setHeader('content-type', 'application/json');
     const replay = /^\/deliveries\/([a-f0-9]{64})\/replay$/.exec(request.url ?? '');
@@ -174,22 +213,20 @@ export async function startPluginListener(runtime: PluginRuntime, options: Plugi
       server.listen(port, options.host ?? '127.0.0.1', () => { server.off('error', onError); resolve(); });
     });
     queue?.start();
-  } catch (error) { await queue?.close(); throw error; }
+  } catch (error) { await closePluginTriggerQueue(runtime); throw error; }
   return {
     address: server.address(),
     queue,
     close(): Promise<void> {
-      return closing ??= (async () => {
+      return closing ??= new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Trigger listener shutdown timed out; unconfirmed delivery ownership is retained')), 5000);
         const stopped = new Promise<void>((resolve, reject) => {
           server.close(error => error ? reject(error) : resolve());
           server.closeAllConnections();
         });
-        try { await stopped; }
-        finally {
-          await Promise.allSettled([...active]);
-          await queue?.close();
-        }
-      })();
+        Promise.all([stopped, Promise.allSettled([...active]), closePluginTriggerQueue(runtime)])
+          .then(() => { clearTimeout(timer); resolve(); }, error => { clearTimeout(timer); reject(error); });
+      });
     },
   };
 }

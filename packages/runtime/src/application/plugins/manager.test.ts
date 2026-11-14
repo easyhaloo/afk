@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { PluginManager, readInstalledPlugin } from './manager.js';
 import { readPluginConfiguration } from './configuration.js';
 import { loadInstalledPlugins } from './loader.js';
@@ -499,6 +499,37 @@ describe('PluginManager', () => {
     await loadInstalledPlugins(runtime, { homeDir });
     expect(await runtime.getContextProvider('example')!.gather({ scope: 'npm', prompt: 'q' })).toEqual([{ origin: 'npm', content: 'dependency installed' }]);
   }, 30_000);
+
+  it.each(['local', 'registry'] as const)('preserves relative file dependency links when publishing a %s plugin', async mode => {
+    const { source, homeDir, root } = await fixture();
+    const dependency = join(root, 'dependency');
+    await fs.mkdir(dependency);
+    await fs.writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'fixture-context-dependency', version: '1.0.0', type: 'module', main: 'index.js' }));
+    await fs.writeFile(join(dependency, 'index.js'), 'export default "relative dependency installed";');
+    await fs.writeFile(join(source, 'package.json'), JSON.stringify({ name: 'context-example', type: 'module', dependencies: { 'fixture-context-dependency': `file:${dependency}` } }));
+    const entry = join(source, 'dist', 'index.js');
+    await fs.writeFile(entry, `import helper from 'fixture-context-dependency';\n${(await fs.readFile(entry, 'utf8')).replace("content: 'ready'", 'content: helper')}`);
+    const npm = vi.fn(async (args: readonly string[], cwd: string) => {
+      expect(args).toContain('--ignore-scripts');
+      const packageRoot = mode === 'local' ? cwd : join(cwd, 'node_modules', 'context-example');
+      if (mode === 'registry') {
+        await fs.cp(source, packageRoot, { recursive: true });
+        await fs.writeFile(join(cwd, 'package.json'), JSON.stringify({ private: true, dependencies: { 'context-example': '1.0.0' } }));
+      }
+      const modules = join(packageRoot, 'node_modules');
+      await fs.mkdir(modules, { recursive: true });
+      await fs.symlink(relative(modules, dependency), join(modules, 'fixture-context-dependency'), 'dir');
+    });
+    const manager = new PluginManager({ homeDir, runNpm: npm });
+    await manager.install(mode === 'local' ? source : 'context-example@1.0.0');
+    await manager.configure('context.example', { scope: 'relative' });
+    const runtime = new PluginRuntime();
+    try {
+      expect(await loadInstalledPlugins(runtime, { homeDir })).toEqual(['context.example']);
+      expect(await runtime.getContextProvider('example')!.gather({ scope: 'relative', prompt: 'q' })).toEqual([{ origin: 'relative', content: 'relative dependency installed' }]);
+    } finally { await runtime.dispose(); }
+    expect(npm).toHaveBeenCalledOnce();
+  });
 
   it('rejects traversal, changed entry points, and concurrent manager writes', async () => {
     const { source, homeDir } = await fixture();

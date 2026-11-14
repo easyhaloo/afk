@@ -3,14 +3,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { HandoffCoordinator } from './handoff.js';
+import { HandoffCoordinator, handoffDocPath } from './handoff.js';
 import type { BacklogProvider } from '../../domain/backlog/index.js';
 import type { TmuxClient } from '../../infrastructure/tmux/tmux.js';
 import type { Watchdog } from './watchdog.js';
-import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
+import { loadWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
+import type { AgentExecution } from '../../domain/agents/types.js';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
-function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
+function makeTmux(overrides: Partial<TmuxClient> = {}) {
   return {
     killSession: vi.fn(async () => {}),
     closeSession: vi.fn(async () => {}),
@@ -29,6 +30,7 @@ function makeWatchdog() {
 
 function makeConfig(): WorkflowConfig {
   return {
+    ...loadWorkflowConfig(os.homedir(), {}),
     agentDefault: 'claude',
     tmuxSession: 'afk',
     completionTimeout: 7200 * 1000,
@@ -61,6 +63,7 @@ describe('HandoffCoordinator', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
 
@@ -76,10 +79,33 @@ describe('HandoffCoordinator', () => {
 
   // ── auto ───────────────────────────────────────────────────────────────────
 
+  it.each(['auto', 'terminal'] as const)('preserves interactive %s handoff with canonical identity', async mode => {
+    const id = 'gitlab:fixture/subgroup/repo#42';
+    const backlog = makeBacklog();
+    const tmux = makeTmux();
+    const watchdog = makeWatchdog();
+    const coord = new HandoffCoordinator(backlog, tmux, watchdog, makeConfig());
+    expect(await coord.handoff(ctx({ backlogId: id }), mode, mode === 'terminal' ? 'tokens' : undefined))
+      .toBe(mode === 'auto' ? 'continued' : 'terminated');
+    const doc = mode === 'auto' ? handoffDocPath(wtPath, id, 1)
+      : handoffDocPath(wtPath, id, 1).replace(/-1\.md$/, '-terminal.md');
+    expect(path.basename(doc)).toBe(`handoff-${encodeURIComponent(id)}-${mode === 'auto' ? '1' : 'terminal'}.md`);
+    expect(fs.readFileSync(doc, 'utf8')).toContain(`# Handoff ${id}`);
+    expect(tmux.sendKeys).toHaveBeenCalled();
+    expect(tmux.killSession).toHaveBeenCalledWith('afk-backlog-42');
+    if (mode === 'auto') {
+      expect(tmux.createSession).toHaveBeenCalled();
+      expect(watchdog.arm).toHaveBeenCalled();
+    } else {
+      expect(tmux.createSession).not.toHaveBeenCalled();
+      expect(backlog.transition).toHaveBeenCalledWith(id, 'blocked', { reason: 'tokens' });
+    }
+  });
+
   it('auto success: writes doc, posts comment, restarts session, re-arms watchdog', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'implemented AC 1-3' })),
+      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready' as const, summary: 'implemented AC 1-3', timestamp: '2026-11-13T00:00:00Z' })),
       capturePane: vi.fn(async () => 'line1\nline2'),
       waitForPrompt: vi.fn(async () => true),
     });
@@ -104,7 +130,7 @@ describe('HandoffCoordinator', () => {
   it('auto relaunch failure: flips to manual (handoff::active + killed), returns terminated', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'partial work' })),
+      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready' as const, summary: 'partial work', timestamp: '2026-11-13T00:00:00Z' })),
       waitForPrompt: vi.fn(async () => false), // relaunch: claude never ready
     });
     const watchdog = makeWatchdog();
@@ -123,7 +149,7 @@ describe('HandoffCoordinator', () => {
   it('auto no-summary (placeholder "<总结>"): doc falls back to snapshot, no summary', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: '<总结>' })),
+      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready' as const, summary: '<总结>', timestamp: '2026-11-13T00:00:00Z' })),
       capturePane: vi.fn(async () => 'snapshot-line'),
       waitForPrompt: vi.fn(async () => true),
     });
@@ -142,7 +168,7 @@ describe('HandoffCoordinator', () => {
   it('terminal/budget: embeds terminal doc in comment, labels handoff::active, no re-arm', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'final summary' })),
+      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready' as const, summary: 'final summary', timestamp: '2026-11-13T00:00:00Z' })),
       capturePane: vi.fn(async () => 'final-snapshot'),
     });
     const watchdog = makeWatchdog();
@@ -166,7 +192,7 @@ describe('HandoffCoordinator', () => {
   it('terminal/tokens: surfaces the token-budget reason text', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 's' })),
+      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready' as const, summary: 's', timestamp: '2026-11-13T00:00:00Z' })),
       capturePane: vi.fn(async () => 'snap'),
     });
     const coord = new HandoffCoordinator(backlog, tmux, makeWatchdog(), makeConfig());
@@ -174,5 +200,29 @@ describe('HandoffCoordinator', () => {
     await coord.handoff(ctx(), 'terminal', 'tokens');
 
     expect(backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'tokens' });
+  });
+
+  it('batch rejects a missing execution without requesting or restarting tmux', async () => {
+    const backlog = makeBacklog();
+    const tmux = makeTmux();
+    const coord = new HandoffCoordinator(backlog, tmux, makeWatchdog(), makeConfig());
+    await expect(coord.handoff({ ...ctx(), executionMode: 'batch' }, 'auto')).rejects.toThrow('requires the old execution');
+    expect(backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
+    expect(tmux.sendKeys).not.toHaveBeenCalled();
+    expect(tmux.killSession).not.toHaveBeenCalled();
+    expect(tmux.createSession).not.toHaveBeenCalled();
+  });
+
+  it('batch still stops the execution when writing the recovery doc fails', async () => {
+    const backlog = makeBacklog();
+    const tmux = makeTmux();
+    const execution = { captureOutput: vi.fn(async () => 'real capture'), kill: vi.fn(async () => {}) } as unknown as AgentExecution;
+    vi.spyOn(fs.promises, 'writeFile').mockRejectedValueOnce(new Error('fixture disk failure'));
+    const coord = new HandoffCoordinator(backlog, tmux, makeWatchdog(), makeConfig());
+    await expect(coord.handoff({ ...ctx(), executionMode: 'batch', execution }, 'auto')).rejects.toThrow('fixture disk failure');
+    expect(execution.kill).toHaveBeenCalledOnce();
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'batch handoff failed: fixture disk failure' });
+    expect(backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
+    expect(tmux.createSession).not.toHaveBeenCalled();
   });
 });

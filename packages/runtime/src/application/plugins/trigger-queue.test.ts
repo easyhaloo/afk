@@ -32,6 +32,31 @@ function database(file: string) {
 }
 
 describe('durable trigger queue', () => {
+  it('bounds close without releasing an unconfirmed active consumer', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const first = queue(file, async () => pending);
+    first.instance.enqueue('trigger.schedule', '{}', 'active');
+    first.instance.enqueue('trigger.schedule', '{}', 'queued');
+    first.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    const closed = first.instance.close({ drain: false, timeoutMs: 10 });
+    let failure: unknown;
+    void closed.catch(error => { failure = error; });
+    await vi.advanceTimersByTimeAsync(10);
+    try {
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain('ownership retained');
+      expect(() => new DurableTriggerQueue(file, async () => {})).toThrow('already owned');
+      expect(first.instance.status().map(row => row.status).sort()).toEqual(['pending', 'processing']);
+      expect(() => first.instance.enqueue('trigger.schedule', '{}')).toThrow('unavailable');
+    } finally { finish(); await first.instance.close({ drain: false }); }
+    const next = queue(file);
+    expect(next.instance.status().map(row => row.status).sort()).toEqual(['delivered', 'pending']);
+  });
+
   it('can stop dispatching on close while retaining pending work for a new owner', async () => {
     vi.useFakeTimers();
     const file = queueFile();

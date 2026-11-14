@@ -244,13 +244,15 @@ export class PluginManager {
       let published = false;
       let pending: PendingActivation | undefined;
       try {
+        const versionRoot = join(stage, `.version-${randomUUID()}`);
+        await fs.mkdir(versionRoot);
         const local = resolve(source);
         const isLocal = await fs.stat(local).then(stat => stat.isDirectory(), () => false);
         let packageRoot: string;
         const args = ['install', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--legacy-peer-deps'];
         if (isLocal) {
           if (inside(await fs.realpath(local), await fs.realpath(stage))) throw new Error('Plugin source contains its installation directory');
-          packageRoot = join(stage, 'package');
+          packageRoot = join(versionRoot, 'package');
           await fs.cp(local, packageRoot, { recursive: true, filter: path => !['node_modules', '.git'].includes(path.split(sep).at(-1) ?? '') });
           const metadata = JSON.parse(await fs.readFile(join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: object; optionalDependencies?: object };
           if (Object.keys(metadata.dependencies ?? {}).length || Object.keys(metadata.optionalDependencies ?? {}).length) await this.npm(args, packageRoot);
@@ -258,12 +260,12 @@ export class PluginManager {
           if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*(?:@[A-Za-z0-9.*^~+<>=|-]+)?$/.test(source)) {
             throw new Error('Expected a local plugin directory or an npm package specification');
           }
-          await fs.writeFile(join(stage, 'package.json'), '{"private":true}');
-          await this.npm([...args, '--save-exact', source], stage);
-          const metadata = JSON.parse(await fs.readFile(join(stage, 'package.json'), 'utf8')) as { dependencies?: { [name: string]: string } };
+          await fs.writeFile(join(versionRoot, 'package.json'), '{"private":true}');
+          await this.npm([...args, '--save-exact', source], versionRoot);
+          const metadata = JSON.parse(await fs.readFile(join(versionRoot, 'package.json'), 'utf8')) as { dependencies?: { [name: string]: string } };
           const names = Object.keys(metadata.dependencies ?? {});
           if (names.length !== 1) throw new Error('The package manager did not resolve exactly one plugin package');
-          packageRoot = join(stage, 'node_modules', names[0]);
+          packageRoot = join(versionRoot, 'node_modules', names[0]);
         }
         let metadata: PluginManifest & { entry?: string };
         try {
@@ -279,16 +281,11 @@ export class PluginManager {
         const sdkLink = join(packageRoot, 'node_modules', '@afk', 'runtime');
         await fs.rm(sdkLink, { recursive: true, force: true });
         await fs.symlink(fileURLToPath(new URL('../../../', import.meta.url)), sdkLink, 'dir');
-        // A real, unique directory isolates relative imports as well as the entry in Node's ESM cache.
-        const versionDirectory = `.version-${randomUUID()}`;
         const stagedEntry = relative(await fs.realpath(stage), entry);
-        const children = await fs.readdir(stage);
-        await fs.mkdir(join(stage, versionDirectory));
-        for (const child of children) await fs.rename(join(stage, child), join(stage, versionDirectory, child));
         const record: InstalledPluginRecord = {
           id: metadata.id, version: metadata.version, source: isLocal ? local : source,
-          entry: join(versionDirectory, stagedEntry), manifest: metadata,
-          integrity: `sha256-${createHash('sha256').update(await fs.readFile(join(stage, versionDirectory, stagedEntry))).digest('base64')}`,
+          entry: stagedEntry, manifest: metadata,
+          integrity: `sha256-${createHash('sha256').update(await fs.readFile(entry)).digest('base64')}`,
           installedAt: new Date().toISOString(),
         };
         await fs.writeFile(join(stage, 'install.json'), JSON.stringify(record, null, 2), { mode: 0o600 });

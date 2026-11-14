@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { CredentialProvider, CredentialRef, CredentialValue, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import type { CredentialProvider, CredentialRef, CredentialValue, ProviderDiagnostic, ProviderHealth, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { openInBrowser } from '../../shared/browser.js';
 import { checkAbort, requestHttp, type FetchTransport } from './dependencies.js';
 import { OAuthKeychainStore, type OAuthSecretStore } from './oauth-keychain.js';
@@ -38,6 +38,7 @@ const revokeEndpoint = 'https://oauth2.googleapis.com/revoke';
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const requestedScopes = ['openid', 'email', GMAIL_SEND_SCOPE];
 const scopeLabels: Readonly<Record<string, string>> = { openid: 'Google account identity', email: 'Google account email', [GMAIL_SEND_SCOPE]: 'Send email on your behalf (gmail.send)' };
+const invalidAccountRecord = 'Google OAuth account record is invalid; sign in again';
 const secretText = z.string().min(1).max(16384).regex(/^[^\s\0]+$/);
 const clientSchema = z.object({
   installed: z.object({
@@ -116,7 +117,7 @@ export class GoogleOAuthCredentialProvider implements CredentialProvider {
     const text = await this.store.read(options);
     if (text === undefined) return undefined;
     try { return sessionSchema.parse(JSON.parse(text)); }
-    catch { throw new Error('Google OAuth account record is invalid; sign in again'); }
+    catch { throw new Error(invalidAccountRecord); }
   }
 
   private async token(parameters: URLSearchParams, options?: ProviderOperationOptions, previous?: GoogleSession): Promise<Pick<GoogleSession, 'accessToken' | 'refreshToken' | 'expiresAt' | 'scopes'>> {
@@ -251,6 +252,40 @@ export class GoogleOAuthCredentialProvider implements CredentialProvider {
   async status(): Promise<{ connected: boolean; email?: string; expiresAt?: string }> {
     const session = await this.session();
     return session ? { connected: true, email: session.email, expiresAt: new Date(session.expiresAt).toISOString() } : { connected: false };
+  }
+
+  async health(options?: ProviderOperationOptions): Promise<ProviderHealth> {
+    const findings = await this.doctor(options);
+    const failure = findings.find(finding => !finding.ok);
+    return {
+      status: failure ? failure.check === 'account' ? 'unavailable' : 'degraded' : 'ok',
+      message: failure?.detail ?? 'Local credentials are ready; live Google authentication and permissions have not been validated',
+    };
+  }
+
+  async doctor(options?: ProviderOperationOptions): Promise<readonly ProviderDiagnostic[]> {
+    checkAbort(options);
+    let session: GoogleSession | undefined;
+    try { session = await this.session(options); }
+    catch (error) {
+      checkAbort(options);
+      return error instanceof Error && error.message === invalidAccountRecord
+        ? [{ check: 'account-record', ok: false, detail: invalidAccountRecord }]
+        : [{ check: 'storage', ok: false, detail: 'Google OAuth storage could not be read; unlock the system keychain and retry' }];
+    }
+    checkAbort(options);
+    if (!session) return [{ check: 'account', ok: false, detail: 'No saved Google account; run plugin auth login google --client <desktop-client.json>' }];
+    const permissions = hasScopes(session.scopes, requestedScopes);
+    const fresh = session.expiresAt > this.now() + 60_000;
+    return [
+      { check: 'account', ok: true, detail: 'A saved Google account is present; live authentication has not been validated' },
+      { check: 'permissions', ok: permissions, detail: permissions
+        ? 'Required permissions are recorded locally; live grants have not been validated'
+        : 'Required Google permissions are missing from the saved account; sign in again with plugin auth login google --client <desktop-client.json>' },
+      { check: 'access-token', ok: fresh, detail: !fresh
+        ? 'The cached Google access token is expired or due for refresh and may be refreshable; normal authorized use can attempt refresh. If refresh fails, run plugin auth login google --client <desktop-client.json>; no refresh was attempted by this diagnostic'
+        : 'The cached Google access token is within its local expiry; live authentication has not been validated' },
+    ];
   }
 
   async resolve(ref: CredentialRef, options?: ProviderOperationOptions): Promise<CredentialValue> {

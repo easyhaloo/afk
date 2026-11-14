@@ -46,6 +46,9 @@ existing learning system actions through a PluginService-owned runtime for each
 complete operation, including candidate preflight, mutation and postflight. Each
 runtime is disposed before its operation lease is released. Installation,
 removal, configuration and enablement changes cannot overlap these operations.
+Agent-provider discovery and PluginService operations share a mutex per home
+directory, covering construction through awaited disposal, so snapshot reads
+cannot hide installed checkers from concurrent learning operations.
 The renderer receives bounded metadata and version-bound results, without
 credentials, raw evidence, database access or a generic system-action bridge.
 These calls share Runtime's candidate ledger and do not start a distillation

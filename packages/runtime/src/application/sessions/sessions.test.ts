@@ -8,6 +8,8 @@ import { HandoffSessionStore } from './handoff-store.js';
 import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from './types.js';
 import { RunStateWriter } from './run-state.js';
 import type { SessionSnapshot } from '../../domain/agents/types.js';
+import { handoffDocPath } from '../workflows/handoff.js';
+import { encodeWorkItemIdForPath, parseWorkItemId } from '../../domain/work-item/identity.js';
 
 function makeSnapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {
@@ -101,6 +103,40 @@ describe('HandoffSessionStore', () => {
   });
   afterEach(() => {
     fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+
+  it.each([
+    'github:fixture/repo#42', 'gitlab:fixture/subgroup/repo#42',
+    'github:fixture/repo-gen-2#42', "github:fixture/repo!'()*#42",
+  ])('lists and loads encoded canonical recovery docs for %s without changing identity', async id => {
+    const encoded = encodeWorkItemIdForPath(parseWorkItemId(id).id);
+    const store = new HandoffSessionStore(wtPath);
+    for (const gen of [2, 'terminal'] as const) {
+      const file = path.join(workspaceDataDirectory(wtPath), 'handoff', `handoff-${encoded}-${gen}.md`);
+      expect(handoffDocPath(wtPath, id, gen === 'terminal' ? 1 : gen).replace(/-1\.md$/, '-terminal.md')).toBe(file);
+      fs.writeFileSync(file, `# Handoff ${id}\noutput ${gen}`, 'utf8');
+      const runId = `issue-${id}-${gen === 'terminal' ? 'terminal' : `gen-${gen}`}`;
+      expect(await store.list()).toContainEqual(expect.objectContaining({ runId }));
+      const snapshot = await store.load({ runId });
+      expect(snapshot).toMatchObject({ sessionId: runId, generation: gen === 'terminal' ? 0 : gen, checkpoint: null });
+      expect(snapshot.summary).toContain(id);
+      expect(snapshot.summary).toContain(`output ${gen}`);
+    }
+  });
+
+  it('keeps same-number canonical repositories separate and ignores malformed encoded identities', async () => {
+    const store = new HandoffSessionStore(wtPath);
+    const ids = ['github:fixture/first#42', 'github:fixture/second#42'];
+    for (const id of ids) {
+      const encoded = encodeWorkItemIdForPath(parseWorkItemId(id).id);
+      fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', `handoff-${encoded}-1.md`), id, 'utf8');
+    }
+    for (const name of ['handoff-%ZZ-1.md', 'handoff-..%2Foutside-1.md']) {
+      fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', name), 'invalid', 'utf8');
+    }
+    expect((await store.list()).map(entry => entry.runId).sort()).toEqual(ids.map(id => `issue-${id}-gen-1`).sort());
+    for (const id of ids) expect((await store.load({ runId: `issue-${id}-gen-1` })).summary).toBe(id);
+    await expect(store.load({ runId: 'issue-../outside-gen-1' })).rejects.toBeInstanceOf(SessionNotFoundError);
   });
 
   it('load() reads existing handoff-{iid}-{gen}.md as SessionSnapshot', async () => {

@@ -137,6 +137,7 @@ export function registerPluginCommands(program: Command, composition: PluginComm
       process.stdout.write(`${JSON.stringify(result ?? null, null, 2)}\n`);
       if (result && typeof result === 'object' && (
         ('passed' in result && result.passed === false) || ('allowed' in result && result.allowed === false)
+        || ('removed' in result && result.removed === false)
         || ('delivered' in result && result.delivered === false) || ('code' in result && typeof result.code === 'number' && result.code !== 0)
       )) process.exitCode = 1;
     });
@@ -186,7 +187,7 @@ export function registerPluginCommands(program: Command, composition: PluginComm
       let host: PluginRuntime | undefined;
       let listener: Awaited<ReturnType<typeof startPluginListener>> | undefined;
       try {
-        host = await createDefaultPluginRuntime({ activateTriggers: true, warn: message => process.stderr.write(`${message}\n`) });
+        host = await createDefaultPluginRuntime({ activateTriggers: true, queuePath: options.queue, warn: message => process.stderr.write(`${message}\n`) });
         if ((await host.diagnostics()).some(diagnostic => diagnostic.severity === 'error')) throw new Error('Plugin listener configuration failed validation; run plugin doctor for details');
         listener = await startPluginListener(host, { token, host: options.host, port: options.port, queuePath: options.queue });
         const address = listener.address;

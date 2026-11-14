@@ -19,7 +19,8 @@ import { CONTEXT_MAX_CHARS, writeReferenceContext } from '../workflows/context-f
 import { setPluginAuditArtifacts, setPluginAuditEvidence } from './observability.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
 import { evidenceStoreSelectionSchema, type EvidenceMirrorOptions } from '../../infrastructure/observability/run-observer-factory.js';
-import { currentTriggerDeliveryId } from './trigger-queue.js';
+import { currentTriggerDeliveryId, TriggerQueueFull, TriggerDeliveryConflict, type TriggerQueueOptions } from './trigger-queue.js';
+import { pluginTriggerQueue, closePluginTriggerQueue } from './listener.js';
 
 const identifier = z.string().min(1);
 
@@ -28,12 +29,34 @@ export interface DefaultPluginRuntimeOptions {
   readonly workspaceRoot?: string;
   readonly warn?: (message: string, error?: unknown) => void;
   readonly activateTriggers?: boolean;
+  readonly queuePath?: string;
+  readonly queueOptions?: TriggerQueueOptions;
 }
 
 export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOptions = {}): Promise<PluginRuntime> {
+  const runtime = new PluginRuntime();
+  if (options.activateTriggers) pluginTriggerQueue(runtime, {
+    queuePath: options.queuePath ?? join(options.homeDir ?? homedir(), '.afk', 'triggers', 'deliveries.sqlite'),
+    queueOptions: options.queueOptions,
+    warn: options.warn,
+  });
+  try {
+    if (options.activateTriggers) await runtime.activate({
+      manifest: { id: 'workflow.trigger-delivery', version: '0.1.0', apiVersion: 1, provides: [], trusted: true },
+      activate(context) { context.onDispose(() => closePluginTriggerQueue(runtime)); },
+    });
+    await configureDefaultPluginRuntime(runtime, options);
+    return runtime;
+  } catch (error) {
+    try { await closePluginTriggerQueue(runtime); }
+    finally { await runtime.dispose(); }
+    throw error;
+  }
+}
+
+async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: DefaultPluginRuntimeOptions): Promise<PluginRuntime> {
   const homeDir = options.homeDir ?? homedir();
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const runtime = new PluginRuntime();
   const invalidSettings: string[] = [];
   let requiredIntegrations: Plugin | undefined;
   let auditArtifacts: { provider: string; timeoutMs?: number } | undefined;
@@ -135,6 +158,19 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
       onTrigger: async event => {
         const entry = configured.find(candidate => candidate.id === event.pluginId);
         if (typeof entry?.action !== 'string') throw new Error('Trigger action is not configured');
+        if (event.pluginId === 'trigger.schedule') {
+          try {
+            if (!event.tick) throw new Error('Scheduled tick identity is missing');
+            const queue = pluginTriggerQueue(runtime);
+            if (!queue) throw new Error('Durable schedule queue is unavailable');
+            queue.enqueue(event.pluginId, JSON.stringify({ action: entry.action, input: event.trigger.input ?? event.payload ?? event.trigger.payload ?? {}, triggerId: event.trigger.id, tick: event.tick }), event.tick.id);
+          } catch (error) {
+            const code = error instanceof TriggerQueueFull ? 'trigger.queue-full' : error instanceof TriggerDeliveryConflict ? 'trigger.delivery-conflict' : 'trigger.persistence-failed';
+            runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code, message: 'Scheduled tick could not be durably accepted; inspect queue capacity, delivery conflicts and private storage' });
+            throw error;
+          }
+          return;
+        }
         try { await runtime.dispatchSystemAction(entry.action, event.trigger.input ?? event.payload ?? event.trigger.payload ?? {}); }
         catch {
           runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'trigger.action-failed', message: 'Configured trigger action failed' });
@@ -259,13 +295,16 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
       context.registerLifecycle({ name: 'invalid-plugin-settings', order: -1000, failureMode: 'required', async onInit() { throw new Error(invalidSettings.join('; ')); } });
     },
   });
+  let triggerActionsAvailable = true;
   if (options.activateTriggers) {
     for (const entry of configuration.plugins) {
       if (!entry.builtin || entry.enabled === false || !entry.id.startsWith('trigger.') || !runtime.getPlugin(entry.id)) continue;
       if (typeof entry.action === 'string' && runtime.listSystemActions().includes(entry.action)) continue;
+      triggerActionsAvailable = false;
       await runtime.dispose(entry.id);
       runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'trigger.action-missing', message: 'Configured trigger action is not registered' });
     }
   }
+  if (!invalidSettings.length && triggerActionsAvailable) pluginTriggerQueue(runtime)?.start();
   return runtime;
 }

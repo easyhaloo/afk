@@ -75,6 +75,7 @@ export interface AgentCommandOptions {
   worktreePath: string;
   /** Session identifier (used for resume/restore). */
   sessionId: string;
+  resume?: SessionSnapshot;
   /** Initial prompt or goal text. */
   goal?: string;
   /** Whether to attach interactively (HITL). */
@@ -113,6 +114,7 @@ export interface AgentExecutionHost {
   readonly worktreePath: string;
   readonly workspacePath: string;
   startAgent(options: AgentStartOptions): Promise<AgentExecution>;
+  startProviderExecution?(provider: AgentProviderName, options: Omit<AgentExecutionOptions, 'sandbox'>): Promise<AgentExecution>;
 }
 
 export interface AgentExecutionOptions extends AgentCommandOptions {
@@ -126,7 +128,7 @@ export interface AgentExecutionOptions extends AgentCommandOptions {
 /** An event emitted by the agent during execution. */
 export type AgentEvent =
   | { type: 'text'; text: string }
-  | { type: 'session'; sessionId: string }
+  | { type: 'session'; sessionId: string; worktreePath?: string }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: Error };
@@ -155,6 +157,14 @@ export interface SessionSnapshot {
   capturedAt: string;
 }
 
+export interface NativeSessionCheckpoint {
+  version: 1;
+  provider: AgentProviderName;
+  sessionId: string;
+  worktreePath: string;
+  workspacePath?: string;
+}
+
 /** Options for capturing a session snapshot. */
 export interface CaptureSessionOptions {
   sessionId: string;
@@ -176,6 +186,7 @@ export interface CaptureOptions {
 
 export interface ResumeOptions {
   snapshot: SessionSnapshot;
+  prompt?: string;
 }
 
 export type ExecutionEvent =

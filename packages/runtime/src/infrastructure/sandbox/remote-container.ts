@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import type {
-  AgentExecution, AgentExecutionMetadata, AgentStartOptions, CaptureOptions, ExecutionEvent,
-  ExecutionResult, InterruptReason, ResumeOptions, SessionSnapshot,
+  AgentExecution, AgentExecutionMetadata, AgentExecutionOptions, AgentProviderName, AgentStartOptions, CaptureOptions, ExecutionEvent,
+  ExecutionResult, InterruptReason, NativeSessionCheckpoint, ResumeOptions, SessionSnapshot,
 } from '../../domain/agents/types.js';
 import type { Sandbox, SandboxOptions, SandboxProvider, SandboxCapability, WorktreeInfo } from './types.js';
 import { createHostCommandExecutor, validateTimeout } from '../host/command.js';
@@ -21,7 +22,7 @@ export interface RemoteContainerPayloads {
   'workspace.create': { readonly iid: number; readonly baseBranch: string };
   'sandbox.create': Pick<SandboxOptions, 'worktreePath' | 'session' | 'branch' | 'interactive' | 'env' | 'executionMode' | 'workspaceRoot' | 'runtimeRunId'>;
   'sandbox.close': { readonly sandboxId: string };
-  'agent.start': { readonly sandboxId: string; readonly options: Omit<AgentStartOptions, 'parseLine'> };
+  'agent.start': { readonly sandboxId: string; readonly options: Omit<AgentStartOptions, 'parseLine'> & Pick<AgentExecutionOptions, 'runtime'> };
   'agent.resume': RemoteExecutionReference & { readonly options: ResumeOptions };
   'agent.event.next': RemoteExecutionReference;
   'agent.wait': RemoteExecutionReference & { readonly options?: Parameters<AgentExecution['waitForResult']>[0] };
@@ -41,6 +42,14 @@ export interface RemoteContainerTransport {
 
 const text = z.string().refine(value => value.trim().length > 0, 'non-blank string is required');
 const count = z.number().int().nonnegative().finite();
+export const remoteExecutionRuntimeSchema = z.union([
+  z.object({ kind: z.literal('default') }).strict(),
+  z.object({ kind: z.literal('codex'), transport: z.literal('exec'), auth: z.enum(['chatgpt', 'api', 'unknown']),
+    provider: text.refine(value => value.length <= 256 && !value.includes('\0')),
+    profile: text.refine(value => value.length <= 256 && !value.includes('\0')).optional(),
+    startupTimeoutMs: z.number().int().positive().max(2147483647),
+  }).strict(),
+]);
 const usage = z.object({ inputTokens: count, outputTokens: count, totalTokens: count });
 const metadata = z.object({
   provider: text, transport: z.enum(['process', 'exec', 'app-server']),
@@ -57,6 +66,8 @@ const resultSchema = z.object({
   version: z.literal(1), runId: text,
   status: z.enum(['completed', 'blocked', 'failed', 'aborted', 'timed_out', 'context_high']),
   provider: text, sessionId: text.optional(), exitCode: z.number().int().optional(),
+  metadata: metadata.optional(),
+  sessionInvalidated: z.boolean().optional(),
   structuredOutput: z.unknown().optional(), usage: usage.optional(), commits: z.array(text), branch: text.optional(),
   tools: z.array(z.object({
     id: text, name: text, result: z.enum(['succeeded', 'failed', 'unknown', 'in_progress']),
@@ -85,7 +96,7 @@ const event = z.union([
 const ack = z.object({ ok: z.literal(true) });
 const responses = {
   'workspace.create': z.object({ iid: z.number().int().positive(), path: text, branch: text }),
-  'sandbox.create': z.object({ id: text, workspacePath: text.optional() }),
+  'sandbox.create': z.object({ id: text, worktreePath: text.optional(), workspacePath: text.optional() }),
   'sandbox.close': ack,
   'agent.start': executionInfo, 'agent.resume': executionInfo,
   'agent.event.next': event.nullable(), 'agent.wait': resultSchema,
@@ -255,7 +266,8 @@ export class RemoteContainerSandboxProvider implements SandboxProvider {
       interactive: options.interactive, env: options.env, executionMode: options.executionMode,
       workspaceRoot: options.workspaceRoot, runtimeRunId: options.runtimeRunId,
     });
-    return new RemoteContainerSandbox(this.transport, result.id, result.workspacePath ?? options.worktreePath);
+    return new RemoteContainerSandbox(this.transport, result.id, result.worktreePath ?? options.worktreePath,
+      result.workspacePath ?? result.worktreePath ?? options.worktreePath);
   }
 }
 
@@ -264,9 +276,10 @@ class RemoteContainerSandbox implements Sandbox {
   readonly workspacePath: string;
   private closed = false;
   private closing?: Promise<void>;
+  private readonly captures = new Map<string, { snapshot: SessionSnapshot; execution: RemoteAgentExecution }>();
 
-  constructor(private readonly transport: RemoteContainerTransport, readonly id: string, workspacePath: string) {
-    this.worktreePath = workspacePath;
+  constructor(private readonly transport: RemoteContainerTransport, readonly id: string, worktreePath: string, workspacePath: string) {
+    this.worktreePath = worktreePath;
     this.workspacePath = workspacePath;
   }
 
@@ -274,30 +287,58 @@ class RemoteContainerSandbox implements Sandbox {
     if (this.closed || this.closing) throw new Error('remote container sandbox is closed or closing');
   };
 
-  async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
+  async startProviderExecution(provider: AgentProviderName, options: Omit<AgentExecutionOptions, 'sandbox'>): Promise<AgentExecution> {
+    this.assertOpen();
+    if (options.executionMode === 'interactive' || options.interactive) throw new Error('remote provider execution requires batch mode');
+    if (options.executionProfile === 'analysis' || (options.runtime && (!remoteExecutionRuntimeSchema.safeParse(options.runtime).success
+      || (options.runtime.kind === 'codex' && provider !== 'codex')))) {
+      throw new Error('remote provider execution does not support the selected profile/runtime');
+    }
+    if (options.worktreePath !== this.worktreePath) throw new Error('remote provider workspace does not match');
+    if (options.resume) {
+      const captured = this.captures.get(options.resume.sessionId);
+      if (!captured || captured.execution.metadata.provider !== provider || !isDeepStrictEqual(captured.snapshot, options.resume)) {
+        throw new Error('remote resume requires a snapshot captured by this sandbox');
+      }
+      if (options.generation !== captured.snapshot.generation + 1) throw new Error('remote resume generation does not follow the captured generation');
+      const execution = await captured.execution.resume({ snapshot: captured.snapshot, prompt: options.prompt });
+      this.captures.delete(options.resume.sessionId);
+      return execution;
+    }
+    return this.startAgent({ command: { argv: [provider] }, metadata: { provider, transport: 'process' },
+      generation: options.generation, prompt: options.prompt, signalType: options.signalType, executionMode: 'batch', runtime: options.runtime });
+  }
+
+  async startAgent(options: AgentStartOptions & Pick<AgentExecutionOptions, 'runtime'>): Promise<AgentExecution> {
     this.assertOpen();
     const serializable = z.object({
       command: z.object({ argv: z.array(z.string().refine(value => !value.includes('\0'))).nonempty(), env: z.record(z.string()).optional(), cwd: text.optional() }),
       metadata, generation: count, prompt: z.string(), signalType: z.literal('goal_complete'), executionMode: z.enum(['interactive', 'batch']).optional(),
+      runtime: remoteExecutionRuntimeSchema.optional(),
     }).parse(options);
     if (!serializable.command.argv[0]) throw new Error('remote agent command must not be empty');
     const info = await request(this.transport, 'agent.start', { sandboxId: this.id, options: serializable });
     this.assertOpen();
     if (info.metadata.provider !== options.metadata.provider) throw new Error('remote agent provider does not match the start request');
-    return new RemoteAgentExecution(this.transport, this.id, info, this.assertOpen);
+    return new RemoteAgentExecution(this.transport, this.id, info, this.assertOpen, {
+      generation: options.generation, worktreePath: this.worktreePath, workspacePath: this.workspacePath,
+      captured: (execution, snapshot) => { this.captures.set(snapshot.sessionId, { execution, snapshot }); },
+    });
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     if (this.closing) return this.closing;
-    this.closing = request(this.transport, 'sandbox.close', { sandboxId: this.id }).then(() => { this.closed = true; });
+    this.closing = request(this.transport, 'sandbox.close', { sandboxId: this.id }).then(() => { this.closed = true; this.captures.clear(); });
     try { await this.closing; } finally { this.closing = undefined; }
   }
 }
 
 class RemoteAgentExecution implements AgentExecution {
   readonly id: string;
-  readonly sessionId?: string;
+  private nativeSessionId?: string;
+  private sessionInvalidated = false;
+  get sessionId(): string | undefined { return this.nativeSessionId; }
   readonly metadata: AgentExecutionMetadata;
   private state: 'running' | 'interrupted' | 'killed' | 'terminal' | 'resumed' = 'running';
   private result?: Promise<ExecutionResult>;
@@ -307,9 +348,10 @@ class RemoteAgentExecution implements AgentExecution {
   constructor(
     private readonly transport: RemoteContainerTransport, private readonly sandboxId: string,
     info: z.infer<typeof executionInfo>, private readonly assertOpen: () => void,
+    private readonly context?: { generation: number; worktreePath: string; workspacePath: string; captured(execution: RemoteAgentExecution, snapshot: SessionSnapshot): void },
   ) {
     this.id = info.id;
-    this.sessionId = info.sessionId;
+    this.nativeSessionId = info.sessionId;
     this.metadata = info.metadata;
   }
 
@@ -331,7 +373,7 @@ class RemoteAgentExecution implements AgentExecution {
     this.payload();
     if (value === null) this.streamEnded = true;
     else if (value.type === 'interrupt-acked') this.markStopped('interrupted');
-    else if (value.type === 'killed') this.markStopped('killed');
+    else if (value.type === 'killed') this.markStopped('interrupted');
     return value;
   }
 
@@ -341,16 +383,29 @@ class RemoteAgentExecution implements AgentExecution {
     if (options?.completionTimeoutMs !== undefined) validateTimeout(options.completionTimeoutMs);
     this.result = request(this.transport, 'agent.wait', { ...payload, options }, {
       timeoutMs: options?.completionTimeoutMs === undefined ? undefined : Math.min(2147483647, options.completionTimeoutMs + 1000),
-    }).then(value => {
+    }).then(response => {
+      const { metadata: remoteMetadata, sessionInvalidated, ...value } = response;
       this.payload();
-      if (value.provider !== this.metadata.provider || (value.sessionId && this.sessionId && value.sessionId !== this.sessionId)) {
+      if (value.provider !== this.metadata.provider || (remoteMetadata && remoteMetadata.provider !== this.metadata.provider)
+        || (value.sessionId && this.sessionId && value.sessionId !== this.sessionId)) {
         throw new Error('remote result does not match the agent provider/session');
       }
       if (value.status === 'completed' && value.exitCode !== undefined && value.exitCode !== 0) {
         throw new Error('remote result reports completed with a nonzero exit code');
       }
       if (value.status === 'completed' && value.error !== undefined) throw new Error('remote result reports completed with an error');
-      this.state = 'terminal';
+      if (value.status === 'completed' && sessionInvalidated) throw new Error('remote result reports completed after native session invalidation');
+      if (remoteMetadata) {
+        this.sessionInvalidated ||= sessionInvalidated ?? (value.status === 'failed' && !value.sessionId && !remoteMetadata.threadId);
+        this.nativeSessionId = value.sessionId;
+        Object.assign(this.metadata, { threadId: undefined }, remoteMetadata);
+      } else if (value.sessionId) this.nativeSessionId = value.sessionId;
+      this.sessionInvalidated ||= sessionInvalidated === true;
+      if (this.sessionInvalidated) {
+        this.nativeSessionId = undefined;
+        this.metadata.threadId = undefined;
+      }
+      if (value.status !== 'context_high' && this.state !== 'killed') this.state = 'terminal';
       return value;
     }).catch(error => { this.result = undefined; throw error; });
     return this.result;
@@ -366,10 +421,10 @@ class RemoteAgentExecution implements AgentExecution {
 
   async kill(): Promise<void> {
     const payload = this.payload();
-    if (this.state === 'terminal' || this.state === 'killed') return;
+    if (this.state === 'killed') return;
     await request(this.transport, 'agent.kill', payload);
     this.payload();
-    this.markStopped('killed');
+    this.state = 'killed';
   }
 
   async captureOutput(options?: CaptureOptions): Promise<string> {
@@ -379,22 +434,41 @@ class RemoteAgentExecution implements AgentExecution {
   }
 
   async captureSession(): Promise<SessionSnapshot | undefined> {
-    const value = await request(this.transport, 'agent.capture-session', this.payload());
+    const payload = this.payload();
+    if (this.sessionInvalidated) return undefined;
+    const value = await request(this.transport, 'agent.capture-session', payload);
     this.payload();
-    return value ?? undefined;
+    if (!value || this.sessionInvalidated) return undefined;
+    if (this.metadata.provider === 'cursor' || this.metadata.provider === 'pi') {
+      const checkpoint = value.checkpoint as Partial<NativeSessionCheckpoint> | null;
+      const workspacePath = checkpoint?.workspacePath ?? checkpoint?.worktreePath;
+      if (!checkpoint || checkpoint.version !== 1 || checkpoint.provider !== this.metadata.provider
+        || checkpoint.sessionId !== value.sessionId || (this.sessionId && this.sessionId !== value.sessionId)
+        || (this.context && (checkpoint.worktreePath !== this.context.worktreePath
+          || (workspacePath !== this.context.workspacePath && workspacePath !== (this.context.workspacePath.replace(/\/+$/, '') || '/'))))) {
+        throw new Error('remote native session identity does not match the execution');
+      }
+      if (this.context && value.generation !== this.context.generation) throw new Error('remote native session generation does not match');
+    }
+    this.nativeSessionId = value.sessionId;
+    this.metadata.threadId = value.sessionId;
+    this.context?.captured(this, structuredClone(value));
+    return value;
   }
 
   async resume(options: ResumeOptions): Promise<AgentExecution> {
     const payload = this.payload();
+    if (this.sessionInvalidated) throw new Error('remote native session identity is no longer valid');
     if (this.state === 'running') throw new Error('interrupt or finish the remote agent before resuming');
     const captured = validateResponse(snapshot, options.snapshot, 'resume snapshot');
     this.resuming = true;
     try {
-      const info = await request(this.transport, 'agent.resume', { ...payload, options: { snapshot: captured } });
+      const info = await request(this.transport, 'agent.resume', { ...payload, options: { snapshot: captured, ...(options.prompt !== undefined ? { prompt: options.prompt } : {}) } });
       this.assertOpen();
       if (info.metadata.provider !== this.metadata.provider) throw new Error('remote resumed agent provider does not match');
       this.state = 'resumed';
-      return new RemoteAgentExecution(this.transport, this.sandboxId, info, this.assertOpen);
+      return new RemoteAgentExecution(this.transport, this.sandboxId, info, this.assertOpen,
+        this.context ? { ...this.context, generation: captured.generation + 1 } : undefined);
     } finally { this.resuming = false; }
   }
 }

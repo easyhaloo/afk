@@ -12,6 +12,16 @@ export interface LogContext {
 }
 
 const logContext = new AsyncLocalStorage<Readonly<LogContext>>();
+const logWriteFailureObserver = new AsyncLocalStorage<() => void>();
+
+/** Observes native day-log write failures only while this operation is active. */
+export function withLogWriteFailureObserver<T>(onFailure: () => void, operation: () => Promise<T>): Promise<T> {
+  let active = true;
+  return logWriteFailureObserver.run(() => { if (active) onFailure(); }, async () => {
+    try { return await operation(); }
+    finally { active = false; }
+  });
+}
 
 export function getLogContext(): Readonly<LogContext> | undefined {
   return logContext.getStore();
@@ -53,15 +63,15 @@ export class DayRotator extends Writable {
       const file = resolveLogPath();
       if (file !== this.current || this.fd === null) this.openFor(file);
       writeSync(this.fd!, chunk);
-      callback();
     } catch {
       // Swallow write failures (disk full, EMFILE...). Passing the error to
       // callback() would emit 'error' on the stream — with no listener that
       // crashes the daemon, and with one it destroys the stream so every
       // later log line is lost too. Logging I/O failing must never kill the
       // loop; the next write simply retries.
-      callback();
+      try { logWriteFailureObserver.getStore()?.(); } catch { /* diagnostics must not break logging */ }
     }
+    callback();
   }
 
   private openFor(file: string): void {
@@ -71,6 +81,7 @@ export class DayRotator extends Writable {
       } catch {
         /* ignore */
       }
+      this.fd = null;
     }
     try {
       ensureLogDir(resolveLogDir());

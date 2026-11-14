@@ -5,7 +5,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import type { BranchHandle } from '../../domain/branches/types.js';
 import type { WorkflowRunRepository } from './run-request.js';
-import type { RunOutcomeStatus } from './resource-scope.js';
+import type { ExecutionCleanupOwnership, RunOutcomeStatus } from './resource-scope.js';
+import { assertWorkspaceOwnershipAvailable } from './resource-scope.js';
 import { gitLabCloneUrl } from '../../shared/gitlab-project.js';
 import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
@@ -54,6 +55,14 @@ export interface PreparedRepository extends WorkflowRunRepository {
   original: RepositoryGitSnapshot;
 }
 
+interface RepositoryCleanupProgress {
+  cleanupStarted: boolean;
+  finalized: Set<PreparedRepository>;
+  captured: Set<PreparedRepository>;
+  dependenciesReleased: Set<PreparedRepository>;
+  cleaned: Set<PreparedRepository>;
+}
+
 export interface PreparedRepositorySet {
   heartbeat?(): Promise<void>;
   repositories: PreparedRepository[];
@@ -68,7 +77,7 @@ export interface PreparedRepositorySet {
 }
 
 export interface MultiRepositoryPreparationService {
-  prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string): Promise<PreparedRepositorySet>;
+  prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string, ownership?: ExecutionCleanupOwnership): Promise<PreparedRepositorySet>;
 }
 
 export interface WorkspaceLockDependencies {
@@ -91,16 +100,22 @@ export interface WorkspaceLockDependencies {
 export class MultiRepositoryPreparer implements MultiRepositoryPreparationService {
   constructor(private readonly dependencies: MultiRepositoryPreparerDependencies = defaultDependencies()) {}
 
-  async prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string): Promise<PreparedRepositorySet> {
+  async prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string, ownership?: ExecutionCleanupOwnership): Promise<PreparedRepositorySet> {
     const primaryCount = repositories.filter(repository => repository.primary).length;
     if (primaryCount !== 1) throw new Error('repositories must contain exactly one primary repository');
     if (new Set(repositories.map(repository => repository.workingBranch)).size !== 1) {
       throw new Error('repositories must use the same working branch');
     }
 
+    await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories, ownership?.claims);
     const lock = await this.dependencies.lock.acquire(workspaceRoot);
     let repositoryLeases: Awaited<ReturnType<RepositoryLeases['acquire']>> | undefined;
-    const release = async () => { try { await repositoryLeases?.release(); } finally { await lock.release(); } };
+    let nativeReleased = false;
+    let lockReleased = false;
+    const release = async () => {
+      if (!nativeReleased) { await repositoryLeases?.release(); nativeReleased = true; }
+      if (!lockReleased) { await lock.release(); lockReleased = true; }
+    };
     const prepared: PreparedRepository[] = [];
     try {
       repositoryLeases = await this.dependencies.repositoryLeases?.acquire(repositories.map(repository => `${repository.platform}:${repository.projectKey}`));
@@ -117,11 +132,23 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     const primary = prepared.find(repository => repository.primary)!;
     let finishPromise: Promise<void> | undefined;
     let releasePromise: Promise<void> | undefined;
+    let ownedTerminal: Promise<void> | undefined;
+    let ownedComplete = false;
+    const progress: RepositoryCleanupProgress = { cleanupStarted: false, finalized: new Set(), captured: new Set(), dependenciesReleased: new Set(), cleaned: new Set() };
+    const finishOwned = (operation: () => Promise<void>): Promise<void> => {
+      ownership!.assertClosed();
+      if (ownedComplete) return Promise.resolve();
+      return ownedTerminal ??= operation().then(release).then(() => { ownedComplete = true; }, error => {
+        ownedTerminal = undefined;
+        throw error;
+      });
+    };
     return {
       repositories: prepared,
       primary,
       ...(repositoryLeases ? { heartbeat: repositoryLeases.heartbeat } : {}),
-      finish: outcome => {
+      finish: async outcome => {
+        if (ownership) return finishOwned(() => this.finish(prepared, outcome.status, progress));
         finishPromise ??= this.finish(prepared, outcome.status).then(
           () => release(),
           async error => {
@@ -131,7 +158,11 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
         );
         return finishPromise;
       },
-      release: () => {
+      release: async () => {
+        if (ownership) return finishOwned(() => {
+          progress.cleanupStarted = true;
+          return this.cleanup(prepared, undefined, progress);
+        });
         releasePromise ??= this.cleanup(prepared).then(
           () => release(),
           async error => {
@@ -203,38 +234,61 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     }
   }
 
-  private async finish(repositories: PreparedRepository[], status: RunOutcomeStatus): Promise<void> {
+  private async finish(repositories: PreparedRepository[], status: RunOutcomeStatus, progress?: RepositoryCleanupProgress): Promise<void> {
+    if (progress?.cleanupStarted) return this.cleanup(repositories, undefined, progress);
+    const errors: unknown[] = [];
     if (status !== 'success') {
       for (const repository of repositories) {
-        if (repository.managedByStore) {
-          await this.dependencies.dependencies?.capture(repository.repoRoot);
-          await this.dependencies.dependencies?.release(repository.repoRoot, true);
-        }
+        try {
+          if (repository.managedByStore) {
+            if (!progress?.captured.has(repository)) {
+              await this.dependencies.dependencies?.capture(repository.repoRoot);
+              progress?.captured.add(repository);
+            }
+            if (!progress?.dependenciesReleased.has(repository)) {
+              await this.dependencies.dependencies?.release(repository.repoRoot, true);
+              progress?.dependenciesReleased.add(repository);
+            }
+          }
+        } catch (error) { errors.push(error); }
       }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) throw new AggregateError(errors, 'multiple repository cleanups failed');
       return;
     }
-    const errors: unknown[] = [];
     for (const repository of repositories) {
       try {
-        await this.dependencies.git.finalize(repository.repoRoot, repository.workingBranch);
-        if (repository.managedByStore) await this.dependencies.dependencies?.capture(repository.repoRoot);
+        if (!progress?.finalized.has(repository)) {
+          await this.dependencies.git.finalize(repository.repoRoot, repository.workingBranch);
+          progress?.finalized.add(repository);
+        }
+        if (repository.managedByStore && !progress?.captured.has(repository)) {
+          await this.dependencies.dependencies?.capture(repository.repoRoot);
+          progress?.captured.add(repository);
+        }
       } catch (error) {
         errors.push(error);
       }
     }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, 'multiple repository finalizations failed');
-    await this.cleanup(repositories);
+    if (progress) progress.cleanupStarted = true;
+    await this.cleanup(repositories, undefined, progress);
   }
 
-  private async cleanup(repositories: PreparedRepository[], initialError?: unknown): Promise<void> {
+  private async cleanup(repositories: PreparedRepository[], initialError?: unknown, progress?: RepositoryCleanupProgress): Promise<void> {
     let firstError = initialError;
     for (const repository of [...repositories].reverse()) {
       try {
+        if (progress?.cleaned.has(repository)) continue;
         if (initialError !== undefined && repository.managedByStore && !repository.createdByRun) continue;
-        if (repository.managedByStore) await this.dependencies.dependencies?.release(repository.repoRoot);
+        if (repository.managedByStore && !progress?.dependenciesReleased.has(repository)) {
+          await this.dependencies.dependencies?.release(repository.repoRoot);
+          progress?.dependenciesReleased.add(repository);
+        }
         if (repository.createdByRun || repository.managedByStore) await this.dependencies.filesystem.removeTarget(repository.repoRoot);
         else await this.dependencies.git.restore(repository.repoRoot, repository.original, repository.workingBranch);
+        progress?.cleaned.add(repository);
       } catch (error) {
         firstError ??= error;
       }

@@ -14,6 +14,7 @@ import {
   type WorkspaceLockDependencies,
 } from './multi-repository-preparer.js';
 import type { WorkflowRunRepository } from './run-request.js';
+import { RunResourceScope } from './resource-scope.js';
 
 function repository(overrides: Partial<WorkflowRunRepository> = {}): WorkflowRunRepository {
   return {
@@ -97,6 +98,74 @@ function lockStat(iso: string) {
 }
 
 describe('MultiRepositoryPreparer', () => {
+  it.each([['release', false], ['finish', false], ['release', true], ['finish', true]] as const)('retains owned native leases and retries only unconfirmed repository cleanup via %s (failed outcome retry=%s)', async (terminal, failedRetry) => {
+    const deps = dependencies();
+    const nativeRelease = vi.fn(async () => {});
+    deps.repositoryLeases = { acquire: vi.fn(async () => ({ heartbeat: vi.fn(async () => {}), release: nativeRelease })) };
+    const lock = await deps.lock.acquire('/workspace');
+    vi.mocked(deps.lock.acquire).mockClear();
+    const failure = new Error('owned restore unconfirmed');
+    vi.mocked(deps.git.restore).mockImplementation(async root => {
+      if (root.endsWith('/api')) throw failure;
+    });
+    const prepared = await new MultiRepositoryPreparer(deps).prepare([
+      repository(), repository({ projectKey: 'acme/web', repoRoot: '/workspace/repositories/web', primary: false }),
+    ], '/workspace', { claims: [], assertClosed: () => {} });
+    const stop = () => terminal === 'release' ? prepared.release() : prepared.finish({ status: 'success' });
+    await expect(stop()).rejects.toBe(failure);
+    expect(nativeRelease).not.toHaveBeenCalled();
+    expect(lock.release).not.toHaveBeenCalled();
+    expect(deps.git.restore).toHaveBeenCalledTimes(2);
+    vi.mocked(deps.git.restore).mockResolvedValue(undefined);
+    if (failedRetry) await prepared.finish({ status: 'failed' });
+    else await stop();
+    expect(deps.git.restore).toHaveBeenCalledTimes(3);
+    if (terminal === 'finish') expect(deps.git.finalize).toHaveBeenCalledTimes(2);
+    expect(nativeRelease).toHaveBeenCalledTimes(1);
+    expect(lock.release).toHaveBeenCalledTimes(1);
+    await prepared.release();
+    await prepared.finish({ status: 'failed' });
+    expect(deps.git.restore).toHaveBeenCalledTimes(3);
+    expect(nativeRelease).toHaveBeenCalledTimes(1);
+    expect(lock.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks direct prepare during retained execution ownership and releases only after the same scope closes it', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'preparer-retained-'));
+    vi.stubEnv('AFK_STATE_DIR', join(root, 'state'));
+    const repo = repository({ repoRoot: join(root, 'api') });
+    const deps = dependencies();
+    const release = vi.fn(async () => {});
+    deps.repositoryLeases = { acquire: vi.fn(async () => ({ heartbeat: vi.fn(async () => {}), release })) };
+    const preparer = new MultiRepositoryPreparer(deps);
+    const scope = new RunResourceScope({ repoRoot: root, baseBranch: 'main', ownership: { workspaceRoot: root, repositories: [repo], owner: 'owner-42' } });
+    const kill = vi.fn(async () => {});
+    kill.mockRejectedValueOnce(new Error('owned process still alive'));
+    try {
+      await scope.acquireOwnership();
+      const workspace = await preparer.prepare([repo], root, scope.cleanupOwnership);
+      scope.registerExecution({ kill });
+      scope.registerExternalResource(workspace);
+      await expect(scope.finish({ status: 'failed' })).rejects.toThrow('still alive');
+      await expect(workspace.finish({ status: 'failed' })).rejects.toThrow(/unclosed/);
+      await expect(workspace.release()).rejects.toThrow(/unclosed/);
+      expect(release).not.toHaveBeenCalled();
+      expect(deps.git.restore).not.toHaveBeenCalled();
+      await expect(preparer.prepare([repo], root)).rejects.toThrow(/quarantin/);
+      expect(deps.lock.acquire).toHaveBeenCalledTimes(1);
+      expect(deps.git.prepareWorkingBranch).toHaveBeenCalledTimes(1);
+      await scope.finish({ status: 'failed' });
+      expect(release).toHaveBeenCalledTimes(1);
+      const next = await preparer.prepare([repo], root);
+      await next.release();
+      expect(deps.lock.acquire).toHaveBeenCalledTimes(2);
+    } finally {
+      await scope.finish({ status: 'failed' });
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('builds GitLab clone URLs only from an explicit provider host', () => {
     expect(cloneUrl(repository({ platform: 'gitlab', projectKey: 'team.platform/subgroup/repo' })))
       .toBe('https://gitlab.com/team.platform/subgroup/repo.git');

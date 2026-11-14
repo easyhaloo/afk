@@ -7,14 +7,17 @@ import type { TmuxClient } from '../../infrastructure/tmux/index.js';
 import { logger, STATUS_FILENAME, clearSignal } from '../../infrastructure/io/index.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import { Watchdog } from './watchdog.js';
+import type { AgentExecution, ExecutionMode } from '../../domain/agents/types.js';
+import { encodeWorkItemIdForPath, parseWorkItemId } from '../../domain/work-item/identity.js';
 
 /**
  * Path of a handoff recovery doc inside a worktree. The runner uses this to
  * build the resumed-round goal text; the coordinator uses it to write the doc.
  * Keeping the convention in one place stops the two from drifting.
  */
-export function handoffDocPath(worktreePath: string, backlogId: string, gen: number): string {
-  return join(workspaceDataDirectory(worktreePath), 'handoff', `handoff-${backlogId}-${gen}.md`);
+export function handoffDocPath(worktreePath: string, backlogId: string, gen: number | 'terminal'): string {
+  const identity = /^\d+$/.test(backlogId) ? backlogId : encodeWorkItemIdForPath(parseWorkItemId(backlogId).id);
+  return join(workspaceDataDirectory(worktreePath), 'handoff', `handoff-${identity}-${gen}.md`);
 }
 
 export type HandoffMode = 'auto' | 'terminal';
@@ -31,6 +34,8 @@ export interface HandoffContext {
   gen: number;
   /** Token count that triggered the handoff (advisory, surfaces in the comment). */
   tokens: number;
+  executionMode?: ExecutionMode;
+  execution?: AgentExecution;
 }
 
 interface HandoffSummary {
@@ -75,7 +80,35 @@ export class HandoffCoordinator {
     mode: HandoffMode,
     reason?: TerminalReason,
   ): Promise<HandoffOutcome> {
+    if (ctx.executionMode === 'batch') return this.batchHandoff(ctx, mode, reason);
     return mode === 'auto' ? this.autoHandoff(ctx) : this.terminalHandoff(ctx, reason);
+  }
+
+  private async batchHandoff(ctx: HandoffContext, mode: HandoffMode, reason?: TerminalReason): Promise<HandoffOutcome> {
+    this.watchdog.disarm();
+    try {
+      if (!ctx.execution) throw new Error('batch handoff requires the old execution');
+      try {
+        const snapshot = await ctx.execution.captureOutput({ lines: 100, history: 200 });
+        const head = await this.gitHead(ctx.wtPath);
+        await this.writeHandoffDoc(ctx.wtPath, ctx.backlogId, mode === 'terminal' ? 'terminal' : ctx.gen,
+          { summary: null, snapshot, ...head });
+      } finally {
+        await ctx.execution.kill();
+      }
+      if (mode === 'terminal') {
+        await this.backlog.transition(ctx.backlogId, 'blocked', { reason: reason ?? 'context handoff exhausted' });
+        await this.backlog.setExecutionMode(ctx.backlogId, 'hitl');
+        return 'terminated';
+      }
+      await clearSignal(ctx.wtPath);
+      await fs.rm(join(workspaceDataDirectory(ctx.wtPath), STATUS_FILENAME), { force: true });
+      return 'continued';
+    } catch (error) {
+      await this.backlog.transition(ctx.backlogId, 'blocked', { reason: `batch handoff failed: ${error instanceof Error ? error.message : String(error)}` });
+      await this.backlog.setExecutionMode(ctx.backlogId, 'hitl');
+      throw error;
+    }
   }
 
   // ── auto ───────────────────────────────────────────────────────────────────
@@ -220,7 +253,7 @@ export class HandoffCoordinator {
   ): Promise<{ path: string; content: string }> {
     const handoffDir = join(workspaceDataDirectory(worktreePath), 'handoff');
     await fs.mkdir(handoffDir, { recursive: true });
-    const docPath = join(handoffDir, `handoff-${backlogId}-${gen}.md`);
+    const docPath = handoffDocPath(worktreePath, backlogId, gen);
     const content = [
       `# Handoff ${backlogId} (round ${gen})`,
       '',

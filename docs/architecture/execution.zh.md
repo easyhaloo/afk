@@ -42,6 +42,7 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk plugin import-issue <provider> <issue> --project <platform:projectKey> [--mode <hitl|afk>] [--json]`：按稳定来源和幂等键，将 Linear/Jira 条目导入目标代码仓库的真实受管 backlog。默认 `hitl`，返回的规范任务身份沿用现有执行、QA 和发布链路。`sync-issue <provider> <issue> <canonical-work-item> --states <json-file> [--json]` 校验来源绑定，仅更新显式映射的外部生命周期状态。工作流 action `work-item.import`、`work-item.sync` 提供同样能力。
 - `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`：派发显式白名单操作，校验 JSON 输入和输出；无论是否带 `--json` 都输出 JSON。验证/策略/投递否定结果或远程非零 code 使 exit status 为 `1`；不开放凭据读取或 merge。CLI 验证输入必须显式提供 `target`。仓库生命周期句柄属于单个 Runtime；`repository.provider/run` 在同一调用中完成准备、检出、注册 action 回调、发布和清理。
 - `afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`：激活配置 trigger，保持认证 HTTP 宿主和 Runtime 常驻，SIGINT/SIGTERM 后关闭并 dispose；默认 `127.0.0.1:8374`，持久化 SQLite 队列位于 `~/.afk/triggers/deliveries.sqlite`，环境 token 必需且至少 16 字符、无 CR/LF。已认证 Webhook 持久化后返回 HTTP 202，支持去重、有界退避重试以及失败投递查询和重放。启动拒绝 error diagnostic，未注册的 action 会 dispose 对应 trigger；普通 Runtime 构造不启动 timer。见[能力插件架构](plugins.zh.md)。
+- `plugin listen` 的定时 tick 使用同一所选队列，在 timer 激活前取得所有权。已保存的 tick 身份、action 和 input 跨重试/重启保持不变，当前配置不改写旧投递。listener 关闭和 Runtime dispose 各最多等待五秒；action 未结算时保留消费者所有权。不补跑停机时段，不承诺外部副作用恰好一次。
 - `afk plugin deliveries --token-env <name> [--url <listener>]` 和 `afk plugin replay <delivery-id> --token-env <name> [--url <listener>]`：通过认证 HTTP 查询运行中队列，或重放一条失败投递。仅允许 HTTPS 或回环 HTTP，拒绝重定向，状态不返回载荷。托管执行使用投递与规范工作项派生的稳定 ID；中断执行保留审计与日志供协调恢复，避免创建重复任务。
 - 投递查询支持 `--offset <number> --limit <1-100>` 访问较早记录。`afk plugin prune-deliveries --token-env <name> [--url <listener>]` 显式清理超过去重窗口（默认七天）的成功回执，保留待处理和失败记录。队列达到条数或字节上限时以 HTTP 503 拒绝新投递，不驱逐已保留的任务。
 - `afk plugin serve-container --repository <path> --workspace-root <path> --sandbox <provider> --agent <providers...> --token-env <name> [--host <address>] [--port <number>] [--allow-remote]`：显式通过共享 registry 提供 remote-container sandbox/agent 操作；五个未加方括号的 flag 全部必需，workspace root 必须已存在并限定执行 worktree，Agent 使用显式白名单，环境 token 至少 32 bytes。默认 `127.0.0.1:8375`，非 loopback 绑定/客户端需 `--allow-remote`；SIGINT/SIGTERM 后关闭服务并 dispose Runtime。后端组合与信任边界见[能力插件架构](plugins.zh.md)。
@@ -83,6 +84,17 @@ Provider backlog、Runtime 状态、run-event 审计轨迹和证据属于不同�
 
 ## 失败与恢复
 
+### 上下文交接
+
+默认执行器构造共享交接协调器。batch模式遇到`context_high`时，先捕获当前执行输出与仓库
+revision、写入恢复文档，再等待执行清理后启动后继；清理失败不得继续启动。执行器在原生
+恢复或全新启动前持久化一次交接预算预留；原生启动失败后的fallback复用同一次预留。
+预算耗尽时保留terminal恢复文档，并阻塞工作项。
+
+恢复文档路径与历史文档匹配使用同一份编码后的完整规范工作身份；旧数字身份保留原文件名。
+首次异步创建执行之前即登记取消清理，取消后晚返回的执行先停止再拒绝phase，其晚结果不得
+完成任务或启动下一轮。
+
 ### 失败诊断
 
 失败的 run 携带的是**结构化失败诊断**，而不是一句自由文本的 reason。诊断把过去挤在一个字符串里的四件事分开：
@@ -97,6 +109,8 @@ Provider backlog、Runtime 状态、run-event 审计轨迹和证据属于不同�
 agent 自己报告的失败原因就是根因。provider 抓到的 stdout/stderr 是证据：它以截断尾部（4 KiB，最后 40 行）保留，其中的错误行会被提到根因里，于是 pre-commit 钩子的拒绝不会被 `pnpm` 日志的尾巴顶替。
 
 超时是一等失败。静默超时、完成超时、硬超时各有自己的 code，并带上用尽的预算、最后已知活动与判定依据。
+
+批处理执行将收到的 stdout、stderr 数据块计为活动；即使字节重复或捕获尾部已达到长度上限，也不会因此误判静默。执行仍活动且归一化用量达到 `contextHighTokens` 时返回 `context_high`，保留进程供协调器捕获并停止。完成、取消和已知失败保留各自结果；完成期限耗尽优先于上下文轮换。Provider 不提供中间用量时，不能在实际观察到用量之前主动触发轮换。
 
 「重试一次尝试是否有意义」从诊断里读，而不是从被拍平的字符串里重新推导。agent 错误码词汇保持原样：`AGENT_TURN_FAILED`、`AGENT_GONE`、`AGENT_IDLE` 是 agent 运行的事实而不是对工作的判决，而超时是关于工作的事实。
 

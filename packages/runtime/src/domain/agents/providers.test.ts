@@ -16,7 +16,7 @@ import {
 } from './registry.js';
 import { AgentProviderRegistry, createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
 import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
-import type { AgentProvider } from './types.js';
+import type { AgentProvider, AgentStartOptions } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
 function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; interactive: boolean }> = {}) {
@@ -78,7 +78,7 @@ describe('Agent providers — fixture coverage', () => {
 
     it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {
       const execution = { id: 'execution-1' } as AgentExecution;
-      const startAgent = vi.fn(async () => execution);
+      const startAgent = vi.fn(async (_options: AgentStartOptions) => execution);
       const sandbox = { startAgent } as unknown as Sandbox;
 
       await expect(p.createExecution({
@@ -309,13 +309,13 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv).toContain('--print');
     });
 
-    it('buildCommand uses --interactive when interactive', () => {
+    it('buildCommand uses the default TUI when interactive', () => {
       const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv).toContain('--interactive');
+      expect(cmd.argv).toEqual(['cursor-agent']);
     });
 
     it('parseLine routes JSON events', () => {
-      const events = p.parseLine(JSON.stringify({ type: 'usage', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }));
+      const events = p.parseLine(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', usage: { inputTokens: 0, outputTokens: 0 } }));
       expect(events[0].type).toBe('usage');
     });
   });
@@ -329,15 +329,14 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('streaming')).toBe(true);
     });
 
-    it('buildCommand uses --non-interactive when not interactive', () => {
+    it('buildCommand uses print JSON mode when not interactive', () => {
       const cmd = p.buildCommand(opts({ interactive: false }));
-      expect(cmd.argv[0]).toBe('pi');
-      expect(cmd.argv).toContain('--non-interactive');
+      expect(cmd.argv).toEqual(['pi', '--print', '--mode', 'json']);
     });
 
-    it('buildCommand omits --non-interactive when interactive', () => {
+    it('buildCommand uses the default TUI when interactive', () => {
       const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv).not.toContain('--non-interactive');
+      expect(cmd.argv).toEqual(['pi']);
     });
   });
 
@@ -517,8 +516,7 @@ describe('Resume capability gating', () => {
     })).rejects.toThrow(/does not support resume/);
   });
 
-  it('guardedRestoreSession succeeds for resume-capable provider', async () => {
-    // CursorProvider.restoreSession is a no-op; should not throw.
+  it('guardedRestoreSession rejects a synthetic snapshot for a resume-capable provider', async () => {
     await expect(guardedRestoreSession(resumeProvider, {
       snapshot: {
         sessionId: 'x',
@@ -528,7 +526,7 @@ describe('Resume capability gating', () => {
         capturedAt: new Date().toISOString(),
       },
       worktreePath: '/tmp',
-    })).resolves.toBeUndefined();
+    })).rejects.toThrow(/native session snapshot/);
   });
 
   it('guardedCaptureSession throws for non-resume provider', async () => {

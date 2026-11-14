@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const execute = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
 const fixtureRoot = resolve('tests/fixtures/plugin-matrix/execution');
 const hosts = ['ssh', 'aws-ssm', 'kubernetes-exec', 'jumpserver'] as const;
 const triggers = ['webhook', 'schedule', 'git-push', 'issue-event'] as const;
@@ -120,7 +120,7 @@ async function fixture() {
         await configure('sandbox.remote-container', { transport: 'http', endpoint: remote.url, token: { env: 'MATRIX_TOKEN' } });
       }
       await execute(process.execPath, [join(fixtureRoot, 'managed-run.mjs'), agent, sandbox, mode], {
-        cwd: workspace, env: { ...env, MATRIX_RUNTIME: resolve('packages/runtime/dist') }, timeout: 20_000,
+        cwd: workspace, env: { ...env, MATRIX_RUNTIME: resolve(process.env.AFK_E2E_RUNTIME_ROOT ?? 'packages/runtime/dist') }, timeout: 20_000,
       });
       return JSON.parse(await readFile(join(workspace, 'managed-result.json'), 'utf8'));
     } finally { if (remote) await stop(remote.child); }
@@ -285,10 +285,16 @@ describe('built WorkflowRunner Agent × Sandbox (simulated agent outputs)', () =
       'claude-code': ['--dangerously-skip-permissions', '--print', '--output-format', 'stream-json', '--verbose'],
       codex: ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '-C', current.workspace],
       cursor: ['--print', '--output-format', 'stream-json'],
-      pi: ['--non-interactive'], opencode: ['run', '--format', 'json'], copilot: ['--allow-all'],
+      pi: ['--print', '--mode', 'json'], opencode: ['run', '--format', 'json'], copilot: ['--allow-all'],
     };
     expect(report.effect.binary).toBe({ 'claude-code': 'claude', codex: 'codex', cursor: 'cursor-agent', pi: 'pi', opencode: 'opencode', copilot: 'copilot' }[agent]);
     expect(report.effect.argv).toEqual(commands[agent]);
+    if (agent === 'cursor' || agent === 'pi') {
+      expect(report.events.filter((event: { kind: string }) => event.kind === 'agent.session_recorded')).toEqual([
+        expect.objectContaining({ kind: 'agent.session_recorded', sessionId: `matrix-${agent}-native`,
+          usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } }),
+      ]);
+    }
     expect(report.events).toContainEqual(expect.objectContaining({ kind: 'step.completed', stepId: 'implement', outcome: 'succeeded' }));
     expect(report.events).toContainEqual(expect.objectContaining({ kind: 'implementation.completed' }));
     expect(report.transitions).toContain('verification');
@@ -300,6 +306,9 @@ describe('built WorkflowRunner Agent × Sandbox (simulated agent outputs)', () =
       expect(run.argv).toContain('1000:1000');
       expect(run.argv).toContain(`${current.workspace}:/workspace`);
       expect(calls.some(call => call.argv[0] === 'exec')).toBe(true);
+      const execution = calls.find(call => call.argv[0] === 'exec')!;
+      expect(execution.argv[execution.argv.indexOf('-w') + 1]).toBe('/workspace');
+      if (agent === 'codex') expect(execution.argv.slice(-2)).toEqual(['-C', '/workspace']);
       expect(calls.some(call => call.argv[0] === 'rm')).toBe(true);
     }
     coveredAgentSandbox.add(`${agent}/${sandbox}`);
@@ -307,6 +316,23 @@ describe('built WorkflowRunner Agent × Sandbox (simulated agent outputs)', () =
 
   it('covers every required Agent × Sandbox pair after asserting managed effects', () => {
     expect([...coveredAgentSandbox].sort()).toEqual(agents.flatMap(agent => sandboxes.map(sandbox => `${agent}/${sandbox}`)).sort());
+  });
+
+  it.each(['cursor', 'pi'].flatMap(agent => [
+    { agent, mode: 'native-error', code: 'AGENT_ERROR', reasonCode: 'upstream_model_error', message: `simulated native ${agent} failure` },
+    { agent, mode: 'identity-mismatch', code: 'NATIVE_SESSION_MISMATCH', reasonCode: 'agent_execution_failed', message: 'Native session identity does not match the requested execution' },
+  ]))('$agent / local rejects $mode despite completion-like native output', async ({ agent, mode, code, reasonCode, message }) => {
+    const current = await fixture();
+    const report = await current.managed(agent, 'local', mode);
+    expect(report.error, JSON.stringify(report)).toContain(`execution failed: ${code}: ${message}`);
+    expect(report.result).toBeUndefined();
+    expect(report.effect).toMatchObject({ simulated: true, cwd: current.workspace, prompt: expect.stringContaining('Run the simulated matrix agent') });
+    expect(report.events).toContainEqual(expect.objectContaining({ kind: 'run.finished', outcome: 'failed', reasonCode, reason: expect.stringContaining(message) }));
+    expect(report.events).not.toContainEqual(expect.objectContaining({ kind: 'step.completed', stepId: 'implement', outcome: 'succeeded' }));
+    expect(report.events).not.toContainEqual(expect.objectContaining({ kind: 'implementation.completed' }));
+    expect(report.transitions).toContain('blocked');
+    expect(report.transitions).not.toContain('verification');
+    expect(report).toMatchObject({ released: 1, armed: false });
   });
 
   it.each([

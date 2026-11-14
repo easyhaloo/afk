@@ -9,7 +9,7 @@ import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecyc
 import type { PluginRuntime } from './runtime.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 import { GitPushTriggerProvider, IssueEventTriggerProvider } from '../../infrastructure/providers/triggers.js';
-import { startPluginListener } from './listener.js';
+import { startPluginListener, pluginTriggerQueue } from './listener.js';
 import { createPluginRunObserver } from './observability.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
@@ -572,6 +572,9 @@ describe('createDefaultPluginRuntime', () => {
       const capture = vi.spyOn(runtime.getContextProvider('context.code')!, 'gather').mockResolvedValue([]);
       expect(runtime.getPlugin('workflow.invalid-settings')).toBeUndefined();
       await vi.advanceTimersByTimeAsync(1000);
+      expect(pluginTriggerQueue(runtime)!.status()).toEqual([expect.objectContaining({ providerId: 'trigger.schedule', status: 'pending' })]);
+      expect(capture).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
       expect(capture).toHaveBeenCalledWith(payload.input);
       await runtime.dispose();
       expect(vi.getTimerCount()).toBe(0);

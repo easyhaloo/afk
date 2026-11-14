@@ -2,7 +2,8 @@ import type { ChildProcess } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { PluginManager, createDefaultPluginRuntime, readPluginConfiguration, validateManifest, type InstalledPluginRecord, type PluginRuntime } from "@afk/runtime/plugin-sdk";
+import { PluginManager, readPluginConfiguration, validateManifest, type InstalledPluginRecord, type PluginRuntime } from "@afk/runtime/plugin-sdk";
+import { withPluginRuntime } from "./runtime-service.js";
 import { parsePluginEnabled, parsePluginId, parsePluginInstall, type DesktopPluginDiagnostic, type DesktopPluginList, type PluginInstallInput } from "../../shared/plugin-contract.js";
 
 const diagnosticMessages: Record<string, string> = {
@@ -40,9 +41,7 @@ export function createPluginService(options: PluginServiceOptions) {
     if (changingFiles) throw new Error("插件文件操作正在进行，请稍后重试");
     activeRuntimes += 1;
     try {
-      const runtime = await (options.createRuntime?.() ?? createDefaultPluginRuntime({ homeDir }));
-      try { return await operation(runtime); }
-      finally { await runtime.dispose(); }
+      return await withPluginRuntime({ homeDir, createRuntime: options.createRuntime }, operation);
     } catch { throw new Error("插件运行操作失败，请检查插件配置与运行状态后重试。"); }
     finally { activeRuntimes -= 1; }
   }

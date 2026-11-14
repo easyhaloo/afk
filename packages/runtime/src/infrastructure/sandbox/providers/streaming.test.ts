@@ -15,6 +15,160 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  describe('UTF-8 byte streaming', () => {
+    async function receive(chunks: Buffer[], stream: 'stdout' | 'stderr' = 'stdout', exitCode = 0) {
+      const provider = new ClaudeCodeProvider();
+      const parseLine = vi.fn(provider.parseLine.bind(provider));
+      const script = `process.stdin.resume(); process.stdin.once('end', () => {
+        const chunks = ${JSON.stringify(chunks.map(chunk => [...chunk]))};
+        const write = () => {
+          const chunk = chunks.shift();
+          if (!chunk) { process.exitCode = ${exitCode}; return; }
+          process.${stream}.write(Buffer.from(chunk));
+          setTimeout(write, 120);
+        };
+        write();
+      });`;
+      const execution = new StreamingAgentExecution({ command: command(script), prompt: 'inert UTF-8 fixture',
+        signalType: 'goal_complete', worktreePath: process.cwd(), metadata: { ...PROCESS_METADATA }, parseLine });
+      execution.start();
+      const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+      const received: number[] = [];
+      child[stream].on('data', (chunk: Buffer) => received.push(chunk.length));
+      try {
+        await once(child, 'close', { signal: AbortSignal.timeout(5000) });
+        expect(received).toEqual(chunks.map(chunk => chunk.length));
+        const result = await execution.waitForResult({ completionTimeoutMs: 5000 });
+        return { result, output: await execution.captureOutput(), metadata: execution.metadata, parseLine };
+      } finally { await execution.kill(); }
+    }
+
+    function splitDetail(payload: string): Buffer[] {
+      const bytes = Buffer.from(payload);
+      const latin = bytes.indexOf(Buffer.from('é'));
+      const chinese = bytes.indexOf(Buffer.from('错'));
+      const emoji = bytes.indexOf(Buffer.from('🧪'));
+      const cuts = [0, latin + 1, chinese + 1, chinese + 2, emoji + 1, emoji + 2, emoji + 3, bytes.length];
+      return cuts.slice(1).map((end, index) => bytes.subarray(cuts[index]!, end));
+    }
+
+    for (const source of ['native', 'legacy'] as const) {
+      it.each(['\n', '\r\n', ''])('preserves ' + source + ' details across byte chunks (ending: %j)', async ending => {
+        const detail = 'é错误🧪';
+        const event = { type: 'result', is_error: true, session_id: 'utf8-session',
+          usage: { input_tokens: 2, output_tokens: 3 },
+          ...(source === 'native' ? { errors: [detail] } : { result: detail }) };
+        const line = JSON.stringify(event);
+        const observed = await receive(splitDetail(line + ending));
+        expect(observed.output).toBe(line + ending);
+        expect(observed.parseLine).toHaveBeenCalledWith(line + (ending === '\r\n' ? '\r' : ''));
+        const events = new ClaudeCodeProvider().parseLine(line);
+        expect(events.map(event => event.type)).toEqual(['usage', 'session', 'error', 'result']);
+        expect(observed.result).toMatchObject({ status: 'failed', exitCode: 0,
+          error: { code: 'AGENT_ERROR', message: events.find(event => event.type === 'error')!.error.message },
+          usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } });
+        expect(observed.metadata.threadId).toBe('utf8-session');
+      });
+    }
+
+    it.each(['\n', ''])('preserves stderr details and nonzero-exit precedence (ending: %j)', async ending => {
+      const detail = 'é错误🧪' + ending;
+      const observed = await receive(splitDetail(detail), 'stderr', 7);
+      expect(observed.output).toBe(detail);
+      expect(observed.result).toMatchObject({ status: 'failed', exitCode: 7,
+        error: { code: 'NON_ZERO_EXIT', message: detail.trim() } });
+    });
+
+    it.each(['\n', ''])('preserves a Unicode completion across byte chunks (ending: %j)', async ending => {
+      const line = JSON.stringify({ type: 'result', result: JSON.stringify({ type: 'goal_complete', summary: 'é错误🧪' }) });
+      const observed = await receive(splitDetail(line + ending));
+      expect(observed.result).toMatchObject({ status: 'completed', structuredOutput: { type: 'goal_complete', summary: 'é错误🧪' } });
+    });
+
+    it.each(['stdout', 'stderr'] as const)('flushes an incomplete %s codepoint once at EOF', async stream => {
+      const bytes = Buffer.concat([Buffer.from(stream === 'stdout' ? '{"type":"result","result":"' : 'diagnostic:'), Buffer.from([0xf0, 0x9f])]);
+      const observed = await receive([bytes], stream, stream === 'stderr' ? 7 : 0);
+      expect(observed.output).toBe(bytes.toString('utf8'));
+      expect(observed.result).toMatchObject({ status: 'failed', error: stream === 'stdout'
+        ? { code: 'MISSING_RESULT' } : { code: 'NON_ZERO_EXIT', message: bytes.toString('utf8') } });
+    });
+  });
+
+  it.skipIf(process.platform === 'win32').each(['ignore', 'inherit'] as const)(
+    'confirms detached descendants are stopped after the root exits naturally (%s output)', async output => {
+      const script = `const { spawn } = require('node:child_process');
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
+          { detached: true, stdio: ['ignore', '${output}', 'ignore'] });
+        console.log('descendant:' + child.pid); child.unref();`;
+      const execution = new StreamingAgentExecution({ command: command(script), prompt: 'go', signalType: 'goal_complete',
+        worktreePath: process.cwd(), metadata: PROCESS_METADATA });
+      execution.start();
+      const root = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+      let descendant: number | undefined;
+      try {
+        await once(root, 'exit', { signal: AbortSignal.timeout(5000) });
+        await vi.waitFor(async () => expect(await execution.captureOutput()).toMatch(/descendant:\d+/));
+        descendant = Number((await execution.captureOutput()).match(/descendant:(\d+)/)![1]);
+        expect(() => process.kill(descendant!, 0)).not.toThrow();
+        await execution.kill();
+        expect(() => process.kill(descendant!, 0)).toThrow();
+      } finally {
+        if (descendant) { try { process.kill(descendant, 'SIGKILL'); } catch {} }
+        await execution.kill();
+      }
+    });
+
+  it('resolves concurrent kills only after the child has actually exited', async () => {
+    const execution = new StreamingAgentExecution({ command: command('console.log("ready"); setInterval(() => {}, 1000)'),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
+    execution.start();
+    const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+    let exited = false;
+    child.once('exit', () => { exited = true; });
+    try {
+      await vi.waitFor(async () => expect(await execution.captureOutput()).toContain('ready'));
+      await Promise.all([execution.kill(), execution.kill()]);
+      expect(exited).toBe(true);
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    } finally {
+      await execution.kill();
+      if (!exited) await once(child, 'exit', { signal: AbortSignal.timeout(2000) });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('does not stop another execution in the same workspace', async () => {
+    const executions = [0, 1].map(() => new StreamingAgentExecution({ command: command('console.log("ready:" + process.pid); setInterval(() => {}, 1000)'),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA }));
+    for (const execution of executions) execution.start();
+    try {
+      for (const execution of executions) await vi.waitFor(async () => expect(await execution.captureOutput()).toMatch(/ready:\d+/));
+      const otherPid = Number((await executions[1].captureOutput()).match(/ready:(\d+)/)![1]);
+      await executions[0].kill();
+      expect(() => process.kill(otherPid, 0)).not.toThrow();
+    } finally { await Promise.all(executions.map(execution => execution.kill())); }
+  });
+
+  it('rejects an unconfirmed stop and allows a later termination retry', async () => {
+    const execution = new StreamingAgentExecution({ command: command('console.log("ready"); setInterval(() => {}, 1000)'),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
+    execution.start();
+    const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+    const signalling = vi.spyOn(execution as unknown as { signalProcess(signal: NodeJS.Signals): void }, 'signalProcess');
+    try {
+      await vi.waitFor(async () => expect(await execution.captureOutput()).toContain('ready'));
+      signalling.mockImplementation(() => {});
+      await expect(execution.kill()).rejects.toThrow(/did not exit/);
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      signalling.mockRestore();
+      await execution.kill();
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    } finally {
+      signalling.mockRestore();
+      await execution.kill();
+    }
+  });
+
   describe('stdout drain after process exit', () => {
     const executions: StreamingAgentExecution[] = [];
     const inheritedPids: number[] = [];
@@ -624,7 +778,90 @@ describe('StreamingAgentExecution', () => {
     });
   });
 
+  describe('context budget', () => {
+    it.each([100, 101])('returns context_high at %i tokens without destroying the resumable process', async totalTokens => {
+      const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: totalTokens - 20, outputTokens: 20, totalTokens } });
+      const completed = JSON.stringify({ type: 'result', result: JSON.stringify({ type: 'goal_complete' }) });
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log(${JSON.stringify(usage)}); setTimeout(() => console.log(${JSON.stringify(completed)}), 1800); setInterval(() => {}, 10000)`),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+      });
+      execution.start();
+      try {
+        const result = await execution.waitForResult({ completionTimeoutMs: 5000, contextHighTokens: 100 });
+        expect(result).toMatchObject({ status: 'context_high', usage: { totalTokens } });
+        expect(await execution.captureOutput()).not.toContain('goal_complete');
+        const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+        expect(child.exitCode).toBeNull();
+        expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      } finally { await execution.kill(); }
+    });
+
+    it.each(['below', 'completed', 'failed', 'cancelled'] as const)('preserves %s instead of rotating the context', async outcome => {
+      const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: outcome === 'below' ? 79 : 80, outputTokens: 20, totalTokens: outcome === 'below' ? 99 : 100 } });
+      const result = outcome === 'failed'
+        ? JSON.stringify({ type: 'error', message: 'fixture failure' })
+        : JSON.stringify({ type: 'result', result: JSON.stringify({ type: 'goal_complete' }) });
+      const execution = new StreamingAgentExecution({
+        command: command(`process.stdout.write(${JSON.stringify(`${usage}\n${result}\n`)}); ${outcome === 'failed' ? 'setTimeout(() => process.exit(3), 1200)' : 'setInterval(() => {}, 10000)'}`),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+      });
+      execution.start();
+      try {
+        if (outcome === 'cancelled') await execution.interrupt('manual');
+        await expect(execution.waitForResult({ completionTimeoutMs: 5000, contextHighTokens: 100 })).resolves.toMatchObject({
+          status: outcome === 'failed' ? 'failed' : outcome === 'cancelled' ? 'aborted' : 'completed',
+        });
+      } finally { await execution.kill(); }
+    });
+
+    it('preserves an exhausted completion budget when the context is also full', async () => {
+      const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 } });
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log(${JSON.stringify(usage)}); setInterval(() => {}, 10000)`),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+      });
+      execution.start();
+      try {
+        const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+        await once(child.stdout, 'data');
+        await expect(execution.waitForResult({ completionTimeoutMs: 0, contextHighTokens: 100 })).resolves.toMatchObject({
+          status: 'timed_out', diagnostics: { timeout: { kind: 'completion', budgetMs: 0 } },
+        });
+      } finally { await execution.kill(); }
+    });
+
+    it.each([new ClaudeCodeProvider(), new CodexProvider()])('uses normalized native usage from $name', async provider => {
+      const usage = JSON.stringify(provider.name === 'claude-code'
+        ? { type: 'usage', usage: { input_tokens: 60, cache_creation_input_tokens: 10, cache_read_input_tokens: 10, output_tokens: 20 } }
+        : { type: 'turn.completed', usage: { input_tokens: 70, cached_input_tokens: 10, output_tokens: 20 } });
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log(${JSON.stringify(usage)}); setInterval(() => {}, 10000)`),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+        metadata: { provider: provider.name, transport: 'process' }, parseLine: provider.parseLine!.bind(provider),
+      });
+      execution.start();
+      try {
+        await expect(execution.waitForResult({ completionTimeoutMs: 1500, contextHighTokens: 100 })).resolves.toMatchObject({
+          status: 'context_high', usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+        });
+      } finally { await execution.kill(); }
+    });
+  });
+
   describe('idle watchdog', () => {
+    it.each(['stdout', 'stderr'] as const)('counts repeated %s chunks as activity after the output tail is full', async stream => {
+      const completed = JSON.stringify({ type: 'result', result: JSON.stringify({ type: 'goal_complete' }) });
+      const execution = new StreamingAgentExecution({
+        command: command(`const ticker = setInterval(() => process.${stream}.write('x'.repeat(5000) + '\\n'), 30); setTimeout(() => { clearInterval(ticker); console.log(${JSON.stringify(completed)}); }, 1800)`),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+      });
+      execution.start();
+      try {
+        await expect(execution.waitForResult({ completionTimeoutMs: 5000, idleTimeoutMs: 600 })).resolves.toMatchObject({ status: 'completed' });
+      } finally { await execution.kill(); }
+    });
+
     it('gives up on a batch agent that stops producing output', async () => {
       const execution = new StreamingAgentExecution({
         command: command('setInterval(() => {}, 10000)'),

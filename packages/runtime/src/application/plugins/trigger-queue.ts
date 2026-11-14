@@ -194,9 +194,10 @@ export class DurableTriggerQueue {
     this.wake();
   }
 
-  close(options: { drain?: boolean } = {}): Promise<void> {
+  close(options: { drain?: boolean; timeoutMs?: number } = {}): Promise<void> {
+    if (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1)) throw new RangeError('Invalid trigger queue close timeout');
     if (options.drain === false) this.stopDispatch = true;
-    return this.closing ??= (async () => {
+    this.closing ??= (async () => {
       if (this.timer) clearTimeout(this.timer);
       try {
         await this.running;
@@ -207,6 +208,11 @@ export class DurableTriggerQueue {
       }
       if (this.faulted) throw new Error('Trigger queue persistence failed; restart to recover pending deliveries');
     })();
+    if (options.timeoutMs === undefined) return this.closing;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Trigger queue shutdown timed out; ownership retained until active delivery settles')), options.timeoutMs);
+      this.closing!.then(() => { clearTimeout(timer); resolve(); }, error => { clearTimeout(timer); reject(error); });
+    });
   }
 
   private assertWritable(): void {

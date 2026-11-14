@@ -2,17 +2,30 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentRuntime } from "../../shared/ipc-contract.js";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
-import { createDefaultPluginRuntime } from "@afk/runtime/plugin-sdk";
+import { createKeyedMutex } from "../lib/async-mutex.js";
+import { createDefaultPluginRuntime, type PluginRuntime } from "@afk/runtime/plugin-sdk";
+
+const pluginRuntimes = createKeyedMutex();
+
+type PluginRuntimeOptions = {
+  homeDir?: string;
+  workspaceRoot?: string;
+  createRuntime?: () => Promise<PluginRuntime>;
+};
+
+export function withPluginRuntime<Result>(options: PluginRuntimeOptions, operation: (runtime: PluginRuntime) => Promise<Result>): Promise<Result> {
+  return pluginRuntimes.run(options.homeDir ?? homedir(), async () => {
+    const { createRuntime, ...runtimeOptions } = options;
+    const runtime = await (createRuntime?.() ?? createDefaultPluginRuntime(runtimeOptions));
+    try { return await operation(runtime); }
+    finally { await runtime.dispose(); }
+  });
+}
 
 export async function listRegisteredAgentProviders(workspaceRoot: string): Promise<string[]> {
-  const plugins = await createDefaultPluginRuntime({ workspaceRoot });
-  try {
-    return plugins.getAgentProviderRegistry().list()
-      .filter(provider => typeof provider.name === "string" && provider.name.trim().length > 0 && typeof provider.createExecution === "function")
-      .map(provider => provider.name);
-  } finally {
-    await plugins.dispose();
-  }
+  return withPluginRuntime({ workspaceRoot }, async plugins => plugins.getAgentProviderRegistry().list()
+    .filter(provider => typeof provider.name === "string" && provider.name.trim().length > 0 && typeof provider.createExecution === "function")
+    .map(provider => provider.name));
 }
 
 type AgentRuntimeDefinition = Pick<AgentRuntime, "id" | "label" | "command"> & { versionArgs: string[] };

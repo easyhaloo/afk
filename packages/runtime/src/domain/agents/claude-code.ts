@@ -118,8 +118,10 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
         }
         const resultEvent: AgentEvent = { type: 'result', result: parsed.result };
         if (parsed.is_error === true) {
+          const message = parsed.result ?? (Array.isArray(parsed.errors)
+            ? parsed.errors.filter((entry: unknown) => typeof entry === 'string').join('\n') || undefined : undefined);
           events.push(
-            { type: 'error', error: new Error(String(parsed.result ?? 'agent returned an error')) },
+            { type: 'error', error: new Error(String(message ?? 'agent returned an error')) },
             resultEvent,
           );
           return events;

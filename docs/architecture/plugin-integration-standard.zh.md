@@ -130,6 +130,10 @@ Agent/Sandbox、任意插件方法及凭据解析不属于通用 dispatcher；�
 激活失败回滚当前批次注册；外部资源、子进程和 timer 通过 `onDispose` 清理。
 清理应幂等，一项失败不阻止其余清理；缺少健康检查时不得伪造健康。
 
+升级须确认新版本激活；失败先完成该实例的资源清理，再恢复上一可用版本及配置。
+清理未确认时保留占用和待恢复状态。同一插件 ID 的不同激活实例分别持有清理责任，
+旧实例完成清理不得改变新实例状态。取消后的迟到成功不得变成有效操作结果。
+
 内置 secret 字段接受 `{"env":"TOKEN"}` 或
 `{"provider":"credential.enterprise","name":"deployment","scope":"read"}`，
 `scope` 可省略，`provider` 为精确注册名。保存配置只校验引用形状，不认证、不访问网络。
@@ -190,6 +194,10 @@ worktree。失败/取消后以独立 15 秒 signal 清理，拒绝删除时保�
 `{id,kind,schedule?,payload?,input?}`；`schedule` 是正整数毫秒。条目选择注册 `action`，
 派发参数依次选 `input`、事件 payload、descriptor payload、`{}`，不合并。
 
+定时器激活前必须取得所选队列的唯一所有权。每个已观察到的 tick 具有
+`{id,scheduledAt}`，身份由激活 UUID 和递增序号组成；action、input 和 tick 先持久化再派发。
+重试或重启沿用保存内容，配置变化不重写旧投递；容量或写入失败显式诊断，不回退直接执行。
+
 `listen --token-env <name> [--queue <path>]` 默认监听 loopback 8374，队列默认
 `~/.afk/triggers/deliveries.sqlite`。POST `/triggers/<provider>` 接受最多 1 MiB body，
 认证支持 bearer、GitLab token、原始 body 的 HMAC-SHA256；Webhook 自身签名不可被
@@ -216,6 +224,9 @@ UUID，缺失时用 body hash；同 ID 不同内容返回 `409`。单拥有者�
 允许重试，不自动重复已启动实现；启动后中断必须走原生所有权及审计对账，不保证任意重试
 续跑引擎或外部 action 恰好一次。关闭停止接收、等待在途操作并 dispose；pending 保留，
 interval timer 不补跑停机时段。
+
+listener 关闭和 Runtime dispose 各有五秒等待边界。超时不证明 action 已停止；
+在途 action 未结算时保留队列所有权，后继消费者不得接管，pending 留待后续恢复。
 
 ## 7. Artifact 与审计证据协议
 
@@ -251,6 +262,10 @@ SDK EvidenceStore 使用独立根配置，不复用 ArtifactSink 选择：
 Observability 仅镜像已本地持久化的事件，同一对象重复注册去重。每条记录使用独立 span，
 运行/工作项身份放 trace 属性；metric 使用低基数属性，持久化延迟为 histogram。
 导出受截止时间和取消约束；无外部健康或投递证据时不得宣称真实服务可用。
+
+每条源记录至多追加一条本地 `observability.delivery` 摘要；固定维度计数有界，
+摘要不再导出、采集证据或触发学习。capture 的 failed/timed_out/cancelled 与实际 SDK
+投递分别记账；未生成 capture 计划不得虚构 SDK 调用或 mirror 回执。终态元数据不重开业务状态。
 
 ## 8. 经验交换、验证与采纳
 

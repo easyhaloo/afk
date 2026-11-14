@@ -23,7 +23,7 @@
  * Shared SDK types are re-used; only provider-local shapes (payloads, handler
  * signatures, timer tokens) are declared here.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type {
   ProviderOperationOptions,
   TriggerCapability,
@@ -400,9 +400,14 @@ export type ScheduleSetInterval = (callback: () => void, ms: number) => unknown;
 /** Injectable `clearInterval` accepting the handle {@link ScheduleSetInterval} returned. */
 export type ScheduleClearInterval = (handle: unknown) => void;
 
+export interface ScheduledTriggerTick {
+  readonly id: string;
+  readonly scheduledAt: number;
+}
+
 export interface ScheduleTriggerOptions {
   /** Callback fired on each interval tick. */
-  readonly onFire?: (trigger: TriggerDescriptor) => void | Promise<void>;
+  readonly onFire?: (trigger: TriggerDescriptor, tick: ScheduledTriggerTick) => void | Promise<void>;
   readonly onError?: (error: unknown, trigger: TriggerDescriptor) => void | Promise<void>;
   readonly setInterval?: ScheduleSetInterval;
   readonly clearInterval?: ScheduleClearInterval;
@@ -434,7 +439,7 @@ export class ScheduleTriggerProvider extends BaseTriggerProvider implements Trig
   };
   protected readonly kind = 'schedule';
 
-  private readonly onFire?: (trigger: TriggerDescriptor) => void | Promise<void>;
+  private readonly onFire?: ScheduleTriggerOptions['onFire'];
   private readonly onError?: ScheduleTriggerOptions['onError'];
   private failed = false;
   private readonly setIntervalFn: ScheduleSetInterval;
@@ -475,8 +480,10 @@ export class ScheduleTriggerProvider extends BaseTriggerProvider implements Trig
   protected activate(descriptor: TriggerDescriptor): void {
     const ms = parseIntervalMs(descriptor.schedule);
     if (ms === null) return; // unreachable: assertDescriptor guards
+    const activationId = randomUUID();
+    let sequence = 0;
     const handle = this.setIntervalFn(() => {
-      const work = this.fire(descriptor);
+      const work = this.fire(descriptor, { id: `${activationId}:${++sequence}`, scheduledAt: Date.now() });
       this.pending.add(work);
       void work.finally(() => this.pending.delete(work));
     }, ms);
@@ -491,10 +498,10 @@ export class ScheduleTriggerProvider extends BaseTriggerProvider implements Trig
     }
   }
 
-  private async fire(descriptor: TriggerDescriptor): Promise<void> {
+  private async fire(descriptor: TriggerDescriptor, tick: ScheduledTriggerTick): Promise<void> {
     if (this.registered.get(descriptor.id) !== descriptor) return;
     try {
-      if (this.onFire) await this.onFire(descriptor);
+      if (this.onFire) await this.onFire(descriptor, tick);
       this.failed = false;
     } catch (error) {
       this.failed = true;

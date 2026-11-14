@@ -17,6 +17,7 @@ import { workspaceDataDirectory } from '../../workspace.js';
 import { randomUUID } from 'crypto';
 import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
+import { simpleGit } from 'simple-git';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
 import { clearSignal, getTokenUsage, readSignal, preacceptClaudeProjectTrust, isClaudeCodeArgv, logger } from '../../io/index.js';
@@ -41,6 +42,8 @@ import {
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { CodexTurnWatcher } from '../../../infrastructure/codex/turn-failure.js';
+import { ClaudeTurnWatcher } from '../../../infrastructure/claude/turn-watcher.js';
+import type { AgentTurnWatcher } from '../../../domain/agents/types.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 import { repositoryClaimIds } from '../../git/repository-lease.js';
@@ -68,6 +71,25 @@ const IDLE_PANE_INTERVAL_MS = 5_000;
  * How often the completion loop polls for the signal file.
  */
 const POLL_INTERVAL_MS = 2_000;
+
+/**
+ * How long AFK waits for a nudged agent to report its result.
+ *
+ * The agent's turn is over and it wrote no completion signal. The work may
+ * well be done — the report is what is missing — so AFK asks once before it
+ * calls the run a failure. The grace stays well inside the two minutes an
+ * operator is willing to wait for a verdict.
+ */
+const NUDGE_GRACE_MS = 60_000;
+
+/**
+ * What AFK says when it asks a finished agent to report its result.
+ */
+const NUDGE_TEXT = [
+  'AFK has not received a completion signal for this task.',
+  'Write .afk-signal.json now: result PASS with a summary when the work is done,',
+  'or result FAIL with a summary that says what blocked you.',
+].join(' ');
 
 /**
  * Local sandbox backed by git worktree + tmux.
@@ -234,10 +256,25 @@ export class LocalAgentExecution implements AgentExecution {
   private readonly paneIntervalMs: number;
   private readonly pollIntervalMs: number;
   /**
-   * Codex says in its own rollout when a turn died. The terminal stays open
-   * after that, so nothing about the process would tell us the turn is over.
+   * The agent says in its own records when a turn ended or died. The terminal
+   * stays open after that, so nothing about the process would tell us the
+   * turn is over.
    */
-  private readonly turnWatcher: CodexTurnWatcher | undefined;
+  private readonly turnWatcher: AgentTurnWatcher | undefined;
+  /**
+   * The commit the worktree was at when the run started.
+   *
+   * A commit that was not there then is the agent's work, and it is what
+   * separates "the agent did nothing" from "the agent did the work and
+   * forgot to report it".
+   */
+  private readonly startHead: Promise<string | undefined>;
+  /** How long a nudged agent may take to report its result. */
+  private readonly nudgeGraceMs: number;
+  /** True once AFK has asked the agent to report its result. */
+  private nudged = false;
+  /** When the nudge's grace period ends. */
+  private nudgeDeadline = 0;
   private done = false;
   private interruptAcked = false;
 
@@ -254,8 +291,10 @@ export class LocalAgentExecution implements AgentExecution {
     paneIntervalMs?: number;
     /** How often the completion loop polls for the signal file. */
     pollIntervalMs?: number;
-    /** How to tell that the agent's turn died. */
-    turnWatcher?: CodexTurnWatcher;
+    /** How to tell that the agent's turn ended or died. */
+    turnWatcher?: AgentTurnWatcher;
+    /** How long a nudged agent may take to report its result. */
+    nudgeGraceMs?: number;
   }) {
     this.id = randomUUID();
     this.worktreePath = opts.worktreePath;
@@ -268,12 +307,17 @@ export class LocalAgentExecution implements AgentExecution {
     this.metadata = opts.metadata;
     this.paneIntervalMs = opts.paneIntervalMs ?? IDLE_PANE_INTERVAL_MS;
     this.pollIntervalMs = opts.pollIntervalMs ?? POLL_INTERVAL_MS;
-    this.turnWatcher = opts.turnWatcher ?? (opts.metadata?.provider === 'codex' ? new CodexTurnWatcher() : undefined);
+    this.turnWatcher = opts.turnWatcher ?? defaultTurnWatcher(opts.metadata?.provider);
+    this.nudgeGraceMs = opts.nudgeGraceMs ?? NUDGE_GRACE_MS;
+    this.startHead = readHeadSha(opts.worktreePath);
   }
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
   async sendPrompt(): Promise<void> {
     if (this.metadata?.provider === 'opencode') return;
+
+    // The baseline has to be taken before the agent can commit anything.
+    await this.startHead;
 
     // `sendGoal` is retained as a narrow compatibility seam for injected
     // legacy tmux fakes and older embedders; production TmuxClient exposes
@@ -362,12 +406,30 @@ export class LocalAgentExecution implements AgentExecution {
         }
       } catch { /* ignore */ }
 
-      // Codex reports a turn that died — a stream the gateway cut — in its
-      // own rollout. The terminal stays open, so without this the wait would
-      // run on until the hard timeout for a turn that is already over.
+      // The agent says in its own records when a turn ended — Codex in its
+      // rollout, Claude Code in its transcript. The terminal stays open, so
+      // without this the wait would run on until the idle timeout for a turn
+      // that is already over.
       if (this.turnWatcher) {
-        const failure = await this.turnWatcher.check(this.worktreePath, start);
-        if (failure) {
+        const verdict = await this.turnWatcher.check(this.worktreePath, start);
+        if (verdict?.ended) {
+          // The agent handed the turn back and reported nothing. The work
+          // may be done, so AFK asks once before it calls the run a failure.
+          if (!this.nudged) {
+            this.nudged = true;
+            this.nudgeDeadline = Date.now() + this.nudgeGraceMs;
+            await this.nudgeForSignal();
+            await this.sleep(this.pollIntervalMs);
+            continue;
+          }
+          if (Date.now() < this.nudgeDeadline) {
+            await this.sleep(this.pollIntervalMs);
+            continue;
+          }
+          this.done = true;
+          return await this.missingResult(verdict.message);
+        }
+        if (verdict) {
           this.done = true;
           return {
             version: 1,
@@ -379,7 +441,7 @@ export class LocalAgentExecution implements AgentExecution {
             branch: this.sessionName,
             error: {
               code: 'AGENT_TURN_FAILED',
-              message: failure.message,
+              message: verdict.message,
             },
           };
         }
@@ -472,6 +534,49 @@ export class LocalAgentExecution implements AgentExecution {
 
       await this.sleep(this.pollIntervalMs);
     }
+  }
+
+  /**
+   * Ask the agent to report its result.
+   *
+   * The agent's turn is over and it wrote no completion signal. The work may
+   * well be done — the report is what is missing — so AFK asks once before
+   * it calls the run a failure.
+   */
+  private async nudgeForSignal(): Promise<void> {
+    try {
+      await (this.tmux as any).sendText?.(this.sessionName, 'main', NUDGE_TEXT);
+    } catch (error) {
+      logger.warn({ session: this.sessionName, error }, 'could not ask the agent to report its result');
+    }
+  }
+
+  /**
+   * The run ended without a completion signal.
+   *
+   * A commit the agent made is work a person can look at, so the run stops
+   * in the state that waits for a person instead of throwing the work away.
+   */
+  private async missingResult(message: string): Promise<ExecutionResult> {
+    const committed = await this.hasAgentCommit();
+    return {
+      version: 1,
+      runId: this.id,
+      status: committed ? 'blocked' : 'failed',
+      provider: 'local',
+      sessionId: this.sessionId,
+      commits: [],
+      branch: this.sessionName,
+      error: { code: 'MISSING_RESULT', message },
+    };
+  }
+
+  /** True when the agent committed work the run started without. */
+  private async hasAgentCommit(): Promise<boolean> {
+    const start = await this.startHead;
+    if (!start) return false;
+    const now = await readHeadSha(this.worktreePath);
+    return now !== undefined && now !== start;
   }
 
   async interrupt(_reason: InterruptReason): Promise<void> {
@@ -620,6 +725,34 @@ export class LocalSandboxProvider implements SandboxProvider {
       workspaceRoot: options.workspaceRoot,
       runtimeRunId: options.runtimeRunId,
     });
+  }
+}
+
+/**
+ * The watcher that reads an agent's own record of its turn.
+ *
+ * Each agent writes that record somewhere different, and only the agents AFK
+ * can read get a watcher: a provider whose record AFK cannot read keeps its
+ * previous behaviour.
+ */
+function defaultTurnWatcher(provider: string | undefined): AgentTurnWatcher | undefined {
+  if (provider === 'codex') return new CodexTurnWatcher();
+  if (provider === 'claude-code') return new ClaudeTurnWatcher();
+  return undefined;
+}
+
+/**
+ * The commit a worktree is at.
+ *
+ * Undefined when the worktree is not a git repository — the run then has no
+ * commits of its own to tell apart.
+ */
+async function readHeadSha(worktreePath: string): Promise<string | undefined> {
+  try {
+    const head = await simpleGit(worktreePath).revparse(['HEAD']);
+    return head.trim() || undefined;
+  } catch {
+    return undefined;
   }
 }
 

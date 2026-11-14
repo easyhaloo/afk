@@ -1033,6 +1033,17 @@ names and supported provider settings belong to `configured.ts`; complete
 provider configuration examples must follow that implementation rather than
 guessing constructor-to-YAML mappings.
 
+Named references in ReportPlatform tokens, Feishu/Slack webhooks, OAuth client
+secrets and enterprise credential values resolve on each operation. These fields
+also accept an offset-aware ISO `expiresAt` on the reference. Activation and static
+inspection do not resolve them. Each operation checks reference and returned
+credential expiry, rejects `revoked: true`, forwards cancellation and the absolute
+`deadlineAt`, and rejects values arriving after that consumer activation is disposed.
+Enterprise forwarding retains the earlier reference or upstream expiry. Environment references
+remain construction-captured; other named-reference consumers retain activation-time
+resolution. Gmail retains its separate refresh flow. Disposal cannot undo requests
+already sent or forcibly stop an uncooperative credential resolver.
+
 A trigger plugin entry selects a registered `workflow.action` through its
 top-level `action` field, alongside `id`, `enabled`, `builtin` and `config`.
 The host's event callback dispatches that action. Each `TriggerDescriptor` has

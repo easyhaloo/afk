@@ -380,7 +380,7 @@ describe('private credentials consumed by an installed local context plugin', ()
     await test.cli('enable', 'context.matrix-credential-probe');
     await test.mode('failure');
     const before = await readFile(join(test.output, 'credential-receipt.json'), 'utf8');
-    await expectRejected(test.run(), 'Matrix credential provider is not active');
+    await expectRejected(test.run(), 'Operation credential unavailable');
     expect(await readFile(join(test.output, 'credential-receipt.json'), 'utf8')).toBe(before);
   });
 });

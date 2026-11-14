@@ -23,6 +23,7 @@ export interface ProviderAbortSignal {
 /** Options threaded through every provider operation that can be cancelled. */
 export interface ProviderOperationOptions {
   readonly signal?: ProviderAbortSignal;
+  readonly deadlineAt?: number;
 }
 
 /** Outcome of a provider health probe. */
@@ -157,6 +158,7 @@ export interface CredentialRef {
 export interface CredentialValue {
   readonly secret: string;
   readonly expiresAt?: string;
+  readonly revoked?: boolean;
 }
 
 export interface CredentialProvider extends CapabilityProvider<CredentialCapability> {

@@ -92,7 +92,7 @@ CLI/manager默认静态接线不导入入口或解析secret；`list --loaded`与
 | `notification.provider` / `NotificationProvider` | `notify` 返回 `delivered/channel/error?`；失败不得伪装为送达。 |
 | `trigger.provider` / `TriggerProvider` | `register/unregister`；宿主管理 listener、timer 和 action 派发，见第 6 节。 |
 | `context.provider` / `ContextSource` | `gather({scope,prompt,limit?})` 返回带 `origin` 的有界 fragment；只读取授权内容。 |
-| `credential.provider` / `CredentialProvider` | `resolve({name,scope?})` 返回私有 `secret/expiresAt?`；不开放通用 CLI 输出。 |
+| `credential.provider` / `CredentialProvider` | `resolve({name,scope?}, {signal?,deadlineAt?}?)` 返回私有 `secret/expiresAt?/revoked?`；不开放通用 CLI 输出。 |
 | `artifact.provider` / `ArtifactSink` | `put({name,mediaType,bytes})` 返回 `{uri,name}`；写入前校验大小/路径，审计导出见第 7 节。 |
 | `repository.provider` / `RepositoryProvider` | 必需 `snapshot`；可选 `prepare/checkout/publish/cleanup/withLifecycleLease`，见第 5 节。 |
 | `policy.provider` / `PolicyCheckProvider` | `evaluate({action,context?})` 返回 `allowed/rule?/reason?`；required 闸门拒绝或异常阻止继续。 |
@@ -137,9 +137,10 @@ Agent/Sandbox、任意插件方法及凭据解析不属于通用 dispatcher；�
 内置 secret 字段接受 `{"env":"TOKEN"}` 或
 `{"provider":"credential.enterprise","name":"deployment","scope":"read"}`，
 `scope` 可省略，`provider` 为精确注册名。保存配置只校验引用形状，不认证、不访问网络。
-构造时读取环境引用；激活时 await 凭据解析并校验实际值后注册消费者，失败不泄露原始错误。
+构造时读取环境引用。ReportPlatform token、飞书/Slack webhook、OAuth clientSecret、企业凭据 values 的具名引用按操作解析，接受带时区 ISO `expiresAt`；激活及静态检查不解析。
+这些消费者拒绝过期、撤权及销毁后晚到的凭据，传递 `signal/deadlineAt`，失败不泄露原始错误。企业凭据转发保留引用和上游中较早的有效期；激活时只查找上游以绑定生命周期，不调用其解析器。
 同批具体凭据依赖排序，拒绝自环/互引环；缺失具名 Provider 延迟加载并给出诊断。
-通用引用按激活取值，重新激活重取；Gmail 保留自身 OAuth 刷新。
+其余具名引用按激活取值，重新激活重取；Gmail 保留自身 OAuth 刷新。销毁不撤回已发送请求，不宣称强制终止未配合的解析器。
 
 管理守卫只检查静态 Manifest/配置及依赖，不执行插件；运行时检查可执行受信代码和凭据
 解析。修改影响后续 Runtime/Worker，不热更新已有 Worker。活动或不可核实的 Worker

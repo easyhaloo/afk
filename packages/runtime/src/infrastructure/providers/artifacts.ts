@@ -23,6 +23,7 @@ import type {
   ProviderOperationOptions,
 } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, requestHttp, type FetchTransport } from './dependencies.js';
+import { resolveOperationSecret, type OperationSecret } from './operation-secret.js';
 
 export type { ArtifactSinkCapability };
 
@@ -393,7 +394,7 @@ export interface ReportPlatformProviderOptions {
   /** Full upload endpoint that accepts the raw artifact body. */
   readonly endpoint: string;
   /** Optional bearer token sent as an Authorization header. */
-  readonly token?: string;
+  readonly token?: OperationSecret;
 }
 
 /**
@@ -412,6 +413,7 @@ export class ReportPlatformProvider implements ArtifactSink {
   constructor(private readonly options: ReportPlatformProviderOptions) {}
 
   async put(artifact: ArtifactDescriptor, options?: ProviderOperationOptions): Promise<ArtifactRef> {
+    if (this.options.token && options?.signal?.aborted) throw new Error('Report upload cancelled');
     checkAbort(options);
     assertSafeArtifactName(artifact.name);
     if (typeof artifact.mediaType !== 'string' || artifact.mediaType.length === 0) {
@@ -419,6 +421,7 @@ export class ReportPlatformProvider implements ArtifactSink {
     }
     const endpoint = new URL(artifactHttpUri(this.options.endpoint));
     if (this.options.token && endpoint.protocol !== 'https:') throw new Error('report platform bearer token requires HTTPS');
+    const token = !this.options.token ? undefined : await resolveOperationSecret(this.options.token, options);
     const response = await requestHttp(
       this.options.transport,
       this.options.endpoint,
@@ -427,11 +430,14 @@ export class ReportPlatformProvider implements ArtifactSink {
         body: Buffer.from(artifact.bytes),
         headers: {
           'content-type': artifact.mediaType,
-          ...(this.options.token ? { authorization: `Bearer ${this.options.token}` } : {}),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
       },
       options,
-    );
+    ).catch(error => {
+      if (this.options.token && options?.signal?.aborted) throw new Error('Report upload cancelled');
+      throw error;
+    });
     const uri = await this.readReturnedUri(response);
     if (!uri) throw new Error('report platform did not return a valid artifact URI');
     return { uri, name: artifact.name };

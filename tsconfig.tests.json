@@ -64,6 +64,15 @@
     "packages/runtime/src/infrastructure/providers/triggers.test.ts",
     "packages/runtime/src/application/workflows/backlog-provider.test.ts",
     "packages/runtime/src/application/workflows/execution-manifest-runner.test.ts",
-    "packages/runtime/src/application/plugins/inventory.test.ts"
+    "packages/runtime/src/application/plugins/inventory.test.ts",
+    "packages/runtime/src/application/plugins/configured.test.ts",
+    "packages/runtime/src/application/plugins/loader.test.ts",
+    "packages/runtime/src/application/plugins/configured-operation-metadata.test.ts",
+    "packages/runtime/src/application/plugins/configured-operation-dependency.test.ts",
+    "packages/runtime/src/application/plugins/configured-operation-secret.test.ts",
+    "packages/runtime/src/application/plugins/configured-nested-operation.test.ts",
+    "packages/runtime/src/infrastructure/providers/credentials.test.ts",
+    "packages/runtime/src/infrastructure/providers/operation-secret.test.ts",
+    "packages/runtime/src/infrastructure/providers/dependencies.test.ts"
   ]
 }

@@ -311,7 +311,7 @@ describe('createDefaultPluginRuntime', () => {
     } finally { await listener.close(); }
   });
   it.each([false, true])('waits for an installed named credential provider across builtin activation (nested: %s)', async nested => {
-    const network = vi.fn();
+    const network = vi.fn(async () => new Response('ok'));
     vi.stubGlobal('fetch', network);
     const { runtime, credential } = await installedCredentialFixture([
       { id: 'notification.slack', builtin: true, config: { webhook: { provider: nested ? 'credential.enterprise' : 'fixture', name: 'webhook' } } },
@@ -320,9 +320,12 @@ describe('createDefaultPluginRuntime', () => {
     expect(runtime.getCredentialProvider('credential.system-keychain')).toBeDefined();
     expect(runtime.getCredentialProvider('fixture')).toBeDefined();
     expect(runtime.getNotificationProvider('notification.slack')).toBeDefined();
-    expect(credential.resolutions).toBe(1);
+    expect(credential.resolutions).toBe(0);
     expect((await runtime.diagnostics()).filter(item => item.severity === 'error')).toEqual([]);
     expect(network).not.toHaveBeenCalled();
+    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Delivery' })).resolves.toMatchObject({ delivered: true });
+    expect(credential.resolutions).toBe(1);
+    expect(network).toHaveBeenCalledOnce();
   });
 
   it.each([false, true])('reports unresolved named credential dependencies without attempting activation (cycle: %s)', async cycle => {
@@ -337,16 +340,19 @@ describe('createDefaultPluginRuntime', () => {
     if (cycle) expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ pluginId: 'credential.fixture', code: 'load.dependencies' }));
   });
 
-  it('does not retry a named provider resolution that actually fails', async () => {
+  it('does not retry a named provider resolution that fails at delivery', async () => {
+    const network = vi.fn(); vi.stubGlobal('fetch', network);
     const { runtime, credential } = await installedCredentialFixture([
       { id: 'notification.slack', builtin: true, config: { webhook: { provider: 'fixture', name: 'webhook' } } },
     ], ['context.provider'], true);
     expect(runtime.getCredentialProvider('fixture')).toBeDefined();
-    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
-    expect(credential.resolutions).toBe(1);
+    expect(runtime.getNotificationProvider('notification.slack')).toBeDefined();
+    expect(credential.resolutions).toBe(0);
     const errors = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.slack');
-    expect(errors.map(item => item.code)).toEqual(['activation.failed', 'load.failed']);
-    expect(errors.every(item => item.message.includes('credential resolution failed'))).toBe(true);
+    expect(errors).toEqual([]);
+    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Delivery' })).resolves.toMatchObject({ delivered: false, error: 'Operation credential unavailable' });
+    expect(credential.resolutions).toBe(1);
+    expect(network).not.toHaveBeenCalled();
   });
 
   it('activates configured credential references before their consumers regardless of input order', async () => {

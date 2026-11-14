@@ -400,11 +400,11 @@ it.each(['client_secret_basic', 'client_secret_post'] as const)('credential.oaut
   expect(await invoke('artifact.provider', 'report-platform', 'put', artifact)).toMatchObject({ uri: `${https}/report/8` });
   expect(requests).toHaveLength(4);
   for (const [reply, error] of [
-    [{ status: 400, json: { error: 'invalid_client' } }, /not registered/],
-    [{ json: { ...token, scope: 'unrelated' } }, /not registered/],
-    [{ json: { ...token, token_type: 'MAC' } }, /not registered/],
-    [{ text: 'broken-json' }, /not registered/],
-    [{ hang: true }, /not registered/],
+    [{ status: 400, json: { error: 'invalid_client' } }, /^Operation credential unavailable\n$/],
+    [{ json: { ...token, scope: 'unrelated' } }, /^Operation credential unavailable\n$/],
+    [{ json: { ...token, token_type: 'MAC' } }, /^Operation credential unavailable\n$/],
+    [{ text: 'broken-json' }, /^Operation credential unavailable\n$/],
+    [{ hang: true }, /^Operation credential unavailable\n$/],
   ] as const) {
     const count = requests.length;
     replies.push(reply);
@@ -449,11 +449,13 @@ it.each([false, true])('credential.oidc discovers and pins its endpoint, exchang
     { ...metadata, token_endpoint: `${http}/insecure-token` }]) {
     const count = requests.length;
     replies.push({ json: badMetadata });
-    await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /not registered/);
+    await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /^Operation credential unavailable\n$/);
     expect(requests).toHaveLength(count + 1);
   }
+  const beforeInvalidToken = requests.length;
   replies.push({ json: metadata }, { json: { ...issued, scope: 'wrong', access_token: 'invalid token' } });
-  await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /not registered/);
+  await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /^Operation credential unavailable\n$/);
+  expect(requests).toHaveLength(beforeInvalidToken + 2);
   await cli('disable', 'artifact.report-platform');
   await cli('disable', 'credential.oidc');
   await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /not registered/);

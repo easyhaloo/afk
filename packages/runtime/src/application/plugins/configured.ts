@@ -34,7 +34,8 @@ import {
   SecretScanPolicyProvider, LicensePolicyProvider, CompliancePolicyProvider,
   executeCommand,
 } from '../../infrastructure/providers/index.js';
-import type { CommandExecutor, FetchTransport } from '../../infrastructure/providers/dependencies.js';
+import { checkAbort, type CommandExecutor, type FetchTransport } from '../../infrastructure/providers/dependencies.js';
+import { validateOperationCredential, type OperationSecret } from '../../infrastructure/providers/operation-secret.js';
 import { OtlpObservabilityProvider } from '../../infrastructure/observability/otlp-provider.js';
 import { createLearningPlugin, learningConfigurationSchema, learningPluginManifest } from './learning.js';
 
@@ -128,6 +129,7 @@ export function getConfiguredCredentialDependencies(plugin: object): readonly st
 const text = z.string().trim().min(1).refine(value => !/[\0\r\n]/.test(value), 'must not contain control characters');
 const environmentReference = z.object({ env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }).strict();
 const credentialReference = z.object({ provider: z.string().regex(/^[a-z][a-z0-9.-]*$/), name: text, scope: text.optional() }).strict();
+const operationCredentialReference = credentialReference.extend({ expiresAt: z.string().datetime({ offset: true }).refine(value => Number.isFinite(Date.parse(value))).optional() });
 const strings = z.array(text).min(1);
 const httpUrl = text.refine(value => {
   try {
@@ -188,6 +190,34 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       })();
     }),
   ]);
+  const operationSecret = (context?: PluginSetupContext, dependencies?: Set<string>) => z.union([
+    environmentSecret,
+    operationCredentialReference.transform((ref): OperationSecret => {
+      dependencies?.add(ref.provider);
+      if (context && !context.getCredentialProvider(ref.provider)) throw new Error('credential provider is not active');
+      let active = context !== undefined;
+      context?.onDispose(() => { active = false; });
+      return async operation => {
+        if (!active) throw new Error('Operation credential unavailable');
+        checkAbort(operation);
+        if (ref.expiresAt !== undefined && Date.parse(ref.expiresAt) <= Date.now()) throw new Error('Operation credential unavailable');
+        const provider = context?.getCredentialProvider(ref.provider);
+        if (!provider) throw new Error('Operation credential unavailable');
+        const value = await provider.resolve({ name: ref.name, ...(ref.scope ? { scope: ref.scope } : {}) }, operation);
+        if (!active) throw new Error('Operation credential unavailable');
+        if (typeof value?.secret === 'string' && value.secret) {
+          secrets.add(value.secret);
+          if (value.secret.trim()) secrets.add(value.secret.trim());
+        }
+        if (ref.expiresAt !== undefined && Date.parse(ref.expiresAt) <= Date.now()) throw new Error('Operation credential unavailable');
+        const validated = validateOperationCredential(value);
+        if (ref.expiresAt !== undefined && (validated.expiresAt === undefined || Date.parse(validated.expiresAt) > Date.parse(ref.expiresAt))) {
+          return { ...validated, expiresAt: ref.expiresAt };
+        }
+        return validated;
+      };
+    }),
+  ]);
   const fetch: FetchTransport = (input, init) => (options.fetch ?? globalThis.fetch)(input, init);
   const execute = options.execute ?? executeCommand;
   let googleCredentialProvider: GoogleOAuthCredentialProvider | undefined;
@@ -200,15 +230,15 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     for (const value of [...secrets].sort((left, right) => right.length - left.length)) message = message.split(value).join('[redacted]');
     return message;
   };
-  const define = <Schema extends z.ZodTypeAny>(provides: string | readonly string[], schema: Schema | ((value: ReturnType<typeof secret>) => Schema), create: (config: z.output<Schema>) => PreparedPlugin, providesForConfig?: (config: z.output<Schema>) => readonly string[]): Definition => ({
+  const defineWithSecret = <SecretSchema extends z.ZodTypeAny>(secretFactory: (context?: PluginSetupContext, dependencies?: Set<string>) => SecretSchema, referenceSchema: typeof credentialReference | typeof operationCredentialReference = credentialReference) => <Schema extends z.ZodTypeAny>(provides: string | readonly string[], schema: Schema | ((value: SecretSchema) => Schema), create: (config: z.output<Schema>) => PreparedPlugin, providesForConfig?: (config: z.output<Schema>) => readonly string[]): Definition => ({
     provides: typeof provides === 'string' ? [provides] : provides,
     inspect(config) {
       const dependencies = new Set<string>();
       const shapeSecret = z.union([
         environmentReference.transform(() => 'https://credential.invalid/shape-only'),
-        credentialReference.transform(ref => { dependencies.add(ref.provider); return 'https://credential.invalid/shape-only'; }),
+        referenceSchema.transform(ref => { dependencies.add(ref.provider); return 'https://credential.invalid/shape-only'; }),
       ]);
-      const result = (typeof schema === 'function' ? schema(shapeSecret as unknown as ReturnType<typeof secret>) : schema).safeParse(config);
+      const result = (typeof schema === 'function' ? schema(shapeSecret as unknown as SecretSchema) : schema).safeParse(config);
       if (!result.success) throw new Error(`invalid configuration fields: ${result.error.issues.map(issue => issue.path.join('.') || 'config').join(', ')}`);
       const triggers = result.data?.triggers as readonly { id: string }[] | undefined;
       if (triggers && new Set(triggers.map(item => item.id)).size !== triggers.length) throw new Error('trigger ids must be unique');
@@ -226,17 +256,19 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
         }
         return parsed.data;
       };
-      const validationSchema = typeof schema === 'function' ? schema(secret(undefined, dependencies)) : schema;
+      const validationSchema = typeof schema === 'function' ? schema(secretFactory(undefined, dependencies)) : schema;
       const prepared = create(parse(validationSchema.safeParse(config)));
       return {
         ...prepared,
         dependencies: [...dependencies],
         prepare: dependencies.size && typeof schema === 'function'
-          ? async context => create(parse(await schema(secret(context)).safeParseAsync(config)))
+          ? async context => create(parse(await schema(secretFactory(context)).safeParseAsync(config)))
           : undefined,
       };
     },
   });
+  const define = defineWithSecret(secret);
+  const defineOperation = defineWithSecret(operationSecret, operationCredentialReference);
   const capability = (provider: ManagedProvider, selection: Parameters<typeof createBuiltinCapabilityPlugins>[0]): PreparedPlugin => ({
     provider, plugin: createBuiltinCapabilityPlugins(selection)[0],
   });
@@ -313,11 +345,11 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new JiraTrackerProvider({ ...config, fetch });
       return capability(provider, { issueTrackers: [provider] });
     }),
-    'notification.feishu': define('notification.provider', secret => z.object({ webhook: secret.pipe(httpUrl), channel: text.optional() }).strict(), config => {
+    'notification.feishu': defineOperation('notification.provider', secret => z.object({ webhook: secret.refine(value => typeof value !== 'string' || httpUrl.safeParse(value).success, 'invalid webhook configuration'), channel: text.optional() }).strict(), config => {
       const provider = new FeishuNotificationProvider({ ...config, fetch });
       return capability(provider, { notifications: [provider] });
     }),
-    'notification.slack': define('notification.provider', secret => z.object({ webhook: secret.pipe(httpUrl), channel: text.optional() }).strict(), config => {
+    'notification.slack': defineOperation('notification.provider', secret => z.object({ webhook: secret.refine(value => typeof value !== 'string' || httpUrl.safeParse(value).success, 'invalid webhook configuration'), channel: text.optional() }).strict(), config => {
       const provider = new SlackNotificationProvider({ ...config, fetch });
       return capability(provider, { notifications: [provider] });
     }),
@@ -364,7 +396,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       return capability(provider, { credentials: [provider] });
     }),
     'credential.google-oauth': define('credential.provider', z.object({}).strict(), () => { const provider = googleCredentials(); return capability(provider, { credentials: [provider] }); }),
-    'credential.oauth': define('credential.provider', secret => z.object({ tokenEndpoint: httpsUrl, clientId: text, clientSecret: secret, authMethod: z.enum(['client_secret_basic', 'client_secret_post']).optional(), timeoutMs: milliseconds.optional() }).strict(), config => {
+    'credential.oauth': defineOperation('credential.provider', secret => z.object({ tokenEndpoint: httpsUrl, clientId: text, clientSecret: secret, authMethod: z.enum(['client_secret_basic', 'client_secret_post']).optional(), timeoutMs: milliseconds.optional() }).strict(), config => {
       const provider = new OAuthCredentialProvider({ ...config, fetch });
       return capability(provider, { credentials: [provider] });
     }),
@@ -375,7 +407,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new OidcCredentialProvider({ ...config, fetch });
       return capability(provider, { credentials: [provider] });
     }),
-    'credential.enterprise': define('credential.provider', secret => z.object({ values: z.record(secret).refine(values => Object.keys(values).length > 0, 'must contain credential references') }).strict(), config => {
+    'credential.enterprise': defineOperation('credential.provider', secret => z.object({ values: z.record(secret).refine(values => Object.keys(values).length > 0, 'must contain credential references') }).strict(), config => {
       const provider = new EnterpriseCredentialProvider({ values: config.values, environment: {} });
       return capability(provider, { credentials: [provider] });
     }),
@@ -395,7 +427,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new ObjectStorageProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),
-    'artifact.report-platform': define('artifact.provider', secret => z.object({ endpoint: httpUrl, token: secret.optional() }).strict(), config => {
+    'artifact.report-platform': defineOperation('artifact.provider', secret => z.object({ endpoint: httpUrl, token: secret.optional() }).strict(), config => {
       const provider = new ReportPlatformProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),

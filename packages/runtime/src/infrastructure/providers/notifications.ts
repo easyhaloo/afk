@@ -31,6 +31,7 @@ import type {
   ProviderOperationOptions,
 } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, executeCommand, requestHttp } from './dependencies.js';
+import { resolveWebhook, type OperationSecret } from './operation-secret.js';
 import type { CommandExecutor, CommandRequest, FetchTransport } from './dependencies.js';
 
 /** Flattens a neutral message into the single text body webhook providers send. */
@@ -57,7 +58,7 @@ function describeError(error: unknown, secrets: readonly string[]): string {
 
 export interface FeishuNotificationOptions {
   /** Incoming webhook URL. Treated as a secret and never echoed in receipts. */
-  readonly webhook: string;
+  readonly webhook: OperationSecret;
   /** Optional transport; defaults to global fetch at delivery time. */
   readonly fetch?: FetchTransport;
   /** Channel label reported in receipts. */
@@ -79,7 +80,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
     mention: false,
   };
 
-  private readonly webhook: string;
+  private readonly webhook: OperationSecret;
   private readonly fetch?: FetchTransport;
   private readonly defaultChannel: string;
 
@@ -91,10 +92,12 @@ export class FeishuNotificationProvider implements NotificationProvider {
 
   async notify(message: NotificationMessage, options?: ProviderOperationOptions): Promise<NotificationReceipt> {
     const channel = message.channel ?? this.defaultChannel;
+    let webhook: string | undefined;
     try {
+      webhook = await resolveWebhook(this.webhook, options);
       const response = await requestHttp(
         this.fetch,
-        this.webhook,
+        webhook,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -111,7 +114,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
       }
       return { delivered: true, channel };
     } catch (error) {
-      return { delivered: false, channel, error: describeError(error, [this.webhook]) };
+      return { delivered: false, channel, error: webhook && options?.signal?.aborted ? 'Notification cancelled' : describeError(error, webhook ? [webhook] : []) };
     }
   }
 }
@@ -120,7 +123,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
 
 export interface SlackNotificationOptions {
   /** Slack incoming-webhook URL. Treated as a secret. */
-  readonly webhook: string;
+  readonly webhook: OperationSecret;
   readonly fetch?: FetchTransport;
   readonly channel?: string;
 }
@@ -140,7 +143,7 @@ export class SlackNotificationProvider implements NotificationProvider {
     mention: true,
   };
 
-  private readonly webhook: string;
+  private readonly webhook: OperationSecret;
   private readonly fetch?: FetchTransport;
   private readonly defaultChannel: string;
 
@@ -152,10 +155,12 @@ export class SlackNotificationProvider implements NotificationProvider {
 
   async notify(message: NotificationMessage, options?: ProviderOperationOptions): Promise<NotificationReceipt> {
     const channel = message.channel ?? this.defaultChannel;
+    let webhook: string | undefined;
     try {
+      webhook = await resolveWebhook(this.webhook, options);
       const response = await requestHttp(
         this.fetch,
-        this.webhook,
+        webhook,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -169,7 +174,7 @@ export class SlackNotificationProvider implements NotificationProvider {
       }
       return { delivered: true, channel };
     } catch (error) {
-      return { delivered: false, channel, error: describeError(error, [this.webhook]) };
+      return { delivered: false, channel, error: webhook && options?.signal?.aborted ? 'Notification cancelled' : describeError(error, webhook ? [webhook] : []) };
     }
   }
 }

@@ -157,3 +157,35 @@ describe('provider dependencies', () => {
     await expect(pending).rejects.toThrow('aborted');
   });
 });
+
+
+describe('absolute HTTP deadline completion checks', () => {
+  it.each(['chunk', 'eof'] as const)('rejects a clock jump during body %s without timer dispatch', async stage => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      let reads = 0;
+      const body = new ReadableStream<Uint8Array>({ pull(controller) {
+        reads++;
+        if (stage === 'chunk' || reads === 2) vi.setSystemTime(now + 30);
+        if (reads === 1) controller.enqueue(new Uint8Array([1]));
+        else controller.close();
+      } }, { highWaterMark: 0 });
+      await expect(requestHttp(async () => new Response(body), 'https://example.test', {}, { deadlineAt: now + 20 }))
+        .rejects.toThrow(/deadline/);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('rejects an empty response at the exact absolute deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      await expect(requestHttp(async () => {
+        vi.setSystemTime(now + 20);
+        return new Response(null, { status: 204 });
+      }, 'https://example.test', {}, { deadlineAt: now + 20 })).rejects.toThrow(/deadline/);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});

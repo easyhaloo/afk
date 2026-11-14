@@ -839,6 +839,13 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 真实 secret 字段名和 Provider 配置范围由 `configured.ts` 定义，完整示例应逐项对照该
 实现，不能猜测 constructor 到 YAML 的映射。
 
+ReportPlatform token、飞书/Slack webhook、OAuth clientSecret 和企业凭据 values 中的
+具名引用在每次操作时解析，并接受带时区的 ISO `expiresAt`。激活及静态检查不解析这些
+引用。操作检查引用和返回凭据的有效期，拒绝 `revoked: true`，传递取消与绝对
+`deadlineAt`，拒绝所属激活已销毁后晚到的值。企业凭据转发保留引用和上游中较早的有效期。
+环境引用仍在构造时取值；其他具名引用消费者仍在激活时解析；Gmail 保留独立刷新流程。
+销毁不能撤回已发送的请求，也不能强制停止不响应取消的凭据解析器。
+
 Trigger 插件条目用顶层 `action` 选择一个已注册的 `workflow.action`，与 `id`、
 `enabled`、`builtin`、`config` 并列；宿主事件 callback 负责派发该 action。
 每个 `TriggerDescriptor` 包含 `id`、`kind`，以及可选的 `schedule`、`payload`、

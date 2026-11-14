@@ -134,7 +134,8 @@ describe('configured plugin composition', () => {
     const [plugin] = await createConfiguredPlugins({ configurations: [{ ...configuration, config: references }], environment: {}, fetch: network, execute, onTrigger: vi.fn() });
     expect(resolve).not.toHaveBeenCalled();
     await runtime.activate(plugin);
-    expect(resolve).toHaveBeenCalled();
+    if (['artifact.report-platform', 'notification.feishu', 'notification.slack', 'credential.oauth', 'credential.enterprise'].includes(configuration.id)) expect(resolve).not.toHaveBeenCalled();
+    else expect(resolve).toHaveBeenCalled();
     expect(runtime.listProvidersForPlugin(configuration.id)).not.toHaveLength(0);
     expect(network).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
@@ -171,7 +172,7 @@ describe('configured plugin composition', () => {
     })).rejects.toThrow('invalid configuration fields');
   });
 
-  it('awaits scoped credential resolution through the runtime registry before registering the consumer', async () => {
+  it('registers the consumer passively and awaits scoped resolution at delivery', async () => {
     const runtime = new PluginRuntime();
     runtimes.push(runtime);
     let complete!: (value: { secret: string }) => void;
@@ -185,13 +186,13 @@ describe('configured plugin composition', () => {
       configurations: [{ id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'hook', scope: 'notify:write' } } }], fetch: network,
     });
     expect(resolve).not.toHaveBeenCalled();
-    const activation = runtime.activate(plugin);
-    await vi.waitFor(() => expect(resolve).toHaveBeenCalledWith({ name: 'hook', scope: 'notify:write' }));
-    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    await runtime.activate(plugin);
+    expect(resolve).not.toHaveBeenCalled();
+    const delivery = runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' });
+    await vi.waitFor(() => expect(resolve).toHaveBeenCalledWith({ name: 'hook', scope: 'notify:write' }, undefined));
     expect(network).not.toHaveBeenCalled();
     complete({ secret: environment.HOOK });
-    await activation;
-    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' })).resolves.toMatchObject({ delivered: true });
+    await expect(delivery).resolves.toMatchObject({ delivered: true });
     expect(String(network.mock.calls[0][0])).toBe(environment.HOOK);
   });
 
@@ -226,10 +227,10 @@ describe('configured plugin composition', () => {
       activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve: async () => ({ secret: value as string }) }); },
     });
     const [plugin] = await createConfiguredPlugins({ configurations: [{ id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'hook' } } }] });
-    const activation = runtime.activate(plugin);
-    await expect(activation).rejects.toThrow();
-    if (typeof value === 'string' && value.trim()) await expect(activation).rejects.not.toThrow(value);
-    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    await runtime.activate(plugin);
+    const delivery = await runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' });
+    expect(delivery.delivered).toBe(false);
+    if (typeof value === 'string' && value.trim()) expect(delivery.error).not.toContain(value);
     if (typeof value === 'string' && value.trim()) expect(JSON.stringify(await runtime.diagnostics())).not.toContain(value);
   });
 

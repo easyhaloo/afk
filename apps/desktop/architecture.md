@@ -147,15 +147,21 @@ Builtin secret fields accept `{env: "TOKEN"}` or
 `{provider: "credential.enterprise", name: "deployment", scope?: "read"}`.
 Configuration validation checks reference shape without credential resolution,
 authentication or network calls; environment references are checked and captured
-during construction. Activation awaits credential resolution once per referenced
-field, validates the result (including webhook URLs), and then registers the
-consumer. Configured builtins sort specific credential dependencies and reject
-self/cyclic references; the shared loader also waits for exact named providers
-from installed plugins. Missing/cyclic dependencies fail without activation;
-actual credential resolution failures are not retried.
-Values injected through these generic references are not automatically
-refreshed; Gmail retains its own OAuth refresh behavior. Secret values and raw
-authentication errors must not enter renderer DTOs or diagnostics.
+during construction. ReportPlatform tokens, Feishu and Slack webhook references,
+OAuth clientSecret and Enterprise values bind the exact named provider during
+activation without resolving its secret, retaining the dependency owner until
+disposal. Each operation looks up that provider again and checks reference and
+result expiry, revocation, cancellation, deadline and disposal before accepting
+the value. Original metadata is validated before applying the earlier expiry;
+new OAuth access tokens retain their server-supplied lifetime. Other generic
+references still resolve during activation. Configured builtins sort specific
+credential dependencies and reject self/cyclic references; the shared loader
+also waits for exact named providers from installed plugins. Missing/cyclic
+dependencies fail without activation; credential failures are not automatically
+retried. Operation-time lookup does not terminate an uncooperative resolver or
+retract requests already sent. Gmail retains its own OAuth refresh behavior.
+Secret values and raw authentication errors must not enter renderer DTOs or
+diagnostics.
 
 Plugin Settings does not mount `surface.desktop` or install external provider
 tools. Google sign-in selects a Desktop OAuth client JSON in Main and calls

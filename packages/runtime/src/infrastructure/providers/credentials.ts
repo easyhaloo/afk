@@ -1,6 +1,7 @@
 import { platform } from 'node:os';
 import type { CredentialProvider, CredentialRef, CredentialValue, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, executeCommand, requestHttp, type CommandExecutor, type FetchTransport } from './dependencies.js';
+import { resolveOperationCredential, resolveOperationSecret, type OperationSecret } from './operation-secret.js';
 
 function httpsEndpoint(value: string, issuer = false): string {
   let url: URL;
@@ -91,7 +92,7 @@ export class SystemKeychainProvider implements CredentialProvider {
 export interface OAuthCredentialOptions {
   readonly tokenEndpoint: string;
   readonly clientId: string;
-  readonly clientSecret: string;
+  readonly clientSecret: OperationSecret;
   readonly authMethod?: 'client_secret_basic' | 'client_secret_post';
   readonly fetch?: FetchTransport;
   readonly timeoutMs?: number;
@@ -106,21 +107,22 @@ export class OAuthCredentialProvider implements CredentialProvider {
   constructor(options: OAuthCredentialOptions) {
     httpsEndpoint(options.tokenEndpoint);
     required(options.clientId, 'client ID');
-    required(options.clientSecret, 'client secret');
+    if (typeof options.clientSecret === 'string') required(options.clientSecret, 'client secret');
     if (options.authMethod && !['client_secret_basic', 'client_secret_post'].includes(options.authMethod)) throw new Error('Unsupported client authentication method');
     this.config = { ...options };
   }
 
   async resolve(ref: CredentialRef, options?: ProviderOperationOptions): Promise<CredentialValue> {
     checkAbort(options);
+    const clientSecret = await resolveOperationSecret(this.config.clientSecret, options);
     const body = new URLSearchParams({ grant_type: 'client_credentials', ...(ref.scope ? { scope: ref.scope } : {}) });
     const headers = new Headers({ 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' });
     if (this.config.authMethod === 'client_secret_post') {
       body.set('client_id', this.config.clientId);
-      body.set('client_secret', this.config.clientSecret);
+      body.set('client_secret', clientSecret);
     } else {
       const encode = (value: string) => new URLSearchParams({ value }).toString().slice(6);
-      headers.set('authorization', `Basic ${Buffer.from(`${encode(this.config.clientId)}:${encode(this.config.clientSecret)}`).toString('base64')}`);
+      headers.set('authorization', `Basic ${Buffer.from(`${encode(this.config.clientId)}:${encode(clientSecret)}`).toString('base64')}`);
     }
     const response = await requestHttp(this.config.fetch, this.config.tokenEndpoint, { method: 'POST', headers, body }, { ...options, timeoutMs: this.config.timeoutMs });
     return tokenPayload(await readJson(response, options), this.config.now ?? Date.now, ref.scope);
@@ -209,7 +211,7 @@ export class OidcCredentialProvider implements CredentialProvider {
 }
 
 export interface EnterpriseCredentialOptions {
-  readonly values?: Readonly<Record<string, string>>;
+  readonly values?: Readonly<Record<string, OperationSecret>>;
   readonly environment?: NodeJS.ProcessEnv;
   readonly prefix?: string;
 }
@@ -218,7 +220,7 @@ export class EnterpriseCredentialProvider implements CredentialProvider {
   readonly id = 'credential.enterprise';
   readonly mode = 'environment-credentials' as const;
   readonly capabilities = { read: true, rotate: false, 'scoped-token': false } as const;
-  private readonly values: Readonly<Record<string, string>>;
+  private readonly values: Readonly<Record<string, OperationSecret>>;
   private readonly environment: NodeJS.ProcessEnv;
   private readonly prefix: string;
 
@@ -233,7 +235,7 @@ export class EnterpriseCredentialProvider implements CredentialProvider {
     if (ref.scope) throw new Error('Environment credential adapter cannot issue scoped tokens; use an OAuth or OIDC adapter');
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(ref.name)) throw new Error('Invalid environment credential name');
     const secret = Object.hasOwn(this.values, ref.name) ? this.values[ref.name] : this.environment[`${this.prefix}${ref.name.toUpperCase()}`];
-    if (typeof secret !== 'string' || !secret) throw new Error('Environment credential is unavailable');
-    return { secret };
+    if (secret === undefined || secret === '') throw new Error('Environment credential is unavailable');
+    return resolveOperationCredential(secret, options);
   }
 }

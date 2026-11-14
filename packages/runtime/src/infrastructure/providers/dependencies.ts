@@ -19,6 +19,9 @@ export type CommandExecutor = (request: CommandRequest) => Promise<CommandResult
 
 export function checkAbort(options?: ProviderOperationOptions): void {
   if (options?.signal?.aborted) throw options.signal.reason;
+  if (options?.deadlineAt !== undefined && (!Number.isSafeInteger(options.deadlineAt) || options.deadlineAt <= Date.now())) {
+    throw new Error('Provider operation deadline exceeded');
+  }
 }
 
 export interface HttpRequestOptions extends ProviderOperationOptions {
@@ -55,7 +58,7 @@ export async function requestHttp(
     onAbort = () => reject(controller.signal.reason);
     controller.signal.addEventListener('abort', onAbort, { once: true });
   });
-  const timer = setTimeout(() => controller.abort(new Error('Provider HTTP request timed out')), timeoutMs);
+  const timer = setTimeout(() => controller.abort(new Error('Provider HTTP request timed out')), Math.min(timeoutMs, options?.deadlineAt === undefined ? timeoutMs : Math.max(1, options.deadlineAt - Date.now())));
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let received: Response | undefined;
   try {
@@ -71,6 +74,7 @@ export async function requestHttp(
       }),
       interrupted,
     ]);
+    checkAbort({ ...options, signal: controller.signal });
     if (!response.ok) {
       void response.body?.cancel().catch(() => undefined);
       throw new Error(`Provider HTTP request failed (${response.status})`);
@@ -81,15 +85,17 @@ export async function requestHttp(
     let length = 0;
     for (;;) {
       const chunk = await Promise.race([reader.read(), interrupted]);
+      checkAbort({ ...options, signal: controller.signal });
       if (chunk.done) break;
       length += chunk.value.byteLength;
       if (length > maxResponseBytes) throw new Error('Provider HTTP response exceeded limit');
       chunks.push(chunk.value);
     }
-    if (controller.signal.aborted) throw controller.signal.reason;
+    checkAbort({ ...options, signal: controller.signal });
     return new Response(Buffer.concat(chunks, length), { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason;
+    checkAbort(options);
     if (error instanceof Error && /^Provider HTTP (request failed \(\d+\)|response exceeded limit)$/.test(error.message)) throw error;
     throw new Error('Provider HTTP transport failed');
   } finally {

@@ -1,3 +1,29 @@
+import { z } from 'zod';
+
+const externalToolSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/),
+  command: z.string().max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  location: z.enum(['host', 'backend']),
+  version: z.object({
+    args: z.array(z.string().max(256).refine(value => !/[\x00-\x1f\x7f]/.test(value))).min(1).max(16).readonly(),
+    minimum: z.string().regex(/^(?:0|[1-9]\d{0,5})\.(?:0|[1-9]\d{0,5})\.(?:0|[1-9]\d{0,5})$/).optional(),
+  }).strict().readonly().optional(),
+  platforms: z.array(z.enum(['aix', 'darwin', 'freebsd', 'linux', 'openbsd', 'sunos', 'win32', 'android', 'haiku'])).min(1).refine(values => new Set(values).size === values.length).readonly().optional(),
+  architectures: z.array(z.enum(['arm', 'arm64', 'ia32', 'loong64', 'mips', 'mipsel', 'ppc', 'ppc64', 'riscv64', 's390', 's390x', 'x64'])).min(1).refine(values => new Set(values).size === values.length).readonly().optional(),
+  source: z.object({ url: z.string().max(2048).url().refine(value => {
+    if (/[\x00-\x20\x7f]/.test(value)) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
+    } catch { return false; }
+  }) }).strict().readonly(),
+  optional: z.boolean().optional(),
+}).strict().readonly();
+
+export type ExternalToolDependency = z.infer<typeof externalToolSchema>;
+
+const externalToolsSchema = z.array(externalToolSchema).max(64).refine(tools => new Set(tools.map(tool => tool.id)).size === tools.length);
+
 export const CORE_CAPABILITIES = [
   'agent.provider',
   'sandbox.provider',
@@ -80,6 +106,7 @@ export interface PluginManifest {
   readonly requires?: readonly Capability[];
   readonly conflicts?: readonly string[];
   readonly configSchema?: PluginConfigSchema;
+  readonly externalTools?: readonly ExternalToolDependency[];
   readonly trusted: boolean;
 }
 
@@ -150,6 +177,9 @@ export function validateManifest(manifest: PluginManifest): void {
   for (const capability of manifest.provides) validateIdentifier(capability, 'capability');
   for (const capability of manifest.requires ?? []) validateIdentifier(capability, 'capability');
   for (const conflict of manifest.conflicts ?? []) validateIdentifier(conflict, 'plugin conflict');
+  if (manifest.externalTools !== undefined && !externalToolsSchema.safeParse(manifest.externalTools).success) {
+    throw new Error(`plugin '${manifest.id}' has invalid externalTools`);
+  }
 }
 
 export function validatePluginId(id: string): void {

@@ -330,6 +330,12 @@ Acquire resources during activation and register their cleanup with
 `context.onDispose`. Resources created during module import or factory execution
 are outside the activation batch and require factory-owned cleanup on failure.
 
+### External-tool declarations and SDK diagnosis
+
+API v1 manifests accept optional `externalTools`, read statically through `listExternalTools`. `diagnoseExternalTools` executes only with explicit probing and a trusted caller's exact command/argv/location allowlist. Host and backend are distinct execution locations; missing backends never fall back to the host. Unconfirmed cleanup retains `unknown` and `cleanup: unconfirmed`. The [integration standard](plugin-integration-standard.zh.md#21-外部工具声明与诊断) defines fields, deadlines and result contracts.
+
+Integrated scope is the SDK, declaration validation, builtin tool metadata and explicit diagnosis. Side-effect-free CLI/manager discovery, configured custom executable bindings and external dependency installation remain separate work. Passing the SDK does not qualify these product paths. Source URLs are informational and never trigger downloads or installation.
+
 ## Installation and configuration
 
 ```sh

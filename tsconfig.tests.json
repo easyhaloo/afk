@@ -23,6 +23,9 @@
     "packages/runtime/src/application/learning/proposals.test.ts",
     "packages/runtime/src/application/learning/proposal-runtime.test.ts",
     "packages/runtime/src/application/learning/proposal-semantics.test.ts",
-    "packages/runtime/src/application/learning/proposal-validation.test.ts"
+    "packages/runtime/src/application/learning/proposal-validation.test.ts",
+    "packages/runtime/src/application/plugins/builtin-manifests.test.ts",
+    "packages/runtime/src/application/plugins/external-tools.test.ts",
+    "packages/runtime/src/plugin-sdk/profile.test.ts"
   ]
 }

@@ -53,6 +53,32 @@ interface Plugin {
 `getProvider/getCredentialProvider`，以及 `registerLifecycle`、`registerSystemAction`、
 模板/界面注册和 `onDispose`。注册名稳定、唯一；Manifest 声明本身不会构造 Provider 或挂载 UI。
 
+### 2.1 外部工具声明与诊断
+
+Manifest 可选 `externalTools`，最多64项，`id` 唯一。每项定义：
+
+```json
+{
+  "id": "node",
+  "command": "node",
+  "location": "host",
+  "version": {"args": ["--version"], "minimum": "22.16.0"},
+  "source": {"url": "https://nodejs.org/"},
+  "optional": false
+}
+```
+
+- `command` 是单个程序名，只接受字母、数字、点、下划线和连字符；不接受路径、参数或shell片段。
+- `location` 为 `host/backend`；可选 `platforms/architectures` 限制目标位置的平台与架构。
+- `version` 可省略；提供时 `args` 为1–16个无控制字符的参数，`minimum` 为稳定三段数字版本。
+- `source.url` 必须为无凭据、query和fragment的HTTPS URL；它是获取说明，不证明发布者、内容完整性或安装权限。
+- `listExternalTools(manifest)` 只校验并返回声明。`diagnoseExternalTools(manifest, options?)` 默认返回 `unknown/not-requested`。
+- 版本探测要求 `probe: true` 及可信调用方提供的精确 `command/args/location` 白名单。自定义宿主执行器声明 `executorLifecycle: trusted-cooperative`；backend执行器声明 `lifecycle: trusted-cooperative`，缺失backend不回退宿主。
+- 结果状态为 `available/missing/unsupported/outdated/unknown`；返回受限版本与固定原因，不返回原始输出或异常。
+- 整个清单共享默认3秒、最大5秒执行期限；另有固定1秒清理收口预算。默认宿主执行器等待原生close及临时目录清理；未确认时返回 `unknown` 并保留 `cleanup: unconfirmed`。协作Promise结束不等于真实backend物理关闭。
+
+以上为SDK合同；CLI/manager静态接线、配置后的实际程序绑定及按需安装分别验收。
+
 ## 3. 能力接口与调用协议
 
 | 能力 / 接口 | 操作和结果契约 |

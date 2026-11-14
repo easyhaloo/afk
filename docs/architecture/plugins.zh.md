@@ -277,6 +277,12 @@ export default function createPlugin({ configuration }) {
 在 activate 中获取资源，并通过 `context.onDispose` 注册清理。
 模块 import 或 factory 阶段创建的资源不在激活 batch 内，失败时由工厂自行清理。
 
+### 外部工具声明与SDK诊断
+
+API v1 Manifest支持可选的`externalTools`，由`listExternalTools`静态读取；`diagnoseExternalTools`仅在显式探测和可信调用方精确白名单同时满足时执行。目标位置区分host/backend，缺失backend不搜索宿主；清理未确认保留`unknown`与`cleanup: unconfirmed`。字段、执行期限和结果协议见[接入标准](plugin-integration-standard.zh.md#21-外部工具声明与诊断)。
+
+当前已集成的是SDK、声明校验、内置工具元数据及显式诊断。CLI/manager无副作用发现、配置后的自定义程序绑定与外部依赖安装仍独立推进；不能用SDK通过替代这些产品资格。来源URL只作说明，不触发下载或安装。
+
 ## 安装与配置
 
 ```sh

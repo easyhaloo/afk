@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { PluginManifest } from '../../plugin-sdk/profile.js';
+import type { ExternalToolDependency, PluginManifest } from '../../plugin-sdk/profile.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
 import {
   CodeContextProvider, CompliancePolicyProvider, DesktopNotificationProvider,
@@ -48,7 +48,10 @@ export function createDefaultBuiltinProviderPlugins(homeDir: string, workspaceRo
         new CompliancePolicyProvider({ rules: [] }),
       ],
     }),
-  ];
+  ].map(plugin => {
+    const externalTools = builtinExternalTools(plugin.manifest.id);
+    return externalTools.length ? { ...plugin, manifest: { ...plugin.manifest, externalTools } } : plugin;
+  });
 }
 
 export function builtinPluginManifests(homeDir: string, integrations?: unknown): readonly PluginManifest[] {
@@ -57,4 +60,29 @@ export function builtinPluginManifests(homeDir: string, integrations?: unknown):
     .concat({ id: 'workflow.capabilities', version: '0.1.0', apiVersion: 1, provides: ['workflow.action'], trusted: true });
   if (integrations !== undefined) manifests.push({ id: 'workflow.integrations', version: '0.1.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true });
   return manifests;
+}
+
+export function builtinExternalTools(pluginId: string): readonly ExternalToolDependency[] {
+  const tool = (id: string, command: string, location: 'host' | 'backend', url: string, args?: string[]): ExternalToolDependency => ({
+    id, command, location, source: { url }, ...(args ? { version: { args } } : {}),
+  });
+  switch (pluginId) {
+    case 'agent.claude-code': return [tool('claude-code', 'claude', 'backend', 'https://code.claude.com/docs/en/setup', ['--version'])];
+    case 'agent.codex': return [tool('codex', 'codex', 'backend', 'https://github.com/openai/codex', ['--version'])];
+    case 'agent.cursor': return [tool('cursor', 'cursor-agent', 'backend', 'https://cursor.com/docs/cli/installation', ['--version'])];
+    case 'agent.pi': return [tool('pi', 'pi', 'backend', 'https://github.com/badlogic/pi-mono', ['--version'])];
+    case 'agent.opencode': return [tool('opencode', 'opencode', 'backend', 'https://opencode.ai/docs/', ['--version'])];
+    case 'agent.copilot': return [tool('copilot', 'copilot', 'backend', 'https://github.com/github/copilot-cli', ['--version'])];
+    case 'host.ssh': return [
+      tool('ssh', 'ssh', 'host', 'https://www.openssh.com/', ['-V']),
+      tool('scp', 'scp', 'host', 'https://www.openssh.com/'),
+    ];
+    case 'host.jumpserver': return [tool('jms', 'jms', 'host', 'https://github.com/jumpserver/jms')];
+    case 'host.aws-ssm': return [tool('aws', 'aws', 'host', 'https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html', ['--version'])];
+    case 'host.kubernetes-exec': return [tool('kubectl', 'kubectl', 'host', 'https://kubernetes.io/docs/tasks/tools/', ['version', '--client', '--output=json'])];
+    case 'sandbox.docker': return [tool('docker', 'docker', 'host', 'https://docs.docker.com/engine/install/', ['--version'])];
+    case 'sandbox.podman': return [tool('podman', 'podman', 'host', 'https://podman.io/docs/installation', ['--version'])];
+    case 'verification.browser-check': return [{ ...tool('playwright', 'playwright', 'backend', 'https://playwright.dev/docs/intro', ['--version']), optional: true }];
+    default: return [];
+  }
 }

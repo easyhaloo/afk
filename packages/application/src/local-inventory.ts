@@ -1,4 +1,4 @@
-export type InventoryPlatform = 'github' | 'gitlab';
+export type InventoryPlatform = 'github' | 'gitlab' | 'geelib';
 export type InventoryState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 
 export interface InventoryProject {

@@ -114,3 +114,37 @@ describe('isProjectDetectionFailure', () => {
     expect(isProjectDetectionFailure(new Error('Provider authentication is required.'))).toBe(false);
   });
 });
+
+describe('default tracker routing for geelib', () => {
+  it('serves a geelib work item from the environment credentials without falling into gitlab', async () => {
+    vi.stubEnv('GELIB_TOKEN', 'geelib-token');
+    vi.stubEnv('GELIB_USER_MAIL', 'afk@example.com');
+    vi.stubEnv('GELIB_URL', 'https://geelib.example');
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('Matter/getMatterStatus')) {
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: [
+          { id: 1, status_name: '新建', status_stage: '未开始' },
+        ] }), { status: 200 });
+      }
+      expect(url.searchParams.get('sub_id')).toBe('6856');
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+        total: 1,
+        matterList: [{ id: 1083121, sub_id: 6856, type_id: 20655, title: '集酷工作项', mkd_content: '正文', matter_status: 1, label_name: 'afk' }],
+      } }), { status: 200 });
+    }));
+
+    const provider = new InventoryBacklogProvider();
+    const item = await provider.get('geelib:6856#1083121');
+
+    expect(item).toMatchObject({
+      id: 'geelib:6856#1083121',
+      workItemId: 'geelib:6856#1083121',
+      issueNumber: 1083121,
+      title: '集酷工作项',
+      tags: ['afk'],
+    });
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+});

@@ -262,6 +262,49 @@ export class GeelibClient implements TrackerProvider {
     }, { method: 'POST' });
   }
 
+  /**
+   * Point a work item at its native parent. The parent edge is the one the
+   * platform UI shows as the hierarchy; dependencies ride on the
+   * resource-reference module instead.
+   */
+  async changeParent(matterId: number, parentId: number): Promise<void> {
+    await this.request('Matter/changeParent', {
+      sub_id: this.subId,
+      id: matterId,
+      parent_id: parentId,
+    }, { method: 'POST' });
+  }
+
+  /**
+   * Reference other work items as dependencies of this one.
+   *
+   * The reference module is the platform's only cross-project link between
+   * work items, so it carries the AFK dependency edges. The target's title
+   * is part of the payload the platform requires — callers read it first.
+   */
+  async addResourceReferences(matterId: number, targets: ReadonlyArray<{ id: number; title: string; subId: number }>): Promise<void> {
+    await this.request('OpenApiResourcesMgr/addResources', {
+      id: matterId,
+      source: 'matter',
+      data: { matter: targets.map(target => ({ id: target.id, title: target.title, sub_id: target.subId })) },
+    }, { method: 'POST' });
+  }
+
+  /** The work items this one references, decoded from the module's list. */
+  async listResourceReferences(matterId: number): Promise<Array<{ id: number; title: string; subId: number }>> {
+    const envelope = await this.request('OpenApiResourcesMgr/getDemandReourcesList', { id: matterId, source: 'matter' });
+    const data = envelope.data as { matter?: Array<{ id?: number; title?: string; sub_id?: number }> } | null;
+    const references = Array.isArray(data?.matter) ? data.matter : [];
+    return references
+      .filter(reference => reference.id !== undefined)
+      .map(reference => ({ id: Number(reference.id), title: String(reference.title ?? ''), subId: Number(reference.sub_id ?? this.subId) }));
+  }
+
+  /** Remove one reference by the id the platform assigned it. */
+  async removeResourceReference(referenceId: number): Promise<void> {
+    await this.request('OpenApiResourcesMgr/delResources', { id: referenceId }, { method: 'POST' });
+  }
+
   getRetryCount(): number {
     // Geelib carries no retry-count channel; retries are tracked in AFK's own records.
     return 0;

@@ -118,6 +118,78 @@ describe('geelib work item reads', () => {
   });
 });
 
+describe('geelib catalog reads', () => {
+  it('lists the projects the account can access', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+      count: 2,
+      list: [
+        { id: 6856, name: '示例项目', update_time: '2026-11-14 23:24:48' },
+        { id: 4065, name: '另一个项目' },
+      ],
+    } }), { status: 200 }));
+
+    const projects = await client().listCatalogProjects();
+
+    expect(projects).toEqual([
+      { id: 6856, name: '示例项目', updatedAt: '2026-11-14 23:24:48' },
+      { id: 4065, name: '另一个项目', updatedAt: undefined },
+    ]);
+    const url = new URL(fetchMock.mock.calls[0]?.[0] as string);
+    expect(url.pathname).toBe('/openapi/OpenApiSubBusMgr/getSubBusList');
+  });
+
+  it('lists catalog issues of one project with native state and update time', async () => {
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('Matter/getMatterStatus')) {
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: [
+          { id: 1, status_name: '新建', status_stage: '未开始' },
+          { id: 20, status_name: '关闭', status_stage: '已完成' },
+        ] }), { status: 200 });
+      }
+      expect(url.searchParams.get('sub_id')).toBe('4065');
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+        total: 2,
+        matterList: [
+          { id: 11, sub_id: 4065, type_id: 20655, title: '打开的', matter_status: 1, label_name: 'BugTrace', update_time: '2026-11-15 10:00:00' },
+          { id: 12, sub_id: 4065, type_id: 20655, title: '完成的', matter_status: 20, label_name: '', update_time: '2026-11-15 11:00:00' },
+        ],
+      } }), { status: 200 });
+    });
+
+    const issues = await client().listCatalogIssues(4065);
+
+    expect(issues).toEqual([
+      { issueNumber: 11, title: '打开的', description: '', labels: ['BugTrace'], state: 'opened', updatedAt: '2026-11-15 10:00:00', webUrl: 'https://geelib.example/geelib/project/matter/detail?subId=4065&id=11' },
+      { issueNumber: 12, title: '完成的', description: '', labels: [], state: 'closed', updatedAt: '2026-11-15 11:00:00', webUrl: 'https://geelib.example/geelib/project/matter/detail?subId=4065&id=12' },
+    ]);
+  });
+
+  it('resolves the account identity by searching its own mail', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+      count: 2,
+      list: [
+        { id: 73, mail: 'afk@example.com', real_name: 'AFK' },
+        { id: 74, mail: 'other@example.com', real_name: 'Other' },
+      ],
+    } }), { status: 200 }));
+
+    expect(await client().accountIdentity()).toEqual({ accountId: '73' });
+    const url = new URL(fetchMock.mock.calls[0]?.[0] as string);
+    expect(url.pathname).toBe('/openapi/UserMgr/getUserListBySearch');
+    expect(url.searchParams.get('query')).toBe('afk@example.com');
+  });
+
+  it('refuses an account identity when the search does not match the configured mail', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+      count: 1,
+      list: [{ id: 74, mail: 'other@example.com' }],
+    } }), { status: 200 }));
+
+    await expect(client().accountIdentity()).rejects.toThrow(/afk@example\.com/);
+  });
+});
+
 describe('geelib unsupported capabilities', () => {
   it('refuses write and code-hosting capabilities with a clear error', async () => {
     const geelib = client();

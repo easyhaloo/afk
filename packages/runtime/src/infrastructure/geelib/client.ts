@@ -21,6 +21,9 @@ import type {
 /** A refused capability: every call rejects with the same clear diagnosis. */
 type Refused = (...arguments_: never[]) => Promise<never>;
 
+/** An untyped JSON object, narrowed from `unknown`. */
+type UnknownObject = { [key: string]: unknown };
+
 /**
  * The canonical query string the Geelib OpenAPI signs.
  *
@@ -29,12 +32,12 @@ type Refused = (...arguments_: never[]) => Promise<never>;
  * GET query and as the signature input. This mirrors the platform's
  * published algorithm, verified against the geelib-cli reference client.
  */
-export function geelibCanonical(params: Record<string, unknown>): string {
+export function geelibCanonical(params: UnknownObject): string {
   const pairs: string[] = [];
   const flatten = (prefix: string, value: unknown): void => {
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       for (const key of Object.keys(value).sort()) {
-        flatten(prefix ? `${prefix}[${key}]` : key, (value as Record<string, unknown>)[key]);
+        flatten(prefix ? `${prefix}[${key}]` : key, (value as UnknownObject)[key]);
       }
       return;
     }
@@ -235,7 +238,7 @@ export class GeelibClient implements TrackerProvider {
     return table;
   }
 
-  private async request(path: string, params: Record<string, unknown>): Promise<GeelibEnvelope> {
+  private async request(path: string, params: UnknownObject): Promise<GeelibEnvelope> {
     const signed = { ...params, t: Math.floor(Date.now() / 1000), user_mail: this.userMail };
     const withoutSign = { ...signed };
     const canonical = geelibCanonical(withoutSign);

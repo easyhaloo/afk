@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { GeelibClient, geelibCanonical, geelibSign } from './client.js';
-import type { TrackedIssue } from '../domain/tracker/types.js';
+import type { TrackedIssue } from '../../domain/tracker/types.js';
 
 const fetchMock = vi.fn();
 const client = () => new GeelibClient({

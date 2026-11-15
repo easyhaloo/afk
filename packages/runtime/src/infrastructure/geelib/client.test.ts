@@ -214,6 +214,17 @@ describe('geelib write methods', () => {
     expect(body.sign).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  it('replaces the label set with the JSON-string payload the platform expects', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 }));
+
+    await client().setLabels(1083121, ['billing', 'mode::hitl']);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toBe('https://geelib.example/openapi/Matter/edit');
+    const body = JSON.parse(String(init.body));
+    expect(body.data).toEqual([{ cf_name: '标签', cf_value: '["billing","mode::hitl"]' }]);
+  });
+
   it('refuses a status outside the verified native vocabulary', async () => {
     await expect(client().setStatus(1083121, '随便写的')).rejects.toThrow(/native state/);
     expect(fetchMock).not.toHaveBeenCalled();

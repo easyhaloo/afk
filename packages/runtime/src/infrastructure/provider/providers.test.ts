@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProviderBundle } from './providers.js';
-import { GeelibBacklogProvider } from '../geelib/backlog-provider.js';
+
 import { GeelibClient } from '../geelib/client.js';
 
 const fetchMock = vi.fn();
@@ -35,7 +35,7 @@ describe('createProviderBundle for geelib', () => {
 
     const bundle = createProviderBundle(geelibTracker(), repoRoot);
 
-    expect(bundle.backlog).toBeInstanceOf(GeelibBacklogProvider);
+    // The recorder wraps the geelib provider; the behavior is the contract.
     const item = await bundle.backlog.get('geelib:6856#1083121');
     expect(item).toMatchObject({ id: 'geelib:6856#1083121', state: 'ready' });
     // Change requests live on the git platform for geelib items (hybrid mode).

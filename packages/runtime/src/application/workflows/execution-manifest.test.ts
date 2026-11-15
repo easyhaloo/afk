@@ -93,7 +93,7 @@ describe('parseExecutionManifest', () => {
     ['invalid provider backlog id', { ...validManifest(), providerBacklogId: 'WI-42' }, /providerBacklogId.*positive integer/],
     ['missing tracker', missingTracker, /tracker must be an object/],
     ['malformed tracker', { ...validManifest(), tracker: null }, /tracker must be an object/],
-    ['invalid tracker platform', { ...validManifest(), tracker: { platform: 'bitbucket', projectKey: 'acme/api' } }, /tracker\.platform must be github or gitlab/],
+    ['invalid tracker platform', { ...validManifest(), tracker: { platform: 'bitbucket', projectKey: 'acme/api' } }, /tracker\.platform must be github, gitlab or geelib/],
     ['missing tracker project key', { ...validManifest(), tracker: { platform: 'github' } }, /tracker\.projectKey/],
     ['empty repositories', { ...validManifest(), repositories: [] }, /repositories must be a non-empty array/],
     ['zero primary repositories', {

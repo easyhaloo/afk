@@ -26,7 +26,7 @@ const WINDOWS_RESERVED_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\
 
 type UnknownObject = { [key: string]: unknown };
 
-export type ExecutionManifestPlatform = 'github' | 'gitlab';
+export type ExecutionManifestPlatform = 'github' | 'gitlab' | 'geelib';
 
 export interface ExecutionManifestTracker {
   platform: ExecutionManifestPlatform;
@@ -151,7 +151,7 @@ function parseManifest(value: unknown, backlogId: string): ExecutionManifest {
 function parseTracker(value: unknown): ExecutionManifestTracker {
   const candidate = objectValue(value, 'tracker');
   assertExactKeys(candidate, TRACKER_KEYS, 'tracker');
-  if (candidate.platform !== 'github' && candidate.platform !== 'gitlab') throw new Error('tracker.platform must be github or gitlab');
+  if (candidate.platform !== 'github' && candidate.platform !== 'gitlab' && candidate.platform !== 'geelib') throw new Error('tracker.platform must be github, gitlab or geelib');
   return {
     platform: candidate.platform,
     projectKey: projectKeyValue(candidate.projectKey, 'tracker.projectKey'),
@@ -168,7 +168,7 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
   if (repositoryWorkingBranch !== workingBranch) throw new Error(`${label}.workingBranch must match workingBranch`);
   if (typeof candidate.primary !== 'boolean') throw new Error(`${label}.primary must be a boolean`);
   const platform = candidate.platform;
-  if (platform !== 'github' && platform !== 'gitlab') throw new Error(`${label}.platform must be github or gitlab`);
+  if (platform !== 'github' && platform !== 'gitlab' && platform !== 'geelib') throw new Error(`${label}.platform must be github, gitlab or geelib`);
 
   return {
     platform,

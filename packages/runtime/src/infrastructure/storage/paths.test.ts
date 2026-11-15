@@ -21,8 +21,8 @@ describe('shared storage paths', () => {
   });
 
   it('names a geelib account its own isolated namespace', () => {
-    const geelib = { platform: 'geelib' as const, accountId: '789' };
-    const github = { platform: 'github' as const, accountId: '789' };
+    const geelib = { platform: 'geelib' as const, host: 'geelib.qihoo.net', accountId: '789' };
+    const github = { platform: 'github' as const, host: 'github.com', accountId: '789' };
 
     expect(inventoryNamespace([geelib])).toBe(inventoryNamespace([{ ...geelib }]));
     expect(inventoryNamespace([geelib])).not.toBe(inventoryNamespace([github]));

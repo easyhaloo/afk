@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 export interface ProviderAccountIdentity {
-  platform: 'github' | 'gitlab';
+  platform: 'github' | 'gitlab' | 'geelib';
   host: string;
   accountId: string;
 }
@@ -24,7 +24,7 @@ export function providerHost(host: string): string {
 export function inventoryNamespace(identities: readonly ProviderAccountIdentity[]): string {
   if (!identities.length) throw new Error('Verified Provider identity is required');
   const entries = identities.map(identity => {
-    if (!['github', 'gitlab'].includes(identity.platform) || !identity.accountId.trim() || identity.accountId.trim() !== identity.accountId) {
+    if (!['github', 'gitlab', 'geelib'].includes(identity.platform) || !identity.accountId.trim() || identity.accountId.trim() !== identity.accountId) {
       throw new Error('Invalid Provider identity');
     }
     return JSON.stringify([identity.platform, providerHost(identity.host), identity.accountId]);

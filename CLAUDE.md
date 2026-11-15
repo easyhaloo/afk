@@ -116,7 +116,7 @@ GITLAB_URL=            # GitLab instance URL
 GITHUB_TOKEN=          # GitHub API token
 AFK_WORKSPACE=         # Desktop project selection; does not relocate execution or system data
 AFK_TRACKER_PROJECT=   # Provider project fallback when cwd has no git remote
-AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab)
+AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab|geelib)
 AFK_TMUX_SESSION=      # tmux session name (default: afk)
 ```
 

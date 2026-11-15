@@ -147,7 +147,7 @@ function parseTracker(value: unknown): WorkItemExecutionManifest["tracker"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("tracker must be an object");
   const candidate = value as Record<string, unknown>;
   assertExactKeys(candidate, TRACKER_KEYS, "tracker");
-  if (candidate.platform !== "github" && candidate.platform !== "gitlab") throw new Error("tracker.platform is invalid");
+  if (candidate.platform !== "github" && candidate.platform !== "gitlab" && candidate.platform !== "geelib") throw new Error("tracker.platform is invalid");
   if (typeof candidate.projectKey !== "string" || !candidate.projectKey.trim()) throw new Error("tracker.projectKey is invalid");
   for (const key of ["providerHost", "providerProjectId"] as const) {
     if (candidate[key] !== undefined && (typeof candidate[key] !== "string" || !candidate[key].trim())) throw new Error(`tracker.${key} is invalid`);

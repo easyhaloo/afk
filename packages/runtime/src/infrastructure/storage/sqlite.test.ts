@@ -71,4 +71,44 @@ describe('shared SQLite lifecycle', () => {
     databases.push(repaired);
     expect(repaired.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
   });
+
+  it('lets a migration rebuild a referenced parent with foreign keys disabled', () => {
+    const root = mkdtempSync(join(tmpdir(), 'afk-storage-fkoff-'));
+    directories.push(root);
+    const file = join(root, 'fk.sqlite');
+    const v1Schema = `
+      CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL) STRICT;
+      CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id), label TEXT NOT NULL) STRICT;
+    `;
+    const first = openSqlite({ file, schema: v1Schema, version: 1 });
+    first.prepare('INSERT INTO parent (id, name) VALUES (1, ?)').run('kept');
+    first.prepare('INSERT INTO child (id, parent_id, label) VALUES (10, 1, ?)').run('child-row');
+    first.close();
+
+    const reopened = openSqlite({
+      file,
+      version: 2,
+      schema: v1Schema.replace('name TEXT NOT NULL', 'name TEXT NOT NULL, extra TEXT'),
+      migrations: [{
+        from: 1,
+        to: 2,
+        foreignKeys: 'off',
+        migrate: database => {
+          database.exec(`
+            CREATE TABLE parent_v2 (id INTEGER PRIMARY KEY, name TEXT NOT NULL, extra TEXT) STRICT;
+            INSERT INTO parent_v2 (id, name) SELECT id, name FROM parent;
+            DROP TABLE parent;
+            ALTER TABLE parent_v2 RENAME TO parent;
+          `);
+        },
+      }],
+    });
+    databases.push(reopened);
+
+    expect(reopened.prepare('SELECT name, extra FROM parent').all()).toEqual([{ name: 'kept', extra: null }]);
+    expect(reopened.prepare('SELECT label FROM child').all()).toEqual([{ label: 'child-row' }]);
+    // Enforcement is back on after the migration: a dangling reference fails.
+    expect(() => reopened.prepare('INSERT INTO child (id, parent_id, label) VALUES (11, 99, ?)').run('dangling')).toThrow();
+    expect(reopened.prepare('PRAGMA foreign_keys').get()).toEqual({ foreign_keys: 1 });
+  });
 });

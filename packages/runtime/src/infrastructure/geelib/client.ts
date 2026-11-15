@@ -281,28 +281,49 @@ export class GeelibClient implements TrackerProvider {
    * The reference module is the platform's only cross-project link between
    * work items, so it carries the AFK dependency edges. The target's title
    * is part of the payload the platform requires — callers read it first.
+   *
+   * The `data` group travels as one JSON **string**: the server signs it as
+   * a single parameter, and the nested-object form fails the signature
+   * check (errno 4001, verified live against the reference signer).
    */
   async addResourceReferences(matterId: number, targets: ReadonlyArray<{ id: number; title: string; subId: number }>): Promise<void> {
     await this.request('OpenApiResourcesMgr/addResources', {
       id: matterId,
       source: 'matter',
-      data: { matter: targets.map(target => ({ id: target.id, title: target.title, sub_id: target.subId })) },
+      data: JSON.stringify({ matter: targets.map(target => ({ id: target.id, title: target.title, sub_id: target.subId })) }),
     }, { method: 'POST' });
   }
 
-  /** The work items this one references, decoded from the module's list. */
-  async listResourceReferences(matterId: number): Promise<Array<{ id: number; title: string; subId: number }>> {
+  /**
+   * The work items this one references, decoded from the module's list.
+   *
+   * Each entry's `id` is the platform's reference record; the referenced
+   * work item is `type_id` (verified live). `referenceId` is kept for
+   * diagnostics only — the platform's own deletion call refuses every id
+   * form probed (its CLI fails identically), so removal is not implemented.
+   */
+  async listResourceReferences(matterId: number): Promise<Array<{ referenceId: number; id: number; title: string; subId: number }>> {
     const envelope = await this.request('OpenApiResourcesMgr/getDemandReourcesList', { id: matterId, source: 'matter' });
-    const data = envelope.data as { matter?: Array<{ id?: number; title?: string; sub_id?: number }> } | null;
+    const data = envelope.data as { matter?: Array<{ id?: number; type_id?: number; title?: string; sub_id?: string | number }> } | null;
     const references = Array.isArray(data?.matter) ? data.matter : [];
     return references
-      .filter(reference => reference.id !== undefined)
-      .map(reference => ({ id: Number(reference.id), title: String(reference.title ?? ''), subId: Number(reference.sub_id ?? this.subId) }));
+      .filter(reference => reference.type_id !== undefined)
+      .map(reference => ({
+        referenceId: Number(reference.id),
+        id: Number(reference.type_id),
+        title: String(reference.title ?? ''),
+        subId: Number(reference.sub_id ?? this.subId),
+      }));
   }
 
-  /** Remove one reference by the id the platform assigned it. */
-  async removeResourceReference(referenceId: number): Promise<void> {
-    await this.request('OpenApiResourcesMgr/delResources', { id: referenceId }, { method: 'POST' });
+  /**
+   * Unimplemented: the platform's deletion endpoint reports 项目资源不存在
+   * for every id form probed — including through the platform's own
+   * geelib-cli. Removal happens on the platform UI; this gap is a platform
+   * confirmation item.
+   */
+  async removeResourceReference(): Promise<never> {
+    throw new Error('The geelib provider cannot delete resource references: the platform deletion API refuses every id form (its own CLI fails identically); remove them on the platform UI.');
   }
 
   getRetryCount(): number {

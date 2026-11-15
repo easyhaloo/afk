@@ -248,7 +248,7 @@ describe('geelib relation channel', () => {
     expect(body.sub_id).toBe(6856);
   });
 
-  it('adds resource references from a work item to its dependencies', async () => {
+  it('adds resource references with the data payload signed as a JSON string', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: 1 }), { status: 200 }));
 
     await client().addResourceReferences(1083121, [{ id: 1083000, title: '依赖项', subId: 6856 }]);
@@ -258,32 +258,32 @@ describe('geelib relation channel', () => {
     const body = JSON.parse(String(init.body));
     expect(body.id).toBe(1083121);
     expect(body.source).toBe('matter');
-    expect(body.data.matter).toEqual([{ id: 1083000, title: '依赖项', sub_id: 6856 }]);
+    // The server signs `data` as one string parameter: the nested object form
+    // fails the signature check (errno 4001, verified live).
+    expect(typeof body.data).toBe('string');
+    expect(JSON.parse(body.data)).toEqual({ matter: [{ id: 1083000, title: '依赖项', sub_id: 6856 }] });
   });
 
-  it('lists the resource references of a work item', async () => {
+  it('lists the resource references of a work item, decoding the target matter id', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: {
-      matter: [{ id: 1083000, title: '依赖项', sub_id: 6856 }],
+      matter: [{ id: 836916, source_id: '1083121', type_id: 1083000, title: '依赖项', sub_id: '6856' }],
       list: [],
     } }), { status: 200 }));
 
     const references = await client().listResourceReferences(1083121);
 
-    expect(references).toEqual([{ id: 1083000, title: '依赖项', subId: 6856 }]);
+    // `id` is the platform's reference record; the referenced work item is
+    // `type_id` (verified live).
+    expect(references).toEqual([{ referenceId: 836916, id: 1083000, title: '依赖项', subId: 6856 }]);
     const url = new URL(fetchMock.mock.calls[0]?.[0] as string);
     expect(url.pathname).toBe('/openapi/OpenApiResourcesMgr/getDemandReourcesList');
     expect(url.searchParams.get('id')).toBe('1083121');
     expect(url.searchParams.get('source')).toBe('matter');
   });
 
-  it('removes a resource reference by its reference id', async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: '' }), { status: 200 }));
-
-    await client().removeResourceReference(5566);
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(String(url)).toBe('https://geelib.example/openapi/OpenApiResourcesMgr/delResources');
-    expect(JSON.parse(String(init.body)).id).toBe(5566);
+  it('refuses reference removal with the platform diagnosis', async () => {
+    await expect(client().removeResourceReference(836916)).rejects.toThrow(/cannot delete resource references/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

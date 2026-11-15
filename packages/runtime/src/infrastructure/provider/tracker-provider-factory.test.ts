@@ -217,6 +217,32 @@ describe('tracker target resolution outside a git repository', () => {
     await expect(createTracker('6856', '/nowhere', 'geelib')).rejects.toThrow(/Geelib authentication is required/i);
   });
 
+  it('creates a geelib catalog from credentials and refuses the platform without them', () => {
+    const geelibCatalog = { platform: 'geelib', scopeKey: 'geelib.qihoo.net' } as ProviderCatalog;
+    const createGeelibCatalog = vi.fn(() => geelibCatalog);
+
+    const catalogs = createGlobalWorkItemCatalogs('geelib', {
+      env: { GELIB_TOKEN: 'geelib-token', GELIB_USER_MAIL: 'afk@example.com', GELIB_URL: 'https://geelib.example' },
+      readGhToken: vi.fn(() => null),
+      listGlabTokens: vi.fn(() => []),
+      createGitHubCatalog: vi.fn(),
+      createGitLabCatalog: vi.fn(),
+      createGeelibCatalog,
+    });
+
+    expect(catalogs).toEqual([geelibCatalog]);
+    expect(createGeelibCatalog).toHaveBeenCalledWith({ userMail: 'afk@example.com', token: 'geelib-token', baseUrl: 'https://geelib.example' });
+
+    expect(() => createGlobalWorkItemCatalogs('geelib', {
+      env: {},
+      readGhToken: vi.fn(() => null),
+      listGlabTokens: vi.fn(() => []),
+      createGitHubCatalog: vi.fn(),
+      createGitLabCatalog: vi.fn(),
+      createGeelibCatalog,
+    })).toThrow(/Geelib authentication is required/i);
+  });
+
   it('creates a geelib tracker from GELIB_TOKEN and GELIB_USER_MAIL', async () => {
     process.env.GELIB_TOKEN = 'geelib-token';
     process.env.GELIB_USER_MAIL = 'afk@example.com';

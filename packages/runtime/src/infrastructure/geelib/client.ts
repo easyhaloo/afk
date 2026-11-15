@@ -85,6 +85,7 @@ interface MatterRecord {
   mkd_content?: string;
   matter_status?: number;
   label_name?: string;
+  update_time?: string;
 }
 
 interface MatterStatus {
@@ -188,7 +189,7 @@ export class GeelibClient implements TrackerProvider {
       title: String(matter.title ?? ''),
       description: String(matter.mkd_content ?? ''),
       labels: String(matter.label_name ?? '').split(',').map(name => name.trim()).filter(Boolean),
-      state: await this.stateOf(matter, subId),
+      state: await this.stateOf(matter, subId) === 'closed' ? 'closed' as const : 'opened' as const,
       ...(matter.update_time ? { updatedAt: matter.update_time } : {}),
       webUrl: `${this.baseUrl}/geelib/project/matter/detail?subId=${matter.sub_id ?? subId}&id=${matter.id}`,
     })));

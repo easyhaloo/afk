@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { Octokit } from '@octokit/rest';
 import { GeelibClient } from '../geelib/client.js';
+import { GeelibProviderCatalog } from './catalogs.js';
 import { GitHubClient } from '../github/client.js';
 import { GitLabClient } from '../gitlab/index.js';
 import {
@@ -95,6 +96,8 @@ export interface GlobalWorkItemCatalogDependencies {
   listGlabTokens(): GlabTokenConfig[];
   createGitHubCatalog(token: string): ProviderCatalog;
   createGitLabCatalog(host: string, url: string, token: string): ProviderCatalog;
+  /** Optional so hand-built dependency sets from before geelib keep compiling. */
+  createGeelibCatalog?(auth: { userMail: string; token: string; baseUrl: string }): ProviderCatalog;
 }
 
 export function createGlobalWorkItemCatalogs(
@@ -114,8 +117,17 @@ export function createGlobalWorkItemCatalogs(
       throw new Error('GitLab authentication is required. Set GITLAB_TOKEN or authenticate with glab auth login.');
     }
   }
+  if (platform === 'all' || platform === 'geelib') {
+    const auth = resolveGeelibAuth(dependencies.env);
+    if (auth && dependencies.createGeelibCatalog) catalogs.push(dependencies.createGeelibCatalog(auth));
+    else if (platform === 'geelib') {
+      throw new Error(dependencies.createGeelibCatalog
+        ? 'Geelib authentication is required. Set GELIB_TOKEN and GELIB_USER_MAIL.'
+        : 'Geelib catalog support is not wired into this dependency set.');
+    }
+  }
   if (catalogs.length === 0) {
-    throw new Error('Provider authentication is required. Configure GitHub or GitLab credentials.');
+    throw new Error('Provider authentication is required. Configure GitHub, GitLab or Geelib credentials.');
   }
   return catalogs;
 }
@@ -242,6 +254,7 @@ function defaultCatalogDependencies(): GlobalWorkItemCatalogDependencies {
     listGlabTokens,
     createGitHubCatalog: createGitHubProviderCatalog,
     createGitLabCatalog: createGitLabProviderCatalog,
+    createGeelibCatalog: createGeelibProviderCatalog,
   };
 }
 
@@ -264,6 +277,11 @@ function configuredGitLabTokens(
     if (!unique.has(entry.host)) unique.set(entry.host, { host: entry.host, url, token: entry.token });
   }
   return [...unique.values()].sort((left, right) => left.host.localeCompare(right.host));
+}
+
+function createGeelibProviderCatalog(auth: { userMail: string; token: string; baseUrl: string }): ProviderCatalog {
+  const client = new GeelibClient({ ...auth, subId: 0 });
+  return new GeelibProviderCatalog(client, new URL(auth.baseUrl).host);
 }
 
 function createGitHubProviderCatalog(token: string): ProviderCatalog {

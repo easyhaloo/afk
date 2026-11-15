@@ -9,6 +9,7 @@
     ]
   },
   "include": [
+    "packages/runtime/src/infrastructure/verification/command.test.ts",
     "packages/runtime/src/domain/context/terms.test.ts",
     "packages/runtime/src/infrastructure/providers/context.test.ts",
     "packages/runtime/src/application/plugins/configured-remote-operation.test.ts",

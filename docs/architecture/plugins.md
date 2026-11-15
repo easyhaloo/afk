@@ -645,6 +645,19 @@ Reconstruct configured consumers to recapture environment values or change a
 configured credential source. Operation-resolved fields read fresh values from
 their bound provider; other consumers retain activation-captured values.
 
+Ordinary command verification keeps `target` as its working directory. Optional
+`input` travels through stdin and is limited to 256 KiB of UTF-8; `executionId`
+is an identifier of at most 512 characters. When observation is requested, the
+default native runner returns a `verification-execution-v1` receipt only after
+the direct child closes. It records executionId, launched argv, canonical cwd,
+inputDigest, exit code and separate stdout/stderr; the public dispatcher retains
+that structure. Calls without observation retain their previous result shape.
+Injected runner results are not endorsed as native execution receipts. Cancel,
+signal termination and timeout cannot produce a successful observation; caller
+absolute deadlines apply before launch and after completion. A command receipt
+proves only that direct-child execution, not business assertions, Repository/
+Sandbox binding or learning-asset qualification.
+
 ## Loading, dependencies and disposal
 
 1. Read configuration, ignore disabled entries, record duplicates and malformed

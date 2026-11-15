@@ -47,6 +47,14 @@ it('keeps normal verification results pending until child close', async () => {
   expect(await result).toEqual({ exitCode: 0, stdout: 'output', stderr: '' });
 });
 
+it.each([256, 3221225477, -1073741510])('preserves platform exit code %s in a closed native observation', async code => {
+  const f = childFixture();
+  const result = runVerificationCommand([process.execPath, 'owned-fixture'], { cwd: tmpdir(), timeoutMs: 1000, executionId: 'platform-exit' });
+  f.finish(Object.assign(new Error('platform exit'), { code }));
+  f.child.emit('close', code, null);
+  expect(await result).toMatchObject({ exitCode: code, execution: { executionId: 'platform-exit', exitCode: code, closed: true } });
+});
+
 it.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')('retains the npm stage and lock after cancellation callback until process close', async () => {
   const f = childFixture(), stop = new AbortController();
   const root = await fs.mkdtemp(join(tmpdir(), 'afk-managed-tool-process-')); roots.push(root);

@@ -521,6 +521,14 @@ configured 消费者引用的精确凭据 Provider，包括已安装插件注册
 环境值或配置的凭据来源变化后需重建消费者；按操作解析字段从绑定的 Provider 读取新值，
 其他消费者继续保留激活时捕获的值。
 
+普通命令验证的 `target` 保持为工作目录。可选 `input` 经 stdin 传入，上限为 UTF-8
+256 KiB；`executionId` 为最多 512 字符的标识符。请求执行观察时，默认原生命令执行器
+在直属子进程确认 close 后返回 `verification-execution-v1` 收据，包含 executionId、
+实际 argv、规范 cwd、inputDigest、退出码及独立 stdout/stderr。公共调用入口保留该结构。
+未请求观察的调用保留原结果形状；注入 runner 的结果不被背书为原生执行收据。
+取消、信号终止或超时不产生成功观察，调用方绝对期限覆盖启动和返回检查。
+命令收据仅证明该直属进程执行，不授予业务断言、Repository/Sandbox 绑定或学习资产资格。
+
 ## 加载、依赖与 dispose
 
 1. 读取配置，跳过 disabled 条目，对重复 ID、配置格式错误记录诊断；模块加载跳过

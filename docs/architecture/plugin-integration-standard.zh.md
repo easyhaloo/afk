@@ -88,7 +88,7 @@ CLI/manager默认静态接线不导入入口或解析secret；`list --loaded`与
 | `host.connection` / `HostConnectionPort` | `listHosts/resolve/exec`，可选 `upload`；命令使用 argv，远程非零退出仍返回原 `code/stdout/stderr`，连接/认证/超时单独分类。 |
 | `tracker.issue` / `IssueTrackerPort` | 字符串 issue ID 的 CRUD、评论、关系、`health/doctor`；保留真实项目、ID、key 和 URL。 |
 | `tracker.provider`、`backlog.provider` | 源码托管 issue/change request 与规范 backlog 身份；不把外部 issue key 当源码托管数字 ID。 |
-| `verification.provider` / `VerificationProvider` | `verify` 返回 `passed`、时长和可选输出；目标工作区来自调用方。 |
+| `verification.provider` / `VerificationProvider` | `verify` 返回 `passed`、时长、可选输出及执行观察；普通命令的 `target` 为工作目录，可选 `input` 经 stdin 传入。 |
 | `notification.provider` / `NotificationProvider` | `notify` 返回 `delivered/channel/error?`；失败不得伪装为送达。 |
 | `trigger.provider` / `TriggerProvider` | `register/unregister`；宿主管理 listener、timer 和 action 派发，见第 6 节。 |
 | `context.provider` / `ContextSource` | `gather({scope,prompt,limit?})` 返回带 `origin` 的有界 fragment；只读取授权内容。 |
@@ -99,6 +99,13 @@ CLI/manager默认静态接线不导入入口或解析secret；`list --loaded`与
 | Observability | EventStore `append/read`，EvidenceStore `put/get`，Tracer `startSpan/addEvent/endSpan?`，Metrics `record`。本地审计始终为权威。 |
 
 通用能力 Provider 声明 `id` 与操作能力布尔表；Agent/Sandbox 使用各自的名称和能力集合。
+
+命令验证可选请求 `executionId`；`input` 上限为 UTF-8 256 KiB。
+默认原生 runner 在直属子进程 close 后返回可选 `execution`：
+`{ protocol: "verification-execution-v1", executionId, command, cwd, inputDigest, exitCode, stdout, stderr, closed: true }`。
+`inputDigest` 是 stdin 原始 UTF-8 字节的 SHA256；argv、规范 cwd、退出码及流由宿主记录。
+注入 runner 不授予原生观察；取消、信号终止、超时或绝对期限后的成功不授予成功观察。
+公共调用保留结构化收据，普通调用结果保持兼容。此收据不代替领域检查、执行授权、目标版本或工作区归属证明。
 可取消操作使用 `ProviderOperationOptions.signal`；未支持取消的接口必须明确边界。
 Provider `health` 状态为 `ok/degraded/unavailable`，`doctor` 返回 `check/ok/detail?`；
 插件级 `health` 状态为 `healthy/degraded/unhealthy/unknown`，与 Provider 检查结果区分。

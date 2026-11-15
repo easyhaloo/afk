@@ -39,13 +39,22 @@ const contextQuery = z.object({ scope: text, prompt: z.string(), limit: z.number
   return { ...query, ...parsed.data };
 });
 
+const verificationCommand = z.array(z.string()).min(1)
+  .refine(argv => argv.length > 0 && argv[0].trim().length > 0 && argv.every(arg => !arg.includes('\0')));
+const verificationExecutionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/);
 export const verificationRequestSchema = z.object({
   target: text,
-  command: z.array(z.string()).min(1).refine(argv => argv.length > 0 && argv[0].trim().length > 0 && argv.every(arg => !arg.includes('\0'))).optional(),
+  command: verificationCommand.optional(),
   timeoutMs: timeout.optional(),
+  input: z.string().refine(value => Buffer.byteLength(value, 'utf8') <= 256 * 1024).optional(),
+  executionId: verificationExecutionId.optional(),
 }).strict();
 export const verificationResultSchema = z.object({
   passed: z.boolean(), durationMs: z.number().finite().nonnegative(), output: z.string().optional(),
+  execution: z.object({ protocol: z.literal('verification-execution-v1'), executionId: verificationExecutionId,
+    command: verificationCommand, cwd: text, inputDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    exitCode: z.number().int().safe(), stdout: z.string(), stderr: z.string(), closed: z.literal(true),
+  }).strict().optional(),
 });
 export const contextFragmentsSchema = z.array(z.object({
   content: z.string(), origin: z.string(), score: z.number().finite().optional(),

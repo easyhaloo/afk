@@ -83,6 +83,34 @@ async function fixture() {
 }
 
 describe('invokeCapability', () => {
+  it('forwards bounded verification input and projects a structured execution observation', async () => {
+    const current = await fixture();
+    const input = { target: '/repo', command: ['checker'], input: '{}', executionId: 'execution-1' };
+    const execution = { protocol: 'verification-execution-v1' as const, executionId: 'execution-1', command: ['checker'],
+      cwd: '/repo', inputDigest: 'a'.repeat(64), exitCode: 0, stdout: '{}', stderr: 'diagnostic', closed: true as const };
+    const result = { passed: true, durationMs: 12, output: '{}\ndiagnostic', secret: 'discarded', execution };
+    current.verification.verify.mockResolvedValueOnce(result);
+    try {
+      expect(await invokeCapability(current.runtime, { capability: 'verification.provider', provider: 'verification', operation: 'verify', input }))
+        .toEqual({ passed: true, durationMs: 12, output: '{}\ndiagnostic', execution });
+      expect(current.verification.verify).toHaveBeenCalledWith(input);
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each([
+    { input: '😀'.repeat(65537), executionId: 'execution-large' },
+    { input: {}, executionId: 'execution-object' },
+    { input: '{}', executionId: 'invalid\nidentity' },
+    { input: '{}', executionId: '' },
+  ])('rejects malformed verification input before provider dispatch ($executionId)', async addition => {
+    const current = await fixture();
+    try {
+      await expect(invokeCapability(current.runtime, { capability: 'verification.provider', provider: 'verification', operation: 'verify',
+        input: { target: '/repo', ...addition } })).rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(current.verification.verify).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
   it('forwards validated applicability and target context through the public dispatcher', async () => {
     const current = await fixture();
     const input = { scope: 'github:acme/lesson', prompt: 'retry', applicability: { version: 'fixture-v1', environment: 'test' },

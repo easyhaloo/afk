@@ -64,12 +64,27 @@ export interface VerificationRequest {
   readonly target: string;
   readonly command?: readonly string[];
   readonly timeoutMs?: number;
+  readonly input?: string;
+  readonly executionId?: string;
+}
+
+export interface VerificationExecutionObservation {
+  readonly protocol: 'verification-execution-v1';
+  readonly executionId: string;
+  readonly command: readonly string[];
+  readonly cwd: string;
+  readonly inputDigest: string;
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly closed: true;
 }
 
 export interface VerificationResult {
   readonly passed: boolean;
   readonly durationMs: number;
   readonly output?: string;
+  readonly execution?: VerificationExecutionObservation;
 }
 
 export interface VerificationProvider extends CapabilityProvider<VerificationCapability> {

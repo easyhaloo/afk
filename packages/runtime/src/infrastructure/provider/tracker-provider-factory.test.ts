@@ -213,7 +213,17 @@ describe('tracker target resolution outside a git repository', () => {
     expect(tracker).toMatchObject({ platform: 'github', projectId: 'team/repo' });
   });
 
-  it('refuses a geelib target with a clear error until its client exists', async () => {
-    await expect(createTracker('6856', '/nowhere', 'geelib')).rejects.toThrow(/geelib tracker client is not available/i);
+  it('requires geelib credentials before it creates a geelib tracker', async () => {
+    await expect(createTracker('6856', '/nowhere', 'geelib')).rejects.toThrow(/Geelib authentication is required/i);
+  });
+
+  it('creates a geelib tracker from GELIB_TOKEN and GELIB_USER_MAIL', async () => {
+    process.env.GELIB_TOKEN = 'geelib-token';
+    process.env.GELIB_USER_MAIL = 'afk@example.com';
+    process.env.GELIB_URL = 'https://geelib.example';
+
+    const tracker = await createTracker('6856', '/nowhere', 'geelib');
+
+    expect(tracker).toMatchObject({ platform: 'geelib', projectId: '6856', providerHost: 'geelib.example' });
   });
 });

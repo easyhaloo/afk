@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { workspaceStateDirectory } from '../workspace.js';
-import { openSqlite, transaction, type SqliteDatabase } from '../storage/sqlite.js';
+import { openSqlite, transaction, type SqliteDatabase, type SqliteMigration } from '../storage/sqlite.js';
 
 /**
  * Tracker store — the local record of the provider projects AFK has worked
@@ -26,7 +26,9 @@ import { openSqlite, transaction, type SqliteDatabase } from '../storage/sqlite.
  */
 
 /** Provider platforms AFK can address. */
-export type TrackerPlatform = 'github' | 'gitlab';
+export type TrackerPlatform = 'github' | 'gitlab' | 'geelib';
+
+const TRACKER_PLATFORMS: readonly TrackerPlatform[] = ['github', 'gitlab', 'geelib'];
 
 /** One issue AFK has seen in a provider project. */
 export interface TrackerIssueRecord {
@@ -64,10 +66,66 @@ export interface TrackerActivity {
   issues?: Array<{ id: string; title?: string }>;
 }
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const MAX_ISSUES_PER_PROJECT = 500;
 const MAX_PATHS_PER_PROJECT = 20;
 const LEGACY_STORE_FILENAME = 'tracker-projects.json';
+
+/**
+ * Version 2 widens the platform CHECK to geelib. SQLite cannot alter a CHECK,
+ * so the three tables are rebuilt around copied rows. The children are
+ * rebuilt too: they carry no platform constraint of their own, but dropping
+ * the parent under an active foreign key would cascade their rows away.
+ * The index is a cache of what commands observed, so the migration keeps
+ * every row exactly as it was stored.
+ */
+const TRACKER_MIGRATIONS = [
+  {
+    from: 1,
+    to: 2,
+    migrate: (database: SqliteDatabase): void => {
+      database.exec(`
+        CREATE TABLE tracker_projects_v2 (
+          platform TEXT NOT NULL CHECK (platform IN ('github', 'gitlab', 'geelib')),
+          host TEXT NOT NULL DEFAULT '',
+          project TEXT NOT NULL,
+          updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+          PRIMARY KEY (platform, host, project)
+        ) STRICT;
+        CREATE TABLE tracker_paths_v2 (
+          platform TEXT NOT NULL,
+          host TEXT NOT NULL DEFAULT '',
+          project TEXT NOT NULL,
+          path TEXT NOT NULL,
+          rank INTEGER NOT NULL CHECK (rank >= 0),
+          PRIMARY KEY (platform, host, project, path),
+          FOREIGN KEY (platform, host, project) REFERENCES tracker_projects_v2(platform, host, project) ON DELETE CASCADE
+        ) STRICT;
+        CREATE TABLE tracker_issues_v2 (
+          platform TEXT NOT NULL,
+          host TEXT NOT NULL DEFAULT '',
+          project TEXT NOT NULL,
+          issue_id TEXT NOT NULL,
+          seen_at_ms INTEGER NOT NULL CHECK (seen_at_ms >= 0),
+          PRIMARY KEY (platform, host, project, issue_id),
+          FOREIGN KEY (platform, host, project) REFERENCES tracker_projects_v2(platform, host, project) ON DELETE CASCADE
+        ) STRICT;
+        INSERT INTO tracker_projects_v2 (platform, host, project, updated_at_ms)
+          SELECT platform, host, project, updated_at_ms FROM tracker_projects;
+        INSERT INTO tracker_paths_v2 (platform, host, project, path, rank)
+          SELECT platform, host, project, path, rank FROM tracker_paths;
+        INSERT INTO tracker_issues_v2 (platform, host, project, issue_id, seen_at_ms)
+          SELECT platform, host, project, issue_id, seen_at_ms FROM tracker_issues;
+        DROP TABLE tracker_issues;
+        DROP TABLE tracker_paths;
+        DROP TABLE tracker_projects;
+        ALTER TABLE tracker_projects_v2 RENAME TO tracker_projects;
+        ALTER TABLE tracker_paths_v2 RENAME TO tracker_paths;
+        ALTER TABLE tracker_issues_v2 RENAME TO tracker_issues;
+      `);
+    },
+  },
+] as const satisfies readonly SqliteMigration[];
 
 const TRACKER_SCHEMA = `
 CREATE TABLE tracker_meta (
@@ -76,7 +134,7 @@ CREATE TABLE tracker_meta (
 ) STRICT;
 
 CREATE TABLE tracker_projects (
-  platform TEXT NOT NULL CHECK (platform IN ('github', 'gitlab')),
+  platform TEXT NOT NULL CHECK (platform IN ('github', 'gitlab', 'geelib')),
   host TEXT NOT NULL DEFAULT '',
   project TEXT NOT NULL,
   updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
@@ -122,6 +180,8 @@ function openTrackerDatabase(directory?: string): SqliteDatabase {
   return openSqlite({
     file: trackerDatabasePath(stateDirectory),
     schema: TRACKER_SCHEMA,
+    version: STORE_VERSION,
+    migrations: TRACKER_MIGRATIONS,
     initialize: database => importLegacyStore(database, stateDirectory),
   });
 }
@@ -154,7 +214,9 @@ function assembleStore(database: SqliteDatabase): TrackerStore {
   const projects: Record<string, TrackerProjectRecord> = {};
   const rows = database.prepare('SELECT platform, host, project, updated_at_ms FROM tracker_projects ORDER BY platform, host, project').all();
   for (const row of rows) {
-    const platform = row.platform === 'github' || row.platform === 'gitlab' ? row.platform : undefined;
+    const platform = (TRACKER_PLATFORMS as readonly string[]).includes(String(row.platform))
+      ? (String(row.platform) as TrackerPlatform)
+      : undefined;
     if (!platform) continue;
     const host = String(row.host ?? '');
     const project = String(row.project ?? '');
@@ -279,7 +341,9 @@ function readLegacyTrackerStore(path: string): TrackerStore | undefined {
     const projects: Record<string, TrackerProjectRecord> = {};
     for (const [key, value] of Object.entries(parsed.projects)) {
       if (!isRecord(value)) continue;
-      const platform = value.platform === 'github' || value.platform === 'gitlab' ? value.platform : undefined;
+      const platform = (TRACKER_PLATFORMS as readonly string[]).includes(String(value.platform))
+        ? (String(value.platform) as TrackerPlatform)
+        : undefined;
       const project = typeof value.project === 'string' ? value.project : undefined;
       if (!platform || !project) continue;
       projects[key] = {

@@ -102,7 +102,7 @@ describe('tracker store', () => {
   it('reads a damaged legacy index as empty instead of failing', () => {
     writeFileSync(join(directory, 'tracker-projects.json'), '{not json', 'utf8');
 
-    expect(readTrackerStore(directory)).toEqual({ version: 1, projects: {} });
+    expect(readTrackerStore(directory)).toEqual({ version: 2, projects: {} });
   });
 
   it('imports the retired JSON index once, then keeps the file', () => {

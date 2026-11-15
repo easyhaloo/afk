@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AuditPersistenceError, WorkflowRunner, type RunnerOptions } from './workflow-engine.js';
@@ -15,6 +15,8 @@ import type { ProviderAbortSignal, ProviderOperationOptions } from '../plugin-sd
 import type { LifecycleContext, InitContext } from './workflows/lifecycle.js';
 import { LifecycleDispatcher } from './workflows/lifecycle.js';
 import type { RunResourceScope } from './workflows/resource-scope.js';
+import type { WorkflowRunRepository } from './workflows/run-request.js';
+import type { BranchHandle } from '../domain/branches/types.js';
 import { CommandVerificationProvider } from '../infrastructure/verification/command.js';
 import { FilesystemClaimLock, type ClaimLease } from '../domain/backlog/claim.js';
 
@@ -172,8 +174,9 @@ async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verific
     ] });
   } });
   const config = { ...getWorkflowConfig(), workflowHardTimeout: 60_000, qaTimeout: 60_000, maxRetries: 0 };
-  const repository = { primary: true, repoRoot: root, baseBranch: 'main', targetBranch: 'main', sourceBranch: 'feat/task',
-    handle: { branch: 'feat/task', path: root, isNewBranch: false } };
+  const repository = { platform: 'github', projectKey: `fixture/${basename(root)}`, name: 'api', checkoutPath: '.',
+    primary: true, repoRoot: root, baseBranch: 'main', targetBranch: 'main', sourceBranch: 'feat/task', workingBranch: 'feat/task',
+    handle: { branch: 'feat/task', path: root, isNewBranch: false } } satisfies WorkflowRunRepository & { handle: BranchHandle };
   const prepareRepositories = { prepare: vi.fn(async () => ({ primary: repository, repositories: [repository],
     heartbeat: repositoryHeartbeat, finish: finishWorkspace, release: releaseWorkspace })) };
   const runtimeManager = { start: vi.fn(async () => {}), heartbeat: vi.fn(async () => {}), finish: vi.fn(async (_runId: string, _outcome: { status: string; errorSummary?: string }) => {}) };

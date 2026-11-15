@@ -33,20 +33,32 @@ const SNAPSHOT_ONLY: RepositoryProvider['capabilities'] = Object.freeze({
   push: false,
 });
 
-async function runRepositoryCommand(executor: CommandExecutor, request: CommandRequest): Promise<CommandResult> {
+async function runRepositoryCommand(executor: CommandExecutor, request: CommandRequest, failureMessage?: string): Promise<CommandResult> {
   checkAbort(request);
   const controller = request.deadlineAt === undefined ? undefined : new AbortController();
   const abort = () => controller?.abort(request.signal?.reason);
-  const timer = controller ? setTimeout(() => controller.abort(new Error('Repository command deadline exceeded')),
-    Math.min(30_000, Math.max(1, request.deadlineAt! - Date.now()))) : undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expire = () => {
+    if (controller?.signal.aborted) return;
+    const remaining = request.deadlineAt! - Date.now();
+    if (remaining > 0) timer = setTimeout(expire, Math.min(2_147_483_647, remaining));
+    else controller?.abort(new Error('Repository command deadline exceeded'));
+  };
   if (controller) {
     request.signal?.addEventListener('abort', abort, { once: true });
     if (request.signal?.aborted) abort();
+    expire();
   }
+  const command = { ...request, signal: controller?.signal ?? request.signal };
   try {
-    const result = await executor({ ...request, signal: controller?.signal ?? request.signal });
-    checkAbort(request);
+    checkAbort(command);
+    const result = await executor(command);
+    checkAbort(command);
     return result;
+  } catch (error) {
+    checkAbort(command);
+    if (failureMessage) throw new Error(failureMessage);
+    throw error;
   } finally {
     clearTimeout(timer);
     if (controller) request.signal?.removeEventListener('abort', abort);
@@ -470,15 +482,9 @@ export class SpecialGitBackendProvider implements RepositoryProvider {
     if (options.lifecycle) {
       this.lifecycle = new ConfiguredRepositoryLifecycle(options.lifecycle, async (operation, input, workspace, operationOptions) => {
         checkAbort(operationOptions);
-        let result: CommandResult;
-        try {
-          result = await runRepositoryCommand(this.executor, { command: this.options.backend, args: [operation, '--json'],
-            input: JSON.stringify({ ...input, ...(workspace ? { repository: workspace.repository, workspaceId: workspace.id } : {}) }),
-            signal: operationOptions?.signal, deadlineAt: operationOptions?.deadlineAt });
-        } catch {
-          checkAbort(operationOptions);
-          throw new Error('special git backend lifecycle command failed');
-        }
+        const result = await runRepositoryCommand(this.executor, { command: this.options.backend, args: [operation, '--json'],
+          input: JSON.stringify({ ...input, ...(workspace ? { repository: workspace.repository, workspaceId: workspace.id } : {}) }),
+          signal: operationOptions?.signal, deadlineAt: operationOptions?.deadlineAt }, 'special git backend lifecycle command failed');
         checkAbort(operationOptions);
         try { return JSON.parse(result.stdout) as unknown; } catch { throw new Error('special git backend returned invalid JSON'); }
       });
@@ -504,13 +510,8 @@ export class SpecialGitBackendProvider implements RepositoryProvider {
     if (repository.ref !== undefined) validateBranch(repository.ref);
     const args = ['snapshot', '--json', repository.url];
     if (repository.ref) args.push('--ref', repository.ref);
-    let result: CommandResult;
-    try {
-      result = await runRepositoryCommand(this.executor, { command: this.options.backend, args, signal: options?.signal, deadlineAt: options?.deadlineAt });
-    } catch {
-      checkAbort(options);
-      throw new Error('special git backend snapshot command failed');
-    }
+    const result = await runRepositoryCommand(this.executor, { command: this.options.backend, args, signal: options?.signal,
+      deadlineAt: options?.deadlineAt }, 'special git backend snapshot command failed');
     checkAbort(options);
     let parsed: unknown;
     try {

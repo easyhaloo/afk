@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -192,7 +192,6 @@ it('rejects a late parent continuation after its own reference is released while
   try {
     await child.release();
     const retainedAfterChildRelease = await leases.active([key]);
-    await writeFile(join(process.env.QUALITY_OUTPUT!, 'late-parent-evidence.json'), JSON.stringify({ outcome, childClaimIds: child.claimIds, retainedAfterChildRelease }, null, 2));
     expect(outcome.status).toBe('rejected');
     expect(retainedAfterChildRelease).toBe(false);
   } finally { await acquired?.release(); await child.release(); }

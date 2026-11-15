@@ -165,7 +165,13 @@ boolean values. Each header value must be an environment reference such as
 `{"env":"OTLP_AUTHORIZATION"}` or a credential reference such as
 `{"provider":"credential.enterprise","name":"otlp-authorization"}`.
 Set the referenced secret to the full header value; raw string values are
-rejected. Omit `headers` for an unauthenticated local collector.
+rejected. Omit `headers` for an unauthenticated local collector. Named header
+references resolve afresh on each actual `endSpan` or `record` export, including
+rotation, expiry and revocation checks. Discovery, activation, health, doctor,
+span start and event capture do not resolve them. Environment references retain
+construction-time capture. One absolute deadline bounds resolution and delivery:
+the earlier caller deadline or configured export timeout. Cancellation and disposal
+prevent late credentials or transport success from completing a failed export.
 `timeoutMs` defaults to 2000 and accepts at most 300000. The host's shared
 5000 ms deadline bounds all exports for one audit record.
 
@@ -618,15 +624,14 @@ validates configuration before saving; validation neither resolves credential
 provider references nor performs authentication/network calls or starts timers.
 Environment references are checked and captured during construction.
 
-Credential references are shape-checked first. At activation the factory looks
-up the exact credential provider in the existing Runtime registry, awaits
-`resolve({name, scope?})` once per referenced field, validates the actual value,
-then registers the consumer. Webhook URL validation runs after the asynchronous
-resolution. Missing providers, invalid results and resolution errors fail
-activation without publishing the consumer or exposing credential errors.
-Values injected through these generic references are captured for that
-activation; operations do not automatically resolve or refresh them.
-Reactivation resolves again. Gmail retains its own OAuth refresh behavior.
+Credential references are shape-checked first. Operation-resolved consumers
+listed under “Secret references and trigger lifetime” bind the exact named
+provider at activation without resolving a value; their operations validate
+fresh values. Other consumers resolve each referenced field during activation
+before publication and retain that value until reactivation. Webhook URL
+validation follows resolution. Missing named providers fail activation; invalid
+credentials and resolver failures for operation-resolved fields fail the operation
+without exposing credential errors. Gmail retains its separate refresh behavior.
 
 The shared composition root batches valid configured builtins. Within that
 batch, specific credential references order credential providers before their
@@ -636,8 +641,9 @@ same-capability `requires` edge for their own references. The shared loader also
 defers configured consumers until their exact named credential providers are
 registered, including providers from installed plugins. Missing or cyclic
 dependencies produce `load.dependencies`; actual resolution failures are not retried.
-Change an environment value or credential source by constructing a new Runtime;
-there is no automatic refresh of an existing consumer.
+Reconstruct configured consumers to recapture environment values or change a
+configured credential source. Operation-resolved fields read fresh values from
+their bound provider; other consumers retain activation-captured values.
 
 ## Loading, dependencies and disposal
 
@@ -1057,8 +1063,8 @@ names and supported provider settings belong to `configured.ts`; complete
 provider configuration examples must follow that implementation rather than
 guessing constructor-to-YAML mappings.
 
-Named references in ReportPlatform tokens, Feishu/Slack webhooks, OAuth client
-secrets and enterprise credential values resolve on each operation. These fields
+Named references in OTLP headers, ReportPlatform tokens, Feishu/Slack webhooks,
+OAuth client secrets and enterprise credential values resolve on each operation. These fields
 also accept an offset-aware ISO `expiresAt` on the reference. Activation and static
 inspection do not resolve them. Each operation checks reference and returned
 credential expiry, rejects `revoked: true`, forwards cancellation and the absolute

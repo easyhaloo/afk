@@ -142,6 +142,10 @@ afk plugin configure observability.otlp --builtin --file observability.json
 每个 header 值必须使用 `{"env":"OTLP_AUTHORIZATION"}` 这样的环境引用，
 或 `{"provider":"credential.enterprise","name":"otlp-authorization"}`
 这样的凭据引用。引用的 secret 应是完整 header 值，禁止直接配置原始字符串。
+具名 header 引用在每次实际 `endSpan` 或 `record` 导出时重新解析，并检查轮换、有效期
+及撤权；发现、激活、health、doctor、开始 span 和记录事件均不解析。环境引用仍在
+构造时捕获。解析和 HTTP 投递共用调用方 deadline 与配置导出 timeout 中较早的绝对
+期限；取消和销毁后，晚到的凭据或传输成功不能将失败导出改为成功。
 无认证的本地 collector 可省略 `headers`。`timeoutMs` 默认 2000，上限 300000，
 但每条审计记录的全部导出共用宿主 5000 ms 期限。
 
@@ -503,18 +507,19 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 显式配置会替换同 ID 默认插件。`--builtin` 保存前校验配置，不解析 credential
 Provider 引用，不进行认证/网络调用，也不启动 timer；环境引用在构造时校验并取值。
 
-Credential 引用先校验形状。激活时从现有 Runtime registry 查找精确 Provider，
-对每个引用字段 await 一次 `resolve({name, scope?})`，校验真实值后才注册消费者。
-Webhook URL 校验在异步解析完成后执行。Provider 缺失、返回值无效或解析异常会使
-激活失败，不发布消费者，不暴露认证原始错误。通用引用注入的值保留于本次激活，
-普通操作不会重新解析或自动刷新；重新激活会重新取值。Gmail 保留自身 OAuth 刷新行为。
+Credential 引用先校验形状。“Secret 引用和 Trigger 生命周期”列出的按操作解析消费者
+在激活时绑定精确具名 Provider，不读取凭据值；实际操作再解析并校验新值。其余消费者
+在激活时逐字段解析，校验成功后发布，并保留到重新激活。Webhook URL 在解析后校验。
+具名 Provider 缺失使激活失败；按操作解析字段的凭据失效或解析异常使本次操作失败，
+不暴露认证原始错误。Gmail 保留独立 OAuth 刷新行为。
 
 共享组合根批量构造有效的 configured builtin，按具体凭据引用将 Provider 排在
 消费者前，支持凭据 Provider 之间的引用链；自引用与循环引用在解析前拒绝。
 凭据 Provider 自身不会为其引用增加同能力的 `requires` 边。共享 loader 同时等待
 configured 消费者引用的精确凭据 Provider，包括已安装插件注册的 Provider。
 缺失或循环依赖报告 `load.dependencies`；实际解析失败不重试。
-环境值或凭据来源变化后需新建 Runtime，现有消费者不会自动刷新。
+环境值或配置的凭据来源变化后需重建消费者；按操作解析字段从绑定的 Provider 读取新值，
+其他消费者继续保留激活时捕获的值。
 
 ## 加载、依赖与 dispose
 
@@ -852,8 +857,8 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 真实 secret 字段名和 Provider 配置范围由 `configured.ts` 定义，完整示例应逐项对照该
 实现，不能猜测 constructor 到 YAML 的映射。
 
-ReportPlatform token、飞书/Slack webhook、OAuth clientSecret 和企业凭据 values 中的
-具名引用在每次操作时解析，并接受带时区的 ISO `expiresAt`。激活及静态检查不解析这些
+OTLP headers、ReportPlatform token、飞书/Slack webhook、OAuth clientSecret 和企业凭据
+values 中的具名引用在每次操作时解析，并接受带时区的 ISO `expiresAt`。激活及静态检查不解析这些
 引用。操作检查引用和返回凭据的有效期，拒绝 `revoked: true`，传递取消与绝对
 `deadlineAt`，拒绝所属激活已销毁后晚到的值。企业凭据转发保留引用和上游中较早的有效期。
 环境引用仍在构造时取值；其他具名引用消费者仍在激活时解析；Gmail 保留独立刷新流程。

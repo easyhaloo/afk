@@ -1,4 +1,3 @@
-import { createServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CredentialProvider, EventStoreProvider, EvidenceStoreProvider, MetricsProvider, TracerProvider } from '../../plugin-sdk/capabilities.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
@@ -116,8 +115,7 @@ describe('configured observability plugins', () => {
     expect(network).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
     await instance.activate(plugin);
-    expect(resolve).toHaveBeenCalledOnce();
-    expect(resolve).toHaveBeenCalledWith({ name: 'collector', scope: 'telemetry:write' });
+    expect(resolve).not.toHaveBeenCalled();
     expect(network).not.toHaveBeenCalled();
     expect(instance.getObservabilityProvider('otlp')).toBeInstanceOf(OtlpObservabilityProvider);
   });
@@ -136,15 +134,16 @@ describe('configured observability plugins', () => {
     expect(new Headers(network.mock.calls[0][1]?.headers).get('authorization')).toBe('Bearer private-token');
   });
 
-  it.each(['', ' ', 'private\rvalue', 'private\nvalue', 'private\0value'])('rejects invalid resolved header values %j during activation', async value => {
+  it.each(['', ' ', 'private\rvalue', 'private\nvalue', 'private\0value'])('rejects invalid resolved header values %j during export', async value => {
     const instance = runtime();
     const resolve = vi.fn(async () => ({ secret: value }));
     await registerCredential(instance, resolve);
     const network = vi.fn();
     const [plugin] = await configure({ endpoint, headers: { Authorization: { provider: 'fixture', name: 'collector' } } }, { fetch: network });
     expect(resolve).not.toHaveBeenCalled();
-    await expect(instance.activate(plugin)).rejects.toThrow(/resolved.*credential.*invalid/);
-    expect(instance.getObservabilityProvider('otlp')).toBeUndefined();
+    await instance.activate(plugin);
+    expect(resolve).not.toHaveBeenCalled();
+    await expect((instance.getObservabilityProvider('otlp') as MetricsProvider).record({ name: 'metric', value: 1 })).rejects.toThrow('OTLP export failed');
     expect(network).not.toHaveBeenCalled();
     if (value.trim()) expect(JSON.stringify(await instance.diagnostics())).not.toContain(value);
   });
@@ -153,9 +152,10 @@ describe('configured observability plugins', () => {
     const instance = runtime();
     const resolve = vi.fn(async () => ({ secret: 'first-private-token' }));
     await registerCredential(instance, resolve);
-    const [plugin] = await configure({ endpoint, headers: { Authorization: { provider: 'fixture', name: 'collector' } } });
+    const [plugin] = await configure({ endpoint, headers: { Authorization: { provider: 'fixture', name: 'collector' } } }, { fetch: async () => Response.json({}) });
     await instance.activate(plugin);
     const provider = instance.getObservabilityProvider('otlp') as OtlpObservabilityProvider;
+    await provider.record({ name: 'metric', value: 1 });
     vi.spyOn(provider, 'health').mockResolvedValue({ status: 'unavailable', message: 'first-private-token' });
     vi.spyOn(provider, 'doctor').mockResolvedValue([{ check: 'first-private-token', ok: false, detail: 'first-private-token' }]);
     const dispose = vi.spyOn(provider, 'dispose');
@@ -166,6 +166,8 @@ describe('configured observability plugins', () => {
     expect(instance.getObservabilityProvider('otlp')).toBeUndefined();
     resolve.mockResolvedValue({ secret: 'second-private-token' });
     await instance.activate(plugin);
+    expect(resolve).toHaveBeenCalledOnce();
+    await (instance.getObservabilityProvider('otlp') as MetricsProvider).record({ name: 'metric', value: 1 });
     expect(resolve).toHaveBeenCalledTimes(2);
     expect(instance.getObservabilityProvider('otlp')).not.toBe(provider);
   });
@@ -192,22 +194,19 @@ describe('configured observability plugins', () => {
 
   it('exports traces and metrics over HTTP using configured credentials and resource attributes', async () => {
     const requests: { path: string; authorization?: string; contentType?: string; body: unknown }[] = [];
-    const server = createServer(async (request, response) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      requests.push({ path: request.url!, authorization: request.headers.authorization, contentType: request.headers['content-type'], body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
-      response.writeHead(200, { 'content-type': 'application/json' }).end('{}');
-    });
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Collector did not bind a TCP port');
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      const headers = new Headers(init?.headers);
+      requests.push({ path: new URL(String(url)).pathname, authorization: headers.get('authorization') ?? undefined,
+        contentType: headers.get('content-type') ?? undefined, body: JSON.parse(String(init?.body)) });
+      return Response.json({});
+    };
     const instance = runtime();
     try {
       const [plugin] = await configure({
-        endpoint: `http://127.0.0.1:${address.port}/collector`, serviceName: 'configured-afk',
+        endpoint: 'https://collector.example.test/collector', serviceName: 'configured-afk',
         resourceAttributes: { region: 'test-region', workers: 2, enabled: true },
         headers: { Authorization: { env: 'COLLECTOR_TOKEN' } },
-      }, { environment: { COLLECTOR_TOKEN: 'Bearer collector-secret' } });
+      }, { environment: { COLLECTOR_TOKEN: 'Bearer collector-secret' }, fetch });
       await instance.activate(plugin);
       const provider = instance.getObservabilityProvider('otlp') as TracerProvider & MetricsProvider;
       const context = { traceId: '1234567890abcdef1234567890abcdef', spanId: '1234567890abcdef' };
@@ -226,7 +225,6 @@ describe('configured observability plugins', () => {
       for (const value of ['configured-afk', 'test-region', 'configured.span', 'configured.event', 'configured.metric', 'phase']) expect(bodies).toContain(value);
     } finally {
       await instance.close();
-      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }
   });
 });

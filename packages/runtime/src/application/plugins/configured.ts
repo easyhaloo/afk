@@ -299,7 +299,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     operations: z.array(z.enum(['prepare', 'checkout', 'publish', 'cleanup'])).min(1),
   }).strict();
   const definitions: Record<string, Definition> = {
-    'observability.otlp': define('observability.provider', secret => z.object({
+    'observability.otlp': defineOperation('observability.provider', secret => z.object({
       endpoint: baseUrl.refine(value => !/[?#]/.test(value), 'must not contain a query or fragment'),
       serviceName: text.optional(),
       timeoutMs: milliseconds.max(300_000).default(2000),

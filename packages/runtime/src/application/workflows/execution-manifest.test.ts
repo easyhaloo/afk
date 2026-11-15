@@ -73,6 +73,15 @@ describe('parseExecutionManifest', () => {
     });
   });
 
+  it('accepts a geelib tracker platform', () => {
+    const value = validManifest();
+    value.tracker = { platform: 'geelib', projectKey: '6856' };
+
+    expect(parseExecutionManifest(value, { manifestPath, backlogId })).toMatchObject({
+      tracker: { platform: 'geelib', projectKey: '6856' },
+    });
+  });
+
   it.each([
     ['non-object manifest', null, /manifest must be an object/],
     ['unknown manifest field', { ...validManifest(), extra: true }, /manifest has unknown field: extra/],

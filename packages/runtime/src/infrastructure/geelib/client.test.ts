@@ -190,6 +190,50 @@ describe('geelib catalog reads', () => {
   });
 });
 
+describe('geelib write methods', () => {
+  it('edits a work item status through the documented edit call', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 }));
+
+    await client().setStatus(1083121, '修复中');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toBe('https://geelib.example/openapi/Matter/edit');
+    const body = JSON.parse(String(init.body));
+    expect(body.id).toBe(1083121);
+    expect(body.sub_id).toBe(6856);
+    expect(body.data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
+    expect(body.t).toBeGreaterThan(0);
+    expect(body.user_mail).toBe('afk@example.com');
+    expect(body.sign).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('refuses a status outside the verified native vocabulary', async () => {
+    await expect(client().setStatus(1083121, '随便写的')).rejects.toThrow(/native state/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('appends a comment as an HTML rich-text block', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: 1 }), { status: 200 }));
+
+    await client().addComment(1083121, '<p>AFK 已认领</p>');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toBe('https://geelib.example/openapi/OpenApiCommentMgr/addComment');
+    const body = JSON.parse(String(init.body));
+    expect(body.sub_id).toBe(6856);
+    expect(body.id).toBe(1083121);
+    expect(body.type).toBe('matter');
+    expect(body.content).toBe('<p>AFK 已认领</p>');
+    expect(body.sign).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('surfaces a platform error from a write as a readable failure', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 5001, errmsg: '无法流转到此状态，请刷新页面后重新选择', data: '' }), { status: 200 }));
+
+    await expect(client().setStatus(1083121, '关闭')).rejects.toThrow('无法流转到此状态');
+  });
+});
+
 describe('geelib unsupported capabilities', () => {
   it('refuses write and code-hosting capabilities with a clear error', async () => {
     const geelib = client();

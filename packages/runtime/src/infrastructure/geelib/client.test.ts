@@ -22,6 +22,13 @@ describe('geelib request signing', () => {
       .toBe('page=1&pageSize=20&sub_id=6856&t=1700000000&user_mail=afk%40example.com');
   });
 
+  it('encodes the flattened array keys as well as the values', () => {
+    // Verified live: the server validates the encoded form, and a key left
+    // raw fails the signature check (errno 4001).
+    expect(geelibCanonical({ sub_id: 6856, matter_ids: [322370], t: 1700000000, user_mail: 'afk@example.com' }))
+      .toBe('matter_ids%5B0%5D=322370&sub_id=6856&t=1700000000&user_mail=afk%40example.com');
+  });
+
   it('signs the canonical query with the documented double digest', () => {
     const canonical = geelibCanonical({ sub_id: 6856, page: 1, pageSize: 20, t: 1700000000, user_mail: 'afk@example.com' });
     // Reference implementation (geelib-cli api-call.py) golden value.

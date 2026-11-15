@@ -33,6 +33,7 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk loop start`：针对一个绑定 manifest 的工作项持续尝试，并委托给同一受管执行路径；它不是全局多工作项调度器。
 - `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
 - `afk plugin install <source>`：在暂存目录安装可信本地目录或 npm package spec，校验 `plugin.json` 的 manifest/entry，记录入口摘要并启用；普通升级失败保留旧安装，禁用 npm lifecycle scripts，包需要自带构建后的入口。
+- `afk plugin install-tool <recipe> --target <target> [--offline]`：仅允许在 darwin/arm64、Node >=22.16 上，以显式 `host-local` 目标安装已批准的 `browser-check-1.62.1` 配方。校验随包资产、锁文件、依赖闭包与包内 CLI，并把安装凭据绑定到 Node 和完整目录树。SIGINT/SIGTERM 取消后仍保留暂存所有权，直到子进程 close；普通失败保留旧安装。`--offline` 禁止获取包。浏览器载荷、OS/backend 前置条件和真实厂商就绪度需另行验证；引用未知时继续阻止托管工具移除。
 - `afk plugin configure <id> --file <path> [--builtin] [--action <name>]`：保存 JSON 配置对象；已安装插件按 manifest schema 校验，`--builtin` 校验并构造已知的配置化 Provider。`--action` 写入插件条目的顶层 trigger action，省略时保留已有 action。
 - `afk plugin auth login google --client <path>`：将浏览器 OAuth 和 loopback 回调委托给 `GoogleOAuthCredentialProvider`，读取 Google Desktop app 客户端 JSON，无需输入邮箱。SIGINT/SIGTERM 取消认证并关闭回调服务器。登录成功后以 `{}` 配置 builtin `credential.google-oauth`，仅在缺失时以 `{}` 添加 builtin `notification.gmail`，保留已有 Gmail 配置；默认收件人为授权账号自身，登录不发送邮件。见 [Gmail OAuth 配置](plugins.zh.md#gmail-oauth)。
 - `afk plugin auth status google`：仅输出本地 Keychain 记录状态（`connected`，以及可选的 `email`、`expiresAt`），不需要客户端文件，不输出令牌，不检查 Google 会话或令牌有效性。
@@ -41,6 +42,7 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk plugin remove <id>`：禁用并删除已安装包，保留配置。
 - `afk plugin import-issue <provider> <issue> --project <platform:projectKey> [--mode <hitl|afk>] [--json]`：按稳定来源和幂等键，将 Linear/Jira 条目导入目标代码仓库的真实受管 backlog。默认 `hitl`，返回的规范任务身份沿用现有执行、QA 和发布链路。`sync-issue <provider> <issue> <canonical-work-item> --states <json-file> [--json]` 校验来源绑定，仅更新显式映射的外部生命周期状态。工作流 action `work-item.import`、`work-item.sync` 提供同样能力。
 - `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`：派发显式白名单操作，校验 JSON 输入和输出；无论是否带 `--json` 都输出 JSON。验证/策略/投递否定结果或远程非零 code 使 exit status 为 `1`；不开放凭据读取或 merge。CLI 验证输入必须显式提供 `target`。仓库生命周期句柄属于单个 Runtime；`repository.provider/run` 在同一调用中完成准备、检出、注册 action 回调、发布和清理。
+- Repository `checkout` JSON 接受 `{workspaceId,branch?,ref?}`；组合 `run` 接受可选 `checkout:{branch?,ref?}`。prepare 保持配置基线，checkout 单独指定目标和可选来源分支；publish/cleanup 仍只接受句柄。缺省兼容从 prepare revision 创建 `afk/<runId>`。
 - `afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`：激活配置 trigger，保持认证 HTTP 宿主和 Runtime 常驻，SIGINT/SIGTERM 后关闭并 dispose；默认 `127.0.0.1:8374`，持久化 SQLite 队列位于 `~/.afk/triggers/deliveries.sqlite`，环境 token 必需且至少 16 字符、无 CR/LF。已认证 Webhook 持久化后返回 HTTP 202，支持去重、有界退避重试以及失败投递查询和重放。启动拒绝 error diagnostic，未注册的 action 会 dispose 对应 trigger；普通 Runtime 构造不启动 timer。见[能力插件架构](plugins.zh.md)。
 - `plugin listen` 的定时 tick 使用同一所选队列，在 timer 激活前取得所有权。已保存的 tick 身份、action 和 input 跨重试/重启保持不变，当前配置不改写旧投递。listener 关闭和 Runtime dispose 各最多等待五秒；action 未结算时保留消费者所有权。不补跑停机时段，不承诺外部副作用恰好一次。
 - `afk plugin deliveries --token-env <name> [--url <listener>]` 和 `afk plugin replay <delivery-id> --token-env <name> [--url <listener>]`：通过认证 HTTP 查询运行中队列，或重放一条失败投递。仅允许 HTTPS 或回环 HTTP，拒绝重定向，状态不返回载荷。托管执行使用投递与规范工作项派生的稳定 ID；中断执行保留审计与日志供协调恢复，避免创建重复任务。

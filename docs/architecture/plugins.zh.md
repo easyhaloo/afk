@@ -325,6 +325,12 @@ Installer 链接宿主的 `@afk/runtime` 包供 SDK 导入。
 先将旧目录改名为 backup，再发布 stage 并启用配置；普通升级失败会恢复旧目录。
 这不是崩溃可恢复的多文件事务、完整包树签名，也不构成恶意代码沙箱；进程崩溃还可能遗留 lock。
 
+受信依赖配方使用 `afk plugin install-tool browser-check-1.62.1 --target host-local
+[--offline]` 安装。首个配方支持 darwin/arm64 和 Node >=22.16，锁定 npm 来源和完整性，
+禁用 lifecycle scripts 和浏览器下载，并校验完整 CLI 目录树。浏览器载荷及 OS/backend
+前置条件仍需单独配置。Provider 仅接受启动工作区或内部 `PluginSystemActionOptions`
+授权的 worktree，action JSON 不能授予路径权限。托管工具卸载在具备权威引用检查前保持阻断。
+
 配置保存在 `~/.afk/plugins.yml`：
 
 ```yaml
@@ -622,16 +628,23 @@ Project-note 示例对应的 invoke 集成契约为
 `RepositoryLifecycleService.run(request, callback, options?)` 要求
 `prepare`、`checkout`、`publish`、`cleanup`，可用 `withLifecycleLease` 包围完整顺序：
 `prepare → checkout → callback(workspace) → publish → cleanup`。
-公开 `repository.provider/run` 输入为 `{repository:{url,ref?},runId,action,input}`，
+公开 `repository.provider/run` 输入为 `{repository:{url,ref?},runId,checkout?:{branch?,ref?},action,input}`，
 注册 system action 收到 `{input,repositoryWorkspace,worktreePath}`；返回
 `{value,workspace,publication,cleanup}`，此显式操作不自动替换工作项执行器。
 
 受管本地仓库使用规范仓库租约和 checkout 所有权锁，句柄归 Provider 实例所有，
-checkout 创建 `afk/<runId>`。发布检查干净分支/commit 和配置 remote，不执行合并。
+checkout 接受可选目标 `branch` 和来源 `ref`，缺省从准备好的 revision 创建 `afk/<runId>`。
+prepare 始终使用配置基线；受管实现使用工作分支及可选 sourceBranch，独立QA使用实现来源和自己的QA分支。
+本地显式来源从配置remote获取并解析为固定commit后再创建分支；无来源时拒绝revision漂移。
+来源、目标均校验，获取过程传递取消和期限；publish绑定实际checkout分支，安全清理基线在成功checkout后更新。
+目标不得等于配置基线；已有目标分支只在revision相同时复用，否则拒绝，不重置或覆盖。
+发布检查干净分支/commit 和配置 remote，不执行合并。
 清理拒绝脏工作区、迁移路径、无所有权或未发布内容以及嵌套 worktree。远程/特殊
 backend 必须实现选定的 lifecycle 协议，仅配置 snapshot 不启用这些操作。
 checkout/callback/发布失败或取消后，清理使用独立的 15 秒 signal；执行和清理同时
 失败时保留两项错误，拒绝清理时保留工作区而非报告成功。
+
+Repository 回调的检出路径缺失时，显式空的可信授权使 Verification dispatcher 在调用 Provider 前拒绝；不能验证启动目录后发布另一仓库。不需要本地路径的其他 action 仍可使用远端句柄。独立直接调用省略授权字段时继续使用启动工作区语义。
 
 ### CLI 操作白名单
 

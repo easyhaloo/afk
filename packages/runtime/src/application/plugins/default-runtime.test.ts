@@ -422,7 +422,7 @@ describe('createDefaultPluginRuntime', () => {
     await expect(runtime.dispatchSystemAction('capability.invoke', {
       worktreePath: workspaceRoot,
       input: { capability: 'verification.provider', provider: 'test-runner', operation: 'verify', input: { command: [process.execPath, '-e', 'process.exit(7)'] } },
-    })).rejects.toThrow('required check');
+    }, { authorizedWorkspace: workspaceRoot })).rejects.toThrow('required check');
   });
 
   it.each([
@@ -445,7 +445,7 @@ describe('createDefaultPluginRuntime', () => {
     await lifecycle.run('after-agent', { ...context, worktreePath });
     await lifecycle.run('before-publish', { ...context, worktreePath });
     expect(verify).toHaveBeenCalledTimes(2);
-    expect(verify).toHaveBeenCalledWith({ command, timeoutMs: 5000, target: worktreePath });
+    expect(verify).toHaveBeenCalledWith({ command, timeoutMs: 5000, target: worktreePath }, { authorizedWorkspace: worktreePath });
     const actualWorktree = await realpath(worktreePath);
     expect((await readFile(join(worktreePath, 'verification-marker'), 'utf8')).trim().split('\n')).toEqual([actualWorktree, actualWorktree]);
     await expect(lstat(join(workspaceRoot, 'verification-marker'))).rejects.toMatchObject({ code: 'ENOENT' });

@@ -1,0 +1,12 @@
+{
+  "name": "managed-playwright",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@playwright/test": "1.62.1"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

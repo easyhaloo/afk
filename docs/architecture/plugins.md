@@ -392,6 +392,15 @@ An ordinary failed upgrade restores the old directory. This is not a
 crash-recoverable multi-file transaction, a package-tree signature, or a
 malicious-code sandbox. A process crash can also leave the manager lock behind.
 
+Approved dependency recipes use `afk plugin install-tool browser-check-1.62.1
+--target host-local [--offline]`. This first recipe supports darwin/arm64 and
+Node >=22.16, pins npm sources and integrity, disables lifecycle scripts and
+browser downloads, and verifies the complete installed CLI tree. Browser
+payloads and OS/backend prerequisites require separate provisioning. Its
+provider accepts only the startup workspace or a worktree authorized through
+internal `PluginSystemActionOptions`; action JSON cannot grant that authority.
+Managed removal remains blocked until authoritative reference checks exist.
+
 Configuration lives in `~/.afk/plugins.yml`:
 
 ```yaml
@@ -772,20 +781,35 @@ same managed operations to workflows.
 `prepare`, `checkout`, `publish` and `cleanup`. Optional `withLifecycleLease`
 wraps the full sequence: `prepare → checkout → callback(workspace) → publish → cleanup`.
 Public `repository.provider/run` input is
-`{repository:{url,ref?},runId,action,input}`; the registered system action receives
+`{repository:{url,ref?},runId,checkout?:{branch?,ref?},action,input}`; the registered system action receives
 `{input,repositoryWorkspace,worktreePath}`. The result is
 `{value,workspace,publication,cleanup}`. This explicit operation does not
 automatically replace the work-item runner.
 
 Managed local repositories use canonical repository leases and checkout
-ownership locks. Handles belong to the provider instance; checkout creates
-`afk/<runId>`. Publish validates the clean branch/commit and configured remote,
+ownership locks. Handles belong to the provider instance. Checkout accepts optional
+target `branch` and source `ref`, defaulting to `afk/<runId>` at the prepared revision.
+Prepare always uses the configured base; managed implementation uses its working branch
+and optional sourceBranch, while independent QA uses the implementation source and its own QA branch.
+Local explicit sources are fetched from the configured remote and pinned to a commit before
+branch creation; without a source, revision drift is refused. Both refs are validated;
+acquisition carries cancellation/deadlines. Publish binds the actual checkout branch,
+and successful checkout updates the unchanged-workspace cleanup baseline.
+Targets cannot equal the configured base. An existing target is reused only at the pinned
+revision; conflicting revisions are refused without reset or overwrite.
+Publish validates the clean branch/commit and configured remote,
 and never merges. Cleanup refuses dirty, relocated, unowned or unpublished work
 and nested worktrees. Remote/special backends must implement the selected
 lifecycle protocol; snapshot-only configuration does not enable it. Following
 checkout/callback/publication failure or cancellation, cleanup uses a separate
 15-second signal. Execution and cleanup failures are both retained; refused
 cleanup preserves the workspace instead of reporting success.
+
+When a Repository callback has no checkout path, its explicitly empty trusted authority
+makes the Verification dispatcher refuse before invoking the provider; it cannot verify
+the startup directory and publish a different repository. Other actions that need no
+local path can still use the remote handle. Independent direct calls that omit the
+authority field retain startup-workspace semantics.
 
 ### CLI invocation whitelist
 

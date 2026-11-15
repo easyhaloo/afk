@@ -2,12 +2,13 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dump } from 'js-yaml';
 import { validateManifest, validatePluginId, type PluginManifest } from '../../plugin-sdk/profile.js';
 import { pluginConfigurationPath, readPluginConfiguration, validatePluginConfig, type InstalledPluginEntry, type PluginConfiguration } from './configuration.js';
 import { activationLease, assertInactive, atomicWrite, pendingPath, readPending, restorePending, sameIdentity, verifyInstallation, withManagerLock, writePending, type PendingActivation } from './activation-recovery.js';
+import { TOOL_ASSETS, PLAYWRIGHT_PLUGIN_ID, assertToolTarget, prepareToolStage, sealToolStage, toolNpmArguments, toolNpmEnvironment, verifyToolPackage, type ToolInstallOptions } from './tool-recipes.js';
 
 export interface InstalledPluginRecord {
   readonly id: string;
@@ -17,11 +18,12 @@ export interface InstalledPluginRecord {
   readonly integrity: string;
   readonly installedAt: string;
   readonly manifest: PluginManifest;
+  readonly toolReceipt?: string;
 }
 
 export interface PluginManagerOptions {
   readonly homeDir?: string;
-  readonly runNpm?: (args: readonly string[], cwd: string) => Promise<void>;
+  readonly runNpm?: (args: readonly string[], cwd: string, options?: { readonly signal?: AbortSignal; readonly env?: NodeJS.ProcessEnv }) => Promise<void>;
 }
 
 interface PluginDependencyState {
@@ -55,9 +57,12 @@ export async function resolveInstalledPluginEntry(directory: string, record: Ins
   return entry;
 }
 
-const runNpm: NonNullable<PluginManagerOptions['runNpm']> = (args, cwd) => new Promise((resolveCommand, reject) => {
-  execFile('npm', [...args], { cwd, timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }, error => {
-    if (error) reject(new Error('Plugin dependency installation failed; the previous installation was preserved'));
+const runNpm: NonNullable<PluginManagerOptions['runNpm']> = (args, cwd, options) => new Promise((resolveCommand, reject) => {
+  let failure: Error | null = null;
+  const child = execFile('npm', [...args], { cwd, env: options?.env, signal: options?.signal, killSignal: 'SIGKILL', timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }, error => { failure = error; });
+  child.once('close', () => {
+    if (options?.signal?.aborted) reject(options.signal.reason);
+    else if (failure) reject(new Error('Plugin dependency installation failed; the previous installation was preserved', { cause: failure }));
     else resolveCommand();
   });
 });
@@ -236,7 +241,17 @@ export class PluginManager {
   }
 
   async install(source: string): Promise<InstalledPluginRecord> {
+    return this.installSource(source);
+  }
+
+  async installTool(recipe: string, options: ToolInstallOptions): Promise<InstalledPluginRecord> {
+    assertToolTarget(recipe, options);
+    return this.installSource(TOOL_ASSETS, options);
+  }
+
+  private async installSource(source: string, tool?: ToolInstallOptions): Promise<InstalledPluginRecord> {
     return this.locked(async () => {
+      tool?.signal?.throwIfAborted();
       const configuration = this.configuration();
       const stage = await fs.mkdtemp(join(this.directory, '.install-'));
       let destination: string | undefined;
@@ -255,7 +270,15 @@ export class PluginManager {
           packageRoot = join(versionRoot, 'package');
           await fs.cp(local, packageRoot, { recursive: true, filter: path => !['node_modules', '.git'].includes(path.split(sep).at(-1) ?? '') });
           const metadata = JSON.parse(await fs.readFile(join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: object; optionalDependencies?: object };
-          if (Object.keys(metadata.dependencies ?? {}).length || Object.keys(metadata.optionalDependencies ?? {}).length) await this.npm(args, packageRoot);
+          if (tool) await prepareToolStage(packageRoot, tool);
+          if (Object.keys(metadata.dependencies ?? {}).length || Object.keys(metadata.optionalDependencies ?? {}).length) {
+            if (tool) {
+              await this.npm(toolNpmArguments(args, tool), packageRoot, { signal: tool.signal, env: toolNpmEnvironment(packageRoot) });
+              tool.signal?.throwIfAborted();
+              await fs.rm(join(versionRoot, '.npm-home'), { recursive: true, force: true });
+              await fs.rm(join(versionRoot, '.npm-cache'), { recursive: true, force: true });
+            } else await this.npm(args, packageRoot);
+          }
         } else {
           if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*(?:@[A-Za-z0-9.*^~+<>=|-]+)?$/.test(source)) {
             throw new Error('Expected a local plugin directory or an npm package specification');
@@ -272,6 +295,7 @@ export class PluginManager {
           metadata = JSON.parse(await fs.readFile(join(packageRoot, 'plugin.json'), 'utf8')) as typeof metadata;
           validateManifest(metadata);
         } catch { throw new Error('Invalid plugin manifest'); }
+        if (metadata.id === PLAYWRIGHT_PLUGIN_ID && !tool) throw new Error('Managed plugin identity is reserved for the approved tool recipe');
         const entryPath = metadata.entry ?? 'dist/index.js';
         if (isAbsolute(entryPath)) throw new Error('Plugin entry must be a relative path');
         const root = await fs.realpath(packageRoot);
@@ -281,12 +305,14 @@ export class PluginManager {
         const sdkLink = join(packageRoot, 'node_modules', '@afk', 'runtime');
         await fs.rm(sdkLink, { recursive: true, force: true });
         await fs.symlink(fileURLToPath(new URL('../../../', import.meta.url)), sdkLink, 'dir');
+        const toolReceipt = tool ? await sealToolStage(packageRoot, tool) : undefined;
         const stagedEntry = relative(await fs.realpath(stage), entry);
         const record: InstalledPluginRecord = {
           id: metadata.id, version: metadata.version, source: isLocal ? local : source,
           entry: stagedEntry, manifest: metadata,
           integrity: `sha256-${createHash('sha256').update(await fs.readFile(entry)).digest('base64')}`,
           installedAt: new Date().toISOString(),
+          ...(toolReceipt ? { toolReceipt } : {}),
         };
         await fs.writeFile(join(stage, 'install.json'), JSON.stringify(record, null, 2), { mode: 0o600 });
         await assertInactive(this.directory, metadata.id);
@@ -296,18 +322,27 @@ export class PluginManager {
         let previousUsable = true;
         const existing = configuration.plugins.find(entry => entry.id === metadata.id);
         if (existing?.config !== undefined) this.validateSettings(metadata, existing.config);
-        const setting = { ...existing, id: metadata.id, enabled: true, builtin: false };
+        const setting = { ...existing, ...(tool && existing?.config === undefined ? { config: { execution: 'host-local' } } : {}), id: metadata.id, enabled: true, builtin: false };
         const next = { ...configuration, plugins: existing ? configuration.plugins.map(entry => entry.id === metadata.id ? setting : entry) : [...configuration.plugins, setting] };
         await this.protectDependencies(metadata.id, configuration, next, metadata);
         if (!sameIdentity(configuration, this.configuration())) throw new Error('Plugin configuration changed concurrently; retry installation');
+        tool?.signal?.throwIfAborted();
         destination = join(this.directory, metadata.id);
         if (await fs.stat(destination).then(() => true, () => false)) {
           if (!previous) throw new Error('Plugin installation has no verifiable previous identity');
           await verifyInstallation(destination, previous, false);
-          try { await resolveInstalledPluginEntry(destination, previous); }
+          try {
+            const priorEntry = await resolveInstalledPluginEntry(destination, previous);
+            if (previous.id === PLAYWRIGHT_PLUGIN_ID) {
+              if (!previous.toolReceipt) throw new Error('Previous managed tool receipt is missing');
+              await verifyToolPackage(dirname(priorEntry), previous.toolReceipt);
+            }
+          }
           catch { previousUsable = false; }
           backup = join(this.directory, `.previous-${metadata.id}-${randomUUID()}`);
         }
+        if (tool && !sameIdentity(configuration, this.configuration())) throw new Error('Plugin configuration changed concurrently; retry installation');
+        tool?.signal?.throwIfAborted();
         if (previous) {
           pending = { id: metadata.id, phase: 'prepared', stage: basename(stage), backup: backup ? basename(backup) : undefined,
             previous, previousUsable, next: record, previousEntry: existing, nextEntry: setting };
@@ -378,6 +413,7 @@ export class PluginManager {
       await assertInactive(this.directory, id);
       if (await readPending(this.directory, id)) throw new Error('Plugin activation is pending; load or recover it before removal');
       if (!await this.installed(id)) throw new Error(`Plugin '${id}' is not installed`);
+      if (id === PLAYWRIGHT_PLUGIN_ID) throw new Error('Managed tool references are unknown; removal requires an authoritative worker/asset reference query');
       await this.setEnabledUnlocked(id, false);
       // Keep plugin-written data; uninstall only removes the installed identity from its active path.
       await fs.rename(directory, join(this.directory, `.removed-${id}-${randomUUID()}`));

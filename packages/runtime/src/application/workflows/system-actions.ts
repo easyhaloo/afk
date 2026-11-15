@@ -1,5 +1,4 @@
-import type { PluginRuntime } from '../plugins/runtime.js';
-import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import type { PluginRuntime, PluginSystemActionOptions } from '../plugins/runtime.js';
 import { withCancellation } from '../plugins/cancellation.js';
 
 export type SystemActionName = 'publish-change' | 'queue-qa';
@@ -15,12 +14,12 @@ export interface SystemActionExecutorOptions {
 export class SystemActionExecutor {
   constructor(private readonly options: SystemActionExecutorOptions) {}
 
-  async execute(action: string, context: unknown, operation?: ProviderOperationOptions): Promise<unknown> {
+  async execute(action: string, context: unknown, operation?: PluginSystemActionOptions): Promise<unknown> {
     await withCancellation(() => undefined, operation);
     return this.dispatch(action, context, operation);
   }
 
-  private dispatch(action: string, context: unknown, operation?: ProviderOperationOptions): unknown | Promise<unknown> {
+  private dispatch(action: string, context: unknown, operation?: PluginSystemActionOptions): unknown | Promise<unknown> {
     switch (action) {
       case 'publish-change': return this.options.publishChange(context);
       case 'queue-qa': return this.options.queueQA(context);

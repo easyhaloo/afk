@@ -64,6 +64,7 @@ interface RepositoryCleanupProgress {
 }
 
 export interface PreparedRepositorySet {
+  publish?(): Promise<void>;
   heartbeat?(): Promise<void>;
   repositories: PreparedRepository[];
   primary: PreparedRepository;

@@ -190,7 +190,7 @@ describe('invokeCapability', () => {
       await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: 'repository', operation: 'prepare', input: { repository: { url: 'api' }, runId: 'run-1' } })).rejects.toThrow('does not support');
       const result = await invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation: 'run', input: { repository: { url: 'api' }, runId: 'run-1', action: 'repository.verify', input: { target: 'all' } } });
       expect(result).toMatchObject({ value: { passed: true }, publication: { commit: 'abc' }, cleanup: { removed: true } });
-      expect(execute).toHaveBeenCalledWith({ input: { target: 'all' }, repositoryWorkspace: workspace, worktreePath: '/owned/api' });
+      expect(execute).toHaveBeenCalledWith({ input: { target: 'all' }, repositoryWorkspace: workspace, worktreePath: '/owned/api' }, { authorizedWorkspace: '/owned/api' });
       expect(prepare).toHaveBeenCalledWith({ repository: { url: 'api' }, runId: 'run-1' }, undefined);
       for (const [operation, input] of [['prepare', { repository: { url: 'api' }, runId: 'run-1' }], ['checkout', { workspaceId: 'owned' }], ['publish', { workspaceId: 'owned' }], ['cleanup', { workspaceId: 'owned' }]] as const) {
         await invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation, input });

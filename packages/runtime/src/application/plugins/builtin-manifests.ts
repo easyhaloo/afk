@@ -19,6 +19,7 @@ import { configuredPluginManifests } from './configured.js';
 
 const identifier = z.string().min(1);
 export const capabilitySelectionSchema = z.object({
+  repository: z.object({ provider: identifier }).strict().optional(),
   policies: z.array(z.object({ provider: identifier, input: z.object({ action: identifier, context: z.record(z.union([z.string(), z.number(), z.boolean()])).optional() }).strict() }).strict()).default([]),
   verifications: z.array(verificationRequestSchema.omit({ target: true }).extend({ provider: identifier }).strict()).max(32).default([]),
   contexts: z.array(z.object({ provider: identifier, query: z.object({ scope: identifier, prompt: z.string(), limit: z.number().int().positive().optional() }).strict() }).strict()).default([]),
@@ -27,6 +28,7 @@ export const capabilitySelectionSchema = z.object({
   notifications: z.array(z.object({ provider: identifier, message: z.object({ title: identifier, body: z.string(), channel: z.string().optional(), urgency: z.enum(['low', 'normal', 'high']).optional() }).strict() }).strict()).default([]),
 }).strict();
 
+// Each default selection owns its lazy factory and metadata IDs together.
 function defaultSelections(homeDir: string, workspaceRoot: string) {
   return [
     { ids: ['host.jumpserver'], create: () => [createJumpserverPlugin()] },
@@ -113,6 +115,7 @@ export interface UnsupportedToolBinding {
   readonly reason: 'custom-binding';
 }
 
+/** Configured executable bindings cannot inherit approval of a default command. */
 export function configuredExternalTools(id: string, config: { readonly [key: string]: PluginConfigValue } = {}): {
   readonly declarations: readonly ExternalToolDependency[];
   readonly unsupported: readonly UnsupportedToolBinding[];

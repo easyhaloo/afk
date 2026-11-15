@@ -380,7 +380,7 @@ describe('configured repository lifecycle', () => {
     const { provider, transport, setSnapshot } = remoteLifecycle();
     expect(provider.capabilities).toEqual({ read: true, clone: false, push: false, prepare: true, checkout: true, publish: true, cleanup: true });
     expect(await provider.prepare(prepareInput)).toEqual(workspace());
-    const unsafeInput = { ...workspaceRequest, path: '/outside', repository: { url: 'https://outside.example' }, ref: 'main', force: true, merge: true };
+    const unsafeInput = { ...workspaceRequest, path: '/outside', repository: { url: 'https://outside.example' }, force: true, merge: true };
     expect(await provider.checkout(unsafeInput)).toEqual(workspace('afk/run-1'));
     setSnapshot({ commit: publishedCommit, branch: 'afk/run-1', dirty: false });
     expect(await provider.publish(unsafeInput)).toEqual({ commit: publishedCommit, branch: 'afk/run-1', url: 'https://git.example/changes/1' });

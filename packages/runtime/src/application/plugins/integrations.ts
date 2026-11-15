@@ -55,7 +55,7 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
       const result = verificationResultSchema.parse(await invokeCapability(runtime, {
         capability: 'verification.provider', provider: verification.provider, operation: 'verify',
         input: await withCancellation(() => verification.request(context), context.signal ? { signal: context.signal } : undefined),
-      }, context.signal ? { signal: context.signal } : undefined));
+      }, { ...(context.signal ? { signal: context.signal } : {}), authorizedWorkspace: context.worktreePath }));
       if (!result.passed) throw new Error('Capability verification failed');
     }
   };

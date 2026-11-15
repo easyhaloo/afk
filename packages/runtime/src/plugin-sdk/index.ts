@@ -1,7 +1,7 @@
 export * from './profile.js';
 export * from './capabilities.js';
 export * from './issue-tracker.js';
-export type { Plugin, PluginDiagnostic, PluginHealth, PluginSetupContext, WorkflowPlugin } from '../application/plugins/runtime.js';
+export type { Plugin, PluginDiagnostic, PluginHealth, PluginSetupContext, PluginSystemActionOptions, WorkflowPlugin } from '../application/plugins/runtime.js';
 export { PluginRuntime } from '../application/plugins/runtime.js';
 export { loadInstalledPlugins } from '../application/plugins/loader.js';
 export { createJumpserverPlugin } from '../application/plugins/builtins.js';
@@ -45,3 +45,5 @@ export { listPluginInventory, diagnosePluginInventory } from '../application/plu
 export type { PluginInventoryEntry } from '../application/plugins/inventory.js';
 export { inspectConfiguredPlugins, configuredPluginManifests } from '../application/plugins/configured.js';
 export type { ConfiguredPluginMetadata } from '../application/plugins/configured.js';
+export { createManagedPlaywrightPlugin } from '../application/plugins/managed-playwright.js';
+export { PLAYWRIGHT_RECIPE_ID, PLAYWRIGHT_PLUGIN_ID, PLAYWRIGHT_PROVIDER_ID, type ToolInstallOptions } from '../application/plugins/tool-recipes.js';

@@ -33,6 +33,7 @@ export interface CommandVerificationOptions {
 export const runVerificationCommand: VerificationCommandRunner = (argv, options) => {
   if (options.signal?.aborted) return Promise.reject(options.signal.reason ?? new Error('verification aborted'));
   return new Promise<VerificationCommandResult>((resolve, reject) => {
+    let outcome: (() => void) | undefined;
     const abort = (): void => { child.kill('SIGKILL'); };
     const child = execFile(argv[0], [...argv.slice(1)], {
       cwd: options.cwd,
@@ -42,13 +43,18 @@ export const runVerificationCommand: VerificationCommandRunner = (argv, options)
       encoding: 'utf8',
       shell: false,
     }, (error, stdout, stderr) => {
+      outcome = () => {
+        if (options.signal?.aborted) return reject(options.signal.reason ?? new Error('verification aborted'));
+        if (error && typeof error.code !== 'number') {
+          if (error.killed || error.signal) {
+            resolve({ exitCode: 1, stdout, stderr: [stderr, `verification terminated: ${error.signal ?? 'timeout'}`].filter(Boolean).join('\n') });
+          } else reject(error);
+        } else resolve({ exitCode: typeof error?.code === 'number' ? error.code : 0, stdout, stderr });
+      };
+    });
+    child.once('close', () => {
       options.signal?.removeEventListener('abort', abort);
-      if (options.signal?.aborted) return reject(options.signal.reason ?? new Error('verification aborted'));
-      if (error && typeof error.code !== 'number') {
-        if (error.killed || error.signal) {
-          resolve({ exitCode: 1, stdout, stderr: [stderr, `verification terminated: ${error.signal ?? 'timeout'}`].filter(Boolean).join('\n') });
-        } else reject(error);
-      } else resolve({ exitCode: typeof error?.code === 'number' ? error.code : 0, stdout, stderr });
+      outcome?.();
     });
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();

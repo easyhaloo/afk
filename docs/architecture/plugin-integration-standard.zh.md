@@ -164,10 +164,12 @@ Google 面板经主进程完成客户端文件选择、浏览器授权、状态�
 |---|---|
 | `snapshot` | `{url,ref?}` → `{commit,branch,dirty}` |
 | `prepare` | `{repository:{url,ref?},runId}` → `{id,repository,runId,snapshot,path?}` |
-| `checkout` | `{workspaceId}` → 同身份工作区，分支 `afk/<runId>` |
+| `checkout` | `{workspaceId,branch?,ref?}` → 同身份工作区；`branch` 为目标分支，缺省 `afk/<runId>`；`ref` 为来源分支，缺省使用 prepare revision |
 | `publish` | `{workspaceId}` → `{commit,branch,url?}`，必须匹配检查后的快照，不合并 |
 | `cleanup` | `{workspaceId}` → `{removed}` |
-| 组合 `run` | `{repository,runId,action,input}` → `{value,workspace,publication,cleanup}` |
+| 组合 `run` | `{repository,runId,checkout?:{branch?,ref?},action,input}` → `{value,workspace,publication,cleanup}` |
+
+Repository 回调明确传递的 `authorizedWorkspace: undefined` 表示缺失本地检出授权；公开 Verification dispatcher 必须在调用 Provider 前拒绝，不能回退启动目录。独立直接调用省略此授权字段时保留启动目录语义；不依赖本地路径的其他 Repository action 不受影响。
 
 `RepositoryLifecycleService.run` 要求四个 lifecycle 操作，按
 `prepare → checkout → callback(workspace) → publish → cleanup` 执行，可由
@@ -175,6 +177,8 @@ Google 面板经主进程完成客户端文件选择、浏览器授权、状态�
 `{input,repositoryWorkspace,worktreePath}`；不自动替换工作项执行器。
 本地 managed 仓库要求规范租约键和 checkout 所有权；远程/特殊 backend 显式声明
 仓库/ref 白名单和支持的操作，默认仍仅 snapshot。
+
+prepare 绑定配置基线；checkout 单独校验目标与来源分支，拒绝将配置基线作为目标。受管实现使用工作分支及可选 sourceBranch；QA 从实现分支建立独立 QA 分支。本地来源仅从配置 remote 获取，解析为固定 commit 后切换；无显式来源时不得改变 prepare revision。已有目标分支仅在 revision 相同时复用，否则拒绝，不重置或覆盖。publish 绑定本次实际检出分支；成功 checkout 后更新未修改工作区的安全清理基线。公开 publish/cleanup 不接受 checkout 字段。
 
 远程工作区协议以 `/workspaces/<repository>` 为资源根：GET `snapshot`；POST `prepare`；
 句柄下 GET `sessions/<id>/snapshot` 及 POST `sessions/<id>/{checkout,publish,cleanup}`。

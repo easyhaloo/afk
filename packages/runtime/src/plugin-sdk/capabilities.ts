@@ -210,6 +210,15 @@ export interface RepositoryWorkspaceRequest {
   readonly workspaceId: string;
 }
 
+export interface RepositoryCheckoutRequest extends RepositoryWorkspaceRequest {
+  readonly branch?: string;
+  readonly ref?: string;
+}
+
+export interface RepositoryRunRequest extends RepositoryPrepareRequest {
+  readonly checkout?: Pick<RepositoryCheckoutRequest, 'branch' | 'ref'>;
+}
+
 export interface RepositoryWorkspace {
   readonly id: string;
   readonly repository: RepositoryRef;
@@ -233,7 +242,7 @@ export interface RepositoryProvider extends Omit<CapabilityProvider<RepositoryCa
   readonly capabilities: Readonly<Record<'read' | 'clone' | 'push', boolean> & Partial<Record<RepositoryLifecycleOperation, boolean>>>;
   snapshot(repository: RepositoryRef, options?: ProviderOperationOptions): Promise<RepositorySnapshot>;
   prepare?(request: RepositoryPrepareRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
-  checkout?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
+  checkout?(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
   publish?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication>;
   cleanup?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult>;
 }

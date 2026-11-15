@@ -27,7 +27,11 @@ import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.j
 import { validateManifest } from '../../plugin-sdk/profile.js';
 import { withCancellation } from './cancellation.js';
 
-export type PluginSystemAction = (input: unknown, options?: ProviderOperationOptions) => unknown | Promise<unknown>;
+export interface PluginSystemActionOptions extends ProviderOperationOptions {
+  readonly authorizedWorkspace?: string;
+}
+
+export type PluginSystemAction = (input: unknown, options?: PluginSystemActionOptions) => unknown | Promise<unknown>;
 export type PluginProvider = object;
 export type PluginSurface = object;
 export type PluginHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
@@ -297,7 +301,7 @@ export class PluginRuntime {
   listIssueTrackerProviders(): string[] { return this.listProviders('tracker.issue'); }
   listHostProviders(): string[] { return this.listProviders('host.connection'); }
 
-  async dispatchSystemAction(name: string, input: unknown, options?: ProviderOperationOptions): Promise<unknown> {
+  async dispatchSystemAction(name: string, input: unknown, options?: PluginSystemActionOptions): Promise<unknown> {
     const action = this.actions.get(name);
     if (!action) throw new Error(`unknown system action '${name}'`);
     await withCancellation(() => undefined, options);

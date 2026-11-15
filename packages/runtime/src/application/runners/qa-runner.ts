@@ -1,3 +1,4 @@
+import { prepareManagedRepositories } from '../plugins/repository-lifecycle.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../infrastructure/git/index.js';
@@ -36,7 +37,7 @@ import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
-import { RunResourceScope, type ExecutionCleanupOwnership } from '../workflows/resource-scope.js';
+import { RunResourceScope } from '../workflows/resource-scope.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import { runQaPreflight } from './qa-preflight.js';
 import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecycle.js';
@@ -272,7 +273,7 @@ export class QARunner {
       runtimeStarted = true;
       controller.signal.throwIfAborted();
       await leaseScope.acquireOwnership();
-      workspace = await this.prepareWorkspace(id, leaseScope.cleanupOwnership);
+      workspace = await this.prepareWorkspace(id, leaseScope, runtimeRunId, `${backlog.branchName}-qa`, options);
       if (workspace) leaseScope.registerExternalResource({ finish: outcome => runtimeErrorSummary || outcome.status !== 'success'
         ? workspace!.finish({ status: 'failed' }) : workspace!.release() });
       const dispatcher = new LifecycleDispatcher(this.plugins?.getLifecycleModules());
@@ -300,9 +301,11 @@ export class QARunner {
         await leaseScope.stopExecutions();
       });
       await withCancellation(() => dispatcher.run('init', { ...lifecycleBase, projectName: undefined }), options);
-      const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
+      const handle = workspace?.publish
+        ? { worktreePath: workspace.primary.handle.path, branchName: workspace.primary.handle.branch }
+        : await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
-      leaseScope.registerStepHandle({ branch: handle.branchName, path: worktreePath, isNewBranch: true },
+      if (!workspace?.publish) leaseScope.registerStepHandle({ branch: handle.branchName, path: worktreePath, isNewBranch: true },
         () => this.providers.branches.cleanup(worktreePath!, { preserve: !!runtimeErrorSummary }));
       const context = { ...lifecycleBase, worktreePath, sessionName: session };
       lifecycleContext = context;
@@ -488,7 +491,10 @@ export class QARunner {
       if (signal.result === 'PASS') await withCancellation(() => dispatcher.run('after-agent', context), options);
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName,
         () => withCancellation(() => dispatcher.run('before-publish', context), options), options,
-        change => { publication = change; });
+        change => { publication = change; }, workspace?.publish && (async () => {
+          await leaseScope.stopExecutions();
+          await workspace!.publish!();
+        }));
       if (!outcome.success) {
         runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
       }
@@ -516,7 +522,10 @@ export class QARunner {
           runtimeErrorSummary = [runtimeErrorSummary, failure.message].filter(Boolean).join('; ');
         }
       };
-      await attempt('lease scope', () => leaseScope.finish({ status: runtimeErrorSummary ? 'failed' : 'success' }));
+      await attempt('lease scope', async () => {
+        await leaseScope.finish({ status: runtimeErrorSummary ? 'failed' : 'success' });
+        leaseScope.cleanupOwnership.assertClosed();
+      });
       if (lifecycleContext) await attempt('lifecycle', () => lifecycle!.run('cleanup', lifecycleContext!));
       if (cleanupErrors.length) {
         runtimeErrorSummary += `; cleanup ownership unconfirmed for run ${runtimeRunId}, worktree ${worktreePath ?? this.projectRoot}`;
@@ -537,10 +546,10 @@ export class QARunner {
    * on a missing repository root. A borrowed checkout is restored, one this
    * call created is removed again by release().
    */
-  private async prepareWorkspace(id: string, ownership?: ExecutionCleanupOwnership): Promise<PreparedRepositorySet | undefined> {
-    if (!this.repositories?.length) return undefined;
-    const workspace = await this.prepareRepositories.prepare(this.repositories, this.projectRoot, ownership);
-    logger.info({ backlogId: id, workspace: workspace.primary.handle.path }, 'QA workspace prepared');
+  private async prepareWorkspace(id: string, scope: RunResourceScope, runId: string, verificationBranch: string, options: ProviderOperationOptions): Promise<PreparedRepositorySet | undefined> {
+    const workspace = await prepareManagedRepositories({ runtime: this.plugins, fallback: this.prepareRepositories,
+      repositories: this.repositories ?? [], workspaceRoot: this.projectRoot, scope, runId, verification: true, verificationBranch, options });
+    if (workspace) logger.info({ backlogId: id, workspace: workspace.primary.handle.path }, 'QA workspace prepared');
     return workspace;
   }
 
@@ -559,6 +568,9 @@ export class QARunner {
    * repository's own defaults are the last resort.
    */
   private async resolvePlan(backlog: BacklogItem): Promise<ExecutionPlan> {
+    if (this.repositories?.some(repository => !backlog.branchName || repository.workingBranch !== backlog.branchName)) {
+      throw new Error('Managed QA implementation refs conflict with backlog branch');
+    }
     const primary = this.repositories?.find(repository => repository.primary);
     const declared = parseExecutionPlan(backlog.description);
     const manifest = this.executionPlan ?? (primary && createExecutionPlan({
@@ -758,6 +770,7 @@ export class QARunner {
     beforePublish: () => Promise<void>,
     options?: ProviderOperationOptions,
     onPublished?: (change: ChangeRequest) => void,
+    publishRepository?: () => Promise<void>,
   ): Promise<QAProcessResult> {
     await withCancellation(() => undefined, options);
     if (signal.result === 'FAIL') return this.routeQARework(backlogId, signal as QAFailure);
@@ -777,7 +790,8 @@ export class QARunner {
       }
       if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
       await beforePublish();
-      await this.providers.branches.push(verificationBranch, worktreePath);
+      if (publishRepository) await publishRepository();
+      else await this.providers.branches.push(verificationBranch, worktreePath);
       // A previous attempt may have left the change request behind (a re-run
       // of an already-published item). Look it up unconditionally: `beforeChange`
       // is an optional pre-publish hook, not a gate for the lookup. Without it

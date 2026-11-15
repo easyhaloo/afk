@@ -10,6 +10,7 @@ import { invokeCapability } from './operations.js';
 import { createConfiguredPlugins } from './configured.js';
 import { readPluginConfiguration, type PluginConfiguration } from './configuration.js';
 import { createCapabilityLifecycle } from './integrations.js';
+import { selectManagedRepository } from './repository-lifecycle.js';
 import type { ContextFragment } from '../../plugin-sdk/capabilities.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 import { assembleProviders } from '../../infrastructure/provider/assembly.js';
@@ -121,11 +122,11 @@ async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: De
           return result;
         });
         context.registerSystemAction('capability.invoke', async (context, operation) => {
-          const envelope = context && typeof context === 'object' ? context as { input?: unknown; worktreePath?: string } : undefined;
+          const envelope = context && typeof context === 'object' ? context as { input?: unknown } : undefined;
           let input = context && typeof context === 'object' && 'capability' in context ? context : envelope?.input ?? context;
-          if (input && typeof input === 'object' && 'capability' in input && input.capability === 'verification.provider' && envelope?.worktreePath) {
+          if (input && typeof input === 'object' && 'capability' in input && input.capability === 'verification.provider' && operation?.authorizedWorkspace) {
             const request = input as { capability: string; input?: { target?: string } };
-            input = { ...request, input: { target: envelope.worktreePath, ...request.input } };
+            input = { ...request, input: { target: operation.authorizedWorkspace, ...request.input } };
           }
           const result = await invokeCapability(runtime, input, operation);
           if (result && typeof result === 'object' && (
@@ -257,8 +258,9 @@ async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: De
           context.onDispose(() => fragments.clear());
         },
       };
+      if (selection.repository) selectManagedRepository(runtime, selection.repository.provider, integration);
       plugins.push(integration);
-      if (selection.policies.length || selection.verifications.length) requiredIntegrations = integration;
+      if (selection.policies.length || selection.verifications.length || selection.repository) requiredIntegrations = integration;
     }
   }
   await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });

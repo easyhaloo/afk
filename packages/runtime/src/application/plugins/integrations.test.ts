@@ -181,7 +181,7 @@ describe('createCapabilityLifecycle', () => {
     calls.length = 0;
     await new LifecycleDispatcher([module]).run('after-agent', context);
     expect(request).toHaveBeenNthCalledWith(1, context);
-    expect(verification.verify).toHaveBeenNthCalledWith(1, { target: context.worktreePath, command: ['npm', 'test'], timeoutMs: 5000 });
+    expect(verification.verify).toHaveBeenNthCalledWith(1, { target: context.worktreePath, command: ['npm', 'test'], timeoutMs: 5000 }, { authorizedWorkspace: context.worktreePath });
     expect(put).toHaveBeenCalledWith({ name: 'evidence-42.txt', mediaType: 'text/plain', bytes: Buffer.from('issue=42\nsession=afk-42') });
     expect(publish).toHaveBeenCalledWith({ uri: new URL(`file://${root}/evidence-42.txt`).href, name: 'evidence-42.txt' }, context);
     expect(notification.notify).toHaveBeenCalledWith({ title: 'Issue 42 complete', body: publish.mock.calls[0][0].uri });
@@ -191,7 +191,7 @@ describe('createCapabilityLifecycle', () => {
     const publication = vi.fn(async () => { calls.push('publication'); });
     await new LifecycleDispatcher([module, { name: 'publication', onBeforePublish: publication }]).run('before-publish', current);
     expect(request).toHaveBeenNthCalledWith(2, current);
-    expect(verification.verify).toHaveBeenNthCalledWith(2, { target: current.worktreePath, command: ['npm', 'test'], timeoutMs: 5000 });
+    expect(verification.verify).toHaveBeenNthCalledWith(2, { target: current.worktreePath, command: ['npm', 'test'], timeoutMs: 5000 }, { authorizedWorkspace: current.worktreePath });
     expect(put).toHaveBeenCalledTimes(1);
     expect(notification.notify).toHaveBeenCalledTimes(1);
     expect(calls).toEqual(['policy', 'verify', 'publication']);

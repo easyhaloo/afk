@@ -1,3 +1,4 @@
+import { prepareManagedRepositories } from './plugins/repository-lifecycle.js';
 import { promises as fs } from 'fs';
 import { basename, join } from 'path';
 import { randomUUID } from 'node:crypto';
@@ -654,8 +655,9 @@ export class WorkflowRunner {
     this.workspaceRoot = options.workspaceRoot ?? this.repoRoot;
     controller.signal.throwIfAborted();
     await this.resourceScope?.acquireOwnership();
-    if (options.repositories?.length) {
-      this.preparedRepositories = await this.multiRepositoryPreparer.prepare(options.repositories, this.workspaceRoot, this.resourceScope?.cleanupOwnership);
+    this.preparedRepositories = await prepareManagedRepositories({ runtime: this.plugins, fallback: this.multiRepositoryPreparer,
+      repositories: options.repositories ?? [], workspaceRoot: this.workspaceRoot, scope: this.resourceScope, runId: context.runId, options: this.operationOptions });
+    if (this.preparedRepositories) {
       const repositoryScope = this.resourceScope;
       const activeBacklogId = this.activeBacklog?.id;
       if (this.preparedRepositories.heartbeat) this.stopRepositoryHeartbeat = this.resourceScope?.registerHeartbeat(this.preparedRepositories.heartbeat, 10_000, async error => {
@@ -687,7 +689,13 @@ export class WorkflowRunner {
       }));
       await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: setup.message, reasonCode: setup.code });
       await this.markBacklogBlocked(setup.message);
-      await this.resourceScope?.finish({ status: 'failed' });
+      try { await this.resourceScope?.finish({ status: 'failed' }); }
+      catch (cleanupError) {
+        const summary = `${setup.message}; cleanup ownership unconfirmed for run ${context.runId} at ${this.repoRoot}`;
+        await this.finishRuntime('blocked', summary);
+        throw new AggregateError([error, cleanupError], summary, { cause: { runError: error,
+          implementationHandedOff: false, recovery: { runtimeRunId: context.runId, worktreePath: this.repoRoot, scope: this.resourceScope } } });
+      }
       await this.finishRuntime('blocked', setup.message);
       throw error;
     }
@@ -707,6 +715,7 @@ export class WorkflowRunner {
       }
       if (result.success && this.preparedRepositories) {
         await this.resourceScope?.stopExecutions();
+        this.resourceScope?.cleanupOwnership.assertClosed();
         await this.preparedRepositories.heartbeat?.();
         await this.activeClaim?.heartbeat();
         for (const repository of this.preparedRepositories.repositories) {
@@ -766,6 +775,7 @@ export class WorkflowRunner {
       let scopeError: unknown;
       try {
         await this.resourceScope?.finish({ status: terminalOutcome });
+        this.resourceScope?.cleanupOwnership.assertClosed();
       } catch (err) {
         scopeError = err;
       }
@@ -1301,7 +1311,7 @@ export class WorkflowRunner {
       executeSystem: async step => {
         const startedAt = new Date().toISOString();
         try {
-          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input }, this.operationOptions);
+          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input }, { ...this.operationOptions, authorizedWorkspace: wt.path });
           return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
         } catch (error) {
           return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };

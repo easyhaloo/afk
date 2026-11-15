@@ -149,6 +149,19 @@ export function registerPluginCommands(program: Command, composition: PluginComm
       const installed = await manager.install(source);
       process.stdout.write(`Installed ${installed.id}@${installed.version}\n`);
     });
+  plugin.command('install-tool <recipe>')
+    .description('Install an explicitly approved local tool recipe')
+    .requiredOption('--target <target>', 'Explicit execution target; host-local only')
+    .option('--offline', 'Use only the private npm cache; never fetch')
+    .action(async (recipe, options) => {
+      const stop = new AbortController();
+      const abort = () => stop.abort(new Error('Tool installation cancelled'));
+      process.once('SIGINT', abort); process.once('SIGTERM', abort);
+      try {
+        const installed = await manager.installTool(recipe, { target: options.target, offline: options.offline === true, signal: stop.signal });
+        process.stdout.write(`Installed ${installed.id}@${installed.version}; browser/native prerequisites require separate provisioning\n`);
+      } finally { process.off('SIGINT', abort); process.off('SIGTERM', abort); }
+    });
   plugin.command('configure <id>')
     .description('Save validated plugin settings from a JSON file')
     .requiredOption('--file <path>', 'JSON settings file; use environment references for secrets')

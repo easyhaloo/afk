@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import type { PluginRuntime } from './runtime.js';
+import type { PluginRuntime, PluginSystemActionOptions } from './runtime.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
-import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { withCancellation } from './cancellation.js';
 import { RepositoryLifecycleService } from './repository-lifecycle.js';
 import { experienceQueryContextSchema } from '../learning/experience-store.js';
@@ -25,6 +24,7 @@ const repositoryRef = z.object({ url: text, ref: text.optional() }).strict();
 const repositorySnapshot = z.object({ commit: text, branch: text, dirty: z.boolean() });
 const repositoryPrepare = z.object({ repository: repositoryRef, runId: text }).strict();
 const repositoryHandle = z.object({ workspaceId: text }).strict();
+const repositoryCheckout = repositoryHandle.extend({ branch: text.optional(), ref: text.optional() }).strict();
 const repositoryWorkspace = z.object({ id: text, repository: repositoryRef, runId: text, snapshot: repositorySnapshot, path: text.optional() });
 const repositoryPublication = z.object({ commit: text, branch: text, url: text.optional() });
 const repositoryCleanup = z.object({ removed: z.boolean() });
@@ -96,10 +96,10 @@ const invocationSchema = z.union([
   }).strict()),
   operation('repository.provider', 'snapshot', repositoryRef),
   operation('repository.provider', 'prepare', repositoryPrepare),
-  operation('repository.provider', 'checkout', repositoryHandle),
+  operation('repository.provider', 'checkout', repositoryCheckout),
   operation('repository.provider', 'publish', repositoryHandle),
   operation('repository.provider', 'cleanup', repositoryHandle),
-  operation('repository.provider', 'run', repositoryPrepare.extend({ action: text, input: z.record(jsonValue) }).strict()),
+  operation('repository.provider', 'run', repositoryPrepare.extend({ action: text, input: z.record(jsonValue), checkout: repositoryCheckout.omit({ workspaceId: true }).optional() }).strict()),
   operation('policy.provider', 'evaluate', z.object({ action: text, context: z.record(scalar).optional() }).strict()),
   operation('trigger.provider', 'register', z.object({
     id: text, kind: z.enum(['schedule', 'webhook', 'manual']), schedule: text.optional(), payload: z.record(jsonValue).optional(), input: z.record(jsonValue).optional(),
@@ -168,7 +168,7 @@ function output<S extends z.ZodTypeAny>(schema: S, value: unknown): z.output<S> 
   return parsed.data;
 }
 
-export async function invokeCapability(runtime: PluginRuntime, input: unknown, options?: ProviderOperationOptions): Promise<unknown> {
+export async function invokeCapability(runtime: PluginRuntime, input: unknown, options?: PluginSystemActionOptions): Promise<unknown> {
   const fields = input && typeof input === 'object' ? Object.getOwnPropertyDescriptors(input) : undefined;
   const ownEnvelope = fields && ['capability', 'provider', 'operation', 'input']
     .every(key => Object.hasOwn(fields, key) && Object.hasOwn(fields[key], 'value'));
@@ -185,10 +185,14 @@ export async function invokeCapability(runtime: PluginRuntime, input: unknown, o
   return withCancellation(() => dispatchCapability(runtime, request, options), options);
 }
 
-async function dispatchCapability(runtime: PluginRuntime, request: z.output<typeof invocationSchema>, options?: ProviderOperationOptions): Promise<unknown> {
-  const forwarded: [] | [ProviderOperationOptions] = options ? [options] : [];
+async function dispatchCapability(runtime: PluginRuntime, request: z.output<typeof invocationSchema>, options?: PluginSystemActionOptions): Promise<unknown> {
+  const forwarded: [] | [PluginSystemActionOptions] = options ? [options] : [];
   switch (request.capability) {
     case 'verification.provider':
+      if (options && Object.hasOwn(options, 'authorizedWorkspace')
+        && (typeof options.authorizedWorkspace !== 'string' || !options.authorizedWorkspace.trim())) {
+        throw new Error('Verification requires an authorized Repository checkout workspace');
+      }
       return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(request.input, ...forwarded));
     case 'notification.provider':
       return output(notificationReceiptSchema, await required(runtime.getNotificationProvider(request.provider)).notify(request.input, ...forwarded));
@@ -203,9 +207,9 @@ async function dispatchCapability(runtime: PluginRuntime, request: z.output<type
       if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input, ...forwarded));
       if (request.operation === 'run') {
         if (!runtime.listSystemActions().includes(request.input.action)) throw new Error('Repository execution action is not registered');
-        const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId }, workspace => runtime.dispatchSystemAction(request.input.action, {
+        const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId, checkout: request.input.checkout }, workspace => runtime.dispatchSystemAction(request.input.action, {
           input: request.input.input, repositoryWorkspace: workspace, worktreePath: workspace.path,
-        }, options), options);
+        }, { ...options, authorizedWorkspace: workspace.path }), options);
         return output(z.object({ value: z.unknown(), workspace: repositoryWorkspace, publication: repositoryPublication, cleanup: repositoryCleanup }), result);
       }
       const operation = request.operation;

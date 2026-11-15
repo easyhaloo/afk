@@ -9,6 +9,7 @@ import type {
   RepositorySnapshot,
   RepositoryLifecycleOperation,
   RepositoryPrepareRequest,
+  RepositoryCheckoutRequest,
   RepositoryWorkspaceRequest,
   RepositoryWorkspace,
   RepositoryPublication,
@@ -21,6 +22,7 @@ import {
   executeCommand,
   requestHttp,
   type CommandExecutor,
+  type CommandRequest,
   type CommandResult,
   type FetchTransport,
 } from './dependencies.js';
@@ -30,6 +32,26 @@ const SNAPSHOT_ONLY: RepositoryProvider['capabilities'] = Object.freeze({
   clone: false,
   push: false,
 });
+
+async function runRepositoryCommand(executor: CommandExecutor, request: CommandRequest): Promise<CommandResult> {
+  checkAbort(request);
+  const controller = request.deadlineAt === undefined ? undefined : new AbortController();
+  const abort = () => controller?.abort(request.signal?.reason);
+  const timer = controller ? setTimeout(() => controller.abort(new Error('Repository command deadline exceeded')),
+    Math.min(30_000, Math.max(1, request.deadlineAt! - Date.now()))) : undefined;
+  if (controller) {
+    request.signal?.addEventListener('abort', abort, { once: true });
+    if (request.signal?.aborted) abort();
+  }
+  try {
+    const result = await executor({ ...request, signal: controller?.signal ?? request.signal });
+    checkAbort(request);
+    return result;
+  } finally {
+    clearTimeout(timer);
+    if (controller) request.signal?.removeEventListener('abort', abort);
+  }
+}
 
 /** Validate the common snapshot shape shared by the remote providers. */
 function validateSnapshot(payload: unknown): RepositorySnapshot {
@@ -214,13 +236,28 @@ export class MultiRepositoryProvider implements RepositoryProvider {
             checkAbort(operationOptions);
             if (operation === 'snapshot') return this.snapshotPath(path, operationOptions);
             if (operation === 'checkout') {
-              await this.run(path, ['switch', '-c', `afk/${workspace!.runId}`], operationOptions);
-              return { ...workspace, snapshot: await this.snapshotPath(path, operationOptions) };
+              const branch = input.branch!;
+              let commit = workspace!.snapshot.commit;
+              const current = await this.snapshotPath(path, operationOptions);
+              if (current.dirty || current.commit !== commit || current.branch !== workspace!.snapshot.branch) throw new Error('repository workspace changed before checkout');
+              if (input.ref !== undefined) {
+                await this.assertPushDestination(path, config.remoteUrl!, operationOptions);
+                await this.run(path, ['-c', 'http.followRedirects=false', 'fetch', '--no-tags', '--no-recurse-submodules', '--',
+                  config.remoteUrl!, `refs/heads/${input.ref}`], operationOptions);
+                commit = (await this.run(path, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], operationOptions)).stdout.trim();
+                if (!/^[a-f0-9]{7,64}$/i.test(commit)) throw new Error('invalid repository checkout source commit');
+              }
+              const existing = (await this.run(path, ['for-each-ref', '--format=%(objectname)', `refs/heads/${branch}`], operationOptions)).stdout.trim();
+              if (existing && existing !== commit) throw new Error('repository checkout target revision conflicts with requested source');
+              await this.run(path, existing ? ['switch', branch] : ['switch', '-c', branch, commit], operationOptions);
+              const snapshot = await this.snapshotPath(path, operationOptions);
+              if (snapshot.commit !== commit || snapshot.branch !== branch) throw new Error('repository checkout differs from requested revision or branch');
+              return { ...workspace, snapshot };
             }
             const current = await this.snapshotPath(path, operationOptions);
             if (current.dirty || current.commit !== input.expectedCommit || current.branch !== input.expectedBranch) throw new Error('repository workspace changed before operation');
             if (operation === 'publish') {
-              if (current.branch !== `afk/${workspace!.runId}`) throw new Error('refusing to publish an unowned branch');
+              if (current.branch !== workspace!.snapshot.branch) throw new Error('refusing to publish an unowned branch');
               await this.assertPushDestination(path, config.remoteUrl!, operationOptions);
               await this.run(path, ['-c', 'http.followRedirects=false', 'push', '--no-follow-tags', '--recurse-submodules=no', '--',
                 config.remoteUrl!, `${current.commit}:refs/heads/${current.branch}`], operationOptions);
@@ -280,7 +317,7 @@ export class MultiRepositoryProvider implements RepositoryProvider {
     return requireLifecycle(this.lifecycle).prepare(request, options);
   }
 
-  async checkout(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
+  async checkout(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
     return requireLifecycle(this.lifecycle).checkout(request, options);
   }
 
@@ -301,10 +338,7 @@ export class MultiRepositoryProvider implements RepositoryProvider {
   }
 
   private async run(cwd: string, args: readonly string[], options?: ProviderOperationOptions): Promise<CommandResult> {
-    checkAbort(options);
-    const result = await this.git({ command: 'git', args, cwd, signal: options?.signal });
-    checkAbort(options);
-    return result;
+    return runRepositoryCommand(this.git, { command: 'git', args, cwd, signal: options?.signal, deadlineAt: options?.deadlineAt });
   }
 }
 
@@ -350,7 +384,7 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
     return requireLifecycle(this.lifecycle).prepare(request, options);
   }
 
-  async checkout(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
+  async checkout(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
     return requireLifecycle(this.lifecycle).checkout(request, options);
   }
 
@@ -438,8 +472,9 @@ export class SpecialGitBackendProvider implements RepositoryProvider {
         checkAbort(operationOptions);
         let result: CommandResult;
         try {
-          result = await this.executor({ command: this.options.backend, args: [operation, '--json'],
-            input: JSON.stringify({ ...input, ...(workspace ? { repository: workspace.repository, workspaceId: workspace.id } : {}) }), signal: operationOptions?.signal });
+          result = await runRepositoryCommand(this.executor, { command: this.options.backend, args: [operation, '--json'],
+            input: JSON.stringify({ ...input, ...(workspace ? { repository: workspace.repository, workspaceId: workspace.id } : {}) }),
+            signal: operationOptions?.signal, deadlineAt: operationOptions?.deadlineAt });
         } catch {
           checkAbort(operationOptions);
           throw new Error('special git backend lifecycle command failed');
@@ -471,7 +506,7 @@ export class SpecialGitBackendProvider implements RepositoryProvider {
     if (repository.ref) args.push('--ref', repository.ref);
     let result: CommandResult;
     try {
-      result = await this.executor({ command: this.options.backend, args, signal: options?.signal });
+      result = await runRepositoryCommand(this.executor, { command: this.options.backend, args, signal: options?.signal, deadlineAt: options?.deadlineAt });
     } catch {
       checkAbort(options);
       throw new Error('special git backend snapshot command failed');
@@ -490,7 +525,7 @@ export class SpecialGitBackendProvider implements RepositoryProvider {
     return requireLifecycle(this.lifecycle).prepare(request, options);
   }
 
-  async checkout(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
+  async checkout(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
     return requireLifecycle(this.lifecycle).checkout(request, options);
   }
 
@@ -517,6 +552,7 @@ type LifecycleInput = (RepositoryPrepareRequest | RepositoryWorkspaceRequest) & 
   readonly expectedCommit?: string;
   readonly expectedBranch?: string;
   readonly branch?: string;
+  readonly ref?: string;
   readonly merge?: false;
 };
 type LifecycleRequest = (operation: RepositoryLifecycleOperation | 'snapshot', input: LifecycleInput,
@@ -575,14 +611,21 @@ class ConfiguredRepositoryLifecycle {
     } finally { this.preparing.delete(key); }
   }
 
-  checkout(input: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
+  checkout(input: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
     return this.use('checkout', input, options, async owned => {
       if (owned.checkout) throw new Error('repository workspace already checked out');
-      const workspace = validateWorkspace(await this.request('checkout', { workspaceId: owned.workspace.id, branch: `afk/${owned.workspace.runId}` }, owned.workspace, options), owned.workspace, this.localPaths);
+      const branch = input.branch ?? `afk/${owned.workspace.runId}`;
+      const ref = input.ref;
+      validateBranch(branch);
+      if (ref !== undefined) validateBranch(ref);
+      if (branch === owned.workspace.repository.ref) throw new Error('repository checkout cannot target the configured base branch');
+      const workspace = validateWorkspace(await this.request('checkout', { workspaceId: owned.workspace.id, branch, ...(ref === undefined ? {} : { ref }) }, owned.workspace, options), owned.workspace, this.localPaths);
       if (workspace.id !== owned.workspace.id) throw new Error('repository checkout changed workspace identity');
-      if (workspace.path !== owned.workspace.path || workspace.snapshot.branch !== `afk/${workspace.runId}`) throw new Error('repository checkout did not create the run branch');
+      if (workspace.path !== owned.workspace.path || workspace.snapshot.branch !== branch) throw new Error('repository checkout did not create the run branch');
+      if (ref === undefined && workspace.snapshot.commit !== owned.workspace.snapshot.commit) throw new Error('repository checkout changed the prepared revision');
       owned.workspace = workspace;
       owned.checkout = true;
+      owned.safeCommit = workspace.snapshot.commit;
       return workspace;
     });
   }

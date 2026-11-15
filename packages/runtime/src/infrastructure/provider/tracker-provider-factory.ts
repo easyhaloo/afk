@@ -186,6 +186,11 @@ export async function createTracker(
     cwd,
     credentials: () => detectTrackerCredentials(),
   });
+  if (target.platform === 'geelib') {
+    // Fail closed instead of falling into the GitLab client: a geelib target
+    // must never be served by the wrong provider while its client is pending.
+    throw new Error('The geelib tracker client is not available yet; it lands in a following slice.');
+  }
   return target.platform === 'github'
     ? createGitHubTracker(target.projectId, cwd)
     : createGitLabTracker(target.projectId, cwd, preferredHost);

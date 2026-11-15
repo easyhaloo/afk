@@ -151,9 +151,9 @@ export function inferPlatformFromProject(
     ?? (credentials.gitlab && !credentials.github ? 'gitlab' : 'github');
 }
 
-/** Parse a platform string, ignoring anything that is not github/gitlab. */
+/** Parse a platform string, ignoring anything that is not a supported platform. */
 export function asTrackerPlatform(value: unknown): TrackerPlatform | undefined {
-  return value === 'github' || value === 'gitlab' ? value : undefined;
+  return value === 'github' || value === 'gitlab' || value === 'geelib' ? value : undefined;
 }
 
 interface ProjectSelection {

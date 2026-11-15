@@ -212,4 +212,8 @@ describe('tracker target resolution outside a git repository', () => {
 
     expect(tracker).toMatchObject({ platform: 'github', projectId: 'team/repo' });
   });
+
+  it('refuses a geelib target with a clear error until its client exists', async () => {
+    await expect(createTracker('6856', '/nowhere', 'geelib')).rejects.toThrow(/geelib tracker client is not available/i);
+  });
 });

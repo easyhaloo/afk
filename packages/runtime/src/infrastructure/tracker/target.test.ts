@@ -76,6 +76,21 @@ describe('tracker target resolution', () => {
     });
   });
 
+  it('resolves an explicit geelib target from the environment', async () => {
+    const target = await resolveTrackerTarget({
+      cwd: '/nowhere',
+      env: { AFK_TRACKER_PROJECT: '6856', AFK_TRACKER_PLATFORM: 'geelib' },
+      store: emptyStore,
+    });
+
+    expect(target).toMatchObject({
+      platform: 'geelib',
+      projectId: '6856',
+      platformSource: 'env',
+      projectSource: 'env',
+    });
+  });
+
   it('resolves an issue id to the project the local index recorded for it', async () => {
     const target = await resolveTrackerTarget({
       issueId: '229',

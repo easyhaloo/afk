@@ -167,6 +167,29 @@ describe('GeelibBacklogProvider claim and transition', () => {
   });
 });
 
+describe('GeelibBacklogProvider execution mode', () => {
+  it('swaps the mode tag and keeps the business labels', async () => {
+    mockPlatform();
+    matter.label_name = 'billing,mode::afk';
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await provider.applyMode('geelib:6856#1083121', 'hitl');
+
+    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
+    expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '标签', cf_value: '["billing","mode::hitl"]' }]);
+    matter.label_name = '';
+  });
+
+  it('fails closed when the platform drops the mode tag', async () => {
+    mockPlatform();
+    matter.label_name = 'billing'; // no mode tag provisioned: the write will be dropped
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await expect(provider.applyMode('geelib:6856#1083121', 'hitl')).rejects.toThrow(/mode::hitl/i);
+    matter.label_name = '';
+  });
+});
+
 describe('GeelibBacklogProvider transition writeback', () => {
   it('appends a comment when a transition carries a reason', async () => {
     mockPlatform();

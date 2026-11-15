@@ -134,7 +134,7 @@ describe('configured plugin composition', () => {
     const [plugin] = await createConfiguredPlugins({ configurations: [{ ...configuration, config: references }], environment: {}, fetch: network, execute, onTrigger: vi.fn() });
     expect(resolve).not.toHaveBeenCalled();
     await runtime.activate(plugin);
-    if (['artifact.report-platform', 'notification.feishu', 'notification.slack', 'credential.oauth', 'credential.enterprise', 'sandbox.remote-container', 'repository.remote-workspace'].includes(configuration.id)) expect(resolve).not.toHaveBeenCalled();
+    if (['artifact.report-platform', 'notification.feishu', 'notification.slack', 'credential.oauth', 'credential.enterprise', 'credential.oidc', 'sandbox.remote-container', 'repository.remote-workspace'].includes(configuration.id)) expect(resolve).not.toHaveBeenCalled();
     else expect(resolve).toHaveBeenCalled();
     expect(runtime.listProvidersForPlugin(configuration.id)).not.toHaveLength(0);
     expect(network).not.toHaveBeenCalled();
@@ -155,6 +155,28 @@ describe('configured plugin composition', () => {
       }));
       expect(network.mock.calls.map(([, init]) => new Headers(init?.headers).get('authorization')))
         .toEqual([`Bearer ${environment.TOKEN}`, 'Bearer rotated-remote']);
+      expect(execute).not.toHaveBeenCalled();
+    }
+    if (configuration.id === 'credential.oidc') {
+      network.mockImplementation(async (_url, init) => init?.method === 'GET'
+        ? Response.json({ issuer: references.issuer, token_endpoint: 'https://auth.example.test/token' })
+        : Response.json({ access_token: 'issued-token', token_type: 'Bearer', issued_token_type: 'urn:ietf:params:oauth:token-type:access_token' }));
+      const provider = runtime.getCredentialProvider('credential.oidc')!;
+      const options = { signal: new AbortController().signal, deadlineAt: Date.now() + 10_000 };
+      for (const secret of ['fresh-assertion-one', 'fresh-assertion-two']) {
+        resolve.mockResolvedValue({ secret });
+        await expect(provider.resolve({ name: 'api', scope: 'read' }, options)).resolves.toEqual({ secret: 'issued-token' });
+        const form = new URLSearchParams(String(network.mock.calls.at(-1)?.[1]?.body));
+        expect(form.get('client_assertion')).toBe(secret);
+        expect(form.get('grant_type')).toBe(references.exchange ? 'urn:ietf:params:oauth:grant-type:token-exchange' : 'client_credentials');
+        if (references.exchange) expect(form.get('subject_token')).toBe(secret);
+      }
+      expect(resolve.mock.calls.map(([ref]) => ref)).toEqual(Array.from({ length: 2 }, () => references.exchange
+        ? [{ name: 'TOKEN' }, { name: 'TOKEN' }] : [{ name: 'TOKEN' }]).flat());
+      for (let call = 1; call <= resolve.mock.calls.length; call++) expect(resolve).toHaveBeenNthCalledWith(call, { name: 'TOKEN' }, expect.objectContaining({
+        signal: expect.any(AbortSignal), deadlineAt: options.deadlineAt,
+      }));
+      expect(network).toHaveBeenCalledTimes(4);
       expect(execute).not.toHaveBeenCalled();
     }
   });

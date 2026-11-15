@@ -1064,7 +1064,7 @@ provider configuration examples must follow that implementation rather than
 guessing constructor-to-YAML mappings.
 
 Named references in OTLP headers, ReportPlatform tokens, Feishu/Slack webhooks,
-OAuth client secrets and enterprise credential values resolve on each operation.
+OAuth client secrets, OIDC assertions/exchange subject tokens and enterprise credential values resolve on each operation.
 Named references in HTTP `sandbox.remote-container.token` and
 `repository.remote-workspace.token` resolve before every actual HTTP request,
 including container active health, repository snapshots and lifecycle preflight
@@ -1078,9 +1078,28 @@ inspection do not resolve them. Each operation checks reference and returned
 credential expiry, rejects `revoked: true`, forwards cancellation and the absolute
 `deadlineAt`, and rejects values arriving after that consumer activation is disposed.
 Enterprise forwarding retains the earlier reference or upstream expiry. Environment references
-remain construction-captured; other named-reference consumers retain activation-time
+are captured by schema preparation, not each operation; OIDC timing is detailed below. Other named-reference consumers retain activation-time
 resolution. Gmail retains its separate refresh flow. Disposal cannot undo requests
 already sent or forcibly stop an uncooperative credential resolver.
+
+Configured OIDC activation binds both exact named credential owners without resolving
+either input. Every actual `resolve` discovers and validates the exact HTTPS issuer,
+endpoint and optional endpoint pin before preparing fresh inputs. Discovery, assertion
+and subject preparation, token exchange and response-body consumption share one absolute
+budget: the earlier caller `deadlineAt` or configured `timeoutMs` (default 15 seconds,
+maximum 300 seconds). Input expiry can shorten the remaining preparation/exchange budget;
+expiry, revocation, cancellation and disposal prevent an accepted late result. Issued
+access-token expiry still comes from the token response, independently of input expiry.
+Direct string inputs and legacy `assertion(ref, tokenEndpoint)` / `subjectToken(ref)`
+callbacks remain supported. Callbacks may additionally accept operation options as the
+third/second argument and return `CredentialValue` metadata instead of a string.
+
+OIDC follows existing `defineOperation` environment capture semantics: environment-only
+configuration captures values when `createConfiguredPlugins` constructs it. If either
+input is a named reference, dependency preparation reparses the whole OIDC configuration
+at each activation and captures environment inputs again then. Neither case rereads the
+environment on each OIDC resolve. Reactivation registers a new OIDC provider; old
+provider references and pending operations remain disposed.
 
 A trigger plugin entry selects a registered `workflow.action` through its
 top-level `action` field, alongside `id`, `enabled`, `builtin` and `config`.

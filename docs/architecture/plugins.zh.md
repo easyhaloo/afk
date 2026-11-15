@@ -857,7 +857,7 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 真实 secret 字段名和 Provider 配置范围由 `configured.ts` 定义，完整示例应逐项对照该
 实现，不能猜测 constructor 到 YAML 的映射。
 
-OTLP headers、ReportPlatform token、飞书/Slack webhook、OAuth clientSecret 和企业凭据
+OTLP headers、ReportPlatform token、飞书/Slack webhook、OAuth clientSecret、OIDC assertion/exchange subjectToken 和企业凭据
 values 中的具名引用在每次操作时解析。HTTP `sandbox.remote-container.token` 和
 `repository.remote-workspace.token` 的具名引用在每次实际 HTTP 请求前解析，包括容器
 主动 health、Repository snapshot 以及 publish/cleanup 前的生命周期预检 snapshot。
@@ -866,8 +866,22 @@ values 中的具名引用在每次操作时解析。HTTP `sandbox.remote-contain
 这些按操作解析的字段接受带时区的 ISO `expiresAt`。激活及静态检查不解析这些
 引用。操作检查引用和返回凭据的有效期，拒绝 `revoked: true`，传递取消与绝对
 `deadlineAt`，拒绝所属激活已销毁后晚到的值。企业凭据转发保留引用和上游中较早的有效期。
-环境引用仍在构造时取值；其他具名引用消费者仍在激活时解析；Gmail 保留独立刷新流程。
+环境引用在 schema 准备时捕获，不按操作重读，OIDC 时机详见下文；其他具名引用消费者仍在激活时解析；Gmail 保留独立刷新流程。
 销毁不能撤回已发送的请求，也不能强制停止不响应取消的凭据解析器。
+
+配置式 OIDC 激活只绑定两个精确具名凭据的所属插件，不解析输入。每次实际 `resolve`
+先发现并校验精确 HTTPS issuer、endpoint 及可选 endpoint pin，再取得新 assertion 和
+可选 subjectToken。发现、输入准备、交换和响应体读取共用一个绝对期限，取调用方
+`deadlineAt` 与配置 `timeoutMs` 中较早者；默认 15 秒，最大 300 秒。输入有效期可进一步
+缩短后续准备和交换期限；过期、撤权、取消及销毁阻止接受晚到结果。签发 access token 的
+有效期仍由响应决定，不沿用输入 assertion 或 subjectToken 的有效期。
+直接字符串和原 `assertion(ref, tokenEndpoint)` / `subjectToken(ref)` 回调保持兼容；
+回调可在第三/第二个参数接收操作选项，并返回带元数据的 `CredentialValue`。
+
+OIDC 沿用 `defineOperation` 的环境捕获时机：仅含环境引用时，在
+`createConfiguredPlugins` 构造时取值；任一输入含具名引用时，每次激活的依赖准备会
+重新解析整份 OIDC 配置，此时再次捕获其中的环境值。两种情况均不在每次 resolve 时
+重读环境。重新激活注册新的 OIDC Provider，旧引用和旧操作仍保持已销毁状态。
 
 Trigger 插件条目用顶层 `action` 选择一个已注册的 `workflow.action`，与 `id`、
 `enabled`、`builtin`、`config` 并列；宿主事件 callback 负责派发该 action。

@@ -400,12 +400,21 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new OAuthCredentialProvider({ ...config, fetch });
       return capability(provider, { credentials: [provider] });
     }),
-    'credential.oidc': define('credential.provider', secret => z.object({
+    'credential.oidc': defineOperation('credential.provider', secret => z.object({
       issuer: baseUrl.refine(value => new URL(value).protocol === 'https:', 'must use HTTPS'), clientId: text, assertion: secret, tokenEndpoint: httpsUrl.optional(), timeoutMs: milliseconds.optional(),
       exchange: z.object({ subjectToken: secret, subjectTokenType: text, audience: text.optional(), resource: text.optional() }).strict().optional(),
     }).strict(), config => {
-      const provider = new OidcCredentialProvider({ ...config, fetch });
-      return capability(provider, { credentials: [provider] });
+      return direct({}, 'credential.provider', context => {
+        const { assertion, exchange, ...settings } = config;
+        const provider = new OidcCredentialProvider({ ...settings, fetch,
+          assertion: (_ref, _endpoint, operation) => typeof assertion === 'string' ? assertion : assertion(operation),
+          exchange: exchange ? { ...exchange,
+            subjectToken: (_ref, operation) => typeof exchange.subjectToken === 'string' ? exchange.subjectToken : exchange.subjectToken(operation),
+          } : undefined,
+        });
+        context.onDispose(() => provider.dispose());
+        context.registerCredentialProvider(provider.id, provider);
+      });
     }),
     'credential.enterprise': defineOperation('credential.provider', secret => z.object({ values: z.record(secret).refine(values => Object.keys(values).length > 0, 'must contain credential references') }).strict(), config => {
       const provider = new EnterpriseCredentialProvider({ values: config.values, environment: {} });

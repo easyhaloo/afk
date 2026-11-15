@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   registerBacklogCommands,
   runBacklogAdopt,
+  runBacklogAssociate,
   runBacklogConfirmMerge,
   runBacklogCreate,
   runBacklogChildren,
@@ -1509,5 +1510,32 @@ describe('backlog children identity', () => {
   it('refuses an id that is neither an issue number nor a canonical identity', async () => {
     await expect(resolveBacklogChildrenIdentity('not-an-id', {}, { target: async () => target }))
       .rejects.toThrow(/must be an issue number or platform:projectKey#issueNumber/);
+  });
+});
+
+describe('runBacklogAssociate', () => {
+  async function gitRepo(): Promise<string> {
+    const { mkdir } = await import('node:fs/promises');
+    const root = await mkdtemp(join(tmpdir(), 'afk-associate-'));
+    await mkdir(join(root, '.git'), { recursive: true });
+    return root;
+  }
+
+  it('binds the repository directory to a geelib project in the local index', async () => {
+    const root = await gitRepo();
+
+    await runBacklogAssociate({ project: 'geelib:6856', directory: root }, { root });
+
+    const { readTrackerStore } = await import('@afk/runtime/infrastructure/tracker/store');
+    const store = readTrackerStore(root);
+    expect(store.projects['geelib::6856']).toMatchObject({ platform: 'geelib', project: '6856' });
+    expect(store.projects['geelib::6856'].paths).toContain(root);
+  });
+
+  it('refuses a bare provider path that names no platform', async () => {
+    const root = await gitRepo();
+
+    await expect(runBacklogAssociate({ project: 'group/api', directory: root }, { root }))
+      .rejects.toThrow(/platform:project/);
   });
 });

@@ -212,6 +212,48 @@ function recordInventory(items: readonly GlobalWorkItem[]): void {
   }
 }
 
+export interface BacklogAssociateOptions extends JsonMode {
+  /** The canonical project to bind: `platform:projectKey` (a geelib project is its numeric id). */
+  project: string;
+  /** The directory to bind; defaults to the working directory. */
+  directory?: string;
+}
+
+/**
+ * Bind a repository directory to a provider project in the local index.
+ *
+ * An inventory run binds every project the credentials reach, which is far
+ * too broad to resolve a directory by. This command writes the one precise
+ * binding, and later commands run from that directory resolve the project
+ * without flags.
+ */
+export async function runBacklogAssociate(
+  options: BacklogAssociateOptions,
+  storage?: { root?: string },
+): Promise<void> {
+  const kind = 'backlog.associate';
+  const parsed = parseProjectArgument(options.project);
+  if (!parsed) {
+    throw new Error(`--project must be a canonical platform:projectKey identity (for example geelib:6856): ${options.project}`);
+  }
+  const directory = options.directory ?? process.cwd();
+  recordTrackerActivity({
+    platform: parsed.platform,
+    project: parsed.projectId,
+    ...(parsed.host ? { host: parsed.host } : {}),
+    cwd: directory,
+  }, storage?.root);
+  emitSuccess(kind, {
+    platform: parsed.platform,
+    project: parsed.projectId,
+    ...(parsed.host ? { host: parsed.host } : {}),
+    directory,
+  });
+  if (!options.json) {
+    detail(`Bound ${directory} to ${parsed.platform}:${parsed.projectId}. Commands in this directory now resolve this project without flags.`);
+  }
+}
+
 export interface BacklogInventoryOptions extends JsonMode {
   platform?: string;
   state?: string;
@@ -1450,6 +1492,23 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.inventory', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  backlog.command('associate')
+    .description('Bind a repository directory to a provider project in the local index')
+    .requiredOption('--project <project>', 'Canonical project identity (platform:projectKey; a geelib project is its numeric id)')
+    .option('--directory <directory>', 'Directory to bind (defaults to the working directory)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogAssociate(options, {});
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.associate', classifyError(error), (error as Error).message);
           return;
         }
         handleCommandError(error);

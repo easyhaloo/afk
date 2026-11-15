@@ -123,6 +123,30 @@ describe('tracker target resolution', () => {
     });
   });
 
+  it('resolves a bound repository directory to its geelib project', async () => {
+    const store: TrackerStore = {
+      version: 2,
+      projects: {
+        'geelib::6856': {
+          platform: 'geelib',
+          project: '6856',
+          paths: ['/workspace/产品仓库'],
+          issues: {},
+          updatedAt: '2026-11-16T00:00:00.000Z',
+        },
+      },
+    };
+
+    const target = await resolveTrackerTarget({ cwd: '/workspace/产品仓库/packages/app', env: {}, store });
+
+    expect(target).toMatchObject({
+      platform: 'geelib',
+      projectId: '6856',
+      platformSource: 'index-path',
+      projectSource: 'index-path',
+    });
+  });
+
   it('prefers an explicit project over the local index', async () => {
     const target = await resolveTrackerTarget({
       project: 'other/project',

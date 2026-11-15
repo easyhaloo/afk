@@ -119,7 +119,12 @@ export class DependencyPool {
           const destination = resolve(dirname(absolute), linkValue);
           const destinationRelative = relative(repoRoot, destination);
           if (destinationRelative.startsWith('..') || isAbsolute(destinationRelative)) return false;
-          if (!destinationRelative.split(sep).includes('node_modules') && link.split('/').length > (link.startsWith('@') ? 2 : 1)) return false;
+          // Workspace links legitimately point outside node_modules. The top
+          // level carries them shallowly; pnpm 10+ also mirrors them under
+          // the virtual store at `.pnpm/node_modules/<name>`, and those deep
+          // links are expected, not a layout this pool must reject.
+          const insideVirtualStore = link.split('/').includes('.pnpm');
+          if (!insideVirtualStore && !destinationRelative.split(sep).includes('node_modules') && link.split('/').length > (link.startsWith('@') ? 2 : 1)) return false;
           if (isAbsolute(linkValue)) {
             await rm(absolute);
             await symlink(relative(dirname(absolute), destination), absolute);

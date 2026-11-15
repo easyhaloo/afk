@@ -52,7 +52,7 @@ describe('inventory geelib platform', () => {
     };
 
     const ok = await store.publish(
-      await store.begin({ platform: 'geelib', host: 'geelib.qihoo.net', kind: 'issues' }),
+      await store.begin({ platform: 'geelib', host: 'geelib.qihoo.net', kind: 'catalog' }),
       { items: [geelibItem], projects: [geelibProject], diagnostics: [], complete: true },
     );
 
@@ -77,7 +77,7 @@ describe('inventory geelib platform', () => {
     expect(await store.get('github:acme/api#1')).toMatchObject({ id: 'github:acme/api#1' });
     const geelibProject = { platform: 'geelib' as const, projectKey: '1843', name: '通用需求管理' };
     const ok = await store.publish(
-      await store.begin({ platform: 'geelib', host: 'geelib.qihoo.net', kind: 'issues' }),
+      await store.begin({ platform: 'geelib', host: 'geelib.qihoo.net', kind: 'catalog' }),
       { items: [{ ...item(9, { id: 'geelib:1843#9', issueNumber: 9, project: geelibProject, providerRef: 'geelib:1843#9' }) }], projects: [geelibProject], diagnostics: [], complete: true },
     );
     expect(ok).toBe(true);
@@ -199,7 +199,7 @@ describe('normalized inventory', () => {
     // The mirror is a cache: it is migrated forward, not thrown away.
     expect(store.databasePath).toBe(file);
     expect((await store.get('github:acme/api#1'))?.title).toBe('kept');
-    const inspect = openSqlite({ file, schema: LEGACY_SCHEMA, version: 2 });
+    const inspect = openSqlite({ file, schema: LEGACY_SCHEMA, version: 3 });
     const columns = inspect.prepare('SELECT name FROM pragma_table_info(\'work_items\')').all();
     inspect.close();
     expect(columns.map(column => column.name)).toContain('kind');

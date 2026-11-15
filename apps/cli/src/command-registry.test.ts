@@ -60,7 +60,7 @@ describe('CLI command registry and dispatcher', () => {
     expect(adopt?.[0]?.options.filter(option => option.mandatory).map(option => option.long)).toEqual([
       '--id', '--project', '--platform',
     ]);
-    expect(adopt?.[0]?.options.find(option => option.long === '--platform')?.argChoices).toEqual(['github', 'gitlab']);
+    expect(adopt?.[0]?.options.find(option => option.long === '--platform')?.argChoices).toEqual(['github', 'gitlab', 'geelib']);
     expect(adopt?.[0]?.options.some(option => option.long === '--json')).toBe(true);
     expect(inventory?.[0]?.options.map(option => option.long)).toEqual(expect.arrayContaining([
       '--platform', '--state', '--mode', '--tag', '--project', '--json',

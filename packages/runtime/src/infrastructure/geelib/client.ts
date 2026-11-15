@@ -17,6 +17,7 @@ import type {
   UploadArtifactsOptions,
   UploadedArtifact,
 } from '../../domain/tracker/types.js';
+import { NATIVE_STATE_NAMES, type NativeStateName } from './state-map.js';
 
 /** A refused capability: every call rejects with the same clear diagnosis. */
 type Refused = (...arguments_: never[]) => Promise<never>;
@@ -215,6 +216,34 @@ export class GeelibClient implements TrackerProvider {
     return extractAC(issue);
   }
 
+  /**
+   * Move a work item to a native status through the edit call.
+   *
+   * Only the live-verified native vocabulary is accepted here: a name the
+   * platform's state machine does not know would either fail confusingly or,
+   * worse, be dropped, so the mapping module is the single gate.
+   */
+  async setStatus(matterId: number, state: NativeStateName): Promise<void> {
+    if (!(NATIVE_STATE_NAMES as readonly string[]).includes(state)) {
+      throw new Error(`${String(state)} is not a native state this client may write; use afkStateToNative first`);
+    }
+    await this.request('Matter/edit', {
+      sub_id: this.subId,
+      id: matterId,
+      data: [{ cf_name: '状态', cf_value: state }],
+    }, { method: 'POST' });
+  }
+
+  /** Append one comment. The platform requires HTML rich text. */
+  async addComment(matterId: number, html: string): Promise<void> {
+    await this.request('OpenApiCommentMgr/addComment', {
+      sub_id: this.subId,
+      id: matterId,
+      type: 'matter',
+      content: html,
+    }, { method: 'POST' });
+  }
+
   getRetryCount(): number {
     // Geelib carries no retry-count channel; retries are tracked in AFK's own records.
     return 0;
@@ -294,13 +323,18 @@ export class GeelibClient implements TrackerProvider {
     return table;
   }
 
-  private async request(path: string, params: UnknownObject): Promise<GeelibEnvelope> {
+  private async request(path: string, params: UnknownObject, options: { method?: 'GET' | 'POST' } = {}): Promise<GeelibEnvelope> {
+    const method = options.method ?? 'GET';
     const signed = { ...params, t: Math.floor(Date.now() / 1000), user_mail: this.userMail };
-    const withoutSign = { ...signed };
-    const canonical = geelibCanonical(withoutSign);
-    const sign = geelibSign(canonical, this.token);
-    const url = `${this.baseUrl}/openapi/${path}?${geelibCanonical({ ...withoutSign, sign })}`;
-    const response = await this.doFetch(url, { headers: { 'From-App': this.userMail } });
+    const sign = geelibSign(geelibCanonical(signed), this.token);
+    const url = `${this.baseUrl}/openapi/${path}`;
+    const response = method === 'POST'
+      ? await this.doFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'From-App': this.userMail },
+          body: JSON.stringify({ ...signed, sign }),
+        })
+      : await this.doFetch(`${url}?${geelibCanonical({ ...signed, sign })}`, { headers: { 'From-App': this.userMail } });
     const envelope = await response.json() as GeelibEnvelope;
     if (envelope.errno !== 2000) throw new Error(`geelib ${path} failed: ${envelope.errmsg || `errno ${envelope.errno}`}`);
     return envelope;
@@ -324,7 +358,6 @@ export class GeelibClient implements TrackerProvider {
   updateLabels = this.refused('editing labels');
   addLabel = this.refused('editing labels');
   removeLabel = this.refused('editing labels');
-  addComment = this.refused('writing comments');
   listIssueComments = this.refused('reading comments');
   updateIssueComment = this.refused('editing comments');
   linkIssues = this.refused('linking work items');

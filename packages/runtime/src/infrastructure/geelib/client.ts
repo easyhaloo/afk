@@ -150,6 +150,24 @@ export class GeelibClient implements TrackerProvider {
     return this.toTrackedIssue(matter);
   }
 
+  /** The native status name of one work item, resolved through the status table. */
+  async getMatterStateName(matterId: number): Promise<string | undefined> {
+    const [matter] = await this.listMatters({ matterIds: [matterId] });
+    if (!matter) throw new Error(`geelib work item ${matterId} does not exist in project ${this.subId}`);
+    return this.stateNameOf(matter);
+  }
+
+  private async stateNameOf(matter: MatterRecord): Promise<string | undefined> {
+    const typeId = Number(matter.type_id ?? 0);
+    if (!typeId) return undefined;
+    try {
+      const table = await this.statusTable(matter.sub_id ?? this.subId, typeId);
+      return table.get(Number(matter.matter_status))?.status_name;
+    } catch {
+      return undefined;
+    }
+  }
+
   async listIssues(options?: ListOptions): Promise<TrackedIssue[]> {
     const matters = await this.listAllMatters();
     let issues = await Promise.all(matters.map(matter => this.toTrackedIssue(matter)));

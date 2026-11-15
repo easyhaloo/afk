@@ -15,12 +15,16 @@ const statuses = [
 ];
 
 function mockPlatform(): void {
-  fetchMock.mockImplementation(async (input: string | URL) => {
+  fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.pathname.endsWith('Matter/getMatterStatus')) {
       return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: statuses }), { status: 200 });
     }
     if (url.pathname.endsWith('Matter/edit')) {
+      // A real edit moves the native status; the confirmation read must see it.
+      const body = JSON.parse(String(init?.body));
+      const requested = body.data?.find((entry: { cf_name?: string }) => entry.cf_name === '状态')?.cf_value;
+      matter.matter_status = statuses.find(status => status.status_name === requested)?.id ?? matter.matter_status;
       return new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 });
     }
     return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {

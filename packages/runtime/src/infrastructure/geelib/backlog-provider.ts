@@ -19,6 +19,7 @@ import { evaluateRunnability, type Runnability } from '../../domain/backlog/runn
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import type { ProviderProjectRef } from '../../domain/work-item/types.js';
 import type { ListOptions } from '../../domain/tracker/types.js';
+import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
 import { afkStateToNative, nativeToAfkState } from './state-map.js';
 
 /**
@@ -35,6 +36,9 @@ export interface GeelibBacklogClient {
   getMatterStateName(matterId: number): Promise<string | undefined>;
   setStatus(matterId: number, state: import('./state-map.js').NativeStateName): Promise<void>;
   addComment(matterId: number, html: string): Promise<void>;
+  changeParent(matterId: number, parentId: number): Promise<void>;
+  addResourceReferences(matterId: number, targets: ReadonlyArray<{ id: number; title: string; subId: number }>): Promise<void>;
+  listResourceReferences(matterId: number): Promise<Array<{ referenceId: number; id: number; title: string; subId: number }>>;
 }
 
 export interface GeelibBacklogProviderOptions {
@@ -98,7 +102,10 @@ export class GeelibBacklogProvider implements BacklogProvider {
     }
     const issue = await this.client.getIssue(parsed.issueNumber);
     const stateName = await this.client.getMatterStateName(parsed.issueNumber);
-    return this.toBacklogItem(parsed.projectKey, issue, stateName, parsed.id as BacklogItem['workItemId']);
+    const dependsOn = await this.client.listResourceReferences(parsed.issueNumber)
+      .then(references => references.map(reference => `geelib:${reference.subId}#${reference.id}`))
+      .catch(() => [] as string[]);
+    return this.toBacklogItem(parsed.projectKey, issue, stateName, parsed.id as BacklogItem['workItemId'], dependsOn);
   }
 
   async list(options: BacklogListOptions = {}): Promise<BacklogItem[]> {
@@ -135,6 +142,49 @@ export class GeelibBacklogProvider implements BacklogProvider {
     await this.client.setStatus(parsed.issueNumber, target);
   }
 
+  /**
+   * Apply a relationship edit through the platform's two channels: the
+   * native parent edge and the resource-reference dependency edges.
+   *
+   * Cross-platform references are refused — the reference module links
+   * geelib work items only, which the work-identity contract already
+   * treats as the rule. Edge removal rides on the platform's deletion
+   * endpoint, which refuses every id form (see the client); an operator
+   * removes edges on the platform UI.
+   */
+  async applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
+    const parsed = parseWorkItemId(id);
+    if (update.clearParent) throw new Error('The geelib provider cannot clear a parent edge: the platform exposes no parent-removal call.');
+    if (update.removeDependsOn?.length) {
+      throw new Error('The geelib provider cannot delete resource references: the platform deletion API refuses every id form (its own CLI fails identically); remove them on the platform UI.');
+    }
+    if (update.parent) {
+      const parent = this.resolveLocalReference(update.parent, id);
+      await this.client.changeParent(parsed.issueNumber, parent);
+    }
+    if (update.base || update.clearBase) {
+      throw new Error('The geelib provider cannot carry an execution-base edge; baselines live on the git platform.');
+    }
+    for (const reference of update.addDependsOn ?? []) {
+      const target = this.resolveLocalReference(reference, id);
+      const targetIssue = await this.client.getIssue(target);
+      await this.client.addResourceReferences(parsed.issueNumber, [{
+        id: target,
+        title: targetIssue.title,
+        subId: Number(this.client.projectId),
+      }]);
+    }
+  }
+
+  /** Resolve a geelib reference to the numeric matter id it names. */
+  private resolveLocalReference(reference: string, context: string): number {
+    const parsed = parseWorkItemId(reference);
+    if (parsed.platform !== 'geelib') {
+      throw new Error(`cross-platform relationships are not supported: ${reference} (from ${context})`);
+    }
+    return parsed.issueNumber;
+  }
+
   isRunnable(item: BacklogItem): Promise<boolean> {
     return Promise.resolve(this.runnabilityOf(item).runnable);
   }
@@ -159,7 +209,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
     });
   }
 
-  private toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, stateName: string | undefined, workItemId?: BacklogItem['workItemId']): BacklogItem {
+  private toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, stateName: string | undefined, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): BacklogItem {
     const id = workItemId ?? `geelib:${projectKey}#${issue.id}`;
     const modeLabel = issue.labels.find(label => label === 'mode::afk' || label === 'mode::hitl');
     return {
@@ -174,7 +224,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
       executionMode: modeLabel === 'mode::hitl' ? 'hitl' : 'afk',
       title: issue.title,
       description: issue.description || undefined,
-      dependsOn: [],
+      dependsOn,
       tags: issue.labels.filter(label => !RESERVED_LABEL_PREFIXES.some(prefix => label.startsWith(prefix))),
       branchName: '',
       providerRef: id,
@@ -207,7 +257,6 @@ export class GeelibBacklogProvider implements BacklogProvider {
   create = this.refused('creating work items; create them on the platform');
   addTag = this.refused('editing tags; the platform cannot create tags through its API');
   removeTag = this.refused('editing tags; the platform cannot create tags through its API');
-  applyRelationUpdate = this.refused('editing relations; the relation channel lands with the resource-reference slice');
   applyRole = this.refused('assigning the PRD role');
   applyExecutionBase = this.refused('recording the execution base');
   applyPrdBaseline = this.refused('recording the PRD baseline');

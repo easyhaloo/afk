@@ -17,6 +17,8 @@ const statuses = [
   { id: 46, status_name: '修复中', status_stage: '进行中' },
   { id: 20, status_name: '关闭', status_stage: '已完成' },
 ];
+/** Resource references the fake platform answers with; relations tests seed it. */
+let resourceRefs: Array<{ id: number; source_id: string; type_id: number; title: string; sub_id: string }> = [];
 
 function mockPlatform(): void {
   fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
@@ -39,16 +41,12 @@ function mockPlatform(): void {
     }
     if (url.pathname.endsWith('OpenApiResourcesMgr/getDemandReourcesList')) {
       return new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: {
-        matter: [{ id: 836916, source_id: String(matter.id), type_id: dependencyMatter.id, title: dependencyMatter.title, sub_id: '6856' }],
-        list: [],
+        matter: resourceRefs, list: [],
       } }), { status: 200 });
     }
-    const requested = JSON.parse(String(init?.body ?? '{}'));
-    const matterIds = url.searchParams.get('matter_ids');
+    const matterIds = [...url.searchParams.entries()].filter(([key]) => key.startsWith('matter_ids')).map(([, value]) => Number(value));
     const pool = [matter, dependencyMatter];
-    const found = matterIds
-      ? pool.filter(entry => JSON.parse(matterIds).includes(entry.id))
-      : pool.filter(entry => entry.id === requested.id).length ? [pool.find(entry => entry.id === requested.id) as typeof matter] : [matter];
+    const found = matterIds.length ? pool.filter(entry => matterIds.includes(entry.id)) : [matter];
     return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: { total: found.length, matterList: found } }), { status: 200 });
   });
 }
@@ -67,6 +65,7 @@ function lock(lease?: ClaimLease): { acquire: ReturnType<typeof vi.fn> } {
 
 afterEach(() => {
   fetchMock.mockReset();
+  resourceRefs = [];
   vi.restoreAllMocks();
 });
 
@@ -169,6 +168,7 @@ describe('GeelibBacklogProvider claim and transition', () => {
 describe('GeelibBacklogProvider relations', () => {
   it('decodes resource references into canonical dependency identities', async () => {
     mockPlatform();
+    resourceRefs = [{ id: 836916, source_id: '1083121', type_id: 1083000, title: '依赖项', sub_id: '6856' }];
     const provider = new GeelibBacklogProvider(client());
 
     const item = await provider.get('geelib:6856#1083121');

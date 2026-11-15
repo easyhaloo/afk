@@ -120,7 +120,7 @@ export class GeelibClient implements TrackerProvider {
   private readonly token: string;
   private readonly subId: number;
   private readonly doFetch: typeof fetch;
-  private readonly statusCache = new Map<number, Promise<Map<number, MatterStatus>>>();
+  private readonly statusCache = new Map<string, Promise<Map<number, MatterStatus>>>();
 
   constructor(options: GeelibClientOptions) {
     if (!options.token?.trim()) throw new Error('Geelib authentication requires a token');
@@ -156,6 +156,59 @@ export class GeelibClient implements TrackerProvider {
     return issues;
   }
 
+  /** The projects the authenticated account can reach, for the global inventory. */
+  async listCatalogProjects(): Promise<Array<{ id: number; name: string; updatedAt?: string }>> {
+    const envelope = await this.request('OpenApiSubBusMgr/getSubBusList', {});
+    const data = envelope.data as { list?: Array<{ id?: number; name?: string; update_time?: string }> } | null;
+    const list = Array.isArray(data?.list) ? data.list : [];
+    return list.map(project => ({
+      id: Number(project.id),
+      name: String(project.name ?? ''),
+      ...(project.update_time ? { updatedAt: project.update_time } : {}),
+    }));
+  }
+
+  /**
+   * The work items of one project in the shape the global inventory stores.
+   * Runs against any project on the instance, not only the one this client
+   * was scoped to, so one catalog serves every discovered project.
+   */
+  async listCatalogIssues(subId: number): Promise<Array<{
+    issueNumber: number;
+    title: string;
+    description: string;
+    labels: string[];
+    state: 'opened' | 'closed';
+    updatedAt?: string;
+    webUrl: string;
+  }>> {
+    const matters = await this.listAllMatters(subId);
+    return Promise.all(matters.map(async matter => ({
+      issueNumber: matter.id,
+      title: String(matter.title ?? ''),
+      description: String(matter.mkd_content ?? ''),
+      labels: String(matter.label_name ?? '').split(',').map(name => name.trim()).filter(Boolean),
+      state: await this.stateOf(matter, subId),
+      ...(matter.update_time ? { updatedAt: matter.update_time } : {}),
+      webUrl: `${this.baseUrl}/geelib/project/matter/detail?subId=${matter.sub_id ?? subId}&id=${matter.id}`,
+    })));
+  }
+
+  /**
+   * The account behind this client's credentials. The platform exposes no
+   * "who am I" call, so the identity resolves by searching the configured
+   * mail and matching it exactly; a miss means the credentials cannot be
+   * verified and the resolver reports that per catalog.
+   */
+  async accountIdentity(): Promise<{ accountId: string }> {
+    const envelope = await this.request('UserMgr/getUserListBySearch', { query: this.userMail });
+    const data = envelope.data as { list?: Array<{ id?: number; mail?: string }> } | null;
+    const list = Array.isArray(data?.list) ? data.list : [];
+    const match = list.find(user => String(user.mail ?? '').toLowerCase() === this.userMail.toLowerCase());
+    if (!match) throw new Error(`geelib account ${this.userMail} could not be verified against the instance`);
+    return { accountId: String(match.id) };
+  }
+
   /** `parseAC` matches the git providers: the body carries the acceptance criteria. */
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria {
     return extractAC(issue);
@@ -170,9 +223,10 @@ export class GeelibClient implements TrackerProvider {
     return { baseUrl: this.baseUrl, userMail: this.userMail, token: this.token, subId: this.subId, fetch: this.doFetch };
   }
 
-  private async listMatters(filters: { matterIds?: number[] } = {}): Promise<MatterRecord[]> {
+  private async listMatters(filters: { subId?: number; matterIds?: number[] } = {}): Promise<MatterRecord[]> {
+    const subId = filters.subId ?? this.subId;
     const envelope = await this.request('Matter/getList', {
-      sub_id: this.subId,
+      sub_id: subId,
       page: 1,
       pageSize: filters.matterIds?.length ?? 20,
       simple: 0,
@@ -182,11 +236,11 @@ export class GeelibClient implements TrackerProvider {
     return Array.isArray(data?.matterList) ? data.matterList : [];
   }
 
-  private async listAllMatters(): Promise<MatterRecord[]> {
+  private async listAllMatters(subId = this.subId): Promise<MatterRecord[]> {
     const all: MatterRecord[] = [];
     const pageSize = 100;
     for (let page = 1; page <= 200; page += 1) {
-      const envelope = await this.request('Matter/getList', { sub_id: this.subId, page, pageSize, simple: 0 });
+      const envelope = await this.request('Matter/getList', { sub_id: subId, page, pageSize, simple: 0 });
       const data = envelope.data as { total?: number; matterList?: MatterRecord[] } | null;
       const matters = Array.isArray(data?.matterList) ? data.matterList : [];
       all.push(...matters);
@@ -213,27 +267,28 @@ export class GeelibClient implements TrackerProvider {
    * `已完成` stage counts as closed, everything else is open. The status
    * table is read once per work-item type and cached on the client.
    */
-  private async stateOf(matter: MatterRecord): Promise<TrackedIssue['state']> {
+  private async stateOf(matter: MatterRecord, subId = this.subId): Promise<TrackedIssue['state']> {
     const typeId = Number(matter.type_id ?? 0);
     if (!typeId) return 'opened';
     try {
-      const statuses = await this.statusTable(typeId);
+      const statuses = await this.statusTable(subId, typeId);
       return statuses.get(Number(matter.matter_status))?.status_stage === '已完成' ? 'closed' : 'opened';
     } catch {
       return 'opened';
     }
   }
 
-  private statusTable(typeId: number): Promise<Map<number, MatterStatus>> {
-    let table = this.statusCache.get(typeId);
+  private statusTable(subId: number, typeId: number): Promise<Map<number, MatterStatus>> {
+    const cacheKey = `${subId}:${typeId}`;
+    let table = this.statusCache.get(cacheKey);
     if (!table) {
-      table = this.request('Matter/getMatterStatus', { sub_id: this.subId, type_id: String(typeId) })
+      table = this.request('Matter/getMatterStatus', { sub_id: subId, type_id: String(typeId) })
         .then(envelope => {
           const statuses = Array.isArray(envelope.data) ? envelope.data as MatterStatus[] : [];
           return new Map(statuses.map(status => [Number(status.id), status]));
         });
-      table.catch(() => this.statusCache.delete(typeId));
-      this.statusCache.set(typeId, table);
+      table.catch(() => this.statusCache.delete(cacheKey));
+      this.statusCache.set(cacheKey, table);
     }
     return table;
   }

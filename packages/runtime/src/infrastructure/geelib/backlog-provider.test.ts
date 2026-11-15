@@ -165,6 +165,63 @@ describe('GeelibBacklogProvider claim and transition', () => {
   });
 });
 
+describe('GeelibBacklogProvider transition writeback', () => {
+  it('appends a comment when a transition carries a reason', async () => {
+    mockPlatform();
+    matter.matter_status = 46; // 修复中
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await provider.transition('geelib:6856#1083121', 'blocked', { reason: 'QA rework 9: 断言失败' });
+
+    const comment = fetchMock.mock.calls.find(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'));
+    expect(comment).toBeDefined();
+    const body = JSON.parse(String(comment?.[1]?.body));
+    expect(body.id).toBe(1083121);
+    expect(body.type).toBe('matter');
+    expect(body.content).toContain('blocked');
+    expect(body.content).toContain('QA rework 9: 断言失败');
+  });
+
+  it('names the change request when an item reaches merge_ready', async () => {
+    mockPlatform();
+    matter.matter_status = 47; // 已修复
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await provider.transition('geelib:6856#1083121', 'merge_ready', { changeId: '159' });
+
+    const comment = fetchMock.mock.calls.find(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'));
+    expect(JSON.parse(String(comment?.[1]?.body)).content).toContain('#159');
+  });
+
+  it('writes the done confirmation as a comment even when the status write is skipped', async () => {
+    mockPlatform();
+    matter.matter_status = 23; // 已验证 — the collapse target of done
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+    fetchMock.mockClear();
+    mockPlatform();
+
+    await provider.transition('geelib:6856#1083121', 'done', { changeId: '159' });
+
+    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
+    expect(edit).toBeUndefined(); // same native state: the write is skipped
+    const comment = fetchMock.mock.calls.find(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'));
+    expect(comment).toBeDefined();
+    expect(JSON.parse(String(comment?.[1]?.body)).content).toContain('#159');
+  });
+
+  it('does not comment on a bare transition', async () => {
+    mockPlatform();
+    matter.matter_status = 1;
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+    fetchMock.mockClear();
+    mockPlatform();
+
+    await provider.transition('geelib:6856#1083121', 'in_progress');
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'))).toBe(false);
+  });
+});
+
 describe('GeelibBacklogProvider relations', () => {
   it('decodes resource references into canonical dependency identities', async () => {
     mockPlatform();

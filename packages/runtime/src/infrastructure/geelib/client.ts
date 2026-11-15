@@ -46,7 +46,7 @@ export function geelibCanonical(params: UnknownObject): string {
       value.forEach((entry, index) => flatten(prefix ? `${prefix}[${index}]` : String(index), entry));
       return;
     }
-    pairs.push(`${prefix}=${encode(String(value))}`);
+    pairs.push(`${encode(prefix)}=${encode(String(value))}`);
   };
   flatten('', params);
   return pairs.join('&');

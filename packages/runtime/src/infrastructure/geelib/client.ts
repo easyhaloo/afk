@@ -263,6 +263,20 @@ export class GeelibClient implements TrackerProvider {
   }
 
   /**
+   * Replace the whole label set — the platform's labels are one overwrite
+   * field, written as a JSON array of names. Every name must already exist
+   * on the project: a name the project does not have is silently dropped
+   * (errno 2000), so callers verify the read-back after writing.
+   */
+  async setLabels(matterId: number, labels: readonly string[]): Promise<void> {
+    await this.request('Matter/edit', {
+      sub_id: this.subId,
+      id: matterId,
+      data: [{ cf_name: '标签', cf_value: JSON.stringify(labels) }],
+    }, { method: 'POST' });
+  }
+
+  /**
    * Point a work item at its native parent. The parent edge is the one the
    * platform UI shows as the hierarchy; dependencies ride on the
    * resource-reference module instead.

@@ -21,6 +21,8 @@ const statuses = [
 ];
 /** Resource references the fake platform answers with; relations tests seed it. */
 let resourceRefs: Array<{ id: number; source_id: string; type_id: number; title: string; sub_id: string }> = [];
+/** Tags provisioned on the fake project; the platform silently drops the rest. */
+let provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
 
 function mockPlatform(): void {
   fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
@@ -29,10 +31,16 @@ function mockPlatform(): void {
       return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: statuses }), { status: 200 });
     }
     if (url.pathname.endsWith('Matter/edit')) {
-      // A real edit moves the native status; the confirmation read must see it.
+      // A real edit moves the native status and the label set; the
+      // confirmation read must see both. A label the project does not have
+      // is silently dropped — that is the platform's documented behavior.
       const body = JSON.parse(String(init?.body));
       const requested = body.data?.find((entry: { cf_name?: string }) => entry.cf_name === '状态')?.cf_value;
       matter.matter_status = statuses.find(status => status.status_name === requested)?.id ?? matter.matter_status;
+      const labels = body.data?.find((entry: { cf_name?: string }) => entry.cf_name === '标签')?.cf_value;
+      if (typeof labels === 'string') {
+        matter.label_name = (JSON.parse(labels) as string[]).filter(tag => provisionedTags.includes(tag)).join(',');
+      }
       return new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 });
     }
     if (url.pathname.endsWith('Matter/changeParent')) {
@@ -68,6 +76,7 @@ function lock(lease?: ClaimLease): { acquire: ReturnType<typeof vi.fn> } {
 afterEach(() => {
   fetchMock.mockReset();
   resourceRefs = [];
+  provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
   vi.restoreAllMocks();
 });
 
@@ -182,10 +191,12 @@ describe('GeelibBacklogProvider execution mode', () => {
 
   it('fails closed when the platform drops the mode tag', async () => {
     mockPlatform();
-    matter.label_name = 'billing'; // no mode tag provisioned: the write will be dropped
+    provisionedTags = ['billing', 'mode::afk']; // mode::hitl not provisioned
+    matter.label_name = 'billing';
     const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
 
     await expect(provider.applyMode('geelib:6856#1083121', 'hitl')).rejects.toThrow(/mode::hitl/i);
+    provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
     matter.label_name = '';
   });
 });

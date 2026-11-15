@@ -35,6 +35,7 @@ export interface GeelibBacklogClient {
   listIssues(options?: ListOptions): Promise<Array<{ id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }>>;
   getMatterStateName(matterId: number): Promise<string | undefined>;
   setStatus(matterId: number, state: import('./state-map.js').NativeStateName): Promise<void>;
+  setLabels(matterId: number, labels: readonly string[]): Promise<void>;
   addComment(matterId: number, html: string): Promise<void>;
   changeParent(matterId: number, parentId: number): Promise<void>;
   addResourceReferences(matterId: number, targets: ReadonlyArray<{ id: number; title: string; subId: number }>): Promise<void>;
@@ -291,8 +292,25 @@ export class GeelibBacklogProvider implements BacklogProvider {
   applyExecutionBase = this.refused('recording the execution base');
   applyPrdBaseline = this.refused('recording the PRD baseline');
   applyDescription = this.refused('replacing the body');
-  setExecutionMode = this.refused('switching the execution mode; pre-provision the mode:: tags instead');
-  applyMode = this.refused('switching the execution mode; pre-provision the mode:: tags instead');
+  async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    const parsed = parseWorkItemId(id);
+    const target = `mode::${mode}`;
+    const issue = await this.client.getIssue(parsed.issueNumber);
+    const labels = issue.labels.filter(label => label !== 'mode::afk' && label !== 'mode::hitl');
+    if (!labels.includes(target)) labels.push(target);
+    await this.client.setLabels(parsed.issueNumber, labels);
+    // The platform silently drops a label the project does not have, so the
+    // write is verified: a mode tag that did not land means the project was
+    // not provisioned, and the switch has not happened.
+    const confirmed = await this.client.getIssue(parsed.issueNumber);
+    if (!confirmed.labels.includes(target)) {
+      throw new Error(`The platform dropped ${target}: pre-provision the mode::afk/mode::hitl tags on the project once, in the platform UI.`);
+    }
+  }
+
+  setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    return this.applyMode(id, mode);
+  }
   createRework = this.refused('rework records; rework rides on the native rework state in this slice');
   getActiveRework = this.refused('rework records');
   resolveRework = this.refused('rework records');

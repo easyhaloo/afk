@@ -213,17 +213,27 @@ export async function createTracker(
     credentials: () => detectTrackerCredentials(),
   });
   if (target.platform === 'geelib') {
-    const auth = resolveGeelibAuth();
-    if (!auth) {
-      throw new Error('Geelib authentication is required. Set GELIB_TOKEN and GELIB_USER_MAIL (and GELIB_URL for a non-default instance).');
-    }
-    const subId = Number(target.projectId);
-    if (!Number.isSafeInteger(subId) || subId <= 0) throw new Error(`geelib project key must be the numeric project id: ${target.projectId}`);
-    return new GeelibClient({ ...auth, subId });
+    return createGeelibTracker(target.projectId);
   }
   return target.platform === 'github'
     ? createGitHubTracker(target.projectId, cwd)
     : createGitLabTracker(target.projectId, cwd, preferredHost);
+}
+
+/**
+ * The geelib tracker for one numeric project id, built from the environment
+ * credentials. Separate from `createTracker` so the inventory provider can
+ * route a geelib project without re-resolving a target from the git remote,
+ * which a geelib-backed repository never names.
+ */
+export async function createGeelibTracker(projectId: string): Promise<TrackerProvider> {
+  const auth = resolveGeelibAuth();
+  if (!auth) {
+    throw new Error('Geelib authentication is required. Set GELIB_TOKEN and GELIB_USER_MAIL (and GELIB_URL for a non-default instance).');
+  }
+  const subId = Number(projectId);
+  if (!Number.isSafeInteger(subId) || subId <= 0) throw new Error(`geelib project key must be the numeric project id: ${projectId}`);
+  return new GeelibClient({ ...auth, subId });
 }
 
 export async function createWorkflowProviders(

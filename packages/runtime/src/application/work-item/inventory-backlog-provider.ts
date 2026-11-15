@@ -12,6 +12,7 @@ import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/in
 import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
 import type { ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
 import {
+  createGeelibTracker,
   createGitHubTracker,
   createGitLabTracker,
   createGlobalWorkItemCatalogs,
@@ -39,6 +40,7 @@ function gitLabApiProject(project: ProviderProjectRef): { projectId: string; hos
 
 async function defaultTrackerFor(project: ProviderProjectRef): Promise<TrackerProvider> {
   if (project.platform === 'github') return createGitHubTracker(project.projectKey);
+  if (project.platform === 'geelib') return createGeelibTracker(project.providerProjectId ?? project.projectKey);
   const { projectId, host } = gitLabApiProject(project);
   return createGitLabTracker(projectId, undefined, host);
 }

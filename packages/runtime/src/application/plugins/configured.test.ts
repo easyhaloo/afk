@@ -134,11 +134,29 @@ describe('configured plugin composition', () => {
     const [plugin] = await createConfiguredPlugins({ configurations: [{ ...configuration, config: references }], environment: {}, fetch: network, execute, onTrigger: vi.fn() });
     expect(resolve).not.toHaveBeenCalled();
     await runtime.activate(plugin);
-    if (['artifact.report-platform', 'notification.feishu', 'notification.slack', 'credential.oauth', 'credential.enterprise'].includes(configuration.id)) expect(resolve).not.toHaveBeenCalled();
+    if (['artifact.report-platform', 'notification.feishu', 'notification.slack', 'credential.oauth', 'credential.enterprise', 'sandbox.remote-container', 'repository.remote-workspace'].includes(configuration.id)) expect(resolve).not.toHaveBeenCalled();
     else expect(resolve).toHaveBeenCalled();
     expect(runtime.listProvidersForPlugin(configuration.id)).not.toHaveLength(0);
     expect(network).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
+    if (configuration.id === 'sandbox.remote-container' || configuration.id === 'repository.remote-workspace') {
+      network.mockImplementation(async () => Response.json(configuration.id === 'sandbox.remote-container'
+        ? { iid: 1, path: '/remote', branch: 'main' }
+        : { commit: 'a'.repeat(40), branch: 'main', dirty: false }));
+      const invoke = configuration.id === 'sandbox.remote-container'
+        ? () => runtime.getSandboxProvider('remote-container')!.createWorktree({ iid: 1, baseBranch: 'main' })
+        : () => runtime.getRepositoryProvider('remote-workspace')!.snapshot({ url: 'team/repo' });
+      await invoke();
+      resolve.mockResolvedValueOnce({ secret: 'rotated-remote' });
+      await invoke();
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(resolve).toHaveBeenLastCalledWith({ name: 'TOKEN' }, expect.objectContaining({
+        signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
+      }));
+      expect(network.mock.calls.map(([, init]) => new Headers(init?.headers).get('authorization')))
+        .toEqual([`Bearer ${environment.TOKEN}`, 'Bearer rotated-remote']);
+      expect(execute).not.toHaveBeenCalled();
+    }
   });
 
   it('validates credential references without resolving, probing or subscribing', async () => {

@@ -858,7 +858,12 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 实现，不能猜测 constructor 到 YAML 的映射。
 
 OTLP headers、ReportPlatform token、飞书/Slack webhook、OAuth clientSecret 和企业凭据
-values 中的具名引用在每次操作时解析，并接受带时区的 ISO `expiresAt`。激活及静态检查不解析这些
+values 中的具名引用在每次操作时解析。HTTP `sandbox.remote-container.token` 和
+`repository.remote-workspace.token` 的具名引用在每次实际 HTTP 请求前解析，包括容器
+主动 health、Repository snapshot 以及 publish/cleanup 前的生命周期预检 snapshot。
+容器 health 成功不证明执行已就绪。容器 CLI 传输没有 bearer token 字段；容器 HTTP
+传输接受 HTTP(S)，Repository bearer 认证要求 HTTPS（匿名 Repository 请求可用 HTTP）。
+这些按操作解析的字段接受带时区的 ISO `expiresAt`。激活及静态检查不解析这些
 引用。操作检查引用和返回凭据的有效期，拒绝 `revoked: true`，传递取消与绝对
 `deadlineAt`，拒绝所属激活已销毁后晚到的值。企业凭据转发保留引用和上游中较早的有效期。
 环境引用仍在构造时取值；其他具名引用消费者仍在激活时解析；Gmail 保留独立刷新流程。
@@ -1083,6 +1088,8 @@ lifecycle 策略闸门。
 实现、QA / 冲突解决和 CLI 工作流图均可选取已注册的插件模板。内存模板的 prompt 文件必须是绝对路径。卸载插件后模板不可继续被缓存命中。必需 Hook 仍能阻断执行或发布；当前没有跨厂商拦截所有 Agent 工具调用的统一 API。
 
 引用上下文保留来源，每个文件最多 32,000 字符；生命周期每个工作树最多保留 64 个有界片段。经验检索最多五条，序列化记录预算 8,000 字符。提示词携带短文件引用，仍遵循 Provider 的提示词预算。只有同一规范项目内相关、已验证且未过期的经验能够进入上下文。实现引擎通过 `decision.made`、`command=experience.recall` 审计经验供应。
+
+Code、Retrieval 与 Project Memory 的本地词项排序支持中文分词及英文查询，共用经验检索的分词函数，新增中文词项过滤通用疑问词。经验召回在分词后执行自身的相关性、否定条件和适用范围过滤；通用 Context 的词项命中不授予经验验证或发布资格。
 
 结构化失败（含中途可重试失败）自动形成候选经验，保留运行和工作项身份。共享 SQLite 账本跨工作树使用、按项目隔离，保存有界且脱敏的诊断及证据引用，不复制原始会话。限制为 1,000 条、逻辑负载与来源收据合计 8 MiB、单条 32 KiB、每条 256 个来源，默认有效期 90 天；容量淘汰优先处理过期和未验证记录。
 

@@ -139,6 +139,9 @@ Agent/Sandbox、任意插件方法及凭据解析不属于通用 dispatcher；�
 `scope` 可省略，`provider` 为精确注册名。保存配置只校验引用形状，不认证、不访问网络。
 构造时读取环境引用。OTLP headers、ReportPlatform token、飞书/Slack webhook、OAuth clientSecret、企业凭据 values 的具名引用按操作解析，接受带时区 ISO `expiresAt`；激活及静态检查不解析。
 OTLP 仅在实际结束 span 或导出 metric 时解析 header，span/event 捕获保持被动；解析和传输共用调用方与配置超时中较早的绝对期限。
+HTTP `sandbox.remote-container.token` 和 `repository.remote-workspace.token` 的具名引用同样按操作解析，接受上述 `expiresAt`；激活时只绑定精确具名 Provider，不读取凭据值。
+两个远端 bearer 字段在每次实际 HTTP 请求前重新解析，包括容器主动 health、Repository snapshot 和 publish/cleanup 前的生命周期预检 snapshot；容器 health 成功不证明执行已就绪。
+容器 CLI 传输没有 bearer token 字段；容器 HTTP 传输接受 HTTP(S)，Repository bearer 认证要求 HTTPS，匿名 Repository 请求可用 HTTP。
 这些消费者拒绝过期、撤权及销毁后晚到的凭据，传递 `signal/deadlineAt`，失败不泄露原始错误。企业凭据转发保留引用和上游中较早的有效期；激活时只查找上游以绑定生命周期，不调用其解析器。
 同批具体凭据依赖排序，拒绝自环/互引环；缺失具名 Provider 延迟加载并给出诊断。
 其余具名引用按激活取值，重新激活重取；Gmail 保留自身 OAuth 刷新。销毁不撤回已发送请求，不宣称强制终止未配合的解析器。

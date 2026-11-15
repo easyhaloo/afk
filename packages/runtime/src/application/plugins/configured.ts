@@ -325,7 +325,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       hosts: z.array(z.object({ id: text.optional(), alias: text, pod: text, namespace: text.optional(), container: text.optional(), address: text.optional() }).strict()).min(1),
       namespace: text.optional(), context: text.optional(), kubeconfig: text.optional(), binary: text.optional(),
     }).strict(), config => host(createKubernetesExecHostConnection({ ...config, kubeconfig: config.kubeconfig && path(config.kubeconfig), exec: options.hostExec }), 'kubernetes-exec')),
-    'sandbox.remote-container': define('sandbox.provider', secret => z.discriminatedUnion('transport', [
+    'sandbox.remote-container': defineOperation('sandbox.provider', secret => z.discriminatedUnion('transport', [
       z.object({ transport: z.literal('cli'), command: text, timeoutMs: milliseconds.optional() }).strict(),
       z.object({ transport: z.literal('http'), endpoint: baseUrl, token: secret.optional(), timeoutMs: milliseconds.optional() }).strict(),
     ]), config => {
@@ -439,7 +439,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
         managed: config.managed && { workspaceRoot: path(config.managed.workspaceRoot) } });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.remote-workspace': define('repository.provider', secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional() }).strict(), config => {
+    'repository.remote-workspace': defineOperation('repository.provider', secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional() }).strict(), config => {
       const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch });
       return capability(provider, { repositories: [provider] });
     }),

@@ -100,6 +100,27 @@ describe('context providers', () => {
     ]);
   });
 
+  it.each(['retrieval', 'code', 'memory'] as const)('recalls Chinese business context through %s', async kind => {
+    const path = await root();
+    const documents = [
+      { origin: 'login.md', content: '如何配置登录后的邮箱通知。' },
+      { origin: 'disk.md', content: '磁盘空间不足时应清理构建缓存，再重新运行测试。' },
+    ];
+    let provider: RetrievalProvider | CodeContextProvider | ProjectMemoryProvider;
+    if (kind === 'code') {
+      await Promise.all(documents.map(document => fs.writeFile(join(path, document.origin), document.content)));
+      provider = new CodeContextProvider({ root: path });
+    } else if (kind === 'memory') {
+      const memory = new ProjectMemoryProvider({ root: path, file: join(path, 'memory.json') });
+      for (const document of documents) await memory.remember(document);
+      provider = memory;
+    } else provider = new RetrievalProvider(documents);
+    await expect(provider.gather({ scope: '.', prompt: '如何解决磁盘空间不足导致的构建失败？', limit: 1 }))
+      .resolves.toEqual([expect.objectContaining({ origin: 'disk.md' })]);
+    await expect(provider.gather({ scope: '.', prompt: '如何同步企业联系人信息？' })).resolves.toEqual([]);
+    await expect(provider.gather({ scope: '.', prompt: '磁盘空间不足', limit: 0 })).resolves.toEqual([]);
+  });
+
   it('uses global knowledge-base fetch lazily and validates all returned fragments', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify([{ content: 'answer', origin: 'kb:1', score: 0.9 }])));
     vi.stubGlobal('fetch', fetch);

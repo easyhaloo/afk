@@ -1064,7 +1064,15 @@ provider configuration examples must follow that implementation rather than
 guessing constructor-to-YAML mappings.
 
 Named references in OTLP headers, ReportPlatform tokens, Feishu/Slack webhooks,
-OAuth client secrets and enterprise credential values resolve on each operation. These fields
+OAuth client secrets and enterprise credential values resolve on each operation.
+Named references in HTTP `sandbox.remote-container.token` and
+`repository.remote-workspace.token` resolve before every actual HTTP request,
+including container active health, repository snapshots and lifecycle preflight
+snapshots before publish/cleanup. Container health success does not establish
+execution readiness. Container CLI transport has no bearer token field; container
+HTTP transport accepts HTTP(S), while repository bearer authentication requires
+HTTPS (anonymous repository requests may use HTTP).
+These operation-resolved fields
 also accept an offset-aware ISO `expiresAt` on the reference. Activation and static
 inspection do not resolve them. Each operation checks reference and returned
 credential expiry, rejects `revoked: true`, forwards cancellation and the absolute
@@ -1325,6 +1333,8 @@ The [implementation plan](../superpowers/plans/2026-11-08-runtime-learning-and-v
 Implementation, QA/conflict resolution and CLI graph generation can select registered plugin templates. Prompt files in an in-memory plugin template must be absolute. Removing a plugin removes its templates without a stale cache. Required hooks still block execution/publication. The runtime does not offer a vendor-independent interception API for every Agent tool call.
 
 Selected reference context retains source identifiers and is capped at 32,000 characters per file; the lifecycle retains at most 64 bounded fragments per worktree. Experience retrieval selects at most five records within an 8,000-character serialized-record budget. Prompts carry short file references and remain subject to the provider's prompt limit. Only relevant, unexpired, verified records from the exact canonical project enter this context. The implementation runner audits a supplied experience context as `decision.made` with command `experience.recall`.
+
+Local Code, Retrieval and Project Memory ranking supports Chinese word segmentation alongside English queries, sharing the experience-recall tokenizer and filtering generic question words from the added Chinese terms. Experience recall applies its own relevance, exclusion and applicability filters after segmentation; a generic Context match does not grant experience verification or publication authority.
 
 Structured runner failures, including intermediate retryable failures, automatically create candidates with run/work-item provenance. A shared SQLite ledger isolates projects across checkouts and stores bounded redacted diagnoses and evidence references. It does not copy transcripts. Bounds are 1,000 records, 8 MiB logical payload/receipts, 32 KiB per record, 256 source identities per record and a default 90-day validity period. Eviction prefers expired and unverified records.
 

@@ -6,9 +6,11 @@ import type {
 } from '../../domain/agents/types.js';
 import type { Sandbox, SandboxOptions, SandboxProvider, SandboxCapability, WorktreeInfo } from './types.js';
 import { createHostCommandExecutor, validateTimeout } from '../host/command.js';
-import type { ProviderHealth } from '../../plugin-sdk/capabilities.js';
+import type { ProviderHealth, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import { checkAbort } from '../providers/dependencies.js';
+import { resolveOperationCredential, validateOperationCredential, type OperationSecret } from '../providers/operation-secret.js';
 
-export interface RemoteRequestOptions {
+export interface RemoteRequestOptions extends ProviderOperationOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
 }
@@ -38,6 +40,7 @@ export interface RemoteContainerTransport {
   readonly kind: 'cli' | 'http';
   request<Op extends RemoteContainerOperation>(operation: Op, payload: RemoteContainerPayloads[Op], options?: RemoteRequestOptions): Promise<unknown>;
   health?(): Promise<boolean>;
+  dispose?(): void;
 }
 
 const text = z.string().refine(value => value.trim().length > 0, 'non-blank string is required');
@@ -160,7 +163,7 @@ export function createRemoteContainerCliTransport(options: RemoteContainerCliTra
 
 export interface RemoteContainerHttpTransportOptions {
   readonly baseUrl?: string;
-  readonly token?: string;
+  readonly token?: OperationSecret;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly fetch?: typeof globalThis.fetch;
@@ -184,49 +187,85 @@ export function createRemoteContainerHttpTransport(options: RemoteContainerHttpT
     throw new Error('remote container baseUrl must be an HTTP(S) URL without credentials, query or fragment');
   }
   base.pathname = `${base.pathname.replace(/\/+$/, '')}/`;
-  if (options.token !== undefined && (!options.token || /[\r\n]/.test(options.token))) throw new Error('invalid remote container bearer token');
+  if (typeof options.token === 'string' && (!options.token || /[\r\n]/.test(options.token))) throw new Error('invalid remote container bearer token');
   const fetch = options.fetch ?? globalThis.fetch;
+  const lifetime = new AbortController();
 
   async function send(operation: string, payload?: RemoteContainerPayloads[RemoteContainerOperation], requestOptions?: RemoteRequestOptions): Promise<unknown> {
     const controller = new AbortController();
     const budget = validateTimeout(requestOptions?.timeoutMs ?? timeoutMs);
-    const timer = setTimeout(() => controller.abort(new DOMException(`remote container ${operation} timed out after ${budget}ms`, 'TimeoutError')), budget);
-    const signal = AbortSignal.any([controller.signal, ...[options.signal, requestOptions?.signal].filter((value): value is AbortSignal => value !== undefined)]);
-    try {
+    let deadlineAt = Math.min(Date.now() + budget, requestOptions?.deadlineAt ?? Infinity);
+    const signal = AbortSignal.any([controller.signal, lifetime.signal, ...[options.signal, requestOptions?.signal].filter((value): value is AbortSignal => value !== undefined)]);
+    const expire = () => controller.abort(new DOMException('Remote container request timed out', 'TimeoutError'));
+    let timer = setTimeout(expire, Math.max(0, deadlineAt - Date.now()));
+    let abort!: () => void;
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(new DOMException('Remote container request aborted', 'AbortError'));
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
+    let resolving = options.token !== undefined;
+    let failure: Error | undefined;
+    const deliver = async () => {
+      checkAbort(requestOptions);
+      checkAbort({ signal, deadlineAt });
+      const credential = options.token === undefined ? undefined : await resolveOperationCredential(options.token, { signal, deadlineAt });
+      resolving = false;
+      if (credential?.expiresAt !== undefined) {
+        deadlineAt = Math.min(deadlineAt, Date.parse(credential.expiresAt));
+        clearTimeout(timer);
+        timer = setTimeout(expire, Math.max(0, deadlineAt - Date.now()));
+      }
+      checkAbort({ signal, deadlineAt });
       const response = await fetch(new URL(operation, base), {
         method: payload === undefined ? 'GET' : 'POST', redirect: 'error', signal,
         headers: {
           Accept: 'application/json', ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
-          ...(options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` }),
+          ...(credential === undefined ? {} : { Authorization: `Bearer ${credential.secret}` }),
         },
         body: payload === undefined ? undefined : JSON.stringify(payload),
       });
+      if (signal.aborted) void response.body?.cancel().catch(() => undefined);
+      checkAbort({ signal, deadlineAt });
       if (!response.ok) {
-        await response.body?.cancel();
-        throw new Error(`remote container ${operation} returned HTTP ${response.status}`);
+        void response.body?.cancel().catch(() => undefined);
+        throw failure = new Error(`remote container ${operation} returned HTTP ${response.status}`);
       }
       const contentType = response.headers.get('content-type') ?? '';
       if (!/^application\/(?:[\w.-]+\+)?json(?:\s*;|$)/i.test(contentType)) {
-        await response.body?.cancel();
-        throw new Error(`remote container ${operation} returned a non-JSON content type`);
+        void response.body?.cancel().catch(() => undefined);
+        throw failure = new Error(`remote container ${operation} returned a non-JSON content type`);
       }
       let data: unknown;
-      try { data = await response.json(); } catch (error) {
-        if (signal.aborted) throw signal.reason;
-        throw new Error(`remote container ${operation} returned invalid JSON`, { cause: error });
+      try { data = await response.json(); } catch {
+        throw failure = new Error(`remote container ${operation} returned invalid JSON`);
       }
-      if (signal.aborted) throw signal.reason;
+      checkAbort({ signal, deadlineAt });
+      if (credential) validateOperationCredential(credential);
       return data;
+    };
+    try {
+      return await Promise.race([deliver(), interrupted]);
+    } catch {
+      if (resolving) throw new Error('Operation credential unavailable');
+      if (signal.aborted) throw new DOMException('Remote container request interrupted', controller.signal.aborted ? 'TimeoutError' : 'AbortError');
+      if (failure) throw failure;
+      throw new Error(`remote container ${operation} request failed`);
     } finally {
       clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
     }
   }
 
   return {
     kind: 'http',
+    dispose: () => lifetime.abort(),
     async request(operation, payload, requestOptions) {
       const schema = operationSchema(operation);
-      return validateResponse(schema, await send(operation, payload, requestOptions), operation);
+      const value = await send(operation, payload, requestOptions);
+      const parsed = schema.safeParse(value);
+      if (!parsed.success) throw new Error(`invalid remote container response for ${operation}`);
+      return parsed.data;
     },
     health: options.health ?? (async () => validateResponse(z.object({ healthy: z.boolean() }), await send('health'), 'health').healthy),
   };
@@ -254,6 +293,8 @@ export class RemoteContainerSandboxProvider implements SandboxProvider {
       }
     };
   }
+
+  dispose(): void { this.transport.dispose?.(); }
 
   async createWorktree(options: { iid: number; baseBranch: string }): Promise<WorktreeInfo> {
     return request(this.transport, 'workspace.create', options);

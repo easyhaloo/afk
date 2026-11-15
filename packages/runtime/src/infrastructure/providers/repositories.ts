@@ -17,6 +17,7 @@ import type {
 } from '../../plugin-sdk/capabilities.js';
 import { RepositoryStore } from '../git/repository-store.js';
 import { RepositoryLeases } from '../git/repository-lease.js';
+import { resolveOperationCredential, validateOperationCredential, type OperationSecret } from './operation-secret.js';
 import {
   checkAbort,
   executeCommand,
@@ -362,7 +363,7 @@ export interface RemoteWorkspaceProviderOptions {
   /** Optional transport; defaults to global fetch at operation time. */
   readonly transport?: FetchTransport;
   /** Optional bearer token sent as an Authorization header. */
-  readonly token?: string;
+  readonly token?: OperationSecret;
   readonly lifecycle?: RepositoryLifecycleConfig;
 }
 
@@ -374,6 +375,7 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
   readonly id = 'remote-workspace';
   readonly capabilities: RepositoryProvider['capabilities'];
   private readonly lifecycle?: ConfiguredRepositoryLifecycle;
+  private readonly lifetime = new AbortController();
 
   constructor(private readonly options: RemoteWorkspaceProviderOptions) {
     if (options.lifecycle) {
@@ -387,28 +389,38 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
   }
 
   async snapshot(repository: RepositoryRef, options?: ProviderOperationOptions): Promise<RepositorySnapshot> {
-    checkAbort(options);
     assertCurrentWorkspace(repository);
     return validateSnapshot(await this.request(repository.url, 'snapshot', undefined, options));
   }
 
   async prepare(request: RepositoryPrepareRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
-    return requireLifecycle(this.lifecycle).prepare(request, options);
+    return this.operate(() => requireLifecycle(this.lifecycle).prepare(request, options), options);
   }
 
   async checkout(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
-    return requireLifecycle(this.lifecycle).checkout(request, options);
+    return this.operate(() => requireLifecycle(this.lifecycle).checkout(request, options), options);
   }
 
   async publish(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication> {
-    return requireLifecycle(this.lifecycle).publish(request, options);
+    return this.operate(() => requireLifecycle(this.lifecycle).publish(request, options), options);
   }
 
   async cleanup(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult> {
-    return requireLifecycle(this.lifecycle).cleanup(request, options);
+    return this.operate(() => requireLifecycle(this.lifecycle).cleanup(request, options), options);
+  }
+
+  dispose(): void { this.lifetime.abort(); }
+
+  private async operate<Result>(operation: () => Promise<Result>, options?: ProviderOperationOptions): Promise<Result> {
+    try { return await operation(); }
+    catch (error) {
+      if (this.options.token !== undefined && options?.signal?.aborted) throw new Error('Workspace request cancelled or interrupted');
+      throw error;
+    }
   }
 
   private async request(repository: string, route: string, input: unknown, options?: ProviderOperationOptions): Promise<unknown> {
+    if (this.lifetime.signal.aborted || (this.options.token !== undefined && options?.signal?.aborted)) throw new Error('Operation credential unavailable');
     checkAbort(options);
     // `repository` is an encoded URL path segment, not a lifecycle identifier:
     // names such as "team/repo with space" are part of the snapshot contract.
@@ -423,22 +435,39 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
     if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) {
       throw new Error('invalid workspace API base URL');
     }
-    if (this.options.token && base.protocol !== 'https:') throw new Error('workspace bearer token requires HTTPS');
+    if (this.options.token !== undefined && base.protocol !== 'https:') throw new Error('workspace bearer token requires HTTPS');
     const workspace = encodeURIComponent(repository);
     const url = `${this.options.baseUrl.replace(/\/+$/, '')}/workspaces/${workspace}/${route}`;
-    const response = await requestHttp(
-      this.options.transport,
-      url,
-      {
-        method: input === undefined ? 'GET' : 'POST',
-        headers: { ...this.headers(), ...(input === undefined ? {} : { 'content-type': 'application/json' }) },
-        ...(input === undefined ? {} : { body: JSON.stringify(input) }),
-      },
-      options,
-    );
-    const result = await this.parseJson(response);
-    checkAbort(options);
-    return result;
+    const controller = new AbortController();
+    const abort = () => controller.abort(new Error('Workspace request interrupted'));
+    options?.signal?.addEventListener('abort', abort, { once: true });
+    if (options?.signal?.aborted) abort();
+    const signal = AbortSignal.any([this.lifetime.signal, controller.signal]);
+    let deadlineAt = Math.min(Date.now() + 15_000, options?.deadlineAt ?? Infinity);
+    try {
+      const credential = this.options.token === undefined ? undefined : await resolveOperationCredential(this.options.token, { signal, deadlineAt });
+      if (credential?.expiresAt !== undefined) deadlineAt = Math.min(deadlineAt, Date.parse(credential.expiresAt));
+      checkAbort({ signal, deadlineAt });
+      const response = await requestHttp(
+        this.options.transport,
+        url,
+        {
+          method: input === undefined ? 'GET' : 'POST',
+          headers: { ...(credential ? { authorization: `Bearer ${credential.secret}` } : {}), ...(input === undefined ? {} : { 'content-type': 'application/json' }) },
+          ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+        },
+        { signal, deadlineAt },
+      );
+      const result = await this.parseJson(response);
+      checkAbort({ signal, deadlineAt });
+      if (credential) validateOperationCredential(credential);
+      return result;
+    } catch (error) {
+      if (signal.aborted || deadlineAt <= Date.now()) throw new Error('Workspace request interrupted');
+      throw error;
+    } finally {
+      options?.signal?.removeEventListener('abort', abort);
+    }
   }
 
   private async parseJson(response: Response): Promise<unknown> {
@@ -448,10 +477,6 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
     } catch {
       throw new Error('workspace API returned invalid JSON');
     }
-  }
-
-  private headers(): Record<string, string> {
-    return this.options.token ? { authorization: `Bearer ${this.options.token}` } : {};
   }
 }
 

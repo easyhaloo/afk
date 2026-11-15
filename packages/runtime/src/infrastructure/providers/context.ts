@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ContextFragment, ContextQuery, ContextSource, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, requestHttp, type FetchTransport } from './dependencies.js';
+import { lexicalTerms } from '../../domain/context/terms.js';
 
 export interface ContextFileSystem {
   readFile(path: string, encoding: 'utf8'): Promise<string>;
@@ -33,6 +34,7 @@ const defaultContextFileSystem: ContextFileSystem = {
 
 const TEXT_EXTENSIONS = new Set(['.c', '.cc', '.cpp', '.css', '.go', '.h', '.hpp', '.java', '.js', '.jsx', '.json', '.md', '.py', '.rb', '.rs', '.sh', '.sql', '.ts', '.tsx', '.txt', '.vue', '.yaml', '.yml']);
 const EXCLUDED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'build']);
+const QUESTION_WORDS = new Set(['如何', '什么', '怎么', '为何', '为什么', '是否', '哪些', '请问']);
 
 function safePath(root: string, input: string): string {
   if (!input || input.includes('\0')) throw new Error('Invalid context path');
@@ -93,7 +95,10 @@ function positiveLimit(value: number): number {
 }
 
 function rankedFragments(prompt: string, documents: readonly { origin: string; content: string }[], limit: number): ContextFragment[] {
-  const queryTerms = [...new Set(prompt.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter(Boolean))];
+  const queryTerms = [...new Set([
+    ...prompt.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter(Boolean),
+    ...lexicalTerms(prompt).filter(term => term.length >= 2 && /\p{Script=Han}/u.test(term) && !QUESTION_WORDS.has(term)),
+  ])];
   return documents.map(document => {
     const lower = document.content.toLowerCase();
     const score = queryTerms.reduce((total, term) => total + (lower.split(term).length - 1), 0);

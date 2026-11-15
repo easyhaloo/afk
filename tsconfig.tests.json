@@ -9,6 +9,9 @@
     ]
   },
   "include": [
+    "packages/runtime/src/domain/context/terms.test.ts",
+    "packages/runtime/src/infrastructure/providers/context.test.ts",
+    "packages/runtime/src/application/plugins/configured-remote-operation.test.ts",
     "packages/runtime/src/application/plugins/repository-authority.test.ts",
     "packages/runtime/src/infrastructure/providers/repository-checkout.test.ts",
     "packages/runtime/src/infrastructure/providers/repository-command-deadline.test.ts",

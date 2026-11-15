@@ -4,6 +4,7 @@ import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/i
 import { redactUtf8 } from '../../infrastructure/observability/local-evidence-store.js';
 import { openSqlite, transaction, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 import type { ContextQuery } from '../../plugin-sdk/capabilities.js';
+import { lexicalTerms } from '../../domain/context/terms.js';
 
 const MAX_RECORDS = 1000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -12,15 +13,9 @@ const MAX_RECEIPTS = 256;
 const DAY = 24 * 60 * 60 * 1000;
 const MAX_EXCHANGE_BYTES = 1024 * 1024;
 const MAX_ADOPTIONS = 64;
-const recallSegmenter = new Intl.Segmenter('zh', { granularity: 'word' });
 
 function recallTerms(value: string): Set<string> {
-  const normalized = value.toLowerCase();
-  const identifier = /[\p{Script=Latin}\p{N}_]+(?:[./:-][\p{Script=Latin}\p{N}_]+)*/gu;
-  const identifiers = normalized.match(identifier) ?? [];
-  const words = [...recallSegmenter.segment(normalized.replace(identifier, ' '))]
-    .filter(part => part.isWordLike).map(part => part.segment);
-  return new Set([...identifiers, ...words].filter(term => term.length >= 2
+  return new Set(lexicalTerms(value).filter(term => term.length >= 2
     && !['the', 'and', 'for', 'with', 'this', 'that', 'please', 'fix', 'is', 'are', 'was', 'were', 'not', 'no', 'only'].includes(term)));
 }
 

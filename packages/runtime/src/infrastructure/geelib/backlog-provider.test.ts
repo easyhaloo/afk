@@ -15,6 +15,8 @@ const dependencyMatter = {
 const statuses = [
   { id: 1, status_name: '新建', status_stage: '未开始' },
   { id: 46, status_name: '修复中', status_stage: '进行中' },
+  { id: 47, status_name: '已修复', status_stage: '进行中' },
+  { id: 23, status_name: '已验证', status_stage: '已完成' },
   { id: 20, status_name: '关闭', status_stage: '已完成' },
 ];
 /** Resource references the fake platform answers with; relations tests seed it. */
@@ -178,7 +180,7 @@ describe('GeelibBacklogProvider transition writeback', () => {
     const body = JSON.parse(String(comment?.[1]?.body));
     expect(body.id).toBe(1083121);
     expect(body.type).toBe('matter');
-    expect(body.content).toContain('blocked');
+    expect(body.content).toContain('阻塞');
     expect(body.content).toContain('QA rework 9: 断言失败');
   });
 

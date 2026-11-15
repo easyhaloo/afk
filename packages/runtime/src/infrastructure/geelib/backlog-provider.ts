@@ -53,6 +53,11 @@ export interface GeelibBacklogProviderOptions {
 
 const RESERVED_LABEL_PREFIXES = ['mode::', 'stage::', 'kind::', 'idempotency::', 'depends-on::', 'parent::', 'ac::'];
 
+/** The platform comments are HTML rich text; runner text must not smuggle markup in. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /**
  * The geelib backlog provider: AFK's lifecycle, written onto the platform's
  * native state machine.
@@ -134,12 +139,37 @@ export class GeelibBacklogProvider implements BacklogProvider {
     };
   }
 
-  async transition(id: string, state: BacklogState, _details?: { reason?: string; changeId?: string }): Promise<void> {
+  async transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> {
     const parsed = parseWorkItemId(id);
     const target = afkStateToNative(state);
     const current = await this.client.getMatterStateName(parsed.issueNumber);
-    if (current === target) return; // the collapse of done/merge_ready makes this the common path
-    await this.client.setStatus(parsed.issueNumber, target);
+    if (current !== target) await this.client.setStatus(parsed.issueNumber, target);
+    const note = this.reconciliationNote(state, details);
+    if (note) await this.client.addComment(parsed.issueNumber, note);
+  }
+
+  /**
+   * The comment a transition leaves on the platform, when it has something
+   * the status field cannot say.
+   *
+   * The native state carries the lifecycle position, so a bare transition
+   * is silent. What the status cannot carry is the why and the what's-next:
+   * a blocked or rework reason from the runner, the change request an item
+   * now waits on, and — because `done` collapses onto the same native state
+   * as `merge_ready` — the merge confirmation that makes an item done.
+   */
+  private reconciliationNote(state: BacklogState, details?: { reason?: string; changeId?: string }): string | undefined {
+    if (state === 'done') {
+      const confirmation = details?.changeId ? `变更 #${details.changeId} 已合并并确认` : '变更已合并并确认';
+      return `<p><strong>AFK 已完成</strong>：${confirmation}。</p>`;
+    }
+    if (details?.reason && (state === 'blocked' || state === 'rework')) {
+      return `<p><strong>AFK ${state === 'blocked' ? '阻塞' : '返工'}</strong>：${escapeHtml(details.reason)}</p>`;
+    }
+    if (details?.changeId && state === 'merge_ready') {
+      return `<p><strong>AFK 待合并</strong>：变更请求 #${escapeHtml(details.changeId)} 已发布，等待人工合并。</p>`;
+    }
+    return undefined;
   }
 
   /**

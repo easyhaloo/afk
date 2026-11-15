@@ -48,6 +48,7 @@ export type TrackerTargetSource =
 export interface TrackerTargetCredentials {
   github: boolean;
   gitlab: boolean;
+  geelib: boolean;
 }
 
 export interface TrackerTargetOptions {
@@ -145,7 +146,7 @@ export async function resolveTrackerTarget(options: TrackerTargetOptions = {}): 
  */
 export function inferPlatformFromProject(
   projectId: string,
-  credentials: TrackerTargetCredentials = { github: false, gitlab: false },
+  credentials: TrackerTargetCredentials = { github: false, gitlab: false, geelib: false },
 ): TrackerPlatform {
   return decisivePlatformFromProject(projectId)
     ?? (credentials.gitlab && !credentials.github ? 'gitlab' : 'github');
@@ -230,7 +231,7 @@ function selectPlatform(input: {
     return { platform: remote.platform, source: 'remote' };
   }
   return {
-    platform: inferPlatformFromProject(selection.projectId, credentials?.() ?? { github: false, gitlab: false }),
+    platform: inferPlatformFromProject(selection.projectId, credentials?.() ?? { github: false, gitlab: false, geelib: false }),
     source: 'inferred',
   };
 }

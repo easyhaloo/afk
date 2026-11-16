@@ -76,6 +76,21 @@ describe('tracker target resolution', () => {
     });
   });
 
+  it('resolves an explicit geelib target from the environment', async () => {
+    const target = await resolveTrackerTarget({
+      cwd: '/nowhere',
+      env: { AFK_TRACKER_PROJECT: '6856', AFK_TRACKER_PLATFORM: 'geelib' },
+      store: emptyStore,
+    });
+
+    expect(target).toMatchObject({
+      platform: 'geelib',
+      projectId: '6856',
+      platformSource: 'env',
+      projectSource: 'env',
+    });
+  });
+
   it('resolves an issue id to the project the local index recorded for it', async () => {
     const target = await resolveTrackerTarget({
       issueId: '229',
@@ -103,6 +118,30 @@ describe('tracker target resolution', () => {
       platform: 'gitlab',
       projectId: 'team/api',
       host: 'git.corp',
+      platformSource: 'index-path',
+      projectSource: 'index-path',
+    });
+  });
+
+  it('resolves a bound repository directory to its geelib project', async () => {
+    const store: TrackerStore = {
+      version: 2,
+      projects: {
+        'geelib::6856': {
+          platform: 'geelib',
+          project: '6856',
+          paths: ['/workspace/产品仓库'],
+          issues: {},
+          updatedAt: '2026-11-16T00:00:00.000Z',
+        },
+      },
+    };
+
+    const target = await resolveTrackerTarget({ cwd: '/workspace/产品仓库/packages/app', env: {}, store });
+
+    expect(target).toMatchObject({
+      platform: 'geelib',
+      projectId: '6856',
       platformSource: 'index-path',
       projectSource: 'index-path',
     });

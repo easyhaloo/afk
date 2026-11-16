@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { openSqlite } from '../storage/sqlite.js';
 import {
   findProjectByIssue,
   findProjectByName,
@@ -101,7 +102,7 @@ describe('tracker store', () => {
   it('reads a damaged legacy index as empty instead of failing', () => {
     writeFileSync(join(directory, 'tracker-projects.json'), '{not json', 'utf8');
 
-    expect(readTrackerStore(directory)).toEqual({ version: 1, projects: {} });
+    expect(readTrackerStore(directory)).toEqual({ version: 2, projects: {} });
   });
 
   it('imports the retired JSON index once, then keeps the file', () => {
@@ -147,5 +148,67 @@ describe('tracker store', () => {
       .toEqual({ project: 'team/api', host: 'git.corp' });
     expect(trackerIdentityOf({ platform: 'github', projectKey: 'owner/repo' }))
       .toEqual({ project: 'owner/repo', host: undefined });
+  });
+
+  it('records a geelib project and its issues alongside the git platforms', () => {
+    recordTrackerActivity({ platform: 'geelib', project: '6856', issues: [{ id: '1083121' }] }, directory);
+
+    const store = readTrackerStore(directory);
+    expect(store.projects['geelib::6856']).toMatchObject({ platform: 'geelib', project: '6856' });
+    expect(findProjectByIssue(store, '1083121')?.project).toBe('6856');
+  });
+
+  it('migrates a version-1 store in place, keeping its rows and accepting geelib', () => {
+    // Build the version-1 database by hand: the pre-geelib schema rejects any
+    // other platform, which is exactly the constraint this store outgrows.
+    mkdirSync(join(directory, 'storage'), { recursive: true });
+    const legacy = openSqlite({
+      file: trackerDatabasePath(directory),
+      schema: `
+        CREATE TABLE tracker_meta (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          legacy_imported_at_ms INTEGER
+        ) STRICT;
+        CREATE TABLE tracker_projects (
+          platform TEXT NOT NULL CHECK (platform IN ('github', 'gitlab')),
+          host TEXT NOT NULL DEFAULT '',
+          project TEXT NOT NULL,
+          updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+          PRIMARY KEY (platform, host, project)
+        ) STRICT;
+        CREATE TABLE tracker_paths (
+          platform TEXT NOT NULL,
+          host TEXT NOT NULL DEFAULT '',
+          project TEXT NOT NULL,
+          path TEXT NOT NULL,
+          rank INTEGER NOT NULL CHECK (rank >= 0),
+          PRIMARY KEY (platform, host, project, path),
+          FOREIGN KEY (platform, host, project) REFERENCES tracker_projects(platform, host, project) ON DELETE CASCADE
+        ) STRICT;
+        CREATE TABLE tracker_issues (
+          platform TEXT NOT NULL,
+          host TEXT NOT NULL DEFAULT '',
+          project TEXT NOT NULL,
+          issue_id TEXT NOT NULL,
+          seen_at_ms INTEGER NOT NULL CHECK (seen_at_ms >= 0),
+          PRIMARY KEY (platform, host, project, issue_id),
+          FOREIGN KEY (platform, host, project) REFERENCES tracker_projects(platform, host, project) ON DELETE CASCADE
+        ) STRICT;
+      `,
+    });
+    legacy.prepare("INSERT INTO tracker_projects (platform, host, project, updated_at_ms) VALUES ('gitlab', 'git.corp', 'team/api', 1)").run();
+    legacy.prepare("INSERT INTO tracker_paths (platform, host, project, path, rank) VALUES ('gitlab', 'git.corp', 'team/api', '/work/team-api', 0)").run();
+    legacy.prepare("INSERT INTO tracker_issues (platform, host, project, issue_id, seen_at_ms) VALUES ('gitlab', 'git.corp', 'team/api', '7', 1)").run();
+    legacy.close();
+
+    const store = readTrackerStore(directory);
+    expect(store.version).toBe(2);
+    expect(store.projects['gitlab:git.corp:team/api']).toMatchObject({ platform: 'gitlab', paths: ['/work/team-api'] });
+    expect(findProjectByIssue(store, '7')?.project).toBe('team/api');
+
+    recordTrackerActivity({ platform: 'geelib', project: '6856', issues: [{ id: '9' }] }, directory);
+    expect(readTrackerStore(directory).projects['geelib::6856']).toMatchObject({ platform: 'geelib' });
+    // The migrated rows survive the geelib write.
+    expect(findProjectByIssue(readTrackerStore(directory), '7')?.project).toBe('team/api');
   });
 });

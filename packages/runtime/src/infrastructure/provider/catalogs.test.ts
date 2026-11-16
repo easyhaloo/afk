@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GitHubProviderCatalog, GitLabProviderCatalog } from './catalogs.js';
+import { GitHubProviderCatalog, GeelibProviderCatalog, GitLabProviderCatalog } from './catalogs.js';
 
 describe('provider catalogs', () => {
   it('enumerates GitHub repositories and issues across every page', async () => {
@@ -86,5 +86,56 @@ describe('provider catalogs', () => {
     const catalog = new GitLabProviderCatalog('gitlab.corp', { listProjectsPage: vi.fn(), listIssuesPage }, 50);
     const issues = await catalog.listIssues({ platform: 'gitlab', projectKey: 'gitlab.corp/api', providerHost: 'gitlab.corp', name: 'api' });
     expect(issues[0]).toMatchObject({ issueNumber: 6, updatedAt: '2026-10-01T00:00:00Z' });
+  });
+});
+
+describe('geelib provider catalog', () => {
+  const catalogClient = {
+    listCatalogProjects: vi.fn(async () => [
+      { id: 6856, name: '示例项目', updatedAt: '2026-11-14 23:24:48' },
+    ]),
+    listCatalogIssues: vi.fn(async () => [
+      { issueNumber: 1083121, title: '工作项', description: '正文', labels: ['BugTrace'], state: 'opened' as const, updatedAt: '2026-11-15 10:00:00', webUrl: 'https://geelib.example/geelib/project/matter/detail?subId=6856&id=1083121' },
+    ]),
+    accountIdentity: vi.fn(async () => ({ accountId: '73' })),
+  };
+
+  it('names projects by their numeric id under the instance host', async () => {
+    const catalog = new GeelibProviderCatalog(catalogClient, 'geelib.qihoo.net');
+
+    expect(catalog.platform).toBe('geelib');
+    expect(catalog.scopeKey).toBe('geelib.qihoo.net');
+
+    const projects = await catalog.listProjects();
+    expect(projects).toEqual([
+      { platform: 'geelib', projectKey: '6856', providerProjectId: '6856', name: '示例项目' },
+    ]);
+  });
+
+  it('maps catalog issues into the inventory shape', async () => {
+    const catalog = new GeelibProviderCatalog(catalogClient, 'geelib.qihoo.net');
+
+    const issues = await catalog.listIssues({ platform: 'geelib', projectKey: '6856', providerProjectId: '6856', name: '示例项目' });
+
+    expect(issues).toEqual([{
+      issueNumber: 1083121,
+      title: '工作项',
+      description: '正文',
+      labels: ['BugTrace'],
+      state: 'opened',
+      updatedAt: '2026-11-15 10:00:00',
+      webUrl: 'https://geelib.example/geelib/project/matter/detail?subId=6856&id=1083121',
+    }]);
+    expect(catalogClient.listCatalogIssues).toHaveBeenCalledWith(6856);
+  });
+
+  it('verifies the account behind the credentials', async () => {
+    const catalog = new GeelibProviderCatalog(catalogClient, 'geelib.qihoo.net');
+
+    expect(await catalog.getAccountIdentity?.()).toEqual({
+      platform: 'geelib',
+      host: 'geelib.qihoo.net',
+      accountId: '73',
+    });
   });
 });

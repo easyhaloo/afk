@@ -82,7 +82,7 @@ import {
 const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const kinds: BacklogKind[] = ['prd'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
-const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'all'];
+const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'geelib', 'all'];
 
 function asPlatform(value: unknown): TrackerPlatform | undefined {
   return value === 'github' || value === 'gitlab' ? value : undefined;
@@ -209,6 +209,48 @@ function recordInventory(items: readonly GlobalWorkItem[]): void {
   }
   for (const group of groups.values()) {
     recordTrackerActivity({ ...group, cwd: process.cwd() });
+  }
+}
+
+export interface BacklogAssociateOptions extends JsonMode {
+  /** The canonical project to bind: `platform:projectKey` (a geelib project is its numeric id). */
+  project: string;
+  /** The directory to bind; defaults to the working directory. */
+  directory?: string;
+}
+
+/**
+ * Bind a repository directory to a provider project in the local index.
+ *
+ * An inventory run binds every project the credentials reach, which is far
+ * too broad to resolve a directory by. This command writes the one precise
+ * binding, and later commands run from that directory resolve the project
+ * without flags.
+ */
+export async function runBacklogAssociate(
+  options: BacklogAssociateOptions,
+  storage?: { root?: string },
+): Promise<void> {
+  const kind = 'backlog.associate';
+  const parsed = parseProjectArgument(options.project);
+  if (!parsed) {
+    throw new Error(`--project must be a canonical platform:projectKey identity (for example geelib:6856): ${options.project}`);
+  }
+  const directory = options.directory ?? process.cwd();
+  recordTrackerActivity({
+    platform: parsed.platform,
+    project: parsed.projectId,
+    ...(parsed.host ? { host: parsed.host } : {}),
+    cwd: directory,
+  }, storage?.root);
+  emitSuccess(kind, {
+    platform: parsed.platform,
+    project: parsed.projectId,
+    ...(parsed.host ? { host: parsed.host } : {}),
+    directory,
+  });
+  if (!options.json) {
+    detail(`Bound ${directory} to ${parsed.platform}:${parsed.projectId}. Commands in this directory now resolve this project without flags.`);
   }
 }
 
@@ -1391,7 +1433,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Explicitly adopt an open manual issue into ready AFK work')
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--project <project>', 'Provider project/repository')
-    .addOption(new Option('--platform <platform>', 'Provider platform').choices(['github', 'gitlab']).makeOptionMandatory())
+    .addOption(new Option('--platform <platform>', 'Provider platform').choices(['github', 'gitlab', 'geelib']).makeOptionMandatory())
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1410,7 +1452,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   backlog.command('init')
     .description('Initialize provider metadata for backlog state and mode')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1456,6 +1498,23 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       }
     });
 
+  backlog.command('associate')
+    .description('Bind a repository directory to a provider project in the local index')
+    .requiredOption('--project <project>', 'Canonical project identity (platform:projectKey; a geelib project is its numeric id)')
+    .option('--directory <directory>', 'Directory to bind (defaults to the working directory)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogAssociate(options, {});
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.associate', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
   backlog.command('list')
     .description('List backlog items')
     .option('--state <state>', `Filter by state (${states.join('|')})`)
@@ -1464,7 +1523,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--tag <tag>', 'Filter by business tag')
     .option('--parent <id>', 'Filter by parent backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1482,7 +1541,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Show one backlog item')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1501,7 +1560,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('List the issues that belong to one work item')
     .argument('<prd-id>', 'Issue number or canonical work item ID (platform:projectKey#issueNumber)')
     .option('--project <project>', 'Project the item belongs to, when the id does not name one')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async (prdId: string, options) => {
       try {
@@ -1520,7 +1579,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Create the backlog records a provider-neutral manifest names')
     .argument('<manifest>', 'Manifest file (YAML)')
     .option('--project <project>', 'Default target project (platform:projectKey)')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--idempotency-key <key>', 'Prefix for the per-item retry keys')
     .option('--dry-run', 'Report the plan without writing anything')
     .option('--json', 'Emit structured JSON envelope to stdout')
@@ -1554,7 +1613,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--idempotency-key <key>', 'Return the existing issue when this project already contains the key')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async (title: string, options) => {
       try {
@@ -1573,7 +1632,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--reason <text>', 'Interruption reason')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1593,7 +1652,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--reason <text>', 'Retry reason')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1612,7 +1671,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Merge an approved backlog change and mark it done')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
@@ -1632,7 +1691,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Complete a backlog whose change is already merged on the provider')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
@@ -1654,7 +1713,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--tag <tag>', 'Tag name')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1673,7 +1732,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--tag <tag>', 'Tag name')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1695,7 +1754,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--base <id>', 'Execution base backlog ID or platform:project#id')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1716,7 +1775,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--base', 'Drop the execution base edge')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id to stop waiting for', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1752,7 +1811,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--summary <text>', 'The fact statement that replaces the record summary')
     .option('--reason <text>', 'Why the statement is being corrected')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1783,7 +1842,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--kind <kind>', `Organizational role (${kinds.join('|')})`)
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1809,7 +1868,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--mode <mode>', `Execution mode (${modes.join('|')})`)
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1835,7 +1894,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--branch <branch>', 'Ref the work starts from')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1861,7 +1920,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID of the PRD')
     .option('--branch <branch>', 'Record this branch as the baseline branch of the PRD')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1886,7 +1945,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Replace the body of a backlog item (its contract and acceptance criteria)')
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--description-file <path>', 'Markdown body file to write')
     .option('--description-stdin', 'Read the body from stdin')
     .option('--reason <text>', 'Why the body is being revised')

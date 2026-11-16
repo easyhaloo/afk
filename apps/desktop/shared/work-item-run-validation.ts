@@ -8,6 +8,7 @@ import type {
 const BACKLOG_PLATFORM_VALUES: Record<BacklogPlatform, true> = {
   github: true,
   gitlab: true,
+  geelib: true,
 };
 const SELECTION_KEYS = new Set(["platform", "projectKey", "providerHost", "providerProjectId", "name", "checkoutPath", "baseBranch", "role"]);
 const WINDOWS_RESERVED_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;

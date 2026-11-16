@@ -114,9 +114,12 @@ and its shared dependencies.
 GITLAB_TOKEN=          # GitLab API token
 GITLAB_URL=            # GitLab instance URL
 GITHUB_TOKEN=          # GitHub API token
+GELIB_TOKEN=           # Geelib (集酷云) OpenAPI token
+GELIB_USER_MAIL=       # Geelib OpenAPI account mail (signs every request)
+GELIB_URL=             # Geelib instance URL (default: https://geelib.qihoo.net)
 AFK_WORKSPACE=         # Desktop project selection; does not relocate execution or system data
 AFK_TRACKER_PROJECT=   # Provider project fallback when cwd has no git remote
-AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab)
+AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab|geelib)
 AFK_TMUX_SESSION=      # tmux session name (default: afk)
 ```
 

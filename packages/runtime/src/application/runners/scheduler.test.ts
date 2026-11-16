@@ -13,6 +13,14 @@ function item(project: string, number: number, overrides: Partial<GlobalWorkItem
     dependsOn: [], tags: [], branchName: `afk/${number}`, providerRef: id, ...overrides };
 }
 
+/** A geelib item as the read-only inventory reports it: numeric id, no AFK metadata. */
+function geelibItem(number: number, overrides: Partial<GlobalWorkItem> = {}): GlobalWorkItem {
+  const id = parseWorkItemId(`geelib:1843#${number}`).id;
+  return { id, issueNumber: number, project: { platform: 'geelib', projectKey: '1843', name: '通用需求管理' },
+    title: `集酷工作项 ${number}`, managed: false, executionEligible: false, state: 'ready', executionMode: 'afk',
+    dependsOn: [], tags: [], branchName: '', providerRef: id, ...overrides };
+}
+
 /** A read of the world in which nothing failed. */
 function read(items: GlobalWorkItem[]): ScheduleInventory {
   return { items, diagnostics: [] };
@@ -315,6 +323,36 @@ describe('scheduler', () => {
     expect(statuses[0]).toMatchObject({ failures: 1, retryInMs: 100 });
     expect(statuses[0]!.error).toContain('fetch failed');
     expect(statuses[3]).toMatchObject({ failures: 4, retryInMs: 800 });
+  });
+});
+
+describe('a geelib schedule previews without touching the platform', () => {
+  it('judges unmanaged geelib items as not runnable and starts nothing', async () => {
+    const parent = geelibItem(322370);
+    const child = geelibItem(322371, { parentId: parent.id });
+    const execute = vi.fn();
+    const report = await scheduleWorkItems({ parent: parent.id, dryRun: true }, {
+      inventory: async () => read([parent, child]), execute,
+    });
+
+    expect(report.waves).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(report.waiting?.map(entry => entry.workItemId)).toEqual([child.id]);
+    expect(report.waiting?.[0]?.runnability).toMatchObject({ runnable: false, reason: 'not_managed' });
+  });
+
+  it('holds a managed geelib item back while its dependency is not done', async () => {
+    const parent = geelibItem(322370);
+    const dependency = geelibItem(322372, { managed: true, executionEligible: true });
+    const dependent = geelibItem(322371, { parentId: parent.id, managed: true, executionEligible: true, dependsOn: [dependency.id] });
+    const execute = vi.fn();
+    const report = await scheduleWorkItems({ parent: parent.id, dryRun: true }, {
+      inventory: async () => read([parent, dependency, dependent]), execute,
+    });
+
+    expect(report.waves).toEqual([]);
+    const waiting = report.waiting?.find(entry => entry.workItemId === dependent.id);
+    expect(waiting?.runnability).toMatchObject({ runnable: false, reason: 'dependency_not_done', blockedBy: [dependency.id] });
   });
 });
 

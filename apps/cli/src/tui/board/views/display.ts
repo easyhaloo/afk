@@ -1,6 +1,7 @@
 /** Compact visual vocabulary shared by every dashboard view. */
 const GITHUB_ICON = 'GH';
 const GITLAB_ICON = 'GL';
+const GEELIB_ICON = 'GE';
 
 export function getStatusIcon(status: string): string {
   switch (status) {
@@ -18,6 +19,7 @@ export function getStatusIcon(status: string): string {
     case 'project': return '◆';
     case 'project_github': return GITHUB_ICON;
     case 'project_gitlab': return GITLAB_ICON;
+    case 'project_geelib': return GEELIB_ICON;
     default: return '•';
   }
 }
@@ -37,16 +39,27 @@ export function getStatusColor(status: string): string {
     case 'project': return 'gray';
     case 'project_github': return 'white';
     case 'project_gitlab': return 'magenta';
+    case 'project_geelib': return 'blue';
     default: return 'white';
   }
 }
 
-export function getProjectPlatformIcon(platform: 'github' | 'gitlab' | undefined): string {
-  return platform === 'github' ? GITHUB_ICON : GITLAB_ICON;
+export type ProjectPlatform = 'github' | 'gitlab' | 'geelib';
+
+export function getProjectPlatformIcon(platform: ProjectPlatform | undefined): string {
+  switch (platform) {
+    case 'github': return GITHUB_ICON;
+    case 'geelib': return GEELIB_ICON;
+    default: return GITLAB_ICON;
+  }
 }
 
-export function getProjectPlatformColor(platform: 'github' | 'gitlab' | undefined): string {
-  return platform === 'github' ? 'white' : 'magenta';
+export function getProjectPlatformColor(platform: ProjectPlatform | undefined): string {
+  switch (platform) {
+    case 'github': return 'white';
+    case 'geelib': return 'blue';
+    default: return 'magenta';
+  }
 }
 
 export function getBranchColor(branch: string, defaultBranch?: string): string {

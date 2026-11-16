@@ -1,5 +1,5 @@
 export interface ProviderInventoryQuery {
-  platform?: 'github' | 'gitlab' | 'all';
+  platform?: 'github' | 'gitlab' | 'geelib' | 'all';
   state?: string;
   executionMode?: string;
   tag?: string;
@@ -7,7 +7,7 @@ export interface ProviderInventoryQuery {
 }
 
 export interface ProviderInventoryItem {
-  project: { platform: 'github' | 'gitlab'; projectKey: string };
+  project: { platform: 'github' | 'gitlab' | 'geelib'; projectKey: string };
   /** The lifecycle position. An organizational parent has none. */
   state?: string;
   executionMode: string;
@@ -15,12 +15,12 @@ export interface ProviderInventoryItem {
 }
 
 export interface ProviderInventoryProject {
-  platform: 'github' | 'gitlab';
+  platform: 'github' | 'gitlab' | 'geelib';
   projectKey: string;
 }
 
 export interface ProviderInventoryDiagnostic {
-  platform: 'github' | 'gitlab';
+  platform: 'github' | 'gitlab' | 'geelib';
   projectKey?: string;
   code: string;
 }
@@ -33,7 +33,7 @@ export interface ProviderInventorySnapshot<Item extends ProviderInventoryItem, P
 }
 
 export interface ProviderInventoryPort<Item extends ProviderInventoryItem, Project extends ProviderInventoryProject, Diagnostic extends ProviderInventoryDiagnostic> {
-  list(platform: 'github' | 'gitlab' | 'all'): Promise<ProviderInventorySnapshot<Item, Project, Diagnostic>>;
+  list(platform: 'github' | 'gitlab' | 'geelib' | 'all'): Promise<ProviderInventorySnapshot<Item, Project, Diagnostic>>;
 }
 
 export async function queryProviderInventory<Item extends ProviderInventoryItem, Project extends ProviderInventoryProject, Diagnostic extends ProviderInventoryDiagnostic>(

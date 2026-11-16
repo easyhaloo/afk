@@ -21,7 +21,7 @@ export type WorkItemApplicationAdapter = {
 };
 
 type WorkItemApplicationProviderDeps = {
-  loadSnapshot: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult | ProviderInventorySnapshot>;
+  loadSnapshot: (platform: "github" | "gitlab" | "geelib" | "all") => Promise<WorkItemInventoryResult | ProviderInventorySnapshot>;
   loadIdentities?: () => Promise<ProviderAccountIdentity[]>;
 };
 
@@ -41,11 +41,11 @@ const requireCjs = createRequire(import.meta.url);
 // a bundle, so every inlined module shares one URL and module-relative depth
 // no longer means anything. getAppPath() resolves to the app dir in development
 // and the asar root once packaged.
-function loadProviderSnapshot(platform: "github" | "gitlab" | "all"): Promise<WorkItemInventoryResult | ProviderInventorySnapshot> {
+function loadProviderSnapshot(platform: "github" | "gitlab" | "geelib" | "all"): Promise<WorkItemInventoryResult | ProviderInventorySnapshot> {
   const bundle = path.join(app.getAppPath(), "dist-electron/provider-inventory.cjs");
   const provider = requireCjs(bundle) as {
-    collectProviderInventorySnapshot?: (platform: "github" | "gitlab" | "all") => Promise<ProviderInventorySnapshot>;
-    collectProviderInventory: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult>;
+    collectProviderInventorySnapshot?: (platform: "github" | "gitlab" | "geelib" | "all") => Promise<ProviderInventorySnapshot>;
+    collectProviderInventory: (platform: "github" | "gitlab" | "geelib" | "all") => Promise<WorkItemInventoryResult>;
   };
   return provider.collectProviderInventorySnapshot?.(platform) ?? provider.collectProviderInventory(platform);
 }

@@ -13,7 +13,7 @@ vi.mock('../tracker/resolver.js', () => ({
   resolveRemoteTarget: mocks.resolveRemoteTarget,
 }));
 
-import { createGlobalWorkItemCatalogs, createTracker, resolveProviderAccountIdentities } from './tracker-provider-factory.js';
+import { createGlobalWorkItemCatalogs, createGeelibChangesTracker, createTracker, resolveProviderAccountIdentities } from './tracker-provider-factory.js';
 import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
 import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
 
@@ -211,5 +211,85 @@ describe('tracker target resolution outside a git repository', () => {
     const tracker = await createTracker(undefined, '/repo');
 
     expect(tracker).toMatchObject({ platform: 'github', projectId: 'team/repo' });
+  });
+
+  it('requires geelib credentials before it creates a geelib tracker', async () => {
+    await expect(createTracker('6856', '/nowhere', 'geelib')).rejects.toThrow(/Geelib authentication is required/i);
+  });
+
+  it('creates a geelib catalog from credentials and refuses the platform without them', () => {
+    const geelibCatalog = { platform: 'geelib', scopeKey: 'geelib.qihoo.net' } as ProviderCatalog;
+    const createGeelibCatalog = vi.fn(() => geelibCatalog);
+
+    const catalogs = createGlobalWorkItemCatalogs('geelib', {
+      env: { GELIB_TOKEN: 'geelib-token', GELIB_USER_MAIL: 'afk@example.com', GELIB_URL: 'https://geelib.example' },
+      readGhToken: vi.fn(() => null),
+      listGlabTokens: vi.fn(() => []),
+      createGitHubCatalog: vi.fn(),
+      createGitLabCatalog: vi.fn(),
+      createGeelibCatalog,
+    });
+
+    expect(catalogs).toEqual([geelibCatalog]);
+    expect(createGeelibCatalog).toHaveBeenCalledWith({ userMail: 'afk@example.com', token: 'geelib-token', baseUrl: 'https://geelib.example' });
+
+    expect(() => createGlobalWorkItemCatalogs('geelib', {
+      env: {},
+      readGhToken: vi.fn(() => null),
+      listGlabTokens: vi.fn(() => []),
+      createGitHubCatalog: vi.fn(),
+      createGitLabCatalog: vi.fn(),
+      createGeelibCatalog,
+    })).toThrow(/Geelib authentication is required/i);
+  });
+
+  it('creates a geelib tracker from GELIB_TOKEN and GELIB_USER_MAIL', async () => {
+    process.env.GELIB_TOKEN = 'geelib-token';
+    process.env.GELIB_USER_MAIL = 'afk@example.com';
+    process.env.GELIB_URL = 'https://geelib.example';
+
+    const tracker = await createTracker('6856', '/nowhere', 'geelib');
+
+    expect(tracker).toMatchObject({ platform: 'geelib', projectId: '6856', providerHost: 'geelib.example' });
+  });
+});
+
+describe('createGeelibChangesTracker', () => {
+  afterEach(() => {
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GITLAB_TOKEN;
+    delete process.env.GITLAB_URL;
+    mocks.resolveRemoteTarget.mockReset();
+    mocks.resolveRemoteTarget.mockResolvedValue(null);
+  });
+
+  it('resolves the change-channel tracker from the execution repository remote', async () => {
+    process.env.GITHUB_TOKEN = 'token';
+    mocks.resolveRemoteTarget.mockImplementation(async (cwd?: string) =>
+      cwd === '/workspace/repositories/api' ? { platform: 'github', projectId: 'acme/api', host: 'github.com' } : null);
+
+    const tracker = await createGeelibChangesTracker('/workspace/repositories/api', '/invocation');
+
+    expect(tracker).toMatchObject({ platform: 'github', projectId: 'acme/api' });
+    expect(mocks.resolveRemoteTarget).toHaveBeenCalledWith('/workspace/repositories/api');
+  });
+
+  it('falls back to the invocation directory when the execution checkout has no remote yet', async () => {
+    process.env.GITLAB_TOKEN = 'token';
+    process.env.GITLAB_URL = 'https://gitlab.example';
+    mocks.resolveRemoteTarget.mockImplementation(async (cwd?: string) =>
+      cwd === '/invocation/repo' ? { platform: 'gitlab', projectId: 'team/api', host: 'gitlab.example' } : null);
+
+    const tracker = await createGeelibChangesTracker('/workspace/repositories/api', '/invocation/repo');
+
+    expect(tracker).toMatchObject({ platform: 'gitlab', projectId: 'team/api' });
+    expect(mocks.resolveRemoteTarget).toHaveBeenCalledWith('/invocation/repo');
+  });
+
+  it('fails with a readable error when no directory has a git platform remote', async () => {
+    mocks.resolveRemoteTarget.mockResolvedValue(null);
+
+    await expect(createGeelibChangesTracker('/workspace/repositories/api', '/invocation'))
+      .rejects.toThrow(/geelib.*change requests.*git platform.*GitHub or GitLab/s);
   });
 });

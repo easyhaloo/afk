@@ -37,6 +37,32 @@ describe("work item execution manifest store", () => {
     await expect(readFile(manifestPath(workspace), "utf8")).resolves.toBe(`${JSON.stringify(manifest, null, 2)}\n`);
   });
 
+  it("round-trips an explicit cloneUrl and drops a blank one", async () => {
+    const workspace = await createWorkspace();
+    const store = createWorkItemExecutionManifestStore();
+    const manifest = createManifest();
+    manifest.repositories[1].cloneUrl = "https://gitlab.company.com/acme/web.git";
+    await store.save(workspace, manifest);
+    await expect(store.load(workspace)).resolves.toEqual(manifest);
+
+    const blank = createManifest();
+    blank.repositories[1].cloneUrl = "   ";
+    await store.save(workspace, blank);
+    await expect(store.load(workspace)).resolves.toSatisfy(
+      value => (value?.repositories[1] as Record<string, unknown>).cloneUrl === undefined,
+    );
+  });
+
+  it("rejects a non-string cloneUrl", async () => {
+    const workspace = await createWorkspace();
+    const invalid = {
+      ...createManifest(),
+      repositories: [{ ...createManifest().repositories[0], cloneUrl: 42 }],
+    } as unknown as WorkItemExecutionManifest;
+
+    await expect(createWorkItemExecutionManifestStore().save(workspace, invalid)).rejects.toThrow(/cloneUrl/i);
+  });
+
   it("reports malformed JSON and invalid schema with the manifest path", async () => {
     const workspace = await createWorkspace();
     const file = manifestPath(workspace);

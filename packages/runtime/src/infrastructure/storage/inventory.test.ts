@@ -38,6 +38,52 @@ function snapshot(items: InventoryItem[], complete = true): InventorySnapshot {
 async function publish(store: SqliteInventoryStore, items: InventoryItem[], complete = true) {
   return store.publish(await store.begin(scope), snapshot(items, complete));
 }
+
+/** The mirror as it looked before geelib: the platform CHECKs exclude it. */
+const V2_SCHEMA = INVENTORY_SCHEMA.replaceAll("'github','gitlab','geelib'", "'github','gitlab'");
+
+describe('inventory geelib platform', () => {
+  it('publishes a geelib mirror alongside the git platforms', async () => {
+    const store = open();
+    const geelibProject = { platform: 'geelib' as const, projectKey: '1843', name: '通用需求管理' };
+    const geelibItem: InventoryItem = {
+      ...item(1, { id: 'geelib:1843#322370', issueNumber: 322370, project: geelibProject, providerRef: 'geelib:1843#322370' }),
+      branchName: 'afk/geelib-322370',
+    };
+
+    const ok = await store.publish(
+      await store.begin({ platform: 'geelib', host: 'geelib.qihoo.net', kind: 'catalog' }),
+      { items: [geelibItem], projects: [geelibProject], diagnostics: [], complete: true },
+    );
+
+    expect(ok).toBe(true);
+    expect(await store.get('geelib:1843#322370')).toMatchObject({ id: 'geelib:1843#322370', title: '仓库任务 1' });
+  });
+
+  it('migrates a version-2 mirror in place, keeping its rows and accepting geelib', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'afk-inventory-migrate-'));
+    roots.push(root);
+    const databasePath = join(root, 'mirror.sqlite');
+    const legacy = openSqlite({ file: databasePath, schema: V2_SCHEMA });
+    legacy.prepare("INSERT INTO inventory_meta (singleton, namespace_key, namespace_kind, created_at_ms) VALUES (1, ?, 'authenticated', 1)").run('a'.repeat(64));
+    legacy.prepare("INSERT INTO sync_scopes (id, platform, host_key, scope_kind, project_key) VALUES (1, 'github', 'github.com', 'issues', 'acme/api')").run();
+    legacy.prepare("INSERT INTO repositories (id, platform, project_key, host_key, name, catalog_scope_id, observed_at_ms) VALUES (1, 'github', 'acme/api', 'github.com', 'API', 1, 1)").run();
+    legacy.exec('PRAGMA user_version = 2');
+    legacy.close();
+
+    const store = new SqliteInventoryStore({ root, namespaceKey: 'a'.repeat(64), databasePath });
+    await publish(store, [item()]);
+
+    expect(await store.get('github:acme/api#1')).toMatchObject({ id: 'github:acme/api#1' });
+    const geelibProject = { platform: 'geelib' as const, projectKey: '1843', name: '通用需求管理' };
+    const ok = await store.publish(
+      await store.begin({ platform: 'geelib', host: 'geelib.qihoo.net', kind: 'catalog' }),
+      { items: [{ ...item(9, { id: 'geelib:1843#9', issueNumber: 9, project: geelibProject, providerRef: 'geelib:1843#9' }) }], projects: [geelibProject], diagnostics: [], complete: true },
+    );
+    expect(ok).toBe(true);
+    expect(await store.get('geelib:1843#9')).toMatchObject({ id: 'geelib:1843#9' });
+  });
+});
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -153,7 +199,7 @@ describe('normalized inventory', () => {
     // The mirror is a cache: it is migrated forward, not thrown away.
     expect(store.databasePath).toBe(file);
     expect((await store.get('github:acme/api#1'))?.title).toBe('kept');
-    const inspect = openSqlite({ file, schema: LEGACY_SCHEMA, version: 2 });
+    const inspect = openSqlite({ file, schema: LEGACY_SCHEMA, version: 3 });
     const columns = inspect.prepare('SELECT name FROM pragma_table_info(\'work_items\')').all();
     inspect.close();
     expect(columns.map(column => column.name)).toContain('kind');

@@ -105,6 +105,63 @@ describe('MultiRepositoryPreparer', () => {
     }))).toBe('https://git.corp/team.platform/subgroup/repo.git');
   });
 
+  it('refuses to invent a clone URL for a geelib repository', () => {
+    // The clone URL of a geelib item's repository is not derivable from the
+    // geelib project key: the repository is hosted on its git platform. A
+    // readable error beats silently cloning `https://gitlab.com/6856.git`.
+    expect(() => cloneUrl(repository({ platform: 'geelib', projectKey: '6856' })))
+      .toThrow(/geelib.*clone URL/is);
+  });
+
+  it('uses the manifest cloneUrl verbatim when the repository provides one', () => {
+    expect(cloneUrl(repository({ platform: 'geelib', projectKey: '6856', cloneUrl: 'https://gitlab.company.com/acme/api.git' })))
+      .toBe('https://gitlab.company.com/acme/api.git');
+    expect(cloneUrl(repository({ cloneUrl: 'git@github.com:acme/api.git' })))
+      .toBe('git@github.com:acme/api.git');
+  });
+
+  it('accepts a geelib checkout whose origin points at the hosted repository', () => {
+    // The checkout of a geelib item was prepared from the hosted repository,
+    // so its origin cannot be compared against a URL derived from the geelib
+    // key; it is only required to be a usable git remote.
+    const geelib = repository({ platform: 'geelib', projectKey: '6856' });
+    expect(() => assertRepositoryOrigin(geelib, 'https://github.com/acme/api.git')).not.toThrow();
+    expect(() => assertRepositoryOrigin(geelib, 'git@gitlab.example:team/api.git')).not.toThrow();
+    expect(() => assertRepositoryOrigin(geelib, '/tmp/not-a-remote')).toThrow(/origin/);
+  });
+
+  it('checks a cloneUrl origin against the cloneUrl host, tolerating protocol differences', () => {
+    const hosted = repository({ platform: 'geelib', projectKey: '6856', cloneUrl: 'https://gitlab.company.com/acme/api.git' });
+    expect(() => assertRepositoryOrigin(hosted, 'git@gitlab.company.com:acme/api.git')).not.toThrow();
+    expect(() => assertRepositoryOrigin(hosted, 'ssh://git@gitlab.company.com/group/api.git')).not.toThrow();
+    expect(() => assertRepositoryOrigin(hosted, 'https://github.com/acme/api.git')).toThrow(/origin does not match/);
+    expect(() => assertRepositoryOrigin(hosted, '/tmp/not-a-remote')).toThrow(/origin/);
+  });
+
+  it('clones a geelib repository from its manifest cloneUrl and verifies the origin host', async () => {
+    const deps = dependencies();
+    vi.mocked(deps.filesystem.inspectTarget).mockResolvedValue('missing');
+    vi.mocked(deps.git.originUrl).mockResolvedValue('https://gitlab.company.com/acme/api.git');
+    const geelib = repository({ platform: 'geelib', projectKey: '6856', cloneUrl: 'https://gitlab.company.com/acme/api.git' });
+
+    await new MultiRepositoryPreparer(deps).prepare([geelib], '/workspace');
+
+    expect(deps.repositoryStore.ensureCheckout).toHaveBeenCalledWith(
+      'https://gitlab.company.com/acme/api.git', geelib.repoRoot, geelib.baseBranch, { createBaseline: false });
+  });
+
+  it('rejects a geelib repository whose cloneUrl is missing or whose origin host differs', async () => {
+    const deps = dependencies();
+    vi.mocked(deps.filesystem.inspectTarget).mockResolvedValue('missing');
+    vi.mocked(deps.git.originUrl).mockResolvedValue('https://github.com/acme/api.git');
+    const geelib = repository({ platform: 'geelib', projectKey: '6856', cloneUrl: 'https://gitlab.company.com/acme/api.git' });
+
+    await expect(new MultiRepositoryPreparer(deps).prepare([geelib], '/workspace')).rejects.toThrow('origin does not match');
+    await expect(new MultiRepositoryPreparer(deps).prepare([repository({ platform: 'geelib', projectKey: '6856' })], '/workspace'))
+      .rejects.toThrow(/clone URL/);
+    expect(deps.git.capture).not.toHaveBeenCalled();
+  });
+
   it('does not reclaim an initializing lock directory with no owner inside the grace period', async () => {
     const rename = vi.fn(async () => undefined);
     const deps = lockDependencies({

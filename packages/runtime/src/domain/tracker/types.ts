@@ -1,7 +1,7 @@
 /**
  * Platform type
  */
-export type Platform = 'gitlab' | 'github';
+export type Platform = 'gitlab' | 'github' | 'geelib';
 
 /**
  * Common list options

@@ -14,7 +14,10 @@ import {
   type NewReworkRecord,
   type ReworkRecord,
   type ReworkResolution,
+  type ReworkRevisionInput,
 } from '../../domain/backlog/index.js';
+import { nextReworkAttempt, reworkRecordId } from '../../domain/backlog/rework-record.js';
+import { planReworkRevision } from '../../domain/backlog/rework-revision.js';
 import { evaluateRunnability, type Runnability } from '../../domain/backlog/runnability.js';
 import { deriveBacklogBranchName } from '../../domain/backlog/index.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
@@ -27,6 +30,14 @@ import {
   loadGeelibStateMappings,
   type GeelibStateMappingEntry,
 } from './state-mapping-resolver.js';
+import {
+  activeRework,
+  renderReworkOpenComment,
+  renderReworkResolutionComment,
+  renderReworkRevisionComment,
+  renderReworkSupersededComment,
+  reworkHistory,
+} from './rework-comments.js';
 import type { TrackerIssueComment } from '../../domain/tracker/types.js';
 
 /**
@@ -433,10 +444,93 @@ export class GeelibBacklogProvider implements BacklogProvider {
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
     return this.applyMode(id, mode);
   }
-  createRework = this.refused('rework records; rework rides on the native rework state in this slice');
-  getActiveRework = this.refused('rework records');
-  resolveRework = this.refused('rework records');
-  reviseRework = this.refused('rework records');
+
+  /**
+   * Open one rework record, written as a comment.
+   *
+   * The QA and merge-conflict paths route the item's state themselves —
+   * `routeQARework`/`openConflictRework` call `transition('rework', …)` right
+   * after this returns — so this writes the record comment only. The
+   * operator-retry path (`retryBacklog`) has no transition of its own and
+   * relies on the provider to move the item out of blocked+hitl, exactly as
+   * the git providers do, so the operator source transitions here.
+   *
+   * The platform's comments are append-only, so a record that is still open
+   * when the next one is written is closed by an appended superseded marker
+   * rather than edited; the newest open record is the active one.
+   */
+  async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
+    const matterId = this.matterIdOf(id);
+    const history = await this.client.listComments(matterId, 'matter').then(reworkHistory);
+    const open = history.filter(record => record.status === 'open');
+    const active = open.length ? open[open.length - 1] : undefined;
+    if (active?.source === 'operator' && input.source === 'operator') {
+      throw new Error(`backlog ${id} already has an open rework record`);
+    }
+    const { cycle, attempt } = nextReworkAttempt(history, input.source);
+    const record: ReworkRecord = {
+      ...input,
+      version: 1,
+      id: reworkRecordId(cycle, attempt),
+      cycle,
+      attempt,
+      status: 'open',
+      createdAt: new Date().toISOString(),
+    };
+    await this.client.addComment(matterId, renderReworkOpenComment(record));
+    if (active) await this.client.addComment(matterId, renderReworkSupersededComment(active.id));
+    if (input.source === 'operator') {
+      await this.transition(id, 'rework');
+      await this.setExecutionMode(id, 'afk');
+    }
+    return record;
+  }
+
+  async getActiveRework(id: string): Promise<ReworkRecord | undefined> {
+    const matterId = this.matterIdOf(id);
+    const comments = await this.client.listComments(matterId, 'matter');
+    return activeRework(comments);
+  }
+
+  async resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> {
+    const matterId = this.matterIdOf(id);
+    const record = await this.openRecord(matterId, reworkId);
+    const resolved = { resolvedAt: new Date().toISOString(), summary: resolution.summary };
+    await this.client.addComment(matterId, renderReworkResolutionComment(record.id, resolved));
+  }
+
+  /**
+   * Correct an open rework record to the current fact.
+   *
+   * The record itself cannot be edited on this platform, so the correction
+   * is an appended revision comment; reading folds it back onto the record
+   * it corrects. The record keeps its identity, its round and its evidence —
+   * only the statement about the current situation moves, and the previous
+   * statement stays in the trail.
+   */
+  async reviseRework(id: string, reworkId: string, revision: ReworkRevisionInput): Promise<ReworkRecord> {
+    const matterId = this.matterIdOf(id);
+    const record = await this.openRecord(matterId, reworkId);
+    const revised = planReworkRevision(record, revision);
+    const entry = revised.revisions?.[revised.revisions.length - 1];
+    if (!entry) throw new Error(`the rework revision produced no correction: ${reworkId}`);
+    await this.client.addComment(matterId, renderReworkRevisionComment(record.id, entry));
+    return revised;
+  }
+
+  /** The open record an id names, or the refusal the git providers raise. */
+  private async openRecord(matterId: number, reworkId: string): Promise<ReworkRecord> {
+    const comments = await this.client.listComments(matterId, 'matter');
+    const record = reworkHistory(comments).find(candidate => candidate.id === reworkId && candidate.status === 'open');
+    if (!record) throw new Error(`open rework record not found: ${reworkId}`);
+    return record;
+  }
+
+  /** The numeric matter id a work-item reference names inside this project. */
+  private matterIdOf(id: string): number {
+    return parseWorkItemId(this.canonicalId(id)).issueNumber;
+  }
+
   async initialize(): Promise<void> {
     // The native state machine needs no provisioning.
   }

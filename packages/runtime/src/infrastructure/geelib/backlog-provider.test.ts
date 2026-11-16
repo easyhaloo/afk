@@ -6,6 +6,7 @@ import { GeelibBacklogProvider } from './backlog-provider.js';
 import { GeelibClient } from './client.js';
 import type { GeelibStateMappingEntry } from './state-mapping-resolver.js';
 import type { ClaimLease } from '../../domain/backlog/claim.js';
+import type { NewReworkRecord, ReworkRecord, ReworkRevision } from '../../domain/backlog/index.js';
 
 const fetchMock = vi.fn();
 const matter = {
@@ -32,6 +33,8 @@ let statuses = [...BASE_STATUSES];
 let resourceRefs: Array<{ id: number; source_id: string; type_id: number; title: string; sub_id: string }> = [];
 /** Tags provisioned on the fake project; the platform silently drops the rest. */
 let provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
+/** The matter-silo comments the fake platform answers with; rework tests seed it. */
+let comments: Array<{ id: string; content: string }> = [];
 
 function mockPlatform(): void {
   fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
@@ -63,6 +66,16 @@ function mockPlatform(): void {
         matter: resourceRefs, list: [],
       } }), { status: 200 });
     }
+    if (url.pathname.endsWith('OpenApiCommentMgr/getList')) {
+      // The platform answers in the comment silo the query names; AFK reads
+      // the `matter` silo. The list is chronological (oldest first).
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: comments }), { status: 200 });
+    }
+    if (url.pathname.endsWith('OpenApiCommentMgr/addComment')) {
+      const body = JSON.parse(String(init?.body));
+      comments.push({ id: `c${comments.length + 1}`, content: String(body.content) });
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '添加评论成功', data: '' }), { status: 200 });
+    }
     const matterIds = [...url.searchParams.entries()].filter(([key]) => key.startsWith('matter_ids')).map(([, value]) => Number(value));
     const pool = [matter, dependencyMatter];
     const found = matterIds.length ? pool.filter(entry => matterIds.includes(entry.id)) : [matter];
@@ -87,6 +100,7 @@ afterEach(() => {
   resourceRefs = [];
   provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
   statuses = [...BASE_STATUSES];
+  comments = [];
   vi.restoreAllMocks();
 });
 
@@ -569,5 +583,254 @@ describe('GeelibBacklogProvider configured state mapping', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ── Rework records ──────────────────────────────────────────────────────────
+//
+// The comment protocol, written literally here so the tests pin the wire
+// format and not just the implementation: a state marker plus a data marker
+// inside HTML comments (never rendered), then a human-readable body.
+
+const stateMarker = (id: string, state: string): string => `<!-- afk:rework:${id}:${state} -->`;
+const dataMarker = (id: string, payload: unknown): string => `<!-- afk:rework:${id}:data:${JSON.stringify(payload)} -->`;
+const openBody = (record: ReworkRecord): string => `${stateMarker(record.id, 'open')}\n${dataMarker(record.id, record)}\n<p>AFK 返工记录 ${record.id}</p>`;
+const resolvedBody = (id: string, summary: string): string => `${stateMarker(id, 'resolved')}\n${dataMarker(id, { resolvedAt: '2026-11-15T11:00:00.000Z', summary })}\n<p>AFK 返工完成：${summary}</p>`;
+const supersededBody = (id: string): string => `${stateMarker(id, 'superseded')}\n<p>AFK 返工记录 ${id} 已被取代</p>`;
+const revisionBody = (id: string, revision: ReworkRevision): string => `${stateMarker(id, 'revision')}\n${dataMarker(id, revision)}\n<p>AFK 返工更正 ${id}</p>`;
+
+function seedComments(...bodies: string[]): void {
+  // The platform payload shape `GeelibClient.listComments` decodes: `content`
+  // is the comment body, the silo is `matter`.
+  comments = bodies.map((body, index) => ({ id: `seed-${index + 1}`, body: '', author: 'AFK', time: '2026-11-15 10:00:00', content: body }));
+}
+
+/** The comment bodies this test run wrote through addComment, in order. */
+function writtenCommentBodies(): string[] {
+  return fetchMock.mock.calls
+    .filter(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'))
+    .map(([, init]) => JSON.parse(String(init?.body)).content as string);
+}
+
+/** The data payload a written comment carries for one record id. */
+function writtenData(body: string, id: string): ReworkRecord {
+  const match = new RegExp(`<!-- afk:rework:${id}:data:([\\s\\S]*?)\\s*-->`).exec(body);
+  expect(match).not.toBeNull();
+  return JSON.parse(match![1]) as ReworkRecord;
+}
+
+const seededRecord = (overrides: Partial<ReworkRecord> = {}): ReworkRecord => ({
+  version: 1,
+  id: 'r1-1',
+  cycle: 1,
+  attempt: 1,
+  status: 'open',
+  source: 'qa',
+  summary: '断言失败：期望 2 实际 1',
+  failedCriteria: [{ id: 'ac-1', expected: '2', actual: '1' }],
+  requiredChecks: [{ command: 'pnpm test', expected: 'all green' }],
+  createdAt: '2026-11-15T10:00:00.000Z',
+  ...overrides,
+});
+
+describe('GeelibBacklogProvider rework records', () => {
+  it('writes the rework record as an open-marker comment without touching the state machine', async () => {
+    // QA routes the rework state itself (`transition('rework', {reason})` at
+    // the call site), so createRework must not transition: one record
+    // comment, no status edit.
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+    const input: NewReworkRecord = {
+      source: 'qa', summary: '断言失败：期望 2 实际 1',
+      failedCriteria: [{ id: 'ac-1', expected: '2', actual: '1' }],
+      requiredChecks: [{ command: 'pnpm test', expected: 'all green' }],
+    };
+
+    const record = await provider.createRework('geelib:6856#1083121', input);
+
+    expect(record).toMatchObject({ version: 1, id: 'r1-1', cycle: 1, attempt: 1, status: 'open', source: 'qa' });
+    const bodies = writtenCommentBodies();
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toContain(stateMarker('r1-1', 'open'));
+    const payload = writtenData(bodies[0], 'r1-1');
+    expect(payload).toMatchObject({
+      version: 1, id: 'r1-1', cycle: 1, attempt: 1, status: 'open', source: 'qa',
+      summary: '断言失败：期望 2 实际 1',
+      failedCriteria: [{ id: 'ac-1', expected: '2', actual: '1' }],
+      requiredChecks: [{ command: 'pnpm test', expected: 'all green' }],
+    });
+    expect(bodies[0]).toContain('<p>断言失败：期望 2 实际 1</p>');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+  });
+
+  it('escapes the human-readable body but keeps the payload intact', async () => {
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await provider.createRework('geelib:6856#1083121', {
+      source: 'qa', summary: 'a --> b <b>加粗</b>', failedCriteria: [], requiredChecks: [],
+    });
+
+    const body = writtenCommentBodies()[0];
+    expect(body).toContain('&lt;b&gt;加粗&lt;/b&gt;'); // human part is escaped
+    const payload = writtenData(body, 'r1-1');
+    expect(payload).toMatchObject({ summary: 'a --> b <b>加粗</b>' }); // machine part round-trips
+  });
+
+  it('numbers the next attempt inside the running cycle from the comment history', async () => {
+    mockPlatform();
+    seedComments(openBody(seededRecord()), resolvedBody('r1-1', 'QA passed after rework r1-1.'));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const record = await provider.createRework('geelib:6856#1083121', {
+      source: 'qa', summary: '再次失败', failedCriteria: [], requiredChecks: [],
+    });
+
+    expect(record).toMatchObject({ id: 'r1-2', cycle: 1, attempt: 2 });
+  });
+
+  it('opens a new cycle for an operator retry and routes the item to rework', async () => {
+    // The operator retry command relies on the provider to move the item out
+    // of blocked+hitl — the QA/conflict paths transition at their own call
+    // sites, the operator path does not.
+    mockPlatform();
+    seedComments(openBody(seededRecord()), resolvedBody('r1-1', 'closed by the operator retry'));
+    matter.matter_status = 24; // 延期 (blocked)
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const record = await provider.createRework('geelib:6856#1083121', {
+      source: 'operator', summary: '依赖已就绪，重试', failedCriteria: [], requiredChecks: [],
+    });
+
+    expect(record).toMatchObject({ id: 'r2-0', cycle: 2, attempt: 0 });
+    const edits = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('Matter/edit')).map(([, init]) => JSON.parse(String(init?.body)));
+    expect(edits.some(edit => edit.data?.some((entry: { cf_name: string; cf_value: string }) => entry.cf_name === '状态' && entry.cf_value === '重新打开'))).toBe(true);
+    matter.matter_status = 1;
+  });
+
+  it('refuses a second operator record while one is open', async () => {
+    mockPlatform();
+    seedComments(openBody(seededRecord({ source: 'operator', id: 'r2-0', cycle: 2, attempt: 0 })));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await expect(provider.createRework('geelib:6856#1083121', {
+      source: 'operator', summary: '又一次重试', failedCriteria: [], requiredChecks: [],
+    })).rejects.toThrow(/already has an open rework record/);
+  });
+
+  it('supersedes an open record when the next attempt is written', async () => {
+    // Append-only platform: the previous record is not edited (there is no
+    // comment-edit call); a superseded marker is appended after the new one.
+    mockPlatform();
+    seedComments(openBody(seededRecord()));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const record = await provider.createRework('geelib:6856#1083121', {
+      source: 'qa', summary: '换个修法再试', failedCriteria: [], requiredChecks: [],
+    });
+
+    expect(record.id).toBe('r1-2');
+    const bodies = writtenCommentBodies();
+    expect(bodies[0]).toContain(stateMarker('r1-2', 'open'));
+    expect(bodies[1]).toContain(stateMarker('r1-1', 'superseded'));
+
+    const active = await provider.getActiveRework('geelib:6856#1083121');
+    expect(active?.id).toBe('r1-2');
+  });
+
+  it('reads the latest open record back from the comments', async () => {
+    mockPlatform();
+    seedComments(
+      openBody(seededRecord()),
+      resolvedBody('r1-1', 'QA passed after rework r1-1.'),
+      openBody(seededRecord({ id: 'r1-2', attempt: 2, summary: '第二次失败' })),
+    );
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const active = await provider.getActiveRework('geelib:6856#1083121');
+
+    expect(active).toMatchObject({
+      id: 'r1-2', cycle: 1, attempt: 2, status: 'open', source: 'qa', summary: '第二次失败',
+      failedCriteria: [{ id: 'ac-1', expected: '2', actual: '1' }],
+    });
+  });
+
+  it('keeps a resolved record inactive', async () => {
+    mockPlatform();
+    seedComments(openBody(seededRecord()), resolvedBody('r1-1', 'QA passed after rework r1-1.'));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    expect(await provider.getActiveRework('geelib:6856#1083121')).toBeUndefined();
+  });
+
+  it('folds revisions into the record they correct', async () => {
+    mockPlatform();
+    seedComments(
+      openBody(seededRecord({ summary: '把依赖写成了 label' })),
+      revisionBody('r1-1', { at: '2026-11-15T12:00:00.000Z', actor: 'operator', from: '把依赖写成了 label', to: '依赖已发布，等待验证' }),
+    );
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const active = await provider.getActiveRework('geelib:6856#1083121');
+
+    expect(active).toMatchObject({
+      id: 'r1-1', status: 'open', summary: '依赖已发布，等待验证',
+      revisions: [{ at: '2026-11-15T12:00:00.000Z', actor: 'operator', from: '把依赖写成了 label', to: '依赖已发布，等待验证' }],
+    });
+  });
+
+  it('appends a resolved comment and closes the record', async () => {
+    mockPlatform();
+    seedComments(openBody(seededRecord()));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await provider.resolveRework('geelib:6856#1083121', 'r1-1', { summary: 'QA passed after rework r1-1.' });
+
+    const body = writtenCommentBodies()[0];
+    expect(body).toContain(stateMarker('r1-1', 'resolved'));
+    expect(body).toContain('QA passed after rework r1-1.');
+    expect(await provider.getActiveRework('geelib:6856#1083121')).toBeUndefined();
+  });
+
+  it('refuses to resolve an unknown or already-closed record', async () => {
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+    await expect(provider.resolveRework('geelib:6856#1083121', 'r1-1', { summary: 'x' }))
+      .rejects.toThrow(/open rework record not found/);
+
+    seedComments(openBody(seededRecord()), resolvedBody('r1-1', 'already resolved'));
+    await expect(provider.resolveRework('geelib:6856#1083121', 'r1-1', { summary: 'x' }))
+      .rejects.toThrow(/open rework record not found/);
+  });
+
+  it('appends a correction that keeps the record identity and the evidence', async () => {
+    mockPlatform();
+    seedComments(openBody(seededRecord()));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const revised = await provider.reviseRework('geelib:6856#1083121', 'r1-1', {
+      summary: '目标分支已包含该变更，无需合并', actor: 'operator', reason: '冲突已消失',
+    });
+
+    expect(revised).toMatchObject({
+      id: 'r1-1', status: 'open', summary: '目标分支已包含该变更，无需合并',
+      failedCriteria: [{ id: 'ac-1', expected: '2', actual: '1' }],
+      revisions: [{ actor: 'operator', from: '断言失败：期望 2 实际 1', to: '目标分支已包含该变更，无需合并', reason: '冲突已消失' }],
+    });
+    const body = writtenCommentBodies()[0];
+    expect(body).toContain(stateMarker('r1-1', 'revision'));
+    expect(writtenData(body, 'r1-1')).toMatchObject({ from: '断言失败：期望 2 实际 1', to: '目标分支已包含该变更，无需合并' });
+
+    const active = await provider.getActiveRework('geelib:6856#1083121');
+    expect(active?.summary).toBe('目标分支已包含该变更，无需合并');
+  });
+
+  it('refuses to revise a record that is not open', async () => {
+    mockPlatform();
+    seedComments(openBody(seededRecord()), resolvedBody('r1-1', 'resolved'));
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await expect(provider.reviseRework('geelib:6856#1083121', 'r1-1', { summary: '依赖已发布', actor: 'operator' }))
+      .rejects.toThrow(/open rework record not found/);
   });
 });

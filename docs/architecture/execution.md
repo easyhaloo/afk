@@ -112,6 +112,8 @@ The provider backlog, runtime state, run-event audit trail, and evidence are sep
 
 A geelib item's backlog lifecycle (claim, status transitions, comments) runs on geelib, but its branches and change request live on the git platform that hosts the repository. The managed run therefore assembles a hybrid provider bundle: the backlog port is the geelib tracker, the branch port is the local git provider, and the change port is the git-platform tracker resolved from the execution repository's `origin` remote (the checkout first, then the directory the run was invoked from). A repository without a remote pointing at GitHub or GitLab cannot publish a change request and fails with a readable error instead of a silent refusal. The change request body references the geelib item by its canonical identity (`geelib:1843#322370`) — the geelib platform has no native issue for the git platform to link — and the association is verified against that reference.
 
+Because the geelib project key does not name a clone URL, a fully automated manifest declares the hosted repository explicitly: `repositories[*].cloneUrl` carries the full git clone URL (`https://gitlab.company.com/group/repo.git` or `git@github.com:owner/repo.git`). The preparer clones from it instead of deriving a URL from the platform identity, and verifies the checkout's `origin` against the clone URL's host (protocol differences between https and ssh are tolerated). Without `cloneUrl`, preparation of a geelib item fails with a readable error rather than inventing a URL.
+
 ## Failure and recovery
 
 ### Failure diagnosis

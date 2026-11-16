@@ -19,6 +19,7 @@ const REPOSITORY_KEYS = new Set([
   'sourceBranch',
   'prdBaseline',
   'role',
+  'cloneUrl',
   'workingBranch',
   'primary',
 ]);
@@ -55,6 +56,12 @@ export interface ExecutionManifestRepository {
    */
   prdBaseline?: boolean;
   role?: string;
+  /**
+   * The full git clone URL of the repository, when it cannot be derived from
+   * the platform identity — a geelib item's repository is hosted on its git
+   * platform and its geelib project key does not name a clone URL.
+   */
+  cloneUrl?: string;
   workingBranch: string;
   primary: boolean;
 }
@@ -169,6 +176,7 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
   if (typeof candidate.primary !== 'boolean') throw new Error(`${label}.primary must be a boolean`);
   const platform = candidate.platform;
   if (platform !== 'github' && platform !== 'gitlab' && platform !== 'geelib') throw new Error(`${label}.platform must be github, gitlab or geelib`);
+  const cloneUrl = parseCloneUrl(candidate.cloneUrl, `${label}.cloneUrl`);
 
   return {
     platform,
@@ -186,6 +194,7 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
     ...(candidate.sourceBranch === undefined ? {} : { sourceBranch: branchValue(candidate.sourceBranch, `${label}.sourceBranch`) }),
     ...(candidate.prdBaseline === undefined ? {} : { prdBaseline: candidate.prdBaseline === true }),
     ...(candidate.role === undefined ? {} : { role: textValue(candidate.role, `${label}.role`) }),
+    ...(cloneUrl === undefined ? {} : { cloneUrl }),
     workingBranch: repositoryWorkingBranch,
     primary: candidate.primary,
   };
@@ -255,6 +264,17 @@ function textValue(value: unknown, label: string, trimmed = false): string {
     throw new Error(`${label} is invalid`);
   }
   return value;
+}
+
+/**
+ * An optional clone URL: absent, or a string that survives trimming. A blank
+ * value is treated as not provided rather than as an error, so a generated
+ * manifest can carry the field only when it has a URL to carry.
+ */
+function parseCloneUrl(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid`);
+  return value.trim() || undefined;
 }
 
 function positiveIntegerString(value: unknown, label: string): string {

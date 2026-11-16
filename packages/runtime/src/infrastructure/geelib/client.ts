@@ -280,6 +280,28 @@ export class GeelibClient implements TrackerProvider {
     }, { method: 'POST' });
   }
 
+  /** The comments of a work item, read from the requested silo. */
+  async listComments(matterId: number, commentType: 'bug' | 'matter' | 'demand'): Promise<Array<{ id: string; body: string; author: string; time: string }>> {
+    const envelope = await this.request('OpenApiCommentMgr/getList', {
+      sub_id: this.subId,
+      type: commentType,
+      id: matterId,
+    });
+    const comments = Array.isArray(envelope.data) ? envelope.data as Array<{ id?: string; content?: string; create_by_name?: string; create_time?: string }> : [];
+    return comments.map(comment => ({
+      id: String(comment.id ?? ''),
+      body: String(comment.content ?? ''),
+      author: String(comment.create_by_name ?? ''),
+      time: String(comment.create_time ?? ''),
+    }));
+  }
+
+  /** TrackerProvider surface: the comment silo AFK writes to (`matter`). */
+  async listIssueComments(id: number): Promise<TrackerIssueComment[]> {
+    const comments = await this.listComments(id, 'matter');
+    return comments.map(comment => ({ id: comment.id, body: comment.body }));
+  }
+
   /**
    * Replace the whole label set — the platform's labels are one overwrite
    * field, written as a JSON array of names. Every name must already exist
@@ -472,8 +494,8 @@ export class GeelibClient implements TrackerProvider {
   updateLabels = this.refused('editing labels');
   addLabel = this.refused('editing labels');
   removeLabel = this.refused('editing labels');
-  listIssueComments = this.refused('reading comments');
   updateIssueComment = this.refused('editing comments');
+
   linkIssues = this.refused('linking work items');
   getMR = this.refused('change requests');
   isMRLinkedToIssue = this.refused('change requests');

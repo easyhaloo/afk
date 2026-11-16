@@ -21,6 +21,7 @@ import type { ProviderProjectRef } from '../../domain/work-item/types.js';
 import type { ListOptions } from '../../domain/tracker/types.js';
 import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
 import { afkStateToNative, nativeToAfkState } from './state-map.js';
+import type { TrackerIssueComment } from '../../domain/tracker/types.js';
 
 /**
  * The slice of the geelib client the backlog provider drives. `GeelibClient`
@@ -36,6 +37,7 @@ export interface GeelibBacklogClient {
   getMatterStateName(matterId: number): Promise<string | undefined>;
   getMatterState(matterId: number): Promise<{ name: string | undefined; stage: string | undefined }>;
   getMatterNativeStates(matterId: number): Promise<string[]>;
+  listComments(matterId: number, commentType: 'bug' | 'matter' | 'demand'): Promise<Array<{ id: string; body: string; author: string; time: string }>>;
   setStatus(matterId: number, state: import('./state-map.js').NativeStateName): Promise<void>;
   setLabels(matterId: number, labels: readonly string[]): Promise<void>;
   addComment(matterId: number, html: string): Promise<void>;
@@ -233,6 +235,20 @@ export class GeelibBacklogProvider implements BacklogProvider {
 
   async explainRunnability(item: BacklogItem): Promise<Runnability> {
     return this.runnabilityOf(item);
+  }
+
+  /**
+   * The comments of an item, read from the silo AFK writes to.
+   *
+   * The silo question matters: the platform keeps bug/matter/demand comment
+   * silos isolated, so a reader must name the same type the writer used.
+   * AFK writes `matter`; pass a different silo to read what the UI panel
+   * shows once its type is confirmed.
+   */
+  async listIssueComments(id: string, commentType: 'bug' | 'matter' | 'demand' = 'matter'): Promise<TrackerIssueComment[]> {
+    const parsed = parseWorkItemId(id);
+    const comments = await this.client.listComments(parsed.issueNumber, commentType);
+    return comments.map(comment => ({ id: comment.id, body: comment.body }));
   }
 
   async addComment(id: string, html: string): Promise<void> {

@@ -32,9 +32,24 @@ let statuses = [...BASE_STATUSES];
 /** Resource references the fake platform answers with; relations tests seed it. */
 let resourceRefs: Array<{ id: number; source_id: string; type_id: number; title: string; sub_id: string }> = [];
 /** Tags provisioned on the fake project; the platform silently drops the rest. */
-let provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
+let provisionedTags = [
+  'billing', 'mode::afk', 'mode::hitl',
+  'stage::ready', 'stage::afk-in-progress', 'stage::verification', 'stage::merge-ready',
+  'stage::done', 'stage::blocked', 'stage::rework', 'kind::prd',
+];
 /** The matter-silo comments the fake platform answers with; rework tests seed it. */
 let comments: Array<{ id: string; content: string }> = [];
+
+/** The Matter/edit body that carried the named custom field, if any. */
+function editBodyFor(cfName: string): any | undefined {
+  for (const [url, init] of fetchMock.mock.calls) {
+    if (!String(url).endsWith('Matter/edit')) continue;
+    const body = JSON.parse(String(init?.body));
+    const entry = (body.data ?? []).find((e: { cf_name?: string }) => e.cf_name === cfName);
+    if (entry) return body;
+  }
+  return undefined;
+}
 
 function mockPlatform(): void {
   fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
@@ -60,6 +75,12 @@ function mockPlatform(): void {
     }
     if (url.pathname.endsWith('OpenApiResourcesMgr/addResources')) {
       return new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: 1 }), { status: 200 });
+    }
+    if (url.pathname.endsWith('OpenApiCreateTagAndModule/getSubTags')) {
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+        count: provisionedTags.length,
+        list: provisionedTags.map((name, index) => ({ id: 9000 + index, name })),
+      } }), { status: 200 });
     }
     if (url.pathname.endsWith('OpenApiResourcesMgr/getDemandReourcesList')) {
       return new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: {
@@ -98,7 +119,11 @@ function lock(lease?: ClaimLease): { acquire: ReturnType<typeof vi.fn> } {
 afterEach(() => {
   fetchMock.mockReset();
   resourceRefs = [];
-  provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
+  provisionedTags = [
+    'billing', 'mode::afk', 'mode::hitl',
+    'stage::ready', 'stage::afk-in-progress', 'stage::verification', 'stage::merge-ready',
+    'stage::done', 'stage::blocked', 'stage::rework', 'kind::prd',
+  ];
   statuses = [...BASE_STATUSES];
   comments = [];
   vi.restoreAllMocks();
@@ -196,12 +221,12 @@ describe('GeelibBacklogProvider mapping', () => {
     expect(await probe(903)).toBe('done');
   });
 
-  it('keeps an unmapped-type item read-only: displayable, never claimable', async () => {
-    // Decision ①: AFK drives the 缺陷 workflow only. A type whose vocabulary
-    // the mapping does not know is display (stage fallback) but not
-    // claimable — claiming would otherwise die in a messy throw chain.
+  it('drives an unmapped-type item through the stage-tag channel', async () => {
+    // The tag channel supersedes decision ①: with the stage tags provisioned,
+    // a 需求-type item (custom native vocabulary) is claimable and drivable —
+    // the native status move is best-effort, the tag is the AFK truth.
     statuses = [
-      { id: 900, status_name: '待处理', status_stage: '进行中' },
+      { id: 900, status_name: '待评审', status_stage: '未开始' },
       { id: 901, status_name: '已完成', status_stage: '已完成' },
     ];
     mockPlatform();
@@ -209,20 +234,22 @@ describe('GeelibBacklogProvider mapping', () => {
     matter.matter_status = 900;
     const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
 
-    const item = await provider.get('geelib:6856#1083121');
-    expect(item.state).toBe('in_progress'); // stage fallback, for display
-    expect(item.executionEligible).toBe(false);
+    const claim = await provider.claim('geelib:6856#1083121', 'worker-1');
 
-    expect(await provider.claim('geelib:6856#1083121', 'worker-1')).toBeNull();
+    expect(claim).not.toBeNull();
+    expect(claim?.item.state).toBe('in_progress');
+    const labelBody = editBodyFor('标签');
+    expect(JSON.parse(labelBody.data.find((e: { cf_name?: string }) => e.cf_name === '标签').cf_value)).toContain('stage::afk-in-progress');
     matter.type_id = 20655;
     matter.matter_status = 1;
   });
 
-  it('refuses to write a native status the item type does not define', async () => {
-    // The 缺陷 name 修复中 does not exist in the 需求 workflow: writing it
-    // must be refused before the call, not surfaced as platform errno 5001.
+  it('moves the native state best-effort when the type does not define the name', async () => {
+    // The 缺陷 name 修复中 does not exist in the 需求 workflow: the stage tag
+    // (the AFK truth) still lands, and the native move is skipped without
+    // failing the transition.
     statuses = [
-      { id: 900, status_name: '待处理', status_stage: '进行中' },
+      { id: 900, status_name: '待评审', status_stage: '未开始' },
       { id: 901, status_name: '已完成', status_stage: '已完成' },
     ];
     mockPlatform();
@@ -232,8 +259,10 @@ describe('GeelibBacklogProvider mapping', () => {
     fetchMock.mockClear();
     mockPlatform();
 
-    await expect(provider.transition('geelib:6856#1083121', 'in_progress')).rejects.toThrow(/does not define native state/);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+    await provider.transition('geelib:6856#1083121', 'in_progress');
+
+    expect(editBodyFor('标签')).toBeDefined();
+    expect(editBodyFor('状态')).toBeUndefined();
     matter.type_id = 20655;
     matter.matter_status = 1;
   });
@@ -320,7 +349,11 @@ describe('GeelibBacklogProvider execution mode', () => {
     const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
 
     await expect(provider.applyMode('geelib:6856#1083121', 'hitl')).rejects.toThrow(/mode::hitl/i);
-    provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
+    provisionedTags = [
+    'billing', 'mode::afk', 'mode::hitl',
+    'stage::ready', 'stage::afk-in-progress', 'stage::verification', 'stage::merge-ready',
+    'stage::done', 'stage::blocked', 'stage::rework', 'kind::prd',
+  ];
     matter.label_name = '';
   });
 });
@@ -353,17 +386,42 @@ describe('GeelibBacklogProvider transition writeback', () => {
     expect(JSON.parse(String(comment?.[1]?.body)).content).toContain('#159');
   });
 
-  it('writes the done confirmation as a comment even when the status write is skipped', async () => {
+  it('keeps the transition alive when the native move is refused', async () => {
+    // 关闭 is unreachable through the API (verified live): the stage tag —
+    // the AFK truth — still lands, the refusal is non-fatal, and the done
+    // confirmation comment is written.
     mockPlatform();
-    matter.matter_status = 23; // 已验证 — the collapse target of done
+    matter.matter_status = 23; // 已验证
     const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
     fetchMock.mockClear();
-    mockPlatform();
+    fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('Matter/edit')) {
+        const body = JSON.parse(String(init?.body));
+        const statusEntry = (body.data ?? []).find((e: { cf_name?: string }) => e.cf_name === '状态');
+        if (statusEntry) {
+          if (statusEntry.cf_value === '关闭') {
+            return new Response(JSON.stringify({ errno: 5001, errmsg: '无法流转到此状态，请刷新页面后重新选择', data: '' }), { status: 200 });
+          }
+          matter.matter_status = statuses.find(s => s.status_name === statusEntry.cf_value)?.id ?? matter.matter_status;
+          return new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 });
+        }
+        const labelEntry = (body.data ?? []).find((e: { cf_name?: string }) => e.cf_name === '标签');
+        if (labelEntry) {
+          matter.label_name = (JSON.parse(labelEntry.cf_value) as string[]).filter(t => provisionedTags.includes(t)).join(',');
+          return new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: '' }), { status: 200 });
+      }
+      if (url.pathname.endsWith('OpenApiCommentMgr/addComment')) {
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '操作成功', data: 1 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: { total: 1, matterList: [matter] } }), { status: 200 });
+    });
 
     await provider.transition('geelib:6856#1083121', 'done', { changeId: '159' });
 
-    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
-    expect(edit).toBeUndefined(); // same native state: the write is skipped
+    expect(matter.label_name).toContain('stage::done');
     const comment = fetchMock.mock.calls.find(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'));
     expect(comment).toBeDefined();
     expect(JSON.parse(String(comment?.[1]?.body)).content).toContain('#159');
@@ -379,6 +437,55 @@ describe('GeelibBacklogProvider transition writeback', () => {
     await provider.transition('geelib:6856#1083121', 'in_progress');
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('OpenApiCommentMgr/addComment'))).toBe(false);
+  });
+});
+
+describe('GeelibBacklogProvider tag state channel', () => {
+  it('reads the AFK state from the stage tag before the native name', async () => {
+    mockPlatform();
+    // 需求-type matter whose native status is 待评审 (未开始), but AFK's tag
+    // already says verification: the tag is the authority.
+    statuses = [
+      { id: 900, status_name: '待评审', status_stage: '未开始' },
+    ];
+    matter.type_id = 20651;
+    matter.matter_status = 900;
+    matter.label_name = 'stage::verification';
+    const provider = new GeelibBacklogProvider(client());
+
+    const item = await provider.get('geelib:6856#1083121');
+
+    expect(item.state).toBe('verification');
+    expect(item.labeledState).toBe('verification');
+    matter.type_id = 20655;
+    matter.matter_status = 1;
+    matter.label_name = '';
+  });
+
+  it('refuses to claim when the project lacks the stage vocabulary', async () => {
+    mockPlatform();
+    provisionedTags = ['billing']; // no stage tags provisioned
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await expect(provider.claim('geelib:6856#1083121', 'worker-1'))
+      .rejects.toThrow(/missing the AFK state tags/);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+    provisionedTags = ['billing', 'mode::afk', 'mode::hitl',
+      'stage::ready', 'stage::afk-in-progress', 'stage::verification', 'stage::merge-ready',
+      'stage::done', 'stage::blocked', 'stage::rework', 'kind::prd'];
+  });
+
+  it('marks a PRD anchor with the kind tag', async () => {
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    await provider.applyRole('geelib:6856#1083121', 'prd');
+
+    const labelBody = editBodyFor('标签');
+    expect(JSON.parse(labelBody.data.find((e: { cf_name?: string }) => e.cf_name === '标签').cf_value)).toContain('kind::prd');
+    matter.label_name = 'kind::prd';
+    expect((await provider.get('geelib:6856#1083121')).kind).toBe('prd');
+    matter.label_name = '';
   });
 });
 

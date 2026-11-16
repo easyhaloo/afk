@@ -36,6 +36,17 @@ function groupIssuesByColumn(issues: TrackedIssue[]): Record<string, BoardColumn
 }
 
 /**
+ * Compact platform badge rendered before each issue id.
+ */
+export function getPlatformTag(platform: TrackedIssue['platform']): string {
+  switch (platform) {
+    case 'github': return chalk.blue('[GH]');
+    case 'geelib': return chalk.magenta('[GE]');
+    default: return chalk.green('[GL]');
+  }
+}
+
+/**
  * Render board to console
  */
 function renderBoard(columns: Record<string, BoardColumn>) {
@@ -62,7 +73,7 @@ function renderBoard(columns: Record<string, BoardColumn>) {
     for (const key of columnOrder) {
       const issue = columns[key].issues[row];
       if (issue) {
-        const platform = issue.platform === 'github' ? chalk.blue('[GH]') : chalk.green('[GL]');
+        const platform = getPlatformTag(issue.platform);
         const title = issue.title.length > 30 ? issue.title.slice(0, 27) + '...' : issue.title;
         const cell = `${platform} #${issue.id} ${title}`;
         process.stdout.write(cell.padEnd(colWidth).slice(0, colWidth));
@@ -78,8 +89,8 @@ function renderBoard(columns: Record<string, BoardColumn>) {
 export function registerKanbanCommands(program: Command): void {
   const kanban = program
     .command('kanban')
-    .description('Display kanban board of issues (GitLab + GitHub)')
-    .option('--platform <platform>', 'Filter by platform (github|gitlab)')
+    .description('Display kanban board of issues (GitLab + GitHub + Geelib)')
+    .option('--platform <platform>', 'Filter by platform (github|gitlab|geelib)')
     .option('--label <label>', 'Filter by label')
     .action(async (options) => {
       try {

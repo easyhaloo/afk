@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   getExecutionModeColor,
   getExecutionModeIcon,
+  getProjectPlatformColor,
+  getProjectPlatformIcon,
   getStatusColor,
   getStatusIcon,
+  type ProjectPlatform,
 } from './display.js';
 
 describe('global status display', () => {
@@ -25,8 +28,22 @@ describe('global status display', () => {
     expect(getStatusIcon('project')).toBe('◆');
     expect(getStatusIcon('project_github')).toBe('GH');
     expect(getStatusIcon('project_gitlab')).toBe('GL');
+    expect(getStatusIcon('project_geelib')).toBe('GE');
     expect(getStatusColor('active')).toBe('yellow');
     expect(getStatusColor('stale')).toBe('red');
+  });
+
+  it('maps every tracker platform to a distinct icon and color', () => {
+    expect(getProjectPlatformIcon('github')).toBe('GH');
+    expect(getProjectPlatformIcon('gitlab')).toBe('GL');
+    expect(getProjectPlatformIcon('geelib')).toBe('GE');
+    expect(getProjectPlatformIcon(undefined)).toBe('GL');
+    expect(getProjectPlatformColor('github')).toBe('white');
+    expect(getProjectPlatformColor('gitlab')).toBe('magenta');
+    expect(getProjectPlatformColor('geelib')).toBe('blue');
+    const platforms: ProjectPlatform[] = ['github', 'gitlab', 'geelib'];
+    const colors = platforms.map(p => getProjectPlatformColor(p));
+    expect(new Set(colors).size).toBe(colors.length);
   });
 
   it('uses the same icons for AFK/batch and HITL/interactive modes', () => {

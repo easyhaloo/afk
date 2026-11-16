@@ -103,8 +103,7 @@ export GELIB_URL=https://geelib.qihoo.net      # 可选，此为默认值
 ```
 
 集酷云 OpenAPI 的每个请求都用签名查询认证（账号邮箱 + 时间戳 + 摘要），
-而非 Bearer 头，因此两个变量都必须配置。平台能力与限制见
-[集酷云 provider 设计记录](architecture/geelib-provider.zh.md)。
+而非 Bearer 头，因此两个变量都必须配置。
 
 ### Tracker 目标
 

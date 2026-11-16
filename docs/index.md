@@ -21,7 +21,6 @@
 | 文档 | 职责与权威范围 |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | 系统边界、workspace 包职责、数据权威、工作项关系、生命周期与关键架构约束；不承担完整 CLI 参考或逐步执行手册 |
-| [architecture/geelib-provider.md](architecture/geelib-provider.md) | 集酷云（Geelib）backlog provider 设计记录：身份、认证签名、状态机映射、关系通道、标签限制、混合边界与平台确认项 |
 | [architecture/plugins.md](architecture/plugins.md) · [中文](architecture/plugins.zh.md) | Core / 插件边界、整体 Mermaid 图、十二类 Provider 与凭据矩阵、manifest API v1、安装配置、依赖事务、CLI / Desktop 接入状态及真实限制 |
 | [architecture/full-workflow-e2e-architecture.md](architecture/full-workflow-e2e-architecture.md) | 当前实现中的 run / execute / loop、模板、QA、状态转换、证据和 E2E 验证细节 |
 | [architecture/execution.md](architecture/execution.md) | 执行入口、运行目录、托管生命周期和恢复原则摘要；英文版本 |

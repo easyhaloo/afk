@@ -121,8 +121,7 @@ export GELIB_URL=https://geelib.qihoo.net      # Optional, this is the default
 
 The Geelib OpenAPI authenticates every request with a signed query (account
 mail + timestamp + digest) rather than a bearer header, so both variables are
-required. See [the geelib provider design](architecture/geelib-provider.md)
-for the platform's capabilities and limits.
+required.
 
 ### Tracker target
 

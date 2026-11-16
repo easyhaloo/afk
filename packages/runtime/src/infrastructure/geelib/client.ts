@@ -17,7 +17,6 @@ import type {
   UploadArtifactsOptions,
   UploadedArtifact,
 } from '../../domain/tracker/types.js';
-import { NATIVE_STATE_NAMES, type NativeStateName } from './state-map.js';
 
 /** A refused capability: every call rejects with the same clear diagnosis. */
 type Refused = (...arguments_: never[]) => Promise<never>;
@@ -82,6 +81,8 @@ interface MatterRecord {
   id: number;
   sub_id: number;
   type_id?: number;
+  /** The type name, when the platform's payload carries one (e.g. 需求). */
+  type_name?: unknown;
   title?: string;
   mkd_content?: string;
   matter_status?: number;
@@ -186,6 +187,24 @@ export class GeelibClient implements TrackerProvider {
     return [...table.values()].map(entry => entry.status_name);
   }
 
+  /**
+   * The type identity of one work item, as the state-mapping resolver keys
+   * its lookups: the numeric project (`sub_id`), the type id, and the type
+   * name when the platform's payload carries one. The name is the stable
+   * identifier the configuration documents; the id is the form every
+   * payload carries.
+   */
+  async getMatterType(matterId: number): Promise<{ subId: number; typeId: number; typeName: string | undefined }> {
+    const [matter] = await this.listMatters({ matterIds: [matterId] });
+    if (!matter) throw new Error(`geelib work item ${matterId} does not exist in project ${this.subId}`);
+    const typeName = typeof matter.type_name === 'string' && matter.type_name.trim() !== '' ? matter.type_name.trim() : undefined;
+    return {
+      subId: Number(matter.sub_id ?? this.subId),
+      typeId: Number(matter.type_id ?? 0),
+      typeName,
+    };
+  }
+
   async listIssues(options?: ListOptions): Promise<TrackedIssue[]> {
     const matters = await this.listAllMatters();
     let issues = await Promise.all(matters.map(matter => this.toTrackedIssue(matter)));
@@ -255,18 +274,21 @@ export class GeelibClient implements TrackerProvider {
   /**
    * Move a work item to a native status through the edit call.
    *
-   * Only the live-verified native vocabulary is accepted here: a name the
-   * platform's state machine does not know would either fail confusingly or,
-   * worse, be dropped, so the mapping module is the single gate.
+   * The platform customizes status names per type and project, so the
+   * caller — the backlog provider's gate, which vets the target against the
+   * item type's own vocabulary (`getMatterNativeStates`) — owns the name
+   * check; this method only refuses an empty one. A configured mapping
+   * therefore drives names far beyond the 缺陷 workflow's verified set.
    */
-  async setStatus(matterId: number, state: NativeStateName): Promise<void> {
-    if (!(NATIVE_STATE_NAMES as readonly string[]).includes(state)) {
-      throw new Error(`${String(state)} is not a native state this client may write; use afkStateToNative first`);
+  async setStatus(matterId: number, state: string): Promise<void> {
+    const name = String(state).trim();
+    if (!name) {
+      throw new Error('setStatus requires a non-empty native state name; resolve it through the state mapping first');
     }
     await this.request('Matter/edit', {
       sub_id: this.subId,
       id: matterId,
-      data: [{ cf_name: '状态', cf_value: state }],
+      data: [{ cf_name: '状态', cf_value: name }],
     }, { method: 'POST' });
   }
 

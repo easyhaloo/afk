@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { GeelibBacklogProvider } from './backlog-provider.js';
 import { GeelibClient } from './client.js';
+import type { GeelibStateMappingEntry } from './state-mapping-resolver.js';
 import type { ClaimLease } from '../../domain/backlog/claim.js';
 
 const fetchMock = vi.fn();
 const matter = {
-  id: 1083121, sub_id: 6856, type_id: 20655, title: '集酷工作项', mkd_content: '正文',
+  id: 1083121, sub_id: 6856, type_id: 20655, type_name: '缺陷', title: '集酷工作项', mkd_content: '正文',
   matter_status: 1, label_name: '', update_time: '2026-11-15 10:00:00',
 };
 const dependencyMatter = {
-  id: 1083000, sub_id: 6856, type_id: 20655, title: '依赖项', mkd_content: '',
+  id: 1083000, sub_id: 6856, type_id: 20655, type_name: '缺陷', title: '依赖项', mkd_content: '',
   matter_status: 1, label_name: '', update_time: '2026-11-15 09:00:00',
 };
 /** The complete 缺陷 workflow enum — the vocabulary AFK's mapping writes. */
@@ -378,5 +382,163 @@ describe('GeelibBacklogProvider relations', () => {
       .rejects.toThrow(/cannot delete resource references/);
     await expect(provider.applyRelationUpdate('geelib:6856#1083121', { clearParent: true }))
       .rejects.toThrow(/cannot clear a parent/);
+  });
+});
+
+/**
+ * The 需求 workflow of the reference project — names the static map does
+ * not know, so a configured mapping is the only way AFK can drive it.
+ */
+const DEMAND_STATUSES = [
+  { id: 900, status_name: '待处理', status_stage: '进行中' },
+  { id: 901, status_name: '编码中', status_stage: '进行中' },
+  { id: 902, status_name: '已接受', status_stage: '已完成' },
+  { id: 903, status_name: '已上线', status_stage: '已完成' },
+  { id: 904, status_name: '暂停', status_stage: '进行中' },
+];
+
+const demandMapping: GeelibStateMappingEntry = {
+  project: 6856,
+  type: '需求',
+  states: { ready: '待处理', in_progress: '编码中', done: '已上线', blocked: '暂停' },
+};
+
+/** Point the fixture matter at the 需求 type and restore 缺陷 afterwards. */
+async function asDemandType(run: () => Promise<void>): Promise<void> {
+  matter.type_id = 20651;
+  matter.type_name = '需求';
+  try {
+    await run();
+  } finally {
+    matter.type_id = 20655;
+    matter.type_name = '缺陷';
+    matter.matter_status = 1;
+  }
+}
+
+describe('GeelibBacklogProvider configured state mapping', () => {
+  it('writes the configured native name when an item of the mapped type transitions', async () => {
+    // The 需求 workflow has no 修复中: without the mapping the write gate
+    // refuses. With it, in_progress resolves to the type's own 编码中.
+    statuses = DEMAND_STATUSES;
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping], claimLock: lock() as never });
+    await asDemandType(async () => {
+      matter.matter_status = 900; // 待处理
+
+      await provider.transition('geelib:6856#1083121', 'in_progress');
+
+      const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
+      expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
+    });
+  });
+
+  it('keeps the write gate fail-closed when a configured name is outside the type vocabulary', async () => {
+    statuses = DEMAND_STATUSES;
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), {
+      mappings: [{ project: 6856, type: '需求', states: { in_progress: '不存在的状态' } }],
+      claimLock: lock() as never,
+    });
+    await asDemandType(async () => {
+      matter.matter_status = 900;
+
+      await expect(provider.transition('geelib:6856#1083121', 'in_progress')).rejects.toThrow(/does not define native state 不存在的状态/);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+    });
+  });
+
+  it('maps a configured native name on the read path instead of the generic stage', async () => {
+    // 待处理 sits in the platform's generic 进行中 stage, which the stage
+    // fallback alone would render as in_progress. The configured mapping is
+    // the more specific truth: the item is claimable ready.
+    statuses = DEMAND_STATUSES;
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping] });
+    await asDemandType(async () => {
+      matter.matter_status = 900;
+
+      const item = await provider.get('geelib:6856#1083121');
+
+      expect(item.state).toBe('ready');
+      expect(item.labeledState).toBe('ready');
+      expect(item.executionEligible).toBe(true);
+    });
+  });
+
+  it('resolves the verified static map before the configuration (a before b)', async () => {
+    // A misconfigured entry for the 缺陷 type must not move AFK off the
+    // live-verified workflow: the static map wins for names it knows.
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), {
+      mappings: [{ project: 6856, type: '缺陷', states: { in_progress: '重新打开' } }],
+      claimLock: lock() as never,
+    });
+
+    await provider.transition('geelib:6856#1083121', 'in_progress');
+
+    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
+    expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
+  });
+
+  it('keeps the current behavior for an unconfigured project+type', async () => {
+    // The mapping covers 需求 only: a 任务 item (another type, same project)
+    // still falls back to the generic stage for display and stays read-only.
+    statuses = DEMAND_STATUSES;
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping] });
+    matter.type_id = 20700;
+    matter.type_name = '任务';
+    try {
+      matter.matter_status = 900; // 待处理, a name the mapping does not cover for 任务
+
+      const item = await provider.get('geelib:6856#1083121');
+      expect(item.state).toBe('in_progress'); // stage fallback, display only
+      expect(item.executionEligible).toBe(false);
+    } finally {
+      matter.type_id = 20655;
+      matter.type_name = '缺陷';
+      matter.matter_status = 1;
+    }
+  });
+
+  it('skips the status write when the item already sits in the configured target', async () => {
+    statuses = DEMAND_STATUSES;
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping], claimLock: lock() as never });
+    await asDemandType(async () => {
+      matter.matter_status = 901; // 编码中
+
+      await provider.transition('geelib:6856#1083121', 'in_progress');
+
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+    });
+  });
+
+  it('loads the mapping file the options name', async () => {
+    statuses = DEMAND_STATUSES;
+    mockPlatform();
+    const dir = mkdtempSync(join(tmpdir(), 'afk-geelib-provider-'));
+    try {
+      const path = join(dir, 'mappings.yml');
+      writeFileSync(path, [
+        'mappings:',
+        '  - project: 6856',
+        '    type: 需求',
+        '    states:',
+        '      in_progress: 编码中',
+      ].join('\n'));
+      const provider = new GeelibBacklogProvider(client(), { mappingsPath: path, claimLock: lock() as never });
+      await asDemandType(async () => {
+        matter.matter_status = 900;
+
+        await provider.transition('geelib:6856#1083121', 'in_progress');
+
+        const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
+        expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

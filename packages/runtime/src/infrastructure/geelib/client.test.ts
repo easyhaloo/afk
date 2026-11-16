@@ -104,6 +104,15 @@ describe('geelib work item reads', () => {
     expect(client().providerHost).toBe('geelib.example');
   });
 
+  it('reports the type identity a state mapping resolves against', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '', data: {
+      total: 1,
+      matterList: [{ id: 1083121, sub_id: 6856, type_id: 20651, type_name: '需求', title: '需求项', matter_status: 900, label_name: '' }],
+    } }), { status: 200 }));
+
+    expect(await client().getMatterType(1083121)).toEqual({ subId: 6856, typeId: 20651, typeName: '需求' });
+  });
+
   it('filters issues by label when the caller asks for one', async () => {
     fetchMock.mockImplementation(async (input: string | URL) => {
       const url = new URL(String(input));
@@ -240,8 +249,20 @@ describe('geelib write methods', () => {
     expect(url.searchParams.get('id')).toBe('1083121');
   });
 
-  it('refuses a status outside the verified native vocabulary', async () => {
-    await expect(client().setStatus(1083121, '随便写的')).rejects.toThrow(/native state/);
+  it('writes the custom native name a configured mapping resolved', async () => {
+    // The provider vets a target against the item type's own vocabulary
+    // before calling; the client therefore accepts any non-empty name —
+    // the platform customizes status names per type, beyond the 缺陷 set.
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 }));
+
+    await client().setStatus(1083121, '编码中');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
+  });
+
+  it('refuses an empty native name', async () => {
+    await expect(client().setStatus(1083121, '')).rejects.toThrow(/native state/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

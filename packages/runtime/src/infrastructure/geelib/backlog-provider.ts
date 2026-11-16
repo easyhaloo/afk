@@ -21,6 +21,11 @@ import type { ProviderProjectRef } from '../../domain/work-item/types.js';
 import type { ListOptions } from '../../domain/tracker/types.js';
 import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
 import { afkStateToNative, nativeToAfkState } from './state-map.js';
+import {
+  GeelibStateMappingResolver,
+  loadGeelibStateMappings,
+  type GeelibStateMappingEntry,
+} from './state-mapping-resolver.js';
 import type { TrackerIssueComment } from '../../domain/tracker/types.js';
 
 /**
@@ -37,8 +42,9 @@ export interface GeelibBacklogClient {
   getMatterStateName(matterId: number): Promise<string | undefined>;
   getMatterState(matterId: number): Promise<{ name: string | undefined; stage: string | undefined }>;
   getMatterNativeStates(matterId: number): Promise<string[]>;
+  getMatterType(matterId: number): Promise<{ subId: number; typeId: number; typeName: string | undefined }>;
   listComments(matterId: number, commentType: 'bug' | 'matter' | 'demand'): Promise<Array<{ id: string; body: string; author: string; time: string }>>;
-  setStatus(matterId: number, state: import('./state-map.js').NativeStateName): Promise<void>;
+  setStatus(matterId: number, state: string): Promise<void>;
   setLabels(matterId: number, labels: readonly string[]): Promise<void>;
   addComment(matterId: number, html: string): Promise<void>;
   changeParent(matterId: number, parentId: number): Promise<void>;
@@ -54,6 +60,17 @@ export interface GeelibBacklogProviderOptions {
   stateRoot?: string;
   /** Decides whether an expired claim on the lease may be taken over. */
   onExpiredClaim?: (key: string) => Promise<boolean>;
+  /**
+   * The configured per-type, per-project state mappings, injected directly
+   * (tests, embedded callers). Wins over `mappingsPath`.
+   */
+  mappings?: readonly GeelibStateMappingEntry[];
+  /**
+   * The file to load the state mappings from. Defaults to the standard
+   * location, `~/.afk/geelib-state-mappings.yml`; a missing file means no
+   * configuration.
+   */
+  mappingsPath?: string;
 }
 
 const RESERVED_LABEL_PREFIXES = ['mode::', 'stage::', 'kind::', 'idempotency::', 'depends-on::', 'parent::', 'ac::'];
@@ -74,11 +91,18 @@ function escapeHtml(text: string): string {
  *   reachable through the API; the done confirmation travels as a comment
  *   written by the reconciliation step;
  * - the execution mode rides on the pre-provisioned `mode::afk`/`mode::hitl`
- *   tags (the platform's OpenAPI cannot create tags) and defaults to afk.
+ *   tags (the platform's OpenAPI cannot create tags) and defaults to afk;
+ * - the state names resolve in order: the verified static map, then the
+ *   user-configured per-type/project mapping (`state-mapping-resolver.ts`,
+ *   `~/.afk/geelib-state-mappings.yml`), then the generic stage — so a type
+ *   whose workflow the platform customizes (需求/任务/…) becomes drivable by
+ *   configuration, without code changes.
  */
 export class GeelibBacklogProvider implements BacklogProvider {
   private readonly claimStrategy: NativeOrLockedClaimStrategy;
   private readonly claimTtlMs: number;
+  /** Layer b of the state resolution: the user-configured mappings. */
+  private readonly stateMappings: GeelibStateMappingResolver;
 
   constructor(
     private readonly client: GeelibBacklogClient,
@@ -89,6 +113,9 @@ export class GeelibBacklogProvider implements BacklogProvider {
       ?? options.claimLockFactory?.(onExpiredClaim)
       ?? new FilesystemClaimLock(options.stateRoot);
     this.claimTtlMs = options.claimTtlMs ?? 60 * 60_000;
+    this.stateMappings = options.mappings
+      ? new GeelibStateMappingResolver(options.mappings)
+      : loadGeelibStateMappings(options.mappingsPath);
     this.claimStrategy = new NativeOrLockedClaimStrategy({
       claimLock,
       claimKey: id => this.claimKey(id),
@@ -123,7 +150,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
     const items: BacklogItem[] = [];
     for (const issue of issues) {
       const state = await this.client.getMatterState(issue.id);
-      items.push(this.toBacklogItem(String(this.client.projectId), issue, state));
+      items.push(await this.toBacklogItem(String(this.client.projectId), issue, state));
     }
     return items.filter(item => options.state === undefined || item.state === options.state);
   }
@@ -146,17 +173,32 @@ export class GeelibBacklogProvider implements BacklogProvider {
 
   async transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> {
     const parsed = parseWorkItemId(id);
-    const target = afkStateToNative(state);
+    const staticTarget = afkStateToNative(state);
     const { name: current } = await this.client.getMatterState(parsed.issueNumber);
-    if (current !== target) {
+    if (current !== staticTarget) {
       // The platform customizes status names per type: a 缺陷 name like 修复中
-      // does not exist in the 需求 workflow. Refuse before the call instead of
-      // surfacing a generic platform 5001.
+      // does not exist in the 需求 workflow. Resolve in the documented order —
+      // the verified static name first; only when the item's type does not
+      // define it does the configured mapping supply the type's own name.
+      // Either way the final target must be in the type's vocabulary: a
+      // mistyped mapping fails closed here instead of reaching the platform.
       const defined = await this.client.getMatterNativeStates(parsed.issueNumber);
-      if (!defined.includes(target)) {
-        throw new Error(`This work item's type does not define native state ${target}; AFK drives the 缺陷 workflow names only. Current type defines: ${defined.join('、') || '(none)'}`);
+      let target: string = staticTarget;
+      let viaMapping = false;
+      if (!defined.includes(staticTarget) && !this.stateMappings.isEmpty) {
+        const configured = this.stateMappings.nativeStateFor(await this.client.getMatterType(parsed.issueNumber), state);
+        if (configured) {
+          target = configured;
+          viaMapping = true;
+        }
       }
-      await this.client.setStatus(parsed.issueNumber, target);
+      if (current !== target) {
+        if (!defined.includes(target)) {
+          const via = viaMapping ? ' (from the configured state mapping)' : '';
+          throw new Error(`This work item's type does not define native state ${target}${via}. Check the type's workflow or ~/.afk/geelib-state-mappings.yml. Current type defines: ${defined.join('、') || '(none)'}`);
+        }
+        await this.client.setStatus(parsed.issueNumber, target);
+      }
     }
     const note = this.reconciliationNote(state, details);
     if (note) await this.client.addComment(parsed.issueNumber, note);
@@ -267,27 +309,28 @@ export class GeelibBacklogProvider implements BacklogProvider {
     });
   }
 
-  private toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, state: { name: string | undefined; stage: string | undefined }, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): BacklogItem {
+  private async toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, state: { name: string | undefined; stage: string | undefined }, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): Promise<BacklogItem> {
     const id = workItemId ?? `geelib:${projectKey}#${issue.id}`;
     const modeLabel = issue.labels.find(label => label === 'mode::afk' || label === 'mode::hitl');
-    // Decision ①: AFK drives the 缺陷 workflow names. A status name outside
-    // the verified mapping means the item's type carries its own state
-    // machine — AFK displays it through the generic stage but never claims
-    // it, because writing the 缺陷 names onto it is refused by the gate.
-    const mapped = nativeToAfkState(state.name ?? '');
+    // Decision ①, evolved by decision ③: a name the verified static map
+    // knows resolves through it; a type-customized name resolves through
+    // the configured mapping when the project+type has one; anything else
+    // is display-only through the generic stage — AFK never claims it,
+    // because the write gate refuses names outside the type's vocabulary.
+    const resolved = await this.resolveAfkState(issue.id, state, issue.state);
     return {
       id,
       workItemId,
       issueNumber: issue.id,
       project: { platform: 'geelib', projectKey, name: projectKey },
       managed: true,
-      executionEligible: mapped !== undefined,
-      // Known native names map through the verified table; a type-customized
-      // name falls back to the platform's generic stage, which is the one
-      // dimension consistent across types — it never misreads in-progress
-      // work as claimable.
-      state: this.afkStateOf(state, issue.state),
-      labeledState: mapped,
+      executionEligible: resolved.labeledState !== undefined,
+      // Known native names map through the verified table or the configured
+      // mapping; an unknown name falls back to the platform's generic stage,
+      // which is the one dimension consistent across types — it never
+      // misreads in-progress work as claimable.
+      state: resolved.state,
+      labeledState: resolved.labeledState,
       executionMode: modeLabel === 'mode::hitl' ? 'hitl' : 'afk',
       title: issue.title,
       description: issue.description || undefined,
@@ -299,16 +342,27 @@ export class GeelibBacklogProvider implements BacklogProvider {
     };
   }
 
-  /** Known name → verified mapping; otherwise the generic stage is the fallback. */
-  private afkStateOf(state: { name: string | undefined; stage: string | undefined }, issueState: 'opened' | 'closed' | 'merged'): BacklogState {
-    const mapped = nativeToAfkState(state.name ?? '');
-    if (mapped) return mapped;
+  /**
+   * The AFK state of an item, resolved in the documented order: (a) the
+   * verified static map, (b) the configured mapping for this project+type,
+   * (c) the generic stage fallback. The configuration layer is consulted
+   * only when the static map misses, so an unconfigured or 缺陷-typed item
+   * costs no extra platform call.
+   */
+  private async resolveAfkState(matterId: number, state: { name: string | undefined; stage: string | undefined }, issueState: 'opened' | 'closed' | 'merged'): Promise<{ state: BacklogState; labeledState: BacklogState | undefined }> {
+    const name = state.name ?? '';
+    const staticMapped = nativeToAfkState(name);
+    if (staticMapped) return { state: staticMapped, labeledState: staticMapped };
+    if (!this.stateMappings.isEmpty) {
+      const configured = this.stateMappings.afkStateFor(await this.client.getMatterType(matterId), name);
+      if (configured) return { state: configured, labeledState: configured };
+    }
     switch (state.stage) {
-      case '未开始': return 'ready';
-      case '进行中': return 'in_progress';
+      case '未开始': return { state: 'ready', labeledState: undefined };
+      case '进行中': return { state: 'in_progress', labeledState: undefined };
       case '已完成':
-      case '已关闭': return 'done';
-      default: return issueState === 'closed' ? 'done' : 'ready';
+      case '已关闭': return { state: 'done', labeledState: undefined };
+      default: return { state: issueState === 'closed' ? 'done' : 'ready', labeledState: undefined };
     }
   }
 

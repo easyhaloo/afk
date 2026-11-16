@@ -12,13 +12,18 @@ const dependencyMatter = {
   id: 1083000, sub_id: 6856, type_id: 20655, title: '依赖项', mkd_content: '',
   matter_status: 1, label_name: '', update_time: '2026-11-15 09:00:00',
 };
-const statuses = [
+/** The complete 缺陷 workflow enum — the vocabulary AFK's mapping writes. */
+const BASE_STATUSES = [
   { id: 1, status_name: '新建', status_stage: '未开始' },
+  { id: 3, status_name: '重新打开', status_stage: '进行中' },
   { id: 46, status_name: '修复中', status_stage: '进行中' },
   { id: 47, status_name: '已修复', status_stage: '进行中' },
   { id: 23, status_name: '已验证', status_stage: '已完成' },
+  { id: 24, status_name: '延期', status_stage: '进行中' },
+  { id: 45, status_name: '已拒绝', status_stage: '进行中' },
   { id: 20, status_name: '关闭', status_stage: '已完成' },
 ];
+let statuses = [...BASE_STATUSES];
 /** Resource references the fake platform answers with; relations tests seed it. */
 let resourceRefs: Array<{ id: number; source_id: string; type_id: number; title: string; sub_id: string }> = [];
 /** Tags provisioned on the fake project; the platform silently drops the rest. */
@@ -77,6 +82,7 @@ afterEach(() => {
   fetchMock.mockReset();
   resourceRefs = [];
   provisionedTags = ['billing', 'mode::afk', 'mode::hitl'];
+  statuses = [...BASE_STATUSES];
   vi.restoreAllMocks();
 });
 
@@ -111,6 +117,55 @@ describe('GeelibBacklogProvider mapping', () => {
     expect((await provider.get('geelib:6856#1083121')).state).toBe('in_progress');
     matter.matter_status = 20;
     expect((await provider.get('geelib:6856#1083121')).state).toBe('done');
+    matter.matter_status = 1;
+  });
+
+  it('falls back to the generic stage when a type customizes its status names', async () => {
+    // The platform customizes status names per type/project (需求 uses
+    // 待处理/规划中/已上线…). A name the mapping does not know must fall back
+    // to the generic stage — 未开始→ready, 进行中→in_progress, 已完成/已关闭→done —
+    // never to a claimable 'ready' for work that is actually in progress.
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client());
+    statuses.push(
+      { id: 900, status_name: '待处理', status_stage: '进行中' },
+      { id: 901, status_name: '规划中', status_stage: '进行中' },
+      { id: 902, status_name: '未激活', status_stage: '未开始' },
+      { id: 903, status_name: '已抛弃', status_stage: '已关闭' },
+    );
+    const probe = (statusId: number) => {
+      matter.type_id = 20651; // 需求 type with its own enum
+      matter.matter_status = statusId;
+      return provider.get('geelib:6856#1083121').then(item => {
+        matter.type_id = 20655;
+        matter.matter_status = 1;
+        return item.state;
+      });
+    };
+
+    expect(await probe(900)).toBe('in_progress'); // NOT claimable 'ready'
+    expect(await probe(901)).toBe('in_progress');
+    expect(await probe(902)).toBe('ready');
+    expect(await probe(903)).toBe('done');
+  });
+
+  it('refuses to write a native status the item type does not define', async () => {
+    // The 缺陷 name 修复中 does not exist in the 需求 workflow: writing it
+    // must be refused before the call, not surfaced as platform errno 5001.
+    statuses = [
+      { id: 900, status_name: '待处理', status_stage: '进行中' },
+      { id: 901, status_name: '已完成', status_stage: '已完成' },
+    ];
+    mockPlatform();
+    matter.type_id = 20651;
+    matter.matter_status = 900;
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+    fetchMock.mockClear();
+    mockPlatform();
+
+    await expect(provider.transition('geelib:6856#1083121', 'in_progress')).rejects.toThrow(/does not define native state/);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+    matter.type_id = 20655;
     matter.matter_status = 1;
   });
 

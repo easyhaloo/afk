@@ -34,6 +34,8 @@ export interface GeelibBacklogClient {
   getIssue(id: number): Promise<{ id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }>;
   listIssues(options?: ListOptions): Promise<Array<{ id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }>>;
   getMatterStateName(matterId: number): Promise<string | undefined>;
+  getMatterState(matterId: number): Promise<{ name: string | undefined; stage: string | undefined }>;
+  getMatterNativeStates(matterId: number): Promise<string[]>;
   setStatus(matterId: number, state: import('./state-map.js').NativeStateName): Promise<void>;
   setLabels(matterId: number, labels: readonly string[]): Promise<void>;
   addComment(matterId: number, html: string): Promise<void>;
@@ -107,19 +109,19 @@ export class GeelibBacklogProvider implements BacklogProvider {
       throw new Error(`work item ${id} does not belong to geelib project ${this.client.projectId}`);
     }
     const issue = await this.client.getIssue(parsed.issueNumber);
-    const stateName = await this.client.getMatterStateName(parsed.issueNumber);
+    const state = await this.client.getMatterState(parsed.issueNumber);
     const dependsOn = await this.client.listResourceReferences(parsed.issueNumber)
       .then(references => references.map(reference => `geelib:${reference.subId}#${reference.id}`))
       .catch(() => [] as string[]);
-    return this.toBacklogItem(parsed.projectKey, issue, stateName, parsed.id as BacklogItem['workItemId'], dependsOn);
+    return this.toBacklogItem(parsed.projectKey, issue, state, parsed.id as BacklogItem['workItemId'], dependsOn);
   }
 
   async list(options: BacklogListOptions = {}): Promise<BacklogItem[]> {
     const issues = await this.client.listIssues({ state: 'all' });
     const items: BacklogItem[] = [];
     for (const issue of issues) {
-      const stateName = await this.client.getMatterStateName(issue.id);
-      items.push(this.toBacklogItem(String(this.client.projectId), issue, stateName));
+      const state = await this.client.getMatterState(issue.id);
+      items.push(this.toBacklogItem(String(this.client.projectId), issue, state));
     }
     return items.filter(item => options.state === undefined || item.state === options.state);
   }
@@ -143,8 +145,17 @@ export class GeelibBacklogProvider implements BacklogProvider {
   async transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> {
     const parsed = parseWorkItemId(id);
     const target = afkStateToNative(state);
-    const current = await this.client.getMatterStateName(parsed.issueNumber);
-    if (current !== target) await this.client.setStatus(parsed.issueNumber, target);
+    const { name: current } = await this.client.getMatterState(parsed.issueNumber);
+    if (current !== target) {
+      // The platform customizes status names per type: a 缺陷 name like 修复中
+      // does not exist in the 需求 workflow. Refuse before the call instead of
+      // surfacing a generic platform 5001.
+      const defined = await this.client.getMatterNativeStates(parsed.issueNumber);
+      if (!defined.includes(target)) {
+        throw new Error(`This work item's type does not define native state ${target}; AFK drives the 缺陷 workflow names only. Current type defines: ${defined.join('、') || '(none)'}`);
+      }
+      await this.client.setStatus(parsed.issueNumber, target);
+    }
     const note = this.reconciliationNote(state, details);
     if (note) await this.client.addComment(parsed.issueNumber, note);
   }
@@ -240,7 +251,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
     });
   }
 
-  private toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, stateName: string | undefined, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): BacklogItem {
+  private toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, state: { name: string | undefined; stage: string | undefined }, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): BacklogItem {
     const id = workItemId ?? `geelib:${projectKey}#${issue.id}`;
     const modeLabel = issue.labels.find(label => label === 'mode::afk' || label === 'mode::hitl');
     return {
@@ -250,8 +261,12 @@ export class GeelibBacklogProvider implements BacklogProvider {
       project: { platform: 'geelib', projectKey, name: projectKey },
       managed: true,
       executionEligible: true,
-      state: nativeToAfkState(stateName ?? '') ?? (issue.state === 'closed' ? 'done' : 'ready'),
-      labeledState: nativeToAfkState(stateName ?? ''),
+      // Known native names map through the verified table; a type-customized
+      // name falls back to the platform's generic stage, which is the one
+      // dimension consistent across types — it never misreads in-progress
+      // work as claimable.
+      state: this.afkStateOf(state, issue.state),
+      labeledState: nativeToAfkState(state.name ?? ''),
       executionMode: modeLabel === 'mode::hitl' ? 'hitl' : 'afk',
       title: issue.title,
       description: issue.description || undefined,
@@ -261,6 +276,19 @@ export class GeelibBacklogProvider implements BacklogProvider {
       providerRef: id,
       webUrl: issue.url,
     };
+  }
+
+  /** Known name → verified mapping; otherwise the generic stage is the fallback. */
+  private afkStateOf(state: { name: string | undefined; stage: string | undefined }, issueState: 'opened' | 'closed' | 'merged'): BacklogState {
+    const mapped = nativeToAfkState(state.name ?? '');
+    if (mapped) return mapped;
+    switch (state.stage) {
+      case '未开始': return 'ready';
+      case '进行中': return 'in_progress';
+      case '已完成':
+      case '已关闭': return 'done';
+      default: return issueState === 'closed' ? 'done' : 'ready';
+    }
   }
 
   private claimKey(id: string): string {

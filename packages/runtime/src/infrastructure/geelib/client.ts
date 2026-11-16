@@ -152,20 +152,38 @@ export class GeelibClient implements TrackerProvider {
 
   /** The native status name of one work item, resolved through the status table. */
   async getMatterStateName(matterId: number): Promise<string | undefined> {
-    const [matter] = await this.listMatters({ matterIds: [matterId] });
-    if (!matter) throw new Error(`geelib work item ${matterId} does not exist in project ${this.subId}`);
-    return this.stateNameOf(matter);
+    return (await this.getMatterState(matterId)).name;
   }
 
-  private async stateNameOf(matter: MatterRecord): Promise<string | undefined> {
+  /**
+   * The native status name **and** the generic stage of one work item.
+   *
+   * The stage (未开始/进行中/已完成/已关闭) is the platform's one status
+   * dimension that is consistent across types and projects, while the names
+   * are customized per type — the provider needs both.
+   */
+  async getMatterState(matterId: number): Promise<{ name: string | undefined; stage: string | undefined }> {
+    const [matter] = await this.listMatters({ matterIds: [matterId] });
+    if (!matter) throw new Error(`geelib work item ${matterId} does not exist in project ${this.subId}`);
     const typeId = Number(matter.type_id ?? 0);
-    if (!typeId) return undefined;
+    if (!typeId) return { name: undefined, stage: undefined };
     try {
       const table = await this.statusTable(matter.sub_id ?? this.subId, typeId);
-      return table.get(Number(matter.matter_status))?.status_name;
+      const entry = table.get(Number(matter.matter_status));
+      return { name: entry?.status_name, stage: entry?.status_stage };
     } catch {
-      return undefined;
+      return { name: undefined, stage: undefined };
     }
+  }
+
+  /** The native status names the work item's type defines (write gate). */
+  async getMatterNativeStates(matterId: number): Promise<string[]> {
+    const [matter] = await this.listMatters({ matterIds: [matterId] });
+    if (!matter) throw new Error(`geelib work item ${matterId} does not exist in project ${this.subId}`);
+    const typeId = Number(matter.type_id ?? 0);
+    if (!typeId) return [];
+    const table = await this.statusTable(matter.sub_id ?? this.subId, typeId);
+    return [...table.values()].map(entry => entry.status_name);
   }
 
   async listIssues(options?: ListOptions): Promise<TrackedIssue[]> {

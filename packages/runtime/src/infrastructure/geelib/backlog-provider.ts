@@ -24,7 +24,7 @@ import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import type { ProviderProjectRef } from '../../domain/work-item/types.js';
 import type { ListOptions } from '../../domain/tracker/types.js';
 import type { BacklogRelationUpdate } from '../../domain/backlog/metadata-codec.js';
-import { afkStateToNative, nativeToAfkState } from './state-map.js';
+import { afkStateForStageTag, afkStateToNative, KIND_PRD_TAG, nativeToAfkState, stageTagFor, STAGE_TAG_NAMES } from './state-map.js';
 import {
   GeelibStateMappingResolver,
   loadGeelibStateMappings,
@@ -55,6 +55,7 @@ export interface GeelibBacklogClient {
   getMatterState(matterId: number): Promise<{ name: string | undefined; stage: string | undefined }>;
   getMatterNativeStates(matterId: number): Promise<string[]>;
   getMatterType(matterId: number): Promise<{ subId: number; typeId: number; typeName: string | undefined }>;
+  listProjectTags(): Promise<string[]>;
   listComments(matterId: number, commentType: 'bug' | 'matter' | 'demand'): Promise<Array<{ id: string; body: string; author: string; time: string }>>;
   setStatus(matterId: number, state: string): Promise<void>;
   setLabels(matterId: number, labels: readonly string[]): Promise<void>;
@@ -168,6 +169,9 @@ export class GeelibBacklogProvider implements BacklogProvider {
   }
 
   async claim(id: string, owner: string): Promise<BacklogClaim | null> {
+    // Fail fast, before the lease: a project without the stage tags cannot
+    // carry AFK's lifecycle, and every later transition would fail anyway.
+    await this.ensureStageVocabulary(id);
     const claim = await this.claimStrategy.claim(id, owner);
     if (!claim) return null;
     return {
@@ -183,35 +187,64 @@ export class GeelibBacklogProvider implements BacklogProvider {
     };
   }
 
+  private async ensureStageVocabulary(id: string): Promise<void> {
+    const parsed = parseWorkItemId(this.canonicalId(id));
+    const projectTags = await this.client.listProjectTags();
+    const missing = STAGE_TAG_NAMES.filter(tag => !projectTags.includes(tag));
+    if (missing.length) {
+      throw new Error(`geelib project ${parsed.projectKey} is missing the AFK state tags: ${missing.join(', ')}; provision them once in the platform UI (the OpenAPI cannot create tags).`);
+    }
+  }
+
   async transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> {
     const parsed = parseWorkItemId(this.canonicalId(id));
-    const staticTarget = afkStateToNative(state);
-    const { name: current } = await this.client.getMatterState(parsed.issueNumber);
-    if (current !== staticTarget) {
-      // The platform customizes status names per type: a 缺陷 name like 修复中
-      // does not exist in the 需求 workflow. Resolve in the documented order —
-      // the verified static name first; only when the item's type does not
-      // define it does the configured mapping supply the type's own name.
-      // Either way the final target must be in the type's vocabulary: a
-      // mistyped mapping fails closed here instead of reaching the platform.
-      const defined = await this.client.getMatterNativeStates(parsed.issueNumber);
-      let target: string = staticTarget;
-      let viaMapping = false;
-      if (!defined.includes(staticTarget) && !this.stateMappings.isEmpty) {
-        const configured = this.stateMappings.nativeStateFor(await this.client.getMatterType(parsed.issueNumber), state);
-        if (configured) {
-          target = configured;
-          viaMapping = true;
-        }
-      }
-      if (current !== target) {
-        if (!defined.includes(target)) {
-          const via = viaMapping ? ' (from the configured state mapping)' : '';
-          throw new Error(`This work item's type does not define native state ${target}${via}. Check the type's workflow or ~/.afk/geelib-state-mappings.yml. Current type defines: ${defined.join('、') || '(none)'}`);
-        }
-        await this.client.setStatus(parsed.issueNumber, target);
+
+    // 1. The authoritative move: swap the stage tags. The platform's native
+    //    state machine is customized per type, so AFK's lifecycle lives here.
+    const issue = await this.client.getIssue(parsed.issueNumber);
+    const targetTag = stageTagFor(state);
+    if (!issue.labels.includes(targetTag)) {
+      const labels = issue.labels.filter(label => !label.startsWith('stage::'));
+      labels.push(targetTag);
+      await this.client.setLabels(parsed.issueNumber, labels);
+      // The platform silently drops a label the project does not have; the
+      // tag is the AFK truth, so a dropped write fails the transition.
+      const confirmed = await this.client.getIssue(parsed.issueNumber);
+      if (!confirmed.labels.includes(targetTag)) {
+        throw new Error(`The platform dropped ${targetTag}: pre-provision the stage:: tags on the project once, in the platform UI.`);
       }
     }
+
+    // 2. Best-effort: move the native status alongside, as the human-facing
+    //    approximation. The static name first; only when the item's type
+    //    does not define it does the configured mapping supply the type's
+    //    own name. A native refusal (a type whose machine lacks the target)
+    //    must not fail the AFK transition — the tag already carries it.
+    try {
+      const staticTarget = afkStateToNative(state);
+      const { name: current } = await this.client.getMatterState(parsed.issueNumber);
+      if (current !== staticTarget) {
+        const defined = await this.client.getMatterNativeStates(parsed.issueNumber);
+        let target: string = staticTarget;
+        let viaMapping = false;
+        if (!defined.includes(staticTarget) && !this.stateMappings.isEmpty) {
+          const configured = this.stateMappings.nativeStateFor(await this.client.getMatterType(parsed.issueNumber), state);
+          if (configured) {
+            target = configured;
+            viaMapping = true;
+          }
+        }
+        if (current !== target && defined.includes(target)) {
+          await this.client.setStatus(parsed.issueNumber, target);
+        }
+        void viaMapping;
+      }
+    } catch {
+      // Non-fatal by design (confirmed with the product decision): the tag
+      // carries the state; a stale native status is a UI display gap.
+    }
+
+    // 3. The comment a transition leaves when the status cannot say it all.
     const note = this.reconciliationNote(state, details);
     if (note) await this.client.addComment(parsed.issueNumber, note);
   }
@@ -338,25 +371,27 @@ export class GeelibBacklogProvider implements BacklogProvider {
   private async toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, state: { name: string | undefined; stage: string | undefined }, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): Promise<BacklogItem> {
     const id = workItemId ?? `geelib:${projectKey}#${issue.id}`;
     const modeLabel = issue.labels.find(label => label === 'mode::afk' || label === 'mode::hitl');
-    // Decision ①, evolved by decision ③: a name the verified static map
-    // knows resolves through it; a type-customized name resolves through
-    // the configured mapping when the project+type has one; anything else
-    // is display-only through the generic stage — AFK never claims it,
-    // because the write gate refuses names outside the type's vocabulary.
-    const resolved = await this.resolveAfkState(issue.id, state, issue.state);
+    // Resolution order, top to bottom: the stage tag (AFK's authoritative
+    // lifecycle, carried per decision to use the tag channel) → the verified
+    // static map → the configured mapping for this project+type → the
+    // generic stage fallback. The tag exists on everything AFK has touched.
+    const stageTag = issue.labels.find(label => afkStateForStageTag(label) !== undefined);
+    const tagState = stageTag ? afkStateForStageTag(stageTag) : undefined;
+    const resolved = tagState
+      ? { state: tagState, labeledState: tagState }
+      : await this.resolveAfkState(issue.id, state, issue.state);
     return {
       id,
       workItemId,
       issueNumber: issue.id,
       project: { platform: 'geelib', projectKey, name: projectKey },
       managed: true,
-      executionEligible: resolved.labeledState !== undefined,
-      // Known native names map through the verified table or the configured
-      // mapping; an unknown name falls back to the platform's generic stage,
-      // which is the one dimension consistent across types — it never
-      // misreads in-progress work as claimable.
+      // The tag channel drives any type once the stage tags are provisioned;
+      // the claim pre-flight is what verifies that, per item claim.
+      executionEligible: true,
       state: resolved.state,
       labeledState: resolved.labeledState,
+      kind: issue.labels.includes(KIND_PRD_TAG) ? 'prd' : undefined,
       executionMode: modeLabel === 'mode::hitl' ? 'hitl' : 'afk',
       title: issue.title,
       description: issue.description || undefined,
@@ -421,7 +456,25 @@ export class GeelibBacklogProvider implements BacklogProvider {
   create = this.refused('creating work items; create them on the platform');
   addTag = this.refused('editing tags; the platform cannot create tags through its API');
   removeTag = this.refused('editing tags; the platform cannot create tags through its API');
-  applyRole = this.refused('assigning the PRD role');
+  /**
+   * Mark an item as a PRD anchor through the kind tag.
+   *
+   * The tag channel makes geelib items usable as organizational parents:
+   * the anchor itself is a container (never executable) and its children
+   * are the work the schedule dispatches.
+   */
+  async applyRole(id: string, kind: BacklogKind): Promise<void> {
+    if (kind !== 'prd') throw new Error(`the geelib provider only carries the prd role (as the ${KIND_PRD_TAG} tag)`);
+    const parsed = parseWorkItemId(this.canonicalId(id));
+    const issue = await this.client.getIssue(parsed.issueNumber);
+    if (issue.labels.includes(KIND_PRD_TAG)) return;
+    await this.client.setLabels(parsed.issueNumber, [...issue.labels, KIND_PRD_TAG]);
+    // The platform silently drops a label the project does not have.
+    const confirmed = await this.client.getIssue(parsed.issueNumber);
+    if (!confirmed.labels.includes(KIND_PRD_TAG)) {
+      throw new Error(`The platform dropped ${KIND_PRD_TAG}: pre-provision it on the project once, in the platform UI.`);
+    }
+  }
   applyExecutionBase = this.refused('recording the execution base');
   applyPrdBaseline = this.refused('recording the PRD baseline');
   applyDescription = this.refused('replacing the body');

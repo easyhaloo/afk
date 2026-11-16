@@ -187,6 +187,14 @@ export class GeelibClient implements TrackerProvider {
     return [...table.values()].map(entry => entry.status_name);
   }
 
+  /** The tag names provisioned on the project (the claim pre-flight checks these). */
+  async listProjectTags(): Promise<string[]> {
+    const envelope = await this.request('OpenApiCreateTagAndModule/getSubTags', { sub_id: this.subId });
+    const data = envelope.data as { list?: Array<{ name?: string }> } | null;
+    const list = Array.isArray(data?.list) ? data.list : [];
+    return list.map(tag => String(tag.name ?? ''));
+  }
+
   /**
    * The type identity of one work item, as the state-mapping resolver keys
    * its lookups: the numeric project (`sub_id`), the type id, and the type

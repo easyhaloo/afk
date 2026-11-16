@@ -59,3 +59,37 @@ export function afkStateToNative(state: BacklogState): NativeStateName {
 export function nativeToAfkState(name: string): BacklogState | undefined {
   return NATIVE_TO_AFK[name as NativeStateName];
 }
+
+/**
+ * The tag channel: AFK's authoritative lifecycle, carried as project tags.
+ *
+ * The native state machine is customized per type and per project, so the
+ * tags — not the native status — are what AFK reads and writes for the
+ * lifecycle. The native status moves best-effort alongside, as the
+ * human-facing approximation. The tags must be provisioned once per project
+ * in the platform UI (the OpenAPI cannot create tags); the claim pre-flight
+ * verifies them.
+ */
+export const STAGE_TAGS: Readonly<Record<BacklogState, string>> = {
+  ready: 'stage::ready',
+  in_progress: 'stage::afk-in-progress',
+  verification: 'stage::verification',
+  merge_ready: 'stage::merge-ready',
+  done: 'stage::done',
+  blocked: 'stage::blocked',
+  rework: 'stage::rework',
+};
+
+export const STAGE_TAG_NAMES: readonly string[] = Object.values(STAGE_TAGS);
+
+export function stageTagFor(state: BacklogState): string {
+  return STAGE_TAGS[state];
+}
+
+export function afkStateForStageTag(tag: string): BacklogState | undefined {
+  const entry = (Object.entries(STAGE_TAGS) as Array<[BacklogState, string]>).find(([, name]) => name === tag);
+  return entry?.[0];
+}
+
+/** Marks a PRD anchor (an organizational parent that is never executable). */
+export const KIND_PRD_TAG = 'kind::prd';

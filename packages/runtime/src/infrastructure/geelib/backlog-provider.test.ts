@@ -51,6 +51,27 @@ function editBodyFor(cfName: string): any | undefined {
   return undefined;
 }
 
+/** The Matter/edit body that carried the native status write, if any. */
+function statusEditBody(): any | undefined {
+  for (const [url, init] of fetchMock.mock.calls) {
+    if (!String(url).endsWith('Matter/edit')) continue;
+    const body = JSON.parse(String(init?.body));
+    if ((body.data ?? []).some((e: { cf_name?: string }) => e.cf_name === '状态')) return body;
+  }
+  return undefined;
+}
+
+/** The tag names of the last label write, if any. */
+function writtenTags(): string[] {
+  for (const [url, init] of fetchMock.mock.calls) {
+    if (!String(url).endsWith('Matter/edit')) continue;
+    const body = JSON.parse(String(init?.body));
+    const entry = (body.data ?? []).find((e: { cf_name?: string }) => e.cf_name === '标签');
+    if (entry) return JSON.parse(entry.cf_value);
+  }
+  return [];
+}
+
 function mockPlatform(): void {
   fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -110,15 +131,18 @@ function client(): GeelibClient {
   return new GeelibClient({ baseUrl: 'https://geelib.example', userMail: 'afk@example.com', token: 'afk-test-token', subId: 6856, fetch: fetchMock as unknown as typeof fetch });
 }
 
-function lock(lease?: ClaimLease): { acquire: ReturnType<typeof vi.fn> } {
-  return { acquire: vi.fn(async () => lease ?? {
-    claimId: 'lease-1', heartbeat: async () => {}, release: async () => {},
-  }) };
+function lock(lease: ClaimLease | null = {
+  claimId: 'lease-1', heartbeat: async () => {}, release: async () => {},
+}): { acquire: ReturnType<typeof vi.fn> } {
+  return { acquire: vi.fn(async () => lease) };
 }
 
 afterEach(() => {
   fetchMock.mockReset();
   resourceRefs = [];
+  matter.label_name = '';
+  matter.type_id = 20655;
+  matter.matter_status = 1;
   provisionedTags = [
     'billing', 'mode::afk', 'mode::hitl',
     'stage::ready', 'stage::afk-in-progress', 'stage::verification', 'stage::merge-ready',
@@ -290,8 +314,10 @@ describe('GeelibBacklogProvider claim and transition', () => {
     expect(claim).not.toBeNull();
     expect(claim?.item.state).toBe('in_progress');
     expect(claim?.claimId).toBe('lease-1');
-    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
-    expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
+    const statusBody = editBodyFor('状态');
+    expect(statusBody?.data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
+    const labelBody = editBodyFor('标签');
+    expect(JSON.parse(labelBody?.data.find((e: { cf_name?: string }) => e.cf_name === '标签')?.cf_value ?? '[]')).toContain('stage::afk-in-progress');
   });
 
   it('returns null when another worker holds the lease', async () => {
@@ -301,30 +327,29 @@ describe('GeelibBacklogProvider claim and transition', () => {
     expect(await provider.claim('geelib:6856#1083121', 'worker-2')).toBeNull();
   });
 
-  it('skips the write when the item already sits in the target state', async () => {
+  it('skips the writes when the item already sits in the target state', async () => {
     mockPlatform();
     matter.matter_status = 46;
+    matter.label_name = 'stage::afk-in-progress';
     const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
 
     await provider.transition('geelib:6856#1083121', 'in_progress');
 
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
-    matter.matter_status = 1;
+    expect(editBodyFor('标签')).toBeUndefined(); // the tag already carries it
+    expect(editBodyFor('状态')).toBeUndefined(); // the native status already matches
+    matter.label_name = '';
   });
 
-  it('maps transitions onto the native machine and lets its refusals surface', async () => {
+  it('fails the transition when the authoritative tag write is refused', async () => {
     mockPlatform();
-    matter.matter_status = 1;
-    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
-
-    await provider.transition('geelib:6856#1083121', 'in_progress');
-    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
-    expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
-
     matter.matter_status = 23; // 已验证
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
     fetchMock.mockClear();
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ errno: 5001, errmsg: '无法流转到此状态，请刷新页面后重新选择', data: '' }), { status: 200 }));
-    await expect(provider.transition('geelib:6856#1083121', 'done')).rejects.toThrow('无法流转到此状态');
+
+    // 关闭 is unreachable natively AND the platform refused the label write:
+    // the tag channel is authoritative, so the transition fails.
+    await expect(provider.transition('geelib:6856#1083121', 'done')).rejects.toThrow(/dropped stage::done|无法流转到此状态/);
     matter.matter_status = 1;
   });
 });
@@ -578,12 +603,14 @@ describe('GeelibBacklogProvider configured state mapping', () => {
 
       await provider.transition('geelib:6856#1083121', 'in_progress');
 
-      const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
-      expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
+      // The stage tag lands (authoritative) and the native status moves to
+      // the type's own name through the configured mapping.
+      expect(statusEditBody()?.data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
+      expect(writtenTags()).toContain('stage::afk-in-progress');
     });
   });
 
-  it('keeps the write gate fail-closed when a configured name is outside the type vocabulary', async () => {
+  it('skips the native write for a configured name outside the type vocabulary, still landing the stage tag', async () => {
     statuses = DEMAND_STATUSES;
     mockPlatform();
     const provider = new GeelibBacklogProvider(client(), {
@@ -593,8 +620,12 @@ describe('GeelibBacklogProvider configured state mapping', () => {
     await asDemandType(async () => {
       matter.matter_status = 900;
 
-      await expect(provider.transition('geelib:6856#1083121', 'in_progress')).rejects.toThrow(/does not define native state 不存在的状态/);
-      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+      // The tag channel carries the transition; the native move to a name
+      // the type does not define is skipped without failing it.
+      await provider.transition('geelib:6856#1083121', 'in_progress');
+
+      expect(writtenTags()).toContain('stage::afk-in-progress');
+      expect(statusEditBody()).toBeUndefined();
     });
   });
 
@@ -627,24 +658,28 @@ describe('GeelibBacklogProvider configured state mapping', () => {
 
     await provider.transition('geelib:6856#1083121', 'in_progress');
 
-    const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
-    expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
+    expect(statusEditBody()?.data).toEqual([{ cf_name: '状态', cf_value: '修复中' }]);
+    expect(writtenTags()).toContain('stage::afk-in-progress');
   });
 
-  it('keeps the current behavior for an unconfigured project+type', async () => {
-    // The mapping covers 需求 only: a 任务 item (another type, same project)
-    // still falls back to the generic stage for display and stays read-only.
+  it('drives an unconfigured project+type through the tag channel', async () => {
+    // The mapping covers 需求 only; a 任务 item (another type, same project)
+    // is still drivable — the stage tags carry AFK's lifecycle, and the
+    // native status move is skipped for the names the type does not define.
     statuses = DEMAND_STATUSES;
     mockPlatform();
-    const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping] });
+    const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping], claimLock: lock() as never });
     matter.type_id = 20700;
     matter.type_name = '任务';
     try {
-      matter.matter_status = 900; // 待处理, a name the mapping does not cover for 任务
+      statuses = [...DEMAND_STATUSES, { id: 903, status_name: '未开始', status_stage: '未开始' }];
+      matter.matter_status = 903; // 未开始, a name the mapping does not cover for 任务
 
-      const item = await provider.get('geelib:6856#1083121');
-      expect(item.state).toBe('in_progress'); // stage fallback, display only
-      expect(item.executionEligible).toBe(false);
+      const claim = await provider.claim('geelib:6856#1083121', 'worker-1');
+
+      expect(claim).not.toBeNull();
+      expect(writtenTags()).toContain('stage::afk-in-progress');
+      expect(statusEditBody()).toBeUndefined(); // 修复中 is not a 任务 name AFK writes
     } finally {
       matter.type_id = 20655;
       matter.type_name = '缺陷';
@@ -658,10 +693,13 @@ describe('GeelibBacklogProvider configured state mapping', () => {
     const provider = new GeelibBacklogProvider(client(), { mappings: [demandMapping], claimLock: lock() as never });
     await asDemandType(async () => {
       matter.matter_status = 901; // 编码中
+      matter.label_name = 'stage::afk-in-progress';
 
       await provider.transition('geelib:6856#1083121', 'in_progress');
 
-      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('Matter/edit'))).toBe(false);
+      expect(statusEditBody()).toBeUndefined(); // native already at the target
+      expect(writtenTags()).toEqual([]); // tag already at the target
+      matter.label_name = '';
     });
   });
 
@@ -684,8 +722,7 @@ describe('GeelibBacklogProvider configured state mapping', () => {
 
         await provider.transition('geelib:6856#1083121', 'in_progress');
 
-        const edit = fetchMock.mock.calls.find(([url]) => String(url).endsWith('Matter/edit'));
-        expect(JSON.parse(String(edit?.[1]?.body)).data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
+        expect(statusEditBody()?.data).toEqual([{ cf_name: '状态', cf_value: '编码中' }]);
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

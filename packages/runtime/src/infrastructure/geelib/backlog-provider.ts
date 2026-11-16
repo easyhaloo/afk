@@ -254,19 +254,24 @@ export class GeelibBacklogProvider implements BacklogProvider {
   private toBacklogItem(projectKey: string, issue: { id: number; title: string; description: string; labels: string[]; state: 'opened' | 'closed' | 'merged'; url: string }, state: { name: string | undefined; stage: string | undefined }, workItemId?: BacklogItem['workItemId'], dependsOn: string[] = []): BacklogItem {
     const id = workItemId ?? `geelib:${projectKey}#${issue.id}`;
     const modeLabel = issue.labels.find(label => label === 'mode::afk' || label === 'mode::hitl');
+    // Decision ①: AFK drives the 缺陷 workflow names. A status name outside
+    // the verified mapping means the item's type carries its own state
+    // machine — AFK displays it through the generic stage but never claims
+    // it, because writing the 缺陷 names onto it is refused by the gate.
+    const mapped = nativeToAfkState(state.name ?? '');
     return {
       id,
       workItemId,
       issueNumber: issue.id,
       project: { platform: 'geelib', projectKey, name: projectKey },
       managed: true,
-      executionEligible: true,
+      executionEligible: mapped !== undefined,
       // Known native names map through the verified table; a type-customized
       // name falls back to the platform's generic stage, which is the one
       // dimension consistent across types — it never misreads in-progress
       // work as claimable.
       state: this.afkStateOf(state, issue.state),
-      labeledState: nativeToAfkState(state.name ?? ''),
+      labeledState: mapped,
       executionMode: modeLabel === 'mode::hitl' ? 'hitl' : 'afk',
       title: issue.title,
       description: issue.description || undefined,

@@ -149,6 +149,28 @@ describe('GeelibBacklogProvider mapping', () => {
     expect(await probe(903)).toBe('done');
   });
 
+  it('keeps an unmapped-type item read-only: displayable, never claimable', async () => {
+    // Decision ①: AFK drives the 缺陷 workflow only. A type whose vocabulary
+    // the mapping does not know is display (stage fallback) but not
+    // claimable — claiming would otherwise die in a messy throw chain.
+    statuses = [
+      { id: 900, status_name: '待处理', status_stage: '进行中' },
+      { id: 901, status_name: '已完成', status_stage: '已完成' },
+    ];
+    mockPlatform();
+    matter.type_id = 20651;
+    matter.matter_status = 900;
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const item = await provider.get('geelib:6856#1083121');
+    expect(item.state).toBe('in_progress'); // stage fallback, for display
+    expect(item.executionEligible).toBe(false);
+
+    expect(await provider.claim('geelib:6856#1083121', 'worker-1')).toBeNull();
+    matter.type_id = 20655;
+    matter.matter_status = 1;
+  });
+
   it('refuses to write a native status the item type does not define', async () => {
     // The 缺陷 name 修复中 does not exist in the 需求 workflow: writing it
     // must be refused before the call, not surfaced as platform errno 5001.

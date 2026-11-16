@@ -225,6 +225,21 @@ describe('geelib write methods', () => {
     expect(body.data).toEqual([{ cf_name: '标签', cf_value: '["billing","mode::hitl"]' }]);
   });
 
+  it('lists the comments of a work item from the requested silo', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ errno: 2000, errmsg: '', data: [
+      { id: '1390431', content: '<p>AFK 已认领</p>', create_by_name: '盛纲舒', create_time: '2026-11-16 10:00:00' },
+    ] }), { status: 200 }));
+
+    const comments = await client().listComments(1083121, 'bug');
+
+    expect(comments).toEqual([{ id: '1390431', body: '<p>AFK 已认领</p>', author: '盛纲舒', time: '2026-11-16 10:00:00' }]);
+    const url = new URL(fetchMock.mock.calls[0]?.[0] as string);
+    expect(url.pathname).toBe('/openapi/OpenApiCommentMgr/getList');
+    expect(url.searchParams.get('sub_id')).toBe('6856');
+    expect(url.searchParams.get('type')).toBe('bug');
+    expect(url.searchParams.get('id')).toBe('1083121');
+  });
+
   it('refuses a status outside the verified native vocabulary', async () => {
     await expect(client().setStatus(1083121, '随便写的')).rejects.toThrow(/native state/);
     expect(fetchMock).not.toHaveBeenCalled();

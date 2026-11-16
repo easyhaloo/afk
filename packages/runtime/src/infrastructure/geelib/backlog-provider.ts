@@ -16,6 +16,7 @@ import {
   type ReworkResolution,
 } from '../../domain/backlog/index.js';
 import { evaluateRunnability, type Runnability } from '../../domain/backlog/runnability.js';
+import { deriveBacklogBranchName } from '../../domain/backlog/index.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import type { ProviderProjectRef } from '../../domain/work-item/types.js';
 import type { ListOptions } from '../../domain/tracker/types.js';
@@ -132,7 +133,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
   }
 
   async get(id: string): Promise<BacklogItem> {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     if (parsed.platform !== 'geelib') throw new Error(`the geelib provider serves geelib work items only: ${id}`);
     if (String(this.client.projectId) !== parsed.projectKey) {
       throw new Error(`work item ${id} does not belong to geelib project ${this.client.projectId}`);
@@ -172,7 +173,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
   }
 
   async transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     const staticTarget = afkStateToNative(state);
     const { name: current } = await this.client.getMatterState(parsed.issueNumber);
     if (current !== staticTarget) {
@@ -239,7 +240,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
    * removes edges on the platform UI.
    */
   async applyRelationUpdate(id: string, update: BacklogRelationUpdate): Promise<void> {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     if (update.clearParent) throw new Error('The geelib provider cannot clear a parent edge: the platform exposes no parent-removal call.');
     if (update.removeDependsOn?.length) {
       throw new Error('The geelib provider cannot delete resource references: the platform deletion API refuses every id form (its own CLI fails identically); remove them on the platform UI.');
@@ -288,14 +289,28 @@ export class GeelibBacklogProvider implements BacklogProvider {
    * shows once its type is confirmed.
    */
   async listIssueComments(id: string, commentType: 'bug' | 'matter' | 'demand' = 'matter'): Promise<TrackerIssueComment[]> {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     const comments = await this.client.listComments(parsed.issueNumber, commentType);
     return comments.map(comment => ({ id: comment.id, body: comment.body }));
   }
 
   async addComment(id: string, html: string): Promise<void> {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     await this.client.addComment(parsed.issueNumber, html);
+  }
+
+  /**
+   * The canonical identity a caller-supplied item reference names.
+   *
+   * The managed execution request addresses an item by its provider-local
+   * issue number (the manifest's `providerBacklogId`), and the local tracker
+   * index hands out the same form. A bare number is therefore resolved
+   * inside the project this client serves; anything else must already be
+   * canonical.
+   */
+  private canonicalId(id: string): string {
+    const bare = id.trim();
+    return /^\d+$/.test(bare) ? `geelib:${this.client.projectId}#${bare}` : id;
   }
 
   private runnabilityOf(item: BacklogItem): Runnability {
@@ -336,7 +351,11 @@ export class GeelibBacklogProvider implements BacklogProvider {
       description: issue.description || undefined,
       dependsOn,
       tags: issue.labels.filter(label => !RESERVED_LABEL_PREFIXES.some(prefix => label.startsWith(prefix))),
-      branchName: '',
+      // Hybrid mode: the item's branches and change requests live on the git
+      // platform, so the association scope (`<branch>`/`<branch>-qa`) must
+      // name the branch AFK actually works on — the same derivation the
+      // inventory projection and the run request use.
+      branchName: deriveBacklogBranchName(String(issue.id)),
       providerRef: id,
       webUrl: issue.url,
     };
@@ -367,7 +386,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
   }
 
   private claimKey(id: string): string {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     return `geelib/${parsed.projectKey}/${parsed.issueNumber}`;
   }
 
@@ -396,7 +415,7 @@ export class GeelibBacklogProvider implements BacklogProvider {
   applyPrdBaseline = this.refused('recording the PRD baseline');
   applyDescription = this.refused('replacing the body');
   async applyMode(id: string, mode: BacklogExecutionMode): Promise<void> {
-    const parsed = parseWorkItemId(id);
+    const parsed = parseWorkItemId(this.canonicalId(id));
     const target = `mode::${mode}`;
     const issue = await this.client.getIssue(parsed.issueNumber);
     const labels = issue.labels.filter(label => label !== 'mode::afk' && label !== 'mode::hitl');

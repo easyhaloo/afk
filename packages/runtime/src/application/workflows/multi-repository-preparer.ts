@@ -246,6 +246,15 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
 
 export function cloneUrl(repository: Pick<WorkflowRunRepository, 'platform' | 'projectKey' | 'providerHost'>): string {
   if (repository.platform === 'github') return `https://github.com/${repository.projectKey}.git`;
+  // A geelib item's repository is hosted on its git platform; the geelib
+  // project key does not name a clone URL. A readable error beats silently
+  // cloning the gitlab.com rendering of a numeric key.
+  if (repository.platform === 'geelib') {
+    throw new Error(
+      `A geelib work item's repository is hosted on its git platform, so its clone URL is not derivable from the geelib project key '${repository.projectKey}'. `
+      + 'Prepare the execution checkout from the hosted repository before the run.',
+    );
+  }
   return gitLabCloneUrl(repository.projectKey, repository.providerHost);
 }
 
@@ -253,6 +262,15 @@ export function assertRepositoryOrigin(
   repository: Pick<WorkflowRunRepository, 'platform' | 'projectKey' | 'providerHost'>,
   originUrl: string,
 ): void {
+  // The checkout of a geelib item was prepared from the hosted repository, so
+  // its origin cannot be compared against a URL derived from the geelib key;
+  // it is only required to be a usable git remote.
+  if (repository.platform === 'geelib') {
+    if (!parseRemoteIdentity(originUrl)) {
+      throw new Error(`repository origin is not a usable git remote for ${repository.platform}:${repository.projectKey}`);
+    }
+    return;
+  }
   const expected = parseRemoteIdentity(cloneUrl(repository));
   const actual = parseRemoteIdentity(originUrl);
   const expectedPath = repository.platform === 'github' ? expected?.path.toLowerCase() : expected?.path;

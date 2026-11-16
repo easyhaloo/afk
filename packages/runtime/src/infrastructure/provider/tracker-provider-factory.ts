@@ -7,6 +7,7 @@ import { GitLabClient } from '../gitlab/index.js';
 import {
   resolveGitHubRepository,
   resolveGitLabProject,
+  resolveRemoteTarget,
 } from '../tracker/resolver.js';
 import {
   resolveTrackerTarget,
@@ -234,6 +235,33 @@ export async function createGeelibTracker(projectId: string): Promise<TrackerPro
   const subId = Number(projectId);
   if (!Number.isSafeInteger(subId) || subId <= 0) throw new Error(`geelib project key must be the numeric project id: ${projectId}`);
   return new GeelibClient({ ...auth, subId });
+}
+
+/**
+ * The git-platform tracker for the change channel of a geelib item.
+ *
+ * Hybrid mode: a geelib work item's change requests live on the git platform
+ * that hosts the repository, not on geelib. The tracker is therefore resolved
+ * from the `origin` remote of the repository — the execution checkout first,
+ * then the directory the run was invoked from (a first attempt has no
+ * checkout yet). A directory pair without such a remote cannot publish a
+ * change request, and that is a readable error rather than a silent fall
+ * back to the refusing channel.
+ */
+export async function createGeelibChangesTracker(repositoryRoot?: string, invocationRoot?: string): Promise<TrackerProvider> {
+  const directories = [repositoryRoot, invocationRoot].filter((directory): directory is string => Boolean(directory));
+  for (const directory of directories) {
+    const remote = await resolveRemoteTarget(directory);
+    if (!remote) continue;
+    return remote.platform === 'github'
+      ? createGitHubTracker(remote.projectId, directory)
+      : createGitLabTracker(remote.projectId, directory, remote.host);
+  }
+  throw new Error(
+    "A geelib work item's change requests live on the git platform that hosts the repository, "
+    + `but no origin remote pointing at GitHub or GitLab was found in: ${directories.join(', ') || '(no directory given)'}. `
+    + 'Run inside the hosted repository checkout, or add its remote (git remote add origin <url>) to the execution repository.',
+  );
 }
 
 export async function createWorkflowProviders(

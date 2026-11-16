@@ -110,6 +110,35 @@ describe('GeelibBacklogProvider mapping', () => {
     expect(item.webUrl).toContain('subId=6856');
   });
 
+  it('carries the derived branch name the change association scopes by', async () => {
+    // Hybrid mode: the item's branches and change requests live on the git
+    // platform, so the association scope (`<branch>`/`<branch>-qa`) must name
+    // the branch AFK actually works on, exactly like the other projections.
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client());
+
+    const item = await provider.get('geelib:6856#1083121');
+
+    expect(item.branchName).toBe('afk/backlog-1083121');
+  });
+
+  it('resolves the bare provider-local issue number the managed execution request uses', async () => {
+    // `afk run` addresses the item through the manifest's providerBacklogId —
+    // the bare issue number. It must resolve inside the project the client
+    // already serves, on every port the execution touches.
+    mockPlatform();
+    const provider = new GeelibBacklogProvider(client(), { claimLock: lock() as never });
+
+    const item = await provider.get('1083121');
+    expect(item.id).toBe('geelib:6856#1083121');
+
+    const claim = await provider.claim('1083121', 'worker-1');
+    expect(claim?.item.id).toBe('geelib:6856#1083121');
+    await expect(provider.transition('1083121', 'merge_ready', { changeId: '5' })).resolves.toBeUndefined();
+    await expect(provider.setExecutionMode('1083121', 'afk')).resolves.toBeUndefined();
+    matter.matter_status = 1;
+  });
+
   it('maps each native status onto its AFK lifecycle position', async () => {
     mockPlatform();
     const provider = new GeelibBacklogProvider(client());

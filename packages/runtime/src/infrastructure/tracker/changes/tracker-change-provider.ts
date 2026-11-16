@@ -25,6 +25,12 @@ export function renderChangeDescription(
   if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) throw new Error('backlog issue number is invalid');
   if (!issue || !tracker) return appendEvidence(`QA: PASS\nCloses #${issueNumber}`, evidence);
   const identity = parseWorkItemId(issue);
+  // Hybrid mode: the change request is published on the git platform that
+  // hosts the repository, so a geelib item is named by its canonical
+  // identity — the geelib platform has no issue there to close.
+  if (identity.platform === 'geelib' && tracker.platform !== 'geelib') {
+    return appendEvidence(`QA: PASS\nRefs ${identity.id}`, evidence);
+  }
   if (identity.platform !== tracker.platform) throw new Error('issue and change request platform mismatch');
   if (identity.issueNumber !== issueNumber) throw new Error('issue number does not match backlog identity');
   const issueProject = identity.platform === 'gitlab'
@@ -185,6 +191,16 @@ export class TrackerChangeProvider implements ChangeProvider {
 
   async verifyIssueAssociation(change: ChangeRequest, canonicalWorkItemId: string): Promise<void> {
     const issue = parseWorkItemId(canonicalWorkItemId);
+    // Hybrid mode: the association of a geelib item is the canonical
+    // reference in the description — the geelib platform has no native link
+    // a git platform could resolve.
+    if (issue.platform === 'geelib' && this.tracker.platform !== 'geelib') {
+      const fresh = await this.get(change.id);
+      if (!fresh.description?.includes(issue.id)) {
+        throw new Error(`change request ${change.id} does not reference ${issue.id}`);
+      }
+      return;
+    }
     if (issue.platform !== this.tracker.platform) throw new Error('issue and change request platform mismatch');
     const id = Number(change.id);
     if (!Number.isSafeInteger(id) || id <= 0 || !change.url) throw new Error('change request identity is incomplete');

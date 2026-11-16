@@ -202,6 +202,49 @@ describe('TrackerChangeProvider', () => {
       .rejects.toThrow(/not linked/i);
   });
 
+  it('references a geelib item by its canonical identity in hybrid mode', () => {
+    // Hybrid mode: the change request is published on the git platform that
+    // hosts the repository, so the body names the geelib item instead of a
+    // platform issue that does not exist there.
+    const backlog = {
+      id: 'geelib:6856#1083121', issueNumber: 1083121,
+      workItemId: 'geelib:6856#1083121', title: '集酷工作项',
+    } as BacklogItem;
+    expect(renderChangeDescription(backlog, { platform: 'github', projectId: 'acme/api' }))
+      .toBe('QA: PASS\nRefs geelib:6856#1083121');
+    expect(renderChangeDescription(backlog, { platform: 'gitlab', projectId: 'team/api', providerHost: 'gitlab.example' }))
+      .toBe('QA: PASS\nRefs geelib:6856#1083121');
+  });
+
+  it('verifies a geelib association through the canonical reference in the description', async () => {
+    // The geelib platform has no native link a git platform could resolve,
+    // so the canonical reference in the body is the association evidence.
+    const tracker = {
+      platform: 'github', projectId: 'acme/api',
+      getMR: vi.fn().mockResolvedValue({
+        id: 5, state: 'opened', sourceBranch: 'afk/backlog-1083121-qa', targetBranch: 'main',
+        url: 'https://github.com/acme/api/pull/5',
+        description: 'QA: PASS\nRefs geelib:6856#1083121',
+      }),
+      isMRLinkedToIssue: vi.fn(),
+    } as unknown as TrackerProvider;
+    const change = {
+      id: '5', state: 'open' as const, sourceBranch: 'afk/backlog-1083121-qa', targetBranch: 'main',
+      url: 'https://github.com/acme/api/pull/5',
+    };
+    const provider = new TrackerChangeProvider(tracker, { associationTimeoutMs: 50, associationPollMs: 1 });
+
+    await expect(provider.verifyIssueAssociation(change, 'geelib:6856#1083121')).resolves.toBeUndefined();
+    expect(tracker.isMRLinkedToIssue).not.toHaveBeenCalled();
+
+    vi.mocked(tracker.getMR).mockResolvedValue({
+      id: 5, state: 'opened', sourceBranch: 'afk/backlog-1083121-qa', targetBranch: 'main',
+      url: 'https://github.com/acme/api/pull/5', description: 'QA: PASS',
+    });
+    await expect(provider.verifyIssueAssociation(change, 'geelib:6856#1083121'))
+      .rejects.toThrow(/does not reference geelib:6856#1083121/);
+  });
+
   it('uses only the QA result and issue closing reference, without repeating the PRD', () => {
     const backlog = {
       id: '158', title: '工作项列表排序', description: '# PRD\n\n大量需求正文',

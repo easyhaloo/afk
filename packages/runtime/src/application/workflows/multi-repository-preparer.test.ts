@@ -105,6 +105,24 @@ describe('MultiRepositoryPreparer', () => {
     }))).toBe('https://git.corp/team.platform/subgroup/repo.git');
   });
 
+  it('refuses to invent a clone URL for a geelib repository', () => {
+    // The clone URL of a geelib item's repository is not derivable from the
+    // geelib project key: the repository is hosted on its git platform. A
+    // readable error beats silently cloning `https://gitlab.com/6856.git`.
+    expect(() => cloneUrl(repository({ platform: 'geelib', projectKey: '6856' })))
+      .toThrow(/geelib.*clone URL/is);
+  });
+
+  it('accepts a geelib checkout whose origin points at the hosted repository', () => {
+    // The checkout of a geelib item was prepared from the hosted repository,
+    // so its origin cannot be compared against a URL derived from the geelib
+    // key; it is only required to be a usable git remote.
+    const geelib = repository({ platform: 'geelib', projectKey: '6856' });
+    expect(() => assertRepositoryOrigin(geelib, 'https://github.com/acme/api.git')).not.toThrow();
+    expect(() => assertRepositoryOrigin(geelib, 'git@gitlab.example:team/api.git')).not.toThrow();
+    expect(() => assertRepositoryOrigin(geelib, '/tmp/not-a-remote')).toThrow(/origin/);
+  });
+
   it('does not reclaim an initializing lock directory with no owner inside the grace period', async () => {
     const rename = vi.fn(async () => undefined);
     const deps = lockDependencies({

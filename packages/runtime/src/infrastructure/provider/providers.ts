@@ -67,6 +67,17 @@ export interface ProviderBundleOptions {
   onGraphError?: (error: unknown) => void;
   /** The canonical project key of the project the tracker reads. */
   projectKey?: string;
+  /**
+   * The change channel of a geelib bundle.
+   *
+   * Hybrid mode: a geelib item's change request lives on the git platform
+   * that hosts the repository, not on geelib. Pass the tracker that platform
+   * resolves to and the bundle serves changes through it; without it the
+   * change channel refuses (the default), so a caller that reaches it learns
+   * which assembly it needs. A tracker that is not geelib ignores this
+   * option — its own tracker already carries the change channel.
+   */
+  changesTracker?: TrackerProvider;
 }
 
 export function createProviderBundle(
@@ -90,10 +101,13 @@ export function createProviderBundle(
     }, repoRoot, options.trackerDirectory),
     branches: new GitBranchProvider(repoRoot),
     // Hybrid mode: a geelib item's change request lives on the git platform,
-    // so the bundle carries a change channel that says so instead of letting
-    // the git-shaped provider guess.
+    // so the bundle carries the tracker of that platform when the caller
+    // resolved one, and a change channel that says so otherwise — instead of
+    // letting the git-shaped provider guess.
     changes: tracker.platform === 'geelib'
-      ? new RefusingChangeProvider()
+      ? (options.changesTracker
+        ? new TrackerChangeProvider(options.changesTracker)
+        : new RefusingChangeProvider())
       : new TrackerChangeProvider(tracker),
   };
 }

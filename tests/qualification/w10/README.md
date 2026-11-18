@@ -6,10 +6,10 @@
 | --- | ---: | --- |
 | `account` | 4 | 有真实账户侧操作或用户收件记录，范围见该行 |
 | `service` | 6 | 有独立工具进程、引擎、接收服务或远端主机的回执 |
-| `native` | 7 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
+| `native` | 8 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
 | `local` | 10 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 2 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 26 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 25 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
@@ -69,3 +69,18 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [D] `$V/docker.log` | `3bcc0bc69c85a1c45a7406ce6631cc2c12fb1ec311ad0b755d7f829c30f7c42c` |
 | [J] `$V/git-final.log` | `89554fa2b730a2203b9a8db0a9fbe1fa3cc1874d0c4b7b691aba415d83163350` |
 | [J] 本树 `apps/cli/dist/index.js` | `0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c` |
+
+## [TS] 安装版静态扫描补验
+
+在独立配置中，用 0.2.142 发行版的 `plugin configure` 保存 TypeScript 5.9.3 的 `tsc --project tsconfig.json --pretty false` 命令。两次 `plugin invoke verification.provider static-scan verify` 使用相同输入，唯一字段为合成项目目录 `target`。每次调用前后 Git 工作树均干净。修正前后只改动 `parcel.ts` 的赋值。
+
+| 测试提交 | 产品回执 | CLI 退出码 |
+| --- | --- | ---: |
+| `907784bfd24f1b887648e7feeb977e7f69a739c0` | `passed=false`，`parcel.ts(1,14)` 报 TS2322 | 1 |
+| `e090c30a36413934cd4dbc13177ed26577ff4004` | `passed=true`，诊断为空 | 0 |
+
+原始回执位于 `$V/static-scan.iqFC4Y/`，含 `tools.txt`、`{rejected,accepted}.{json,exit,revision}` 和可复查两次提交的 `project/`。从本树根运行下列命令可生成独立的新回执。
+
+```sh
+bash tests/qualification/w10/static-scan.sh "$O/.codex/validation/request-lifecycle-20261118/release-142.saPyl47d/profile/bin/afk" "$V"
+```

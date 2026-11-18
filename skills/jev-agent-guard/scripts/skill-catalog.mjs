@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { installedSkillScope, matchesSkillScope } from './skill-scope.mjs';
 
 function sanitize(text) {
   return text.replace(/\b(password|token|secret|api[_-]?key)\s*[:=]\s*[^\s'"`]+/gi, '$1=[redacted]')
@@ -67,8 +68,15 @@ export function listSkillMetadata(roots) {
         const source = fs.readFileSync(file, 'utf8');
         const { name, description } = extractContract(source);
         const metadata = frontmatter(source);
-        if (/^[a-z0-9][a-z0-9-]{0,63}$/.test(name) && !skills.has(name)) skills.set(name, {
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) continue;
+        const scope = installedSkillScope(metadata);
+        if (skills.has(name)) {
+          if (scope !== undefined) skills.get(name).recallScope = null;
+          continue;
+        }
+        skills.set(name, {
           name, description, file,
+          ...(scope !== undefined ? { recallScope: scope } : {}),
           'disable-model-invocation': !/^(?:false)?(?:\s+#.*)?$/i.test(field(metadata, 'disable-model-invocation')),
           'user-invocable': !/^false(?:\s+#.*)?$/i.test(field(metadata, 'user-invocable')),
           'allowed-tools': field(metadata, 'allowed-tools'),
@@ -93,11 +101,18 @@ export function skillRoots(host, projectRoot, env = process.env) {
   return [path.join(projectRoot, '.opencode/skills'), path.join(config, 'opencode/skills')];
 }
 
-export async function recommendSkill(prompt, catalog, choose) {
+export async function recommendSkill(prompt, catalog, choose, task) {
   const cleaned = prompt.slice(0, 2000).replace(/\b(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+/gi, '');
   const terms = [...new Set((cleaned.toLowerCase().match(/[\p{L}\p{N}-]{3,}/gu) ?? []).slice(0, 32))];
-  const ranked = catalog.filter(skill => !skill['disable-model-invocation'])
-    .map(skill => ({ skill, score: terms.filter(term => `${skill.name} ${skill.description}`.toLowerCase().includes(term)).length }))
+  const ranked = catalog.filter(skill => !skill['disable-model-invocation'] && matchesSkillScope(skill.recallScope, task))
+    .map(skill => {
+      const description = `${skill.name} ${skill.description}`.toLowerCase();
+      const matches = new Set(terms.filter(term => description.includes(term)));
+      for (const phrase of skill.description?.match(/\p{Script=Han}{4,}/gu) ?? []) {
+        if (cleaned.includes(phrase)) matches.add(phrase);
+      }
+      return { skill, score: matches.size };
+    })
     .filter(item => item.score > 0).sort((left, right) => right.score - left.score).slice(0, 5);
   if (!ranked.length) return null;
   if (ranked.length === 1 || ranked[0].score > ranked[1].score) return ranked[0].skill.name;

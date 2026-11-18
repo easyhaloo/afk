@@ -62,6 +62,7 @@ export function jevAgentGuardV2({ scriptsRoot = resolveScriptsRoot(), env = proc
       await ctx.session.hook('prompt', async event => {
         try {
           const session = sidOf(event);
+          recommendations.delete(session);
           const prompt = (event?.prompt?.text ?? '').slice(0, 2000);
           const decision = await runAdapter({ host: 'opencode', event: 'prompt', payload: {
             prompt, session_id: session, cwd: directory,

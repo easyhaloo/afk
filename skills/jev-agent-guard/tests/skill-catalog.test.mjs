@@ -5,6 +5,16 @@ import path from 'node:path';
 import test from 'node:test';
 import { extractContract, findSkill, listSkillMetadata, recommendSkill, skillRoots } from '../scripts/skill-catalog.mjs';
 
+test('prompt routing recognizes complete Han labels and aliases in installed descriptions', async () => {
+  const skill = { name: 'stock-audit', description: '库存盘点（货品清点），只读。' };
+  const manual = { ...skill, name: 'manual-audit', 'disable-model-invocation': true };
+  const catalog = [manual, skill];
+  assert.equal(await recommendSkill('请用库存盘点查看差额。', catalog), 'stock-audit');
+  assert.equal(await recommendSkill('如何做货品清点？', catalog), 'stock-audit');
+  assert.equal(await recommendSkill('盘点别的数据。', catalog), null);
+  assert.equal(await recommendSkill('请用货品清点。', [manual]), null);
+});
+
 test('catalog reads bounded Skill metadata and mandatory step titles', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'jev skill catalog '));
   try {

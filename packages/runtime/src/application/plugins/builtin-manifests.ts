@@ -42,7 +42,7 @@ function defaultSelections(homeDir: string, workspaceRoot: string) {
         'policy.secret-scan', 'policy.license-policy', 'policy.compliance-policy'],
       create: () => createBuiltinCapabilityPlugins({
         notifications: [new DesktopNotificationProvider()],
-        contexts: [new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite')),
+        contexts: [new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite'), { homeDir }),
           new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
           new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') })],
         credentials: [new SystemKeychainProvider()],
@@ -81,7 +81,7 @@ function withBuiltinExternalTools(manifest: PluginManifest): PluginManifest {
   return externalTools.length ? { ...manifest, externalTools } : manifest;
 }
 
-export function builtinExternalTools(pluginId: string): readonly ExternalToolDependency[] {
+export function builtinExternalTools(pluginId: string, platform: string = process.platform): readonly ExternalToolDependency[] {
   const tool = (id: string, command: string, location: 'host' | 'backend', url: string, args?: string[]): ExternalToolDependency => ({
     id, command, location, source: { url }, ...(args ? { version: { args } } : {}),
   });
@@ -101,6 +101,12 @@ export function builtinExternalTools(pluginId: string): readonly ExternalToolDep
     case 'host.kubernetes-exec': return [tool('kubectl', 'kubectl', 'host', 'https://kubernetes.io/docs/tasks/tools/', ['version', '--client', '--output=json'])];
     case 'sandbox.docker': return [tool('docker', 'docker', 'host', 'https://docs.docker.com/engine/install/', ['--version'])];
     case 'sandbox.podman': return [tool('podman', 'podman', 'host', 'https://podman.io/docs/installation', ['--version'])];
+    case 'notification.email': return [tool('sendmail', 'sendmail', 'host', 'https://www.postfix.org/sendmail.1.html')];
+    case 'notification.desktop': {
+      if (platform === 'darwin') return [{ ...tool('osascript', 'osascript', 'host', 'https://developer.apple.com/library/archive/documentation/AppleScript/Conceptual/AppleScriptLangGuide/reference/ASLR_cmds.html'), platforms: ['darwin'] }];
+      if (platform === 'win32') return [{ ...tool('powershell', 'powershell', 'host', 'https://learn.microsoft.com/en-us/powershell/scripting/windows-powershell/starting-windows-powershell'), platforms: ['win32'] }];
+      return [{ ...tool('notify-send', 'notify-send', 'host', 'https://gnome.pages.gitlab.gnome.org/libnotify/notify-send.html'), platforms: ['linux'] }];
+    }
     case 'verification.browser-check': return [{ ...tool('playwright', 'playwright', 'backend', 'https://playwright.dev/docs/intro', ['--version']), optional: true }];
     default: return [];
   }
@@ -128,11 +134,12 @@ export function configuredExternalTools(id: string, config: { readonly [key: str
   if (id === 'host.ssh' && typeof config.scpBinary === 'string' && config.scpBinary !== 'scp') bindings.set('scp', config.scpBinary);
   if (id.startsWith('verification.') && Array.isArray(config.command)) bindings.set(id.slice('verification.'.length), String(config.command[0]));
   if (id === 'sandbox.remote-container' && config.transport === 'cli' && typeof config.command === 'string') bindings.set('remote-container', config.command);
-  if (id === 'notification.email') bindings.set('sendmail', typeof config.sendmailPath === 'string' ? config.sendmailPath : '/usr/sbin/sendmail');
+  if (id === 'notification.email' && config.sendmailPath !== 'sendmail') bindings.set('sendmail', typeof config.sendmailPath === 'string' ? config.sendmailPath : '/usr/sbin/sendmail');
   if (id === 'credential.system-keychain' && typeof config.command === 'string') bindings.set('system-keychain', config.command);
   if (id === 'repository.special-git-backend' && typeof config.backend === 'string') bindings.set('special-git-backend', config.backend);
   const unsupported = [...bindings].map(([toolId, command]) => ({ id: toolId, command: command.trim(),
     location: id.startsWith('verification.') ? 'backend' as const : 'host' as const,
     status: 'unsupported' as const, reason: 'custom-binding' as const }));
-  return { declarations: builtinExternalTools(id).filter(tool => !bindings.has(tool.id) && !(id.startsWith('verification.') && config.command !== undefined)), unsupported };
+  return { declarations: builtinExternalTools(id, typeof config.platform === 'string' ? config.platform : undefined)
+    .filter(tool => !bindings.has(tool.id) && !(id.startsWith('verification.') && config.command !== undefined)), unsupported };
 }

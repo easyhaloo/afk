@@ -8,13 +8,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CandidateStore } from './candidate-store.js';
 import type { CandidateProposal } from './contracts.js';
 import { buildEvidencePack } from './evidence.js';
-import { output } from './ledger-data.fixture.spec.js';
+import { completeFixtureRequest, output } from './ledger-data.fixture.spec.js';
 import { prepareAssetProposal, type ProposalInventory } from './proposals.js';
 import { canonicalLearningJson } from './requests.js';
 import type { ProposalValidationChecker, ProposalValidationDependencies } from './proposal-validation.js';
+import * as proposalRuntime from './proposal-runtime.js';
+import * as proposalSemantics from './proposal-semantics.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { DockerContainerProvider } from '../../infrastructure/sandbox/container/docker.js';
-import { executeFrozenContainer } from '../../infrastructure/sandbox/container/frozen-execution.js';
+import { executeFrozenContainer, type FrozenExecutionOptions } from '../../infrastructure/sandbox/container/frozen-execution.js';
+import { captureFrozenScratchHelper } from '../../infrastructure/sandbox/container/frozen-input.js';
 import type { FrozenContainerInspection, FrozenContainerOperations } from '../../infrastructure/sandbox/container/types.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
 import type { RepositoryProvider, RepositoryWorkspace } from '../../plugin-sdk/capabilities.js';
@@ -35,7 +38,7 @@ async function validate(...args: Parameters<typeof import('./proposal-validation
 }
 
 async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidence: 'audit' | 'journal' | 'partial' = 'audit',
-  identity: { sourceRunId?: string | null; sourceId?: string; auditRunId?: string; secondAuditRunId?: string; validationRunId?: string; imported?: boolean } = {}) {
+  identity: { sourceRunId?: string | null; sourceId?: string; auditRunId?: string; secondAuditRunId?: string; validationRunId?: string; analysisCallId?: string; imported?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'proposal-validation-')));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, 'private', 'ledger.sqlite');
@@ -90,7 +93,7 @@ async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidenc
       branches: ['Verify ownership first'], recovery: ['Stop on refusal'], completion: 'Owned target recovered', patch: 'Bound recovery to the owned target',
       evaluationCases: [{ kind: 'normal', input: 'recover owned', expected: 'candidate claims success' },
         { kind: 'refusal', input: 'recover foreign', expected: 'refuse' }, { kind: 'recovery', input: 'retry interrupted', expected: 'recover' }] } }) };
-  const processed = store.completeRequest(source.key, { version: 1, candidates: [proposal], warnings: [] });
+  const processed = completeFixtureRequest(store, source.key, { version: 1, candidates: [proposal], warnings: [] }, identity.analysisCallId);
   const candidate = store.getCandidate(processed.candidateIds[0])!;
   const prepared = prepareAssetProposal(candidate.proposal, inventory);
   const workspace: RepositoryWorkspace = { id: 'owned-workspace', runId: identity.validationRunId ?? 'independent-validation', repository: { url: 'fixture', ref: 'main' },
@@ -146,6 +149,159 @@ async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidenc
   };
   return { root, file, store, source, pack, candidate, prepared, checker, repository, engine, execution, dependencies, input, current, persist, unchanged, rewrite, stateFile };
 }
+
+async function recoveryAcceptanceFixture() {
+  const test = await fixture();
+  const check = test.prepared.checks.find(entry => entry.kind === 'recovery')!;
+  const faultInput = '{"key":"partial"}';
+  const recoveryInput = '{"key":"saved"}';
+  const hex = (value: string) => Buffer.from(value).toString('hex');
+  const state = (value: string) => [{ id: 'state', path: 'state.json', bytes: Buffer.from(value).toString('base64') }];
+  const returns: NonNullable<proposalSemantics.ProposalSemanticConfiguration['recovery']>['returnAssertions'] = {
+    fault: { exitCode: 23, signal: null, stdoutHex: hex('partial\n'), stderrHex: hex('fault\n') },
+    recovery: { exitCode: 0, signal: null, stdoutHex: hex('recovered\n'), stderrHex: '' },
+    replay: { exitCode: 0, signal: null, stdoutHex: hex('already-ready\n'), stderrHex: '' },
+  };
+  const configured: proposalSemantics.ProposalSemanticConfiguration = {
+    protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: 'recovery', input: check.input, callInput: faultInput,
+    assertions: [{ id: 'exit', source: 'exit-code', expected: 0 },
+      { id: 'stdout', source: 'stdout', expected: 'partial\nrecovered\nalready-ready\n' },
+      { id: 'stderr', source: 'stderr', expected: 'fault\n' }],
+    recovery: { contractRevision: 'bounded-recovery-return-state-v1', resources: [{ id: 'state', path: 'state.json' }],
+      callInput: recoveryInput, requireEffectHistory: false,
+      assertions: { fault: state('partial:saved'), recovered: state('ready:saved'), replayed: state('ready:saved') }, returnAssertions: returns },
+  };
+  const helperBytes = Buffer.alloc(120);
+  Buffer.from([127, 69, 76, 70, 2, 1, 1]).copy(helperBytes);
+  helperBytes.writeUInt16LE(2, 16);
+  helperBytes.writeUInt16LE(62, 18);
+  helperBytes.writeBigUInt64LE(64n, 32);
+  helperBytes.writeUInt16LE(56, 54);
+  helperBytes.writeUInt16LE(1, 56);
+  helperBytes.writeUInt32LE(1, 64);
+  const helperPath = join(test.root, 'synthetic-helper.elf');
+  writeFileSync(helperPath, helperBytes);
+  const helper = captureFrozenScratchHelper(helperPath, createHash('sha256').update(helperBytes).digest('hex'));
+  test.checker.runtime.scratchHelper = helper;
+  test.checker.runtime.harness!.cases = test.checker.runtime.harness!.cases.map(entry => entry.checkId === check.id
+    ? { ...entry, argv: ['node', 'asset.js', faultInput], experiment: configured } : entry);
+  const requests: FrozenExecutionOptions[] = [];
+  let active: FrozenExecutionOptions;
+  const execute = test.checker.runtime.sandbox.executeFrozen;
+  test.checker.runtime.sandbox = { limits: { timeoutMs: 750, maxOutputBytes: 8192 }, remainingMs: () => 600,
+    executeFrozen: async request => { requests.push(request); active = request; return execute(request); } };
+  const start = vi.mocked(test.engine.startFrozenContainer).getMockImplementation()!;
+  vi.mocked(test.engine.startFrozenContainer).mockImplementation(async (...args) => {
+    const ordinary = await start(...args);
+    if (!active.scratch) return ordinary;
+    const operationId = args[0];
+    const frame = { revision: 'linux-native-scratch-recovery-v1', operationId, inputDigest: active.input.digest,
+      helperDigest: helper.digest, artifactDigest: active.input.manifest.find(entry => entry.path === 'asset.js')!.digest,
+      candidateVersion: active.scratch.candidateVersion, initialSampledMs: 1,
+      initial: [{ id: 'state', path: 'state.json', present: false, hex: null }],
+      phases: (['fault', 'recovery', 'replay'] as const).map((phase, index) => ({ phase, ordinal: index + 1,
+        invocationId: `${operationId}:${index + 1}`, callInputDigest: bytesDigest(index === 0 ? faultInput : recoveryInput),
+        invocation: { pid: index + 7, startedIdentity: String(123 + index), execConfirmed: true, startedMs: index * 3 + 2,
+          finishedMs: index * 3 + 3, exitCode: index === 0 ? 23 : 0, signal: null }, sampledMs: index * 3 + 4,
+        final: [{ id: 'state', path: 'state.json', present: true, hex: hex(index === 0 ? 'partial:saved' : 'ready:saved') }],
+        stdoutHex: returns[phase].stdoutHex, stderrHex: returns[phase].stderrHex })) };
+    return { code: 0, stdout: JSON.stringify(frame), stderr: '' };
+  });
+  return { ...test, check, helper, helperPath, requests };
+}
+
+function interceptRecoveryAcceptance(test: Awaited<ReturnType<typeof recoveryAcceptanceFixture>>,
+  replace: (observation: proposalRuntime.ProposalRuntimeObservation) => proposalRuntime.ProposalRuntimeObservation,
+  beforeFinal: () => void = () => {}) {
+  const verify = proposalRuntime.verifyRepositoryAssetProposal;
+  const captured: proposalRuntime.ProposalRuntimeObservation[] = [];
+  vi.spyOn(proposalRuntime, 'verifyRepositoryAssetProposal').mockImplementation(async (...args) => {
+    const result = await verify(...args);
+    expect(result.status).toBe('verification-observed');
+    if (result.status !== 'verification-observed') return result;
+    const comparison = result.comparisons.find(entry => entry.checkId === test.check.id)!;
+    for (const version of ['original', 'proposed'] as const) {
+      const observation = comparison[version]!;
+      captured.push(observation);
+      comparison[version] = replace(observation);
+    }
+    beforeFinal();
+    return result;
+  });
+  return captured;
+}
+
+describe('final recovery acceptance with an injected checker and ordinary harness for other checks', () => {
+  it('recomputes both recovery versions with the owned context and persists only receipts', async () => {
+    const test = await recoveryAcceptanceFixture();
+    const observe = vi.spyOn(proposalSemantics, 'observeProposalExperiment');
+    const captured = interceptRecoveryAcceptance(test, observation => observation, () => observe.mockClear());
+    expect(await validate(test.input, test.dependencies)).toMatchObject({ status: 'validated', validatedVersion: 2 });
+    expect(captured.map(observation => observation.receipt.binding.version)).toEqual(['original', 'proposed']);
+    expect(observe).toHaveBeenCalledTimes(2);
+    for (const [index, observation] of captured.entries()) {
+      const context = observation.semanticContext!;
+      expect(observe.mock.calls[index][1]).toBe(observation.execution);
+      expect(observe.mock.calls[index][2]).toBe(context);
+      expect(test.requests).toContain(context.options);
+      expect(context.options.scratch!.helper).toBe(test.helper);
+      expect(context.options).toMatchObject({ timeoutMs: 600, maxOutputBytes: 8192 });
+      expect(context).toMatchObject({ operationId: observation.receipt.binding.operationId, containerId: observation.execution.evidence.containerId });
+      expect(observe.mock.results[index].value).toEqual(observation.receipt.semantic);
+    }
+    const validation = test.store.getValidation(test.candidate.id)!;
+    const savedJson = Buffer.from(validation.results.map(chunk => chunk.slice('json-base64-v1:'.length)).join(''), 'base64').toString();
+    const saved = JSON.parse(savedJson);
+    expect(saved.receiptDigest).toBe(digest(saved.report));
+    const comparison = saved.report.comparisons.find((entry: { checkId: string }) => entry.checkId === test.check.id);
+    for (const version of ['original', 'proposed'] as const) {
+      const packed = comparison[version];
+      expect(Object.keys(packed).sort()).toEqual(['receipt', 'receiptDigest']);
+      expect(packed.receipt.semantic.passed).toBe(true);
+      expect(digest({ ...packed.receipt, binding: { ...saved.report.observationBinding, ...packed.receipt.binding } })).toBe(packed.receiptDigest);
+    }
+    for (const field of ['semanticContext', 'scratchHelper', 'helper', 'options']) expect(savedJson).not.toContain(`"${field}":`);
+    expect(savedJson).not.toContain(test.helperPath);
+  });
+
+  it.each(['missing-context', 'operation', 'container', 'helper', 'timeout-limit', 'output-limit', 'saved-timeout', 'output', 'semantic-receipt'] as const)(
+    'rejects %s tampering after real runtime observation and before final acceptance', async mode => {
+      const test = await recoveryAcceptanceFixture();
+      const persist = vi.spyOn(test.store, 'recordValidation');
+      const captured = interceptRecoveryAcceptance(test, observation => {
+        if (observation.receipt.binding.version !== 'proposed') return observation;
+        const context = observation.semanticContext!;
+        const changed = { ...observation, semanticContext: { ...context, options: { ...context.options } },
+          receipt: { ...observation.receipt, binding: { ...observation.receipt.binding } } };
+        if (mode === 'missing-context') return { ...changed, semanticContext: undefined };
+        if (mode === 'operation') changed.semanticContext.operationId = 'foreign-operation';
+        if (mode === 'container') changed.semanticContext.containerId = 'f'.repeat(64);
+        if (mode === 'helper') changed.semanticContext.options.scratch = { ...context.options.scratch!, helper: { ...test.helper } };
+        if (mode === 'timeout-limit') changed.semanticContext.options.timeoutMs = 751;
+        if (mode === 'output-limit') changed.semanticContext.options.maxOutputBytes = 8193;
+        if (mode === 'saved-timeout') changed.semanticContext.options.timeoutMs = context.options.timeoutMs + 1;
+        if (mode === 'output') {
+          changed.execution = { ...observation.execution, stdout: `${observation.execution.stdout}forged` };
+          changed.receipt.binding.executionDigest = digest(changed.execution);
+        }
+        if (mode === 'semantic-receipt') {
+          const semantic = observation.receipt.semantic!;
+          changed.receipt.semantic = { ...semantic, assertions: semantic.assertions.map(assertion => ({ ...assertion, actual: 'forged' })) };
+          changed.receipt.actual = changed.receipt.semantic.assertions;
+        }
+        changed.receiptDigest = digest(changed.receipt);
+        return changed;
+      });
+      const result = await validate(test.input, test.dependencies);
+      const code = ['semantic-receipt', 'saved-timeout', 'output'].includes(mode) ? 'invalid_receipt' : 'binding_mismatch';
+      expect(result).toEqual(blocked(code));
+      expect(captured).toHaveLength(2);
+      expect(captured.every(observation => observation.receipt.semantic?.passed)).toBe(true);
+      expect(persist).not.toHaveBeenCalled();
+      expect(test.repository.cleanup).toHaveBeenCalledOnce();
+      test.unchanged();
+    });
+});
 
 describe('shared proposal candidate validation foundation', () => {
   it('reports allocation cleanup failure as storage failure without exposing paths or promoting the candidate', async () => {
@@ -253,9 +409,7 @@ describe('shared proposal candidate validation foundation', () => {
   });
 
   it('rechecks validation run independence in the final transaction', async () => {
-    const test = await fixture();
-    test.store.startAnalysisAttempt({ requestKey: test.source.key, callId: 'analysis-fixture', day: '2026-11-12', limit: 1,
-      startedAt: '2026-11-12T00:00:00Z' });
+    const test = await fixture('tool', true, 'audit', { analysisCallId: 'analysis-fixture' });
     const record = test.store.recordValidation.bind(test.store);
     vi.spyOn(test.store, 'recordValidation').mockImplementation((...args) => {
       test.store.recordAnalysisIdentity('analysis-fixture', { analysisRunId: 'independent-analysis', sessionId: test.checker.runtime.request.runId });
@@ -264,7 +418,7 @@ describe('shared proposal candidate validation foundation', () => {
     expect(await validate(test.input, test.dependencies)).toEqual(blocked('target_mismatch')); test.unchanged();
   });
 
-  it.each(['source', 'grant', 'configuration', 'target', 'runtime', 'runtime-version'] as const)('rechecks %s at the final synchronous commit boundary', async mode => {
+  it.each(['source', 'grant', 'configuration', 'target', 'runtime', 'runtime-version', 'sandbox-limits', 'remaining-budget', 'scratch-helper'] as const)('rechecks %s at the final synchronous commit boundary', async mode => {
     const test = await fixture();
     const record = test.store.recordValidation.bind(test.store);
     vi.spyOn(test.store, 'recordValidation').mockImplementation((...args) => {
@@ -274,10 +428,28 @@ describe('shared proposal candidate validation foundation', () => {
       if (mode === 'target') test.checker.target.snapshotDigest = digest('replacement-target');
       if (mode === 'runtime') test.checker.runtime.sandbox.executeFrozen = async () => { throw new Error('replacement-runtime'); };
       if (mode === 'runtime-version') test.checker.runtimeVersion = 'fixture-runtime-v2';
+      if (mode === 'sandbox-limits') test.checker.runtime.sandbox.limits = { timeoutMs: 1, maxOutputBytes: 1 };
+      if (mode === 'remaining-budget') test.checker.runtime.sandbox.remainingMs = () => 1;
+      if (mode === 'scratch-helper') test.checker.runtime.scratchHelper = { digest: 'a'.repeat(64), architecture: 'x64' };
       return record(...args);
     });
     expect(await validate(test.input, test.dependencies)).toEqual(blocked(mode === 'source' ? 'source_unavailable' : mode === 'grant'
       ? 'authorization_changed' : mode === 'target' ? 'target_mismatch' : 'checker_changed')); test.unchanged();
+  });
+
+  it('preserves saved sandbox limits and the remaining budget through final validation', async () => {
+    const test = await fixture();
+    test.checker.runtime.sandbox.limits = { timeoutMs: 950, maxOutputBytes: 128 };
+    test.checker.runtime.sandbox.remainingMs = () => 800.9;
+    const execute = test.checker.runtime.sandbox.executeFrozen;
+    const requests = vi.fn(async (request: Parameters<typeof execute>[0]) => {
+      expect(request.timeoutMs).toBe(800);
+      expect(request.maxOutputBytes).toBe(128);
+      return execute(request);
+    });
+    test.checker.runtime.sandbox.executeFrozen = requests;
+    expect(await validate(test.input, test.dependencies)).toMatchObject({ status: 'validated' });
+    expect(requests).toHaveBeenCalledTimes(test.prepared.checks.length * 2);
   });
 
   it('accepts an own-data null-prototype DTO and a tool with no original baseline', async () => {
@@ -305,7 +477,7 @@ describe('shared proposal candidate validation foundation', () => {
   });
 
   it.each(['unauthorized', 'pre-aborted', 'checker', 'timeout', 'candidate', 'source-run', 'analysis-run'] as const)('rejects initial %s without allocating a workspace', async mode => {
-    const test = await fixture();
+    const test = await fixture('tool', true, 'audit', { analysisCallId: mode === 'analysis-run' ? 'analysis-fixture' : undefined });
     const controller = new AbortController();
     if (mode === 'unauthorized') { test.current.authorization.allowed = false; test.persist(); }
     if (mode === 'pre-aborted') controller.abort();
@@ -313,7 +485,6 @@ describe('shared proposal candidate validation foundation', () => {
     if (mode === 'candidate') test.input.candidateId = 'f'.repeat(64);
     if (mode === 'source-run') test.checker.runtime.request = { ...test.checker.runtime.request, runId: 'source' };
     if (mode === 'analysis-run') {
-      test.store.startAnalysisAttempt({ requestKey: test.source.key, callId: 'analysis-fixture', day: '2026-11-12', limit: 1, startedAt: '2026-11-12T00:00:00Z' });
       test.store.recordAnalysisIdentity('analysis-fixture', { analysisRunId: test.checker.runtime.request.runId, sessionId: 'analysis-session' });
     }
     const codes = { unauthorized: 'unauthorized', 'pre-aborted': 'cancelled', checker: 'checker_unavailable', timeout: 'invalid_input',

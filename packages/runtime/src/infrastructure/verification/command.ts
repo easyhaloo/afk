@@ -36,6 +36,12 @@ export interface CommandVerificationOptions {
   readonly runner?: VerificationCommandRunner;
 }
 
+const nativeObservations = new WeakSet<object>();
+
+export function isNativeVerificationObservation(value: unknown): value is VerificationExecutionObservation {
+  return typeof value === 'object' && value !== null && nativeObservations.has(value);
+}
+
 export const runVerificationCommand: VerificationCommandRunner = (argv, options) => {
   validateCommand(argv);
   validateTimeout(options.timeoutMs);
@@ -72,9 +78,10 @@ export const runVerificationCommand: VerificationCommandRunner = (argv, options)
           const execution: VerificationExecutionObservation | undefined = executionId !== undefined
             && exitSignal === null && exitCode !== null && Number.isSafeInteger(exitCode)
             && exitCode === (typeof error?.code === 'number' ? error.code : 0)
-            ? { protocol: 'verification-execution-v1', executionId, command, cwd,
-              inputDigest: createHash('sha256').update(input ?? '').digest('hex'), exitCode, stdout, stderr, closed: true }
+            ? Object.freeze({ protocol: 'verification-execution-v1', executionId, command: Object.freeze(command), cwd,
+              inputDigest: createHash('sha256').update(input ?? '').digest('hex'), exitCode, stdout, stderr, closed: true })
             : undefined;
+          if (execution) nativeObservations.add(execution);
           resolve({ exitCode: typeof error?.code === 'number' ? error.code : 0, stdout, stderr, ...(execution ? { execution } : {}) });
         }
       };
@@ -143,7 +150,8 @@ export class CommandVerificationProvider implements VerificationProvider {
       passed: result.exitCode === 0,
       durationMs: Math.max(0, performance.now() - startedAt),
       output: [result.stdout, result.stderr].filter(Boolean).join('\n'),
-      ...(executionId !== undefined && this.runner === runVerificationCommand && result.execution ? { execution: result.execution } : {}),
+      ...(executionId !== undefined && this.runner === runVerificationCommand && isNativeVerificationObservation(result.execution)
+        ? { execution: result.execution } : {}),
     };
   }
 }

@@ -3,7 +3,8 @@ import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import { WorkflowRunner } from './workflow-engine.js';
 import type { RunObserver } from '../observability/run-observer.js';
 import { BudgetManager } from './workflows/budget.js';
-import type { ExecutionResult } from '../infrastructure/sandbox/types.js';
+import type { AgentExecution, ExecutionResult } from '../infrastructure/sandbox/types.js';
+import type { AgentExecutionOptions } from '../domain/agents/types.js';
 
 const worktreePath = '/tmp/afk-retry-worktree';
 
@@ -18,8 +19,11 @@ function executionResult(status: ExecutionResult['status'], code?: string): Exec
   } as ExecutionResult;
 }
 
-function harness(results: ExecutionResult[], maxRetries = 2) {
-  const createExecution = vi.fn(async () => {
+function harness(results: ExecutionResult[], maxRetries = 2, options: {
+  recordSelection?: () => Promise<void>; promptLimit?: number; startError?: Error;
+} = {}) {
+  const createExecution = vi.fn(async (_options: AgentExecutionOptions): Promise<AgentExecution> => {
+    if (options.startError) throw options.startError;
     const index = createExecution.mock.calls.length - 1;
     const result = results[Math.min(index, results.length - 1)];
     return {
@@ -39,7 +43,8 @@ function harness(results: ExecutionResult[], maxRetries = 2) {
     { backlog: { claim: vi.fn(async () => null), get: vi.fn(async () => ({ id: '42', state: 'ready' })) } } as unknown as ProviderBundle,
     {
       observer: { record: vi.fn(async () => undefined) } as unknown as RunObserver,
-      agentProvider: { name: 'codex', capabilities: new Set(), createExecution } as never,
+      agentProvider: { name: 'codex', capabilities: new Set(), createExecution,
+        promptLimits: options.promptLimit ? { goalConditionMaxChars: options.promptLimit } : undefined } as never,
       sandboxProvider: { name: 'local', capabilities: new Set() } as never,
       config: { maxRetries, maxSelfIterations: 2 } as never,
     },
@@ -55,16 +60,35 @@ function harness(results: ExecutionResult[], maxRetries = 2) {
     contextHighTokens: Infinity,
     budget: new BudgetManager(4, 1_000_000),
     persistBudget: async () => undefined,
-    prompt: 'implement the backlog item',
+    prompt: options.promptLimit ? '/goal implement the backlog item' : 'implement the backlog item',
     signalType: 'goal_complete',
-    executionMode: 'batch',
+    executionMode: options.promptLimit ? 'interactive' : 'batch',
     completionKind: 'task',
+    recordSelection: options.recordSelection,
   });
 
   return { phase, createExecution };
 }
 
 describe('WorkflowRunner agent failure retry', () => {
+  it.each(['accepted', 'budget', 'start-error', 'feedback-error'] as const)('records context selection only after execution acceptance (%s)', async boundary => {
+    const recordSelection = vi.fn(async () => {
+      if (boundary === 'feedback-error') throw new Error('selection feedback is incomplete');
+    });
+    const { phase, createExecution } = harness([executionResult('completed')], 2, {
+      recordSelection, promptLimit: boundary === 'budget' ? 1 : undefined,
+      startError: boundary === 'start-error' ? new Error('provider refused execution') : undefined,
+    });
+    if (boundary === 'start-error' || boundary === 'feedback-error') {
+      await expect(phase).rejects.toThrow(boundary === 'start-error' ? 'provider refused execution' : 'selection feedback is incomplete');
+    } else {
+      expect((await phase).completed).toBe(boundary === 'accepted');
+    }
+    expect(recordSelection).toHaveBeenCalledTimes(boundary === 'accepted' || boundary === 'feedback-error' ? 1 : 0);
+    if (recordSelection.mock.calls.length) expect(createExecution.mock.invocationCallOrder[0]).toBeLessThan(recordSelection.mock.invocationCallOrder[0]);
+    if (boundary === 'budget') expect(createExecution).not.toHaveBeenCalled();
+  });
+
   it('repeats the step when the agent died rather than failed the work', async () => {
     const { phase, createExecution } = harness([
       executionResult('failed', 'AGENT_TURN_FAILED'),

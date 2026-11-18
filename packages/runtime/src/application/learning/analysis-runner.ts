@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants, lstatSync, promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
+import { aborted } from 'node:util';
 import { z } from 'zod';
 import type { AgentExecution, AgentProvider, TokenUsage } from '../../domain/agents/types.js';
 import { LocalSandbox } from '../../infrastructure/sandbox/providers/local.js';
@@ -12,13 +13,39 @@ const requiredFlags = ['--safe-mode', '--tools', '--permission-mode', '--permiss
   '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--setting-sources',
   '--settings', '--no-session-persistence', '--no-chrome', '--session-id', '--system-prompt'];
 
+function executableIdentity(path: string): string | undefined {
+  const stats = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+  if (stats?.isFile()) return [stats.dev, stats.ino, stats.mode, stats.uid, stats.gid, stats.size, stats.mtimeNs, stats.ctimeNs].join(':');
+}
+
+async function resolveClaudeExecutable(signal: AbortSignal) {
+  for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+    signal.throwIfAborted();
+    if (!isAbsolute(directory)) continue;
+    try {
+      const executable = await fs.realpath(join(directory, 'claude'));
+      const identity = executableIdentity(executable);
+      if (!identity) continue;
+      await fs.access(executable, constants.X_OK);
+      return { executable, verifyExecutable() {
+        let current: string | undefined;
+        try { current = executableIdentity(executable); } catch { /* Cannot establish identity. */ }
+        if (current !== identity) throw new Error('analysis_executable_changed');
+      } };
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+  }
+  throw new Error('analysis_unsupported');
+}
+
 export interface AnalysisExecutionInput {
   provider: AgentProvider;
   jobId: string;
   prompt: string;
   signal?: AbortSignal;
   timeoutMs?: number;
-  onStarted?: (identity: { analysisRunId: string; sessionId: string }) => void;
+  onStarted?: (identity: { analysisRunId: string; sessionId: string }) => void | Promise<void>;
 }
 
 export interface AnalysisExecutionResult {
@@ -45,8 +72,18 @@ export async function executeAnalysis(input: AnalysisExecutionInput): Promise<An
   const cancellationError = () => new Error(timedOut ? 'analysis_timed_out' : 'analysis_cancelled');
   try {
     let help: string;
+    const selected = await resolveClaudeExecutable(controller.signal).catch(() => {
+      throw controller.signal.aborted ? cancellationError() : new Error('analysis_unsupported');
+    });
+    if (controller.signal.aborted) throw cancellationError();
+    const analysisRunId = randomUUID();
+    const sessionId = randomUUID();
+    const recording = input.onStarted?.({ analysisRunId, sessionId });
+    if (recording) await Promise.race([recording, aborted(controller.signal, recording)]);
+    if (controller.signal.aborted) throw cancellationError();
+    selected.verifyExecutable();
     try {
-      const probe = spawnGuardedAnalysis(['claude', '--help'], { signal: controller.signal, timeout: 10_000, killSignal: 'SIGTERM' });
+      const probe = spawnGuardedAnalysis([selected.executable, '--help'], { signal: controller.signal, timeout: 10_000, killSignal: 'SIGTERM' });
       try {
         help = await new Promise<string>((resolve, reject) => {
           let output = '';
@@ -68,12 +105,8 @@ export async function executeAnalysis(input: AnalysisExecutionInput): Promise<An
     if (controller.signal.aborted) throw cancellationError();
     directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'learning-analysis-'));
     if (controller.signal.aborted) throw cancellationError();
-    const analysisRunId = randomUUID();
-    const sessionId = randomUUID();
     const sandbox = new LocalSandbox({ id: analysisRunId, worktreePath: directory, workspaceRoot: directory,
-      sessionName: `learning-${analysisRunId}`, runtimeRunId: analysisRunId, analysisParentGuard: true });
-    input.onStarted?.({ analysisRunId, sessionId });
-    if (controller.signal.aborted) throw cancellationError();
+      sessionName: `learning-${analysisRunId}`, runtimeRunId: analysisRunId, analysis: { ...selected, sessionId } });
     execution = await input.provider.createExecution({ sandbox, worktreePath: directory, sessionId,
       prompt: input.prompt, signalType: 'goal_complete', generation: 1,
       executionMode: 'batch', executionProfile: 'analysis' });
@@ -87,11 +120,12 @@ export async function executeAnalysis(input: AnalysisExecutionInput): Promise<An
     });
     const result = await Promise.race([execution.waitForResult({ completionTimeoutMs: timeoutMs }), cancelled]);
     if (controller.signal.aborted) throw cancellationError();
-    if (result.status !== 'completed' || result.tools?.length) throw new Error('analysis_failed');
+    if (result.status !== 'completed' || result.tools?.length || execution.metadata.threadId !== sessionId) {
+      throw new Error('analysis_failed');
+    }
     const bytes = JSON.stringify(result.structuredOutput);
     if (!bytes || Buffer.byteLength(bytes) > DISTILLATION_LIMITS.outputBytes + 128) throw new Error('analysis_output_limit');
-    return { analysisRunId, sessionId: execution.metadata.threadId ?? result.sessionId,
-      output: result.structuredOutput, usage: result.usage };
+    return { analysisRunId, sessionId, output: result.structuredOutput, usage: result.usage };
   } finally {
     clearTimeout(deadline);
     input.signal?.removeEventListener('abort', cancel);

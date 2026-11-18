@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { builtinPluginManifests, builtinExternalTools } from './builtin-manifests.js';
+import { builtinPluginManifests, builtinExternalTools, configuredExternalTools } from './builtin-manifests.js';
 import { validateManifest } from '../../plugin-sdk/profile.js';
 import { AgentProviderRegistry, ensureBuiltinAgentProviders, ProcessAgentProvider } from '../../domain/agents/index.js';
+import { desktopNotificationCommand } from '../../infrastructure/providers/notifications.js';
 
 vi.mock('node:child_process', async importOriginal => ({
   ...await importOriginal<typeof import('node:child_process')>(),
@@ -42,5 +43,36 @@ describe('builtin external tool inventory', () => {
     expect(builtinExternalTools('host.ssh').map(tool => tool.command)).toEqual(['ssh', 'scp']);
     expect(builtinExternalTools('context.experience')).toEqual([]);
     for (const manifest of builtinPluginManifests('/unused')) expect(() => validateManifest(manifest)).not.toThrow();
+  });
+
+  it.each(['darwin', 'linux', 'win32'] as const)('declares the actual %s desktop command without a notification or version probe', platform => {
+    const command = desktopNotificationCommand(platform, { title: 'inventory', body: 'passive' }).command;
+    const projection = configuredExternalTools('notification.desktop', { platform });
+    expect(projection.unsupported).toEqual([]);
+    expect(projection.declarations).toEqual([expect.objectContaining({ command, location: 'host', platforms: [platform] })]);
+    expect(projection.declarations[0].version).toBeUndefined();
+    expect(() => validateManifest({ id: 'notification.desktop', version: '1.0.0', apiVersion: 1, trusted: true,
+      provides: ['notification.provider'], externalTools: projection.declarations })).not.toThrow();
+  });
+
+  it('includes the current desktop executable in default metadata', () => {
+    const platform = process.platform === 'darwin' || process.platform === 'win32' ? process.platform : 'linux';
+    expect(builtinPluginManifests('/unused').find(manifest => manifest.id === 'notification.desktop')?.externalTools)
+      .toEqual(configuredExternalTools('notification.desktop', { platform }).declarations);
+    expect(builtinExternalTools('notification.desktop')).toHaveLength(1);
+  });
+
+  it('declares bare sendmail without probing delivery and preserves exact path binding safety', () => {
+    const declarations = builtinExternalTools('notification.email');
+    expect(declarations).toEqual([expect.objectContaining({ id: 'sendmail', command: 'sendmail', location: 'host' })]);
+    expect(declarations[0].version).toBeUndefined();
+    expect(configuredExternalTools('notification.email', { sendmailPath: 'sendmail' }))
+      .toEqual({ declarations, unsupported: [] });
+    const configurations: Record<string, string>[] = [{}, { sendmailPath: '/usr/sbin/sendmail' }, { sendmailPath: '/opt/custom/sendmail' }];
+    for (const config of configurations) {
+      expect(configuredExternalTools('notification.email', config)).toEqual({ declarations: [], unsupported: [
+        expect.objectContaining({ id: 'sendmail', command: config.sendmailPath ?? '/usr/sbin/sendmail', status: 'unsupported', reason: 'custom-binding' }),
+      ] });
+    }
   });
 });

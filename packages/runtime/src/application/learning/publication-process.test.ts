@@ -215,15 +215,10 @@ async function assertPublished(fixture: Fixture, candidateIds: string[]): Promis
 function billingCandidate(fixture: Fixture) {
   fixture.policy.targets.push({ ...fixture.policy.targets[0], ref: 'wiki:billing', paths: ['知识/Billing.md'] });
   fixture.persistGrant();
-  const request = fixture.store.getRequest(fixture.candidate.requestKey)!;
-  const next = fixture.store.submitRequest({ request: { ...request.request, sourceId: 'run:billing', sourceRunId: 'billing' }, evidence: request.evidence });
-  const processed = fixture.store.completeRequest(next.key, { version: 1, warnings: [], candidates: [candidateProposalSchema.parse({
+  return fixture.addCandidate(candidateProposalSchema.parse({
     ...output.candidates[0], title: 'Billing', statement: 'Billing requires approval', targetRef: 'wiki:billing',
     payload: { subject: 'billing', rule: 'Approve before billing', classification: 'fact' },
-  })] });
-  const candidate = fixture.store.getCandidate(processed.candidateIds[0])!;
-  return fixture.store.recordValidation(candidate.id, candidate.version, { candidateDigest: candidate.digest,
-    evidenceDigest: candidate.evidenceDigest, validatorVersion: 'knowledge-v1', passed: true, results: ['fixture evidence checked'] });
+  }));
 }
 
 describe.skipIf(process.platform === 'win32')('real publication processes sharing a vault', () => {

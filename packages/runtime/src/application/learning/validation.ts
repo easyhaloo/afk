@@ -1,23 +1,39 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import { isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 import type { ProviderOperationOptions, VerificationProvider, VerificationResult } from '../../plugin-sdk/capabilities.js';
 import type { CandidateStore, LearningCandidate } from './candidate-store.js';
 import { candidateProposalSchema, DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
 import { verifyLessonQaEvidence, type LessonQaConfiguration, type LessonQaBlockedCode, type LessonQaEvidenceResult } from './lesson-validation.js';
+import { lessonQaConfigurationSchema, parseLearningValidationInput } from './validation-input.js';
+import { frozenCheckerConfigurationSchema } from '../../infrastructure/verification/frozen-command.js';
+
+export { lessonQaConfigurationSchema } from './validation-input.js';
 
 const protocol = 'learning-validation-v1';
-const inputSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
-  expectedVersion: z.number().int().positive().safe(), checkerId: learningIdentitySchema }).strict();
 const targetSchema = z.object({ scope: learningScopeSchema, ref: learningIdentitySchema,
   revision: learningIdentitySchema, snapshotDigest: learningDigestSchema }).strict();
-export const lessonQaConfigurationSchema = z.object({ scope: learningScopeSchema, workItemId: learningIdentitySchema,
-  runId: learningIdentitySchema, targetRevision: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
-  root: z.string().min(1).max(4096), auditDigest: learningDigestSchema }).strict();
+const executionSchema = z.object({ protocol: z.literal('learning-fact-command-v1'),
+  command: z.array(z.string().max(4096).refine(value => !value.includes('\0'))).min(1).max(64),
+  cwd: z.string().min(1).max(4096).refine(value => isAbsolute(value) && resolve(value) === value && !/[\0\r\n]/.test(value)),
+  workspaceDigest: learningDigestSchema, workspaceRevision: learningIdentitySchema, leaseId: learningIdentitySchema,
+  frozen: frozenCheckerConfigurationSchema.optional() }).strict().refine(value => !value.frozen || value.cwd === '/workspace');
+const frozenObservationSchema = z.object({ checkerDigest: learningDigestSchema,
+  baseImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/), targetDigest: learningDigestSchema,
+  operationId: z.string().uuid(), containerId: z.string().regex(/^[a-f0-9]{64}$/), imageId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  inputDigest: learningDigestSchema, contextDigest: learningDigestSchema, commandDigest: learningDigestSchema,
+  policyDigest: learningDigestSchema, containerRemoved: z.literal(true), imageRemoved: z.literal(true) }).strict();
+const observationSchema = z.object({ protocol: z.literal('verification-execution-v1'),
+  executionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/),
+  command: z.array(z.string().max(4096)).min(1).max(64), cwd: z.string().min(1).max(4096), inputDigest: learningDigestSchema,
+  exitCode: z.literal(0), stdout: z.string().max(DISTILLATION_LIMITS.outputBytes),
+  stderr: z.string().max(DISTILLATION_LIMITS.outputBytes), closed: z.literal(true),
+  frozen: frozenObservationSchema.optional() }).strict();
 const checkerSchema = z.object({ id: learningIdentitySchema, version: learningIdentitySchema,
   configurationDigest: learningDigestSchema, mode: z.literal('independent-assertions'), target: targetSchema,
-  qa: lessonQaConfigurationSchema.optional() }).strict();
+  qa: lessonQaConfigurationSchema.optional(), execution: executionSchema.optional() }).strict();
 const authorizationSchema = z.object({ allowed: z.boolean(), authorizationDigest: learningDigestSchema }).strict();
 const reconciliationSchema = z.object({ current: z.boolean(), evidenceDigest: learningDigestSchema }).strict();
 const valueSchema = z.union([z.string().max(4096), z.array(z.string().max(1024)).max(64)]);
@@ -35,6 +51,7 @@ export interface LearningValidationChecker {
   target: z.infer<typeof targetSchema>;
   provider: VerificationProvider;
   qa?: LessonQaConfiguration;
+  execution?: z.infer<typeof executionSchema>;
 }
 
 export interface LearningValidationDependencies {
@@ -43,6 +60,7 @@ export interface LearningValidationDependencies {
   authorize(candidate: LearningCandidate, options: ProviderOperationOptions): Promise<z.infer<typeof authorizationSchema>>;
   resolveChecker(candidate: LearningCandidate, checkerId: string, options: ProviderOperationOptions): Promise<LearningValidationChecker | undefined>;
   readCommitSnapshot(candidate: LearningCandidate, checkerId: string): LearningValidationCommitSnapshot;
+  completeExecution?(options: ProviderOperationOptions): Promise<{ closed: true }>;
 }
 
 export interface LearningValidationCommitSnapshot {
@@ -50,12 +68,13 @@ export interface LearningValidationCommitSnapshot {
   source: z.infer<typeof reconciliationSchema>;
   checker: LearningValidationChecker;
   qaAuditDigest?: string;
+  repairAuditDigests?: { failure: string; fix: string };
 }
 
 type ValidationCode = LessonQaBlockedCode | 'invalid_input' | 'candidate_unavailable' | 'scope_mismatch' | 'stale_candidate'
   | 'unsupported_kind' | 'evidence_unavailable' | 'insufficient_evidence' | 'source_unavailable'
   | 'unauthorized' | 'authorization_changed' | 'checker_unavailable' | 'checker_changed' | 'target_mismatch'
-  | 'verification_failed' | 'invalid_receipt' | 'output_limit' | 'binding_mismatch' | 'insufficient_coverage'
+  | 'verification_failed' | 'invalid_execution' | 'cleanup_failed' | 'invalid_receipt' | 'output_limit' | 'binding_mismatch' | 'insufficient_coverage'
   | 'assertion_failed' | 'cancelled' | 'timed_out' | 'storage_failed' | 'commit_guard_unavailable';
 
 export type LearningValidationResult = { status: 'blocked'; code: ValidationCode } | {
@@ -75,11 +94,12 @@ export async function validateLearningCandidate(
   dependencies: LearningValidationDependencies,
   options: ProviderOperationOptions & { timeoutMs?: number } = {},
 ): Promise<LearningValidationResult> {
-  const parsed = inputSchema.safeParse(input);
+  const parsed = parseLearningValidationInput(input);
   const timeout = z.number().int().positive().max(DISTILLATION_LIMITS.timeoutMs).safeParse(options.timeoutMs ?? DISTILLATION_LIMITS.timeoutMs);
-  if (!parsed.success || !timeout.success) return { status: 'blocked', code: 'invalid_input' };
+  if (!parsed?.success || !timeout.success) return { status: 'blocked', code: 'invalid_input' };
   if (options.signal?.aborted) return { status: 'blocked', code: 'cancelled' };
   const request = parsed.data;
+  let committed: Extract<LearningValidationResult, { status: 'validated' }> | undefined;
   const controller = new AbortController();
   const deadline = performance.now() + timeout.data;
   let timedOut = false;
@@ -157,6 +177,7 @@ export async function validateLearningCandidate(
       selected = resolved;
       const { provider: _provider, ...configuration } = resolved;
       checker = checkerSchema.parse(configuration);
+      if (checker.execution && (loaded.candidate.proposal.kind !== 'fact' || checker.qa || !dependencies.completeExecution)) fail('checker_unavailable');
       if (checker.id !== request.checkerId || selected.provider.capabilities['test-execution'] !== true
         || typeof selected.provider.verify !== 'function') fail('checker_unavailable');
       if (typeof selected.provider.doctor !== 'function') fail('checker_unavailable');
@@ -192,7 +213,9 @@ export async function validateLearningCandidate(
       candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest, target: before.checker.target,
       checkerId: before.checker.id, checkerVersion: before.checker.version, configurationDigest: before.checker.configurationDigest,
       authorizationDigest: before.authorization.authorizationDigest, executionId: randomUUID(),
-      ...(before.qa ? { qa: before.qa.binding, qaEvidence: before.qa.evidence } : {}) };
+      ...(before.checker.execution ? { execution: before.checker.execution } : {}),
+      ...(before.qa ? { qa: before.qa.binding, qaEvidence: before.qa.evidence,
+        ...(before.qa.repair ? { repair: before.qa.repair.binding, repairEvidence: before.qa.repair.evidence } : {}) } : {}) };
     const assertions: Array<{ node: string; expected: z.infer<typeof valueSchema>; evidence: z.infer<typeof referenceSchema>[] }> = [];
     const add = (node: string, expected: z.infer<typeof valueSchema>, ids = candidate.proposal.evidenceIds) => {
       assertions.push({ node, expected, evidence: ids.map(id => {
@@ -207,8 +230,12 @@ export async function validateLearningCandidate(
     } else if (candidate.proposal.kind === 'process') {
       const payload = candidate.proposal.payload;
       add('process.entry', payload.entry);
+      for (const field of ['preconditions', 'exclusions', 'invalidationConditions'] as const) {
+        add(`process.applicability.${field}`, candidate.proposal.applicability[field]);
+      }
       add('process.systems', payload.systems);
       add('process.preconditions', payload.preconditions);
+      add('process.stepCount', String(payload.steps.length));
       payload.steps.forEach((step, index) => {
         add(`process.steps.${index}.action`, step.action, step.evidenceIds);
         add(`process.steps.${index}.stateChange`, step.stateChange, step.evidenceIds);
@@ -218,6 +245,7 @@ export async function validateLearningCandidate(
     } else if (candidate.proposal.kind === 'lesson') {
       const payload = candidate.proposal.payload;
       add('lesson.trigger', payload.trigger);
+      if (payload.triggerAliases) add('lesson.triggerAliases', payload.triggerAliases);
       add('lesson.rootCause', payload.rootCause);
       add('lesson.rootCauseStatus', payload.rootCauseStatus);
       add('lesson.attempts', payload.attempts);
@@ -226,20 +254,25 @@ export async function validateLearningCandidate(
       const applicability = candidate.proposal.applicability;
       add('lesson.project', applicability.project);
       add('lesson.environments', applicability.environments);
+      if (applicability.productId !== undefined) add('lesson.productId', applicability.productId);
       add('lesson.versions', applicability.versions);
       add('lesson.applicabilityPreconditions', applicability.preconditions);
       add('lesson.exclusions', applicability.exclusions);
       add('lesson.invalidationConditions', applicability.invalidationConditions);
       const qa = before.qa!;
       const qaRefs = qa.evidence.map(ref => ({ id: ref.id, digest: ref.digest, locator: ref.locator }));
+      const repairRefs = qa.repair?.evidence.map(ref => ({ id: ref.id, digest: ref.digest, locator: ref.locator })) ?? [];
       assertions.filter(assertion => assertion.node === 'lesson.fix' || assertion.node === 'lesson.prevention')
-        .forEach(assertion => { assertion.evidence.push(...qaRefs); });
-      assertions.push({ node: 'lesson.fixTargetRevision', expected: qa.binding.targetRevision, evidence: qaRefs });
+        .forEach(assertion => { assertion.evidence.push(...repairRefs, ...qaRefs); });
+      assertions.push({ node: 'lesson.fixTargetRevision', expected: qa.binding.targetRevision, evidence: [...repairRefs, ...qaRefs] });
     }
     let verification: VerificationResult | undefined;
+    const semanticInput = canonicalLearningJson({ protocol, binding, candidate, evidence, assertions });
     try {
-      verification = await before.verify.call(before.provider, { target: canonicalLearningJson({ protocol, binding,
-        candidate, evidence, assertions }), timeoutMs: timeout.data }, operation);
+      verification = await before.verify.call(before.provider, before.checker.execution
+        ? { target: before.checker.execution.cwd, command: before.checker.execution.command, input: semanticInput,
+          executionId: binding.executionId, timeoutMs: Math.max(1, Math.floor(deadline - performance.now())) }
+        : { target: semanticInput, timeoutMs: timeout.data }, operation);
     } catch { checkAbort(); }
     checkAbort();
     const after = await checkpoint();
@@ -252,10 +285,25 @@ export async function validateLearningCandidate(
     if (!same(before.checker, after.checker) || before.provider !== after.provider || before.verify !== after.verify || before.doctor !== after.doctor
       || before.providerId !== after.providerId || before.capabilities !== after.capabilities) fail('checker_changed');
     if (!verification || verification.passed !== true) fail('verification_failed');
-    if (typeof verification.output !== 'string') fail('invalid_receipt');
-    if (Buffer.byteLength(verification.output, 'utf8') > DISTILLATION_LIMITS.outputBytes) fail('output_limit');
+    let execution: z.infer<typeof observationSchema> | undefined;
+    if (before.checker.execution) {
+      const observed = observationSchema.safeParse(verification.execution);
+      if (!observed.success) fail('invalid_execution');
+      execution = observed.data;
+      if (execution.executionId !== binding.executionId || !same(execution.command, before.checker.execution.command)
+        || execution.cwd !== before.checker.execution.cwd
+        || execution.inputDigest !== createHash('sha256').update(semanticInput, 'utf8').digest('hex')) fail('invalid_execution');
+      const frozen = before.checker.execution.frozen;
+      if (Boolean(frozen) !== Boolean(execution.frozen)) fail('invalid_execution');
+      if (frozen && (!execution.frozen || execution.frozen.checkerDigest !== frozen.checkerDigest
+        || execution.frozen.baseImageId !== frozen.baseImageId
+        || execution.frozen.targetDigest !== before.checker.target.snapshotDigest)) fail('invalid_execution');
+    }
+    const output = execution ? execution.stdout : verification.output;
+    if (typeof output !== 'string') fail('invalid_receipt');
+    if (Buffer.byteLength(output, 'utf8') > DISTILLATION_LIMITS.outputBytes) fail('output_limit');
     let decoded: unknown;
-    try { decoded = JSON.parse(verification.output); } catch { fail('invalid_receipt'); }
+    try { decoded = JSON.parse(output); } catch { fail('invalid_receipt'); }
     const parsedReport = reportSchema.safeParse(decoded);
     if (!parsedReport.success) fail('invalid_receipt');
     const report = parsedReport.data;
@@ -269,8 +317,15 @@ export async function validateLearningCandidate(
       if (!same(actual.evidence, required.evidence)) fail('insufficient_evidence');
       if (!same(actual.expected, required.expected) || !same(actual.actual, required.expected)) fail('assertion_failed');
     }
-    const receiptDigest = digest(report);
-    const audit = canonicalLearningJson({ report, receiptDigest });
+    let cleanup: { closed: true } | undefined;
+    if (execution) {
+      try { cleanup = z.object({ closed: z.literal(true) }).strict().parse(await dependencies.completeExecution!(operation)); }
+      catch { checkAbort(); fail('cleanup_failed'); }
+      checkAbort();
+    }
+    const proof = execution ? { report, execution, cleanup } : report;
+    const receiptDigest = digest(proof);
+    const audit = canonicalLearningJson({ report, ...(execution ? { execution, cleanup } : {}), receiptDigest });
     const results = Buffer.from(audit, 'utf8').toString('base64').match(/.{1,1800}/g)!
       .map(chunk => `json-base64-v1:${chunk}`);
     checkAbort();
@@ -283,7 +338,8 @@ export async function validateLearningCandidate(
         const { provider, ...configuration } = snapshot.checker;
         checker = checkerSchema.parse(configuration);
         commit = { authorization: authorizationSchema.parse(snapshot.authorization),
-          source: reconciliationSchema.parse(snapshot.source), checker: { ...checker, provider }, qaAuditDigest: snapshot.qaAuditDigest };
+          source: reconciliationSchema.parse(snapshot.source), checker: { ...checker, provider }, qaAuditDigest: snapshot.qaAuditDigest,
+          repairAuditDigests: snapshot.repairAuditDigests };
       } catch { checkAbort(); fail('commit_guard_unavailable'); }
       checkAbort();
       if (!commit.authorization.allowed) fail('unauthorized');
@@ -294,12 +350,16 @@ export async function validateLearningCandidate(
         || commit.checker.provider.id !== before.providerId || commit.checker.provider.verify !== before.verify
         || commit.checker.provider.doctor !== before.doctor || canonicalLearningJson(commit.checker.provider.capabilities) !== before.capabilities) fail('checker_changed');
       if (before.qa && commit.qaAuditDigest !== before.qa.binding.auditDigest) fail('audit_changed');
+      if (before.qa?.repair && !same(commit.repairAuditDigests, {
+        failure: before.qa.repair.binding.failure.auditDigest, fix: before.qa.repair.binding.fix.auditDigest,
+      })) fail('audit_changed');
       const current = load();
       if (!same(current.candidate, candidate) || !same(current.source, before.source) || !same(current.evidence, evidence)) fail('stale_candidate');
       if (before.qa) {
         const qaRunId = before.qa.binding.qaRunId;
+        const roles = [qaRunId, ...(before.qa.repair ? [before.qa.repair.binding.failure.runId, before.qa.repair.binding.fix.runId] : [])];
         if (current.source.request.sourceRunId === qaRunId || dependencies.store.listAnalysisAttempts(candidate.requestKey)
-          .some(attempt => attempt.analysisRunId === qaRunId || attempt.sessionId === qaRunId)) fail('qa_not_independent');
+          .some(attempt => (attempt.analysisRunId !== undefined && roles.includes(attempt.analysisRunId)) || (attempt.sessionId && roles.includes(attempt.sessionId)))) fail('qa_not_independent');
       }
       checkAbort();
     };
@@ -315,15 +375,16 @@ export async function validateLearningCandidate(
       if (!current || !same(current, candidate)) fail('stale_candidate');
       fail('storage_failed');
     }
-    return { status: 'validated', candidateId: candidate.id, candidateVersion: candidate.version,
+    committed = { status: 'validated', candidateId: candidate.id, candidateVersion: candidate.version,
       validatedVersion: validated.version, executionId: binding.executionId, receiptDigest };
+    return committed;
   };
 
   try {
     if (options.signal?.aborted) cancel();
     return await Promise.race([execute(), cancellation]);
   } catch (error) {
-    return { status: 'blocked', code: error instanceof ValidationBlocked ? error.code : 'storage_failed' };
+    return committed ?? { status: 'blocked', code: error instanceof ValidationBlocked ? error.code : 'storage_failed' };
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener('abort', cancel);

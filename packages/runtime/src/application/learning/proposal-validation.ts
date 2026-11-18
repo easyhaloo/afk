@@ -12,10 +12,9 @@ import { compareProposalActual, prepareAssetProposal } from './proposals.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema, prepareDistillationRequest } from './requests.js';
 import { observeProposalExperiment, prepareProposalExperiment } from './proposal-semantics.js';
 import type { LearningValidationChecker, LearningValidationCommitSnapshot, LearningValidationDependencies, LearningValidationResult } from './validation.js';
+import { parseLearningValidationInput as parseInput } from './validation-input.js';
 
 const protocol = 'learning-validation-v1';
-const inputSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
-  expectedVersion: z.number().int().positive().safe(), checkerId: learningIdentitySchema }).strict();
 const targetSchema = z.object({ scope: learningScopeSchema, ref: learningIdentitySchema,
   revision: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/), snapshotDigest: learningDigestSchema }).strict();
 const checkerSchema = z.object({ id: learningIdentitySchema, version: learningIdentitySchema, runtimeVersion: learningIdentitySchema,
@@ -46,16 +45,6 @@ const digest = (value: unknown) => createHash('sha256').update(canonicalLearning
 const bytesDigest = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (first: unknown, second: unknown) => canonicalLearningJson(first) === canonicalLearningJson(second);
 
-function parseInput(input: unknown) {
-  try {
-    if (!input || typeof input !== 'object' || ![null, Object.prototype].includes(Object.getPrototypeOf(input))) return;
-    const descriptors = Object.getOwnPropertyDescriptors(input);
-    if (Reflect.ownKeys(descriptors).length !== 4 || Object.keys(inputSchema.shape).some(key =>
-      !Object.hasOwn(descriptors, key) || !('value' in descriptors[key]) || !descriptors[key].enumerable)) return;
-    return inputSchema.safeParse(Object.fromEntries(Object.entries(descriptors).map(([key, descriptor]) => [key, descriptor.value])));
-  } catch { return; }
-}
-
 function describeChecker(checker: ProposalValidationChecker) {
   const metadata = checkerSchema.parse({ id: checker.id, version: checker.version, runtimeVersion: checker.runtimeVersion,
     configurationDigest: checker.configurationDigest, target: checker.target });
@@ -65,9 +54,12 @@ function describeChecker(checker: ProposalValidationChecker) {
   const configuration = { ...metadata, runtime: { request: runtime.request, expectedCommit: runtime.expectedCommit,
     inventory: runtime.inventory, inventoryDigest: runtime.inventoryDigest, inventoryRoot: runtime.inventoryRoot,
     artifactPath: runtime.artifactPath, baseImageId: runtime.baseImageId, repositoryId: repository.id,
+    ...(runtime.scratchHelper === undefined ? {} : { scratchHelper: runtime.scratchHelper }),
+    ...(runtime.sandbox.limits === undefined ? {} : { limits: runtime.sandbox.limits }),
     repositoryCapabilities: repository.capabilities, harness: harness && { id: harness.id, revision: harness.revision, kind: harness.kind, cases: harness.cases } } };
   const identities = [repository, repository.snapshot, repository.withLifecycleLease, repository.prepare, repository.checkout, repository.cleanup,
-    runtime.sandbox, runtime.sandbox.executeFrozen, harness, harness?.observe, runtime.assertCurrent, runtime.recordOwnership];
+    runtime.sandbox, runtime.sandbox.executeFrozen, runtime.sandbox.remainingMs, runtime.scratchHelper,
+    harness, harness?.observe, runtime.assertCurrent, runtime.recordOwnership];
   return { metadata, configuration: canonicalLearningJson(configuration), identities };
 }
 
@@ -211,7 +203,9 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
     const executionOptions: ProposalRuntimeOptions = { ...runtime, binding: runtimeBinding, signal: controller.signal,
       inventory: structuredClone(runtime.inventory), request: structuredClone(runtime.request),
       harness: { ...harness, cases: structuredClone(harness.cases), observe: harness.observe.bind(harness) },
-      sandbox: { executeFrozen: runtime.sandbox.executeFrozen.bind(runtime.sandbox) },
+      sandbox: { executeFrozen: runtime.sandbox.executeFrozen.bind(runtime.sandbox),
+        ...(runtime.sandbox.limits === undefined ? {} : { limits: structuredClone(runtime.sandbox.limits) }),
+        ...(runtime.sandbox.remainingMs === undefined ? {} : { remainingMs: runtime.sandbox.remainingMs.bind(runtime.sandbox) }) },
       recordOwnership: runtime.recordOwnership.bind(runtime),
       async assertCurrent(binding, active) { guard(); await assertCurrent(binding, active); guard(); } };
     let result: Awaited<ReturnType<typeof verifyRepositoryAssetProposal>>;
@@ -258,9 +252,24 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
         let passed = execution.exitCode === 0 && compareProposalActual(receipt.actual, configured.expected);
         if (configured.experiment !== undefined) {
           if (!receipt.semantic) fail('insufficient_coverage');
-          const semanticExperiment = prepareProposalExperiment(prepared.kind, executionOptions.artifactPath, check, configured.experiment);
+          const semanticExperiment = prepareProposalExperiment(prepared.kind, executionOptions.artifactPath, check, configured.experiment,
+            prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);
           if (semanticExperiment.status !== 'prepared') fail('insufficient_coverage');
-          const semantic = observeProposalExperiment(semanticExperiment.experiment, execution);
+          if (semanticExperiment.experiment.recovery !== undefined) {
+            const context = observation.semanticContext;
+            const frozen = context?.options;
+            if (!context || !frozen?.scratch || frozen.scratch.candidateVersion !== version
+              || frozen.scratch.helper !== executionOptions.scratchHelper || frozen.baseImageId !== executionOptions.baseImageId
+              || context.operationId !== binding.operationId || context.containerId !== execution.evidence.containerId
+              || frozen.input.digest !== binding.inputTreeDigest
+              || frozen.input.manifest.find(entry => entry.path === executionOptions.artifactPath)?.digest !== binding.artifactDigest
+              || frozen.timeoutMs > Math.min(prepared.execution.timeoutMs, executionOptions.sandbox.limits?.timeoutMs ?? prepared.execution.timeoutMs)
+              || frozen.maxOutputBytes !== Math.min(DISTILLATION_LIMITS.outputBytes,
+                executionOptions.sandbox.limits?.maxOutputBytes ?? DISTILLATION_LIMITS.outputBytes)) fail('binding_mismatch');
+          }
+          let semantic: ReturnType<typeof observeProposalExperiment>;
+          try { semantic = observeProposalExperiment(semanticExperiment.experiment, execution, observation.semanticContext); }
+          catch { checkAbort(); fail('invalid_receipt'); }
           if (!same(receipt.semantic, semantic) || !same(receipt.actual, semantic.assertions) || receipt.assertions !== semantic.assertions.length) fail('invalid_receipt');
           passed = semantic.passed;
         } else if (receipt.semantic !== undefined) fail('invalid_receipt');

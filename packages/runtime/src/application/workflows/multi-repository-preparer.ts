@@ -64,7 +64,7 @@ interface RepositoryCleanupProgress {
 }
 
 export interface PreparedRepositorySet {
-  publish?(): Promise<void>;
+  publish?(verified?: { path: string; commit: string }): Promise<void>;
   heartbeat?(): Promise<void>;
   repositories: PreparedRepository[];
   primary: PreparedRepository;
@@ -408,32 +408,17 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
         // has to continue it: starting from the base again would make the
         // agent redo the work under a different commit, and the push would
         // then be rejected as a non-fast-forward.
-        if (await fetchRemoteBranch(git, workingBranch)) {
-          // A commit that was made and never published is the same kind of
-          // work — it is just not on the remote yet. Resetting to the
-          // published branch would drop it: the commit would become
-          // unreachable, the next attempt would find nothing to verify, and
-          // the work would be gone. So the local branch is kept whenever the
-          // published branch does not already contain it; the published work
-          // is merged back in when the branch is published.
-          const localHead = await localBranchHead(git, workingBranch);
-          const remoteHead = await remoteBranchHead(git, workingBranch);
-          if (localHead && remoteHead && !(await isAncestorCommit(git, localHead, remoteHead))) {
-            await git.raw(['checkout', '-B', workingBranch, localHead]);
-            return;
-          }
-          await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
-          return;
-        }
         if (await localBranchHead(git, workingBranch)) {
           await git.raw(['checkout', workingBranch]);
+          await reconcilePublishedBranch(git, workingBranch);
+        } else if (await fetchRemoteBranch(git, workingBranch)) {
+          await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
         } else {
           await git.raw(['checkout', '-b', workingBranch, `origin/${baseBranch}`]);
         }
       }),
       finalize: (repoRoot, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, async () => {
         const git = simpleGit(repoRoot);
-        await reconcilePublishedBranch(git, workingBranch);
         await git.push('origin', workingBranch, ['--set-upstream']);
       }),
       restore: (repoRoot, snapshot, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, () => restoreRepository(repoRoot, snapshot, workingBranch)),
@@ -729,16 +714,6 @@ async function remoteBranchHead(git: SimpleGit, branch: string): Promise<string 
   }
 }
 
-/**
- * Bring the published branch into the working branch before it is published
- * again.
- *
- * The push is rejected when the remote has commits the working branch does
- * not have, and the rejection would leave the run without a change request.
- * The published work is taken as it is when it is simply ahead, and merged in
- * when the two have diverged — the same rule the single-repository publisher
- * follows.
- */
 async function reconcilePublishedBranch(git: SimpleGit, branch: string): Promise<void> {
   if (!await fetchRemoteBranch(git, branch)) return;
   const localHead = await localBranchHead(git, branch);

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { HostConnectionPort } from '@afk/core';
 import type {
   ArtifactSink, ContextSource, CredentialProvider, NotificationProvider, PolicyCheckProvider,
@@ -83,6 +86,78 @@ async function fixture() {
 }
 
 describe('invokeCapability', () => {
+  it.each(['external', 'sibling-prefix', 'parent-traversal', 'symlink-escape', 'file', 'missing'] as const)(
+    'rejects an unauthorized verification workspace before provider dispatch (%s)', async kind => {
+      const current = await fixture();
+      const root = await mkdtemp(join(tmpdir(), 'verification-authorization-'));
+      const workspace = join(root, 'workspace');
+      const external = join(root, 'external');
+      const sibling = join(root, 'workspace-other');
+      try {
+        await Promise.all([mkdir(workspace), mkdir(external), mkdir(sibling)]);
+        await symlink(external, join(workspace, 'escape'), 'dir');
+        await writeFile(join(workspace, 'file'), 'fixture');
+        const targets = { external, 'sibling-prefix': sibling, 'parent-traversal': `${workspace}/../external`,
+          'symlink-escape': join(workspace, 'escape'), file: join(workspace, 'file'), missing: join(workspace, 'missing') };
+        await expect(invokeCapability(current.runtime, {
+          capability: 'verification.provider', provider: 'verification', operation: 'verify', input: { target: targets[kind] },
+        }, { authorizedWorkspace: workspace })).rejects.toThrow();
+        expect(current.verification.verify).not.toHaveBeenCalled();
+      } finally {
+        await current.runtime.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['root', 'subdirectory', 'internal-symlink', 'workspace-symlink'] as const)(
+    'canonicalizes an authorized verification workspace and forwards cancellation (%s)', async kind => {
+      const current = await fixture();
+      const root = await mkdtemp(join(tmpdir(), 'verification-authorization-'));
+      const workspace = join(root, 'workspace');
+      const child = join(workspace, 'child');
+      const signal = new AbortController().signal;
+      try {
+        await mkdir(child, { recursive: true });
+        await symlink(child, join(workspace, 'internal'), 'dir');
+        await symlink(workspace, join(root, 'alias'), 'dir');
+        const targets = { root: workspace, subdirectory: child, 'internal-symlink': join(workspace, 'internal'), 'workspace-symlink': workspace };
+        const options = { authorizedWorkspace: kind === 'workspace-symlink' ? join(root, 'alias') : workspace, signal };
+        const input = { target: targets[kind], command: ['checker'], input: '{}', executionId: 'execution-1', timeoutMs: 1000 };
+        await expect(invokeCapability(current.runtime, {
+          capability: 'verification.provider', provider: 'verification', operation: 'verify', input,
+        }, options)).resolves.toEqual({ passed: true, durationMs: 12, output: 'ok' });
+        expect(current.verification.verify).toHaveBeenCalledTimes(1);
+        expect(current.verification.verify).toHaveBeenCalledWith({ ...input, target: await realpath(targets[kind]) }, options);
+      } finally {
+        await current.runtime.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([undefined, '', '   '])('rejects an explicitly missing authorized verification workspace (%s)', async authorizedWorkspace => {
+    const current = await fixture();
+    try {
+      await expect(invokeCapability(current.runtime, {
+        capability: 'verification.provider', provider: 'verification', operation: 'verify', input: { target: '/standalone' },
+      }, { authorizedWorkspace })).rejects.toThrow('Verification requires an authorized Repository checkout workspace');
+      expect(current.verification.verify).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each([undefined, { signal: new AbortController().signal }])(
+    'preserves standalone verification workspace semantics when authorization is omitted (%s)', async options => {
+      const current = await fixture();
+      const input = { target: '/standalone/provider-defined-target' };
+      try {
+        await invokeCapability(current.runtime, { capability: 'verification.provider', provider: 'verification', operation: 'verify', input }, options);
+        expect(current.verification.verify).toHaveBeenCalledTimes(1);
+        expect(current.verification.verify).toHaveBeenCalledWith(input, ...(options ? [options] : []));
+      } finally { await current.runtime.close(); }
+    },
+  );
+
   it('forwards bounded verification input and projects a structured execution observation', async () => {
     const current = await fixture();
     const input = { target: '/repo', command: ['checker'], input: '{}', executionId: 'execution-1' };
@@ -226,6 +301,60 @@ describe('invokeCapability', () => {
       await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation: 'run', input: { repository: { url: 'api' }, runId: 'run-1', action: 'missing', input: {} } })).rejects.toThrow('not registered');
     } finally { await runtime.dispose(); }
   });
+  it('exposes managed recovery by allocation identity and projects private journal details away', async () => {
+    const { runtime } = await fixture();
+    const allocationId = '42b689a2-b7de-4454-87c9-d7d162b97933';
+    const listRecoveryAllocations = vi.fn(async () => [{ phase: 'retained' as const, allocation: {
+      id: allocationId, repository: { url: 'api', ref: 'main' }, runId: 'run-1', path: '/private/retained' },
+      marker: { content: 'private marker' }, owner: { pid: 1 }, configurationDigest: 'private configuration' }]);
+    const recoverAllocation = vi.fn(async (_id: string) => ({ removed: true, path: '/private/retained' }));
+    const provider = { id: 'recoverable', capabilities: { read: true, clone: false, push: false, recovery: true },
+      snapshot: async () => ({ commit: 'abc', branch: 'main', dirty: false }), listRecoveryAllocations, recoverAllocation };
+    await runtime.activate({ manifest: { id: 'repository.recovery', version: '1.0.0', apiVersion: 1,
+      provides: ['repository.provider'], trusted: true }, activate(context) { context.registerRepositoryProvider('recoverable', provider); } });
+    try {
+      const invocation = { capability: 'repository.provider', provider: 'recoverable' };
+      const records = await invokeCapability(runtime, { ...invocation, operation: 'listRecoveryAllocations', input: {} });
+      expect(records).toEqual([{ phase: 'retained', allocation: {
+        id: allocationId, repository: { url: 'api', ref: 'main' }, runId: 'run-1' } }]);
+      expect(await invokeCapability(runtime, { ...invocation, operation: 'recoverAllocation', input: { allocationId } })).toEqual({ removed: true });
+      expect(recoverAllocation).toHaveBeenCalledWith(allocationId);
+      for (const input of [{ allocationId, path: '/foreign' }, { allocationId: '../foreign' }, { allocationId, force: true }]) {
+        await expect(invokeCapability(runtime, { ...invocation, operation: 'recoverAllocation', input })).rejects.toThrow();
+      }
+      expect(recoverAllocation).toHaveBeenCalledTimes(1);
+      await expect(invokeCapability(runtime, { ...invocation, operation: 'listRecoveryAllocations', input: { path: '/foreign' } })).rejects.toThrow();
+      expect(listRecoveryAllocations).toHaveBeenCalledTimes(1);
+      provider.capabilities.recovery = false;
+      for (const [operation, input] of [['listRecoveryAllocations', {}], ['recoverAllocation', { allocationId }]] as const) {
+        await expect(invokeCapability(runtime, { ...invocation, operation, input })).rejects.toThrow('does not support recovery');
+      }
+      provider.capabilities.recovery = true;
+      recoverAllocation.mockRejectedValueOnce(new Error('/private/secret recovery failure'));
+      await expect(invokeCapability(runtime, { ...invocation, operation: 'recoverAllocation', input: { allocationId } }))
+        .rejects.toThrow(/^Repository recovery failed$/);
+      listRecoveryAllocations.mockRejectedValueOnce(new Error('/private/secret journal'));
+      await expect(invokeCapability(runtime, { ...invocation, operation: 'listRecoveryAllocations', input: {} }))
+        .rejects.toThrow(/^Repository recovery inspection failed$/);
+    } finally { await runtime.dispose(); }
+  });
+
+  it.each(['listRecoveryAllocations', 'recoverAllocation'] as const)('normalizes %s admission getter failures without exposing provider details', async operation => {
+    const { runtime } = await fixture();
+    const provider = { id: 'recovery-getter', capabilities: { read: true, clone: false, push: false, recovery: true },
+      snapshot: async () => ({ commit: 'abc', branch: 'main', dirty: false }) };
+    Object.defineProperty(provider, operation, { get() { throw new Error('/private/provider/secret'); } });
+    await runtime.activate({ manifest: { id: 'repository.recovery-getter', version: '1.0.0', apiVersion: 1,
+      provides: ['repository.provider'], trusted: true }, activate(context) { context.registerRepositoryProvider(provider.id, provider); } });
+    try {
+      const input = operation === 'recoverAllocation' ? { allocationId: '42b689a2-b7de-4454-87c9-d7d162b97933' } : {};
+      const message = operation === 'recoverAllocation' ? 'Repository recovery failed' : 'Repository recovery inspection failed';
+      await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: provider.id, operation, input })).rejects.toThrow(message);
+      Object.defineProperty(provider.capabilities, 'recovery', { get() { throw new Error('/private/capability/secret'); } });
+      await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: provider.id, operation, input })).rejects.toThrow(message);
+    } finally { await runtime.dispose(); }
+  });
+
   it('calls typed verification, notification, context, repository and policy providers and projects results', async () => {
     const { runtime, verification, notification, context, repository, policy } = await fixture();
     const cases = [

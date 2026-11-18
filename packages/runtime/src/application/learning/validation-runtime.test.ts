@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -9,21 +9,29 @@ import type { RunEventData } from '@afk/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { TestRunnerVerificationProvider } from '../../infrastructure/verification/index.js';
+import * as frozenVerification from '../../infrastructure/verification/frozen-command.js';
+import { captureFrozenInput } from '../../infrastructure/sandbox/container/frozen-input.js';
+import type { ContainerProvider } from '../../infrastructure/sandbox/container/types.js';
 import * as storage from '../../infrastructure/storage/sqlite.js';
 import type { VerificationProvider, VerificationRequest } from '../../plugin-sdk/capabilities.js';
 import { CandidateStore } from './candidate-store.js';
 import { DISTILLATION_LIMITS, type CandidateProposal } from './contracts.js';
 import { buildEvidencePack } from './evidence.js';
 import { reconcileDistillationSources } from './intake.js';
+import { page, wikiScript } from './knowledge.fixture.spec.js';
+import { KnowledgeContextProvider, prepareConfiguredKnowledge, publishConfiguredKnowledge, reconcileConfiguredKnowledge } from './knowledge-runtime.js';
+import { canonicalLearningJson } from './requests.js';
+import type { FactCommandCheckerConfiguration } from './validation-configuration.js';
 import { validationConfigurationSchema, validateConfiguredLearningCandidate,
   type ValidationConfiguration, type ValidationProviderBinding, type ValidationRuntimeOptions } from './validation-runtime.js';
 
 const scope = 'github:acme/api';
 const bytesDigest = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
 const cleanups: Array<() => void> = [];
-afterEach(() => { cleanups.splice(0).reverse().forEach(clean => clean()); vi.unstubAllEnvs(); });
+afterEach(() => { cleanups.splice(0).reverse().forEach(clean => clean()); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
-async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = false) {
+async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = false, version?: string, project = scope, auditProject = project) {
+  const scope = project;
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'validation-runtime-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, 'ledger', 'candidates.sqlite');
@@ -33,7 +41,7 @@ async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = f
   const events = new JsonlEventStore({ root: auditRoot });
   const transcripts = ['a-session', 'z-session', 'session-1'].map(session => join(root, '.afk', 'transcripts', `${session}.jsonl`));
   await events.append([{ id: 'event-1', schemaVersion: 1, type: 'agent.session_recorded', occurredAt: '2026-11-10T00:00:00Z',
-    context: { runId: 'run-1', traceId: 'trace-1', workItemId: `${scope}#1`, profileId: 'default', attempt: 1,
+    context: { runId: 'run-1', traceId: 'trace-1', workItemId: `${auditProject}#1`, profileId: 'default', attempt: 1,
       actor: { kind: 'system', id: 'fixture' } }, correlationId: 'run-1', data: { kind: 'agent.session_recorded', sessionId: 'session-1',
       ...(managed ? { transcriptPath: transcripts[2] } : {}) } }]);
   const auditPath = events.pathFor('run-1');
@@ -55,7 +63,8 @@ async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = f
   const pack = registered ? store.getEvidencePack(registered.request.evidenceDigest)! : await buildEvidencePack({ sources: [audit] });
   const refs = pack.entries.map(entry => entry.ref);
   const common = { title: 'Approval', statement: 'Approval precedes publication', evidenceIds: [refs[0].id],
-    targetRef: 'wiki:approval', applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] } };
+    targetRef: 'wiki:approval', applicability: { project: scope, environments: [], versions: version ? [version] : [],
+      preconditions: [], exclusions: [], invalidationConditions: [] } };
   const proposal: CandidateProposal = kind === 'fact'
     ? { ...common, kind, payload: { subject: 'release', rule: 'approval required', classification: 'fact' } }
     : kind === 'lesson' ? { ...common, kind, payload: { trigger: 'duplicate approval', rootCause: 'check then write race',
@@ -136,6 +145,8 @@ async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = f
       const values: Record<string, string | string[]> = { 'fact.subject': policy.subject,
         'fact.rule': policy.approvalRequired ? 'approval required' : 'no approval required', 'fact.authority': policy.authority,
         'process.entry': state, 'process.systems': policy.systems, 'process.preconditions': policy.preconditions,
+        'process.stepCount': String(policy.actions.length),
+        'process.applicability.preconditions': [], 'process.applicability.exclusions': [], 'process.applicability.invalidationConditions': [],
         'process.exceptions': [`denied -> ${perform('draft', 'approve', false)}`] };
       policy.actions.forEach((action: string, index: number) => {
         const previous = state;
@@ -166,6 +177,341 @@ async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = f
 
 const blocked = (code: string) => ({ status: 'blocked', code });
 
+async function ownedFactCommandFixture(kind: 'fact' | 'process' = 'fact') {
+  const setup = await fixture(kind);
+  const checkerFile = join(setup.root, 'fact-checker.mjs');
+  writeFileSync(checkerFile, `import { readFileSync } from 'node:fs';
+let input = ''; for await (const chunk of process.stdin) input += chunk;
+const request = JSON.parse(input);
+const policy = JSON.parse(readFileSync('approval.json', 'utf8'));
+const actual = { 'fact.subject': policy.subject,
+  'fact.rule': policy.approvalRequired ? 'approval required' : 'no approval required', 'fact.authority': policy.authority };
+process.stdout.write(JSON.stringify({ protocol: request.protocol, binding: request.binding,
+  assertions: request.assertions.map(assertion => ({ ...assertion, actual: actual[assertion.node], status: 'observed' })) }));
+`);
+  const node = realpathSync(process.execPath);
+  const entry: FactCommandCheckerConfiguration = { ...setup.config.checkers[0], mode: 'fact-command', kind: 'fact',
+    qa: undefined, allowLessonValidation: undefined,
+    executionAuthorizationFile: join(setup.root, 'owned-fixture-execution-grant.json'),
+    execution: { command: [node, checkerFile], timeoutMs: 2000,
+      checkerFiles: [node, checkerFile].map(path => ({ path, digest: bytesDigest(readFileSync(path)) })),
+      workspace: { kind: 'repository', providerId: 'owned-fixture-repository', id: 'owned-fixture-workspace',
+        cwd: dirname(setup.targetPath), revision: 'owned-fixture-revision' } } };
+  const persist = () => writeFileSync(setup.configurationFile, JSON.stringify({ version: 2, checkers: [entry] }), { mode: 0o600 });
+  const executionGrant = { version: 1, purpose: 'fact-validation-execution', revoked: false, kind: 'fact', scope,
+    checkerId: entry.checkerId, checkerVersion: entry.version,
+    checkerDigest: bytesDigest(canonicalLearningJson(entry)), execution: entry.execution };
+  const persistExecutionGrant = () => writeFileSync(entry.executionAuthorizationFile, JSON.stringify(executionGrant), { mode: 0o600 });
+  persist(); persistExecutionGrant();
+  const native = new TestRunnerVerificationProvider({ command: entry.execution.command });
+  let state: 'active' | 'closed' = 'active';
+  const leaseSnapshot = { workspace: structuredClone(entry.execution.workspace), leaseId: 'owned-fixture-lease', state };
+  const lease = { readCommitSnapshot: vi.fn(() => ({ ...leaseSnapshot, state })),
+    cleanup: vi.fn(async () => { state = 'closed'; return { closed: true as const }; }) };
+  const provider = { id: entry.providerId, capabilities: native.capabilities, verify: vi.fn(native.verify.bind(native)) };
+  const options: ValidationRuntimeOptions = { ...setup.options,
+    resolveProvider: vi.fn(async () => provider),
+    fact: { resolveWorkspace: vi.fn(async () => lease) } };
+  return { ...setup, entry, checkerFile, persist, executionGrant, persistExecutionGrant, native, lease, leaseSnapshot, provider, options };
+}
+
+describe('frozen fact ownership bridge with no Docker allocation', () => {
+  async function frozenFixture() {
+    const setup = await ownedFactCommandFixture();
+    const checkerRoot = join(setup.root, 'checker-package');
+    mkdirSync(checkerRoot);
+    writeFileSync(join(checkerRoot, 'checker.mjs'), 'process.stdout.write("inert fixture");');
+    setup.entry.execution = { ...setup.entry.execution, checkerFiles: [],
+      command: ['/usr/local/bin/node', '/workspace/checker.mjs', '/workspace/.verification-request.json', '/workspace/.verification-target.json'],
+      frozen: { checkerRoot, checkerDigest: captureFrozenInput(checkerRoot).digest, baseImageId: `sha256:${'a'.repeat(64)}` } };
+    setup.executionGrant.execution = setup.entry.execution;
+    setup.executionGrant.checkerDigest = bytesDigest(canonicalLearningJson(setup.entry));
+    setup.persist(); setup.persistExecutionGrant();
+    setup.options.frozen = {};
+    const allocations: unknown[] = [];
+    const build = vi.fn(async () => {
+      const reader = new CandidateStore({ file: setup.options.file });
+      try { allocations.push(reader.listFactOwnership(scope)); } finally { reader.close(); }
+      throw new Error('inert allocation boundary reached');
+    });
+    const cleanup = vi.fn(async () => undefined);
+    const engine = { engine: 'docker', binary: 'inert', frozen: {
+      buildFrozenImage: build, cleanupFrozenOperation: cleanup,
+    } } as unknown as ContainerProvider;
+    let beforeOwnership: (() => void) | undefined;
+    vi.spyOn(frozenVerification, 'executeNativeFrozenVerification').mockImplementation(async (request, options) => {
+      beforeOwnership?.();
+      await frozenVerification.executeFrozenVerification(engine, request, options);
+      throw new Error('inert engine cannot grant native identity');
+    });
+    return { ...setup, allocations, build, cleanup, beforeOwnership: (callback: () => void) => { beforeOwnership = callback; } };
+  }
+
+  it('commits exact ownership in SQLite before the allocation boundary without validating a candidate', async () => {
+    const setup = await frozenFixture();
+    const result = await validateConfiguredLearningCandidate(setup.input, setup.options);
+    expect(result.status).toBe('blocked');
+    expect(setup.build).toHaveBeenCalledTimes(1);
+    const records = setup.store.listFactOwnership(scope);
+    expect(records).toHaveLength(1);
+    expect(setup.allocations).toEqual([records]);
+    expect(records[0]).toMatchObject({
+      binding: { scope, candidateId: setup.candidateId, candidateVersion: 1, evidenceDigest: setup.pack.digest },
+      check: { checkerId: setup.input.checkerId, checkerVersion: setup.entry.version,
+        checkerDigest: setup.entry.execution.frozen!.checkerDigest,
+        targetDigest: bytesDigest(readFileSync(setup.targetPath)), workspace: setup.entry.execution.workspace, leaseId: 'owned-fixture-lease' },
+    });
+    expect(records[0].check.requestDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
+    expect(setup.lease.cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['grant', 'target', 'source'] as const)('rejects changed %s before committing ownership or allocating', async change => {
+    const setup = await frozenFixture();
+    setup.beforeOwnership(() => {
+      if (change === 'grant') { setup.executionGrant.revoked = true; setup.persistExecutionGrant(); }
+      else if (change === 'target') writeFileSync(setup.targetPath, '{}');
+      else writeFileSync(setup.auditPath, '{}\n');
+    });
+    expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('blocked');
+    expect(setup.build).not.toHaveBeenCalled();
+    expect(setup.store.listFactOwnership(scope)).toEqual([]);
+    expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
+  });
+
+  it.each(['revoked', 'cancelled', 'hook-failed'] as const)('retains the journal but prevents allocation after %s', async change => {
+    const setup = await frozenFixture();
+    const controller = new AbortController();
+    setup.options = { ...setup.options, signal: controller.signal };
+    setup.options.frozen = { onOwnership: async ownership => {
+      expect(setup.store.getFactOwnership(ownership.operationId)).toBeDefined();
+      if (change === 'revoked') { setup.executionGrant.revoked = true; setup.persistExecutionGrant(); }
+      else if (change === 'cancelled') controller.abort();
+      else throw new Error('ownership observer failed');
+    } };
+    expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('blocked');
+    expect(setup.build).not.toHaveBeenCalled();
+    expect(setup.store.listFactOwnership(scope)).toHaveLength(1);
+    expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
+  });
+
+  it.each(['matching', 'missing', 'operation', 'execution', 'request', 'checker', 'target', 'image', 'input', 'context'] as const)(
+    'binds a returned %s frozen receipt to the durable allocation record without granting native identity', async defect => {
+      const setup = await frozenFixture();
+      vi.mocked(frozenVerification.executeNativeFrozenVerification).mockImplementation(async (request, options) => {
+        const operationId = randomUUID();
+        const ownership = { operationId, engine: 'docker' as const, containerName: `afk-frozen-${operationId}`,
+          baseImageId: request.baseImageId, inputDigest: 'c'.repeat(64), contextDigest: 'd'.repeat(64) };
+        if (defect !== 'missing') await options.onOwnership(ownership);
+        return { protocol: 'verification-execution-v1', executionId: defect === 'execution' ? 'different-execution' : request.executionId,
+          command: request.command, cwd: '/workspace', inputDigest: defect === 'request' ? 'e'.repeat(64) : bytesDigest(request.input),
+          exitCode: 0, stdout: '{}', stderr: '', closed: true,
+          frozen: { checkerDigest: defect === 'checker' ? 'e'.repeat(64) : request.checkerDigest,
+            baseImageId: defect === 'image' ? `sha256:${'e'.repeat(64)}` : request.baseImageId,
+            targetDigest: defect === 'target' ? 'e'.repeat(64) : request.target.digest,
+            operationId: defect === 'operation' ? randomUUID() : operationId, containerId: 'a'.repeat(64), imageId: `sha256:${'b'.repeat(64)}`,
+            inputDigest: defect === 'input' ? 'e'.repeat(64) : ownership.inputDigest,
+            contextDigest: defect === 'context' ? 'e'.repeat(64) : ownership.contextDigest,
+            commandDigest: 'c'.repeat(64), policyDigest: 'd'.repeat(64), containerRemoved: true, imageRemoved: true } };
+      });
+      expect(await validateConfiguredLearningCandidate(setup.input, setup.options))
+        .toEqual(blocked(defect === 'matching' ? 'invalid_execution' : 'verification_failed'));
+      expect(setup.build).not.toHaveBeenCalled();
+      expect(setup.store.listFactOwnership(scope)).toHaveLength(defect === 'missing' ? 0 : 1);
+      expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
+      expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+      expect(setup.lease.cleanup).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('fact command bridge with owned fixtures, not domain qualification', () => {
+  it('runs an independently reading native Node checker with cwd separate from semantic stdin and persists host proof', async () => {
+    const setup = await ownedFactCommandFixture();
+    const result = await validateConfiguredLearningCandidate(setup.input, setup.options);
+    expect(result.status).toBe('validated');
+    expect(setup.lease.cleanup).toHaveBeenCalledTimes(1);
+    expect(setup.options.fact!.resolveWorkspace).toHaveBeenCalledWith(setup.entry.execution.workspace, expect.anything());
+    const receipt = setup.store.getValidation(setup.candidateId)!;
+    const audit = JSON.parse(Buffer.from(receipt.results.map(chunk => chunk.slice('json-base64-v1:'.length)).join(''), 'base64').toString());
+    expect(audit.execution).toMatchObject({ protocol: 'verification-execution-v1', executionId: result.status === 'validated' ? result.executionId : '',
+      cwd: setup.entry.execution.workspace.cwd, command: setup.entry.execution.command, exitCode: 0, closed: true });
+    expect(audit.cleanup).toEqual({ closed: true });
+    expect(audit.report.binding.execution).toMatchObject({ leaseId: 'owned-fixture-lease', workspaceRevision: 'owned-fixture-revision' });
+    expect(audit.receiptDigest).toBe(bytesDigest(canonicalLearningJson({ report: audit.report, execution: audit.execution, cleanup: audit.cleanup })));
+  });
+
+  it('blocks the production entry until a usable selected workspace lease is supplied', async () => {
+    const setup = await ownedFactCommandFixture();
+    delete setup.options.fact;
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('checker_unavailable'));
+    expect(setup.options.resolveProvider).not.toHaveBeenCalled();
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it.each(['missing', 'publication', 'revoked', 'command', 'checker', 'workspace'] as const)('refuses %s independent execution authority before dispatch', async defect => {
+    const setup = await ownedFactCommandFixture();
+    if (defect === 'missing') rmSync(setup.entry.executionAuthorizationFile);
+    if (defect === 'publication') writeFileSync(setup.entry.executionAuthorizationFile, JSON.stringify(setup.grant));
+    if (defect === 'revoked') { setup.executionGrant.revoked = true; setup.persistExecutionGrant(); }
+    if (defect === 'command') { setup.executionGrant.execution.command = [realpathSync(process.execPath), '-e', 'process.exit(0)']; setup.persistExecutionGrant(); }
+    if (defect === 'checker') { setup.executionGrant.checkerDigest = 'a'.repeat(64); setup.persistExecutionGrant(); }
+    if (defect === 'workspace') { setup.executionGrant.execution.workspace.id = 'other'; setup.persistExecutionGrant(); }
+    expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('blocked');
+    expect(setup.options.resolveProvider).not.toHaveBeenCalled();
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it.each(['process', 'checker-bytes', 'workspace', 'lease', 'cleanup', 'semantic'] as const)('fails closed for %s without issuing a receipt', async defect => {
+    const setup = await ownedFactCommandFixture(defect === 'process' ? 'process' : 'fact');
+    if (defect === 'checker-bytes') writeFileSync(setup.checkerFile, 'process.exit(0)');
+    if (defect === 'workspace') setup.leaseSnapshot.workspace.cwd = setup.root;
+    if (defect === 'lease') setup.lease.readCommitSnapshot.mockImplementation(() => ({ ...setup.leaseSnapshot, state: 'closed' }));
+    if (defect === 'cleanup') setup.lease.cleanup.mockRejectedValue(new Error('fixture cleanup failed'));
+    if (defect === 'semantic') { setup.oracle.subject = 'other entity'; setup.persistOracle(); }
+    expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('blocked');
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+    expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
+  });
+
+  it.each(['configuration', 'execution-grant', 'publication-grant', 'checker', 'source', 'target', 'workspace', 'lease', 'cancel'] as const)(
+    'rereads %s under the existing ledger write lock', async defect => {
+      const setup = await ownedFactCommandFixture();
+      const controller = new AbortController();
+      setup.options = { ...setup.options, signal: controller.signal };
+      const changed = () => {
+        if (defect === 'configuration') { setup.entry.version = 'v2'; setup.persist(); }
+        if (defect === 'execution-grant') { setup.executionGrant.revoked = true; setup.persistExecutionGrant(); }
+        if (defect === 'publication-grant') { setup.grant.revoked = true; setup.persistGrant(); }
+        if (defect === 'checker') writeFileSync(setup.checkerFile, 'process.exit(0)');
+        if (defect === 'source') writeFileSync(setup.auditPath, readFileSync(setup.auditPath, 'utf8') + '\n');
+        if (defect === 'target') { setup.oracle.subject = 'changed'; setup.persistOracle(); }
+        if (defect === 'workspace') setup.leaseSnapshot.workspace.revision = 'changed';
+        if (defect === 'lease') setup.leaseSnapshot.leaseId = 'changed';
+        if (defect === 'cancel') controller.abort();
+      };
+      const write = storage.openSqlite;
+      const opening = vi.spyOn(storage, 'openSqlite').mockImplementation((...args) => {
+        const database = write(...args);
+        const exec = database.exec.bind(database);
+        vi.spyOn(database, 'exec').mockImplementation(sql => {
+          exec(sql);
+          if (sql === 'BEGIN IMMEDIATE' && setup.lease.cleanup.mock.calls.length > 0) changed();
+        });
+        return database;
+      });
+      try {
+        expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('blocked');
+        expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+      } finally { opening.mockRestore(); }
+    });
+
+  it('does not replace native stdout with the outer generic output', async () => {
+    const setup = await ownedFactCommandFixture();
+    const run = setup.provider.verify.getMockImplementation()!;
+    setup.provider.verify.mockImplementation(async (...args) => ({ ...await run(...args), output: 'ordinary runner text' }));
+    expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('validated');
+  });
+
+  it('rejects a copied native execution observation even when its fields match', async () => {
+    const setup = await ownedFactCommandFixture();
+    const run = setup.provider.verify.getMockImplementation()!;
+    setup.provider.verify.mockImplementation(async (...args) => {
+      const result = await run(...args);
+      return { ...result, execution: result.execution && { ...result.execution } };
+    });
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('invalid_execution'));
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+    expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
+  });
+
+  it.each(['missing', 'injected'] as const)('refuses %s host observations from a generic command adapter', async defect => {
+    const setup = await ownedFactCommandFixture();
+    if (defect === 'missing') setup.provider.verify.mockResolvedValue({ passed: true, durationMs: 0, output: '{}' });
+    else {
+      const injected = new TestRunnerVerificationProvider({ command: setup.entry.execution.command,
+        runner: async () => ({ exitCode: 0, stdout: '{}', stderr: '' }) });
+      setup.provider.verify.mockImplementation(injected.verify.bind(injected));
+    }
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('invalid_execution'));
+    expect(setup.lease.cleanup).toHaveBeenCalledTimes(1);
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('does not wait forever for failed-path cleanup after cancellation', async () => {
+    const setup = await ownedFactCommandFixture();
+    const controller = new AbortController();
+    setup.options = { ...setup.options, signal: controller.signal };
+    setup.provider.verify.mockImplementation(async () => {
+      controller.abort();
+      return { passed: true, durationMs: 0 };
+    });
+    setup.lease.cleanup.mockImplementation(() => new Promise(() => undefined));
+    const completed = await Promise.race([
+      validateConfiguredLearningCandidate(setup.input, setup.options),
+      new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2500)),
+    ]);
+    expect(completed).toEqual(blocked('cancelled'));
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('releases a cancelled native execution lease only after the verification call settles', async () => {
+    const setup = await ownedFactCommandFixture();
+    const controller = new AbortController();
+    setup.options = { ...setup.options, signal: controller.signal };
+    const run = setup.provider.verify.getMockImplementation()!;
+    let settled = false;
+    let releasedBeforeSettlement = false;
+    setup.provider.verify.mockImplementation(async (...args) => {
+      const timer = setTimeout(() => controller.abort(), 1);
+      try { return await run(...args); }
+      finally { settled = true; clearTimeout(timer); }
+    });
+    const cleanup = setup.lease.cleanup.getMockImplementation()!;
+    setup.lease.cleanup.mockImplementation(async () => { releasedBeforeSettlement = !settled; return cleanup(); });
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('cancelled'));
+    await vi.waitFor(() => expect(setup.lease.cleanup).toHaveBeenCalledTimes(1));
+    expect(releasedBeforeSettlement).toBe(false);
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('cleans a lease returned after cancellation without accepting late success', async () => {
+    const setup = await ownedFactCommandFixture();
+    const controller = new AbortController();
+    setup.options = { ...setup.options, signal: controller.signal };
+    let release: () => void = () => undefined;
+    setup.options.fact!.resolveWorkspace = async () => {
+      controller.abort();
+      await new Promise<void>(resolve => { release = resolve; });
+      return setup.lease;
+    };
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('cancelled'));
+    release();
+    await vi.waitFor(() => expect(setup.lease.cleanup).toHaveBeenCalledTimes(1));
+    expect(setup.options.resolveProvider).not.toHaveBeenCalled();
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('returns the committed result when cancellation arrives after the validation transaction commits', async () => {
+    const setup = await ownedFactCommandFixture();
+    const controller = new AbortController();
+    setup.options = { ...setup.options, signal: controller.signal };
+    const open = storage.openSqlite;
+    const opening = vi.spyOn(storage, 'openSqlite').mockImplementation((...args) => {
+      const database = open(...args);
+      const exec = database.exec.bind(database);
+      vi.spyOn(database, 'exec').mockImplementation(sql => {
+        exec(sql);
+        if (sql === 'COMMIT' && setup.lease.cleanup.mock.calls.length > 0) controller.abort();
+      });
+      return database;
+    });
+    try {
+      expect((await validateConfiguredLearningCandidate(setup.input, setup.options)).status).toBe('validated');
+      expect(setup.store.getValidation(setup.candidateId)?.passed).toBe(true);
+    } finally { opening.mockRestore(); }
+  });
+});
+
 async function holdOpeningLock(file: string) {
   const worker = new Worker(`
     const { parentPort, workerData } = require('node:worker_threads');
@@ -182,6 +528,16 @@ async function holdOpeningLock(file: string) {
 }
 
 describe('persisted learning validation runtime', () => {
+  it.each(['fact', 'process', 'lesson'] as const)('preserves independent %s validation through saved v2 knowledge configuration', async kind => {
+    const setup = await fixture(kind);
+    writeFileSync(setup.configurationFile, JSON.stringify({ version: 2,
+      checkers: setup.config.checkers.map(entry => ({ ...entry, mode: 'knowledge' })) }), { mode: 0o600 });
+    const result = await validateConfiguredLearningCandidate(setup.input, setup.options);
+    expect(result.status).toBe('validated');
+    expect(setup.provider.verify).toHaveBeenCalledTimes(1);
+    expect(setup.bindings[0]).toMatchObject({ scope, checkerId: setup.input.checkerId, providerId: 'semantic-policy' });
+  });
+
   it('validates a lesson only with saved independent QA and independent semantic observations', async () => {
     const setup = await fixture('lesson');
     const result = await validateConfiguredLearningCandidate(setup.input, setup.options);
@@ -559,6 +915,133 @@ describe('persisted learning validation runtime', () => {
     expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('assertion_failed'));
     expect(setup.store.getCandidate(setup.candidateId)?.state).toBe('candidate');
   });
+
+  it('rejects publication with audit evidence for a different GitLab IPv4 host with the same redaction', async () => {
+    const scope = 'gitlab:127.0.0.1:54231/acme/api';
+    const setup = await fixture('fact', false, 'fixture-v1', scope, 'gitlab:127.0.0.2:54231/acme/api');
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toMatchObject({ status: 'validated', validatedVersion: 2 });
+    await expect(prepareConfiguredKnowledge({ scope, file: setup.options.file, recoveryDirectory: join(setup.root, 'recovery'),
+      validationConfigurationFile: setup.configurationFile, config: { wikiScript, grants: [setup.authorizationFile] },
+      candidateId: setup.candidateId, expectedVersion: 2 })).rejects.toThrow('knowledge_publication_source_unavailable');
+    expect(setup.store.listPublications()).toEqual([]);
+  });
+
+  it.each(['fact', 'process', 'lesson'] as const)('prepares a private GitLab IPv4 %s without persisting its host in evidence or preview', async kind => {
+    const scope = 'gitlab:127.0.0.1:54231/acme/api';
+    const setup = await fixture(kind, false, 'fixture-v1', scope);
+    setup.grant.policy.targets[0].kinds.push('lesson');
+    setup.persistGrant();
+    setup.oracle.lesson.versions = ['fixture-v1'];
+    setup.persistOracle();
+    const vault = setup.grant.policy.vault;
+    writeFileSync(join(vault, 'index.md'), page('Index', '[[backlinks]]'));
+    writeFileSync(join(vault, 'backlinks.md'), page('Backlinks', '[[index]]'));
+    writeFileSync(join(vault, 'template.md'), page('{{title}}', '{{knowledge}}'));
+    const knowledge = { scope, file: setup.options.file, recoveryDirectory: join(setup.root, 'recovery'),
+      validationConfigurationFile: setup.configurationFile, config: { wikiScript, grants: [setup.authorizationFile] } };
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toMatchObject({ status: 'validated', validatedVersion: 2 });
+    const input = { ...knowledge, candidateId: setup.candidateId, expectedVersion: 2 };
+    await expect(prepareConfiguredKnowledge({ ...input, scope: scope.replace('127.0.0.1', '127.0.0.2') })).rejects.toThrow();
+    const publication = await prepareConfiguredKnowledge(input);
+    expect(publication.phase).toBe('prepared');
+    const saved = readFileSync(join(knowledge.recoveryDirectory, publication.key, 'plan.json'), 'utf8');
+    expect(saved).not.toContain('127.0.0.1');
+    expect(JSON.stringify(setup.pack)).not.toContain('127.0.0.1');
+    expect(JSON.parse(saved).plan.changes[0].content).toContain(`## ${kind}`);
+    expect(existsSync(join(vault, 'Approval.md'))).toBe(false);
+  });
+
+  it.each(['source invalidated', 'denied', 'authority drift', 'published authority drift'] as const)(
+    'allows Wiki process publication only with independent, current approval: %s', async scenario => {
+      const setup = await fixture('process', false, 'fixture-v1');
+      const vault = setup.grant.policy.vault;
+      const target = join(vault, 'Approval.md');
+      const index = join(vault, 'index.md');
+      const backlinks = join(vault, 'backlinks.md');
+      const originalIndex = page('Index', '[[backlinks]]');
+      const originalBacklinks = page('Backlinks', '[[index]]');
+      writeFileSync(index, originalIndex);
+      writeFileSync(backlinks, originalBacklinks);
+      writeFileSync(join(vault, 'template.md'), page('{{title}}', '{{knowledge}}'));
+      const knowledge = { scope, file: setup.options.file, recoveryDirectory: join(setup.root, 'recovery'),
+        validationConfigurationFile: setup.configurationFile, config: { wikiScript, grants: [setup.authorizationFile] } };
+      const prepare = (expectedVersion: number) => prepareConfiguredKnowledge({ ...knowledge, candidateId: setup.candidateId, expectedVersion });
+      const expectUnwritten = () => {
+        expect(existsSync(target)).toBe(false);
+        expect(readFileSync(index, 'utf8')).toBe(originalIndex);
+        expect(readFileSync(backlinks, 'utf8')).toBe(originalBacklinks);
+      };
+      expect(setup.store.getCandidate(setup.candidateId)).toMatchObject({ state: 'candidate', version: 1 });
+      expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+      if (scenario === 'denied') {
+        setup.oracle.approvedState = 'denied';
+        setup.persistOracle();
+      }
+      const validation = await validateConfiguredLearningCandidate(setup.input, setup.options);
+      expect(setup.provider.verify).toHaveBeenCalledTimes(1);
+      if (scenario === 'denied') {
+        expect(validation).toEqual(blocked('assertion_failed'));
+        await expect(prepare(1)).rejects.toThrow('Knowledge publication requires current version and validation receipt');
+        expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+        expect(setup.store.listPublications()).toEqual([]);
+        expectUnwritten();
+        return;
+      }
+      expect(validation).toMatchObject({ status: 'validated', candidateId: setup.candidateId, validatedVersion: 2 });
+      const receipt = setup.store.getValidation(setup.candidateId);
+      expect(receipt).toMatchObject({ passed: true, candidateVersion: 1, validatedVersion: 2 });
+      const prepared = await prepare(2);
+      expect(prepared).toMatchObject({ phase: 'prepared', candidateId: setup.candidateId, candidateVersion: 2,
+        validatorVersion: receipt!.validatorVersion });
+      expectUnwritten();
+      if (scenario === 'authority drift') {
+        setup.oracle.approvedState = 'denied';
+        setup.persistOracle();
+      }
+      const result = await publishConfiguredKnowledge({ ...knowledge, key: prepared.key });
+      if (scenario === 'authority drift') {
+        expect(result.publication.phase).toBe('conflict');
+        expect(setup.store.getCandidate(setup.candidateId)?.state).not.toBe('published');
+        expectUnwritten();
+        return;
+      }
+      expect(result.publication).toMatchObject({ key: prepared.key, phase: 'committed' });
+      expect(setup.store.getCandidate(setup.candidateId)).toMatchObject({ state: 'published', version: 3 });
+      const content = readFileSync(target, 'utf8');
+      expect(content).toContain('draft -> approved');
+      expect(content).toContain('approved -> published');
+      expect(content).toContain('denied -> draft');
+      expect(readFileSync(index, 'utf8')).toContain('[[Approval');
+      expect(readFileSync(backlinks, 'utf8')).toContain('[[Approval');
+
+      const context = new KnowledgeContextProvider(knowledge);
+      const query = { scope, prompt: 'Approval', applicability: { version: 'fixture-v1' } };
+      expect(await context.gather({ scope, prompt: query.prompt })).toEqual([]);
+      expect(await context.gather({ ...query, applicability: { version: 'fixture-v2' } })).toEqual([]);
+      expect(await context.gather(query)).toEqual([{ origin: `knowledge:${prepared.key}; target:wiki:approval`, content }]);
+      if (scenario === 'source invalidated') setup.store.invalidateRequestSource(setup.source.key);
+      else {
+        setup.oracle.approvedState = 'denied';
+        setup.persistOracle();
+      }
+      expect(await context.gather(query)).toEqual([]);
+      expect(readFileSync(target, 'utf8')).toBe(content);
+      expect(await reconcileConfiguredKnowledge(knowledge)).toMatchObject({ blocked: [], results: [
+        { publication: { key: prepared.key }, withdrawal: { key: prepared.key, status: 'withdrawn' } },
+      ] });
+      const withdrawn = readFileSync(target, 'utf8');
+      expect(withdrawn).toContain('knowledge_status: revoked');
+      expect(withdrawn).not.toContain('approved -> published');
+      if (scenario === 'published authority drift') {
+        setup.oracle.approvedState = 'approved';
+        setup.persistOracle();
+      }
+      expect(await context.gather(query)).toEqual([]);
+      expect(await reconcileConfiguredKnowledge(knowledge)).toMatchObject({ blocked: [], results: [
+        { publication: { key: prepared.key }, withdrawal: { key: prepared.key, status: 'withdrawn' } },
+      ] });
+      expect(readFileSync(target, 'utf8')).toBe(withdrawn);
+    });
 
   it.each(['passed', 'command', 'target', 'providerId', 'version', 'report'])('rejects client %s before reading private configuration', async field => {
     const setup = await fixture();

@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
+import type { RunEvent } from '@afk/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CandidateStore } from '../learning/candidate-store.js';
 import { buildEvidencePack } from '../learning/evidence.js';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import type { VerificationProvider } from '../../plugin-sdk/capabilities.js';
 import { knowledgeFixture } from '../learning/knowledge.fixture.spec.js';
 import { createLearningPlugin, learningPluginManifest } from './learning.js';
@@ -24,18 +25,13 @@ async function setup(enabled = true, script?: (fixture: ReturnType<typeof knowle
   fixtures.push(fixture);
   const homeDir = join(fixture.root, 'home');
   const file = join(homeDir, '.afk', 'learning', 'candidates.sqlite');
-  const store = new CandidateStore({ file });
-  try {
-    const source = fixture.store.getRequest(fixture.candidate.requestKey)!;
-    const request = store.submitRequest({ request: source.request, evidence: source.evidence });
-    const processed = store.completeRequest(request.key, { version: 1, candidates: [fixture.candidate.proposal], warnings: [] });
-    const candidate = store.getCandidate(processed.candidateIds[0]!)!;
-    store.recordValidation(candidate.id, candidate.version, { candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest,
-      validatorVersion: 'knowledge-v1', passed: true, results: ['independent fixture validation'] });
-  } finally { store.close(); }
+  fixture.store.close();
+  mkdirSync(join(homeDir, '.afk', 'learning'), { recursive: true, mode: 0o700 });
+  copyFileSync(join(fixture.root, 'ledger.sqlite'), file);
   const runtime = new PluginRuntime();
   runtimes.push(runtime);
   await runtime.activate(createLearningPlugin({ homeDir, config: { enabled, dailyCalls: 0,
+    validation: { configurationFile: fixture.validationConfigurationFile },
     knowledge: { wikiScript: script?.(fixture) ?? fixture.wikiScript, grants: [fixture.authorizationFile] } } }));
   return { ...fixture, homeDir, file, runtime };
 }
@@ -55,10 +51,13 @@ describe('learning knowledge plugin integration', () => {
       data: { kind: 'agent.session_recorded', sessionId: 'approval-session' } }]);
     const audit = { id: 'audit-1', kind: 'audit' as const, path: events.pathFor('approval-source'),
       allowedRoot: eventRoot, runId: 'approval-source' };
+    const history = readFileSync(audit.path, 'utf8').trim().split('\n').map(line => JSON.parse(line) as RunEvent);
+    if (!verifyRunEventHistory(audit.runId, history).valid) throw new Error('Invalid synthetic audit history');
     const pack = await buildEvidencePack({ sources: [audit] });
     const store = new CandidateStore({ file });
     const source = store.submitRequest({ request: { version: 1, scope: fixture.policy.scope, sourceId: 'run:approval-source',
-      sourceRunId: 'approval-source', evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
+      sourceRunId: 'approval-source', workItemId: `${fixture.policy.scope}#42`,
+      evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
       evidence: pack.entries.map(entry => entry.ref) }, pack);
     const receipt = store.completeRequest(source.key, { version: 1, warnings: [],
       candidates: [{ ...fixture.candidate.proposal, evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
@@ -72,7 +71,7 @@ describe('learning knowledge plugin integration', () => {
       authority: pack.entries.map(entry => entry.ref.locator) }));
     const configurationFile = join(fixture.root, 'checkers.json');
     writeFileSync(configurationFile, JSON.stringify({ version: 1, checkers: [{ ...identity,
-      authorizationFile: fixture.authorizationFile, target: { ref: 'wiki:approval', root: targetRoot, path: 'approval.json' },
+      authorizationFile: fixture.validationAuthorizationFile, target: { ref: 'wiki:approval', root: targetRoot, path: 'approval.json' },
       evidence: [{ digest: pack.digest, sources: [audit] }] }] }), { mode: 0o600 });
     const provider: VerificationProvider = { id: identity.providerId,
       capabilities: { 'test-execution': true, 'static-analysis': false, 'custom-script': false },
@@ -133,8 +132,8 @@ describe('learning knowledge plugin integration', () => {
     for (const [index, path] of tasks.entries()) {
       const context = await gather(path, index + 1);
       expect(context).toBeDefined();
-      expect(readFileSync(join(path, context!), 'utf8')).toContain('Approve before publishing');
-      expect(readFileSync(join(path, context!), 'utf8')).toContain(`knowledge:${prepared.key}`);
+      expect(readFileSync(join(path, context!.path), 'utf8')).toContain('Approve before publishing');
+      expect(readFileSync(join(path, context!.path), 'utf8')).toContain(`knowledge:${prepared.key}`);
     }
     const store = new CandidateStore({ file: fixture.file });
     try { store.invalidateRequestSource(fixture.candidate.requestKey); } finally { store.close(); }
@@ -157,6 +156,7 @@ describe('learning knowledge plugin integration', () => {
     const runtime = new PluginRuntime();
     runtimes.push(runtime);
     const plugin = createLearningPlugin({ homeDir: fixture.homeDir, config: { enabled: true,
+      validation: { configurationFile: fixture.validationConfigurationFile },
       knowledge: { wikiScript: script, grants: [fixture.authorizationFile] } } });
     await runtime.activate(plugin);
     const running = runtime.dispatchSystemAction('learning.knowledge.reconcile', { scope: fixture.policy.scope });
@@ -206,6 +206,8 @@ describe('learning knowledge plugin integration', () => {
     expect(() => validate(['/private/grant.json', '/private/grant.json'])).toThrow();
     expect(() => validate(Array.from({ length: 65 }, (_, index) => `/private/grant-${index}.json`))).toThrow();
     expect(() => validate(['/private/grant.json'])).not.toThrow();
+    expect(() => validatePluginConfig(learningPluginManifest.configSchema, { knowledge: { wikiScript: '/private/wiki.py',
+      grants: ['/private/grant.json'], sourceReadGrantFile: '/private/read.json' } })).not.toThrow();
   });
 
   it('uses saved authorization for preview, publication and actual withdrawal during source reconciliation', async () => {

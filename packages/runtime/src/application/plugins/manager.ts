@@ -5,6 +5,8 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dump } from 'js-yaml';
+import { sharedVerificationProject } from './shared-verification.js';
+import { verificationTreeDigest, verifiedSnapshot } from './verification-tree.js';
 import { validateManifest, validatePluginId, type PluginManifest } from '../../plugin-sdk/profile.js';
 import { pluginConfigurationPath, readPluginConfiguration, validatePluginConfig, type InstalledPluginEntry, type PluginConfiguration } from './configuration.js';
 import { activationLease, assertInactive, atomicWrite, pendingPath, readPending, restorePending, sameIdentity, verifyInstallation, withManagerLock, writePending, type PendingActivation } from './activation-recovery.js';
@@ -16,6 +18,7 @@ export interface InstalledPluginRecord {
   readonly source: string;
   readonly entry: string;
   readonly integrity: string;
+  readonly treeIntegrity?: string;
   readonly installedAt: string;
   readonly manifest: PluginManifest;
   readonly toolReceipt?: string;
@@ -82,7 +85,7 @@ export class PluginManager {
     return withManagerLock(this.directory, operation);
   }
 
-  async beginActivation(id: string): Promise<{ record: InstalledPluginRecord | undefined; entry?: InstalledPluginEntry; release: () => Promise<void> }> {
+  async beginActivation(id: string, workspaceRoot = process.cwd()) {
     validatePluginId(id);
     return this.locked(async () => {
       const pending = await readPending(this.directory, id);
@@ -91,8 +94,28 @@ export class PluginManager {
       if (record) await verifyInstallation(join(this.directory, id), record);
       if (record && pending?.phase === 'published') await verifyInstallation(join(this.directory, id), pending.next);
       const entry = record ? this.configuration().plugins.find(candidate => candidate.id === id) : undefined;
-      const release = await activationLease(this.directory, id);
-      return { record, entry, release };
+      if (pending) await assertInactive(this.directory, id);
+      const workspace = resolve(workspaceRoot);
+      const currentProject = () => record?.manifest.concurrentVerification &&
+        sharedVerificationProject(this.configuration(), record, workspace);
+      const project = currentProject();
+      if (!project || !record?.treeIntegrity) return { record, entry, release: await activationLease(this.directory, id) };
+      const [generation, ...path] = record.entry.split(sep);
+      if (!/^\.version-[\da-f-]{36}$/.test(generation!) || path.some(part => !part || part === '..' || part === '.')) throw new Error('Invalid verification generation');
+      const snapshot = await verifiedSnapshot(join(this.directory, id, generation!), record.treeIntegrity);
+      try {
+        const releaseLease = await activationLease(this.directory, id, JSON.stringify([record.entry, project]));
+        const permits = async (...targets: string[]) => {
+          if ((targets.length && targets[0] !== project) || currentProject() !== project) return false;
+          await snapshot.checkBytes();
+          return currentProject() === project;
+        };
+        return { record, entry, modulePath: join(snapshot.root, ...path), permits,
+          release: async () => { try { await snapshot.dispose(); } finally { await releaseLease(); } } };
+      } catch (error) {
+        await snapshot.dispose();
+        throw error;
+      }
     });
   }
 
@@ -312,6 +335,7 @@ export class PluginManager {
           entry: stagedEntry, manifest: metadata,
           integrity: `sha256-${createHash('sha256').update(await fs.readFile(entry)).digest('base64')}`,
           installedAt: new Date().toISOString(),
+          ...(metadata.concurrentVerification ? { treeIntegrity: await verificationTreeDigest(versionRoot) } : {}),
           ...(toolReceipt ? { toolReceipt } : {}),
         };
         await fs.writeFile(join(stage, 'install.json'), JSON.stringify(record, null, 2), { mode: 0o600 });

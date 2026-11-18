@@ -22,11 +22,15 @@ Applications consume shared packages through declared exports. Shared packages m
 ## Execution entry points
 
 - `afk`: open the interactive TUI.
-- `afk run`: resolve a work item and delegate to the complete managed implementation → independent QA → publication lifecycle. Existing runtime, timeout, budget, extension, and explicit execution-mode options apply to the managed attempt; `--target-branch` names its working branch, not the MR destination.
+- `afk run`: select the template from `--template`, configuration, then the builtin default before resolving managed execution. Learning templates use the learning lifecycle below; execution templates resolve a work item and delegate to managed implementation → independent QA → publication. Runtime, timeout, budget, extension, and explicit execution-mode options apply to the managed attempt; `--target-branch` names its working branch, not the MR destination.
 - `afk execute --work-item-id <id>`: execute the managed lifecycle, including eligibility and manifest checks, implementation, independent QA, change-request handling, and the human-controlled merge gate. `--agent <name>`, `--sandbox <name>`, and `--execution-mode <batch|interactive>` select the attempt's providers and mode; a template may still select a provider for an individual step.
-- `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`: inspect scoped experience. `recall --scope <scope> --query <text> [--json]` returns relevant verified, unexpired records.
+- `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`: inspect scoped experience. `recall --scope <scope> --query <text> [--context <file>] [--json]` returns relevant verified, unexpired records. The optional UTF-8 JSON context file is limited to 32 KiB, accepts only the strict applicability/target query schema, and must match the requested project scope. Invalid context is rejected before storage opens without echoing its contents. Query context does not grant execution provenance, QA, adoption or publication authority.
 - `afk experience jobs --scope <scope> [--limit <0..100>] [--offset <nonnegative-safe-integer>] [--json]` and `candidates` with the same flags: read persisted learning jobs or candidates in full-ID ascending order, filtering exact scope before offset/limit (defaults 0/100). `inspect <64-lowercase-hex-candidate-id> --scope <scope> [--json]` reads one candidate. These read-only commands use configured learning actions when a plugin runtime is supplied, otherwise the shared ledger query; they never start analysis or create an absent ledger. Pages are offsets into the current result, not a cross-call snapshot.
-- `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`, `import --scope <target> --file <file>`, and `copy <id> --scope <source> --target-scope <target>`: exchange bounded portable JSON (1 MiB / 100 lessons). Imported/copied advice is candidate-only and requires local independent verification. Export never grants verification authority. `metrics --scope <scope> [--json]` separates retrieval, explicit adoption and recurrence; `adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` acknowledges use without claiming observed behavior.
+  A failed attempt with `analysis_executable_changed` means the selected analysis executable could not be verified again before launch. Inspect the installation; restarting the worker does not retry that request or refund its reservation.
+- `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`, `import --scope <target> --file <file>`, and `copy <id> --scope <source> --target-scope <target>`: exchange bounded portable JSON (1 MiB / 100 lessons). Imported/copied advice is candidate-only and requires local independent verification. Export never grants verification authority and excludes publication-bound records; copy cannot transfer their publication binding. `metrics --scope <scope> [--json]` separates retrieval, explicit adoption and recurrence; `adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` still emits JSON metrics (`retrievals`, `adoptions`, `recurrences`), now with a `receipt` binding the verified content/verification/applicability and recorded actual target context (`binding: 'verified-version'`, format `version: 2`, additive `contextStatus: 'recorded' | 'unavailable'`). A trusted QA target snapshot records actual context even during an active run without completed QA; absent context binds canonical `{}` with `contextStatus: 'unavailable'`, without inventing a target. Identical source/version/context replays return the saved receipt/timestamp without another count; changed verification or context conflicts, corrupt bindings reject, and historical receipts remain `legacy-unbound` without upgrade. Adoption is explicit acknowledgement, not observed use/outcome; publication-bound experiences additionally retain CandidateStore publication/version identity; at most 64 adoption receipts per lesson. Compatibility is always checked against actual context, consistently before and after QA for unchanged context; even lessons without stored applicability cannot bypass known `productVersions` compatibility checks. Lessons with stored applicability or a publication binding additionally require successful QA and verified applicability matching actual context, including a clean target and exact QA revision; an active snapshot alone cannot qualify them. Actual and verified contexts must match when both are supplied. Ordinary lessons without stored applicability or a publication binding may be acknowledged against an intact active run even when context is unavailable, subject to the actual-context compatibility check. See [experience reuse](plugins.md#runtime-governance-and-experience-reuse) for receipt fields and provenance rules.
+  When the consuming run and work item have already selected this lesson, their first adoption requires a selection of the currently verified version. After reverification, select the updated context before acknowledging it.
+- `afk experience outcomes --scope <scope> --run-id <run> --work-item-id <canonical-id> [--limit <0..100>] [--json]`: read persisted historical outcome receipts for the exact consuming run/work-item pair. The work item must belong to scope; default limit is 20, ordered by descending audit sequence with stable experience/selection tie-breaks. Output is a JSON array (pretty by default, compact with `--json`); no receipts returns `[]`. Receipts retain selected-reference and optional publication/version identity, audit outcome, recurrence association, and `benefit: "unknown"`. Selection is not explicit adoption, success does not prove benefit, and `recurrence: false` does not prove absence of recurrence. Querying does not activate plugins, run a model, refresh credentials, recall assets, or change usage metrics; storage closes before output, and query/close failures suppress private errors. Historical receipts do not grant current retrieval or publication authority.
+- `afk experience correct <candidateId> --scope <scope> --expected-version <version> --file <path> [--json]`: submit exactly `{ scope, candidateId, expectedVersion, correction }` to configured `learning.correct`, persisting a correction job in the inbox without running a model or changing the original candidate. Scope must be a canonical project, candidate ID 64 lowercase hex characters, and expected version a positive safe integer; a stale version or foreign-project candidate is rejected. Correction text comes only from a regular UTF-8 file, must contain non-whitespace text without NUL, and is bounded to 32768 bytes (including during reads). Input and file checks precede lazy runtime creation. Output contains only `{ jobId, scope, candidateId, candidateVersion }` (64 lowercase hex job ID and positive candidate version), formatted JSON by default or compact JSON with `--json`, matching knowledge commands. Only self-created runtimes are disposed; failures report `Learning correction failed` without file contents or Provider errors.
 - `afk experience validate <64-lowercase-hex-candidate-id> --scope <scope> --expected-version <positive-safe-integer> --checker <id> [--json]`: invoke configured `learning.validate`. Trusted configuration supplies verifier, target and grant; clients supply no command or result. Blocked results exit nonzero; the command neither opens legacy experience storage nor creates an absent candidate ledger. Registered protocol-aware verifiers support fact/process; lesson additionally requires explicit saved permission and matching independent QA. Skill/tool remain blocked without dedicated validators.
 - `afk experience knowledge prepare <candidateId> --scope <scope> --expected-version <positive-safe-integer> [--target <logical-ref>] [--json]`: prepare an immutable authorized publication preview. `publish <64-lowercase-hex-publication-key> --scope <scope> [--json]` applies that exact plan through the shared guards; anything short of committed exits nonzero. `reconcile --scope <scope> [--json]` recovers publications and withdraws invalid assets; blocked recovery or human-edit-protected withdrawal exits nonzero, while completed withdrawal succeeds. Output is formatted JSON, or compact JSON with `--json`. All three commands share the learning runtime and dispose only runtimes they own.
 - `afk experience record --scope <scope> --trigger <text> --root-cause <text> --action <text> --run-id <id> --work-item-id <id> --evidence <refs...>`: record a candidate. `verify <id> --scope <scope> --run-id <id> --action <text> --evidence <refs...> [--root <event-store>] [--root-cause <text>]` requires an intact same-project independent QA pass followed by successful completion or confirmed publication at the matching human merge gate. `revoke <id> --scope <scope>` withdraws advice from later retrieval.
@@ -45,6 +49,7 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk plugin remove <id>`: disable and remove an installed package while retaining its settings.
 - `afk plugin import-issue <provider> <issue> --project <platform:projectKey> [--mode <hitl|afk>] [--json]`: import a Linear/Jira issue into the target repository's real managed backlog with stable source provenance and idempotency. Defaults to `hitl`; the returned canonical work item uses existing execution, QA and publication. `sync-issue <provider> <issue> <canonical-work-item> --states <json-file> [--json]` checks the binding and updates only the explicitly mapped external lifecycle state. Workflow actions `work-item.import` and `work-item.sync` expose the same behavior.
 - `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`: dispatch explicitly allowed operations with validated JSON input and output. Output is JSON with or without `--json`; negative verification/policy/delivery results or a nonzero remote code set exit status `1`. Credential reads and merge operations are excluded. CLI verification input requires an explicit `target`. Repository lifecycle handles belong to one Runtime instance; `repository.provider/run` keeps prepare, checkout, the registered callback action, publication and cleanup in one invocation.
+  Providers declaring `recovery` also support `repository.provider/listRecoveryAllocations` with `{}` and `repository.provider/recoverAllocation` with `{allocationId:<uuid>}`. Inspection projects only allocation identity, repository, run identity and recovery phase. Recovery resolves the saved allocation; callers cannot supply a path or force deletion. Provider ownership/lease checks remain authoritative, and public failures omit private journal details. A removal result `{removed:false}` sets exit status `1`.
 - Repository `checkout` JSON accepts `{workspaceId,branch?,ref?}`; composite `run` accepts optional `checkout:{branch?,ref?}`. Prepare retains the configured base; checkout selects a target branch and optional source branch. Publish/cleanup remain handle-only operations. Defaults preserve `afk/<runId>` at the prepared revision.
 - `afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`: activate configured triggers and keep an authenticated HTTP host and Runtime alive until SIGINT/SIGTERM, then close/dispose them. Defaults to `127.0.0.1:8374` with a durable SQLite queue at `~/.afk/triggers/deliveries.sqlite`; the environment token requires at least 16 characters without CR/LF. Authenticated webhook receipts are persisted before HTTP 202, deduplicated and retried with bounded backoff; failed deliveries remain inspectable and replayable. Startup rejects error diagnostics; an unregistered action disposes its trigger. Ordinary runtime construction does not arm timers. See [Capability plugins](plugins.md).
 - Scheduled ticks under `plugin listen` use that same selected queue, owned before timer activation. Persisted tick identity, action and input survive retry/restart without being rewritten by current configuration. Listener close and Runtime disposal each wait at most five seconds; an unsettled action retains consumer ownership. No missed-interval backfill or exactly-once external side effect is promised.
@@ -93,7 +98,108 @@ Only the first half is recoverable — a manifest records its `workItemId`, so t
 
 ## Managed lifecycle
 
+For `afk run`, both execution and learning use the exact template snapshot loaded
+for routing, including across managed request resolution. A learning template
+requires a canonical `--backlog-id` without looking up a Tracker, and uses the
+current directory as its workspace without cloning a project. Configured Agent
+defaults do not require an installed Agent or Sandbox for learning-only actions.
+Explicit execution manifests, branch, Sandbox, Agent, Agent runtime and execution
+mode options are rejected before learning effects. `--session` defaults to a unique
+learning session name; audit run IDs remain independent. `--hard-timeout`, `--ext`
+and `--ext-param` apply. Agent runtime overrides are resolved only on the execution
+route, preserving the configured runtime defaults.
+
+`afk experience review --backlog-id <canonical-id> --run-id <source-run>
+--checker <saved-checker> [--kind <success|repair|skill|tool>] [--session <name>]
+[--hard-timeout <ms>] [--json]`
+defaults to `--kind success`, running `success-review-preview` for process
+candidates. `--kind repair` runs `repair-review-preview` for lesson candidates.
+`--kind skill` and `--kind tool` run `skill-optimization-validation` and
+`tool-optimization-validation` respectively. All four are built-in learning
+workflows. Project scope is
+derived from the canonical work item and checked against the 512-byte UTF-8 scope limit before Runtime creation. The selected source audit must belong
+to that exact work item before capture or analysis. `--hard-timeout` accepts
+integers from 1 through 2147483647 and is checked before Runtime creation.
+The `review` step captures the selected source, processes its exact request,
+validates the selected candidate kind with the saved checker. Success and repair
+reviews additionally prepare publication previews. Their output contains the exact request
+key, candidate IDs, validated versions and prepared publications; `--json` emits
+compact JSON. It does not apply the previews. Publishing remains an explicit
+knowledge publication command with its own authorization. Failed reviews return
+a generic error. A skill/tool review interrupted after committing validation receipts
+also emits a strict `status: "incomplete"` JSON result with those current-invocation
+receipts, the interrupted candidate and a safe reason, while retaining a failure exit.
+Source and learning audit run IDs remain
+distinct; replay reuses persisted requests and candidates.
+An incomplete result grants no retry or publication authority: previously validated
+skill/tool candidates still require the separate revalidation guard. Cancellation
+after a commit does not undo that validation; inspect persisted candidate state.
+Retrying a preview propagates read or validation failures without initiating
+publication conflict or withdrawal. Existing prepared or applied records remain
+available for a later explicit publication or reconciliation, which rechecks
+current authorization and source validity before recovery or withdrawal.
+
+Repair review dispatches `learning.retrospective` with `kind: "lesson"`,
+`repair: true`, canonical `scope/workItemId`, the selected failure `runId` and
+saved `checkerId`. The checker must save `qa.repair.failure` and `qa.repair.fix`,
+each `{ runId, root, auditDigest }`, alongside independent QA's own
+`qa.runId/root/auditDigest/targetRevision`. Failure, implementation fix and QA
+require three distinct run IDs for the same project/work item; `--run-id` must
+match the saved failure. This repair route explicitly admits new failed sources,
+persisting `reason: "failed"` on the request. Validation checks the pinned audits, the fix
+at QA's exact target revision and independent semantic assertions. Review only
+prepares previews; publication still requires the existing checker guards and an
+explicit lesson target grant. Current model output and semantic checks for this
+route are synthetic; live-model/service and full product E2E acceptance remain
+unverified.
+
+Skill/tool reviews dispatch the same `review` system step and
+`learning.retrospective` action with `kind: "skill"` or `kind: "tool"`, canonical
+`scope/workItemId`, source `runId` and saved `checkerId`, without `repair: true`.
+They require saved validation configuration and dedicated validation support;
+knowledge publication configuration is not required. Output is exactly
+`{ scope, runId, requestKey, processing, validated }`, where each `validated`
+entry is an existing `LearningValidationResult` receipt with `status: "validated"`,
+`candidateId`, `candidateVersion`, `validatedVersion`, `executionId` and
+`receiptDigest`. Already-validated proposals are rejected with
+`learning_proposal_revalidation_required`; this entry adds no revalidation
+authority guard. These routes validate proposals only: they do not prepare or
+apply publications, install assets, or complete the optimization lifecycle.
+Mock routing checks do not qualify live models/services, native tools or full
+product E2E behavior.
+
+An explicit template `purpose: learning` selects the learning lifecycle through
+the same public runner. Loading, schema validation and graph compilation precede
+work-item claims, hooks and repository effects. Only registered `learning.*`
+system steps are accepted; agent steps and branch/provider defaults are rejected.
+Each step receives its declared `input` DTO, the authorized existing workspace
+and a cooperative cancellation signal, including its optional `timeoutMs`.
+The learning run ID must differ from source run IDs declared in step inputs,
+including the supported single workflow envelope. Before any audit append,
+preflight uses the action boundary's envelope rules and identity schema, including
+identity trimming. Graph compilation rejects duplicate step IDs.
+The runner does not claim or transition source work, start an implementation
+runtime, prepare repositories, create branches/sandboxes, commit, push or queue QA.
+Validation and publication still require the learning plugin's own authorities.
+The shared learning runner returns `steps`, keyed by step ID, with each step's
+status and successful action output. Failed steps retain their status without
+successful output; callers must check overall success before presenting previews.
+
+Only lifecycle modules explicitly declaring `purposes: ['learning']` participate
+in learning; a shared module can declare both purposes. Init, before and after
+hooks keep their existing meanings. Cleanup drains once in reverse order with
+an independent signal; failures are retained and prevent success. Required audit
+failures remain fatal and stop pending sibling dispatch; started actions still
+settle before cleanup. A terminal audit failure preserves earlier hook and cleanup
+errors. Events carry learning purpose from the first request,
+use effect events for system steps and record the terminal outcome after cleanup;
+they do not report implementation completion or feed learning intake again.
+Absent or explicit `purpose: execution` retains the execution lifecycle;
+`RunnerOptions.purpose` alone remains observation metadata.
+
 The managed execution path validates the work item and its execution manifest, runs implementation, records branch and run evidence, performs independent QA, and prepares or verifies the provider-backed change request. A successful run does not merge code. The final merge is human-controlled; the work item reaches its terminal completed state only after merge and reconciliation.
+
+In workflow templates, `when.step` establishes an ordering dependency even without an explicit `dependsOn`. A missing result never satisfies a condition, including `notEquals`. A matching condition may allow recovery from the referenced step's failure; every other explicit prerequisite must have completed successfully. Failed, aborted, timed-out or skipped prerequisites therefore still block dependent agent and system steps.
 
 The provider backlog, runtime state, run-event audit trail, and evidence are separate projections with different authority:
 
@@ -208,6 +314,14 @@ another round — which pushed the baseline again.
 **working branch** and nothing else: it commits there and pushes there.
 The **base branch**, the **target branch** and the **source branch** are
 read, never pushed.
+
+For the Git branch provider, remote synchronization belongs to workspace
+preparation, before the implementation or QA Agent starts. `preparePush`
+may fast-forward or merge at that point. Publication calls `push` without
+another synchronization. If the remote advances or diverges after review,
+push fails without changing the reviewed local HEAD; the run must prepare
+and verify again before publication. Required publication hooks still run
+before the push and change-request creation.
 
 The rule is stated where every agent reads it — the completion protocol,
 in both transports and for every phase — and again with the branch names

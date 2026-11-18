@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MetricsPort } from '@afk/core';
 import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
-import { RunObserver } from './run-observer.js';
+import { getObservationSignal, RunObserver, withObservationSignal } from './run-observer.js';
 
 const roots: string[] = [];
 
@@ -17,6 +17,83 @@ async function root(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(path => fs.rm(path, { recursive: true, force: true })));
+});
+
+describe('observation signal scope', () => {
+  it.each(['parent', 'child'] as const)('aborts the nested effective signal when the %s aborts', async source => {
+    const parent = new AbortController();
+    const child = new AbortController();
+    const reason = new Error(`${source} cancelled`);
+    expect(getObservationSignal()).toBeUndefined();
+    await withObservationSignal(parent.signal, async () => {
+      expect(getObservationSignal()).toBe(parent.signal);
+      await withObservationSignal(child.signal, async () => {
+        const effective = getObservationSignal();
+        expect(effective?.aborted).toBe(false);
+        await Promise.resolve();
+        expect(getObservationSignal()).toBe(effective);
+        (source === 'parent' ? parent : child).abort(reason);
+        expect(effective?.aborted).toBe(true);
+        expect(effective?.reason).toBe(reason);
+      });
+      expect(getObservationSignal()).toBe(parent.signal);
+      expect(parent.signal.aborted).toBe(source === 'parent');
+      expect(child.signal.aborted).toBe(source === 'child');
+    });
+    expect(getObservationSignal()).toBeUndefined();
+  });
+
+  it.each(['completion', 'rejection'] as const)('restores the outer scope after inner async %s', async outcome => {
+    const parent = new AbortController();
+    const child = new AbortController();
+    const original = new Error('inner failed');
+    await withObservationSignal(parent.signal, async () => {
+      const pending = withObservationSignal(child.signal, async () => {
+        const effective = getObservationSignal();
+        expect(effective).toBeDefined();
+        expect(effective).not.toBe(parent.signal);
+        await Promise.resolve();
+        expect(getObservationSignal()).toBe(effective);
+        if (outcome === 'rejection') throw original;
+        return 'completed';
+      });
+      expect(getObservationSignal()).toBe(parent.signal);
+      if (outcome === 'rejection') await expect(pending).rejects.toBe(original);
+      else await expect(pending).resolves.toBe('completed');
+      expect(getObservationSignal()).toBe(parent.signal);
+    });
+    expect(getObservationSignal()).toBeUndefined();
+  });
+
+  it('restores the outer scope after an inner synchronous throw', () => {
+    const parent = new AbortController();
+    const child = new AbortController();
+    const original = new Error('inner failed');
+    withObservationSignal(parent.signal, () => {
+      expect(() => withObservationSignal(child.signal, () => { throw original; })).toThrow(original);
+      expect(getObservationSignal()).toBe(parent.signal);
+    });
+    expect(getObservationSignal()).toBeUndefined();
+  });
+
+  it('isolates concurrent async scopes and their cancellation', async () => {
+    const first = new AbortController();
+    const second = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const pending = [first, second].map(controller => withObservationSignal(controller.signal, async () => {
+      expect(getObservationSignal()).toBe(controller.signal);
+      await gate;
+      expect(getObservationSignal()).toBe(controller.signal);
+      expect(getObservationSignal()?.aborted).toBe(controller === first);
+    }));
+    expect(getObservationSignal()).toBeUndefined();
+    first.abort();
+    release();
+    await Promise.all(pending);
+    expect(second.signal.aborted).toBe(false);
+    expect(getObservationSignal()).toBeUndefined();
+  });
 });
 
 describe('RunObserver', () => {

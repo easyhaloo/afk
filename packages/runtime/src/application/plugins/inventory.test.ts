@@ -80,6 +80,27 @@ describe('passive inventory', () => {
     expect(selected[0].manifest?.externalTools).toEqual([]);
   });
 
+  it('projects configured notification bindings without activating or sending', async () => {
+    const execute = vi.fn(() => { throw new Error('Notification command execution forbidden'); });
+    const platform = process.platform === 'win32' ? 'linux' : 'win32';
+    for (const sendmailPath of [undefined, 'sendmail', '/opt/custom/sendmail']) {
+      const rows = (await listPluginInventory({ configuration: { plugins: [
+        { id: 'notification.desktop', builtin: true, config: { platform } },
+        { id: 'notification.email', builtin: true, config: { from: 'sender@example.com', to: 'recipient@example.com',
+          ...(sendmailPath ? { sendmailPath } : {}) } },
+      ] } })).filter(row => row.id === 'notification.desktop' || row.id === 'notification.email');
+      expect(rows.every(row => row.configuration === 'valid' && row.diagnostics.length === 0)).toBe(true);
+      const passive = await diagnosePluginInventory(rows, { execute });
+      expect(passive).toContainEqual(expect.objectContaining({ pluginId: 'notification.desktop', reason: 'not-requested' }));
+      expect(passive).toContainEqual(expect.objectContaining({ pluginId: 'notification.email',
+        ...(sendmailPath === 'sendmail' ? { reason: 'not-requested' } : { command: sendmailPath ?? '/usr/sbin/sendmail', reason: 'custom-binding' }) }));
+      expect(await diagnosePluginInventory(rows.filter(row => row.id === 'notification.desktop'),
+        { probe: true, execute, executorLifecycle: 'trusted-cooperative' }))
+        .toEqual([expect.objectContaining({ pluginId: 'notification.desktop', status: 'unsupported' })]);
+    }
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('approves only builtin exact tuples and leaves backend-required without host fallback', async () => {
     const execute = vi.fn(async (_request: import('./external-tools.js').VersionProbeRequest) => ({ stdout: '9.0.0', stderr: '' }));
     const rows = await listPluginInventory({ configuration: { plugins: [] } });

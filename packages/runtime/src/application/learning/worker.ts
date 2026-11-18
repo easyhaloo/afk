@@ -4,13 +4,13 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { AgentProvider } from '../../domain/agents/types.js';
-import { DurableTriggerQueue } from '../plugins/trigger-queue.js';
+import { DurableTriggerQueue, TriggerQueueFull } from '../plugins/trigger-queue.js';
 import { buildAnalysisPrompt, parseAnalysisOutput } from './analysis.js';
 import { executeAnalysis, type AnalysisExecutionResult } from './analysis-runner.js';
-import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type StoredDistillationRequest } from './candidate-store.js';
+import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type ProcessingReceipt, type StoredDistillationRequest } from './candidate-store.js';
 import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
 import { loadEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
-import { canonicalLearningJson } from './requests.js';
+import { canonicalLearningJson, learningDigestSchema } from './requests.js';
 
 export function learningDirectory(homeDir = homedir()): string {
   return join(homeDir, '.afk', 'learning');
@@ -51,21 +51,63 @@ export interface LearningWorkerResult {
   blocked: number;
 }
 
+const learningRequestTargetSchema = z.object({ scope: learningScopeSchema, requestKey: learningDigestSchema }).strict();
+export type LearningRequestTarget = z.infer<typeof learningRequestTargetSchema>;
+
+export interface LearningRequestState {
+  job: LearningJob;
+  processing?: ProcessingReceipt;
+  candidates: LearningCandidate[];
+}
+
+function learningJob(store: CandidateStore, entry: StoredDistillationRequest): LearningJob {
+  return {
+    jobId: entry.key, scope: entry.request.scope, sourceId: entry.request.sourceId, sourceRunId: entry.request.sourceRunId,
+    workItemId: entry.request.workItemId,
+    status: store.getProcessingReceipt(entry.key) ? 'processed' : entry.blockedReason
+      ? ['analysis_invalid_output', 'analysis_failed', 'attempts_exhausted'].includes(entry.blockedReason) ? 'failed' : 'blocked'
+      : 'pending',
+    ...(entry.blockedReason ? { reasonCode: entry.blockedReason } : {}),
+    attempts: store.listAnalysisAttempts(entry.key),
+  };
+}
+
+function requireLearningRequest(store: CandidateStore, target: LearningRequestTarget): StoredDistillationRequest {
+  const entry = store.getRequest(target.requestKey);
+  if (!entry || entry.key !== target.requestKey || entry.request.scope !== target.scope) throw new Error('learning_request_not_found');
+  return entry;
+}
+
+export function queryLearningRequest(input: LearningRequestTarget & { directory: string }): LearningRequestState {
+  const target = learningRequestTargetSchema.parse({ scope: input.scope, requestKey: input.requestKey });
+  const file = join(input.directory, 'candidates.sqlite');
+  if (!existsSync(file)) throw new Error('learning_request_not_found');
+  const store = new CandidateStore({ file });
+  try {
+    const entry = requireLearningRequest(store, target);
+    const processing = store.getProcessingReceipt(target.requestKey);
+    if (processing && (processing.requestKey !== target.requestKey || new Set(processing.candidateIds).size !== processing.candidateIds.length)) {
+      throw new Error('learning_processing_invalid');
+    }
+    const candidates = (processing?.candidateIds ?? []).map(id => {
+      const candidate = store.getCandidate(id);
+      if (!candidate || candidate.id !== id || candidate.requestKey !== target.requestKey
+        || candidate.evidenceDigest !== entry.request.evidenceDigest || candidate.proposal.applicability.project !== target.scope) {
+        throw new Error('learning_processing_invalid');
+      }
+      return candidate;
+    });
+    return { job: learningJob(store, entry), ...(processing ? { processing } : {}), candidates };
+  } finally { store.close(); }
+}
+
 export function queryLearningState(input: { directory: string; scope: string }): LearningState {
   const scope = learningScopeSchema.parse(input.scope);
   const file = join(input.directory, 'candidates.sqlite');
   if (!existsSync(file)) return { jobs: [], candidates: [] };
   const store = new CandidateStore({ file });
   try {
-    const jobs = store.listRequests().filter(entry => entry.request.scope === scope).map(entry => ({
-      jobId: entry.key, scope, sourceId: entry.request.sourceId, sourceRunId: entry.request.sourceRunId,
-      workItemId: entry.request.workItemId,
-      status: store.getProcessingReceipt(entry.key) ? 'processed' as const : entry.blockedReason
-        ? ['analysis_invalid_output', 'analysis_failed', 'attempts_exhausted'].includes(entry.blockedReason) ? 'failed' as const : 'blocked' as const
-        : 'pending' as const,
-      ...(entry.blockedReason ? { reasonCode: entry.blockedReason } : {}),
-      attempts: store.listAnalysisAttempts(entry.key),
-    }));
+    const jobs = store.listRequests().filter(entry => entry.request.scope === scope).map(entry => learningJob(store, entry));
     return { jobs, candidates: store.listCandidates().filter(entry => entry.proposal.applicability.project === scope) };
   } finally { store.close(); }
 }
@@ -77,7 +119,7 @@ export interface LearningWorkerOptions {
   dailyCalls?: number;
   timeoutMs?: number;
   analyze?: typeof executeAnalysis;
-  reconcileSources?: () => Promise<void>;
+  reconcileSources?: (target?: LearningRequestTarget) => Promise<void>;
 }
 
 const deliverySchema = z.object({ jobId: z.string().regex(/^[a-f0-9]{64}$/), scope: learningScopeSchema }).strict();
@@ -103,15 +145,22 @@ export class LearningWorker {
     } catch (error) { this.store.close(); throw error; }
   }
 
-  async runOnce(): Promise<LearningWorkerResult> {
+  async runOnce(): Promise<LearningWorkerResult>;
+  async runOnce(target: LearningRequestTarget): Promise<LearningRequestState>;
+  async runOnce(input?: LearningRequestTarget): Promise<LearningWorkerResult | LearningRequestState> {
+    const target = input === undefined ? undefined : learningRequestTargetSchema.parse(input);
     this.begin();
     try {
-      await this.options.reconcileSources?.();
+      if (target) requireLearningRequest(this.store, target);
+      await this.options.reconcileSources?.(target);
       this.assertEnabled();
-      this.handoff();
-      this.queue.start();
+      const deliveryId = this.handoff(target);
+      if (target) {
+        if (deliveryId) this.queue.start({ deliveryId });
+      } else this.queue.start();
       await this.queue.close();
     } catch (error) { await this.close(); throw error; }
+    if (target) return queryLearningRequest({ directory: this.options.directory, ...target });
     const requests = this.store.listRequests();
     return {
       processed: requests.filter(entry => this.store.getProcessingReceipt(entry.key)).length,
@@ -163,9 +212,11 @@ export class LearningWorker {
     this.started = true;
   }
 
-  private handoff(): void {
+  private handoff(target?: LearningRequestTarget): string | undefined {
     const day = new Date().toISOString().slice(0, 10);
-    for (const entry of this.store.listRequests()) {
+    const entries = target ? [requireLearningRequest(this.store, target)] : this.store.listRequests();
+    let canPrune = target === undefined;
+    for (const entry of entries) {
       if (entry.key === this.activeJobId) continue;
       if (this.store.getProcessingReceipt(entry.key)) continue;
       if (entry.blockedReason && !['budget_exhausted', 'analysis_failed', 'analysis_cancelled',
@@ -182,9 +233,24 @@ export class LearningWorker {
       }
       if (entry.blockedReason) this.store.setRequestBlocked(entry.key, null, entry.blockedReason);
       if (this.store.getRequest(entry.key)?.blockedReason) continue;
-      const delivery = this.queue.enqueue('learning.distill', JSON.stringify({ jobId: entry.key, scope: entry.request.scope }), entry.key);
+      const body = JSON.stringify({ jobId: entry.key, scope: entry.request.scope });
+      let delivery: ReturnType<DurableTriggerQueue['enqueue']> | undefined;
+      for (;;) {
+        try { delivery = this.queue.enqueue('learning.distill', body, entry.key); break; }
+        catch (error) {
+          if (!(error instanceof TriggerQueueFull)) throw error;
+          if (canPrune) {
+            canPrune = false;
+            if (this.queue.pruneDelivered() > 0) continue;
+          }
+          this.store.setRequestBlocked(entry.key, 'storage_blocked', null);
+          break;
+        }
+      }
+      if (!delivery) continue;
       if (delivery.status === 'failed') this.queue.replay(delivery.deliveryId);
       this.store.markHandedOff(entry.key, delivery.deliveryId);
+      if (target) return delivery.deliveryId;
     }
   }
 
@@ -216,7 +282,10 @@ export class LearningWorker {
     const day = new Date().toISOString().slice(0, 10);
     const callId = randomUUID();
     try { this.store.startAnalysisAttempt({ requestKey: jobId, day, callId, limit: this.dailyCalls, startedAt: new Date().toISOString() }); }
-    catch {
+    catch (error) {
+      if (this.store.getProcessingReceipt(jobId)) return;
+      if (error instanceof Error && error.message === 'Learning analysis attempt already in progress') throw error;
+      if (error instanceof Error && error.message === 'Learning analysis attempts exhausted') return fail('attempts_exhausted');
       return fail(this.store.getModelCallCount(day) >= this.dailyCalls ? 'budget_exhausted' : 'storage_blocked');
     }
     this.active = new AbortController();
@@ -240,10 +309,14 @@ export class LearningWorker {
         }
         result = await (this.options.analyze ?? executeAnalysis)({ provider: this.options.provider, jobId,
           prompt, signal: this.active.signal, timeoutMs: this.options.timeoutMs,
-          onStarted: identity => { this.store.recordAnalysisIdentity(callId, identity); } });
+          onStarted: identity => { this.store.claimAnalysisLaunch(callId, identity); } });
         if (result.sessionId) this.store.recordAnalysisIdentity(callId, { analysisRunId: result.analysisRunId, sessionId: result.sessionId });
       } catch (error) {
-        const code = error instanceof Error && ['analysis_unsupported', 'analysis_timed_out', 'analysis_cancelled'].includes(error.message)
+        if (error instanceof Error && error.message === 'Learning request already processed' && this.store.getProcessingReceipt(jobId)) {
+          this.store.finishAnalysisAttempt(callId, { status: 'cancelled', finishedAt: new Date().toISOString(), errorCode: 'already_processed' });
+          return;
+        }
+        const code = error instanceof Error && ['analysis_unsupported', 'analysis_timed_out', 'analysis_cancelled', 'analysis_outcome_unknown', 'analysis_executable_changed'].includes(error.message)
           ? error.message : 'analysis_failed';
         return finishFailed(code);
       }
@@ -253,10 +326,11 @@ export class LearningWorker {
       let output: DistillationOutput;
       try { output = parseAnalysisOutput(result.output, entry.request, pack); }
       catch { return finishFailed('analysis_invalid_output'); }
-      try { this.store.completeRequest(jobId, output); }
+      try {
+        this.store.completeAnalysisAttempt(callId, output, { finishedAt: new Date().toISOString(),
+          ...(result.usage ? { usage: result.usage } : {}) });
+      }
       catch { return finishFailed('storage_blocked'); }
-      this.store.finishAnalysisAttempt(callId, { status: 'succeeded', finishedAt: new Date().toISOString(),
-        ...(result.usage ? { usage: result.usage } : {}) });
     } finally { this.active = undefined; this.activeJobId = undefined; }
   }
 }

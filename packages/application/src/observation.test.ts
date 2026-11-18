@@ -90,6 +90,17 @@ describe('run observation facade', () => {
     expect(execution.failureCode).toBe('agent_idle_timeout');
   });
 
+  it.each([
+    { reason: 'fixture timeout', summary: 'parcel check timed out', reasonCode: 'agent_idle_timeout' as const, expected: 'parcel check timed out' },
+    { reason: 'parcel totals differ', expected: 'parcel totals differ' },
+  ])('preserves the independent QA failure in execution history ($expected)', async ({ expected, ...failure }) => {
+    const qa: RunEvent = { ...event(3, 'run.started'), type: 'qa.failed', data: { kind: 'qa.failed', ...failure } };
+    const finished: RunEvent = { ...event(4, 'run.started'), type: 'run.finished', data: { kind: 'run.finished', outcome: 'failed' } };
+    const { executions } = await queryExecutionHistory({}, port([event(1, 'run.requested'), event(2, 'run.started'), qa, finished]));
+    expect(executions[0]?.failureSummary).toBe(expected);
+    expect(executions[0]?.failureCode).toBe(failure.reasonCode);
+  });
+
   it('isolates invalid or non-replayable runs while returning healthy executions', async () => {    const healthy = port();
     const deps: RunEventQueryPort = {
       async *read(runId) {

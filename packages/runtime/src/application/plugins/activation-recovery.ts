@@ -115,28 +115,58 @@ export async function verifyInstallation(directory: string, expected: InstalledP
   if (verifyEntry) await resolveInstalledPluginEntry(directory, expected);
 }
 
+function sharedOwners(value: string, installation?: string): string[] | undefined {
+  let record;
+  try { record = JSON.parse(value); } catch { return undefined; }
+  if (record?.kind !== 'shared-verification' || !Array.isArray(record.owners) || !record.owners.length) return undefined;
+  if (installation !== undefined && record.installation !== installation) return undefined;
+  for (const identity of record.owners) {
+    if (typeof identity !== 'string') return undefined;
+    let owner;
+    try { owner = JSON.parse(identity); } catch { return undefined; }
+    if (owner?.kind !== 'runtime' || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || typeof owner.token !== 'string' || !owner.token) return undefined;
+  }
+  if (new Set(record.owners).size !== record.owners.length) return undefined;
+  return record.owners.filter((identity: string) => !deadOwner(identity, true));
+}
+
+async function readLease(path: string): Promise<string | undefined> {
+  try {
+    if (!(await fs.lstat(path)).isFile()) throw new Error('Unknown plugin runtime reference');
+    return await fs.readFile(path, 'utf8');
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+}
+
 export async function assertInactive(directory: string, id: string): Promise<void> {
   validatePluginId(id);
-  try { await fs.lstat(join(directory, `.active-${id}.json`)); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
   const path = join(directory, `.active-${id}.json`);
-  if (deadOwner(await fs.readFile(path, 'utf8'), true)) { await fs.unlink(path); return; }
+  const value = await readLease(path);
+  if (value === undefined) return;
+  if (deadOwner(value, true) || sharedOwners(value)?.length === 0) { await fs.unlink(path); return; }
   // Unknown owners and live/reused PIDs stay protected, including worker ownership.
   throw new Error(`Plugin '${id}' has an active or unknown runtime/worker reference`);
 }
 
 /** Called while holding .manager.lock. Runtime disposal owns the release. */
-export async function activationLease(directory: string, id: string): Promise<() => Promise<void>> {
-  await assertInactive(directory, id);
+export async function activationLease(directory: string, id: string, installation?: string): Promise<() => Promise<void>> {
+  validatePluginId(id);
   const path = join(directory, `.active-${id}.json`);
   const identity = JSON.stringify({ kind: 'runtime', pid: process.pid, token: randomUUID() });
-  await fs.writeFile(path, identity, { flag: 'wx', mode: 0o600 });
+  const saveOwners = (owners: string[]) => atomicWrite(path, JSON.stringify({ kind: 'shared-verification', installation, owners }));
+  const owners = installation ? sharedOwners(await readLease(path) ?? '', installation) : undefined;
+  if (!owners) await assertInactive(directory, id);
+  if (installation) await saveOwners([...(owners ?? []), identity]);
+  else await fs.writeFile(path, identity, { flag: 'wx', mode: 0o600 });
   let released = false;
   return async () => {
     if (released) return;
     await withManagerLock(directory, async () => {
-      if (await fs.readFile(path, 'utf8') !== identity) throw new Error('Plugin runtime reference identity changed');
-      await fs.unlink(path);
+      const current = await readLease(path);
+      const members = installation ? sharedOwners(current ?? '', installation) : undefined;
+      if (installation ? !members?.includes(identity) : current !== identity) throw new Error('Plugin runtime reference identity changed');
+      const remaining = members?.filter(member => member !== identity);
+      if (remaining?.length) await saveOwners(remaining);
+      else await fs.unlink(path);
       released = true;
     });
   };

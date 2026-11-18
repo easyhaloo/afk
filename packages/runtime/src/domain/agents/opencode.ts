@@ -58,6 +58,9 @@ export class OpenCodeProvider extends ProcessAgentProvider {
     if (options.executionMode === 'batch') {
       const argv = ['opencode', 'run', '--format', 'json'];
       if (model) argv.push('--model', model);
+      if (options.skillTask && options.skillTask.workspace === options.worktreePath) {
+        return { argv: [...argv, '--standalone'], cwd: options.worktreePath, env: { AFK_SKILL_TASK_CONTEXT: JSON.stringify(options.skillTask) } };
+      }
       return { argv, cwd: options.worktreePath };
     }
 

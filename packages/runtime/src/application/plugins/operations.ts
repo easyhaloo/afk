@@ -4,6 +4,7 @@ import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import { withCancellation } from './cancellation.js';
 import { RepositoryLifecycleService } from './repository-lifecycle.js';
 import { experienceQueryContextSchema } from '../learning/experience-store.js';
+import { localToolTarget } from './tool-recipes.js';
 
 const text = z.string().min(1).refine(value => value.trim().length > 0 && !value.includes('\0'));
 const timeout = z.number().int().positive().max(2_147_483_647);
@@ -28,6 +29,8 @@ const repositoryCheckout = repositoryHandle.extend({ branch: text.optional(), re
 const repositoryWorkspace = z.object({ id: text, repository: repositoryRef, runId: text, snapshot: repositorySnapshot, path: text.optional() });
 const repositoryPublication = z.object({ commit: text, branch: text, url: text.optional() });
 const repositoryCleanup = z.object({ removed: z.boolean() });
+const repositoryRecovery = z.object({ allocation: z.object({ id: z.string().uuid(), repository: repositoryRef, runId: text }),
+  phase: z.enum(['intent', 'reserved', 'owned', 'retained', 'recovering', 'removing', 'closed']) });
 const contextQuery = z.object({ scope: text, prompt: z.string(), limit: z.number().int().positive().optional(),
   applicability: z.unknown().optional(), target: z.unknown().optional(),
 }).strict().transform(({ applicability, target, ...query }, context) => {
@@ -108,6 +111,8 @@ const invocationSchema = z.union([
   operation('repository.provider', 'checkout', repositoryCheckout),
   operation('repository.provider', 'publish', repositoryHandle),
   operation('repository.provider', 'cleanup', repositoryHandle),
+  operation('repository.provider', 'listRecoveryAllocations', empty),
+  operation('repository.provider', 'recoverAllocation', z.object({ allocationId: z.string().uuid() }).strict()),
   operation('repository.provider', 'run', repositoryPrepare.extend({ action: text, input: z.record(jsonValue), checkout: repositoryCheckout.omit({ workspaceId: true }).optional() }).strict()),
   operation('policy.provider', 'evaluate', z.object({ action: text, context: z.record(scalar).optional() }).strict()),
   operation('trigger.provider', 'register', z.object({
@@ -197,12 +202,18 @@ export async function invokeCapability(runtime: PluginRuntime, input: unknown, o
 async function dispatchCapability(runtime: PluginRuntime, request: z.output<typeof invocationSchema>, options?: PluginSystemActionOptions): Promise<unknown> {
   const forwarded: [] | [PluginSystemActionOptions] = options ? [options] : [];
   switch (request.capability) {
-    case 'verification.provider':
-      if (options && Object.hasOwn(options, 'authorizedWorkspace')
-        && (typeof options.authorizedWorkspace !== 'string' || !options.authorizedWorkspace.trim())) {
-        throw new Error('Verification requires an authorized Repository checkout workspace');
+    case 'verification.provider': {
+      let input = request.input;
+      if (options && Object.hasOwn(options, 'authorizedWorkspace')) {
+        const workspace = options.authorizedWorkspace;
+        if (typeof workspace !== 'string' || !workspace.trim()) {
+          throw new Error('Verification requires an authorized Repository checkout workspace');
+        }
+        const target = await withCancellation(() => localToolTarget(workspace, request.input.target), options);
+        input = { ...input, target };
       }
-      return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(request.input, ...forwarded));
+      return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(input, ...forwarded));
+    }
     case 'notification.provider':
       return output(notificationReceiptSchema, await required(runtime.getNotificationProvider(request.provider)).notify(request.input, ...forwarded));
     case 'context.provider':
@@ -214,6 +225,24 @@ async function dispatchCapability(runtime: PluginRuntime, request: z.output<type
     case 'repository.provider': {
       const provider = required(runtime.getRepositoryProvider(request.provider));
       if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input, ...forwarded));
+      if (request.operation === 'listRecoveryAllocations') {
+        try {
+          if (provider.capabilities.recovery) {
+            const inspect = provider.listRecoveryAllocations;
+            if (typeof inspect === 'function') return output(z.array(repositoryRecovery), await inspect.call(provider, ...forwarded));
+          }
+        } catch { throw new Error('Repository recovery inspection failed'); }
+        throw new Error('Repository provider does not support recovery');
+      }
+      if (request.operation === 'recoverAllocation') {
+        try {
+          if (provider.capabilities.recovery) {
+            const recover = provider.recoverAllocation;
+            if (typeof recover === 'function') return output(repositoryCleanup, await recover.call(provider, request.input.allocationId, ...forwarded));
+          }
+        } catch { throw new Error('Repository recovery failed'); }
+        throw new Error('Repository provider does not support recovery');
+      }
       if (request.operation === 'run') {
         if (!runtime.listSystemActions().includes(request.input.action)) throw new Error('Repository execution action is not registered');
         const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId, checkout: request.input.checkout }, workspace => runtime.dispatchSystemAction(request.input.action, {

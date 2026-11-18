@@ -156,6 +156,8 @@ async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: De
   try {
     plugins.push(...await createConfiguredPlugins({
       configurations: configured, homeDir, workspaceRoot, activateTriggers: options.activateTriggers,
+      readToolSourcePolicy: () => readPluginConfiguration(homeDir).plugins.find(entry =>
+        entry.id === 'policy.compliance-policy' && entry.builtin && entry.enabled !== false)?.config,
       onTrigger: async event => {
         const entry = configured.find(candidate => candidate.id === event.pluginId);
         if (typeof entry?.action !== 'string') throw new Error('Trigger action is not configured');
@@ -195,6 +197,7 @@ async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: De
       auditArtifacts = selection.evidence;
       const fragments = new Map<string, ContextFragment[]>();
       const module = createCapabilityLifecycle(runtime, {
+        verificationEvidence: localEvidence,
         policies: selection.policies.map(policy => ({ ...policy, input: context => ({ ...policy.input, context: { ...policy.input.context, worktreePath: context.worktreePath } }) })),
         verifications: selection.verifications.map(({ provider, ...request }) => ({ provider,
           request: context => ({ ...request, target: context.worktreePath }) })),

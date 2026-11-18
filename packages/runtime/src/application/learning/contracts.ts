@@ -1,6 +1,22 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { canonicalProjectKey, parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
+import { StepSchema } from '../../domain/templates/types.js';
+import { recallTerms } from '../../domain/context/terms.js';
+
+const learningWorkflowInputSchema = z.object({
+  iid: z.number().int().positive(), worktreePath: z.string().min(1), branch: z.string().min(1),
+  targetBranch: z.string().min(1), step: StepSchema, input: z.unknown(),
+}).strict();
+
+export function normalizeLearningActionInput(action: string, input: unknown): unknown {
+  if (input && typeof input === 'object' && Object.hasOwn(input, 'step') && Object.hasOwn(input, 'input')) {
+    const envelope = learningWorkflowInputSchema.parse(input);
+    if (envelope.step.kind !== 'system' || envelope.step.action !== action) throw new Error('learning_workflow_input_invalid');
+    return envelope.input;
+  }
+  return input;
+}
 
 export const DISTILLATION_LIMITS = {
   evidenceBytes: 128 * 1024, outputBytes: 32 * 1024, candidates: 10,
@@ -25,6 +41,25 @@ export const learningScopeSchema = identity.superRefine((value, context) => {
   }
 });
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+export const learningReviewIncompleteSchema = z.object({
+  status: z.literal('incomplete'), scope: learningScopeSchema, runId: identity, requestKey: digest,
+  validated: z.array(z.object({
+    status: z.literal('validated'), candidateId: digest, candidateVersion: z.number().int().positive(),
+    validatedVersion: z.number().int().positive(), executionId: identity, receiptDigest: digest,
+  }).strict()).min(1).max(DISTILLATION_LIMITS.candidates),
+  interruptedCandidateId: digest, reason: z.enum(['validation_blocked', 'validation_failed', 'cancelled']),
+}).strict();
+
+export class LearningReviewIncompleteError extends Error {
+  readonly output: z.infer<typeof learningReviewIncompleteSchema>;
+
+  constructor(output: z.infer<typeof learningReviewIncompleteSchema>, options?: ErrorOptions) {
+    super('learning_review_incomplete', options);
+    this.name = 'LearningReviewIncompleteError';
+    this.output = learningReviewIncompleteSchema.parse(output);
+  }
+}
+
 const strings = z.array(text(1024)).max(32);
 const evidenceIds = z.array(identity).max(64).refine(values => new Set(values).size === values.length, 'Duplicate evidence IDs');
 const targetRef = text(512).refine(value => /^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value), 'Expected logical target reference')
@@ -40,7 +75,7 @@ export const evidenceRefSchema = z.object({
 export const distillationRequestSchema = z.object({
   version: z.literal(1), scope: learningScopeSchema, sourceId: identity,
   sourceRunId: identity.optional(), workItemId: identity.optional(), evidenceDigest: digest,
-  analyzerVersion: identity, reason: z.enum(['completed', 'repaired', 'correction', 'import']),
+  analyzerVersion: identity, reason: z.enum(['completed', 'failed', 'repaired', 'correction', 'import']),
 }).strict().superRefine((value, context) => {
   if (value.workItemId === undefined) return;
   try {
@@ -87,8 +122,11 @@ export const candidateProposalSchema = z.discriminatedUnion('kind', [
     entry: text(1024), systems: strings.min(1), preconditions: strings,
     steps: z.array(processStep).min(1).max(32), exceptions: strings, completion: text(2048),
   }).strict() }),
-  proposal.extend({ kind: z.literal('lesson'), payload: z.object({
+  proposal.extend({ kind: z.literal('lesson'), applicability: applicability.extend({ productId: identity.refine(value => value !== '__proto__').optional() })
+    .refine(value => value.productId === undefined || value.versions.length > 0, 'A named product requires a version'), payload: z.object({
     trigger: text(1024), rootCause: text(2048), rootCauseStatus: z.enum(['hypothesis', 'confirmed']),
+    triggerAliases: z.array(text(128).refine(value => !/[\r\n\t]/u.test(value) && recallTerms(value).size > 0,
+      'Expected a single-line searchable phrase')).min(1).max(8).optional(),
     attempts: strings, fix: text(4096), prevention: strings.min(1),
   }).strict() }),
   proposal.extend({ kind: z.literal('skill'), payload: skillPayload }),

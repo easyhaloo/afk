@@ -237,11 +237,13 @@ describe('StreamingAgentExecution', () => {
       }
     });
 
-    async function exitedWithPausedOutput(script: string, analysisParentGuard = false, native = true) {
+    const analysisSessionId = 'fixture-analysis-session';
+
+    async function exitedWithPausedOutput(script: string, guarded = false, native = true) {
       const provider = new ClaudeCodeProvider();
       const execution = new StreamingAgentExecution({
         command: command(script), prompt: 'inert local fixture', signalType: 'goal_complete',
-        worktreePath: process.cwd(), metadata: PROCESS_METADATA, analysisParentGuard,
+        worktreePath: process.cwd(), metadata: { ...PROCESS_METADATA }, analysisSessionId: guarded ? analysisSessionId : undefined,
         parseLine: native ? provider.parseLine.bind(provider) : undefined,
       });
       executions.push(execution);
@@ -287,7 +289,7 @@ describe('StreamingAgentExecution', () => {
       it.skipIf(analysisParentGuard && (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')))
         .each([true, false])('consumes a valid result after exit before close (guarded: ' + analysisParentGuard + ', newline: %s)', async newline => {
           const payload = JSON.stringify({ type: 'result', result: JSON.stringify({ type: 'goal_complete', summary: 'tail delivered' }),
-            usage: { input_tokens: 2, output_tokens: 3 } }) + (newline ? '\n' : '');
+            session_id: analysisSessionId, usage: { input_tokens: 2, output_tokens: 3 } }) + (newline ? '\n' : '');
           const data = await exitedWithPausedOutput(`process.stdin.resume(); process.stdin.once('end', () => process.stdout.write(${JSON.stringify(payload)}, () => process.exit(0)));`, analysisParentGuard);
           data.child.stdout.resume();
           data.child.stderr.resume();
@@ -315,19 +317,83 @@ describe('StreamingAgentExecution', () => {
 
       for (const native of [false, true]) {
         it.skipIf(analysisParentGuard && (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')))
-          .each(['', 'Finished local work: '] as const)('preserves a raw completion marker after exit (guarded: ' + analysisParentGuard + ', native: ' + native + ', prefix: %s)', async prefix => {
+          .each(['', 'Finished local work: '] as const)('accepts a raw completion marker after exit only outside analysis (guarded: ' + analysisParentGuard + ', native: ' + native + ', prefix: %s)', async prefix => {
             const payload = `${prefix}<goal_complete>{}</goal_complete>`;
             const data = await exitedWithPausedOutput(`process.stdin.resume(); process.stdin.once('end', () => process.stdout.write(${JSON.stringify(payload)}, () => process.exit(0)));`, analysisParentGuard, native);
             data.child.stdout.resume();
             data.child.stderr.resume();
             await data.closed;
             expect(data.events).toEqual(['exit', 'data', 'close']);
-            await expect(data.execution.waitForResult({ completionTimeoutMs: 4000 })).resolves.toMatchObject({
-              status: 'completed', exitCode: 0, structuredOutput: { type: 'goal_complete' },
-            });
+            await expect(data.execution.waitForResult({ completionTimeoutMs: 4000 })).resolves.toMatchObject(analysisParentGuard
+              ? { status: 'failed', error: { code: 'MISSING_RESULT' } }
+              : { status: 'completed', exitCode: 0, structuredOutput: { type: 'goal_complete' } });
           });
       }
     }
+
+    it.skipIf(process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec'))
+      .each(['clean', 'late-error', 'non-zero', 'timeout'] as const)('requires the guarded output tail and close after a result (%s)', async outcome => {
+        const result = JSON.stringify({ type: 'result', session_id: analysisSessionId, result: '<goal_complete>{}</goal_complete>' }) + '\n';
+        const tail = outcome === 'late-error' ? JSON.stringify({ type: 'result', session_id: analysisSessionId, is_error: true, result: 'late error' }) + '\n' : '';
+        const provider = new ClaudeCodeProvider();
+        const execution = new StreamingAgentExecution({
+          command: command(`process.stdin.resume(); process.stdin.once('end', () => {
+            process.stdout.write(${JSON.stringify(result)});
+            setTimeout(() => {
+              process.exitCode = ${outcome === 'non-zero' ? 7 : 0};
+              process.stdout.write(${JSON.stringify(tail)});
+            }, 1250);
+          });`),
+          prompt: 'inert guarded fixture', signalType: 'goal_complete', worktreePath: process.cwd(),
+          metadata: { ...PROCESS_METADATA }, parseLine: provider.parseLine.bind(provider), analysisSessionId,
+        });
+        executions.push(execution);
+        execution.start();
+        const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+        const close = vi.fn();
+        child.once('close', close);
+        await once(child.stdout, 'data', { signal: AbortSignal.timeout(5000) });
+        expect(close).not.toHaveBeenCalled();
+
+        const observed = await execution.waitForResult({ completionTimeoutMs: outcome === 'timeout' ? 100 : 4000 });
+        if (outcome === 'timeout') {
+          expect(observed.status).toBe('timed_out');
+          return;
+        }
+        expect(close).toHaveBeenCalledWith(outcome === 'non-zero' ? 7 : 0, null);
+        expect(child.stdout.readableEnded && child.stderr.readableEnded).toBe(true);
+        if (outcome === 'clean') expect(observed).toMatchObject({ status: 'completed', exitCode: 0 });
+        if (outcome === 'late-error') expect(observed).toMatchObject({ status: 'failed', error: { code: 'AGENT_ERROR' } });
+        if (outcome === 'non-zero') expect(observed).toMatchObject({ status: 'failed', exitCode: 7, error: { code: 'NON_ZERO_EXIT' } });
+      });
+
+    it.skipIf(process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec'))('does not qualify a guarded result after the drain timer destroys an unfinished pipe', async () => {
+      const payload = JSON.stringify({ type: 'result', session_id: analysisSessionId, result: '<goal_complete>{}</goal_complete>' }) + '\n';
+      const provider = new ClaudeCodeProvider();
+      const execution = new StreamingAgentExecution({
+        command: command(`process.stdin.resume(); process.stdin.once('end', () => {
+          process.stdout.write(${JSON.stringify(payload)});
+          process.stderr.write('inert diagnostic');
+        });`),
+        prompt: 'inert guarded fixture', signalType: 'goal_complete', worktreePath: process.cwd(),
+        metadata: { ...PROCESS_METADATA }, parseLine: provider.parseLine.bind(provider), analysisSessionId,
+      });
+      executions.push(execution);
+      execution.start();
+      const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
+      const holdUnread = vi.fn();
+      child.stderr.on('readable', holdUnread);
+      try {
+        await once(child, 'exit', { signal: AbortSignal.timeout(5000) });
+        expect(child.stderr.readableEnded).toBe(false);
+        await expect(execution.waitForResult({ completionTimeoutMs: 4000 })).resolves.toMatchObject({
+          status: 'failed', error: { code: 'ANALYSIS_CLOSE_UNCONFIRMED' },
+        });
+        expect(child.stderr.readableEnded).toBe(false);
+      } finally {
+        child.stderr.off('readable', holdUnread);
+      }
+    });
 
     it.each([false, true])('does not infer completion from JSON framing outside a result event (native: %s)', async native => {
       for (const payload of [
@@ -431,7 +497,8 @@ describe('StreamingAgentExecution', () => {
         const { StreamingAgentExecution } = await import(${JSON.stringify(source)});
         const execution = new StreamingAgentExecution({
           command: { argv: [process.execPath, '-e', 'process.exit(2)'], cwd: process.cwd() },
-          analysisParentGuard: ${analysisParentGuard}, prompt: 'x'.repeat(256 * 1024), signalType: 'goal_complete',
+          analysisSessionId: ${analysisParentGuard} ? 'fixture-analysis-session' : undefined,
+          prompt: 'x'.repeat(256 * 1024), signalType: 'goal_complete',
           worktreePath: process.cwd(), metadata: { provider: 'claude-code', transport: 'process' },
         });
         try {
@@ -450,7 +517,7 @@ describe('StreamingAgentExecution', () => {
 
   it.skipIf(process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec'))('does not signal a potentially reused analysis process group after its guard exits', async () => {
     const execution = new StreamingAgentExecution({
-      command: command("console.log('guard:' + process.ppid)"), analysisParentGuard: true,
+      command: command("console.log('guard:' + process.ppid)"), analysisSessionId: 'fixture-analysis-session',
       prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
     });
     execution.start();

@@ -11,6 +11,16 @@ const deliveryScope = new AsyncLocalStorage<{
   counts: Record<DeliverySignal, Record<DeliveryOutcome, number>>;
   evidenceCaptureFailures: Record<CaptureFailure, number>;
 }>();
+const observationSignals = new AsyncLocalStorage<AbortSignal>();
+
+export function withObservationSignal<T>(signal: AbortSignal, operation: () => T): T {
+  const parent = observationSignals.getStore();
+  return observationSignals.run(parent && parent !== signal ? AbortSignal.any([parent, signal]) : signal, operation);
+}
+
+export function getObservationSignal(): AbortSignal | undefined {
+  return observationSignals.getStore();
+}
 
 /** Fixed labels only; provider IDs, errors and payloads never become dimensions. */
 export function recordObservationDelivery(signal: DeliverySignal, outcome: DeliveryOutcome): void {

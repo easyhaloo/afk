@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ValidationReceipt } from './candidate-store.js';
@@ -11,9 +12,96 @@ const revision = 'a'.repeat(40);
 const bytesDigest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const cleanups: Array<() => void> = [];
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); cleanups.splice(0).reverse().forEach(cleanup => cleanup()); });
-const fixture = (managed = false) => createLessonPublicationFixture({ managed, registerCleanup: cleanup => cleanups.push(cleanup) });
+const fixture = (managed = false, analysisCallId?: string) => createLessonPublicationFixture({ managed, analysisCallId, registerCleanup: cleanup => cleanups.push(cleanup) });
 
 describe('lesson publication guard with real production validation receipts', () => {
+  it.each(['missing', 'different'])('rejects a %s trigger alias observation even with a recomputed receipt digest', async defect => {
+    const current = await createLessonPublicationFixture({ triggerAliases: ['double enqueue'], registerCleanup: cleanup => cleanups.push(cleanup) });
+    expect(verifyLessonPublication(current.input).status).toBe('current');
+    current.rewrite(envelope => {
+      const assertions = envelope.report.assertions;
+      const index = assertions.findIndex((entry: { node: string }) => entry.node === 'lesson.triggerAliases');
+      expect(assertions[index]).toMatchObject({ expected: ['double enqueue'], actual: ['double enqueue'] });
+      if (defect === 'missing') assertions.splice(index, 1);
+      else assertions[index].actual = ['unchecked alias'];
+    });
+    expect(verifyLessonPublication(current.input)).toEqual({ status: 'blocked', code: 'invalid_receipt' });
+  });
+
+  it.each(['missing', 'different'])('rejects a named lesson with a %s product observation', async defect => {
+    const current = await createLessonPublicationFixture({ versions: ['2.0'], applicability: { productId: 'parcel' },
+      registerCleanup: cleanup => cleanups.push(cleanup) });
+    expect(verifyLessonPublication(current.input).status).toBe('current');
+    current.rewrite(envelope => {
+      const assertions = envelope.report.assertions;
+      const index = assertions.findIndex((entry: { node: string }) => entry.node === 'lesson.productId');
+      expect(assertions[index]).toMatchObject({ expected: 'parcel', actual: 'parcel' });
+      if (defect === 'missing') assertions.splice(index, 1);
+      else assertions[index].actual = 'other';
+    });
+    expect(verifyLessonPublication(current.input)).toEqual({ status: 'blocked', code: 'invalid_receipt' });
+  });
+
+  it.each([false, true])('replays a three-run repair receipt and rejects fixed audit drift: managed=%s', async managed => {
+    const current = await createLessonPublicationFixture({ managed, repair: true,
+      registerCleanup: cleanup => cleanups.push(cleanup) });
+    expect(verifyLessonPublication(current.input)).toMatchObject({ status: 'current', binding: {
+      repair: { failure: { runId: 'original-failure' }, fix: { runId: 'repair-run' } }, repairEvidence: expect.any(Array),
+    } });
+    const fixPath = current.events.pathFor('repair-run');
+    writeFileSync(fixPath, readFileSync(fixPath, 'utf8') + '\n');
+    expect(verifyLessonPublication(current.input)).toEqual({ status: 'blocked', code: 'audit_changed' });
+    expect(current.store.getCandidate(current.candidate.id)).toEqual(current.candidate);
+  });
+
+  it('does not upgrade a legacy QA-only receipt to three-run repair proof', async () => {
+    const current = await fixture();
+    const result = verifyLessonPublication(current.input);
+    expect(result.status).toBe('current');
+    if (result.status !== 'current') return;
+    expect(result.binding.repair).toBeUndefined();
+    expect(result.binding.repairEvidence).toBeUndefined();
+  });
+
+  it('rechecks a managed lesson session only under the trusted homeDir', async () => {
+    const homeDir = mkdtempSync(join(realpathSync(tmpdir()), 'lesson-trusted-home-'));
+    cleanups.push(() => rmSync(homeDir, { recursive: true, force: true }));
+    const systemHome = realpathSync(homedir());
+    expect(homeDir).not.toBe(systemHome);
+    const current = await createLessonPublicationFixture({ managed: true, homeDir,
+      registerCleanup: cleanup => cleanups.push(cleanup) });
+    expect(realpathSync(homedir())).toBe(systemHome);
+    expect(current.pack.sources.some(source => source.kind === 'session')).toBe(true);
+    expect(verifyLessonPublication({ ...current.input, homeDir })).toMatchObject({ status: 'current',
+      binding: { checkerId: 'lesson-checker', validatedVersion: current.candidate.version } });
+    expect(verifyLessonPublication(current.input)).toEqual({ status: 'blocked', code: 'source_unavailable' });
+    expect(verifyLessonPublication({ ...current.input, homeDir: systemHome })).toEqual({ status: 'blocked', code: 'source_unavailable' });
+    expect(current.store.getCandidate(current.candidate.id)).toEqual(current.candidate);
+    expect(current.store.getValidation(current.candidate.id)).toEqual(current.receipt);
+    expect(current.provider.verify).toHaveBeenCalledTimes(1);
+  });
+
+  it('revalidates a real lesson receipt from saved v2 knowledge configuration alongside an unselected asset checker', async () => {
+    const assetChecker = { mode: 'repository-asset', scope: 'github:acme/lesson', checkerId: 'unselected-tool', version: '1', kind: 'tool',
+      executionAuthorizationFile: '/isolated/private/execution.json',
+      repository: { providerId: 'managed', repository: { url: 'local-fixture', ref: 'main' }, root: '/isolated/repository', expectedCommit: revision },
+      asset: { ref: 'script:fixture', path: 'asset.js' }, inventory: { file: '/isolated/private/catalog.json', digest: 'b'.repeat(64) },
+      sandbox: { engine: 'docker', baseImageId: `sha256:${'c'.repeat(64)}` },
+      semantic: { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', revision: '1',
+        cases: [{ checkId: 'behavior-1', checkDigest: 'd'.repeat(64), experiment: {
+          protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: 'normal', input: '{"value":"alpha"}',
+          assertions: [{ id: 'exit', source: 'exit-code', expected: 0 },
+            { id: 'value', source: 'stdout-json', path: ['value'], expected: 'alpha' }],
+        } }] } };
+    const current = await createLessonPublicationFixture({ configurationVersion: 2, additionalCheckers: [assetChecker],
+      registerCleanup: cleanup => cleanups.push(cleanup) });
+    expect(current.configuration.version).toBe(2);
+    expect(JSON.parse(readFileSync(current.configurationFile, 'utf8')).checkers).toHaveLength(2);
+    expect(verifyLessonPublication(current.input).status).toBe('current');
+    expect(current.store.getValidation(current.candidate.id)).toEqual(current.receipt);
+    expect(current.provider.verify).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['AGENTS.md', '.tools/wiki-lint.py', 'nested/AGENTS.md', 'nested/child/AGENTS.md'])(
     'pins present and absent authorization rules through the final source checks: %s', async rule => {
       const current = await createLessonPublicationFixture({ targetDirectory: 'nested/child',
@@ -85,9 +173,7 @@ describe('lesson publication guard with real production validation receipts', ()
   });
 
   it.each(['analysisRunId', 'sessionId'] as const)('rejects post-validation QA identity binding through %s', async field => {
-    const current = await fixture();
-    current.store.startAnalysisAttempt({ requestKey: current.source.key, callId: 'late-analysis', day: '2026-11-12', limit: 20,
-      startedAt: '2026-11-12T00:00:00Z' });
+    const current = await fixture(false, 'late-analysis');
     expect(verifyLessonPublication(current.input).status).toBe('current');
     current.store.recordAnalysisIdentity('late-analysis', { analysisRunId: 'different-run', sessionId: 'different-session', [field]: 'independent-qa' });
     expect(verifyLessonPublication(current.input)).toEqual({ status: 'blocked', code: 'qa_not_independent' });
@@ -96,9 +182,7 @@ describe('lesson publication guard with real production validation receipts', ()
   });
 
   it.each([true, false])('rechecks live identities at return without rejecting unrelated identities: collision=%s', async collision => {
-    const current = await fixture();
-    current.store.startAnalysisAttempt({ requestKey: current.source.key, callId: 'late-analysis', day: '2026-11-12', limit: 20,
-      startedAt: '2026-11-12T00:00:00Z' });
+    const current = await fixture(false, 'late-analysis');
     const original = current.store.getValidation.bind(current.store);
     vi.spyOn(current.store, 'getValidation').mockImplementationOnce(id => {
       current.store.recordAnalysisIdentity('late-analysis', { analysisRunId: collision ? 'independent-qa' : 'another-analysis', sessionId: 'another-session' });

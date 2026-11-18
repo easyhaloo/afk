@@ -1,10 +1,10 @@
-import { fork, type ChildProcess } from 'node:child_process';
+import { execFileSync, fork, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, chmodSync, readFileSync, linkSync, renameSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openSqlite, requireNodeSqlite, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 import { createRequire } from 'node:module';
 import { CandidateStore, type PublicationInput } from './candidate-store.js';
@@ -81,6 +81,136 @@ afterEach(async () => {
 });
 
 describe('private learning ledger', () => {
+  it('atomically completes an analysis with durable candidates, usage and idempotent replay', () => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    const start = { requestKey: entry.key, callId: 'analysis:complete', day: '2026-11-16', limit: 1,
+      startedAt: '2026-11-16T10:00:00.000Z' };
+    store.startAnalysisAttempt(start);
+    store.recordAnalysisIdentity(start.callId, { analysisRunId: 'analysis:run', sessionId: 'analysis:session' });
+    const result = { finishedAt: '2026-11-16T10:00:01.000Z', usage: { inputTokens: 0, outputTokens: 2 } };
+    const receipt = store.completeAnalysisAttempt(start.callId, output, result);
+    expect(receipt.candidateIds).toHaveLength(1);
+    expect(store.getCandidate(receipt.candidateIds[0]!)?.state).toBe('candidate');
+    expect(store.listAnalysisAttempts(entry.key)).toMatchObject([{ ...result, status: 'succeeded',
+      analysisRunId: 'analysis:run', sessionId: 'analysis:session' }]);
+    store.close();
+    const restarted = open();
+    expect(restarted.getProcessingReceipt(entry.key)).toEqual(receipt);
+    expect(restarted.completeAnalysisAttempt(start.callId, output, result)).toEqual(receipt);
+    expect(restarted.getModelCallCount(start.day)).toBe(1);
+    expect(restarted.listCandidates()).toHaveLength(1);
+    expect(() => restarted.completeAnalysisAttempt(start.callId, { ...output, warnings: ['changed'] }, result)).toThrow(/digest/i);
+    expect(() => restarted.completeAnalysisAttempt(start.callId, output, { ...result, usage: { inputTokens: 1 } })).toThrow(/terminal/i);
+    expect(restarted.getProcessingReceipt(entry.key)).toEqual(receipt);
+    expect(restarted.listAnalysisAttempts(entry.key)[0]?.usage).toEqual(result.usage);
+  });
+
+  it('rolls back analysis completion on a real deferred foreign key COMMIT failure and recovers within attempt and budget limits', () => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    const start = { requestKey: entry.key, callId: 'analysis:commit-failure', day: '2026-11-16', limit: 2,
+      startedAt: '2026-11-16T10:00:00.000Z' };
+    store.startAnalysisAttempt(start);
+    const attempt = store.recordAnalysisIdentity(start.callId, { analysisRunId: 'analysis:run', sessionId: 'analysis:session' });
+    const result = { finishedAt: '2026-11-16T10:00:01.000Z', usage: { inputTokens: 3, outputTokens: 2 } };
+    const sabotage = new sqlite.DatabaseSync(file);
+    try {
+      sabotage.exec(`PRAGMA foreign_keys = ON;
+        CREATE TABLE analysis_commit_parent (id INTEGER PRIMARY KEY);
+        CREATE TABLE analysis_commit_child (
+          parent_id INTEGER NOT NULL REFERENCES analysis_commit_parent(id) DEFERRABLE INITIALLY DEFERRED
+        );
+        CREATE TRIGGER reject_analysis_commit AFTER UPDATE OF payload ON learning_ledger
+          WHEN NEW.kind = 'analysis-attempt' AND json_extract(NEW.payload, '$.status') = 'succeeded'
+          BEGIN INSERT INTO analysis_commit_child(parent_id) VALUES (1); END;`);
+      const ledger = sabotage.prepare('SELECT kind, key, payload, bytes FROM learning_ledger ORDER BY kind, key').all();
+      const exec = vi.spyOn(sqlite.DatabaseSync.prototype, 'exec');
+      try {
+        expect(() => store.completeAnalysisAttempt(start.callId, output, result)).toThrow(/FOREIGN KEY constraint failed/);
+        expect(exec.mock.calls).toEqual([['BEGIN IMMEDIATE'], ['COMMIT'], ['ROLLBACK']]);
+        expect(exec.mock.results.map(result => result.type)).toEqual(['return', 'throw', 'return']);
+        expect(exec.mock.results[1]?.value).toMatchObject({ code: 'ERR_SQLITE_ERROR', errcode: 787,
+          message: 'FOREIGN KEY constraint failed' });
+      } finally { exec.mockRestore(); }
+      expect(sabotage.prepare('SELECT kind, key, payload, bytes FROM learning_ledger ORDER BY kind, key').all()).toEqual(ledger);
+      expect(sabotage.prepare('SELECT * FROM analysis_commit_child').all()).toEqual([]);
+      expect(sabotage.prepare("SELECT * FROM learning_ledger WHERE kind IN ('candidate', 'candidate-version', 'processing')").all()).toEqual([]);
+      expect(store.listCandidates()).toEqual([]);
+      expect(store.getProcessingReceipt(entry.key)).toBeUndefined();
+      expect(store.listAnalysisAttempts(entry.key)).toEqual([attempt]);
+      expect(store.getModelCallCount(start.day)).toBe(1);
+      expect(store.listPendingRequests().map(request => request.key)).toEqual([entry.key]);
+      store.close();
+      const restarted = open();
+      expect(restarted.listCandidates()).toEqual([]);
+      expect(restarted.getProcessingReceipt(entry.key)).toBeUndefined();
+      expect(restarted.listAnalysisAttempts(entry.key)).toEqual([attempt]);
+      expect(restarted.getModelCallCount(start.day)).toBe(1);
+      expect(sabotage.prepare('SELECT kind, key, payload, bytes FROM learning_ledger ORDER BY kind, key').all()).toEqual(ledger);
+
+      sabotage.exec('DROP TRIGGER reject_analysis_commit');
+      const failed = restarted.finishAnalysisAttempt(start.callId, { ...result, status: 'failed', errorCode: 'storage_blocked' });
+      const retry = { ...start, callId: 'analysis:commit-retry', startedAt: '2026-11-16T10:00:02.000Z' };
+      restarted.startAnalysisAttempt(retry);
+      const completion = { ...result, finishedAt: '2026-11-16T10:00:03.000Z' };
+      const receipt = restarted.completeAnalysisAttempt(retry.callId, output, completion);
+      expect(receipt.candidateIds).toHaveLength(1);
+      expect(restarted.getCandidate(receipt.candidateIds[0]!)?.state).toBe('candidate');
+      expect(restarted.getCandidateVersions(receipt.candidateIds[0]!)).toHaveLength(1);
+      expect(restarted.getProcessingReceipt(entry.key)).toEqual(receipt);
+      expect(restarted.listAnalysisAttempts(entry.key)).toEqual([failed, expect.objectContaining({ callId: retry.callId,
+        status: 'succeeded', ...completion })]);
+      expect(restarted.getModelCallCount(start.day)).toBe(2);
+      expect(() => restarted.startAnalysisAttempt({ ...retry, callId: 'analysis:commit-third' })).toThrow(/attempts exhausted/i);
+      expect(() => restarted.reserveModelCall({ day: start.day, callId: 'analysis:commit-third', limit: start.limit })).toThrow(/budget/i);
+      expect(restarted.completeAnalysisAttempt(retry.callId, output, completion)).toEqual(receipt);
+      expect(restarted.listCandidates()).toHaveLength(1);
+      expect(restarted.listAnalysisAttempts(entry.key)).toHaveLength(2);
+      expect(restarted.getModelCallCount(start.day)).toBe(2);
+      restarted.close();
+      const recovered = open();
+      expect(recovered.getProcessingReceipt(entry.key)).toEqual(receipt);
+      expect(recovered.listCandidates()).toHaveLength(1);
+      expect(recovered.listAnalysisAttempts(entry.key)).toEqual([failed, expect.objectContaining({ callId: retry.callId,
+        status: 'succeeded', ...completion })]);
+      expect(recovered.getModelCallCount(start.day)).toBe(2);
+    } finally { sabotage.close(); }
+  });
+
+  it.each(['failed', 'cancelled'] as const)('rejects analysis completion after a %s terminal result without publishing candidates', status => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    store.startAnalysisAttempt({ requestKey: entry.key, callId: 'analysis:terminal', day: '2026-11-16', limit: 1,
+      startedAt: '2026-11-16T10:00:00.000Z' });
+    const attempt = store.finishAnalysisAttempt('analysis:terminal', { status, finishedAt: '2026-11-16T10:00:01.000Z' });
+    expect(() => store.completeAnalysisAttempt('analysis:terminal', output, { finishedAt: '2026-11-16T10:00:02.000Z' })).toThrow(/terminal/i);
+    expect(store.listCandidates()).toEqual([]);
+    expect(store.getProcessingReceipt(entry.key)).toBeUndefined();
+    expect(store.listAnalysisAttempts(entry.key)).toEqual([attempt]);
+    store.close();
+    expect(open().listCandidates()).toEqual([]);
+  });
+
+  it.each(['early', 'usage', 'unknown-field', 'status', 'output', 'blocked', 'missing'] as const)(
+    'rejects invalid analysis completion (%s) without leaving a partial result', invalid => {
+      const store = open();
+      const entry = store.submitRequest(input);
+      store.startAnalysisAttempt({ requestKey: entry.key, callId: 'analysis:invalid', day: '2026-11-16', limit: 1,
+        startedAt: '2026-11-16T10:00:00.000Z' });
+      if (invalid === 'blocked') store.setRequestBlocked(entry.key, 'source_invalidated');
+      const result = { finishedAt: invalid === 'early' ? '2026-11-16T09:00:00.000Z' : '2026-11-16T10:00:01.000Z',
+        ...(invalid === 'usage' ? { usage: { inputTokens: -1 } } : {}),
+        ...(invalid === 'unknown-field' ? { extra: true } : {}),
+        ...(invalid === 'status' ? { status: 'failed' } : {}) };
+      expect(() => store.completeAnalysisAttempt(invalid === 'missing' ? 'analysis:missing' : 'analysis:invalid',
+        invalid === 'output' ? { ...output, candidates: [{ state: 'published' }] } : output, result)).toThrow();
+      expect(store.getProcessingReceipt(entry.key)).toBeUndefined();
+      expect(store.listCandidates()).toEqual([]);
+      expect(store.listAnalysisAttempts(entry.key)).toMatchObject([{ status: 'started' }]);
+      expect(store.getModelCallCount('2026-11-16')).toBe(1);
+    });
+
   it('atomically starts a request-bound analysis attempt and preserves its original owner on replay', () => {
     const store = open();
     const entry = store.submitRequest(input);
@@ -124,6 +254,27 @@ describe('private learning ledger', () => {
     expect(store.listAnalysisAttempts()).toEqual([]);
   });
 
+  it('charges only one process for a request with an unresolved attempt and never charges a processed request', async () => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    const start = { requestKey: entry.key, day: '2026-11-16', limit: 10, startedAt: '2026-11-16T10:00:00.000Z' };
+    const [first, second] = await Promise.all([startChild(), startChild()]);
+    const results = await Promise.all([first, second].map((child, index) => send(child,
+      { action: 'start-analysis', input: { ...start, callId: `competing:${index}` } })));
+    const attempts = store.listAnalysisAttempts(entry.key);
+    expect(attempts).toHaveLength(1);
+    expect(results).toContainEqual({ result: attempts[0] });
+    expect(results).toContainEqual({ error: 'Learning analysis attempt already in progress' });
+    expect(store.getModelCallCount(start.day)).toBe(1);
+
+    const receipt = store.completeAnalysisAttempt(attempts[0]!.callId, output, { finishedAt: '2026-11-16T10:00:01.000Z' });
+    expect(await send(second, { action: 'start-analysis', input: { ...start, callId: 'after-processing' } }))
+      .toEqual({ error: 'Learning request already processed' });
+    expect(store.getProcessingReceipt(entry.key)).toEqual(receipt);
+    expect(store.listAnalysisAttempts(entry.key)).toHaveLength(1);
+    expect(store.getModelCallCount(start.day)).toBe(1);
+  });
+
   it.each(['source_invalidated', 'source_unstable'])('atomically refuses a %s source before reserving a paid attempt', blockedReason => {
     const store = open();
     const entry = store.submitRequest(input);
@@ -138,6 +289,20 @@ describe('private learning ledger', () => {
     expect(store.getRequest(entry.key)?.blockedReason).toBe(blockedReason);
     store.setRequestBlocked(entry.key, null, blockedReason);
     expect(store.getRequest(entry.key)?.blockedReason).toBeUndefined();
+  });
+
+  it.each([false, true])('blocks further reservations on changed executable even before the Worker resumes (source invalidated: %s)', invalid => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    const start = { requestKey: entry.key, callId: 'first', day: '2026-11-09', limit: 2, startedAt: '2026-11-09T10:00:00Z' };
+    store.startAnalysisAttempt(start);
+    if (invalid) store.invalidateRequestSource(entry.key);
+    store.finishAnalysisAttempt(start.callId, { status: 'failed', errorCode: 'analysis_executable_changed', finishedAt: start.startedAt });
+    store.close();
+    const reopened = open();
+    expect(reopened.getRequest(entry.key)?.blockedReason).toBe(invalid ? 'source_invalidated' : 'analysis_executable_changed');
+    expect(() => reopened.startAnalysisAttempt({ ...start, callId: 'second' })).toThrow(/blocked/i);
+    expect(reopened.getModelCallCount(start.day)).toBe(1);
   });
 
   it('records analysis identity once, rejects replacing either ID and keeps it across restart', () => {
@@ -155,6 +320,24 @@ describe('private learning ledger', () => {
     expect(() => store.finishAnalysisAttempt('missing', { status: 'failed', finishedAt: '2026-11-09T10:00:01.000Z' })).toThrow(/attempt.*not found/i);
     store.close();
     expect(open().listAnalysisAttempts(entry.key)).toEqual([recorded]);
+  });
+
+  it('denies a foreign launch owner and cannot reuse a claim after reopening the ledger', async () => {
+    const store = open();
+    const entry = store.submitRequest(input);
+    const callId = 'launch-owner';
+    const identity = { analysisRunId: 'analysis-run:1', sessionId: 'session:1' };
+    store.startAnalysisAttempt({ requestKey: entry.key, callId, day: '2026-11-09', limit: 1, startedAt: '2026-11-09T10:00:00.000Z' });
+    expect(await send(await startChild(), { action: 'claim-launch', key: callId, input: identity }))
+      .toEqual({ error: 'Learning analysis launch owner differs' });
+    const claimed = store.claimAnalysisLaunch(callId, identity);
+    store.close();
+    const reopened = open();
+    expect(() => reopened.claimAnalysisLaunch(callId, identity)).toThrow('analysis_outcome_unknown');
+    expect(reopened.recordAnalysisIdentity(callId, identity)).toEqual(claimed);
+    reopened.finishAnalysisAttempt(callId, { status: 'failed', finishedAt: '2026-11-09T10:00:01.000Z' });
+    expect(() => reopened.claimAnalysisLaunch(callId, identity)).toThrow(/terminal/);
+    expect(reopened.getModelCallCount('2026-11-09')).toBe(1);
   });
 
   it.each(['succeeded', 'failed', 'cancelled'] as const)('persists an idempotent %s result and rejects conflicting terminal data', status => {
@@ -915,6 +1098,34 @@ describe('private learning ledger', () => {
     legacy.close();
     expect(open().getRequest(entry.key)?.evidence).toEqual([evidence]);
     expect(() => openSqlite({ file, schema: '', version: 1 })).toThrow(/unsupported.*version/i);
+  });
+
+  it.skipIf(process.platform === 'win32').each([0o600, 0o640])('preserves a live reader snapshot during multi-process WAL checkpoints (mode %i)', mode => {
+    open();
+    const reader = new sqlite.DatabaseSync(file);
+    const writeAndCheckpoint = () => Number(execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', '-e', `
+      const { DatabaseSync } = require('node:sqlite');
+      const writer = new DatabaseSync(process.argv[1]);
+      writer.exec('PRAGMA busy_timeout = 0; UPDATE parcels SET revision = revision + 1');
+      console.log(writer.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get().busy);
+      writer.close();
+    `, file], { encoding: 'utf8', timeout: 5000 }));
+    try {
+      reader.exec('CREATE TABLE parcels(revision INTEGER); INSERT INTO parcels VALUES (0); BEGIN');
+      const revision = reader.prepare('SELECT revision FROM parcels');
+      expect(revision.get()?.revision).toBe(0);
+      expect(writeAndCheckpoint()).toBe(1);
+      const paths = [file, `${file}-wal`, `${file}-shm`];
+      for (const path of paths) chmodSync(path, mode);
+      open().close();
+      for (const path of paths) expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(writeAndCheckpoint()).toBe(1);
+      expect(revision.get()?.revision).toBe(0);
+      reader.exec('COMMIT');
+      expect(writeAndCheckpoint()).toBe(0);
+      expect(revision.get()?.revision).toBe(3);
+      expect(reader.prepare('PRAGMA quick_check').get()?.quick_check).toBe('ok');
+    } finally { reader.close(); }
   });
 
   it('uses private modes and rejects linked database, parent and sqlite sidecar paths', () => {

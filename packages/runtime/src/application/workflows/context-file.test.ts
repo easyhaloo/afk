@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { CONTEXT_MAX_CHARS, writeReferenceContext } from './context-file.js';
+import { CONTEXT_MAX_CHARS, serializeReferenceContext, writeReferenceContext } from './context-file.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
@@ -17,6 +17,7 @@ describe('bounded reference context', () => {
     await fs.symlink(outside, join(root, '.afk', 'plugin-context.md'));
     const path = await writeReferenceContext(root, 'plugin-context.md', [{ origin: 'code:test', content: 'bounded '.repeat(8000) }]);
     const content = await fs.readFile(join(root, path), 'utf8');
+    expect(content).toBe(serializeReferenceContext([{ origin: 'code:test', content: 'bounded '.repeat(8000) }]));
     expect(content.length).toBeLessThanOrEqual(CONTEXT_MAX_CHARS);
     expect(content).toContain('Source: code:test');
     expect(await fs.readFile(outside, 'utf8')).toBe('unchanged');

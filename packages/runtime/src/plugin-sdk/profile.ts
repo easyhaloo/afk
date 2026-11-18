@@ -99,6 +99,7 @@ export interface PluginConfigSchema {
 }
 
 export interface PluginManifest {
+  readonly concurrentVerification?: true;
   readonly id: string;
   readonly version: string;
   readonly apiVersion: 1;
@@ -175,6 +176,10 @@ export function validateManifest(manifest: PluginManifest): void {
     }
   }
   for (const capability of manifest.provides) validateIdentifier(capability, 'capability');
+  if (manifest.concurrentVerification !== undefined && (manifest.concurrentVerification !== true ||
+    manifest.provides.length !== 1 || manifest.provides[0] !== 'verification.provider')) {
+    throw new Error(`plugin '${manifest.id}' must provide only verification to opt into concurrent verification`);
+  }
   for (const capability of manifest.requires ?? []) validateIdentifier(capability, 'capability');
   for (const conflict of manifest.conflicts ?? []) validateIdentifier(conflict, 'plugin conflict');
   if (manifest.externalTools !== undefined && !externalToolsSchema.safeParse(manifest.externalTools).success) {

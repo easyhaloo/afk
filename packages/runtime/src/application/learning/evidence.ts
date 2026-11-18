@@ -32,7 +32,7 @@ export interface EvidenceSourceInput {
 export interface EvidenceEntry {
   readonly ref: Readonly<EvidenceRef>;
   readonly content: string;
-  readonly position: Readonly<{ sourceId: string; messageIndex: number; line?: number; timestamp?: string; auditSequence?: number }>;
+  readonly position: Readonly<{ sourceId: string; messageIndex: number; line?: number; timestamp?: string; auditSequence?: number; workItemDigest?: string }>;
 }
 export interface EvidenceSource {
   readonly id: string;
@@ -57,7 +57,7 @@ const packSchema = z.object({
     messageCount: z.number().int().nonnegative(), range: rangeSchema.optional() }).strict()).max(64),
   entries: z.array(z.object({ ref: evidenceRefSchema, content: z.string().min(1), position: z.object({
     sourceId, messageIndex: z.number().int().positive(), line: z.number().int().positive().optional(),
-    timestamp: z.string().max(128).optional(), auditSequence: z.number().int().positive().optional(),
+    timestamp: z.string().max(128).optional(), auditSequence: z.number().int().positive().optional(), workItemDigest: digestSchema.optional(),
   }).strict() }).strict()).max(4096),
   warnings: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:(?:missing|invalid-audit|malformed-jsonl|no-messages|message-shard)$/)).max(128),
 }).strict();
@@ -77,7 +77,7 @@ function freeze<T>(value: T): T {
 export function redactEvidenceText(value: string): string {
   const protectedText = value
     .replace(/-----BEGIN ([A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g, '[redacted:private-key]')
-    .replace(/\b(?:https?|ssh):\/\/[^\s<>"'`\\]+/gi, '[redacted:url]')
+    .replace(/\b(?:https?|ssh):\/\/(?:[^\s<>"'`\\]|\\&)+/gi, '[redacted:url]')
     .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, '[redacted:authorization]')
     .replace(/((?:[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
     .replace(/("(?:[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)"\s*:\s*")(?:\\.|[^"\\])*"/gi, '$1[redacted]"')
@@ -107,6 +107,18 @@ function entryDigest(entry: Omit<EvidenceEntry, 'ref'>, status: EvidenceSource['
   return hash(stableJson({ ...entry, completeness: status }));
 }
 
+export function auditEvidenceContent(event: unknown, position: EvidenceEntry['position']) {
+  const workItemId = object(object(event).context).workItemId;
+  const bound = typeof workItemId === 'string' && redactEvidenceText(workItemId) !== workItemId;
+  return { content: stableJson(redactValue(event)), position: bound ? { ...position, workItemDigest: hash(workItemId) } : position };
+}
+
+export function matchesEvidenceWorkItem(entry: EvidenceEntry, observed: unknown, expected: string | undefined): boolean {
+  const digest = entry.position.workItemDigest;
+  if (digest === undefined) return observed === expected;
+  return typeof expected === 'string' && digest === hash(expected) && observed === redactEvidenceText(expected);
+}
+
 export function validateEvidencePack(input: unknown): EvidencePack {
   const pack = packSchema.parse(input);
   if (Buffer.byteLength(JSON.stringify(pack)) > DISTILLATION_LIMITS.evidenceBytes) throw new Error('Evidence pack exceeds byte limit');
@@ -129,7 +141,8 @@ export function validateEvidencePack(input: unknown): EvidencePack {
     if (!source || entry.ref.completeness !== source.completeness || entry.ref.locator !== locator(entry.position)
       || entry.ref.digest !== entryDigest({ content: entry.content, position: entry.position }, source.completeness)
       || entry.ref.id !== `evidence:${entry.ref.digest}`) throw new Error('Evidence entry digest or locator mismatch');
-    if (entry.ref.authority !== (source.kind === 'audit' && source.completeness === 'complete' ? 'observed' : 'declared')
+    if ((entry.position.workItemDigest !== undefined && source.kind !== 'audit')
+      || entry.ref.authority !== (source.kind === 'audit' && source.completeness === 'complete' ? 'observed' : 'declared')
       || (source.kind === 'session' ? !['message', 'tool-result'].includes(entry.ref.kind) : entry.ref.kind !== 'audit')) throw new Error('Invalid evidence provenance');
     if (stableJson(redactValue(JSON.parse(entry.content))) !== entry.content || (entry.position.timestamp && redactEvidenceText(entry.position.timestamp) !== entry.position.timestamp)) throw new Error('Evidence contains unredacted content');
   }
@@ -299,8 +312,9 @@ export async function buildEvidencePack(options: { sources: readonly EvidenceSou
     messages.forEach((item, index) => {
       if (range && (index + 1 < range.start || index + 1 > range.end)) return;
       const { value, evidenceKind, ...location } = item;
-      const position = { sourceId: input.id, messageIndex: index + 1, ...location };
-      const content = stableJson(redactValue(value));
+      const locationInSource = { sourceId: input.id, messageIndex: index + 1, ...location };
+      const { content, position } = input.kind === 'audit' ? auditEvidenceContent(value, locationInSource)
+        : { content: stableJson(redactValue(value)), position: locationInSource };
       const digest = entryDigest({ content, position }, status);
       entries.push({ ref: { id: `evidence:${digest}`, kind: input.kind === 'session' ? evidenceKind ?? 'message' : 'audit', digest,
         locator: locator(position), completeness: status, authority: input.kind === 'audit' && status === 'complete' ? 'observed' : 'declared' }, content, position });

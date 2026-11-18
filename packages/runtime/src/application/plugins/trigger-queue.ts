@@ -85,6 +85,7 @@ export class DurableTriggerQueue {
   private running?: Promise<void>;
   private closing?: Promise<void>;
   private started = false;
+  private selectedDeliveryId?: string;
   private faulted = false;
   private stopDispatch = false;
 
@@ -188,8 +189,10 @@ export class DurableTriggerQueue {
     return receipt;
   }
 
-  start(): void {
+  start(options?: { readonly deliveryId: string }): void {
     this.assertWritable();
+    if (this.started && this.selectedDeliveryId !== options?.deliveryId) throw new Error('Trigger queue selection cannot change after startup');
+    this.selectedDeliveryId = options?.deliveryId;
     this.started = true;
     this.wake();
   }
@@ -231,7 +234,9 @@ export class DurableTriggerQueue {
         this.running = undefined;
         if (this.closing || this.faulted) return;
         try {
-          const next = this.database.prepare("SELECT MIN(nextAttemptAt) AS due FROM trigger_deliveries WHERE status = 'pending'").get()?.due;
+          const next = this.selectedDeliveryId === undefined
+            ? this.database.prepare("SELECT MIN(nextAttemptAt) AS due FROM trigger_deliveries WHERE status = 'pending'").get()?.due
+            : this.database.prepare("SELECT MIN(nextAttemptAt) AS due FROM trigger_deliveries WHERE status = 'pending' AND deliveryId = ?").get(this.selectedDeliveryId)?.due;
           if (typeof next === 'number') this.wake(Math.max(1, Math.min(60_000, next - Date.now())));
         } catch { this.faulted = true; try { this.onError(); } catch {} }
       });
@@ -243,7 +248,9 @@ export class DurableTriggerQueue {
     for (;;) {
       if (this.stopDispatch) return;
       const delivery = transaction(this.database, () => {
-        const row = this.database.prepare("SELECT deliveryId, providerId, body, attempts FROM trigger_deliveries WHERE status = 'pending' AND nextAttemptAt <= ? ORDER BY nextAttemptAt, deliveryId LIMIT 1").get(Date.now());
+        const row = this.selectedDeliveryId === undefined
+          ? this.database.prepare("SELECT deliveryId, providerId, body, attempts FROM trigger_deliveries WHERE status = 'pending' AND nextAttemptAt <= ? ORDER BY nextAttemptAt, deliveryId LIMIT 1").get(Date.now())
+          : this.database.prepare("SELECT deliveryId, providerId, body, attempts FROM trigger_deliveries WHERE status = 'pending' AND nextAttemptAt <= ? AND deliveryId = ? ORDER BY nextAttemptAt, deliveryId LIMIT 1").get(Date.now(), this.selectedDeliveryId);
         if (!row) return undefined;
         this.database.prepare("UPDATE trigger_deliveries SET status = 'processing', attempts = attempts + 1 WHERE deliveryId = ?").run(row.deliveryId);
         return row as unknown as { deliveryId: string; providerId: string; body: string; attempts: number };

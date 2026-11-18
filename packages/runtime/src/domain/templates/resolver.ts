@@ -37,7 +37,12 @@ export interface ExecutionPlan {
  * additional steps it plans to inject.
  */
 export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Set<string>): ExecutionPlan {
-  const validIds = allStepIds ?? new Set(template.steps.map(s => s.id));
+  const declaredIds = new Set<string>();
+  for (const step of template.steps) {
+    if (declaredIds.has(step.id)) throw new TemplateError(`duplicate step id '${step.id}'`, template.name);
+    declaredIds.add(step.id);
+  }
+  const validIds = allStepIds ?? declaredIds;
   for (const step of template.steps) {
     if (!validIds.has(step.id)) {
       throw new TemplateError(`step id '${step.id}' not in valid set`, template.name);
@@ -54,7 +59,7 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
 
   // Self-dependency check (cheap pre-check before Kahn's).
   for (const step of template.steps) {
-    if ((step.dependsOn ?? []).includes(step.id)) {
+    if ((step.dependsOn ?? []).includes(step.id) || step.when?.step === step.id) {
       throw new TemplateError(`step '${step.id}' depends on itself`, template.name);
     }
   }
@@ -63,8 +68,8 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
   const inDegree = new Map<string, number>();
   const dependents = new Map<string, string[]>(); // dep -> [steps that depend on it]
   for (const step of template.steps) {
-    const deps = step.dependsOn ?? [];
-    inDegree.set(step.id, deps.length);
+    const deps = new Set([...(step.dependsOn ?? []), ...(step.when ? [step.when.step] : [])]);
+    inDegree.set(step.id, deps.size);
     if (!dependents.has(step.id)) dependents.set(step.id, []);
     for (const dep of deps) {
       if (!dependents.has(dep)) dependents.set(dep, []);
@@ -74,7 +79,7 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
 
   // BFS levels.
   const levelByStep = new Map<string, number>();
-  const queue: string[] = template.steps.filter(s => (s.dependsOn ?? []).length === 0).map(s => s.id);
+  const queue: string[] = template.steps.filter(s => inDegree.get(s.id) === 0).map(s => s.id);
   for (const id of queue) levelByStep.set(id, 0);
 
   let processed = 0;

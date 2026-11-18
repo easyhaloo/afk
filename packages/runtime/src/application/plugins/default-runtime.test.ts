@@ -14,6 +14,9 @@ import { createPluginRunObserver } from './observability.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
 import type { RunEvent } from '@afk/core';
+import { simpleGit } from 'simple-git';
+import { withObservationSignal } from '../../observability/run-observer.js';
+import type { EvidenceStoreProvider } from '../../plugin-sdk/capabilities.js';
 
 vi.mock('../workflows/execute-work-item.js', () => ({ executeWorkItem: vi.fn() }));
 
@@ -38,6 +41,19 @@ async function fixture(configuration?: unknown, options: DefaultPluginRuntimeOpt
   runtimes.push(runtime);
   const context: LifecycleContext = { iid: 42, worktreePath: workspaceRoot, baseBranch: 'main', sessionName: 'test-42', params: {} };
   return { runtime, context, homeDir, workspaceRoot, lifecycle: new LifecycleDispatcher(runtime.getLifecycleModules()) };
+}
+
+async function verificationContext(runtime: PluginRuntime, context: LifecycleContext, homeDir: string) {
+  const git = simpleGit(context.worktreePath);
+  await git.init().addConfig('user.name', 'Verification test').addConfig('user.email', 'verification@example.test');
+  await git.commit('Initial verification revision', { '--allow-empty': null });
+  const events = new JsonlEventStore({ root: join(homeDir, 'verification-events') });
+  const observer = createPluginRunObserver(runtime, events.root);
+  const identity = { traceId: 'verification-trace', runId: 'verification-run', workItemId: 'github:acme/api#42',
+    profileId: 'test', attempt: 1, actor: { kind: 'system' as const, id: 'verification-test' } };
+  const observed: LifecycleContext = { ...context,
+    observation: { context: identity, record: (data, options) => observer.record(identity, data, options) } };
+  return { context: observed, events, revision: await git.revparse(['HEAD']) };
 }
 
 async function installedCredentialFixture(plugins: unknown[], requires = ['context.provider'], fail = false) {
@@ -69,7 +85,7 @@ async function installedEvidenceFixture(selection: unknown, artifacts = false, d
   await mkdir(directory, { recursive: true });
   await mkdir(remote);
   const entry = join(directory, 'index.js');
-  await writeFile(entry, `import { readFile, writeFile } from 'node:fs/promises';
+  await writeFile(entry, `import { readFile, writeFile, readdir } from 'node:fs/promises';
     import { join } from 'node:path';
     export const calls = [];
     const records = new Map();
@@ -81,7 +97,8 @@ async function installedEvidenceFixture(selection: unknown, artifacts = false, d
           async put(record, operation) {
             operation.signal.throwIfAborted();
             const source = JSON.parse(Buffer.from(record.bytes).toString());
-            const history = await readFile(join(${JSON.stringify(events)}, Buffer.from('evidence-run').toString('base64url') + '.jsonl'), 'utf8');
+            const history = (await Promise.all((await readdir(${JSON.stringify(events)})).filter(name => name.endsWith('.jsonl'))
+              .map(name => readFile(join(${JSON.stringify(events)}, name), 'utf8')))).join('\\n');
             if (!history.split('\\n').filter(Boolean).some(line => JSON.parse(line).id === source.sourceEventId)) throw new Error('source not durable');
             const { bytes, ...metadata } = record;
             records.set(record.id, metadata);
@@ -123,6 +140,66 @@ it('selects an installed SDK EvidenceStore from saved configuration without an A
   expect(await (await createLocalEncryptedEvidenceStore(homeDir)).get(ref)).toEqual(mirrored);
   expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'succeeded' });
   expect(await audit.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+});
+
+it('keeps a pre-cancelled saved EvidenceStore selection local without contaminating the next run', async () => {
+  const { runtime, context, events, plugin } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] });
+  const observer = createPluginRunObserver(runtime, events);
+  const cancelled = new AbortController();
+  cancelled.abort(new Error('cancelled before audit'));
+  await withObservationSignal(cancelled.signal, () => observer.record(context, { kind: 'qa.failed' }));
+  expect(plugin.calls).toEqual([]);
+  const store = new JsonlEventStore({ root: events });
+  const history: RunEvent[] = [];
+  for await (const event of store.read(context.runId)) history.push(event);
+  expect(history[0].data.kind).toBe('qa.failed');
+  expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed', summary: expect.stringContaining('cancelled') });
+  expect(await store.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  await observer.record({ ...context, runId: 'evidence-next-run' }, { kind: 'qa.passed' });
+  expect(plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get']);
+});
+
+it('isolates concurrent run cancellation with one saved EvidenceStore and rejects late readback', async () => {
+  const { runtime, context, events, plugin } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'], timeoutMs: 60_000 });
+  const provider = runtime.getProvider<EvidenceStoreProvider>('observe.evidence', 'private')!;
+  const originalPut = provider.put.bind(provider);
+  let enter!: (signal: AbortSignal) => void;
+  const entered = new Promise<AbortSignal>(resolve => { enter = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const put = vi.spyOn(provider, 'put').mockImplementationOnce(async (record, operation) => {
+    enter(operation!.signal! as AbortSignal);
+    await gate;
+    try { return await originalPut(record, { signal: new AbortController().signal }); }
+    finally { finish(); }
+  });
+  const readback = vi.spyOn(provider, 'get');
+  const first = new AbortController();
+  const second = new AbortController();
+  const observerA = createPluginRunObserver(runtime, events);
+  const observerB = createPluginRunObserver(runtime, events);
+  const pending = withObservationSignal(first.signal, () => observerA.record(context, { kind: 'qa.failed' }));
+  try {
+    const signal = await entered;
+    await withObservationSignal(second.signal, () => observerB.record({ ...context, runId: 'evidence-other-run' }, { kind: 'qa.passed' }));
+    first.abort(new Error('only first run cancelled'));
+    await pending;
+    expect(signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(false);
+    release();
+    await finished;
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(readback).toHaveBeenCalledTimes(1);
+    expect(plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get', 'put']);
+    const store = new JsonlEventStore({ root: events });
+    const history: RunEvent[] = [];
+    for await (const event of store.read(context.runId)) history.push(event);
+    expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed', summary: expect.stringContaining('cancelled') });
+    expect(await store.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+    expect(await store.verify('evidence-other-run')).toMatchObject({ valid: true, lastSequence: 2 });
+  } finally { first.abort(); release(); await pending; }
 });
 
 it('keeps registered but unselected SDK stores private and preserves ArtifactSink evidence configuration', async () => {
@@ -310,6 +387,30 @@ describe('createDefaultPluginRuntime', () => {
       expect(vi.mocked(executeWorkItem).mock.calls).toHaveLength(before);
     } finally { await listener.close(); }
   });
+  it.each(['missing', 'disabled', 'enabled'])('loads Gmail only with its enabled exact Google credential dependency (%s)', async state => {
+    const { GoogleOAuthCredentialProvider } = await import('../../infrastructure/providers/google-oauth.js');
+    const account = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolveAccount').mockRejectedValue(new Error('must not authenticate'));
+    const network = vi.fn();
+    vi.stubGlobal('fetch', network);
+    try {
+      const { runtime } = await fixture({ plugins: [
+        { id: 'notification.gmail', builtin: true, config: {} },
+        ...state === 'missing' ? [] : [{ id: 'credential.google-oauth', builtin: true, enabled: state === 'enabled', config: {} }],
+      ] });
+      expect(runtime.getCredentialProvider('credential.system-keychain')).toBeDefined();
+      const findings = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.gmail');
+      if (state === 'enabled') {
+        expect(runtime.getNotificationProvider('notification.gmail')).toBeDefined();
+        expect(findings.filter(item => item.severity === 'error')).toEqual([]);
+      } else {
+        expect(runtime.getNotificationProvider('notification.gmail')).toBeUndefined();
+        expect(findings).toContainEqual(expect.objectContaining({ code: 'load.dependencies' }));
+      }
+      expect(account).not.toHaveBeenCalled();
+      expect(network).not.toHaveBeenCalled();
+    } finally { account.mockRestore(); }
+  });
+
   it.each([false, true])('waits for an installed named credential provider across builtin activation (nested: %s)', async nested => {
     const network = vi.fn(async () => new Response('ok'));
     vi.stubGlobal('fetch', network);
@@ -415,6 +516,36 @@ describe('createDefaultPluginRuntime', () => {
     vi.mocked(executeWorkItem).mockResolvedValueOnce({ executionId: 'failed-execution', workItemId: input.workItemId, status: 'blocked' });
     await expect(runtime.dispatchSystemAction('work-item.execute', { input })).rejects.toThrow('blocked');
   });
+  it.each(['external', 'symlink-escape'] as const)('binds the production verification workspace before calling its provider (%s)', async kind => {
+    const { runtime, workspaceRoot, homeDir } = await fixture();
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify')
+      .mockResolvedValue({ passed: true, durationMs: 1, output: 'fixture' });
+    const escape = join(workspaceRoot, 'escape');
+    await symlink(homeDir, escape, 'dir');
+    await expect(runtime.dispatchSystemAction('capability.invoke', {
+      worktreePath: workspaceRoot,
+      input: { capability: 'verification.provider', provider: 'test-runner', operation: 'verify',
+        input: { target: kind === 'external' ? homeDir : escape } },
+    }, { authorizedWorkspace: workspaceRoot })).rejects.toThrow('Verification target escapes authorized local workspace');
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it.each(['default', 'root', 'subdirectory'] as const)('preserves an allowed production verification workspace (%s)', async kind => {
+    const { runtime, workspaceRoot } = await fixture();
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify')
+      .mockResolvedValue({ passed: true, durationMs: 1, output: 'fixture' });
+    const child = join(workspaceRoot, 'child');
+    await mkdir(child);
+    const input = kind === 'default' ? {} : { target: kind === 'root' ? workspaceRoot : child };
+    const options = { authorizedWorkspace: workspaceRoot, signal: new AbortController().signal };
+    await expect(runtime.dispatchSystemAction('capability.invoke', {
+      worktreePath: workspaceRoot,
+      input: { capability: 'verification.provider', provider: 'test-runner', operation: 'verify', input },
+    }, options)).resolves.toEqual({ passed: true, durationMs: 1, output: 'fixture' });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledWith({ target: await realpath(kind === 'subdirectory' ? child : workspaceRoot) }, options);
+  });
+
   it('loads shared providers and preserves false verification results as workflow failures', async () => {
     const { runtime, workspaceRoot } = await fixture();
     expect(runtime.listProviders('agent.provider')).toEqual(expect.arrayContaining(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']));
@@ -441,20 +572,45 @@ describe('createDefaultPluginRuntime', () => {
     const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify');
     const worktreePath = join(homeDir, 'verification-execution');
     await mkdir(worktreePath);
+    const observed = await verificationContext(runtime, { ...context, worktreePath }, homeDir);
     await lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot });
-    await lifecycle.run('after-agent', { ...context, worktreePath });
-    await lifecycle.run('before-publish', { ...context, worktreePath });
+    await lifecycle.run('after-agent', observed.context);
+    await lifecycle.run('before-publish', observed.context);
     expect(verify).toHaveBeenCalledTimes(2);
-    expect(verify).toHaveBeenCalledWith({ command, timeoutMs: 5000, target: worktreePath }, { authorizedWorkspace: worktreePath });
     const actualWorktree = await realpath(worktreePath);
+    expect(verify).toHaveBeenCalledWith({ command, timeoutMs: 5000, target: actualWorktree, executionId: expect.any(String) }, { authorizedWorkspace: actualWorktree });
     expect((await readFile(join(worktreePath, 'verification-marker'), 'utf8')).trim().split('\n')).toEqual([actualWorktree, actualWorktree]);
     await expect(lstat(join(workspaceRoot, 'verification-marker'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const history: RunEvent[] = [];
+    for await (const event of observed.events.read('verification-run')) history.push(event);
+    expect(history.map(event => event.type)).toEqual(['effect.started', 'effect.completed', 'effect.started', 'effect.completed']);
+    expect(history.every(event => event.context.runId === 'verification-run' && event.context.workItemId === 'github:acme/api#42')).toBe(true);
+    const completed = history.filter(event => event.type === 'effect.completed');
+    expect(new Set(completed.map(event => event.idempotencyKey)).size).toBe(2);
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    for (const event of completed) {
+      expect(event.evidence).toHaveLength(1);
+      const receipt = JSON.parse(Buffer.from(await evidence.get(event.evidence![0])).toString('utf8'));
+      expect(receipt).toMatchObject({ protocol: 'capability-verification-v1', provider: 'test-runner',
+        observation: observed.context.observation!.context, workspace: actualWorktree,
+        revision: { before: { head: observed.revision }, after: { head: observed.revision } },
+        result: { passed: true, execution: { command, cwd: actualWorktree, exitCode: 0, closed: true } } });
+    }
+    expect((await observed.events.verify('verification-run')).valid).toBe(true);
   });
 
   it.each(['after-agent', 'before-publish'] as const)('blocks %s when the saved verification actually fails', async phase => {
-    const { lifecycle, context } = await fixture({ integrations: { verifications: [{ provider: 'test-runner',
+    const { runtime, lifecycle, context, homeDir } = await fixture({ integrations: { verifications: [{ provider: 'test-runner',
       command: [process.execPath, '-e', 'process.exit(7)'] }] } });
-    await expect(lifecycle.run(phase, context)).rejects.toThrow('Capability verification failed');
+    const observed = await verificationContext(runtime, context, homeDir);
+    await expect(lifecycle.run(phase, observed.context)).rejects.toThrow('Capability verification failed');
+    const history: RunEvent[] = [];
+    for await (const event of observed.events.read('verification-run')) history.push(event);
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    const completed = history.find(event => event.type === 'effect.completed')!;
+    expect(completed.evidence).toHaveLength(1);
+    const receipt = JSON.parse(Buffer.from(await evidence.get(completed.evidence![0])).toString('utf8'));
+    expect(receipt).toMatchObject({ result: { passed: false, execution: { exitCode: 7, closed: true } } });
   });
 
   it('does not invoke an unselected registered verifier', async () => {

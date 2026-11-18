@@ -38,6 +38,134 @@ async function fixture() {
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
 
 describe('durable learning intake', () => {
+  it('captures an explicitly selected failure and rechecks it during ordinary scans', async () => {
+    const input = await fixture();
+    await input.append([{ kind: 'agent.session_recorded', sessionId: 'native-session', transcriptPath: input.transcriptPath },
+      { kind: 'qa.failed', reason: 'Duplicate retry' }, { kind: 'run.finished', outcome: 'failed' }]);
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [] });
+    const selected = { ...input, scope, runId: 'run-1', workItemId, includeFailed: true };
+    const captured = await reconcileDistillationSources(selected);
+    expect(captured).toMatchObject({ submitted: 1, requestKeys: [expect.any(String)], blocked: [] });
+    const store = input.open();
+    try {
+      const request = store.getRequest(captured.requestKeys[0])!;
+      expect(request.request).toMatchObject({ sourceRunId: 'run-1', workItemId, reason: 'failed' });
+      expect(request.request.sourceId).toMatch(/:failure:3:failed:sessions:[a-f0-9]{64}$/);
+      const pack = store.getEvidencePack(request.request.evidenceDigest)!;
+      expect(pack.sources.map(source => source.kind)).toEqual(['audit', 'session']);
+      expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, invalidated: 0,
+        requestKeys: captured.requestKeys, checkedSources: [{ runId: 'run-1', eventRoot: input.eventRoot }], blocked: [] });
+      expect(store.getRequest(request.key)?.blockedReason).toBeUndefined();
+    } finally { store.close(); }
+  });
+
+  it.each(['scope', 'runId', 'workItemId'] as const)('requires an explicit %s for first failure capture', async missing => {
+    const input = await fixture();
+    const selected = { ...input, scope, runId: 'run-1', workItemId, includeFailed: true };
+    await expect(reconcileDistillationSources({ ...selected, [missing]: undefined })).rejects.toThrow('failure_source_identity_required');
+  });
+
+  it('replaces an opted-in failure epoch and withdraws it when the run later succeeds', async () => {
+    const input = await fixture();
+    await input.append([{ kind: 'run.finished', outcome: 'failed' }]);
+    const first = await reconcileDistillationSources({ ...input, scope, runId: 'run-1', workItemId, includeFailed: true });
+    await input.append([{ kind: 'qa.failed', reason: 'Retry still fails' }, { kind: 'run.finished', outcome: 'failed' }]);
+    const next = await reconcileDistillationSources(input);
+    expect(next).toMatchObject({ submitted: 1, invalidated: 1, requestKeys: [expect.any(String)], blocked: [] });
+    expect(next.requestKeys[0]).not.toBe(first.requestKeys[0]);
+    await input.append([{ kind: 'run.finished', outcome: 'succeeded' }]);
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, invalidated: 1, requestKeys: [], blocked: [] });
+    const store = input.open();
+    try { expect(store.listRequests().every(request => request.blockedReason === 'source_invalidated')).toBe(true); }
+    finally { store.close(); }
+  });
+
+  it.each([{ actor: { kind: 'agent' as const, id: 'untrusted' } }, { purpose: 'learning' as const }])(
+    'does not capture an untrusted or learning failure: %j', async context => {
+      const input = await fixture();
+      await input.append([{ kind: 'run.finished', outcome: 'failed' }], context);
+      expect(await reconcileDistillationSources({ ...input, scope, runId: 'run-1', workItemId, includeFailed: true }))
+        .toMatchObject({ submitted: 0, requestKeys: [] });
+    });
+
+  it.each([false, true])('rejects a mismatched work item without capturing or invalidating an existing request: replay=%s', async replay => {
+    const input = await fixture();
+    await input.append(input.complete);
+    if (replay) await reconcileDistillationSources({ ...input, scope, runId: 'run-1' });
+    const store = input.open();
+    try {
+      const before = store.listRequests();
+      const commit = vi.spyOn(CandidateStore.prototype, 'commitScan');
+      const result = await reconcileDistillationSources({ ...input, scope, runId: 'run-1', workItemId: `${scope}#43` });
+      expect(result).toMatchObject({ submitted: 0, invalidated: 0, requestKeys: [],
+        blocked: [{ runId: 'run-1', code: 'source_work_item_mismatch' }] });
+      expect(commit).not.toHaveBeenCalled();
+      expect(store.listRequests()).toEqual(before);
+      expect(store.listCandidates()).toEqual([]);
+      const matching = await reconcileDistillationSources({ ...input, scope, runId: 'run-1', workItemId });
+      expect(matching).toMatchObject({ requestKeys: [expect.any(String)], blocked: [] });
+    } finally { store.close(); }
+  });
+
+  it('returns current request keys only for the requested scope and run', async () => {
+    const input = await fixture();
+    const otherScope = 'github:other/wiki';
+    await input.append(input.complete);
+    await input.append(input.complete, { runId: 'run-2', workItemId: `${scope}#43` });
+    await input.append(input.complete, { runId: 'other-1', workItemId: `${otherScope}#42` });
+    await input.append(input.complete, { runId: 'analysis-1', purpose: 'learning' });
+    const first = await reconcileDistillationSources(input);
+    expect(first).toMatchObject({ submitted: 3, blocked: [] });
+    const store = input.open();
+    try {
+      const entries = store.listRequests();
+      expect(first.requestKeys.sort()).toEqual(entries.map(entry => entry.key).sort());
+      const keyFor = (runId: string) => entries.find(entry => entry.request.sourceRunId === runId)!.key;
+      expect(await reconcileDistillationSources({ ...input, scope, runId: 'run-1' }))
+        .toMatchObject({ submitted: 0, requestKeys: [keyFor('run-1')], blocked: [] });
+      const scoped = await reconcileDistillationSources({ ...input, scope });
+      expect(scoped)
+        .toMatchObject({ submitted: 0, requestKeys: expect.arrayContaining([keyFor('run-1'), keyFor('run-2')]), blocked: [] });
+      expect(scoped.requestKeys).toHaveLength(2);
+      expect(await reconcileDistillationSources({ ...input, scope: otherScope, runId: 'other-1' }))
+        .toMatchObject({ submitted: 0, requestKeys: [keyFor('other-1')], blocked: [] });
+      expect((await reconcileDistillationSources({ ...input, scope, runId: 'other-1' })).requestKeys).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it('returns no request keys when a new scan or replay cursor commit fails', async () => {
+    const input = await fixture();
+    await input.append(input.complete);
+    const commit = vi.spyOn(CandidateStore.prototype, 'commitScan').mockImplementationOnce(() => { throw new Error('storage_blocked'); });
+    expect(await reconcileDistillationSources(input))
+      .toMatchObject({ submitted: 0, requestKeys: [], blocked: [{ code: 'storage_blocked' }] });
+    const successful = await reconcileDistillationSources(input);
+    expect(successful).toMatchObject({ submitted: 1, requestKeys: [expect.any(String)], blocked: [] });
+    await input.append([{ kind: 'run.finished', outcome: 'succeeded' }]);
+    commit.mockImplementationOnce(() => { throw new Error('storage_blocked'); });
+    expect(await reconcileDistillationSources(input))
+      .toMatchObject({ submitted: 0, requestKeys: [], blocked: [{ code: 'storage_blocked' }] });
+    expect(await reconcileDistillationSources(input))
+      .toMatchObject({ submitted: 0, requestKeys: successful.requestKeys, blocked: [] });
+  });
+
+  it('excludes an authoritatively blocked current request while retaining other successful sources', async () => {
+    const input = await fixture();
+    await input.append(input.complete);
+    await input.append(input.complete, { runId: 'run-2', workItemId: `${scope}#43` });
+    await input.append([{ kind: 'qa.started' }, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'failed' }], { runId: 'failed-1' });
+    await reconcileDistillationSources(input);
+    const store = input.open();
+    try {
+      const blocked = store.listRequests().find(entry => entry.request.sourceRunId === 'run-1')!;
+      const successful = store.listRequests().find(entry => entry.request.sourceRunId === 'run-2')!;
+      store.invalidateRequestSource(blocked.key);
+      expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [successful.key], blocked: [] });
+      expect(store.getRequest(blocked.key)?.blockedReason).toBe('source_invalidated');
+      expect(await reconcileDistillationSources({ ...input, runId: 'failed-1' })).toMatchObject({ submitted: 0, requestKeys: [] });
+    } finally { store.close(); }
+  });
+
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('keeps an inaccessible audit retryable and recovers after directory access is restored', async () => {
     const input = await fixture();
     await input.append(input.complete);
@@ -234,13 +362,18 @@ describe('durable learning intake', () => {
     const input = await fixture();
     await fs.rm(input.transcriptPath);
     await input.append(input.complete);
-    expect((await reconcileDistillationSources(input)).submitted).toBe(1);
+    const first = await reconcileDistillationSources(input);
+    expect(first).toMatchObject({ submitted: 1, requestKeys: [expect.any(String)] });
     await fs.writeFile(input.transcriptPath, '{"role":"user","content":"Late review evidence."}\n');
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 1, blocked: [] });
-    expect((await reconcileDistillationSources(input)).submitted).toBe(0);
+    const current = await reconcileDistillationSources(input);
+    expect(current).toMatchObject({ submitted: 1, requestKeys: [expect.any(String)], blocked: [] });
+    expect(current.requestKeys[0]).not.toBe(first.requestKeys[0]);
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: current.requestKeys });
     const store = input.open();
     try {
       expect(store.listRequests()).toHaveLength(2);
+      expect(store.getScanRequestKeys({ scope, runId: 'run-1', analyzerVersion: '1' }).slice().sort())
+        .toEqual([...first.requestKeys, ...current.requestKeys].sort());
       const packs = store.listRequests().map(entry => store.getEvidencePack(entry.request.evidenceDigest)!);
       expect(packs.map(pack => pack.completeness).sort()).toEqual(['complete', 'partial']);
     } finally { store.close(); }
@@ -337,13 +470,15 @@ describe('durable learning intake', () => {
   it('recovers a completed audit without an earlier producer and deduplicates duplicate terminal facts', async () => {
     const input = await fixture();
     await input.append(input.complete);
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 1, blocked: [] });
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, blocked: [] });
+    const first = await reconcileDistillationSources(input);
+    expect(first).toMatchObject({ submitted: 1, requestKeys: [expect.any(String)], blocked: [] });
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: first.requestKeys, blocked: [] });
     await input.append([{ kind: 'run.finished', outcome: 'succeeded' }]);
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, blocked: [] });
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: first.requestKeys, blocked: [] });
     const store = input.open();
     try {
       const [entry] = store.listRequests();
+      expect(first.requestKeys).toEqual([entry.key]);
       expect(store.listRequests()).toHaveLength(1);
       expect(entry.request).toMatchObject({ scope, sourceRunId: 'run-1', workItemId, reason: 'completed' });
       const pack = store.getEvidencePack(entry.request.evidenceDigest)!;
@@ -355,10 +490,10 @@ describe('durable learning intake', () => {
   it('requires independent QA and ignores learning-purpose runs and other projects', async () => {
     const input = await fixture();
     await input.append([{ kind: 'run.finished', outcome: 'succeeded' }]);
-    expect((await reconcileDistillationSources(input)).submitted).toBe(0);
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [] });
     await input.append(input.complete, { runId: 'analysis-1', purpose: 'learning' });
     await input.append(input.complete, { runId: 'other-1', workItemId: 'github:other/wiki#42' });
-    expect((await reconcileDistillationSources({ ...input, scope })).submitted).toBe(0);
+    expect(await reconcileDistillationSources({ ...input, scope })).toMatchObject({ submitted: 0, requestKeys: [] });
     const store = input.open();
     try { expect(store.listRequests()).toEqual([]); } finally { store.close(); }
   });
@@ -377,7 +512,7 @@ describe('durable learning intake', () => {
       candidateId = receipt.candidateIds[0];
     } finally { store.close(); }
     await input.append([{ kind: 'qa.failed', summary: 'The review assertion was disproved.' }]);
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, invalidated: 1 });
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [], invalidated: 1 });
     store = input.open();
     try {
       expect(store.listRequests()[0].blockedReason).toBe('source_invalidated');
@@ -388,12 +523,16 @@ describe('durable learning intake', () => {
   it('creates a new repaired checkpoint after QA restarts while retaining withdrawn history', async () => {
     const input = await fixture();
     await input.append(input.complete);
-    await reconcileDistillationSources(input);
+    const first = await reconcileDistillationSources(input);
     await input.append([{ kind: 'qa.failed' }, { kind: 'qa.started' }, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]);
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 1, invalidated: 1 });
+    const current = await reconcileDistillationSources(input);
+    expect(current).toMatchObject({ submitted: 1, requestKeys: [expect.any(String)], invalidated: 1 });
+    expect(current.requestKeys[0]).not.toBe(first.requestKeys[0]);
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: current.requestKeys });
     const store = input.open();
     try {
       expect(store.listRequests()).toHaveLength(2);
+      expect(current.requestKeys).toEqual([store.listRequests().find(entry => !entry.blockedReason)!.key]);
       expect(store.listRequests().find(entry => !entry.blockedReason)?.request.reason).toBe('repaired');
     } finally { store.close(); }
   });
@@ -404,10 +543,10 @@ describe('durable learning intake', () => {
     await fs.writeFile(outside, '{"role":"user","content":"PRIVATE_OUTSIDE"}\n');
     await input.append([{ kind: 'qa.started' }, { kind: 'agent.session_recorded', sessionId: 'outside', transcriptPath: outside },
       { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]);
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, blocked: [{ runId: 'run-1', code: 'source_not_allowed' }] });
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [], blocked: [{ runId: 'run-1', code: 'source_not_allowed' }] });
     const auditPath = join(input.eventRoot, `${Buffer.from('run-1').toString('base64url')}.jsonl`);
     await fs.writeFile(auditPath, (await fs.readFile(auditPath, 'utf8')).replace('qa.passed', 'qa.failed'));
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, blocked: [{ runId: 'run-1', code: 'audit_invalid' }] });
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [], blocked: [{ runId: 'run-1', code: 'audit_invalid' }] });
     const store = input.open();
     try { expect(store.getScanCursor({ scope, runId: 'run-1', analyzerVersion: '1' })).toBeUndefined(); } finally { store.close(); }
   });
@@ -425,6 +564,125 @@ describe('durable learning intake', () => {
       expect(JSON.stringify(pack)).toContain('current-user-command');
       expect(store.listCandidates()).toEqual([]);
       expect(store.listRequests()).toHaveLength(1);
+    } finally { store.close(); }
+  });
+
+  it.each([
+    { name: 'ASCII', correction: 'x'.repeat(32768) },
+    { name: 'multibyte UTF-8', correction: `${'纠'.repeat(10922)}ab` },
+  ])('accepts exactly 32768 bytes of $name correction without processing it', async ({ correction }) => {
+    const input = await fixture();
+    expect(Buffer.byteLength(correction, 'utf8')).toBe(32768);
+    const submitted = await submitLearningCorrection({ directory: input.directory, scope, sourceId: 'byte-boundary', correction });
+    const store = input.open();
+    try {
+      const pack = store.getEvidencePack(submitted.request.evidenceDigest)!;
+      expect(JSON.parse(pack.entries[0].content).correction).toBe(correction);
+      expect(submitted.evidence).toEqual(pack.entries.map(entry => entry.ref));
+      expect(store.listRequests()).toHaveLength(1);
+      expect(store.listCandidates()).toEqual([]);
+      expect(store.getProcessingReceipt(submitted.key)).toBeUndefined();
+      expect(store.listAnalysisAttempts(submitted.key)).toEqual([]);
+      expect(await fs.stat(join(input.directory, 'distillation-queue.sqlite')).catch(() => undefined)).toBeUndefined();
+    } finally { store.close(); }
+  });
+
+  it.each([
+    { name: 'empty', correction: '' }, { name: 'whitespace', correction: ' \t\n\u3000' },
+    { name: 'NUL', correction: 'Review\0before publishing' },
+    { name: '32769 ASCII bytes', correction: 'x'.repeat(32769) },
+    { name: '32769 UTF-8 bytes', correction: '纠'.repeat(10923) },
+    { name: '32769 UTF-8 bytes with trimmable whitespace', correction: ` ${'纠'.repeat(10922)}ab` },
+  ])('rejects $name before creating evidence or a ledger', async ({ correction }) => {
+    const input = await fixture();
+    const mkdtemp = vi.spyOn(fs, 'mkdtemp');
+    await expect(submitLearningCorrection({ directory: input.directory, scope, sourceId: 'invalid-text', correction }))
+      .rejects.toMatchObject({ name: 'ZodError' });
+    expect(mkdtemp).not.toHaveBeenCalled();
+    expect(await fs.stat(input.directory).catch(() => undefined)).toBeUndefined();
+  });
+
+  it.each([0, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN])('rejects invalid correction target version %s before creating evidence or a ledger', async expectedVersion => {
+    const input = await fixture();
+    const mkdtemp = vi.spyOn(fs, 'mkdtemp');
+    await expect(submitLearningCorrection({ directory: input.directory, scope, sourceId: 'invalid-version', correction: 'Require review.',
+      target: { candidateId: 'a'.repeat(64), expectedVersion } })).rejects.toMatchObject({ name: 'ZodError' });
+    expect(mkdtemp).not.toHaveBeenCalled();
+    expect(await fs.stat(input.directory).catch(() => undefined)).toBeUndefined();
+  });
+
+  it('binds a correction to the stored candidate snapshot and creates an independent unvalidated candidate on processing', async () => {
+    const input = await fixture();
+    const seed = await submitLearningCorrection({ directory: input.directory, scope, sourceId: 'seed', correction: 'Require review.' });
+    const store = input.open();
+    try {
+      const proposal = { kind: 'fact', title: 'Review', statement: 'Require review.', evidenceIds: [seed.evidence[0].id],
+        applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] },
+        payload: { subject: 'publishing', rule: 'Require review', classification: 'proposal' } };
+      const id = store.completeRequest(seed.key, { version: 1, warnings: [], candidates: [proposal] }).candidateIds[0];
+      const original = store.getCandidate(id)!;
+      const correction = { directory: input.directory, scope, sourceId: `candidate:${id}`, correction: 'Only releases require review. password=PRIVATE_TOKEN',
+        target: { candidateId: id, expectedVersion: original.version } };
+      const submitted = await submitLearningCorrection(correction);
+      expect((await submitLearningCorrection(correction)).key).toBe(submitted.key);
+      expect(submitted.key).not.toBe(seed.key);
+      expect(submitted.request.reason).toBe('correction');
+      expect(store.getCandidate(id)).toEqual(original);
+      expect(store.listCandidates()).toHaveLength(1);
+      const pack = store.getEvidencePack(submitted.request.evidenceDigest)!;
+      expect(JSON.stringify(pack)).not.toContain('PRIVATE_TOKEN');
+      const document = JSON.parse(pack.entries[0].content);
+      expect(document.target).toEqual({ candidateId: original.id, candidateVersion: original.version, candidateDigest: original.digest,
+        evidenceDigest: original.evidenceDigest, state: original.state, proposal: original.proposal });
+      store.close();
+      const reopened = input.open();
+      try {
+        expect(reopened.getEvidencePack(submitted.request.evidenceDigest)).toEqual(pack);
+        const receipt = reopened.completeRequest(submitted.key, { version: 1, warnings: [],
+          candidates: [{ ...proposal, statement: 'Only releases require review.', evidenceIds: [submitted.evidence[0].id] }] });
+        expect(receipt.candidateIds[0]).not.toBe(id);
+        expect(reopened.getCandidate(receipt.candidateIds[0])).toMatchObject({ state: 'candidate', version: 1, requestKey: submitted.key });
+        expect(reopened.getCandidate(id)).toEqual(original);
+        expect(reopened.getCandidateVersions(id)).toHaveLength(1);
+        expect(reopened.listCandidates()).toHaveLength(2);
+        expect(reopened.getCandidateVersions(receipt.candidateIds[0])).toHaveLength(1);
+        expect(reopened.listAnalysisAttempts(submitted.key)).toEqual([]);
+        expect(await fs.stat(join(input.directory, 'distillation-queue.sqlite')).catch(() => undefined)).toBeUndefined();
+      } finally { reopened.close(); }
+    } finally { store.close(); }
+  });
+
+  it('rejects absent, foreign and stale correction targets without admitting a new request', async () => {
+    const input = await fixture();
+    const correction = { directory: input.directory, scope, sourceId: 'candidate:missing', correction: 'Require review.',
+      target: { candidateId: 'a'.repeat(64), expectedVersion: 1 } };
+    for (const expectedVersion of [1, Number.MAX_SAFE_INTEGER]) {
+      await expect(submitLearningCorrection({ ...correction, target: { ...correction.target, expectedVersion } }))
+        .rejects.toThrow('correction_target_unavailable');
+    }
+    expect(await fs.stat(join(input.directory, 'candidates.sqlite')).catch(() => undefined)).toBeUndefined();
+    const seed = await submitLearningCorrection({ directory: input.directory, scope, sourceId: 'seed', correction: 'Require review.' });
+    const store = input.open();
+    try {
+      const id = store.completeRequest(seed.key, { version: 1, warnings: [], candidates: [{ kind: 'fact', title: 'Review', statement: 'Require review.',
+        evidenceIds: [seed.evidence[0].id], applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] },
+        payload: { subject: 'publishing', rule: 'Require review', classification: 'proposal' } }] }).candidateIds[0];
+      for (const change of [{ scope: 'github:other/wiki', target: { candidateId: id, expectedVersion: 1 } },
+        { target: { candidateId: id, expectedVersion: 2 } }]) {
+        await expect(submitLearningCorrection({ ...correction, ...change })).rejects.toThrow('correction_target_unavailable');
+      }
+      expect(store.listRequests()).toHaveLength(1);
+      expect(store.listCandidates()).toHaveLength(1);
+      const original = store.transitionCandidate(id, 1, 'rejected');
+      await expect(submitLearningCorrection({ ...correction, target: { candidateId: id, expectedVersion: 1 } }))
+        .rejects.toThrow('correction_target_unavailable');
+      expect(store.listRequests()).toHaveLength(1);
+      const accepted = await submitLearningCorrection({ ...correction, target: { candidateId: id, expectedVersion: original.version } });
+      expect(store.listRequests()).toHaveLength(2);
+      expect(store.getCandidate(id)).toEqual(original);
+      expect(store.getCandidateVersions(id)).toHaveLength(2);
+      expect(store.listCandidates()).toHaveLength(1);
+      expect(store.listAnalysisAttempts(accepted.key)).toEqual([]);
     } finally { store.close(); }
   });
 });

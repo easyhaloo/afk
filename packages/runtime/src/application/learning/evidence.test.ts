@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
-import { buildEvidencePack, loadEvidencePack, readEvidenceSource, redactEvidenceText, saveEvidencePack, validateEvidencePack, type EvidenceSourceInput } from './evidence.js';
+import { buildEvidencePack, loadEvidencePack, matchesEvidenceWorkItem, readEvidenceSource, redactEvidenceText, saveEvidencePack, validateEvidencePack, type EvidenceSourceInput } from './evidence.js';
 import { buildAnalysisPrompt } from './analysis.js';
 
 const roots: string[] = [];
@@ -51,6 +51,13 @@ describe('bounded immutable evidence', () => {
     expect(redactEvidenceText(sensitive)).toBe(redactEvidenceText(redactEvidenceText(sensitive)));
   });
 
+  it('removes the full callback URL when Markdown escapes its query separators', async () => {
+    const source = await fixture(message(String.raw`Sign in at https://localhost/callback?iss=example\&code=fixture-grant\&state=fixture-nonce then return.`));
+    const pack = await buildEvidencePack({ sources: [source] });
+    expect(pack.entries[0].content).toContain('Sign in at [redacted:url] then return.');
+    expect(validateEvidencePack(pack)).toEqual(pack);
+  });
+
   it.each(['2001:db8:85a3::8a2e:370:7334', '[2001:db8::1]:443', '::1', '::ffff:10.23.45.67', 'fe80::1%en0'])('removes IPv6 addresses without damaging relative API routes: %s', address => {
     const output = redactEvidenceText(`host=${address} route=api/v1/orders route=v2/users/{id} GET /api/v1/orders`);
     expect(output).not.toContain(address);
@@ -63,6 +70,29 @@ describe('bounded immutable evidence', () => {
 
   it.each(['host:2001:db8::1', 'remote_addr:fe80::1%en0'])('removes IPv6 immediately following a field label: %s', input => {
     expect(redactEvidenceText(input)).toBe(input.slice(0, input.indexOf(':') + 1) + '[redacted:ip]');
+  });
+
+  it('binds otherwise identical masked audit identities and keeps legacy matching exact', async () => {
+    const identities = ['127.0.0.1', '127.0.0.2'].map(host => `gitlab:${host}:54231/acme/api#42`);
+    const packs = await Promise.all(identities.map(async workItemId => {
+      const source = await fixture('');
+      const store = new JsonlEventStore({ root: source.allowedRoot });
+      await store.append([{ id: 'event', schemaVersion: 1, type: 'qa.started', occurredAt: '2026-11-09T00:00:00Z',
+        context: { runId: 'run', traceId: 'trace', profileId: 'qa', attempt: 1, workItemId, actor: { kind: 'system', id: 'test' } },
+        correlationId: 'run', data: { kind: 'qa.started' } }]);
+      return buildEvidencePack({ sources: [{ ...source, kind: 'audit', runId: 'run', path: store.pathFor('run') }] });
+    }));
+    const [first, second] = packs.map(pack => pack.entries[0]);
+    const observed = JSON.parse(first.content).context.workItemId;
+    expect(JSON.parse(second.content).context.workItemId).toBe(observed);
+    expect(first.position.workItemDigest).not.toBe(second.position.workItemDigest);
+    expect(matchesEvidenceWorkItem(first, observed, identities[0])).toBe(true);
+    expect(matchesEvidenceWorkItem(first, observed, identities[1])).toBe(false);
+    const legacy = { ...first, position: { ...first.position, workItemDigest: undefined } };
+    expect(matchesEvidenceWorkItem(legacy, observed, identities[0])).toBe(false);
+    expect(matchesEvidenceWorkItem(legacy, 'github:acme/api#42', 'github:acme/api#42')).toBe(true);
+    const tampered = { ...packs[0], entries: [{ ...first, position: { ...first.position, workItemDigest: second.position.workItemDigest } }] };
+    expect(() => validateEvidencePack(tampered)).toThrow(/digest mismatch/);
   });
 
   it('removes structured account fields without erasing business names and API routes', async () => {

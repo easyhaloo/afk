@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 
 const execute = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
 const message = { title: 'Matrix complete', body: 'Local service double only.\n第二行', urgency: 'high' };
 const artifactBytes = Buffer.from([0, 255, 13, 10, 65, 128]);
 const artifact = { name: 'matrix.bin', mediaType: 'application/octet-stream', bytes: artifactBytes.toString('base64') };
@@ -600,7 +600,24 @@ if (action === 'read' || action === 'lookup') {
     upstream.once('close', () => { sockets.delete(upstream); socket.destroy(); });
   });
   environment = { ...environment, PATH: `${bin}:${environment.PATH}`, MATRIX_KEYCHAIN: keychain, HTTP_PROXY: http, HTTPS_PROXY: http, NO_PROXY: '' };
+  await configure('credential.google-oauth', {});
   await configure('notification.gmail', { to: 'recipient@example.test', channel: 'fixture-gmail' });
+  const savedSettings = await settings();
+  const expiredRecord = await readFile(keychain, 'utf8');
+  for (const id of ['credential.google-oauth', 'notification.gmail']) {
+    const report = await cli('doctor', '--plugin', id, '--loaded', '--json');
+    expect(JSON.parse(report.stdout).health).toContainEqual(expect.objectContaining({ pluginId: id, status: 'degraded' }));
+    expect(report.stdout).toMatch(/refreshable/i);
+    expect(report.stdout).toMatch(id === 'notification.gmail' ? /live.*not.*validated/i : /no refresh was attempted/i);
+    for (const value of [session.subject, session.email, session.clientId, session.clientSecret, session.accessToken, session.refreshToken]) {
+      expect(report.stdout).not.toContain(value);
+    }
+  }
+  expect(await readFile(keychain, 'utf8')).toBe(expiredRecord);
+  expect(await settings()).toBe(savedSettings);
+  await expect(readFile(join(home, '.afk', 'auth', 'google-oauth.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(tunnels).toEqual([]);
+  expect(requests).toEqual([]);
   replies.push({ json: { access_token: 'gmail-fixture-access', token_type: 'Bearer', expires_in: 3600, scope: session.scopes.join(' ') } }, { json: { id: 'mail-7' } });
   expect(await invoke('notification.provider', 'notification.gmail', 'notify', message)).toEqual({ delivered: true, channel: 'fixture-gmail' });
   expect(tunnels).toEqual(['oauth2.googleapis.com:443', 'gmail.googleapis.com:443']);
@@ -621,6 +638,16 @@ if (action === 'read' || action === 'lookup') {
   const persisted = JSON.parse(Buffer.from(await readFile(keychain, 'utf8'), 'base64url').toString());
   expect(persisted).toMatchObject({ ...session, accessToken: 'gmail-fixture-access', expiresAt: expect.any(Number) });
   expect(persisted.expiresAt).toBeGreaterThan(Date.now() + 3_500_000);
+  const refreshedRecord = await readFile(keychain, 'utf8');
+  for (const id of ['credential.google-oauth', 'notification.gmail']) {
+    const report = await cli('doctor', '--plugin', id, '--loaded', '--json');
+    expect(JSON.parse(report.stdout).health).toContainEqual(expect.objectContaining({ pluginId: id, status: 'healthy' }));
+    expect(report.stdout).toMatch(/live.*not.*validated/i);
+    expect(report.stdout).not.toContain('gmail-fixture-access');
+  }
+  expect(await readFile(keychain, 'utf8')).toBe(refreshedRecord);
+  expect(tunnels).toHaveLength(2);
+  expect(requests).toHaveLength(2);
   for (const [reply, error] of [[{ status: 403 }, /access was denied/], [{ json: {} }, /could not accept/]] as const) {
     replies.push(reply);
     const failed = await failure(invocation('notification.provider', 'notification.gmail', 'notify', message));

@@ -1,23 +1,20 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute, resolve } from 'node:path';
 import type { RunEvent } from '@afk/core';
 import { z } from 'zod';
 import type { CandidateStore } from './candidate-store.js';
-import { candidateProposalSchema, distillationRequestSchema, DISTILLATION_LIMITS, learningScopeSchema, type EvidenceRef } from './contracts.js';
+import { candidateProposalSchema, distillationRequestSchema, DISTILLATION_LIMITS, type EvidenceRef } from './contracts.js';
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
-import { buildEvidencePack, readEvidenceSource, validateEvidencePack } from './evidence.js';
+import { buildEvidencePack, matchesEvidenceWorkItem, readEvidenceSource, validateEvidencePack } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
-import { successfulRunEvidenceFromEvents } from './run-evidence.js';
+import { repairedRunEvidenceFromEvents, successfulRunEvidenceFromEvents } from './run-evidence.js';
+import { lessonQaConfigurationSchema, lessonRepairBindingSchema } from './validation-input.js';
 
 const identity = z.string().min(1).max(512).refine(value => value.trim() === value && !/[\0\r\n\t]/.test(value));
 const revision = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
 const inputSchema = z.object({ candidateId: learningDigestSchema, expectedVersion: z.number().int().positive().safe() }).strict();
-const configurationSchema = z.object({ scope: learningScopeSchema, workItemId: identity, runId: identity,
-  targetRevision: revision, auditDigest: learningDigestSchema,
-  root: z.string().min(1).max(4096).refine(value => isAbsolute(value) && resolve(value) === value && !/[\0\r\n]/.test(value)),
-}).strict().refine(value => {
+const configurationSchema = lessonQaConfigurationSchema.refine(value => {
   try {
     const parsed = parseWorkItemId(value.workItemId);
     return parsed.id === value.workItemId && `${parsed.platform}:${parsed.projectKey}` === value.scope;
@@ -49,14 +46,7 @@ class LessonQaBlocked extends Error {
 function fail(code: LessonQaBlockedCode): never { throw new LessonQaBlocked(code); }
 const digest = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 
-export interface LessonQaConfiguration {
-  scope: string;
-  workItemId: string;
-  runId: string;
-  targetRevision: string;
-  root: string;
-  auditDigest: string;
-}
+export type LessonQaConfiguration = z.infer<typeof lessonQaConfigurationSchema>;
 
 export interface LessonQaDependencies {
   store: Pick<CandidateStore, 'getCandidate' | 'getRequest' | 'getEvidencePack' | 'listAnalysisAttempts'>;
@@ -83,6 +73,7 @@ export type LessonQaEvidenceResult = { status: 'blocked'; code: LessonQaBlockedC
     auditSequence: number;
   };
   evidence: EvidenceRef[];
+  repair?: { binding: z.infer<typeof lessonRepairBindingSchema>; evidence: EvidenceRef[] };
 };
 
 export async function verifyLessonQaEvidence(
@@ -112,7 +103,10 @@ export async function verifyLessonQaEvidence(
       || request.data.evidenceDigest !== candidate.evidenceDigest) fail('source_unavailable');
     if (proposal.data.applicability.project !== qa.scope || request.data.scope !== qa.scope || request.data.workItemId !== qa.workItemId) fail('scope_mismatch');
     const attempts = dependencies.store.listAnalysisAttempts(candidate.requestKey);
-    if (request.data.sourceRunId === qa.runId || attempts.some(attempt => attempt.analysisRunId === qa.runId || attempt.sessionId === qa.runId)) fail('qa_not_independent');
+    const roles = [qa.runId, ...(qa.repair ? [qa.repair.failure.runId, qa.repair.fix.runId] : [])];
+    if (request.data.sourceRunId === qa.runId || (qa.repair && (qa.repair.failure.runId !== request.data.sourceRunId
+      || new Set(roles).size !== roles.length))
+      || attempts.some(attempt => (attempt.analysisRunId !== undefined && roles.includes(attempt.analysisRunId)) || (attempt.sessionId && roles.includes(attempt.sessionId)))) fail('qa_not_independent');
     const stored = dependencies.store.getEvidencePack(candidate.evidenceDigest);
     if (!stored) fail('insufficient_evidence');
     const evidence = validateEvidencePack(stored);
@@ -126,12 +120,56 @@ export async function verifyLessonQaEvidence(
       const event = eventSchema.safeParse(decoded);
       if (!event.success || event.data.context.purpose === 'learning') fail('insufficient_evidence');
       if (event.data.context.runId === qa.runId) fail('qa_not_independent');
-      if (event.data.context.runId !== request.data.sourceRunId || event.data.context.workItemId !== qa.workItemId) fail('scope_mismatch');
+      if (event.data.context.runId !== request.data.sourceRunId || !matchesEvidenceWorkItem(entry, event.data.context.workItemId, qa.workItemId)) fail('scope_mismatch');
     }
     return { candidate, source, evidence, attempts };
   };
   try {
     const loaded = load();
+    const repairReads: Array<() => Promise<Buffer>> = [];
+    let repair: Extract<LessonQaEvidenceResult, { status: 'verified' }>['repair'];
+    if (qa.repair) {
+      const readRepair = async (pin: NonNullable<LessonQaConfiguration['repair']>['failure']) => {
+        const auditPath = new JsonlEventStore({ root: pin.root }).pathFor(pin.runId);
+        const read = async () => {
+          checkAbort();
+          const bytes = await readEvidenceSource(auditPath, pin.root, DISTILLATION_LIMITS.evidenceBytes);
+          checkAbort();
+          if (!bytes) fail('audit_unavailable');
+          if (digest(bytes) !== pin.auditDigest) fail('audit_changed');
+          return bytes;
+        };
+        const bytes = await read();
+        repairReads.push(read);
+        const history: RunEvent[] = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
+        if (!history.length || history.length > 4096 || history.some(event => !eventSchema.safeParse(event).success)) fail('qa_unverified');
+        const integrity = verifyRunEventHistory(pin.runId, history);
+        if (!integrity.valid || !integrity.lastHash) fail('qa_unverified');
+        return { history, integrity, auditPath };
+      };
+      const failure = await readRepair(qa.repair.failure);
+      const fix = await readRepair(qa.repair.fix);
+      const failureSources = loaded.evidence.sources.filter(source => source.kind === 'audit');
+      if (failureSources.length !== 1 || failureSources[0].sourceDigest !== qa.repair.failure.auditDigest
+        || failureSources[0].messageCount !== failure.history.length) fail('source_unavailable');
+      let proof: ReturnType<typeof repairedRunEvidenceFromEvents>;
+      try { proof = repairedRunEvidenceFromEvents({ scope: qa.scope, workItemId: qa.workItemId,
+        failureRunId: qa.repair.failure.runId, fixRunId: qa.repair.fix.runId, qaRunId: qa.runId, targetRevision: qa.targetRevision },
+      failure.history, fix.history); } catch { fail('qa_unverified'); }
+      const failureRef = loaded.evidence.entries.find(entry => entry.position.sourceId === failureSources[0].id
+        && failure.history[entry.position.auditSequence! - 1]?.id === proof.failureEventId)?.ref;
+      const fixPack = await buildEvidencePack({ sources: [{ id: 'lesson-fix', kind: 'audit', path: fix.auditPath,
+        allowedRoot: qa.repair.fix.root, runId: qa.repair.fix.runId, expectedDigest: qa.repair.fix.auditDigest }] });
+      if (!failureRef || fixPack.completeness !== 'complete' || fixPack.entries.length !== fix.history.length) fail('qa_unverified');
+      const fixRefs = [proof.fixCommitEventId, proof.fixCompletionEventId].map(id => fixPack.entries.find(entry =>
+        fix.history[entry.position.auditSequence! - 1]?.id === id)?.ref);
+      if (fixRefs.some(ref => !ref)) fail('qa_unverified');
+      const bind = (pin: NonNullable<LessonQaConfiguration['repair']>['failure'], audit: typeof failure) => ({
+        runId: pin.runId, auditDigest: pin.auditDigest, auditHead: audit.integrity.lastHash!, auditSequence: audit.integrity.lastSequence,
+      });
+      repair = { binding: { failure: bind(qa.repair.failure, failure), fix: bind(qa.repair.fix, fix), ...proof },
+        evidence: [failureRef, ...fixRefs as EvidenceRef[]] };
+    }
     const path = new JsonlEventStore({ root: qa.root }).pathFor(qa.runId);
     const readAudit = async () => {
       checkAbort();
@@ -175,6 +213,7 @@ export async function verifyLessonQaEvidence(
     checkAbort();
     if (pack.completeness !== 'complete' || pack.entries.length !== history.length) fail('qa_unverified');
     await readAudit();
+    for (const read of repairReads) await read();
     if (canonicalLearningJson(loaded) !== canonicalLearningJson(load())) fail('stale_candidate');
     if (canonicalLearningJson(dependencies.qa) !== canonicalLearningJson(qa)) fail('audit_changed');
     const sequences = new Set([started, target, commit, passed, completion].map(index => index + 1));
@@ -184,7 +223,7 @@ export async function verifyLessonQaEvidence(
       candidateId: loaded.candidate.id, candidateVersion: loaded.candidate.version, candidateDigest: loaded.candidate.digest,
       evidenceDigest: loaded.candidate.evidenceDigest, scope: qa.scope, workItemId: qa.workItemId, qaRunId: qa.runId,
       targetRevision: qa.targetRevision, auditDigest: qa.auditDigest, auditHead: integrity.lastHash, auditSequence: integrity.lastSequence,
-    }, evidence };
+    }, evidence, ...(repair ? { repair } : {}) };
     if (Buffer.byteLength(JSON.stringify(result)) > 16 * 1024) fail('output_limit');
     checkAbort();
     return result;

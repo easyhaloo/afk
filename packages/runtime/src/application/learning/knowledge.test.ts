@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { candidateProposalSchema } from './contracts.js';
 import { output } from './ledger-data.fixture.spec.js';
 import { hash, knowledgeFixture, page } from './knowledge.fixture.spec.js';
-import { planKnowledgePublication, readKnowledgeAuthorization, readKnowledgeGrant, runWikiIngest, verifyKnowledgePlan } from './knowledge.js';
+import { assertKnowledgeCandidate, planKnowledgePublication, readKnowledgeAuthorization, readKnowledgeGrant, runWikiIngest, verifyKnowledgePlan } from './knowledge.js';
 
 const reads = vi.hoisted(() => ({ file: '', descriptors: new Set<number>(), sizes: [] as number[], wholeFileSizes: [] as number[],
   afterRead: undefined as (() => void) | undefined }));
@@ -56,6 +56,12 @@ afterEach(() => {
 });
 
 describe('knowledge plan through the existing Python wiki CLI', () => {
+  it('rejects fact publication when its current validation configuration is missing', () => {
+    const fixture = open();
+    expect(() => assertKnowledgeCandidate({ ...fixture.input,
+      validationConfigurationFile: join(fixture.root, 'missing-validation.json') })).toThrow();
+  });
+
   it('captures authorized file and missing directory-rule dependencies without changing the grant DTO', () => {
     const fixture = open();
     const readSet = new Map<string, string | null>();
@@ -225,7 +231,9 @@ describe('knowledge plan through the existing Python wiki CLI', () => {
     const prepared = await planKnowledgePublication(fixture.input);
     expect(prepared.plan.version).toBe(1);
     expect(prepared.plan.changes.map(change => change.path)).toEqual(['知识/Approval.md', '00-总览.md', '知识/入口.md']);
-    expect(prepared.plan.evidence.join('\n')).toContain('revision:abc:rules');
+    const reference = fixture.store.getRequest(fixture.candidate.requestKey)!.evidence
+      .find(entry => entry.id === fixture.candidate.proposal.evidenceIds[0])!;
+    expect(prepared.plan.evidence.join('\n')).toContain(reference.locator);
     expect(prepared.plan.changes[0]!.content).toContain('Approve before publishing');
     expect(prepared.plan.changes[0]!.content).toContain('abc');
     expect(prepared.plan.changes[0]!.content).toContain('[[知识/入口]]');
@@ -257,7 +265,13 @@ describe('knowledge plan through the existing Python wiki CLI', () => {
     const fixture = open();
     const first = await planKnowledgePublication(fixture.input);
     await runWikiIngest(fixture.wikiScript, fixture.vault, first.plan, true);
-    const original = first.plan.changes[0]!.content.replaceAll('"e1"', '"old-e1"').replaceAll('a'.repeat(64), 'c'.repeat(64));
+    const current = first.plan.changes[0]!.content;
+    expect(current).toContain(fixture.candidate.proposal.evidenceIds[0]);
+    expect(current).toContain(fixture.candidate.evidenceDigest);
+    const original = current.replaceAll(fixture.candidate.proposal.evidenceIds[0]!, 'old-evidence')
+      .replaceAll(fixture.candidate.evidenceDigest, 'c'.repeat(64));
+    expect(original).not.toBe(current);
+    expect(original).toContain('old-evidence');
     fixture.write('知识/Approval.md', original);
     const before = statSync(join(fixture.vault, '知识/Approval.md')).mtimeMs;
     const reused = await planKnowledgePublication(fixture.input);
@@ -325,7 +339,9 @@ describe('knowledge plan through the existing Python wiki CLI', () => {
     const fixture = open(process);
     const prepared = await planKnowledgePublication(fixture.input);
     const content = prepared.plan.changes[0]!.content;
-    for (const value of ['submit', 'charge', 'new → queued', 'queued → charged', 'No billing trace', 'revision:abc:rules', 'partial']) expect(content).toContain(value);
+    const reference = fixture.store.getRequest(fixture.candidate.requestKey)!.evidence
+      .find(entry => entry.id === fixture.candidate.proposal.evidenceIds[0])!;
+    for (const value of ['submit', 'charge', 'new → queued', 'queued → charged', 'No billing trace', reference.locator, 'partial']) expect(content).toContain(value);
   });
 
   it('requires current validation, evidence and explicit asset authorization', async () => {
@@ -344,10 +360,18 @@ describe('knowledge plan through the existing Python wiki CLI', () => {
     await expect(planKnowledgePublication(fixture.input)).rejects.toThrow(/canonical|vault|path/i);
   });
 
-  it('accepts a caller-authorized logical target when the candidate omits one', async () => {
+  it('rejects a complete fact without a validated target even when the caller supplies one', async () => {
     const fixture = open(candidateProposalSchema.parse(output.candidates[0]));
+    await expect(planKnowledgePublication(fixture.input)).rejects.toThrow('knowledge_publication_invalid_receipt');
+    await expect(planKnowledgePublication({ ...fixture.input, targetRef: 'wiki:approval' })).rejects.toThrow('knowledge_publication_invalid_receipt');
+    expect(fixture.store.listPublications()).toEqual([]);
+  });
+
+  it('accepts a caller-authorized inbox target for a proposal that omits one', async () => {
+    const fixture = open(candidateProposalSchema.parse({ ...output.candidates[0],
+      payload: { ...output.candidates[0]!.payload, classification: 'proposal' } }));
     await expect(planKnowledgePublication(fixture.input)).rejects.toThrow(/authorization/i);
-    expect((await planKnowledgePublication({ ...fixture.input, targetRef: 'wiki:approval' })).targetRef).toBe('wiki:approval');
+    expect((await planKnowledgePublication({ ...fixture.input, targetRef: 'wiki:inbox' })).targetRef).toBe('wiki:inbox');
   });
 
   it('rejects revoked evidence before planning and never treats review text as credential authorization', async () => {

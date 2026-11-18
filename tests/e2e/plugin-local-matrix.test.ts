@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const execute = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
+const runtime = resolve(process.env.AFK_E2E_RUNTIME_ROOT ?? 'packages/runtime/dist');
 const fixtures = resolve('tests/fixtures/plugin-matrix/local');
 const directories: string[] = [];
 const secret = 'synthetic-matrix-credential-42';
@@ -410,6 +411,70 @@ describe.each(['artifact.test-report-local', 'artifact.evidence-bundle'])('%s fi
 });
 
 describe('repository snapshots against real temporary Git data', () => {
+  it('recovers a retained owned allocation through fresh built CLI processes', async () => {
+    const test = await sandbox();
+    await test.initializeGit();
+    const workspaceRoot = join(test.root, 'managed');
+    const storeRoot = join(test.home, '.loop-workspace', 'repos');
+    const bare = join(storeRoot, 'fixture.git');
+    await mkdir(storeRoot, { recursive: true });
+    await test.git('clone', '--bare', '--no-hardlinks', test.workspace, bare);
+    const repositories = [{ name: 'fixture', path: test.workspace, remoteUrl: 'https://fixture.invalid/repo.git',
+      baseBranch: 'main', leaseKey: 'gitlab:fixture.invalid/repo' }];
+    await test.configure('repository.multi-repository', { repositories, managed: { workspaceRoot } });
+    const providerModule = pathToFileURL(join(runtime, 'infrastructure/providers/repositories.js')).href;
+    const storeModule = pathToFileURL(join(runtime, 'infrastructure/git/repository-store.js')).href;
+    const setup = `
+      import { execFileSync } from 'node:child_process';
+      import { MultiRepositoryProvider, RepositoryPreparationCleanupError } from ${JSON.stringify(providerModule)};
+      import { RepositoryStore } from ${JSON.stringify(storeModule)};
+      const store = new RepositoryStore();
+      store.ensureCheckout = async (_url, path) => {
+        execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', ${JSON.stringify(bare)}, 'worktree', 'add', '--detach', path, 'main'], { stdio: 'pipe' });
+      };
+      store.removeCheckout = async () => { throw new Error('Fixture cleanup interruption'); };
+      const provider = new MultiRepositoryProvider({ repositories: ${JSON.stringify(repositories)},
+        managed: { workspaceRoot: ${JSON.stringify(workspaceRoot)}, store },
+        git: async () => { throw new Error('Fixture snapshot interruption'); } });
+      try { await provider.prepare({ repository: { url: 'fixture' }, runId: 'retained-fixture' }); }
+      catch (error) {
+        if (!(error instanceof RepositoryPreparationCleanupError)) throw error;
+        process.stdout.write(JSON.stringify({ allocationId: error.allocation.id }));
+      }
+    `;
+    const prepared = await execute(process.execPath, ['--input-type=module', '-e', setup], {
+      cwd: test.workspace, env: test.environment, timeout: 15_000, maxBuffer: 1024 * 1024,
+    });
+    const { allocationId } = JSON.parse(prepared.stdout) as { allocationId: string };
+    const records = JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {})).stdout);
+    expect(records).toEqual([{ allocation: { id: allocationId, repository: { url: 'fixture', ref: 'main' }, runId: 'retained-fixture' }, phase: 'retained' }]);
+    expect(JSON.stringify(records)).not.toContain(workspaceRoot);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId })).stdout)).toEqual({ removed: true });
+      expect(JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {})).stdout)).toEqual([]);
+      await expect(lstat(join(workspaceRoot, allocationId))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await test.git('-C', bare, 'worktree', 'list', '--porcelain')).stdout).not.toContain(allocationId);
+    }
+  });
+
+  it('uses configured managed recovery from the built CLI and preserves unknown allocations', async () => {
+    const test = await sandbox();
+    await test.initializeGit();
+    const workspaceRoot = join(test.root, 'managed');
+    const repositories = [{ name: 'fixture', path: test.workspace, remoteUrl: 'https://fixture.invalid/repo.git',
+      baseBranch: 'main', leaseKey: 'gitlab:fixture.invalid/repo' }];
+    await test.configure('repository.multi-repository', { repositories, managed: { workspaceRoot } });
+    expect(JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {})).stdout)).toEqual([]);
+    const allocationId = '42b689a2-b7de-4454-87c9-d7d162b97933';
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId }), 'Repository recovery failed');
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId, path: test.workspace }), 'Invalid or unsupported capability invocation');
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId, force: true }), 'Invalid or unsupported capability invocation');
+    await expect(lstat(workspaceRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
+    await test.configure('repository.multi-repository', { repositories });
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {}), 'does not support recovery');
+  });
+
   it('multi-repository resolves aliases and paths across two repositories and detects working tree changes', async () => {
     const test = await configured('repository.multi-repository');
     const second = join(test.root, 'second');
@@ -608,13 +673,24 @@ describe('notification commands are confined to local delivery files', () => {
   it.each([
     { platform: 'linux', role: 'notify-send', args: ['-u', 'critical', message.title, message.body], input: '' },
     { platform: 'darwin', role: 'osascript', args: ['-e', `display notification "${message.body}" with title "Matrix \\"title\\""`], input: '' },
-    { platform: 'win32', role: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command', '-'], input: `Add-Type -AssemblyName System.Windows.Forms\n[System.Windows.Forms.MessageBox]::Show('${message.body}', '${message.title}')` },
+    { platform: 'win32', role: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', '-'] },
   ])('desktop $platform delivers literal content to a mock executable and reports command failure', async row => {
     const test = await configured('notification.desktop');
     await test.configure(test.provider.id, { platform: row.platform, channel: 'matrix-desktop' });
     expect(JSON.parse((await test.run()).stdout)).toEqual({ delivered: true, channel: 'matrix-desktop' });
     const receipt = await readFile(join(test.output, 'desktop.json'), 'utf8');
-    expect(JSON.parse(receipt)).toEqual({ role: row.role, args: row.args, input: row.input });
+    const { role, args, input } = JSON.parse(receipt) as { role: string; args: string[]; input: string };
+    expect({ role, args }).toEqual({ role: row.role, args: row.args });
+    if (row.platform === 'win32') {
+      const fields = Array.from(input.matchAll(/^\s*\$notification\.BalloonTip(Title|Text) = \[System\.Text\.Encoding\]::UTF8\.GetString\(\[System\.Convert\]::FromBase64String\('([A-Za-z0-9+/=]+)'\)\)$/gm),
+        ([, field, encoded]) => [field, Buffer.from(encoded, 'base64').toString('utf8')]);
+      expect(fields).toEqual([['Title', message.title], ['Text', message.body]]);
+      expect(input).not.toContain(message.body);
+      expect(input).toContain('$notification.ShowBalloonTip(3000)');
+      expect(input).toMatch(/finally \{[^}]*\$notification\.Dispose\(\)/);
+    } else {
+      expect(input).toBe(row.input);
+    }
     expect(await test.optionalFile(join(test.workspace, 'injected'))).toBeNull();
     await test.mode('failure');
     await expectDecision(test.run(), { delivered: false, channel: 'matrix-desktop', error: expect.any(String) });

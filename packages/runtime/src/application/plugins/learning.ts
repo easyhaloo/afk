@@ -1,20 +1,27 @@
 import { z } from 'zod';
 import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { PluginManifest } from '../../plugin-sdk/profile.js';
-import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema } from '../learning/contracts.js';
+import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, LearningReviewIncompleteError, normalizeLearningActionInput } from '../learning/contracts.js';
 import { validateEvidencePack } from '../learning/evidence.js';
-import { LearningWorker, learningDirectory, queryLearningState, submitDistillation } from '../learning/worker.js';
-import { reconcileDistillationSources } from '../learning/intake.js';
+import { LearningWorker, learningDirectory, queryLearningRequest, queryLearningState, submitDistillation } from '../learning/worker.js';
+import { CandidateStore } from '../learning/candidate-store.js';
+import { assertCurrentKnowledgePublication } from '../learning/knowledge-publication-guard.js';
+import { verifyLessonPublication } from '../learning/lesson-publication-guard.js';
+import { reconcileDistillationSources, submitLearningCorrection } from '../learning/intake.js';
 import { learningDigestSchema, learningIdentitySchema } from '../learning/requests.js';
 import { experienceQueryContextSchema } from '../learning/experience-store.js';
 import { validateConfiguredLearningCandidate } from '../learning/validation-runtime.js';
-import type { VerificationProvider } from '../../plugin-sdk/capabilities.js';
+import type { LearningValidationResult } from '../learning/validation.js';
+import { readValidationPrivateFile } from '../learning/validation-files.js';
+import { selectKnowledgeValidationChecker, validationConfigurationSchema } from '../learning/validation-configuration.js';
+import type { RepositoryProvider, VerificationProvider } from '../../plugin-sdk/capabilities.js';
 import { KnowledgeContextProvider, knowledgeConfigurationSchema, prepareConfiguredKnowledge, publishConfiguredKnowledge,
   reconcileConfiguredKnowledge, reconcileConfiguredLessons } from '../learning/knowledge-runtime.js';
-import type { Plugin } from './runtime.js';
+import type { Plugin, PluginSystemAction, PluginSystemActionOptions } from './runtime.js';
 
 export const learningConfigurationSchema = z.object({
   enabled: z.boolean().default(false), provider: z.string().regex(/^[a-z][a-z0-9.-]*$/).default('claude-code'),
@@ -46,6 +53,7 @@ export const learningPluginManifest: PluginManifest = {
     timeoutMs: { type: 'integer', default: 120000, minimum: 1, maximum: 120000 },
     knowledge: { type: 'object', additionalProperties: false, required: ['wikiScript', 'grants'], properties: {
       wikiScript: { type: 'string', minLength: 1, maxLength: 4096 },
+      sourceReadGrantFile: { type: 'string', minLength: 1, maxLength: 4096 },
       grants: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 4096 } },
     } },
     validation: { type: 'object', additionalProperties: false, required: ['configurationFile'], properties: {
@@ -74,7 +82,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
   const captureFailures = new Map<string, { root: string; runId: string; code: string }>();
   const publicationFailures = new Set<string>();
   const knowledge = config.knowledge && { config: config.knowledge, file: join(directory, 'candidates.sqlite'),
-    recoveryDirectory: join(directory, 'publications'), validationConfigurationFile: config.validation?.configurationFile, signal: lifetime.signal };
+    recoveryDirectory: join(directory, 'publications'), validationConfigurationFile: config.validation?.configurationFile, homeDir: options.homeDir, signal: lifetime.signal };
   const reconcileKnowledge = async (scope?: string) => {
     if (!knowledge) return { results: [], blocked: [] };
     try {
@@ -91,10 +99,8 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
     }
   };
   const eventRootSchema = z.string().min(1).max(4096).refine(isAbsolute).optional();
-  const reconcile = async (input: { scope?: string; runId?: string; eventRoot?: string } = {}) => {
+  const captureSources = async (input: { scope?: string; runId?: string; workItemId?: string; eventRoot?: string; includeFailed?: boolean } = {}) => {
     const reconciliation = await reconcileDistillationSources({ directory, homeDir: options.homeDir, ...input });
-    await reconcileConfiguredLessons({ file: join(directory, 'candidates.sqlite'), recoveryDirectory: join(directory, 'publications'),
-      validationConfigurationFile: config.validation?.configurationFile, scope: input.scope, signal: lifetime.signal });
     const root = resolve(input.eventRoot ?? process.env.AFK_EVENT_STORE_DIR ?? join(options.homeDir ?? homedir(), '.afk', 'events'));
     for (const source of reconciliation.checkedSources) {
       captureFailures.delete(JSON.stringify([source.eventRoot, source.runId]));
@@ -103,6 +109,12 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
       const sourceRoot = failure.eventRoot ?? root;
       captureFailures.set(JSON.stringify([sourceRoot, failure.runId]), { ...failure, root: sourceRoot });
     }
+    return reconciliation;
+  };
+  const reconcile = async (input: { scope?: string; runId?: string; eventRoot?: string } = {}) => {
+    const reconciliation = await captureSources(input);
+    await reconcileConfiguredLessons({ file: join(directory, 'candidates.sqlite'), recoveryDirectory: join(directory, 'publications'),
+      validationConfigurationFile: config.validation?.configurationFile, homeDir: options.homeDir, scope: input.scope, signal: lifetime.signal });
     await reconcileKnowledge(input.scope);
     return reconciliation;
   };
@@ -110,9 +122,26 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
     if (!config.enabled) throw new Error('learning_disabled');
     if (lifetime.signal.aborted) throw new Error('learning_plugin_closed');
   };
+  const withOperation = async <Result>(operation: PluginSystemActionOptions | undefined,
+    action: (signal: AbortSignal) => Promise<Result>): Promise<Result> => {
+    const controller = new AbortController();
+    const abort = () => controller.abort(operation?.signal?.reason);
+    operation?.signal?.addEventListener('abort', abort, { once: true });
+    if (operation?.signal?.aborted) abort();
+    const signal = AbortSignal.any([lifetime.signal, controller.signal]);
+    try {
+      checkAbort({ ...operation, signal });
+      return await action(signal);
+    } finally { operation?.signal?.removeEventListener('abort', abort); }
+  };
   return {
     manifest: knowledge ? { ...learningPluginManifest, provides: [...learningPluginManifest.provides, 'context.provider'] } : learningPluginManifest,
     activate(context) {
+      const registerAction = (name: string, action: PluginSystemAction) => {
+        context.registerSystemAction(name, (input, operation) => {
+          return action(normalizeLearningActionInput(name, input), operation);
+        });
+      };
       resolveProvider = () => context.getProvider<AgentProvider>('agent.provider', config.provider);
       if (knowledge) context.registerContextProvider('context.knowledge', new KnowledgeContextProvider(knowledge));
       context.onDispose(async () => {
@@ -121,70 +150,208 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         workers.clear();
         resolveProvider = undefined;
       });
-      context.registerSystemAction('learning.settings', input => {
+      registerAction('learning.settings', input => {
         z.object({}).strict().parse(input);
         return learningConfigurationSchema.parse(config);
       });
-      context.registerSystemAction('learning.context', input => {
+      registerAction('learning.context', input => {
         const { scope } = z.object({ scope: learningScopeSchema }).strict().parse(input);
         return experienceQueryContextSchema.parse(config.executionContexts.find(entry => entry.target?.project === scope) ?? {});
       });
-      context.registerSystemAction('learning.distill', async input => {
+      registerAction('learning.distill', async input => {
         assertEnabled();
         const parsed = z.object({ request: distillationRequestSchema, pack: z.unknown() }).strict().parse(input);
         return submitDistillation({ directory, request: parsed.request, pack: validateEvidencePack(parsed.pack) });
       });
-      context.registerSystemAction('learning.capture', async input => {
+      registerAction('learning.correct', async input => {
+        assertEnabled();
+        const parsed = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
+          expectedVersion: z.number().int().positive().safe(), correction: z.string() }).strict().parse(input);
+        const submitted = await submitLearningCorrection({ directory, scope: parsed.scope, sourceId: `candidate:${parsed.candidateId}`,
+          correction: parsed.correction, target: { candidateId: parsed.candidateId, expectedVersion: parsed.expectedVersion } });
+        return { jobId: submitted.key, scope: parsed.scope, candidateId: parsed.candidateId, candidateVersion: parsed.expectedVersion };
+      });
+      registerAction('learning.capture', async input => {
         assertEnabled();
         return reconcile(z.object({ scope: learningScopeSchema, runId: learningIdentitySchema, eventRoot: eventRootSchema }).strict().parse(input));
       });
-      context.registerSystemAction('learning.reconcile', async input => {
+      registerAction('learning.reconcile', async input => {
         assertEnabled();
         return reconcile(z.object({ scope: learningScopeSchema.optional(), runId: learningIdentitySchema.optional(), eventRoot: eventRootSchema }).strict().parse(input));
       });
-      context.registerSystemAction('learning.jobs', input => {
+      registerAction('learning.jobs', input => {
         const parsed = z.object({ scope: learningScopeSchema }).strict().parse(input);
         return queryLearningState({ directory, scope: parsed.scope }).jobs;
       });
-      context.registerSystemAction('learning.candidates', input => {
+      registerAction('learning.candidates', input => {
         const parsed = z.object({ scope: learningScopeSchema }).strict().parse(input);
         return queryLearningState({ directory, scope: parsed.scope }).candidates;
       });
-      context.registerSystemAction('learning.knowledge.prepare', async input => {
+      registerAction('learning.request', input => {
+        const parsed = z.object({ scope: learningScopeSchema, requestKey: learningDigestSchema }).strict().parse(input);
+        return queryLearningRequest({ directory, ...parsed });
+      });
+      registerAction('learning.knowledge.prepare', async input => {
         assertEnabled();
         if (!knowledge) throw new Error('knowledge_not_configured');
         const parsed = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
           expectedVersion: z.number().int().positive().safe(), targetRef: z.string().min(1).max(512).optional() }).strict().parse(input);
         return prepareConfiguredKnowledge({ ...knowledge, ...parsed });
       });
-      context.registerSystemAction('learning.validate', async input => {
+      registerAction('learning.validate', async input => {
         assertEnabled();
         if (!config.validation) throw new Error('validation_not_configured');
         return validateConfiguredLearningCandidate(input, { file: join(directory, 'candidates.sqlite'),
+          homeDir: options.homeDir,
           configurationFile: config.validation.configurationFile, timeoutMs: config.timeoutMs, signal: lifetime.signal,
-          resolveProvider: async binding => context.getProvider<VerificationProvider>('verification.provider', binding.providerId) });
+          resolveProvider: async binding => context.getProvider<VerificationProvider>('verification.provider', binding.providerId),
+          proposal: { resolveRepository: async binding => context.getProvider<RepositoryProvider>('repository.provider', binding.providerId) } });
       });
-      context.registerSystemAction('learning.knowledge.publish', async input => {
+      registerAction('learning.knowledge.publish', async input => {
         assertEnabled();
         if (!knowledge) throw new Error('knowledge_not_configured');
         const parsed = z.object({ scope: learningScopeSchema, key: learningDigestSchema }).strict().parse(input);
         return publishConfiguredKnowledge({ ...knowledge, ...parsed });
       });
-      context.registerSystemAction('learning.knowledge.reconcile', async input => {
+      registerAction('learning.knowledge.reconcile', async input => {
         assertEnabled();
         const parsed = z.object({ scope: learningScopeSchema.optional() }).strict().parse(input);
         return reconcileKnowledge(parsed.scope);
       });
-      context.registerSystemAction('learning.worker.once', async input => {
+      registerAction('learning.worker.once', async (input, operation) => withOperation(operation, async signal => {
         assertEnabled();
-        z.object({}).strict().parse(input);
+        const check = () => { assertEnabled(); checkAbort({ ...operation, signal }); };
+        check();
+        const parsed = z.union([z.object({}).strict(), z.object({ scope: learningScopeSchema, requestKey: learningDigestSchema }).strict()]).parse(input);
+        const target = 'requestKey' in parsed ? parsed : undefined;
         const provider = resolveProvider?.();
         if (!provider?.capabilities.has('analysis') || provider.name !== 'claude-code') throw new Error('analysis_unsupported');
-        const worker = new LearningWorker({ directory, ...config, provider, reconcileSources: async () => { await reconcile(); } });
+        const worker = new LearningWorker({ directory, ...config, provider, reconcileSources: async selected => {
+          check();
+          if (!selected) { await reconcile(); return; }
+          const state = queryLearningRequest({ directory, ...selected });
+          if (state.job.sourceRunId) await captureSources({ scope: selected.scope, runId: state.job.sourceRunId });
+          check();
+        } });
         workers.add(worker);
-        try { return await worker.runOnce(); }
-        finally { workers.delete(worker); await worker.close(); }
-      });
+        const cancel = () => { void worker.close().catch(() => {}); };
+        signal.addEventListener('abort', cancel, { once: true });
+        try {
+          check();
+          const result = target ? await worker.runOnce(target) : await worker.runOnce();
+          check();
+          return result;
+        } finally { signal.removeEventListener('abort', cancel); workers.delete(worker); await worker.close(); }
+      }));
+      registerAction('learning.retrospective', async (input, operation) => withOperation(operation, async signal => {
+        assertEnabled();
+        const check = () => { assertEnabled(); checkAbort({ ...operation, signal }); };
+        check();
+        const parsed = z.object({ scope: learningScopeSchema, runId: learningIdentitySchema,
+          kind: z.enum(['process', 'lesson', 'skill', 'tool']), checkerId: learningIdentitySchema, workItemId: z.string().optional(),
+          repair: z.literal(true).optional() }).strict().parse(input);
+        const proposalKind = parsed.kind === 'skill' || parsed.kind === 'tool';
+        let repairRoot: string | undefined;
+        if (!proposalKind && !knowledge) throw new Error('knowledge_not_configured');
+        if (!config.validation) throw new Error('validation_not_configured');
+        if (parsed.repair) {
+          if (parsed.kind !== 'lesson' || !parsed.workItemId) throw new Error('repair_source_identity_required');
+          const saved = validationConfigurationSchema.parse(JSON.parse(readValidationPrivateFile(config.validation.configurationFile).bytes.toString('utf8')));
+          const checker = selectKnowledgeValidationChecker(saved, parsed.scope, parsed.checkerId);
+          const qa = checker && 'qa' in checker ? checker.qa : undefined;
+          if (!qa?.repair || qa.scope !== parsed.scope || qa.workItemId !== parsed.workItemId
+            || qa.repair.failure.runId !== parsed.runId
+            || new Set([qa.repair.failure.runId, qa.repair.fix.runId, qa.runId]).size !== 3) throw new Error('repair_checker_unavailable');
+          repairRoot = qa.repair.failure.root;
+        }
+        const source = { scope: parsed.scope, runId: parsed.runId,
+          ...(parsed.repair ? { includeFailed: true, eventRoot: repairRoot } : {}),
+          ...(parsed.workItemId === undefined ? {} : { workItemId: parseWorkItemId(parsed.workItemId).id }) };
+        const capture = await captureSources(source);
+        check();
+        if (capture.blocked.length) throw new Error('learning_capture_blocked');
+        if (capture.requestKeys.length !== 1) throw new Error(capture.requestKeys.length ? 'learning_request_ambiguous' : 'learning_request_unavailable');
+        const target = { scope: parsed.scope, requestKey: capture.requestKeys[0]! };
+        let state = queryLearningRequest({ directory, ...target });
+        if (state.job.sourceRunId !== parsed.runId || source.workItemId !== undefined && state.job.workItemId !== source.workItemId) throw new Error('learning_source_mismatch');
+        if (!state.processing) {
+          const provider = resolveProvider?.();
+          if (!provider?.capabilities.has('analysis') || provider.name !== 'claude-code') throw new Error('analysis_unsupported');
+          const worker = new LearningWorker({ directory, ...config, provider,
+            reconcileSources: async () => {
+              check();
+              const current = await captureSources(source);
+              check();
+              if (current.blocked.length || current.requestKeys.length !== 1 || current.requestKeys[0] !== target.requestKey) throw new Error('learning_capture_blocked');
+            } });
+          workers.add(worker);
+          const cancel = () => { void worker.close().catch(() => {}); };
+          signal.addEventListener('abort', cancel, { once: true });
+          try { check(); state = await worker.runOnce(target); }
+          finally { signal.removeEventListener('abort', cancel); workers.delete(worker); await worker.close(); }
+        }
+        check();
+        if (!state.processing || state.job.status !== 'processed' || state.job.reasonCode) throw new Error('learning_request_blocked');
+        const candidates = state.candidates.filter(candidate => candidate.proposal.kind === parsed.kind);
+        if (!candidates.length) throw new Error('learning_candidates_unavailable');
+        if (proposalKind) for (const candidate of candidates) {
+          if (candidate.state === 'validated') throw new Error('learning_proposal_revalidation_required');
+          if (candidate.state !== 'candidate') throw new Error('learning_candidate_not_preparable');
+        }
+        const prepared = [];
+        const validated: Extract<LearningValidationResult, { status: 'validated' }>[] = [];
+        for (const candidate of candidates) {
+          let blocked = false;
+          try {
+            check();
+            let validatedVersion: number;
+            if (candidate.state === 'candidate') {
+              const validation = await validateConfiguredLearningCandidate({ scope: parsed.scope, candidateId: candidate.id,
+                expectedVersion: candidate.version, checkerId: parsed.checkerId }, { file: join(directory, 'candidates.sqlite'),
+                homeDir: options.homeDir, configurationFile: config.validation.configurationFile,
+                timeoutMs: config.timeoutMs, ...operation, signal,
+                resolveProvider: async binding => context.getProvider<VerificationProvider>('verification.provider', binding.providerId),
+                proposal: { resolveRepository: async binding => context.getProvider<RepositoryProvider>('repository.provider', binding.providerId) } });
+              if (validation.status === 'validated' && proposalKind) validated.push(validation);
+              check();
+              if (validation.status !== 'validated') {
+                blocked = true;
+                throw new Error(`learning_validation_${validation.code}`);
+              }
+              if (proposalKind) continue;
+              validatedVersion = validation.validatedVersion;
+            } else if (candidate.state === 'validated') {
+              const store = new CandidateStore({ file: join(directory, 'candidates.sqlite') });
+              try {
+                const binding = { store, candidate, configurationFile: config.validation.configurationFile, homeDir: options.homeDir };
+                if (parsed.kind === 'lesson') {
+                  const current = verifyLessonPublication(binding, { ...operation, signal });
+                  if (current.status !== 'current' || current.binding.checkerId !== parsed.checkerId) throw new Error('learning_validation_unavailable');
+                  validatedVersion = current.binding.validatedVersion;
+                } else {
+                  assertCurrentKnowledgePublication({ ...binding, checkerId: parsed.checkerId }, { ...operation, signal });
+                  validatedVersion = candidate.version;
+                }
+              } finally { store.close(); }
+            } else throw new Error('learning_candidate_not_preparable');
+            check();
+            if (!knowledge) throw new Error('knowledge_not_configured');
+            const publication = await prepareConfiguredKnowledge({ ...knowledge, signal, scope: parsed.scope, candidateId: candidate.id,
+              expectedVersion: validatedVersion });
+            check();
+            prepared.push({ candidateId: candidate.id, validatedVersion, publication });
+          } catch (error) {
+            if (proposalKind && validated.length) throw new LearningReviewIncompleteError({
+              status: 'incomplete', scope: parsed.scope, runId: parsed.runId, requestKey: target.requestKey,
+              validated, interruptedCandidateId: candidate.id,
+              reason: signal.aborted ? 'cancelled' : blocked ? 'validation_blocked' : 'validation_failed',
+            }, { cause: error });
+            throw error;
+          }
+        }
+        return { scope: parsed.scope, runId: parsed.runId, requestKey: target.requestKey, processing: state.processing,
+          ...(proposalKind ? { validated } : { prepared }) };
+      }));
     },
     health: () => ({ status: config.enabled ? 'unknown' : 'degraded',
       message: config.enabled ? 'Analysis readiness is checked before each execution' : 'Learning is disabled' }),

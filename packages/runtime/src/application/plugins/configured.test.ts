@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createConfiguredPlugins, getConfiguredCredentialDependencies, type ConfiguredPluginsOptions } from './configured.js';
+import { configuredPluginManifests, createConfiguredPlugins, getConfiguredCredentialDependencies, inspectConfiguredPlugins, type ConfiguredPluginsOptions } from './configured.js';
 import { PluginRuntime } from './runtime.js';
 import { PluginManager } from './manager.js';
 import { readPluginConfiguration } from './configuration.js';
@@ -322,11 +322,64 @@ describe('configured plugin composition', () => {
     expect(runtime.getIssueTrackerProvider('linear')).toBeUndefined();
   });
 
+  it('declares and activates Gmail after its exact registered Google credential provider', async () => {
+    const selected = [config('notification.gmail'), config('credential.google-oauth')];
+    const execute = vi.fn(async (_request: CommandRequest) => ({ stdout: '', stderr: '' }));
+    const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(Response.json({ id: 'fixture-message' }));
+    const inspected = inspectConfiguredPlugins({ configurations: selected });
+    expect(inspected.map(row => row.manifest.id)).toEqual(['credential.google-oauth', 'notification.gmail']);
+    expect(inspected[1].credentialDependencies).toEqual(['credential.google-oauth']);
+    expect(inspected[1].manifest.requires).toEqual(['credential.provider']);
+    expect(configuredPluginManifests().find(manifest => manifest.id === 'notification.gmail')?.requires).toEqual(['credential.provider']);
+    const plugins = await createConfiguredPlugins({ configurations: selected, fetch: network, execute });
+    expect(plugins.map(plugin => plugin.manifest.id)).toEqual(['credential.google-oauth', 'notification.gmail']);
+    expect(getConfiguredCredentialDependencies(plugins[1])).toEqual(['credential.google-oauth']);
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    for (const plugin of plugins) await runtime.activate(plugin);
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    const credentials = runtime.getCredentialProvider('credential.google-oauth');
+    expect(credentials).toBeInstanceOf(GoogleOAuthCredentialProvider);
+    const account = vi.spyOn(credentials as GoogleOAuthCredentialProvider, 'resolveAccount').mockResolvedValue({
+      secret: 'fixture-access-token', subject: 'fixture-subject', email: 'fixture@example.test',
+    });
+    await expect(runtime.getNotificationProvider('notification.gmail')!.notify({ title: 'Fixture', body: 'Fixture body' })).resolves.toEqual({ delivered: true, channel: 'gmail' });
+    expect(account).toHaveBeenCalledTimes(1);
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each(['unrelated', 'incompatible'])('rejects Gmail with an %s credential provider without private authentication', async kind => {
+    const network = vi.fn();
+    const execute = vi.fn();
+    const resolve = vi.fn();
+    const resolveAccount = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolveAccount');
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) {
+        context.registerCredentialProvider(kind === 'incompatible' ? 'credential.google-oauth' : 'unrelated', {
+          id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve,
+        });
+      },
+    });
+    const [plugin] = await createConfiguredPlugins({ configurations: [config('notification.gmail')], fetch: network, execute });
+    await expect(runtime.activate(plugin)).rejects.toThrow(/credential provider.*credential.google-oauth/);
+    expect(runtime.getNotificationProvider('notification.gmail')).toBeUndefined();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(resolveAccount).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each(configurations)('constructs and registers $id with its declared capability', async configuration => {
     vi.useFakeTimers();
     const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
     const execute = vi.fn(async (_request: CommandRequest) => ({ stdout: '', stderr: '' }));
-    const [plugin] = await createConfiguredPlugins({ configurations: [configuration], environment, fetch: network, execute, onTrigger: () => undefined });
+    const plugins = await createConfiguredPlugins({ configurations: configuration.id === 'notification.gmail' ? [configuration, config('credential.google-oauth')] : [configuration], environment, fetch: network, execute, onTrigger: () => undefined });
+    const plugin = plugins.find(plugin => plugin.manifest.id === configuration.id)!;
     expect(plugin.manifest.id).toBe(configuration.id);
     expect(plugin.manifest.id.split('.')).toHaveLength(2);
     expect(plugin.manifest.trusted).toBe(true);
@@ -334,7 +387,7 @@ describe('configured plugin composition', () => {
     expect(vi.getTimerCount()).toBe(0);
     const runtime = new PluginRuntime();
     runtimes.push(runtime);
-    await runtime.activate(plugin);
+    for (const selected of plugins) await runtime.activate(selected);
     expect(vi.getTimerCount()).toBe(0);
     expect(runtime.listProvidersForPlugin(configuration.id)).toHaveLength(plugin.manifest.provides.length);
     expect(runtime.listProviders(plugin.manifest.provides[0])).toHaveLength(1);

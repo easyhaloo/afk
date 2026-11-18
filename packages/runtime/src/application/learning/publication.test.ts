@@ -46,19 +46,51 @@ describe('publication cancellation reasons', () => {
     });
 });
 
+describe('publication preview retries', () => {
+  it.each([
+    { interrupted: null, operation: 'refreshKnowledgeNavigation' },
+    { interrupted: null, operation: 'verifyKnowledgePlan' },
+    { interrupted: 'applied', operation: 'verifyKnowledgePlan' },
+    { interrupted: 'committed', operation: 'verifyKnowledgePlan' },
+  ] as const)('preserves publication state on $operation failure after $interrupted interruption', async ({ interrupted, operation }) => {
+    const fixture = open();
+    const prepared = await prepareKnowledgePublication(fixture.input);
+    if (interrupted) {
+      const advance = fixture.store.advancePublication.bind(fixture.store);
+      const journal = vi.spyOn(fixture.store, 'advancePublication').mockImplementation((key, phase, observed) => {
+        if (phase === interrupted) throw new Error('Injected publication interruption');
+        return advance(key, phase, observed);
+      });
+      await expect(publishLearningCandidate({ ...fixture.input, key: prepared.key })).rejects.toThrow('Injected publication interruption');
+      journal.mockRestore();
+    }
+    const publications = fixture.store.listPublications();
+    const candidate = fixture.store.getCandidate(fixture.candidate.id);
+    const paths = ['知识/Approval.md', '00-总览.md', '知识/入口.md'].map(path => join(fixture.vault, path));
+    const contents = paths.map(path => existsSync(path) ? readFileSync(path) : null);
+    const failure = new Error('Temporary Wiki read failure');
+    const lookup = vi.spyOn(knowledge, operation).mockRejectedValueOnce(failure);
+    const writes = vi.spyOn(knowledge, 'runWikiIngest');
+    await expect(prepareKnowledgePublication(fixture.input)).rejects.toBe(failure);
+    expect(fixture.store.listPublications()).toEqual(publications);
+    expect(fixture.store.getCandidate(fixture.candidate.id)).toEqual(candidate);
+    expect(paths.map(path => existsSync(path) ? readFileSync(path) : null)).toEqual(contents);
+    expect(existsSync(join(fixture.recoveryDirectory, prepared.key, 'withdrawal.json'))).toBe(false);
+    expect(writes).not.toHaveBeenCalled();
+    lookup.mockRestore();
+    expect(await prepareKnowledgePublication(fixture.input)).toEqual(publications[0]);
+    expect((await publishLearningCandidate({ ...fixture.input, key: prepared.key })).publication.phase).toBe('committed');
+  });
+});
+
 async function navigationDrift() {
   const fixture = open();
   fixture.policy.targets.push({ ...fixture.policy.targets[0], ref: 'wiki:billing', paths: ['知识/Billing.md'] });
   fixture.persistGrant();
-  const source = fixture.store.getRequest(fixture.candidate.requestKey)!;
-  const request = fixture.store.submitRequest({ request: { ...source.request, sourceId: 'run:billing', sourceRunId: 'billing' }, evidence: source.evidence });
-  const processed = fixture.store.completeRequest(request.key, { version: 1, warnings: [], candidates: [candidateProposalSchema.parse({
-    ...output.candidates[0], title: 'Billing', statement: 'Billing needs review', targetRef: 'wiki:billing',
+  const validated = fixture.addCandidate(candidateProposalSchema.parse({
+    ...output.candidates[0], title: 'Billing', statement: 'Billing needs review (账单审核)', targetRef: 'wiki:billing',
     payload: { subject: 'billing', rule: 'Review bills before payment', classification: 'fact' },
-  })] });
-  const candidate = fixture.store.getCandidate(processed.candidateIds[0]!)!;
-  const validated = fixture.store.recordValidation(candidate.id, candidate.version, { candidateDigest: candidate.digest,
-    evidenceDigest: candidate.evidenceDigest, validatorVersion: 'knowledge-v1', passed: true, results: ['fixture billing evidence'] });
+  }));
   const input = { ...fixture.input, candidateId: validated.id, expectedVersion: validated.version };
   const approval = await prepareKnowledgePublication(fixture.input);
   const stale = await prepareKnowledgePublication(input);
@@ -67,6 +99,27 @@ async function navigationDrift() {
 }
 
 describe('immutable navigation plan replacement', () => {
+  it('ranks eligible knowledge by the task before limiting recall', async () => {
+    const { fixture, input, stale, approval } = await navigationDrift();
+    const billing = (await publishLearningCandidate({ ...input, key: stale.key })).publication;
+    expect(billing.phase).toBe('committed');
+    const provider = new KnowledgeContextProvider({ file: join(fixture.root, 'ledger.sqlite'),
+      recoveryDirectory: fixture.recoveryDirectory, validationConfigurationFile: fixture.validationConfigurationFile,
+      config: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } });
+    const recall = async (prompt: string) => (await provider.gather({ scope: fixture.policy.scope, applicability: { version: 'abc' },
+      prompt, limit: 1 })).map(fragment => fragment.origin);
+    const approvalOrigin = `knowledge:${approval.key}; target:wiki:approval`;
+    const billingOrigin = `knowledge:${billing.key}; target:wiki:billing`;
+    expect.soft(await recall('billing approval publishing')).toEqual([approvalOrigin]);
+    expect.soft(await recall('approval billing payment')).toEqual([billingOrigin]);
+    expect.soft(await recall('如何审核账单')).toEqual([billingOrigin]);
+    expect.soft(await recall('satellite telemetry')).toEqual([]);
+    expect.soft(await recall('evidenceDigest')).toEqual([]);
+    fixture.store.invalidateRequestSource(fixture.store.getCandidate(input.candidateId)!.requestKey);
+    expect.soft(await recall('billing')).toEqual([]);
+    expect(await recall('approval billing payment')).toEqual([approvalOrigin]);
+  });
+
   it('repreviews navigation, preserves current text and redirects old keys after restart without duplicate context', async () => {
     const { fixture, input, stale } = await navigationDrift();
     const snapshot = readFileSync(join(fixture.recoveryDirectory, stale.key, 'plan.json'));
@@ -94,6 +147,7 @@ describe('immutable navigation plan replacement', () => {
       expect(readFileSync(join(fixture.vault, '知识/Billing.md'), 'utf8')).not.toContain('knowledge_status: revoked');
     } finally { store.close(); }
     const configured = { file: join(fixture.root, 'ledger.sqlite'), recoveryDirectory: fixture.recoveryDirectory,
+      validationConfigurationFile: fixture.validationConfigurationFile,
       config: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } };
     expect((await reconcileConfiguredKnowledge(configured)).blocked).toEqual([]);
     const provider = new KnowledgeContextProvider(configured);
@@ -257,7 +311,7 @@ print(json.dumps({'findings': []}))
     const preparing = prepareKnowledgePublication({ ...fixture.input, signal: controller.signal });
     const rejected = expect(preparing).rejects.toBe(reason);
     try {
-      await vi.waitFor(() => expect(existsSync(started)).toBe(true));
+      await vi.waitFor(() => expect(existsSync(started)).toBe(true), { timeout: 5_000 });
       controller.abort(reason);
       await rejected;
       await expect(acquirePublicationLock({ vault: fixture.vault, timeoutMs: 100 })).rejects.toMatchObject({ code: 'publication_lock_timeout' });
@@ -363,16 +417,10 @@ print(json.dumps({'findings': []}))
     fixture.persistGrant();
     const approval = await prepareKnowledgePublication(fixture.input);
     await publishLearningCandidate({ ...fixture.input, key: approval.key });
-    const source = fixture.store.getRequest(fixture.candidate.requestKey)!;
-    const request = fixture.store.submitRequest({ request: { ...source.request, sourceId: 'run:billing', sourceRunId: 'billing',
-      workItemId: 'github:acme/api#43' }, evidence: source.evidence });
-    const processed = fixture.store.completeRequest(request.key, { version: 1, warnings: [], candidates: [candidateProposalSchema.parse({
+    const validated = fixture.addCandidate(candidateProposalSchema.parse({
       ...fixture.candidate.proposal, targetRef: 'wiki:billing', title: 'Billing', statement: 'Billing needs review',
       payload: { subject: 'billing', rule: 'Review bills before payment', classification: 'fact' },
-    })] });
-    const candidate = fixture.store.getCandidate(processed.candidateIds[0]!)!;
-    const validated = fixture.store.recordValidation(candidate.id, candidate.version, { candidateDigest: candidate.digest,
-      evidenceDigest: candidate.evidenceDigest, validatorVersion: 'knowledge-v1', passed: true, results: ['independent billing validation'] });
+    }));
     const billing = await prepareKnowledgePublication({ ...fixture.input, candidateId: validated.id, expectedVersion: validated.version });
     await publishLearningCandidate({ ...fixture.input, key: billing.key });
     for (const publication of [approval, billing]) {

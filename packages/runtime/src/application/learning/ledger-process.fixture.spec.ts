@@ -6,7 +6,7 @@ import type { EvidencePack } from './evidence.js';
 
 const store = new CandidateStore({ file: process.argv[2]! });
 process.send?.('ready');
-process.on('message', (message: { action: 'submit' | 'complete' | 'scan' | 'transition' | 'reserve'; input: never;
+process.on('message', (message: { action: 'submit' | 'complete' | 'scan' | 'transition' | 'reserve' | 'start-analysis' | 'claim-launch'; input: never;
   key?: string; id?: string; version?: number; state?: CandidateState; pauseBeforeCommit?: boolean; snapshot?: EvidencePack }) => {
   try {
     if (message.pauseBeforeCommit) {
@@ -20,6 +20,8 @@ process.on('message', (message: { action: 'submit' | 'complete' | 'scan' | 'tran
     const result = message.action === 'submit' ? store.submitRequest(message.input, message.snapshot)
       : message.action === 'scan' ? store.commitScan(message.input)
         : message.action === 'reserve' ? store.reserveModelCall(message.input)
+        : message.action === 'start-analysis' ? store.startAnalysisAttempt(message.input)
+        : message.action === 'claim-launch' ? store.claimAnalysisLaunch(message.key!, message.input)
         : message.action === 'transition' ? store.transitionCandidate(message.id!, message.version!, message.state!)
           : store.completeRequest(message.key!, message.input);
     process.send?.({ result });

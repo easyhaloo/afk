@@ -22,7 +22,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-async function fixture(options: { git?: boolean; kind?: 'lesson' | 'fact'; hypothesis?: boolean; partial?: boolean; declared?: boolean;
+async function fixture(options: { git?: boolean; kind?: 'lesson' | 'fact'; hypothesis?: boolean; partial?: boolean; declared?: boolean; repair?: boolean;
   sourceIdentity?: { runId?: string; workItemId?: string } } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'lesson-qa-')));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
@@ -40,7 +40,8 @@ async function fixture(options: { git?: boolean; kind?: 'lesson' | 'fact'; hypot
     correlationId: runId, data: entry,
   }));
   const originalRunId = options.sourceIdentity?.runId ?? 'original-failure';
-  await events.append(drafts(originalRunId, [{ kind: 'qa.failed', reason: 'race condition' }]).map(draft => ({ ...draft,
+  await events.append(drafts(originalRunId, [{ kind: 'qa.failed', reason: 'race condition' },
+    ...(options.repair ? [{ kind: 'run.finished' as const, outcome: 'failed' as const }] : [])]).map(draft => ({ ...draft,
     context: { ...draft.context, workItemId: options.sourceIdentity?.workItemId ?? workItemId } })));
   const sourcePath = events.pathFor(originalRunId);
   if (options.partial) await fs.appendFile(sourcePath, '{');
@@ -70,12 +71,69 @@ async function fixture(options: { git?: boolean; kind?: 'lesson' | 'fact'; hypot
     qa.auditDigest = digest(readFileSync(events.pathFor(qa.runId)));
   };
   await reset();
+  if (options.repair) {
+    await events.append(drafts('repair-run', [
+      { kind: 'commit.recorded', phase: 'implementation', commitSha: revision, branch: 'repair' },
+      { kind: 'run.finished', outcome: 'succeeded' },
+    ]));
+    Object.assign(qa, { repair: {
+      failure: { runId: originalRunId, root: events.root, auditDigest: digest(readFileSync(sourcePath)) },
+      fix: { runId: 'repair-run', root: events.root, auditDigest: digest(readFileSync(events.pathFor('repair-run'))) },
+    } });
+  }
   const input = { candidateId: candidate.id, expectedVersion: candidate.version };
   const dependencies: LessonQaDependencies = { store, qa };
   return { root, store, source, pack, candidate, qa, target, cycle, events, input, dependencies, reset, drafts };
 }
 
 describe('lesson independent QA prerequisite with real hash-chained audit', () => {
+  it('pins distinct failed source, implementation repair and independent QA audits', async () => {
+    const current = await fixture({ repair: true });
+    const result = await verifyLessonQaEvidence(current.input, current.dependencies);
+    expect(result.status).toBe('verified');
+    if (result.status !== 'verified') return;
+    expect(result.repair?.binding).toMatchObject({
+      failure: { runId: 'original-failure', auditSequence: 2 },
+      fix: { runId: 'repair-run', auditSequence: 2 },
+    });
+    expect(result.repair?.evidence).toHaveLength(3);
+    expect(result.evidence).toHaveLength(5);
+  });
+
+  it.each(['failure-role', 'fix-role', 'wrong-revision', 'agent-commit', 'fix-failed', 'learning-fix'])
+  ('rejects invalid saved repair provenance: %s', async mutation => {
+    const current = await fixture({ repair: true });
+    const repair = (current.qa as LessonQaConfiguration & { repair: {
+      failure: { runId: string; root: string; auditDigest: string }; fix: { runId: string; root: string; auditDigest: string };
+    } }).repair;
+    if (mutation === 'failure-role') repair.failure = { ...repair.fix };
+    else if (mutation === 'fix-role') repair.fix.runId = current.qa.runId;
+    else {
+      await fs.rm(current.events.pathFor(repair.fix.runId));
+      const data: RunEventData[] = [
+        { kind: 'commit.recorded', phase: 'implementation', commitSha: mutation === 'wrong-revision' ? 'b'.repeat(40) : current.qa.targetRevision, branch: 'repair' },
+        { kind: 'run.finished', outcome: mutation === 'fix-failed' ? 'failed' : 'succeeded' },
+      ];
+      await current.events.append(current.drafts(repair.fix.runId, data, mutation === 'agent-commit' ? 'agent' : 'system')
+        .map(draft => mutation === 'learning-fix' ? { ...draft, context: { ...draft.context, purpose: 'learning' as const } } : draft));
+      repair.fix.auditDigest = digest(readFileSync(current.events.pathFor(repair.fix.runId)));
+    }
+    expect((await verifyLessonQaEvidence(current.input, current.dependencies)).status).toBe('blocked');
+  });
+
+  it('rejects a repair audit changed while collecting QA evidence', async () => {
+    const current = await fixture({ repair: true });
+    const original = evidenceModule.buildEvidencePack;
+    vi.spyOn(evidenceModule, 'buildEvidencePack').mockImplementation(async options => {
+      const pack = await original(options);
+      if (options.sources.some(source => source.id === 'lesson-qa')) {
+        await fs.appendFile(current.events.pathFor('repair-run'), '\n');
+      }
+      return pack;
+    });
+    expect(await verifyLessonQaEvidence(current.input, current.dependencies)).toEqual({ status: 'blocked', code: 'audit_changed' });
+  });
+
   it.each([
     { workItemId: 'github:foreign/repository#72' },
     { workItemId: `${scope}#8` },

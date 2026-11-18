@@ -10,8 +10,9 @@ import {
   SpecialGitBackendProvider,
 } from './repositories.js';
 import { executeCommand, type CommandExecutor, type CommandResult, type FetchTransport } from './dependencies.js';
-import { RepositoryLeases } from '../git/repository-lease.js';
+import { RepositoryLeases, repositoryClaimIds } from '../git/repository-lease.js';
 import { RepositoryStore } from '../git/repository-store.js';
+import { RepositoryRecoveryJournal } from './repository-recovery.js';
 import { RepositoryLifecycleService } from '../../application/plugins/repository-lifecycle.js';
 
 const dirs: string[] = [];
@@ -26,6 +27,7 @@ beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('U
 
 afterEach(async () => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   await Promise.all(dirs.splice(0).map(path => fs.rm(path, { recursive: true, force: true })));
 });
 
@@ -605,7 +607,7 @@ describe('managed local repository lifecycle', () => {
     const provider = new MultiRepositoryProvider({ repositories: [{ name: 'repo', path: repo.path,
       remoteUrl: 'https://fixture.invalid/repo.git', baseBranch: repo.branch, leaseKey: 'gitlab:fixture.invalid/repo' }],
     git: executor, managed: { workspaceRoot, store: withoutRemoval ? { ensureCheckout: store.ensureCheckout.bind(store),
-      ownsCheckout: store.ownsCheckout.bind(store), withCheckoutLock: store.withCheckoutLock.bind(store) } : store, leases } });
+      ownsCheckout: store.ownsCheckout.bind(store), withCheckoutLock: store.withCheckoutLock.bind(store) } : store, leases, leaseStateRoot: join(root, 'leases') } });
     return { provider, repo, root, bare, workspaceRoot, store, leases, paths };
   }
 
@@ -625,7 +627,8 @@ describe('managed local repository lifecycle', () => {
     await expect(provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' })).rejects.toBe(failure);
     expect(paths).toHaveLength(1);
     await expect(fs.stat(paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await fs.readdir(workspaceRoot)).toEqual([]);
+    expect(await fs.readdir(workspaceRoot)).toEqual(['.afk-repository-recovery']);
+    expect(await provider.listRecoveryAllocations()).toEqual([]);
     expect((await git(bare, ['worktree', 'list', '--porcelain'])).stdout).not.toContain(paths[0]);
     expect(await store.ownsCheckout(sibling)).toBe(true);
     expect(await fs.readFile(join(sibling, 'README.md'), 'utf8')).toBe('# fixture\n');
@@ -666,6 +669,133 @@ describe('managed local repository lifecycle', () => {
     expect(Object.isFrozen(error.allocation.repository)).toBe(true);
     expect(await test.store.ownsCheckout(test.paths[0])).toBe(true);
     expect((await git(test.paths[0], ['status', '--porcelain'])).stdout).toBe('');
+  });
+
+  it('persists a failed allocation across provider restart and explicitly recovers only that checkout', async () => {
+    const failure = new Error('persistent snapshot failure');
+    const test = await allocationFixture(async () => { throw failure; }, true);
+    const error = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'durable-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(RepositoryPreparationCleanupError);
+    const records = await test.provider.listRecoveryAllocations();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ allocation: error.allocation, phase: 'removing', retryable: true });
+    expect(records[0].removal).toBeDefined();
+    const restarted = new MultiRepositoryProvider({ repositories: [{ name: 'repo', path: test.repo.path,
+      remoteUrl: 'https://fixture.invalid/repo.git', baseBranch: test.repo.branch, leaseKey: 'gitlab:fixture.invalid/repo' }],
+    managed: { workspaceRoot: test.workspaceRoot, store: test.store, leases: test.leases, leaseStateRoot: join(test.root, 'leases') } });
+    await fs.writeFile(join(test.paths[0], 'keep.txt'), 'preserve dirty resource');
+    await expect(restarted.recoverAllocation(error.allocation.id)).rejects.toThrow(/uncommitted|untracked|ignored/i);
+    await fs.unlink(join(test.paths[0], 'keep.txt'));
+    await expect(restarted.recoverAllocation(error.allocation.id)).resolves.toEqual({ removed: true });
+    expect(await restarted.listRecoveryAllocations()).toEqual([]);
+    await expect(fs.stat(test.paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(restarted.recoverAllocation(error.allocation.id)).resolves.toEqual({ removed: true });
+  });
+
+  it('durably binds intent before ensureCheckout and rejects recovery of an active owner', async () => {
+    const test = await allocationFixture();
+    expect(test.provider.capabilities).toHaveProperty('recovery', true);
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    vi.mocked(test.store.ensureCheckout).mockImplementation(async (...args) => {
+      const records = await test.provider.listRecoveryAllocations();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({ phase: 'reserved', allocation: { path: args[1], runId: 'active-run' }, owner: { pid: process.pid } });
+      await allocate(...args);
+    });
+    const workspace = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'active-run' });
+    await expect(test.provider.recoverAllocation(workspace.id)).rejects.toThrow(/active/i);
+    expect(await test.store.ownsCheckout(workspace.path!)).toBe(true);
+    await test.provider.checkout({ workspaceId: workspace.id });
+    await test.provider.cleanup({ workspaceId: workspace.id });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('lists no allocations before first managed prepare without creating storage', async () => {
+    const test = await allocationFixture();
+    await expect(test.provider.listRecoveryAllocations()).resolves.toEqual([]);
+    await expect(fs.lstat(test.workspaceRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([false, true])('binds the compensation lease before closing a reserved/owned allocation (owned=%s)', async owned => {
+    const failure = new Error('preparation failed');
+    const test = await allocationFixture(async () => { throw failure; });
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    let preparationClaims: string[] = [];
+    vi.mocked(test.store.ensureCheckout).mockImplementation(async (...args) => {
+      preparationClaims = [...repositoryClaimIds()];
+      if (owned) await allocate(...args);
+      else throw failure;
+    });
+    const close = RepositoryRecoveryJournal.prototype.close;
+    let checked = false;
+    vi.spyOn(RepositoryRecoveryJournal.prototype, 'close').mockImplementation(async function (this: RepositoryRecoveryJournal, id) {
+      const record = await this.get(id);
+      expect(record.owner.claims).toEqual(repositoryClaimIds());
+      expect(record.owner.claims).toHaveLength(1);
+      expect(record.owner.claims).not.toEqual(preparationClaims);
+      checked = true;
+      await close.call(this, id);
+    });
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'compensation-owner' })).rejects.toBe(failure);
+    expect(checked).toBe(true);
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('preserves a private reservation witness after failed compensation close and retries explicitly', async () => {
+    const test = await allocationFixture();
+    const rmdir = vi.spyOn(fs, 'rmdir');
+    vi.mocked(test.store.ensureCheckout).mockRejectedValueOnce(new Error('checkout unavailable'));
+    vi.spyOn(RepositoryRecoveryJournal.prototype, 'close').mockRejectedValueOnce(new Error('close unavailable'));
+    const failure = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'reservation-close' }).catch(error => error);
+    expect(failure).toBeInstanceOf(RepositoryPreparationCleanupError);
+    const [record] = await test.provider.listRecoveryAllocations();
+    expect(record).toMatchObject({ phase: 'removing', retryable: true });
+    expect(record.reservationRemoval).toBeDefined();
+    await expect(fs.lstat(record.allocation.path)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await fs.lstat(record.reservationRemoval!.witness)).ino).toBe(record.directory!.ino);
+    await expect(test.provider.recoverAllocation(record.allocation.id)).resolves.toEqual({ removed: true });
+    await expect(test.provider.recoverAllocation(record.allocation.id)).resolves.toEqual({ removed: true });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+    expect(rmdir).not.toHaveBeenCalled();
+  });
+
+  it('retains the normal cleanup deletion phase after close fails and explicitly settles on retry', async () => {
+    const test = await allocationFixture();
+    const workspace = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'close-failed' });
+    const failure = new Error('journal close unavailable');
+    vi.spyOn(RepositoryRecoveryJournal.prototype, 'close').mockRejectedValueOnce(failure);
+    await expect(test.provider.cleanup({ workspaceId: workspace.id })).rejects.toBe(failure);
+    const [record] = await test.provider.listRecoveryAllocations();
+    expect(record).toMatchObject({ phase: 'removing', retryable: true });
+    expect(record.removal).toBeDefined();
+    await expect(fs.lstat(workspace.path!)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(test.provider.recoverAllocation(workspace.id)).resolves.toEqual({ removed: true });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('persists cancelled preparation when cleanup fails and recovers without the cancelled signal', async () => {
+    const test = await allocationFixture();
+    const controller = new AbortController();
+    const reason = new Error('global validation cancelled');
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    vi.mocked(test.store.ensureCheckout).mockImplementation(async (...args) => { await allocate(...args); controller.abort(reason); });
+    vi.spyOn(test.store, 'removeCheckout').mockRejectedValueOnce(new Error('temporary cleanup storage failure'));
+    const error = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'cancelled-run' }, { signal: controller.signal }).catch(error => error);
+    expect(error).toBeInstanceOf(RepositoryPreparationCleanupError);
+    expect(error.cause).toBe(reason);
+    expect(await test.provider.listRecoveryAllocations()).toMatchObject([{ phase: 'retained', allocation: { id: error.allocation.id } }]);
+    await expect(test.provider.recoverAllocation(error.allocation.id)).resolves.toEqual({ removed: true });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('refuses a nonprivate recovery directory before allocation', async () => {
+    const test = await allocationFixture();
+    await fs.mkdir(test.workspaceRoot);
+    const recoveryRoot = join(test.workspaceRoot, '.afk-repository-recovery');
+    await fs.mkdir(recoveryRoot, { mode: 0o755 });
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'unsafe-storage' })).rejects.toThrow(/private/i);
+    expect(test.store.ensureCheckout).not.toHaveBeenCalled();
+    expect(test.paths).toEqual([]);
   });
 
   it('reclaims after snapshot validation fails and permits retrying the same run', async () => {
@@ -838,7 +968,7 @@ describe('managed local repository lifecycle', () => {
     expect(await fs.readFile(join(test.paths[0], 'nested', 'README.md'), 'utf8')).toBe('# fixture\n');
   });
 
-  async function managedProvider(realLeases = false) {
+  async function managedProvider(realLeases = false, push?: CommandExecutor) {
     const repo = await initRepo();
     const root = await tempDir('afk-managed-');
     const owned = new Set<string>();
@@ -856,7 +986,7 @@ describe('managed local repository lifecycle', () => {
     const calls: Array<{ args: readonly string[]; cwd?: string }> = [];
     const executor: CommandExecutor = async request => {
       calls.push(request);
-      if (request.args.includes('push')) return { stdout: '', stderr: '' };
+      if (request.args.includes('push')) return push ? push(request) : { stdout: '', stderr: '' };
       return executeCommand(request);
     };
     await git(repo.path, ['remote', 'add', 'origin', 'https://git.example/repo.git']);
@@ -887,6 +1017,24 @@ describe('managed local repository lifecycle', () => {
       'https://git.example/repo.git', `${repo.head}:refs/heads/afk/run-1`,
     ]);
     expect(calls.find(call => call.args[0] === 'worktree' && call.args[1] === 'remove')?.args).toEqual(['worktree', 'remove', prepared.path]);
+  });
+
+  it('refuses a stale QA revision and pushes only the verified commit if HEAD moves during push', async () => {
+    const remote = await tempDir('verified-publish-');
+    await git(remote, ['init', '--bare', '--quiet']);
+    const { provider, repo, calls } = await managedProvider(false, async request => {
+      await git(request.cwd!, ['commit', '--allow-empty', '-m', 'later change']);
+      return git(request.cwd!, request.args.map(arg => arg === 'https://git.example/repo.git' ? remote : arg));
+    });
+    const prepared = await provider.prepare({ repository: { url: 'repo' }, runId: 'run-1' });
+    const workspace = await provider.checkout({ workspaceId: prepared.id });
+    await git(prepared.path!, ['commit', '--allow-empty', '-m', 'verified change']);
+    const verified = (await git(prepared.path!, ['rev-parse', 'HEAD'])).stdout.trim();
+    await expect(provider.publish({ workspaceId: prepared.id, expectedCommit: repo.head })).rejects.toThrow(/verified commit/);
+    expect(calls.filter(call => call.args.includes('push'))).toHaveLength(0);
+    await expect(provider.publish({ workspaceId: prepared.id, expectedCommit: verified })).resolves.toMatchObject({ commit: verified });
+    expect((await git(remote, ['rev-parse', `refs/heads/${workspace.snapshot.branch}`])).stdout.trim()).toBe(verified);
+    expect((await git(prepared.path!, ['rev-parse', 'HEAD'])).stdout.trim()).not.toBe(verified);
   });
 
   it('retains dirty, ignored, unowned, and unpublished local work', async () => {

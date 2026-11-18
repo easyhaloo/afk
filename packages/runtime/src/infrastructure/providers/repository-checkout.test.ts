@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MultiRepositoryProvider, RemoteWorkspaceProvider, SpecialGitBackendProvider } from './repositories.js';
-import type { CommandRequest } from './dependencies.js';
+import { executeCommand, type CommandRequest } from './dependencies.js';
 import type { RepositoryProvider, RepositoryWorkspace } from '../../plugin-sdk/capabilities.js';
 import { RepositoryLifecycleService } from '../../application/plugins/repository-lifecycle.js';
 import { invokeCapability } from '../../application/plugins/operations.js';
@@ -19,6 +19,10 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function local() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'repository-checkout-')));
   roots.push(root);
+  const seed = join(root, 'seed');
+  const seedGit = (...args: string[]) => executeCommand({ command: 'git', cwd: root, args: ['-c', 'core.hooksPath=/dev/null', ...args] });
+  await seedGit('init', '--template=', '-b', 'main', seed);
+  await seedGit('-C', seed, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '--no-gpg-sign', '-m', 'fixture');
   const state = { commit: baseCommit, branch: 'HEAD', sourceCommit, dirty: false, failFetch: false, existingCommit: '' };
   const git = vi.fn(async (request: CommandRequest) => {
     const args = [...request.args];
@@ -37,7 +41,7 @@ async function local() {
     return { stdout, stderr: '' };
   });
   const store = {
-    ensureCheckout: vi.fn(async (_url: string, path: string, _base: string) => { await writeFile(join(path, '.git'), 'inert owned marker'); }),
+    ensureCheckout: vi.fn(async (_url: string, path: string, base: string) => { await seedGit('-C', seed, 'worktree', 'add', '--detach', path, base); }),
     ownsCheckout: vi.fn(async () => true),
     withCheckoutLock: async <Result>(_path: string, action: () => Promise<Result>) => action(),
   };

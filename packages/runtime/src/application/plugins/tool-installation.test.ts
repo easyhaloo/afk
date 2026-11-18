@@ -11,6 +11,19 @@ import { LifecycleDispatcher } from '../workflows/lifecycle.js';
 import { PluginRuntime } from './runtime.js';
 import { createManagedPlaywrightPlugin } from './managed-playwright.js';
 import { TOOL_ASSETS } from './tool-recipes.js';
+import { simpleGit } from 'simple-git';
+import { randomUUID } from 'node:crypto';
+import { createPluginRunObserver } from './observability.js';
+
+async function observedWorkspace(runtime: PluginRuntime, worktreePath: string, root: string) {
+  await simpleGit(worktreePath).init().addConfig('user.name', 'Tool verification test')
+    .addConfig('user.email', 'tools@example.test').commit('Tool verification revision', { '--allow-empty': null });
+  const observer = createPluginRunObserver(runtime, join(root, 'events'));
+  const identity = { traceId: randomUUID(), runId: randomUUID(), workItemId: 'github:acme/api#42',
+    profileId: 'test', attempt: 1, actor: { kind: 'system' as const, id: 'tool-verification' } };
+  return { iid: 42, baseBranch: 'main', sessionName: 'managed-tool', worktreePath, params: {},
+    observation: { context: identity, record: observer.record.bind(observer, identity) } };
+}
 
 const roots: string[] = [];
 it('uses provider-neutral managed recipe package names', async () => {
@@ -65,7 +78,7 @@ it('installs the closed recipe through PluginManager and executes the selected c
     expect(result).toMatchObject({ passed: true, output: 'managed-fixture:test' });
     const selected = vi.spyOn(runtime.getVerificationProvider('playwright-managed')!, 'verify');
     const lifecycle = new LifecycleDispatcher(runtime.getLifecycleModules());
-    await lifecycle.run('before-publish', { iid: 42, baseBranch: 'main', sessionName: 'managed-tool', worktreePath: f.workspaceRoot, params: {} });
+    await lifecycle.run('before-publish', await observedWorkspace(runtime, f.workspaceRoot, f.root));
     expect(selected).toHaveBeenCalledOnce();
     expect(builtin).not.toHaveBeenCalled();
     await expect(f.manager.remove(record.id)).rejects.toThrow(/active|reference/);
@@ -299,7 +312,7 @@ it('uses the saved production verification selection with only each trusted mana
     await expect(invokeCapability(runtime, { ...request(worktrees[0]), input: { target: worktrees[0], authorizedWorkspace: worktrees[0] } })).rejects.toThrow(/Invalid/);
     await expect(invokeCapability(runtime, { ...request(worktrees[0]), authorizedWorkspace: worktrees[0] })).rejects.toThrow(/Invalid/);
     const lifecycle = new LifecycleDispatcher(runtime.getLifecycleModules());
-    await Promise.all(worktrees.map(worktreePath => lifecycle.run('before-publish', { iid: 42, baseBranch: 'main', sessionName: 'managed-worktree', worktreePath, params: {} })));
+    await Promise.all(worktrees.map(async worktreePath => lifecycle.run('before-publish', await observedWorkspace(runtime, worktreePath, f.root))));
     await expect(invokeCapability(runtime, request(worktrees[0]))).rejects.toThrow(/escapes/);
     const { SystemActionExecutor } = await import('../workflows/system-actions.js');
     const executor = new SystemActionExecutor({ plugins: runtime, publishChange: async () => undefined, queueQA: async () => undefined });
@@ -313,7 +326,7 @@ it('uses the saved production verification selection with only each trusted mana
     expect(rows.map(row => row.cwd).sort()).toEqual((await Promise.all([...worktrees, worktrees[0]].map(path => fs.realpath(path)))).sort());
     for (const row of rows) {
       expect(row.argv).toEqual(['test']);
-      expect(row.cli).toBe(join(dirname(join(f.homeDir, '.afk/plugins', record.id, record.entry)), 'node_modules/@playwright/test/cli.js'));
+      expect(row.cli).toBe(await fs.realpath(join(dirname(join(f.homeDir, '.afk/plugins', record.id, record.entry)), 'node_modules/@playwright/test/cli.js')));
     }
     console.log(JSON.stringify({ check: 'saved-managed-worktree-selection', invocations: rows }));
   } finally { await runtime.dispose(); }

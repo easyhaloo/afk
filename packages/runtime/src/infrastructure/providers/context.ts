@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ContextFragment, ContextQuery, ContextSource, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, requestHttp, type FetchTransport } from './dependencies.js';
+import { resolveOperationSecret, type OperationSecret } from './operation-secret.js';
 import { lexicalTerms } from '../../domain/context/terms.js';
 
 export interface ContextFileSystem {
@@ -161,6 +162,7 @@ export class CodeContextProvider implements ContextSource {
 
 export interface KnowledgeBaseOptions {
   readonly endpoint: string;
+  readonly token?: OperationSecret;
   readonly fetch?: FetchTransport;
   readonly timeoutMs?: number;
 }
@@ -173,10 +175,23 @@ export class KnowledgeBaseProvider implements ContextSource {
   constructor(options: KnowledgeBaseOptions) { this.config = { ...options }; }
 
   async gather(query: ContextQuery, options?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
+    const authenticated = this.config.token !== undefined;
+    if (authenticated && options?.signal?.aborted) throw new Error('Knowledge base request cancelled');
+    checkAbort(options);
     const limit = queryLimit(query.limit);
+    if (authenticated) {
+      let endpoint: URL;
+      try { endpoint = new URL(this.config.endpoint); } catch { throw new Error('Expected an absolute HTTP endpoint'); }
+      if (endpoint.protocol !== 'https:') throw new Error('Knowledge base bearer token requires HTTPS');
+      if (endpoint.username || endpoint.password) throw new Error('Expected an HTTP endpoint without embedded credentials');
+    }
+    const token = this.config.token === undefined ? undefined : await resolveOperationSecret(this.config.token, options);
     const response = await requestHttp(this.config.fetch, this.config.endpoint, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(query),
-    }, { ...options, timeoutMs: this.config.timeoutMs });
+      method: 'POST', headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { authorization: `Bearer ${token}` }) }, body: JSON.stringify(query),
+    }, { ...options, timeoutMs: this.config.timeoutMs }).catch(error => {
+      if (authenticated && options?.signal?.aborted) throw new Error('Knowledge base request cancelled');
+      throw error;
+    });
     let payload: unknown;
     try { payload = await response.json(); } catch { throw new Error('Knowledge base returned invalid JSON'); }
     if (!Array.isArray(payload)) throw new Error('Knowledge base returned an invalid response');

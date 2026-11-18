@@ -15,6 +15,7 @@ const pendingRecoveries = new WeakMap<PluginRuntime, Map<string, InstalledPlugin
 export type { InstalledPluginEntry } from './configuration.js';
 
 export interface PluginFactoryOptions {
+  readonly installedEntryUrl?: string;
   readonly configuration: { readonly [key: string]: PluginConfigValue };
   readonly homeDir: string;
   readonly workspaceRoot: string;
@@ -64,7 +65,7 @@ export async function loadInstalledPlugins(
   const seen = new Set<string>();
   const candidates: LoadablePlugin[] = [];
   const manager = new PluginManager({ homeDir });
-  const activations = new Map<string, { record?: InstalledPluginRecord; entry?: InstalledPluginEntry; release: () => Promise<void> }>();
+  const activations = new Map<string, Awaited<ReturnType<PluginManager['beginActivation']>>>();
   const failed = (id: string, error: unknown, code = 'load.failed'): void => {
     warn(`Failed to load AFK plugin: ${id}`, error);
     runtime.recordDiagnostic({ pluginId: id, severity: 'error', code, message: error instanceof Error ? error.message : String(error) });
@@ -81,7 +82,7 @@ export async function loadInstalledPlugins(
       if (record) await manager.restoreActivation(entry.id, record);
       pendingRecoveries.get(runtime)?.delete(entry.id);
     }
-    const activation = options.resolveEntry ? undefined : await manager.beginActivation(entry.id);
+    const activation = options.resolveEntry ? undefined : await manager.beginActivation(entry.id, options.workspaceRoot);
     if (activation) activations.set(entry.id, activation);
     try {
       const record = activation?.record;
@@ -93,7 +94,7 @@ export async function loadInstalledPlugins(
         runtime.recordDiagnostic({ pluginId: entry.id, severity: 'warning', code: 'load.missing', message: `Plugin entry does not exist: ${modulePath}` });
         throw new Error(`Plugin entry does not exist: ${modulePath}`);
       }
-      const module = await import(pathToFileURL(modulePath).href);
+      const module = await import(pathToFileURL(activation?.modulePath ?? modulePath).href);
       const factory = module.default ?? module.plugin;
       const manifest = record?.manifest ?? module.manifest ?? (typeof factory === 'object' ? factory?.manifest : undefined);
       if (manifest) {
@@ -101,7 +102,8 @@ export async function loadInstalledPlugins(
         validatePluginConfig(manifest.configSchema, entry.config ?? {});
       }
       const plugin = typeof factory === 'function'
-        ? await factory({ configuration: entry.config ?? {}, homeDir, workspaceRoot: options.workspaceRoot ?? process.cwd() } satisfies PluginFactoryOptions)
+        ? await factory({ configuration: entry.config ?? {}, homeDir, workspaceRoot: options.workspaceRoot ?? process.cwd(),
+          ...(record ? { installedEntryUrl: pathToFileURL(modulePath).href } : {}) } satisfies PluginFactoryOptions)
         : factory;
       if (!isLoadablePlugin(plugin)) throw new Error('Plugin module does not export a supported plugin');
       if (pluginId(plugin) !== entry.id) throw new Error(`Plugin manifest id does not match '${entry.id}'`);
@@ -164,7 +166,7 @@ export async function loadInstalledPlugins(
         || getConfiguredCredentialDependencies(plugin).some(name => !runtime.getCredentialProvider(name))) { deferred.push(plugin); continue; }
       try {
         const activation = activations.get(pluginId(plugin));
-        await runtime.load(plugin, activation?.release);
+        await runtime.load(plugin, activation?.release, activation?.permits);
         if (activation?.record) await manager.confirmActivation(pluginId(plugin), activation.record, activation.entry);
         loaded.push(pluginId(plugin));
       } catch (error) {

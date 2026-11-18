@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
+import { isIP } from 'node:net';
 import { z } from 'zod';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
@@ -11,6 +12,8 @@ import { candidateProposalSchema, evidenceRefSchema, learningScopeSchema, type C
 import { redactEvidenceText } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
 import { assertCurrentLessonPublication, verifyLessonPublication } from './lesson-publication-guard.js';
+import { assertCurrentKnowledgePublication } from './knowledge-publication-guard.js';
+import type { CheckSourceRead } from './source-read-grant.js';
 
 const publicationDescriptors = new AsyncLocalStorage<{ vault: string; fd: number }>();
 
@@ -40,7 +43,7 @@ export type KnowledgePlan = {
   plan: WikiPlan; withdrawalContent: string; readSet: Record<string, string | null>; searches: { query: string; paths: string[] }[];
 };
 export type KnowledgePlanningInput = { store: CandidateStore; candidateId: string; expectedVersion: number; targetRef?: string;
-  policy: KnowledgePolicy; wikiScript: string; authorizationFile: string; validationConfigurationFile?: string; signal?: AbortSignal };
+  policy: KnowledgePolicy; wikiScript: string; authorizationFile: string; validationConfigurationFile?: string; homeDir?: string; signal?: AbortSignal };
 export type WikiResult = { status: 'preview' | 'applied' | 'unchanged' };
 
 export class WikiIngestError extends Error {
@@ -248,7 +251,28 @@ export function readKnowledgeAuthorization(input: { authorizationFile: string; p
   return grant;
 }
 
-export function assertKnowledgeCandidate(input: Pick<KnowledgePlanningInput, 'store' | 'candidateId' | 'expectedVersion' | 'policy' | 'validationConfigurationFile'>): LearningCandidate {
+export interface KnowledgeRecallCheck { checkSourceRead?: CheckSourceRead; version?: string; environment?: string }
+
+export function assertKnowledgeValidation(input: Pick<KnowledgePlanningInput, 'store' | 'validationConfigurationFile' | 'homeDir' | 'signal'>,
+  candidate: LearningCandidate, recall?: KnowledgeRecallCheck): void {
+  const checkSourceRead = recall?.checkSourceRead;
+  checkAbort(input);
+  if (candidate.proposal.kind === 'lesson') {
+    assertCurrentLessonPublication({ store: input.store, candidate, configurationFile: input.validationConfigurationFile, homeDir: input.homeDir, checkSourceRead });
+  } else if (candidate.proposal.kind === 'fact' || candidate.proposal.kind === 'process') {
+    const proposal = candidate.proposal;
+    const ids = new Set([...proposal.evidenceIds, ...(proposal.kind === 'process' ? proposal.payload.steps.flatMap(step => step.evidenceIds) : [])]);
+    const evidence = input.store.getRequest(candidate.requestKey)?.evidence.filter(ref => ids.has(ref.id));
+    const draft = !proposal.applicability.versions.length || evidence?.some(ref => ref.completeness === 'partial' || ref.authority === 'inferred')
+      || (proposal.kind === 'process' && proposal.payload.steps.some(step => step.missingEvidence))
+      || (proposal.kind === 'fact' && proposal.payload.classification === 'proposal');
+    if (!draft) assertCurrentKnowledgePublication({ store: input.store, candidate,
+      configurationFile: input.validationConfigurationFile, homeDir: input.homeDir, checkSourceRead, recall }, { signal: input.signal });
+  }
+  checkAbort(input);
+}
+
+export function assertKnowledgeCandidate(input: Pick<KnowledgePlanningInput, 'store' | 'candidateId' | 'expectedVersion' | 'policy' | 'validationConfigurationFile' | 'homeDir' | 'signal'>): LearningCandidate {
   const candidate = input.store.getCandidate(input.candidateId);
   const receipt = input.store.getValidation(input.candidateId);
   const source = candidate && input.store.getRequest(candidate.requestKey);
@@ -260,9 +284,15 @@ export function assertKnowledgeCandidate(input: Pick<KnowledgePlanningInput, 'st
     throw new Error('Knowledge publication requires current version and validation receipt');
   }
   if (candidate.proposal.applicability.project !== input.policy.scope) throw new Error('Candidate project differs from authorized scope');
-  if (candidate.proposal.kind === 'lesson') assertCurrentLessonPublication({ store: input.store, candidate,
-    configurationFile: input.validationConfigurationFile });
+  assertKnowledgeValidation(input, candidate);
   return candidate;
+}
+
+function publicationProject(scope: string) {
+  const host = /^gitlab:(\d+(?:\.\d+){3})(?=:\d+\/|\/)/.exec(scope)?.[1];
+  if (!host || isIP(host) !== 4) return { project: scope };
+  const projectDigest = knowledgeDigest(scope);
+  return { project: scope.replace(host, `redacted-${projectDigest}.invalid`), projectDigest };
 }
 
 function sameKnowledge(existing: string, rendered: string): boolean {
@@ -272,7 +302,8 @@ function sameKnowledge(existing: string, rendered: string): boolean {
   const next = block.exec(rendered)?.[1];
   if (!previous || !next) return false;
   const schema = z.object({ classification: z.enum(['fact', 'proposal', 'unverified', 'process', 'partial', 'snapshot']),
-    proposal: candidateProposalSchema, evidence: z.array(evidenceRefSchema).min(1), evidenceDigest: learningDigestSchema }).strict();
+    proposal: candidateProposalSchema, evidence: z.array(evidenceRefSchema).min(1), evidenceDigest: learningDigestSchema,
+    projectDigest: learningDigestSchema.optional() }).strict();
   const identity = (proposal: CandidateProposal) => {
     const { evidenceIds: _evidence, targetRef: _target, ...material } = proposal;
     return { ...material, payload: proposal.kind === 'process'
@@ -283,13 +314,13 @@ function sameKnowledge(existing: string, rendered: string): boolean {
     const current = schema.parse(JSON.parse(next));
     if (prior.proposal.kind === 'lesson' || current.proposal.kind === 'lesson') return false;
     const sensitive = JSON.stringify(prior);
-    return redactEvidenceText(sensitive) === sensitive && prior.classification === current.classification
+    return redactEvidenceText(sensitive) === sensitive && prior.classification === current.classification && prior.projectDigest === current.projectDigest
       && knowledgeDigest(identity(prior.proposal)) === knowledgeDigest(identity(current.proposal))
       && existing === rendered.replace(next, () => previous);
   } catch { return false; }
 }
 
-function knowledgeRelation(existing: string, proposal: CandidateProposal): 'unrelated' | 'review' | 'contrary' {
+function knowledgeRelation(existing: string, proposal: CandidateProposal, projectDigest?: string): 'unrelated' | 'review' | 'contrary' {
   const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const identity = normalize(proposal.kind === 'fact' ? proposal.payload.subject : proposal.kind === 'process' ? proposal.payload.entry
     : proposal.kind === 'lesson' ? proposal.payload.trigger : proposal.title);
@@ -302,6 +333,7 @@ function knowledgeRelation(existing: string, proposal: CandidateProposal): 'unre
       const previousIdentity = normalize(previous.kind === 'fact' ? previous.payload.subject : previous.kind === 'process' ? previous.payload.entry
         : previous.kind === 'lesson' ? previous.payload.trigger : previous.title);
       if (previousIdentity !== identity || knowledgeDigest(previous.applicability) !== knowledgeDigest(proposal.applicability)) return 'unrelated';
+      if (material.projectDigest !== projectDigest) return 'review';
       if (previous.kind === 'fact' && ['fact', 'snapshot'].includes(material.classification)) rules = [normalize(previous.payload.rule)];
     } catch { return 'review'; }
   } else {
@@ -328,7 +360,8 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
   const { policy, store, wikiScript } = input;
   const authorizationDigest = knowledgeDigest(readKnowledgeAuthorization(input));
   const candidate = assertKnowledgeCandidate(input);
-  const proposal = candidate.proposal;
+  const { project, projectDigest } = publicationProject(policy.scope);
+  const proposal = { ...candidate.proposal, applicability: { ...candidate.proposal.applicability, project } };
   if (proposal.kind !== 'fact' && proposal.kind !== 'process' && proposal.kind !== 'lesson') throw new Error('Unsupported knowledge asset kind');
   if (input.targetRef && proposal.targetRef && input.targetRef !== proposal.targetRef) throw new Error('Publication target differs from validated candidate');
   const target = policy.targets.find(entry => entry.ref === (input.targetRef ?? proposal.targetRef) && entry.kinds.includes(proposal.kind as 'fact' | 'process' | 'lesson'));
@@ -365,10 +398,14 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
   const related = [...new Set([...target.indexPaths, ...target.backlinkPaths])];
   const links = related.map(path => `[[${path.slice(0, -3)}]]`).join(' ');
   const lesson = proposal.kind === 'lesson' ? verifyLessonPublication({ store, candidate,
-    configurationFile: input.validationConfigurationFile }, { signal: input.signal }) : undefined;
+    configurationFile: input.validationConfigurationFile, homeDir: input.homeDir }, { signal: input.signal }) : undefined;
   if (lesson?.status === 'blocked') throw new Error(`lesson_publication_${lesson.code}`);
+  const binding = lesson?.status === 'current' ? lesson.binding : undefined;
   const material = canonicalLearningJson({ classification, proposal, evidence, evidenceDigest: candidate.evidenceDigest,
-    ...(lesson?.status === 'current' ? { validation: { binding: lesson.binding, evidence: lesson.evidence } } : {}) });
+    ...(projectDigest ? { projectDigest } : {}), ...(binding && lesson?.status === 'current' ? { validation: {
+      binding: projectDigest ? { ...binding, scope: project, target: { ...binding.target, scope: project },
+        qa: { ...binding.qa, scope: project, workItemId: binding.qa.workItemId.replace(policy.scope, () => project) } } : binding,
+      evidence: lesson.evidence } } : {}) });
   if (redactEvidenceText(material) !== material) throw new Error('Sensitive credentials or personal data cannot be published');
   const body = `## ${classification}${partial ? ' (partial)' : ''}\n\n\`\`\`json\n${material.replaceAll('`', '\\u0060').replaceAll('<', '\\u003c')}\n\`\`\`\n\n${links}`;
   const title = proposal.title.replace(/[\[\]<>#\r\n`]/g, ' ');
@@ -388,7 +425,7 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
       if (ignored.has(path)) continue;
       const existing = await read(path);
       if (!sameKnowledge(existing, content)) {
-        const relation = knowledgeRelation(existing, proposal);
+        const relation = knowledgeRelation(existing, proposal, projectDigest);
         if (relation === 'contrary') conflict();
         if (relation === 'unrelated' && !target.paths.includes(path)) { delete readSet[path]; continue; }
         throw new Error('Existing knowledge requires explicit identity and equivalence review');
@@ -403,7 +440,7 @@ export async function planKnowledgePublication(input: KnowledgePlanningInput): P
     else {
       const existing = await read(path);
       if (!sameKnowledge(existing, content)) {
-        if (knowledgeRelation(existing, proposal) === 'contrary') conflict();
+        if (knowledgeRelation(existing, proposal, projectDigest) === 'contrary') conflict();
         throw new Error('Existing target requires equivalence review');
       }
       if (!existingPath) { existingPath = path; existingContent = existing; }
@@ -537,7 +574,7 @@ export async function verifyKnowledgePlan(prepared: KnowledgePlan, policy: Knowl
     for (const path of await search(script, policy.vault, previous.query, signal)) {
       if (changed.has(path) || ignored.has(path)) continue;
       const page = await readPage(script, policy.vault, path, signal);
-      if (target.paths.includes(path) || knowledgeRelation(page.content, prepared.proposal) !== 'unrelated') current.push(path);
+      if (target.paths.includes(path) || knowledgeRelation(page.content, prepared.proposal, publicationProject(policy.scope).projectDigest) !== 'unrelated') current.push(path);
     }
     if (canonicalLearningJson(current) !== canonicalLearningJson(previous.paths.filter(path => !changed.has(path)))) {
       throw new Error('Knowledge search results changed; conflict');

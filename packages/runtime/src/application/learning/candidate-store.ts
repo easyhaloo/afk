@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
@@ -10,6 +11,8 @@ import { assertCandidateTransition, candidateStateSchema, DISTILLATION_LIMITS, l
 import { blockedReasonSchema, canonicalLearningJson, learningDigestSchema, learningIdentitySchema,
   prepareDistillationRequest, type DistillationSubmission, type PreparedDistillationRequest } from './requests.js';
 import { validateEvidencePack, type EvidencePack } from './evidence.js';
+import { proposalOwnershipRegistrationSchema, type ProposalOwnershipRegistration } from './proposal-ownership.js';
+import { factOwnershipRegistrationSchema, type FactOwnershipRegistration } from './execution-ownership.js';
 
 const schema = `CREATE TABLE learning_ledger (
   kind TEXT NOT NULL, key TEXT NOT NULL, payload TEXT NOT NULL,
@@ -87,6 +90,36 @@ function digest(input: unknown): string {
   return createHash('sha256').update(canonicalLearningJson(input)).digest('hex');
 }
 
+function runBeforeCommit(guard: (() => void) | undefined, purpose: string): void {
+  const result: unknown = guard?.();
+  if (result === undefined) return;
+  void Promise.resolve(result).catch(() => undefined);
+  throw new Error(`${purpose} beforeCommit guard must be synchronous and return no value`);
+}
+
+function createOrRepairOutsideSqliteProcess(file: string, identity?: { dev: number; ino: number }): void {
+  execFileSync(process.execPath, ['--input-type=commonjs', '-e', `
+    const { constants, openSync, fstatSync, fchmodSync, closeSync } = require('node:fs');
+    const [file, dev, ino] = process.argv.slice(1);
+    try {
+      if (dev === undefined) {
+        closeSync(openSync(file, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600));
+      } else {
+        const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        try {
+          const opened = fstatSync(descriptor);
+          if (String(opened.dev) !== dev || String(opened.ino) !== ino || !opened.isFile()
+            || opened.nlink !== 1 || opened.uid !== process.getuid()) throw new Error('Learning ledger private file changed during open');
+          fchmodSync(descriptor, 0o600);
+        } finally { closeSync(descriptor); }
+      }
+    } catch (error) {
+      if (error.code !== (dev === undefined ? 'EEXIST' : 'ENOENT')) throw error;
+    }
+  `, '--', file, ...(identity ? [String(identity.dev), String(identity.ino)] : [])],
+  { env: { ELECTRON_RUN_AS_NODE: '1' }, stdio: 'pipe', timeout: 5000 });
+}
+
 function privateFile(file: string, repairPermissions = false, unlinkedRetries = 0): void {
   try {
     const stats = lstatSync(file);
@@ -98,12 +131,14 @@ function privateFile(file: string, repairPermissions = false, unlinkedRetries = 
       if (process.platform !== 'win32' && (stats.mode & 0o077)) throw new Error('Learning ledger file permissions must be private (0600)');
       return;
     }
-    const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try {
-      const opened = fstatSync(descriptor);
-      if (opened.ino !== stats.ino || opened.dev !== stats.dev) throw new Error('Learning ledger private file changed during open');
-      if (process.platform !== 'win32') fchmodSync(descriptor, 0o600);
-    } finally { closeSync(descriptor); }
+    if (process.platform !== 'win32' && (stats.mode & 0o7777) !== 0o600) {
+      createOrRepairOutsideSqliteProcess(file, stats);
+      return;
+    }
+    const current = lstatSync(file);
+    if (current.nlink === 0 && unlinkedRetries > 0) return privateFile(file, true, unlinkedRetries - 1);
+    if (current.ino !== stats.ino || current.dev !== stats.dev || current.uid !== stats.uid
+      || current.nlink !== 1 || current.mode !== stats.mode) throw new Error('Learning ledger private file changed during open');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
@@ -126,10 +161,7 @@ function privatePath(file: string): string {
     throw new Error('Learning ledger parent directory must be owned and private (0700)');
   }
   for (const path of [absolute, `${absolute}-wal`, `${absolute}-shm`, `${absolute}-journal`]) privateFile(path, true, path === absolute ? 0 : 2);
-  try {
-    const descriptor = openSync(absolute, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
-    closeSync(descriptor);
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+  if (!lstatSync(absolute, { throwIfNoEntry: false })) createOrRepairOutsideSqliteProcess(absolute);
   privateFile(absolute, true);
   return absolute;
 }
@@ -170,8 +202,11 @@ export class CandidateStore {
       if (existing && (existing.requestKey !== parsed.requestKey || existing.day !== parsed.day || existing.startedAt !== parsed.startedAt)) {
         throw new Error('Learning analysis attempt: same callId has conflicting content');
       }
-      if (!existing && this.listAnalysisAttempts(parsed.requestKey).length >= DISTILLATION_LIMITS.attempts) {
-        throw new Error('Learning analysis attempts exhausted');
+      if (!existing) {
+        const attempts = this.listAnalysisAttempts(parsed.requestKey);
+        if (attempts.some(attempt => attempt.status === 'started')) throw new Error('Learning analysis attempt already in progress');
+        if (attempts.length >= DISTILLATION_LIMITS.attempts) throw new Error('Learning analysis attempts exhausted');
+        if (this.getProcessingReceipt(parsed.requestKey)) throw new Error('Learning request already processed');
       }
       this.reserveModelCallInTransaction(parsed);
       if (existing) return existing;
@@ -183,11 +218,27 @@ export class CandidateStore {
   }
 
   recordAnalysisIdentity(callId: string, identity: AnalysisIdentity): AnalysisAttempt {
+    return this.bindAnalysisIdentity(callId, identity, 'record');
+  }
+
+  claimAnalysisLaunch(callId: string, identity: AnalysisIdentity): AnalysisAttempt {
+    return this.bindAnalysisIdentity(callId, identity, 'launch');
+  }
+
+  private bindAnalysisIdentity(callId: string, identity: AnalysisIdentity, mode: 'record' | 'launch'): AnalysisAttempt {
     const key = learningIdentitySchema.parse(callId);
     const parsed = analysisIdentitySchema.parse(identity);
     return this.write(() => {
       const current = this.requireAnalysisAttempt(key);
+      if (mode === 'launch') {
+        if (current.ownerPid !== process.pid || current.host !== hostname()) throw new Error('Learning analysis launch owner differs');
+        if (current.status !== 'started') throw new Error('Learning analysis attempt is terminal');
+        const request = this.requireRequest(current.requestKey);
+        if (request.blockedReason) throw new Error(`Learning request blocked: ${request.blockedReason}`);
+        if (this.getProcessingReceipt(current.requestKey)) throw new Error('Learning request already processed');
+      }
       if (current.analysisRunId !== undefined || current.sessionId !== undefined) {
+        if (mode === 'launch') throw new Error('analysis_outcome_unknown');
         if (current.analysisRunId !== parsed.analysisRunId || current.sessionId !== parsed.sessionId) {
           throw new Error('Learning analysis attempt identity cannot be replaced');
         }
@@ -201,26 +252,44 @@ export class CandidateStore {
 
   finishAnalysisAttempt(callId: string, result: AnalysisAttemptResult): AnalysisAttempt {
     const key = learningIdentitySchema.parse(callId);
+    return this.write(() => this.finishAnalysisAttemptInTransaction(key, result));
+  }
+
+  completeAnalysisAttempt(callId: string, modelOutput: unknown,
+    result: Pick<AnalysisAttemptResult, 'finishedAt' | 'usage'>): ProcessingReceipt {
+    const key = learningIdentitySchema.parse(callId);
+    const completion = analysisResultSchema.omit({ status: true, errorCode: true }).parse(result);
+    return this.write(() => {
+      const attempt = this.requireAnalysisAttempt(key);
+      const receipt = this.completeRequestInTransaction(attempt.requestKey, modelOutput);
+      this.finishAnalysisAttemptInTransaction(key, { ...completion, status: 'succeeded' });
+      return receipt;
+    });
+  }
+
+  private finishAnalysisAttemptInTransaction(key: string, result: AnalysisAttemptResult): AnalysisAttempt {
     const parsed = analysisResultSchema.parse(result);
     const terminal: AnalysisAttemptResult = { status: parsed.status, finishedAt: parsed.finishedAt };
     if (parsed.errorCode !== undefined) terminal.errorCode = parsed.errorCode;
     if (parsed.usage !== undefined) {
       terminal.usage = Object.fromEntries(Object.entries(parsed.usage).filter(([, value]) => value !== undefined));
     }
-    return this.write(() => {
-      const current = this.requireAnalysisAttempt(key);
-      if (Date.parse(terminal.finishedAt) < Date.parse(current.startedAt)) throw new Error('Learning analysis attempt finishedAt precedes startedAt');
-      if (current.status !== 'started') {
-        const existing = { status: current.status, finishedAt: current.finishedAt, errorCode: current.errorCode, usage: current.usage };
-        if (canonicalLearningJson(existing) !== canonicalLearningJson(terminal)) {
-          throw new Error('Learning analysis attempt has conflicting terminal content');
-        }
-        return current;
+    const current = this.requireAnalysisAttempt(key);
+    if (Date.parse(terminal.finishedAt) < Date.parse(current.startedAt)) throw new Error('Learning analysis attempt finishedAt precedes startedAt');
+    if (current.status !== 'started') {
+      const existing = { status: current.status, finishedAt: current.finishedAt, errorCode: current.errorCode, usage: current.usage };
+      if (canonicalLearningJson(existing) !== canonicalLearningJson(terminal)) {
+        throw new Error('Learning analysis attempt has conflicting terminal content');
       }
-      const attempt = { ...current, ...terminal };
-      this.put('analysis-attempt', key, attempt);
-      return attempt;
-    });
+      return current;
+    }
+    const attempt = { ...current, ...terminal };
+    this.put('analysis-attempt', key, attempt);
+    if (terminal.status === 'failed' && terminal.errorCode === 'analysis_executable_changed'
+      && this.requireRequest(current.requestKey).blockedReason !== 'source_invalidated' && !this.getProcessingReceipt(current.requestKey)) {
+      this.put('blocking', current.requestKey, { reason: terminal.errorCode });
+    }
+    return attempt;
   }
 
   listAnalysisAttempts(requestKey?: string): AnalysisAttempt[] {
@@ -350,26 +419,28 @@ export class CandidateStore {
   }
 
   completeRequest(key: string, modelOutput: unknown): ProcessingReceipt {
-    return this.write(() => {
-      const source = this.requireRequest(key);
-      if (source.blockedReason) throw new Error(`Learning request blocked: ${source.blockedReason}`);
-      const output = parseDistillationOutput(modelOutput, source.request, source.evidence);
-      const outputDigest = digest(output);
-      const existing = this.getProcessingReceipt(key);
-      if (existing) {
-        if (existing.outputDigest !== outputDigest) throw new Error('Processing receipt content digest differs for the same key');
-        return existing;
-      }
-      const candidateIds = output.candidates.map((proposal, index) => {
-        const id = digest([key, index]);
-        this.saveCandidate({ id, requestKey: key, version: 1, state: 'candidate', digest: digest(proposal),
-          evidenceDigest: source.request.evidenceDigest, proposal });
-        return id;
-      });
-      const receipt = { requestKey: key, outputDigest, candidateIds, warnings: output.warnings };
-      this.put('processing', key, receipt);
-      return receipt;
+    return this.write(() => this.completeRequestInTransaction(key, modelOutput));
+  }
+
+  private completeRequestInTransaction(key: string, modelOutput: unknown): ProcessingReceipt {
+    const source = this.requireRequest(key);
+    if (source.blockedReason) throw new Error(`Learning request blocked: ${source.blockedReason}`);
+    const output = parseDistillationOutput(modelOutput, source.request, source.evidence);
+    const outputDigest = digest(output);
+    const existing = this.getProcessingReceipt(key);
+    if (existing) {
+      if (existing.outputDigest !== outputDigest) throw new Error('Processing receipt content digest differs for the same key');
+      return existing;
+    }
+    const candidateIds = output.candidates.map((proposal, index) => {
+      const id = digest([key, index]);
+      this.saveCandidate({ id, requestKey: key, version: 1, state: 'candidate', digest: digest(proposal),
+        evidenceDigest: source.request.evidenceDigest, proposal });
+      return id;
     });
+    const receipt = { requestKey: key, outputDigest, candidateIds, warnings: output.warnings };
+    this.put('processing', key, receipt);
+    return receipt;
   }
 
   getCandidate(id: string): LearningCandidate | undefined { return this.read('candidate', learningDigestSchema.parse(id)); }
@@ -390,6 +461,76 @@ export class CandidateStore {
     });
   }
 
+  recordProposalOwnership(input: unknown, beforeCommit?: () => void): ProposalOwnershipRegistration {
+    const parsed = proposalOwnershipRegistrationSchema.parse(input);
+    return this.write(() => {
+      const current = this.requireCandidate(parsed.binding.candidateId, parsed.binding.candidateVersion);
+      if (current.state !== 'candidate') throw new Error('Proposal ownership requires candidate state');
+      if (current.proposal.kind !== 'tool' && current.proposal.kind !== 'skill') throw new Error('Proposal ownership requires an executable asset kind');
+      const source = this.requireRequest(current.requestKey);
+      if (source.request.scope !== parsed.binding.scope || current.evidenceDigest !== parsed.binding.evidenceDigest) {
+        throw new Error('Proposal ownership candidate scope or evidence differs');
+      }
+      if (source.blockedReason) throw new Error('Proposal ownership source is blocked');
+      if (parsed.check.runId === source.request.sourceRunId || this.listAnalysisAttempts(current.requestKey).some(attempt =>
+        attempt.analysisRunId === parsed.check.runId || attempt.sessionId === parsed.check.runId)) {
+        throw new Error('Proposal ownership requires an independent validation run');
+      }
+      runBeforeCommit(beforeCommit, 'Proposal ownership');
+      if (this.getFactOwnership(parsed.ownership.operationId)) throw new Error('Execution ownership operation already belongs to a fact check');
+      return this.insertImmutable('proposal-ownership', parsed.ownership.operationId, parsed);
+    });
+  }
+
+  getProposalOwnership(operationId: string): ProposalOwnershipRegistration | undefined {
+    const key = z.string().uuid().parse(operationId);
+    const value = this.read<ProposalOwnershipRegistration>('proposal-ownership', key);
+    if (value === undefined) return undefined;
+    const parsed = proposalOwnershipRegistrationSchema.parse(value);
+    if (parsed.ownership.operationId !== key) throw new Error('Proposal ownership operation identity differs');
+    return parsed;
+  }
+
+  recordFactOwnership(input: unknown, beforeCommit: () => void): FactOwnershipRegistration {
+    const parsed = factOwnershipRegistrationSchema.parse(input);
+    if (typeof beforeCommit !== 'function') throw new Error('Fact ownership requires a current-authority guard');
+    return this.write(() => {
+      const assertCurrent = () => {
+        const current = this.requireCandidate(parsed.binding.candidateId, parsed.binding.candidateVersion);
+        if (current.state !== 'candidate' || current.proposal.kind !== 'fact') throw new Error('Fact ownership requires a fact in candidate state');
+        const source = this.requireRequest(current.requestKey);
+        if (source.request.scope !== parsed.binding.scope || current.evidenceDigest !== parsed.binding.evidenceDigest) {
+          throw new Error('Fact ownership candidate scope or evidence differs');
+        }
+        if (source.blockedReason) throw new Error('Fact ownership source is blocked');
+        if (parsed.check.executionId === source.request.sourceRunId || this.listAnalysisAttempts(current.requestKey).some(attempt =>
+          attempt.analysisRunId === parsed.check.executionId || attempt.sessionId === parsed.check.executionId)) {
+          throw new Error('Fact ownership requires an independent validation execution');
+        }
+      };
+      assertCurrent();
+      runBeforeCommit(beforeCommit, 'Fact ownership');
+      assertCurrent();
+      if (this.getProposalOwnership(parsed.ownership.operationId)) throw new Error('Execution ownership operation already belongs to a proposal check');
+      return this.insertImmutable('fact-ownership', parsed.ownership.operationId, parsed);
+    });
+  }
+
+  getFactOwnership(operationId: string): FactOwnershipRegistration | undefined {
+    const key = z.string().uuid().parse(operationId);
+    const value = this.read<FactOwnershipRegistration>('fact-ownership', key);
+    if (value === undefined) return undefined;
+    const parsed = factOwnershipRegistrationSchema.parse(value);
+    if (parsed.ownership.operationId !== key) throw new Error('Fact ownership operation identity differs');
+    return parsed;
+  }
+
+  listFactOwnership(scope: string): FactOwnershipRegistration[] {
+    const selectedScope = learningScopeSchema.parse(scope);
+    return this.all<FactOwnershipRegistration>('fact-ownership')
+      .map(value => factOwnershipRegistrationSchema.parse(value)).filter(value => value.binding.scope === selectedScope);
+  }
+
   recordValidation(id: string, expectedVersion: number, input: CandidateValidation, beforeCommit?: () => void): LearningCandidate {
     versionSchema.parse(expectedVersion);
     const parsed = validationSchema.parse(input);
@@ -397,7 +538,7 @@ export class CandidateStore {
       const current = this.requireCandidate(id, expectedVersion);
       if (current.digest !== parsed.candidateDigest || current.evidenceDigest !== parsed.evidenceDigest) throw new Error('Validation candidate or evidence digest differs');
       if (current.state !== 'candidate') throw new Error('Validation requires candidate state');
-      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Validation beforeCommit guard must be synchronous and return no value');
+      runBeforeCommit(beforeCommit, 'Validation');
       const next = parsed.passed ? this.move(current, 'validated') : current;
       const receipt: ValidationReceipt = { ...parsed, candidateId: id, candidateVersion: current.version, validatedVersion: next.version };
       this.insertImmutable('validation', digest([id, current.version, parsed.validatorVersion]), receipt);
@@ -417,7 +558,7 @@ export class CandidateStore {
     return this.write(() => {
       const current = this.requireCandidate(id, expectedVersion);
       this.assertPublicationValidation(current, parsed);
-      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Publication beforeCommit guard must be synchronous and return no value');
+      runBeforeCommit(beforeCommit, 'Publication');
       const record: PublicationRecord = { ...parsed, candidateId: id, candidateVersion: current.version,
         candidateDigest: current.digest, evidenceDigest: current.evidenceDigest, phase: 'prepared' };
       const existing = this.read<PublicationRecord>('publication', parsed.key);
@@ -439,7 +580,7 @@ export class CandidateStore {
     return this.write(() => {
       const old = this.getPublication(oldKey);
       if (!old) throw new Error('Publication not found');
-      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Publication beforeCommit guard must be synchronous and return no value');
+      runBeforeCommit(beforeCommit, 'Publication');
       if (old.phase === 'superseded') {
         if (old.supersededBy !== parsed.key) throw new Error('Publication already superseded by a different key');
       } else if (old.phase !== 'prepared') throw new Error('Supersession requires a prepared publication phase');
@@ -484,7 +625,7 @@ export class CandidateStore {
     return this.write(() => {
       const publication = this.read<PublicationRecord>('publication', key);
       if (!publication) throw new Error('Publication not found');
-      if (beforeCommit && beforeCommit() !== undefined) throw new Error('Publication beforeCommit guard must be synchronous and return no value');
+      runBeforeCommit(beforeCommit, 'Publication');
       if (publication.phase === phase && publication.observedDigest === observedDigest) return publication;
       if (publication.phase === 'committed' && phase === 'applied' && publication.observedDigest === observedDigest) return publication;
       if (!((publication.phase === 'prepared' && phase === 'applied') || (publication.phase === 'applied' && phase === 'committed'))) throw new Error('Invalid publication phase');

@@ -52,13 +52,14 @@ export class StreamingAgentExecution implements AgentExecution {
   private readonly signalType: 'goal_complete';
   private readonly worktreePath: string;
   private readonly parseLine?: (line: string) => AgentEvent[];
-  private readonly analysisParentGuard: boolean;
+  private readonly analysisSessionId?: string;
   /** Mutable metadata so providers can update fields (e.g. threadId) after start. */
   private _mutableMetadata: AgentExecutionMetadata;
 
   private proc: ChildProcess | null = null;
   private readonly processOwner = randomUUID();
   private done = false;
+  private analysisClosed = false;
   private stopping?: Promise<void>;
   private readonly signalledDescendants = new Map<number, string>();
   private interruptAcked = false;
@@ -85,7 +86,7 @@ export class StreamingAgentExecution implements AgentExecution {
     sessionId?: string;
     metadata: AgentExecutionMetadata;
     parseLine?: (line: string) => AgentEvent[];
-    analysisParentGuard?: boolean;
+    analysisSessionId?: string;
   }) {
     this.id = randomUUID();
     this.sessionId = opts.sessionId;
@@ -96,7 +97,7 @@ export class StreamingAgentExecution implements AgentExecution {
     this.signalType = opts.signalType;
     this.worktreePath = opts.worktreePath;
     this.parseLine = opts.parseLine;
-    this.analysisParentGuard = opts.analysisParentGuard ?? false;
+    this.analysisSessionId = opts.analysisSessionId;
   }
 
   /**
@@ -118,7 +119,7 @@ export class StreamingAgentExecution implements AgentExecution {
       // group so timeout/interrupt cleanup cannot leave the agent orphaned.
       detached: process.platform !== 'win32',
     };
-    this.proc = this.analysisParentGuard
+    this.proc = this.analysisSessionId !== undefined
       ? spawnGuardedAnalysis(argv, spawnOptions)
       : spawn(argv[0]!, argv.slice(1), spawnOptions);
 
@@ -140,7 +141,7 @@ export class StreamingAgentExecution implements AgentExecution {
         this.stdoutBuffer += text;
         this.stdoutTail = (this.stdoutTail + text).slice(-4000);
         this.drainStdoutLines();
-        this.completeFromBufferedSignal();
+        if (this.analysisSessionId === undefined) this.completeFromBufferedSignal();
       });
     }
 
@@ -161,7 +162,12 @@ export class StreamingAgentExecution implements AgentExecution {
       }
     });
 
-    this.proc.on('close', () => this.finishOutput());
+    const child = this.proc;
+    child.on('close', (code, signal) => {
+      this.analysisClosed = this.analysisSessionId !== undefined && !this.done && code === 0 && signal === null
+        && child.stdout?.readableEnded === true && child.stderr?.readableEnded === true;
+      this.finishOutput();
+    });
 
     this.proc.on('error', (err: Error) => {
       this.error = { code: 'SPAWN_ERROR', message: err.message };
@@ -203,13 +209,21 @@ export class StreamingAgentExecution implements AgentExecution {
             };
             break;
           case 'result': {
+            if (this.analysisSessionId !== undefined) {
+              this.structuredOutput = undefined;
+              const nativeSession = events.find(candidate => candidate.type === 'session');
+              if (nativeSession?.sessionId !== this.analysisSessionId) {
+                this.error ??= { code: 'ANALYSIS_SESSION_MISMATCH', message: 'Guarded result did not confirm the requested session' };
+                break;
+              }
+            }
             // result field contains raw output: <goal_complete>{"summary":"..."}</goal_complete>
             const raw = String(event.result ?? '');
             this.lastResultOutput = raw.trim().slice(-4000);
             const extracted = this.extractSignal(raw);
             if (extracted) {
               this.structuredOutput = extracted;
-              if (this.hasExpectedSignal()) this.done = true;
+              if (this.analysisSessionId === undefined && this.hasExpectedSignal()) this.done = true;
             }
             break;
           }
@@ -226,6 +240,8 @@ export class StreamingAgentExecution implements AgentExecution {
       }
       return;
     }
+
+    if (this.analysisSessionId !== undefined) return;
 
     // Fallback: inline parsing if provider has no parseLine
     let parsed: { type: string; [key: string]: unknown };
@@ -275,6 +291,11 @@ export class StreamingAgentExecution implements AgentExecution {
   private extractSignal(raw: string): unknown {
     const trimmed = raw.trim();
     if (!trimmed) return undefined;
+    if (this.analysisSessionId !== undefined && trimmed.startsWith('```')) {
+      const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]+)\r?\n```$/i.exec(trimmed);
+      if (!fenced) return undefined;
+      try { return JSON.parse(fenced[1]!); } catch { return undefined; }
+    }
     const completion = extractGoalComplete(trimmed);
     if (completion) return completion;
 
@@ -391,7 +412,10 @@ export class StreamingAgentExecution implements AgentExecution {
       };
     }
 
-    if (this.error || (this.exitCode !== undefined && this.exitCode !== 0)) {
+    const error = this.error ?? (this.analysisSessionId !== undefined && !this.analysisClosed
+      ? { code: 'ANALYSIS_CLOSE_UNCONFIRMED', message: 'Guarded analysis did not close after draining both output streams' }
+      : undefined);
+    if (error || (this.exitCode !== undefined && this.exitCode !== 0)) {
       return {
         version: 1,
         runId: this.id,
@@ -399,7 +423,7 @@ export class StreamingAgentExecution implements AgentExecution {
         provider: 'batch',
         sessionId: this.sessionId,
         exitCode: this.exitCode,
-        error: this.error,
+        error,
         usage: this.usage,
         tools: this.tools.size ? [...this.tools.values()] : undefined,
         commits: [],

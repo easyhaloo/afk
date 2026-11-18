@@ -16,7 +16,7 @@ import { workspaceDataDirectory } from '../../workspace.js';
 
 import { randomUUID } from 'crypto';
 import { promises as fs, realpathSync } from 'fs';
-import { join } from 'path';
+import { isAbsolute, join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
 import { clearSignal, getTokenUsage, readSignal, preacceptClaudeProjectTrust, isClaudeCodeArgv, logger } from '../../io/index.js';
@@ -85,7 +85,7 @@ export class LocalSandbox implements Sandbox {
   private readonly branch?: string;
   private readonly workspaceRoot: string;
   private readonly runtimeRunId?: string;
-  private readonly analysisParentGuard: boolean;
+  private readonly analysis?: { executable: string; sessionId: string; verifyExecutable(): void };
   private _closed = false;
   private sessionCreated = false;
 
@@ -97,7 +97,7 @@ export class LocalSandbox implements Sandbox {
     tmux?: TmuxClient;
     workspaceRoot?: string;
     runtimeRunId?: string;
-    analysisParentGuard?: boolean;
+    analysis?: LocalSandbox['analysis'];
   }) {
     this.id = opts.id;
     this.worktreePath = opts.worktreePath;
@@ -107,25 +107,29 @@ export class LocalSandbox implements Sandbox {
     this.branch = opts.branch;
     this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
     this.runtimeRunId = opts.runtimeRunId;
-    this.analysisParentGuard = opts.analysisParentGuard ?? false;
+    this.analysis = opts.analysis;
   }
 
   async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
     if (this._closed) throw new Error('sandbox already closed');
+    const analysis = this.analysis;
+    if (analysis && (!isAbsolute(analysis.executable)
+      || options.executionMode !== 'batch' || options.command.argv[0] !== 'claude')) throw new Error('analysis_unsupported');
 
     // Batch mode: spawn child process directly, parse stream-json stdout.
     // No tmux involvement; StreamingAgentExecution manages its own process.
     if (options.executionMode === 'batch') {
       const execution = new StreamingAgentExecution({
-        command: options.command,
+        command: analysis ? { ...options.command, argv: [analysis.executable, ...options.command.argv.slice(1)] } : options.command,
         prompt: options.prompt,
         signalType: options.signalType,
         worktreePath: this.worktreePath,
         sessionId: this.sessionName,
         metadata: options.metadata,
         parseLine: options.parseLine,
-        analysisParentGuard: this.analysisParentGuard,
+        analysisSessionId: analysis?.sessionId,
       });
+      analysis?.verifyExecutable();
       execution.start();
       return execution;
     }

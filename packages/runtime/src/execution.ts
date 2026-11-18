@@ -6,11 +6,13 @@ export { scheduleWorkItems, scheduleWaitReason, describeScheduleWaitReason, inve
   type ScheduleStatus, type ScheduleWaitContext, type ScheduleWaitReason, type ScheduleWaitingItem, type ScheduleInventory, type ScheduleScopeReport } from './application/runners/scheduler.js';
 export { assessScheduleScope, computeScheduleScope, type ScheduleScope, type ScheduleScopeAssessment } from './domain/backlog/schedule-scope.js';
 export { inspectWorkspaceDisk, type WorkspaceDiskReport } from './application/workflows/workspace-disk.js';
-export { ExperienceStore, type ExperienceRecord, type ExperienceStatus, type RecordFailureInput, type ExperienceVerification, type ExperienceExchange, type ExperienceMetrics } from './application/learning/experience-store.js';
+export { ExperienceStore, type ExperienceRecord, type ExperienceStatus, type RecordFailureInput, type ExperienceVerification, type ExperienceExchange, type ExperienceMetrics, type ExperienceAdoptionContext, type ExperienceAdoptionReceipt, type ExperienceAdoptionResult, type ExperienceOutcomeEvent, type ExperienceOutcomeReceipt } from './application/learning/experience-store.js';
 export { experienceStorePath, experienceScope, verifyExperienceRun, verifyApplicableExperience, verifyAdoptionRun,
-  resolveExperienceQueryContext, recordSuccessfulExperience } from './application/learning/runtime.js';
+  resolveExperienceQueryContext, recordSuccessfulExperience, recordExperienceOutcomes } from './application/learning/runtime.js';
 export { experienceQueryContextSchema, type ExperienceQueryContext } from './application/learning/experience-store.js';
-export { DISTILLATION_LIMITS, learningScopeSchema, evidenceRefSchema, distillationRequestSchema,
+export { learningIdentitySchema } from './application/learning/requests.js';
+export { DISTILLATION_LIMITS, learningScopeSchema, learningReviewIncompleteSchema, LearningReviewIncompleteError,
+  evidenceRefSchema, distillationRequestSchema,
   candidateStateSchema, candidateProposalSchema, distillationOutputSchema, distillationKey,
   parseDistillationOutput, assertCandidateTransition, type EvidenceRef as LearningEvidenceRef,
   type DistillationRequest, type CandidateProposal, type DistillationOutput, type AssetKind,
@@ -29,5 +31,6 @@ export { validateLearningCandidate, type LearningValidationResult, type Learning
   type LearningValidationDependencies, type LearningValidationCommitSnapshot } from './application/learning/validation.js';
 export { validateConfiguredLearningCandidate, validationConfigurationSchema, type ValidationConfiguration,
   type ValidationRuntimeOptions, type ValidationProviderBinding } from './application/learning/validation-runtime.js';
+export type { KnowledgeSourceReadGrant } from './application/learning/source-read-grant.js';
 export { KnowledgeContextProvider, knowledgeConfigurationSchema, prepareConfiguredKnowledge, publishConfiguredKnowledge,
   reconcileConfiguredKnowledge, type KnowledgeConfiguration, type KnowledgeRuntimeOptions } from './application/learning/knowledge-runtime.js';

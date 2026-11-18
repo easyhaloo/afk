@@ -51,6 +51,7 @@ async function fixture(options: {
   increasingUsage?: boolean;
   id?: string;
   duringInitialStart?: (scope: RunResourceScope) => Promise<void>;
+  recordSelection?: () => Promise<void>;
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'afk-batch-handoff-'));
   const children: ChildProcess[] = [];
@@ -174,7 +175,8 @@ async function fixture(options: {
   });
   const run = () => internals.runPhase({ iid: 42, session: 'afk-logical', wtPath: root,
     hardTimeoutMs: 10000, completionTimeoutMs: 10000, idleTimeoutMs: 5000, contextHighTokens: 100,
-    budget, persistBudget, prompt: 'continue fixture work', signalType: 'goal_complete', executionMode: 'batch', completionKind: 'task' });
+    budget, persistBudget, prompt: 'continue fixture work', signalType: 'goal_complete', executionMode: 'batch', completionKind: 'task',
+    recordSelection: options.recordSelection });
   return { root, sha, children, events, prompts, commands, overlap, ledgerAtStarts, backlog, budget, persisted, chain, startAgent, scope, run };
 }
 
@@ -277,7 +279,8 @@ describe('batch context handoff lifecycle', () => {
     expect(host.persisted.at(-1)).toEqual(host.budget.snapshot());
   });
   it.each(['cursor', 'pi'] as const)('stops old %s execution before native resume and preserves its provider', async provider => {
-    const host = await fixture({ provider });
+    const recordSelection = vi.fn(async () => {});
+    const host = await fixture({ provider, recordSelection });
     expect(await host.run()).toEqual({ completed: true, output: undefined });
     expect(host.overlap).toEqual([false]);
     expect(host.events.indexOf('stop-1')).toBeLessThan(host.events.indexOf('start-2'));
@@ -285,6 +288,10 @@ describe('batch context handoff lifecycle', () => {
     expect(host.chain.saveFirst).toHaveBeenCalledWith(expect.objectContaining({ provider }));
     expect(host.prompts[1]).toBe(host.prompts[0]);
     expect(host.budget.used).toBe(1);
+    expect(recordSelection).toHaveBeenCalledTimes(2);
+    for (let index = 0; index < 2; index++) {
+      expect(host.startAgent.mock.invocationCallOrder[index]).toBeLessThan(recordSelection.mock.invocationCallOrder[index]);
+    }
   });
 
   it.each(['cursor', 'pi'] as const)('uses the real streaming host kill boundary for %s', async provider => {

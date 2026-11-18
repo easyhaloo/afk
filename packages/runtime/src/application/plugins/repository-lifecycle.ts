@@ -132,15 +132,18 @@ export async function prepareManagedRepositories(input: {
       || input.runtime!.getPlugin('workflow.integrations') !== selected.integration) throw new Error('Selected Repository provider or integration was revoked');
     for (const allocation of allocations) if (allocation.failure) throw allocation.failure.error;
   };
-  const publish = async () => {
+  const publish = async (verified?: { path: string; commit: string }) => {
     await heartbeat();
     input.scope!.cleanupOwnership.assertClosed();
     for (const allocation of allocations) {
       if (allocation.published || !allocation.workspace) continue;
       if (allocation.cleaned) throw new Error('Selected Repository workspace is already cleaned');
       if (input.options?.signal?.aborted) throw input.options.signal.reason ?? new Error('Repository publication aborted');
-      const publication = await allocation.invoke(() => provider.publish!({ workspaceId: allocation.workspace!.id }, input.options));
       const git = simpleGit(allocation.workspace.path!);
+      const expected = verified && verified.path === allocation.workspace.path ? verified.commit : undefined;
+      if (expected && expected !== (await git.revparse(['HEAD'])).trim()) throw new Error('QA checkout moved before publication');
+      const publication = await allocation.invoke(() => provider.publish!({ workspaceId: allocation.workspace!.id, ...(expected && { expectedCommit: expected }) }, input.options));
+      if (expected && publication.commit !== expected) throw new Error('Repository published a different commit than QA verified');
       if (publication.branch !== allocation.workspace.snapshot.branch || publication.commit !== (await git.revparse(['HEAD'])).trim()
         || publication.branch !== (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()) throw new Error('Repository publication changed workspace branch or omitted revision');
       if (input.options?.signal?.aborted) throw input.options.signal.reason ?? new Error('Repository publication aborted');

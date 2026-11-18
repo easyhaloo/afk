@@ -19,6 +19,10 @@ import type { WorkflowRunRepository } from './workflows/run-request.js';
 import type { BranchHandle } from '../domain/branches/types.js';
 import { CommandVerificationProvider } from '../infrastructure/verification/command.js';
 import { FilesystemClaimLock, type ClaimLease } from '../domain/backlog/claim.js';
+import { createPluginRunObserver, setPluginAuditEvidence } from './plugins/observability.js';
+import { createLocalEncryptedEvidenceStore } from '../infrastructure/observability/local-evidence-store.js';
+import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
+import type { RunEvent } from '@afk/core';
 
 const earlyClaimIo = vi.hoisted(() => ({ target: '', remaining: 0, errors: [] as Error[] }));
 vi.mock('node:fs/promises', async original => {
@@ -61,7 +65,7 @@ async function bounded<T>(promise: Promise<T>): Promise<T | 'still pending'> {
   finally { timer.abort(); }
 }
 
-async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verification' = false, repositoryLease = false) {
+async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verification' = false, repositoryLease = false, mirror = false) {
   const root = await mkdtemp(join(tmpdir(), 'afk-hook-cancellation-'));
   roots.push(root);
   execFileSync('git', ['init', '-q', '-b', 'main', root]);
@@ -119,6 +123,7 @@ async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verific
       getActiveRework: vi.fn(async () => undefined), transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}) },
     branches: { createBranch: vi.fn(async () => ({ worktreePath: root, branchName: 'feat/task' })),
       createVerificationWorktree: vi.fn(async () => ({ worktreePath: root, branchName: 'feat/task' })),
+      verificationRevision: vi.fn(async () => execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()),
       mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), commit, push, cleanup: vi.fn(async () => {}) },
     changes: { findForBacklog: vi.fn(async () => null), create, get: vi.fn(async () => change) },
   };
@@ -153,7 +158,11 @@ async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verific
         capture(context, 'init');
         await invokeCapability(plugins, { capability: 'context.provider', provider: 'local.context', operation: 'gather', input: { scope: 'local', prompt: 'init' } }, { signal: context.signal });
       },
-      async onBeforeAgent(context) { capture(context, 'before-agent'); },
+      async onBeforeAgent(context) {
+        capture(context, 'before-agent');
+        if (mirror) await context.observation!.record({ kind: 'failure.classified', failureClass: 'workflow-cancellation-probe',
+          summary: 'synthetic workflow evidence cancellation probe' });
+      },
       async onAfterAgent(context) { capture(context, 'after-agent'); },
       async onBeforePublish(context) { capture(context, 'before-publish'); },
       async onCleanup(context) { cleanupSignals.push(context.signal); },
@@ -183,18 +192,74 @@ async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verific
   const common = { plugins, agentProvider, sandboxProvider, config, projectRoot: root,
     ...(repositoryLease ? { repositories: [repository], multiRepositoryPreparer: prepareRepositories, prepareRepositories } : {}),
     runtimeManager };
-  const observer = { record: vi.fn(async () => {}) };
+  const mirrorEntered = deferred<AbortSignal>();
+  const mirrorRelease = deferred<void>();
+  const mirrorGet = vi.fn(async () => undefined);
+  const eventRoot = join(root, 'events');
+  if (mirror) {
+    await plugins.load({
+      manifest: { id: 'evidence.deadline', version: '1.0.0', apiVersion: 1, provides: ['observe.evidence'], trusted: true },
+      activate(setup) {
+        setup.registerCapability('observe.evidence', 'deadline', { id: 'deadline', capabilities: { put: true, get: true, classify: false },
+          async put(record: { id: string }, operation?: ProviderOperationOptions) {
+            mirrorEntered.resolve(operation!.signal! as AbortSignal);
+            await mirrorRelease.promise;
+            return { name: record.id, uri: `memory://${record.id}` };
+          }, get: mirrorGet });
+      },
+    });
+    setPluginAuditEvidence(plugins, { provider: 'deadline', scopes: ['github:org/repo'], timeoutMs: 60_000,
+      evidence: await createLocalEncryptedEvidenceStore(root) });
+  }
+  const liveObserver = mirror ? createPluginRunObserver(plugins, eventRoot) : undefined;
+  const observer = { record: vi.fn(async (...[context, data, options]: Parameters<NonNullable<typeof liveObserver>['record']>) => {
+    await liveObserver?.record(context, data, options);
+  }) };
   const runner = kind === 'workflow'
     ? new WorkflowRunner(providers as unknown as ProviderBundle, { ...common, observer, watchdog: { arm: vi.fn(), disarm: vi.fn() } } as never)
     : new QARunner(providers as unknown as ProviderBundle, config, common as never);
   const run = (options: ProviderOperationOptions = {}) => kind === 'workflow'
     ? (runner as WorkflowRunner).run({ backlogId: '42', session: 'cancellation-42', targetBranch: 'main', baseBranchExplicit: true,
-      repoRoot: root, template: 'cancellation-local', ...(repositoryLease ? { repositories: [repository] } : {}), ...options } as RunnerOptions).catch(error => ({ success: false, summary: String(error), error }))
+      repoRoot: root, template: 'cancellation-local', ...(mirror ? { observationRunId: 'evidence-deadline', observationWorkItemId: 'github:org/repo#42' } : {}),
+      ...(repositoryLease ? { repositories: [repository] } : {}), ...options } as RunnerOptions).catch(error => ({ success: false, summary: String(error), error }))
     : (runner as QARunner).process('42', options);
   return { runner, run, config, providers, heartbeat, release, commit, push, create, notify, execution, agentProvider, entered, gate, plugins, pidFile, sandbox, sandboxProvider, runtimeManager, observer,
     repositoryHeartbeat, prepareRepositories, finishWorkspace, releaseWorkspace,
-    contexts, providerSignals, cleanupSignals, processExited, child: () => child, stopHanging: () => { hang = false; gate.resolve(); } };
+    contexts, providerSignals, cleanupSignals, processExited, child: () => child, stopHanging: () => { hang = false; gate.resolve(); },
+    mirrorEntered, mirrorRelease, mirrorGet, eventRoot };
 }
+
+it('cancels evidence export at the workflow internal deadline while preserving terminal local audit', async () => {
+  const f = await fixture('workflow', 'before-agent', false, false, true);
+  f.config.workflowHardTimeout = 5_000;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  const pending = f.run();
+  try {
+    const signal = await bounded(Promise.race([f.mirrorEntered.promise, pending]));
+    expect(signal).toBeInstanceOf(AbortSignal);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await bounded(pending);
+    expect(result).not.toBe('still pending');
+    expect(result).toMatchObject({ success: false, summary: expect.stringMatching(/deadline/i) });
+    expect((signal as AbortSignal).aborted).toBe(true);
+    expect(f.contexts[0].reason).toEqual(expect.objectContaining({ message: expect.stringMatching(/workflow deadline exceeded/) }));
+    expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
+    expect(f.cleanupSignals).toHaveLength(1);
+    expect(f.cleanupSignals[0]?.aborted).toBe(false);
+    f.mirrorRelease.resolve();
+    await delay(10);
+    expect(f.mirrorGet).not.toHaveBeenCalled();
+    const events = new JsonlEventStore({ root: f.eventRoot });
+    const [run] = await events.listRuns();
+    const history: RunEvent[] = [];
+    for await (const event of events.read(run)) history.push(event);
+    expect(history.some(event => event.data.kind === 'run.finished')).toBe(true);
+    const mirrors = history.filter(event => event.data.kind === 'effect.completed' && event.data.effectKind === 'evidence.mirror');
+    expect(mirrors.length).toBeGreaterThan(0);
+    expect(mirrors.every(event => event.data.kind === 'effect.completed' && JSON.parse(event.data.summary!).reason === 'cancelled')).toBe(true);
+    expect(await events.verify(run)).toMatchObject({ valid: true });
+  } finally { f.mirrorRelease.resolve(); f.stopHanging(); await pending; }
+});
 
 describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
   it.each<Phase>(['init', 'before-agent', 'after-agent', 'before-publish'])('aborts hanging %s with the trusted caller signal and cleans up', async phase => {

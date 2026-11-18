@@ -1,22 +1,20 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { ProviderOperationOptions, RepositoryPrepareRequest, RepositoryProvider, RepositoryWorkspace } from '../../plugin-sdk/capabilities.js';
-import { buildFrozenContext, captureFrozenInput, replaceFrozenFile, type CapturedFrozenInput } from '../../infrastructure/sandbox/container/frozen-input.js';
-import { FrozenCleanupError, type FrozenExecutionOptions, type FrozenExecutionOwnership, type FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
+import { assertFrozenScratchHelper, buildFrozenContext, captureFrozenInput, replaceFrozenFile, selectFrozenFiles, type CapturedFrozenInput,
+  type CapturedFrozenScratchHelper } from '../../infrastructure/sandbox/container/frozen-input.js';
+import { FrozenCleanupError, frozenExecutionArgv, type FrozenExecutionOptions, type FrozenExecutionOwnership, type FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import { RepositoryPreparationCleanupError } from '../../infrastructure/providers/repositories.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
-import { DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
+import { DISTILLATION_LIMITS } from './contracts.js';
 import { compareProposalActual, prepareAssetProposal, type PreparedAssetProposal, type ProposalInventory } from './proposals.js';
 import { observeProposalExperiment, prepareProposalExperiment, type PreparedProposalExperiment,
-  type ProposalSemanticConfiguration, type ProposalSemanticObservation } from './proposal-semantics.js';
+  type ProposalSemanticConfiguration, type ProposalSemanticObservation, type ProposalSemanticExecutionContext } from './proposal-semantics.js';
+import { proposalRuntimeBindingSchema as bindingSchema, proposalExecutionOwnershipSchema as ownershipSchema } from './proposal-ownership.js';
 
-const bindingSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
-  candidateVersion: z.number().int().positive().safe(), evidenceDigest: learningDigestSchema }).strict();
-const ownershipSchema = z.object({ operationId: z.string().uuid(), engine: z.literal('docker'), containerName: learningIdentitySchema,
-  baseImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/), inputDigest: learningDigestSchema, contextDigest: learningDigestSchema }).strict();
 const oracleResultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('observed'), actual: z.unknown().refine(value => value !== undefined),
     assertions: z.number().int().positive().safe() }).strict(),
@@ -50,8 +48,10 @@ export interface ProposalRuntimeOptions extends ProviderOperationOptions {
   inventoryRoot?: string;
   artifactPath: string;
   baseImageId: string;
+  scratchHelper?: CapturedFrozenScratchHelper;
   binding: ProposalRuntimeBinding;
-  sandbox: { executeFrozen(options: FrozenExecutionOptions): Promise<FrozenExecutionResult> };
+  sandbox: { executeFrozen(options: FrozenExecutionOptions): Promise<FrozenExecutionResult>;
+    limits?: { timeoutMs: number; maxOutputBytes: number }; remainingMs?(): number };
   harness?: ProposalRuntimeHarness;
   assertCurrent(binding: Readonly<ProposalRuntimeBinding>, options: ProviderOperationOptions): Promise<void>;
   recordOwnership(ownership: FrozenExecutionOwnership, binding: Readonly<ProposalRuntimeBinding>,
@@ -61,6 +61,7 @@ export interface ProposalRuntimeOptions extends ProviderOperationOptions {
 
 export interface ProposalRuntimeObservation {
   execution: FrozenExecutionResult;
+  semanticContext?: ProposalSemanticExecutionContext;
   receipt: {
     version: 1;
     binding: ProposalRuntimeBinding & { repositoryId: string; workspaceId: string; runId: string; commit: string; repositoryDigest: string;
@@ -129,7 +130,7 @@ async function git(workspace: string, args: string[], signal?: AbortSignal): Pro
 }
 
 async function captureCommitted(workspace: RepositoryWorkspace, commit: string, artifactPath: string, originalDigest: string | null,
-  signal?: AbortSignal): Promise<CapturedFrozenInput> {
+  skills: ProposalInventory['skills'], signal?: AbortSignal): Promise<CapturedFrozenInput> {
   const root = workspace.path!;
   const text = async (args: string[]) => (await git(root, args, signal)).toString('utf8').trim();
   if (await text(['rev-parse', '--show-toplevel']) !== root || await text(['rev-parse', 'HEAD']) !== commit
@@ -166,6 +167,11 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
     if (!target || entry.digest !== target.digest || entry.mode !== target.mode || entry.size !== target.size) throw new Error('Proposal captured bytes or mode differ from commit');
   }
   if (originalDigest ? expected.get(artifactPath)?.digest !== originalDigest : expected.has(artifactPath)) throw new Error('Proposal inventory artifact differs from committed baseline');
+  for (const skill of skills) for (const resource of skill.resources ?? []) {
+    const file = resolve(dirname(skill.source.file), resource.path);
+    const path = relative(skill.source.root, file).split(sep).join('/');
+    if (path === artifactPath || expected.get(path)?.digest !== resource.digest) throw new Error('Proposal skill resource differs from committed baseline');
+  }
   if (await text(['rev-parse', 'HEAD']) !== commit) throw new Error('Proposal baseline changed during capture');
   checkAbort(signal);
   return input;
@@ -203,10 +209,13 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) throw new Error('Proposal requires an exact committed baseline');
   const artifactPath = supplied.artifactPath;
   if (!artifactPath || isAbsolute(artifactPath) || artifactPath.includes('\\') || artifactPath.split('/').some(part => !part || ['.', '..', '.git'].includes(part))) throw new Error('Unsafe configured proposal artifact path');
-  const source = prepared.kind === 'skill' ? inventory.skills.find(entry => `skill:${entry.name}` === prepared.artifact.targetRef)?.source
+  const skill = prepared.kind === 'skill' ? inventory.skills.find(entry => `skill:${entry.name}` === prepared.artifact.targetRef) : undefined;
+  if (prepared.kind === 'skill' && basename(artifactPath) !== 'SKILL.md') throw new Error('Configured skill artifact must be SKILL.md');
+  const source = prepared.kind === 'skill' ? skill?.source
     : inventory.tools.find(entry => entry.ref === prepared.artifact.targetRef)?.source;
   const inventoryRoot = supplied.inventoryRoot ?? source?.root;
   if (inventoryRoot !== undefined && (resolve(inventoryRoot) !== inventoryRoot || realpathSync(inventoryRoot) !== inventoryRoot)) throw new Error('Proposal inventory root must be canonical');
+  if (inventory.skills.some(skill => skill.resources && skill.source.root !== inventoryRoot)) throw new Error('Proposal skill resource root differs from inventory root');
   if (prepared.artifact.originalDigest && (!source || !inventoryRoot || relative(inventoryRoot, realpathSync(source.file)) !== artifactPath)) {
     throw new Error('Configured artifact path differs from inventory source');
   }
@@ -228,7 +237,8 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
     if (!Array.isArray(check.argv) || !check.argv[0]?.trim() || check.argv.length > 128 || check.argv.some(argument => typeof argument !== 'string' || argument.includes('\0'))
       || Buffer.byteLength(canonicalLearningJson(check.argv)) > 32 * 1024) throw new Error('Invalid configured proposal command');
     if (check.experiment !== undefined) {
-      const experiment = prepareProposalExperiment(prepared.kind, artifactPath, prepared.checks.find(entry => entry.id === check.checkId)!, check.experiment);
+      const experiment = prepareProposalExperiment(prepared.kind, artifactPath, prepared.checks.find(entry => entry.id === check.checkId)!, check.experiment,
+        prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);
       if (experiment.status === 'unsupported') return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
       if (canonicalLearningJson(check.argv) !== canonicalLearningJson(experiment.experiment.argv)) throw new Error('Configured semantic command does not deliver the bound input');
       experiments.set(check.checkId, freezeJson(experiment.experiment));
@@ -236,6 +246,16 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   }
   const harness = { id: configured.id, revision: configured.revision, observe: configured.observe.bind(configured) };
   const baseImageId = supplied.baseImageId;
+  const scratchHelper = supplied.scratchHelper;
+  if (scratchHelper !== undefined) assertFrozenScratchHelper(scratchHelper);
+  if ([...experiments.values()].some(experiment => experiment.recovery !== undefined) && scratchHelper === undefined) {
+    return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
+  }
+  const limits = supplied.sandbox.limits === undefined ? undefined : freezeJson(z.object({
+    timeoutMs: z.number().int().positive().max(120_000),
+    maxOutputBytes: z.number().int().positive().max(DISTILLATION_LIMITS.outputBytes),
+  }).strict().parse(supplied.sandbox.limits));
+  const remainingMs = supplied.sandbox.remainingMs?.bind(supplied.sandbox);
   if (!/^sha256:[a-f0-9]{64}$/.test(baseImageId)) throw new Error('Proposal requires an exact local frozen image');
   if (!repository.withLifecycleLease || !repository.capabilities.read || !repository.capabilities.prepare || !repository.capabilities.checkout
     || !repository.capabilities.cleanup || !repository.prepare || !repository.checkout || !repository.cleanup) {
@@ -254,7 +274,8 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   const recordOwnership = supplied.recordOwnership;
   const executeFrozen = supplied.sandbox.executeFrozen.bind(supplied.sandbox);
   const configurationDigest = digest({ repositoryId, request, commit, artifactPath, baseImageId, inventoryDigest, inventoryRoot,
-    binding, harnessId: harness.id, harnessRevision: harness.revision, cases, proposal: prepared });
+    binding, harnessId: harness.id, harnessRevision: harness.revision, cases, proposal: prepared,
+    ...(scratchHelper === undefined ? {} : { scratchHelper }), ...(limits === undefined ? {} : { limits }) });
   const current = async () => { checkAbort(signal); await assertCurrent(binding, { signal }); checkAbort(signal); };
   await current();
   const operationState: { outcome?: ProposalOperationOutcome; workspaceId?: string } = {};
@@ -285,9 +306,14 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
       checkAbort(signal);
       assertWorkspace(workspace);
       if (workspace.path !== preparedPath) throw new Error('Proposal checkout relocated the owned workspace');
-      const original = await captureCommitted(workspace, commit, artifactPath, prepared.artifact.originalDigest, signal);
-      const proposed = replaceFrozenFile(original, artifactPath, Buffer.from(prepared.artifact.content, 'utf8'));
-      const nonAssetDigest = digest(original.manifest.filter(entry => entry.path !== artifactPath));
+      const committed = await captureCommitted(workspace, commit, artifactPath, prepared.artifact.originalDigest, inventory.skills, signal);
+      const amended = replaceFrozenFile(committed, artifactPath, Buffer.from(prepared.artifact.content, 'utf8'));
+      const skillFiles = prepared.kind === 'skill' ? [artifactPath] : undefined;
+      if (skill && skillFiles) skillFiles.push(...(skill.resources ?? []).map(resource =>
+        relative(skill.source.root, resolve(dirname(skill.source.file), resource.path)).split(sep).join('/')));
+      const original = !skillFiles ? committed : prepared.artifact.originalDigest ? selectFrozenFiles(committed, skillFiles) : undefined;
+      const proposed = skillFiles ? selectFrozenFiles(amended, skillFiles) : amended;
+      const nonAssetDigest = digest((original ?? proposed).manifest.filter(entry => entry.path !== artifactPath));
       if (digest(proposed.manifest.filter(entry => entry.path !== artifactPath)) !== nonAssetDigest) throw new Error('Proposal variants changed non-asset bytes');
       const observations: ProposalRuntimeObservation[] = [];
       const comparisons: Comparison[] = [];
@@ -297,16 +323,33 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
       const observe = async (check: ProposalRuntimeCase, version: 'original' | 'proposed') => {
         await current();
         const captured = version === 'original' ? original : proposed;
+        if (!captured) throw new Error('Original skill input is unavailable');
         const experiment = experiments.get(check.checkId);
-        const registration: { ownership?: FrozenExecutionOwnership; recorded: boolean } = { recorded: false };
-        const execution = freezeJson(await executeFrozen({ input: captured, baseImageId, argv: check.argv, timeoutMs: prepared.execution.timeoutMs,
-          maxOutputBytes: DISTILLATION_LIMITS.outputBytes, signal, ...(experiment?.control ? { control: experiment.control } : {}),
-          onOwnership: async ownership => {
+        const registration: { ownership?: FrozenExecutionOwnership; containerId?: string; recorded: boolean } = { recorded: false };
+        const remaining = remainingMs?.() ?? prepared.execution.timeoutMs;
+        if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Proposal execution deadline exceeded');
+        const executionRequest: FrozenExecutionOptions = Object.freeze({ input: captured, baseImageId, argv: Object.freeze([...check.argv]),
+          timeoutMs: Math.max(1, Math.floor(Math.min(prepared.execution.timeoutMs, limits?.timeoutMs ?? prepared.execution.timeoutMs, remaining))),
+          maxOutputBytes: Math.min(DISTILLATION_LIMITS.outputBytes, limits?.maxOutputBytes ?? DISTILLATION_LIMITS.outputBytes), signal,
+          ...(experiment?.control ? { control: experiment.control } : {}),
+          ...(experiment?.recovery ? { scratch: Object.freeze({ helper: scratchHelper!, artifactPath, candidateVersion: version,
+            callInput: experiment.callInput!, resources: experiment.recovery.resources,
+            recovery: Object.freeze({ callInput: experiment.recovery.callInput, requireEffectHistory: experiment.recovery.requireEffectHistory,
+              assertions: experiment.recovery.assertions, returnAssertions: experiment.recovery.returnAssertions }) }) } : {}),
+          ...(experiment?.recovery ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
+            if (!registration.recorded || !registration.ownership || registration.containerId !== undefined
+              || container.operationId !== registration.ownership.operationId || !learningIdentitySchema.safeParse(container.containerId).success) {
+              throw new Error('Frozen container identity differs from recorded ownership registration');
+            }
+            registration.containerId = container.containerId;
+          } } : {}),
+          onOwnership: async (ownership: FrozenExecutionOwnership) => {
             await current();
             const claimed = freezeJson(ownershipSchema.parse(ownership));
             if (registration.ownership || operationIds.has(claimed.operationId) || claimed.baseImageId !== baseImageId
               || claimed.inputDigest !== captured.digest || claimed.containerName !== `afk-frozen-${claimed.operationId}`
-              || claimed.contextDigest !== buildFrozenContext(captured, baseImageId, claimed.operationId).digest) {
+              || claimed.contextDigest !== buildFrozenContext(captured, baseImageId, claimed.operationId,
+                experiment?.recovery ? scratchHelper : undefined).digest) {
               throw new Error('Frozen ownership registration differs from this case or reuses an operation');
             }
             registration.ownership = claimed;
@@ -316,13 +359,18 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
               artifactPath, workspaceId: ownedId, runId: workspace.runId });
             registration.recorded = true;
             await current();
-          } }));
+          } });
+        const execution = freezeJson(await executeFrozen(executionRequest));
         checkAbort(signal);
         if (!registration.recorded || !registration.ownership || execution.evidence.operationId !== registration.ownership.operationId
           || execution.evidence.contextDigest !== registration.ownership.contextDigest) throw new Error('Frozen evidence differs from recorded ownership registration');
+        if (experiment?.recovery && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
+          throw new Error('Frozen evidence differs from independently recorded container identity');
+        }
         if (execution.evidence.mechanism !== 'docker-frozen-image' || execution.evidence.inputDigest !== captured.digest || execution.evidence.baseImageId !== baseImageId
           || execution.evidence.cwd !== '/workspace' || canonicalLearningJson(execution.evidence.argv) !== canonicalLearningJson([
-            '/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/scratch', 'TMPDIR=/scratch', ...check.argv])
+            '/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/scratch', 'TMPDIR=/scratch',
+            ...frozenExecutionArgv(executionRequest, registration.ownership.operationId)])
           || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) throw new Error('Frozen evidence differs from configured proposal execution');
         const candidateCheck = prepared.checks.find(entry => entry.id === check.checkId)!;
         const receiptBinding: ProposalRuntimeObservation['receipt']['binding'] = freezeJson({ ...binding, repositoryId,
@@ -333,7 +381,9 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           imageId: execution.evidence.imageId, baseImageId, contextDigest: execution.evidence.contextDigest, executionDigest: digest(execution), argv: execution.evidence.argv,
           inputTreeDigest: execution.evidence.inputDigest, commandDigest: execution.evidence.commandDigest,
           policyDigest: execution.evidence.policyDigest, cwd: execution.evidence.cwd });
-        const semantic = experiment ? observeProposalExperiment(experiment, execution) : undefined;
+        const semanticContext = experiment?.recovery ? Object.freeze({ options: executionRequest,
+          operationId: registration.ownership.operationId, containerId: registration.containerId! }) : undefined;
+        const semantic = experiment ? observeProposalExperiment(experiment, execution, semanticContext) : undefined;
         const actual = semantic ? { status: 'observed' as const, actual: semantic.assertions, assertions: semantic.assertions.length }
           : oracleResultSchema.parse(await harness.observe(execution, check, { signal }));
         await current();
@@ -346,7 +396,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
         const passed = semantic ? semantic.passed : compareProposalActual(actual.actual, check.expected) && execution.exitCode === 0;
         const receipt: ProposalRuntimeObservation['receipt'] = freezeJson({ version: 1, binding: receiptBinding, actual: JSON.parse(canonicalLearningJson(actual.actual)),
           expected: check.expected, assertions: actual.assertions, passed, ...(semantic ? { semantic } : {}) });
-        const observation = { execution, receipt, receiptDigest: digest(receipt) };
+        const observation = { execution, receipt, receiptDigest: digest(receipt), ...(semanticContext ? { semanticContext } : {}) };
         observations.push(observation);
         return observation;
       };

@@ -9,6 +9,7 @@ import { QARunner } from '../runners/qa-runner.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { RepositoryProvider, RepositoryWorkspace, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
+import { GitBranchProvider } from '../../infrastructure/git/branches/git-provider.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { SandboxProvider } from '../../infrastructure/sandbox/types.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
@@ -17,7 +18,7 @@ import { assertWorkspaceOwnershipAvailable, type RunResourceScope } from '../wor
 const gitState = vi.hoisted(() => new Map<string, { commit: string; branch: string }>());
 vi.mock('simple-git', async original => ({ ...await original<typeof import('simple-git')>(), simpleGit: vi.fn((path: string) => ({
   revparse: vi.fn(async (args: string[]) => args.includes('--abbrev-ref') ? gitState.get(path)?.branch : gitState.get(path)?.commit),
-  status: vi.fn(async () => ({ isClean: () => true })),
+  status: vi.fn(async () => ({ isClean: () => true, current: gitState.get(path)?.branch })),
   raw: vi.fn(async () => ''), log: vi.fn(async () => ({ all: [] })),
 })) }));
 vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
@@ -75,6 +76,7 @@ async function fixture(kind: Kind, selected = 'alpha') {
   const item = { id: '42', providerRef: '42', title: 'Repository routing', kind: 'task', state: kind === 'qa' ? 'verification' : 'ready', executionMode: 'afk', branchName: 'feat/task', dependsOn: [], tags: [] };
   const claimRelease = vi.fn(async () => { events.push('claim:release'); });
   const branches = { createBranch: vi.fn(async () => { throw new Error('default branch used'); }), createVerificationWorktree: vi.fn(async () => { throw new Error('default QA used'); }),
+    verificationRevision: GitBranchProvider.prototype.verificationRevision,
     mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })), commit: vi.fn(async () => ({ sha: '', skippedBinaryFiles: [] })), push: vi.fn(async () => {}), cleanup: vi.fn(async () => {}) };
   const change = { id: 'pr42', url: 'https://fixture.test/42', state: 'open', sourceBranch: kind === 'qa' ? 'feat/task-qa' : 'feat/task', targetBranch: 'main', mergeState: 'mergeable' };
   const bundle = { backlog: { get: vi.fn(async () => ({ ...item })), claim: vi.fn(async () => ({ item, heartbeat: async () => {}, release: claimRelease })), getActiveRework: vi.fn(async () => undefined), transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}) }, branches,
@@ -106,6 +108,7 @@ describe.each<Kind>(['workflow', 'qa'])('%s selected Repository production routi
     expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ worktreePath: join(f.root, selected) }));
     const chosen = f.providers[selected === 'alpha' ? 0 : 1];
     expect(chosen.publish).toHaveBeenCalledTimes(1);
+    if (kind === 'qa') expect(chosen.publish).toHaveBeenCalledWith({ workspaceId: selected + '-handle', expectedCommit: gitState.get(join(f.root, selected))!.commit }, expect.anything());
     expect(chosen.cleanup).toHaveBeenCalledTimes(1);
     expect(f.providers[selected === 'alpha' ? 1 : 0].prepare).not.toHaveBeenCalled();
     expect(f.events.indexOf(selected + ':cleanup')).toBeLessThan(f.events.indexOf(selected + ':release'));

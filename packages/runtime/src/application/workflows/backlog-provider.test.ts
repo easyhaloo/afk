@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { simpleGit } from 'simple-git';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetManager } from './budget.js';
 import { assemblePrompt } from './execution-protocol.js';
@@ -58,7 +59,7 @@ function runner(bundle: ProviderBundle): WorkflowRunner {
  * written into it, and the repository under test must not collect it.
  */
 async function stepGoal(subject: unknown, step: unknown, ctx: unknown, worktreePath: string): Promise<string> {
-  const segments = await (subject as { resolveStepPrompt: (step: unknown, ctx: unknown, worktree: string) => Promise<{ label: string; text: string }[]> })
+  const { segments } = await (subject as { resolveStepPrompt(step: unknown, ctx: unknown, worktree: string): ReturnType<WorkflowRunner['resolveStepPrompt']> })
     .resolveStepPrompt(step, ctx, worktreePath);
   return assemblePrompt(segments);
 }
@@ -370,11 +371,18 @@ describe('WorkflowRunner backlog provider mode', () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;
     subject.activeBacklog = item;
-
-    await subject.autoWrapup(42, process.cwd(), 'worker', 'main');
-
-    expect(bundle.branches.commit).toHaveBeenCalledWith(process.cwd(), expect.stringContaining('backlog 42'));
-    expect(bundle.branches.push).toHaveBeenCalled();
+    const checkout = await mkdtemp(join(tmpdir(), 'wrapup-'));
+    try {
+      const git = simpleGit(checkout);
+      await git.raw(['init', '-b', 'implementation']);
+      await git.raw(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgSign=false', 'commit', '--allow-empty', '-m', 'seed']);
+      await subject.autoWrapup(42, checkout, 'worker', 'main');
+      expect(bundle.branches.commit).toHaveBeenCalledWith(checkout, expect.stringContaining('backlog 42'));
+      expect(bundle.branches.push).toHaveBeenCalledWith('implementation', checkout);
+      expect(vi.mocked(bundle.branches.commit).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(bundle.branches.push).mock.invocationCallOrder[0]);
+    } finally {
+      await rm(checkout, { recursive: true, force: true });
+    }
   });
 
   it('skips a backlog that was not atomically claimed', async () => {

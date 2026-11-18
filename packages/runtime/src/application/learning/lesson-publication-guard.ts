@@ -8,10 +8,13 @@ import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/obs
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import type { CandidateStore, LearningCandidate } from './candidate-store.js';
 import { candidateProposalSchema, distillationRequestSchema, DISTILLATION_LIMITS, evidenceRefSchema, type EvidenceRef } from './contracts.js';
-import { redactEvidenceText, validateEvidencePack } from './evidence.js';
+import { auditEvidenceContent, matchesEvidenceWorkItem, validateEvidencePack } from './evidence.js';
 import { assertKnowledgeDirectory, KNOWLEDGE_FILE_BYTES, knowledgeFile, readKnowledgeAuthorization, readKnowledgeGrant } from './knowledge.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
-import { lessonQaConfigurationSchema } from './validation.js';
+import { lessonQaConfigurationSchema, lessonRepairBindingSchema } from './validation-input.js';
+import { repairedRunEvidenceFromEvents } from './run-evidence.js';
+import type { CheckSourceRead } from './source-read-grant.js';
+import { selectKnowledgeValidationChecker, validationConfigurationSchema } from './validation-configuration.js';
 
 const protocol = 'learning-validation-v1';
 const digest = (value: unknown) => bytesDigest(canonicalLearningJson(value));
@@ -27,7 +30,9 @@ const bindingSchema = z.object({ scope: learningIdentitySchema, candidateId: lea
   target: z.object({ scope: learningIdentitySchema, ref: learningIdentitySchema, revision: learningIdentitySchema,
     snapshotDigest: learningDigestSchema }).strict(), checkerId: learningIdentitySchema, checkerVersion: learningIdentitySchema,
   configurationDigest: learningDigestSchema, authorizationDigest: learningDigestSchema, executionId: z.string().uuid(),
-  qa: qaBindingSchema, qaEvidence: z.array(evidenceRefSchema).length(5) }).strict();
+  qa: qaBindingSchema, qaEvidence: z.array(evidenceRefSchema).length(5), repair: lessonRepairBindingSchema.optional(),
+  repairEvidence: z.array(evidenceRefSchema).length(3).optional() }).strict()
+  .refine(value => Boolean(value.repair) === Boolean(value.repairEvidence));
 const referenceSchema = z.object({ id: learningIdentitySchema, digest: learningDigestSchema, locator: learningIdentitySchema }).strict();
 const valueSchema = z.union([z.string().max(4096), z.array(z.string().max(1024)).max(64)]);
 const reportSchema = z.object({ report: z.object({ protocol: z.literal(protocol), binding: bindingSchema,
@@ -86,15 +91,7 @@ function readFileSnapshot(file: string, root: string, limit: number, privateFile
   } finally { closeSync(descriptor); }
 }
 
-function redactAudit(value: unknown): unknown {
-  if (typeof value === 'string') return redactEvidenceText(value);
-  if (Array.isArray(value)) return value.map(redactAudit);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [redactEvidenceText(key),
-    /^(?:[\w-]*(?:token|secret|password|passwd)|secrets|credentials|api[_-]?key|authorization|private[_-]?key|user(?:[_-]?(?:name|id))?|login|account(?:[_-]?(?:id|name))?|e[_-]?mail)$/i.test(key) ? '[redacted]' : redactAudit(entry)]));
-  return value;
-}
-
-function auditReferences(bytes: Buffer, runId: string) {
+function auditReferences(bytes: Buffer, runId: string, sourceId = 'lesson-qa') {
   const history: RunEvent[] = [];
   const references: EvidenceRef[] = [];
   new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n').forEach((line, index) => {
@@ -102,9 +99,9 @@ function auditReferences(bytes: Buffer, runId: string) {
     if (history.length >= 4096) fail('audit_changed');
     const event: RunEvent = JSON.parse(line);
     history.push(event);
-    const position = { sourceId: 'lesson-qa', messageIndex: history.length, line: index + 1, auditSequence: event.sequence };
-    const hash = digest({ content: canonicalLearningJson(redactAudit(event)), position, completeness: 'complete' });
-    references.push({ id: `evidence:${hash}`, kind: 'audit', digest: hash, locator: `source:lesson-qa/messages/${history.length}`,
+    const position = { sourceId, messageIndex: history.length, line: index + 1, auditSequence: event.sequence };
+    const hash = digest({ ...auditEvidenceContent(event, position), completeness: 'complete' });
+    references.push({ id: `evidence:${hash}`, kind: 'audit', digest: hash, locator: `source:${sourceId}/messages/${history.length}`,
       completeness: 'complete', authority: 'observed' });
   });
   const integrity = verifyRunEventHistory(runId, history);
@@ -113,9 +110,11 @@ function auditReferences(bytes: Buffer, runId: string) {
 }
 
 export interface LessonPublicationInput {
+  checkSourceRead?: CheckSourceRead;
   store: CandidateStore;
   candidate: LearningCandidate;
   configurationFile?: string;
+  homeDir?: string;
 }
 
 export type LessonPublicationResult = { status: 'blocked'; code: BlockedCode } | { status: 'current';
@@ -167,7 +166,7 @@ export function verifyLessonPublication(input: LessonPublicationInput, options: 
       || source.evidence.some(ref => !same(ref, storedRefs.get(ref.id) ?? null))) fail('source_unavailable');
     for (const entry of stored.entries.filter(entry => entry.ref.authority === 'observed')) {
       const event = JSON.parse(entry.content);
-      if (event.context?.runId !== request.sourceRunId || event.context?.workItemId !== request.workItemId
+      if (event.context?.runId !== request.sourceRunId || !matchesEvidenceWorkItem(entry, event.context?.workItemId, request.workItemId)
         || event.context?.purpose === 'learning') fail('source_unavailable');
     }
     const refs = proposal.evidenceIds.map(id => stored.entries.find(entry => entry.ref.id === id)?.ref);
@@ -176,22 +175,21 @@ export function verifyLessonPublication(input: LessonPublicationInput, options: 
     if (!input.configurationFile) fail('configuration_unavailable');
     const pins: Array<{ file: string; root: string; limit: number; privateFile: boolean; fingerprint: string }> = [];
     const readPinned = (file: string, root: string, limit: number, privateFile = false) => {
+      if (!privateFile) input.checkSourceRead?.(file);
       const snapshot = readFileSnapshot(file, root, limit, privateFile, check);
       pins.push({ file, root, limit, privateFile, fingerprint: snapshot.fingerprint });
       return snapshot;
     };
     const configuration = readPinned(input.configurationFile, dirname(input.configurationFile), 1024 * 1024, true);
     if (configuration.fingerprint !== binding.configurationDigest) fail('configuration_unavailable');
-    const config = z.object({ version: z.literal(1), checkers: z.array(z.unknown()).min(1).max(64) }).strict()
-      .parse(JSON.parse(configuration.bytes.toString('utf8')));
-    const matches = config.checkers.filter(entry => {
-      const identity = z.object({ scope: z.string(), checkerId: z.string() }).safeParse(entry);
-      return identity.success && identity.data.scope === binding.scope && identity.data.checkerId === binding.checkerId;
-    });
-    if (matches.length !== 1) fail('configuration_unavailable');
-    const checker = checkerSchema.parse(matches[0]);
+    const config = validationConfigurationSchema.parse(JSON.parse(configuration.bytes.toString('utf8')));
+    const configuredChecker = selectKnowledgeValidationChecker(config, binding.scope, binding.checkerId);
+    if (!configuredChecker) fail('configuration_unavailable');
+    const checker = checkerSchema.parse(configuredChecker);
     if (checker.version !== binding.checkerVersion || checker.target.ref !== binding.target.ref || !same(checker.qa,
-      { scope: qa.scope, workItemId: qa.workItemId, runId: qa.qaRunId, targetRevision: qa.targetRevision, root: checker.qa.root, auditDigest: qa.auditDigest })) fail('configuration_unavailable');
+      { scope: qa.scope, workItemId: qa.workItemId, runId: qa.qaRunId, targetRevision: qa.targetRevision, root: checker.qa.root, auditDigest: qa.auditDigest,
+        ...(checker.qa.repair ? { repair: checker.qa.repair } : {}) })
+      || Boolean(checker.qa.repair) !== Boolean(binding.repair)) fail('configuration_unavailable');
     failureCode = 'authorization_changed';
     const grantSnapshot = readPinned(checker.authorizationFile, dirname(checker.authorizationFile), 1024 * 1024, true);
     const grant = readKnowledgeGrant(checker.authorizationFile);
@@ -214,7 +212,7 @@ export function verifyLessonPublication(input: LessonPublicationInput, options: 
       const sessions = [...new Map(recorded.map(session => [session.sessionId, session])).values()]
         .sort((first, second) => first.sessionId < second.sessionId ? -1 : first.sessionId > second.sessionId ? 1 : 0);
       if (sessions.length > 63) fail('source_unavailable');
-      const home = realpathSync(homedir());
+      const home = realpathSync(input.homeDir ?? homedir());
       const roots = [join(home, '.afk', 'transcripts'), join(home, '.claude', 'projects'), join(home, '.codex', 'sessions'), join(home, '.codex', 'archived_sessions')];
       sources = [{ id: 'audit-1', kind: 'audit', path, allowedRoot: root, runId: identity.runId }, ...sessions.map((session, index) => {
         const path = session.transcriptPath;
@@ -235,6 +233,37 @@ export function verifyLessonPublication(input: LessonPublicationInput, options: 
     const targetDigest = bytesDigest(readPinned(join(checker.target.root, checker.target.path), checker.target.root, DISTILLATION_LIMITS.evidenceBytes).bytes);
     if (binding.target.snapshotDigest !== targetDigest || binding.target.revision !== `sha256:${targetDigest}`) fail('source_unavailable');
     failureCode = 'audit_changed';
+    if (binding.repair && checker.qa.repair) {
+      const repair = binding.repair;
+      const roles = [qa.qaRunId, repair.failure.runId, repair.fix.runId];
+      if (new Set(roles).size !== 3 || repair.failure.runId !== request.sourceRunId
+        || loaded.attempts.some(attempt => (attempt.analysisRunId !== undefined && roles.includes(attempt.analysisRunId)) || (attempt.sessionId && roles.includes(attempt.sessionId)))) fail('qa_not_independent');
+      const audits = (['failure', 'fix'] as const).map(role => {
+        const pin = checker.qa.repair![role];
+        if (pin.runId !== repair[role].runId || pin.auditDigest !== repair[role].auditDigest) fail('configuration_unavailable');
+        const bytes = readPinned(new JsonlEventStore({ root: pin.root }).pathFor(pin.runId), pin.root, DISTILLATION_LIMITS.evidenceBytes).bytes;
+        if (bytesDigest(bytes) !== pin.auditDigest) fail('audit_changed');
+        const sourceId = role === 'fix' ? 'lesson-fix' : stored.sources.find(source => source.kind === 'audit')?.id;
+        if (!sourceId) fail('source_unavailable');
+        const audit = auditReferences(bytes, pin.runId, sourceId);
+        if (audit.integrity.lastHash !== repair[role].auditHead || audit.integrity.lastSequence !== repair[role].auditSequence) fail('audit_changed');
+        return audit;
+      });
+      const [failure, fix] = audits;
+      const sourceAudits = stored.sources.filter(source => source.kind === 'audit');
+      if (sourceAudits.length !== 1 || sourceAudits[0].sourceDigest !== repair.failure.auditDigest
+        || sourceAudits[0].messageCount !== failure.history.length) fail('source_unavailable');
+      let proof: ReturnType<typeof repairedRunEvidenceFromEvents>;
+      try { proof = repairedRunEvidenceFromEvents({ scope: qa.scope, workItemId: qa.workItemId, failureRunId: repair.failure.runId,
+        fixRunId: repair.fix.runId, qaRunId: qa.qaRunId, targetRevision: qa.targetRevision }, failure.history, fix.history); }
+      catch { fail('invalid_receipt'); }
+      if (!same(proof, { failureEventId: repair.failureEventId, fixCommitEventId: repair.fixCommitEventId,
+        fixCompletionEventId: repair.fixCompletionEventId })) fail('invalid_receipt');
+      const selectedRefs = [failure.references[failure.history.findIndex(event => event.id === proof.failureEventId)],
+        fix.references[fix.history.findIndex(event => event.id === proof.fixCommitEventId)],
+        fix.references[fix.history.findIndex(event => event.id === proof.fixCompletionEventId)]];
+      if (selectedRefs.some(ref => !ref) || !same(selectedRefs, binding.repairEvidence)) fail('invalid_receipt');
+    }
     const audit = readPinned(new JsonlEventStore({ root: checker.qa.root }).pathFor(qa.qaRunId), checker.qa.root, DISTILLATION_LIMITS.evidenceBytes);
     if (bytesDigest(audit.bytes) !== qa.auditDigest) fail('audit_changed');
     const observed = auditReferences(audit.bytes, qa.qaRunId);
@@ -260,21 +289,26 @@ export function verifyLessonPublication(input: LessonPublicationInput, options: 
     const shortRef = (ref: EvidenceRef) => ({ id: ref.id, digest: ref.digest, locator: ref.locator });
     const sourceRefs = refs.map(ref => shortRef(ref!));
     const qaRefs = binding.qaEvidence.map(shortRef);
+    const repairRefs = binding.repairEvidence?.map(shortRef) ?? [];
     const expected = { ...proposal.payload, project: proposal.applicability.project, environments: proposal.applicability.environments,
+      ...(proposal.applicability.productId !== undefined ? { productId: proposal.applicability.productId } : {}),
       versions: proposal.applicability.versions, applicabilityPreconditions: proposal.applicability.preconditions,
       exclusions: proposal.applicability.exclusions, invalidationConditions: proposal.applicability.invalidationConditions, fixTargetRevision: qa.targetRevision };
     if (assertions.length !== Object.keys(expected).length || new Set(assertions.map(assertion => assertion.node)).size !== assertions.length) fail('invalid_receipt');
     for (const [key, value] of Object.entries(expected)) {
       const assertion = assertions.find(assertion => assertion.node === `lesson.${key}`);
-      const evidence = key === 'fixTargetRevision' ? qaRefs : key === 'fix' || key === 'prevention' ? [...sourceRefs, ...qaRefs] : sourceRefs;
+      const evidence = key === 'fixTargetRevision' ? [...repairRefs, ...qaRefs]
+        : key === 'fix' || key === 'prevention' ? [...sourceRefs, ...repairRefs, ...qaRefs] : sourceRefs;
       if (!assertion || !same(assertion.expected, value) || !same(assertion.actual, value) || !same(assertion.evidence, evidence)) fail('invalid_receipt');
     }
     for (const pin of pins) {
+      if (!pin.privateFile) input.checkSourceRead?.(pin.file);
       if (readFileSnapshot(pin.file, pin.root, pin.limit, pin.privateFile, check).fingerprint !== pin.fingerprint) fail('source_unavailable');
     }
     failureCode = 'storage_unavailable';
     const current = load();
-    if (current.attempts.some(attempt => attempt.analysisRunId === qa.qaRunId || attempt.sessionId === qa.qaRunId)) fail('qa_not_independent');
+    const roles = [qa.qaRunId, ...(binding.repair ? [binding.repair.failure.runId, binding.repair.fix.runId] : [])];
+    if (current.attempts.some(attempt => (attempt.analysisRunId !== undefined && roles.includes(attempt.analysisRunId)) || (attempt.sessionId && roles.includes(attempt.sessionId)))) fail('qa_not_independent');
     if (!same(current.source, source) || !same(input.store.getValidation(candidate.id), receipt)) fail('stale_candidate');
     failureCode = 'authorization_changed';
     for (const [path, expected] of authorizationReads) {

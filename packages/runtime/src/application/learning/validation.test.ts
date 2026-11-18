@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
+import type { RunEventData } from '@afk/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { TestRunnerVerificationProvider } from '../../infrastructure/verification/index.js';
 import type { VerificationProvider, VerificationRequest } from '../../plugin-sdk/capabilities.js';
 import { CandidateStore } from './candidate-store.js';
+import { completeFixtureRequest } from './ledger-data.fixture.spec.js';
 import type { CandidateProposal } from './contracts.js';
 import { buildEvidencePack } from './evidence.js';
 import { canonicalLearningJson } from './requests.js';
@@ -30,7 +32,7 @@ type Report = { protocol: string; binding: {
 }; assertions: Assertion[] };
 
 async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observed = true,
-  transform: (proposal: CandidateProposal) => CandidateProposal = proposal => proposal) {
+  transform: (proposal: CandidateProposal) => CandidateProposal = proposal => proposal, sourceEvents: RunEventData[] = [], analysisCallId?: string) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'learning-validation-'));
   resources.push(() => rmSync(root, { recursive: true, force: true }));
   const store = new CandidateStore({ file: join(root, 'private', 'ledger.sqlite') });
@@ -40,6 +42,9 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
     occurredAt: '2026-11-09T00:00:00Z', context: { runId: 'run-1', traceId: 'trace-1', workItemId: `${scope}#1`,
       profileId: 'profile-1', attempt: 1, actor: { kind: 'system', id: 'fixture' } }, correlationId: 'run-1',
     data: { kind: 'agent.session_recorded', sessionId: 'session-1' } }]);
+  if (sourceEvents.length) await events.append(sourceEvents.map((data, index) => ({ id: `source-${index}`, schemaVersion: 1 as const,
+    type: data.kind, occurredAt: '2026-11-09T00:00:01Z', context: { runId: 'run-1', traceId: 'trace-1', workItemId: `${scope}#1`,
+      profileId: 'profile-1', attempt: 1, actor: { kind: 'system' as const, id: 'fixture' } }, correlationId: 'run-1', data })));
   const path = join(root, `${Buffer.from('run-1').toString('base64url')}.jsonl`);
   const sourceInput = { id: 'audit-1', kind: observed ? 'audit' as const : 'journal' as const,
     path, allowedRoot: root, runId: 'run-1' };
@@ -55,7 +60,7 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
         exceptions: ['denied -> draft'], completion: 'published' } }) });
   const source = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:run-1', sourceRunId: 'run-1', workItemId: `${scope}#1`,
     evidenceDigest: pack.digest, analyzerVersion: 'fixture-1', reason: 'completed' }, evidence: refs }, snapshot ? pack : undefined);
-  const processed = store.completeRequest(source.key, { version: 1, candidates: [proposal], warnings: [] });
+  const processed = completeFixtureRequest(store, source.key, { version: 1, candidates: [proposal], warnings: [] }, analysisCallId);
   const candidate = store.getCandidate(processed.candidateIds[0])!;
   const oracle = join(root, 'policy.json');
   writeFileSync(oracle, JSON.stringify({ subject: 'release', rule: 'approval required', entry: 'draft',
@@ -73,6 +78,8 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
     const actual: Record<string, string | string[]> = { 'fact.subject': policy.subject, 'fact.rule': policy.rule,
       'fact.authority': policy.authority, 'process.entry': state, 'process.systems': policy.systems,
       'process.preconditions': policy.preconditions,
+      'process.applicability.preconditions': [], 'process.applicability.exclusions': [], 'process.applicability.invalidationConditions': [],
+      'process.stepCount': String(policy.actions.length),
       'process.exceptions': [`denied -> ${perform('draft', 'approve', false)}`] };
     policy.actions.forEach((action: string, index: number) => {
       const previous = state;
@@ -133,10 +140,66 @@ async function setup(kind: 'fact' | 'process' = 'fact', snapshot = true, observe
 
 function blocked(code: string) { return { status: 'blocked', code }; }
 
-async function lessonFixture() {
+async function ownedNativeFactFixture() {
+  const fixture = await setup();
+  const command = [realpathSync(process.execPath), '-e', `
+    const { readFileSync } = require('node:fs'); let input = '';
+    process.stdin.on('data', chunk => input += chunk).on('end', () => {
+      const request = JSON.parse(input), policy = JSON.parse(readFileSync('policy.json', 'utf8'));
+      const actual = { 'fact.subject': policy.subject, 'fact.rule': policy.rule, 'fact.authority': policy.authority };
+      process.stdout.write(JSON.stringify({ protocol: request.protocol, binding: request.binding,
+        assertions: request.assertions.map(assertion => ({ ...assertion, actual: actual[assertion.node], status: 'observed' })) }));
+    });
+  `];
+  const execution = { protocol: 'learning-fact-command-v1' as const, command, cwd: dirname(fixture.oracle),
+    workspaceDigest: hash('owned-fixture-workspace'), workspaceRevision: 'owned-fixture-revision', leaseId: 'owned-fixture-lease' };
+  const native = new TestRunnerVerificationProvider({ command });
+  const verify = vi.fn(native.verify.bind(native));
+  fixture.provider.verify = verify;
+  const resolveChecker = fixture.deps.resolveChecker;
+  fixture.deps.resolveChecker = async (...args) => ({ ...(await resolveChecker(...args))!, execution });
+  const read = fixture.deps.readCommitSnapshot;
+  fixture.deps.readCommitSnapshot = (...args) => { const snapshot = read(...args); return { ...snapshot, checker: { ...snapshot.checker, execution } }; };
+  const completeExecution = vi.fn(async () => ({ closed: true as const }));
+  fixture.deps.completeExecution = completeExecution;
+  return { ...fixture, execution, verify, completeExecution };
+}
+
+describe('native fact receipt binding using owned fixtures', () => {
+  it.each(['missing', 'replay', 'padded-id', 'cwd', 'command', 'input', 'exit', 'closed', 'stdout'] as const)('rejects %s observation even when outer passed is true', async defect => {
+    const fixture = await ownedNativeFactFixture();
+    const run = fixture.verify.getMockImplementation()!;
+    fixture.verify.mockImplementation(async (...args) => {
+      const result = await run(...args);
+      const observation = result.execution!;
+      if (defect === 'missing') return { ...result, execution: undefined };
+      return { ...result, execution: { ...observation,
+        ...(defect === 'replay' ? { executionId: 'previous-execution' } : {}),
+        ...(defect === 'padded-id' ? { executionId: ` ${observation.executionId} ` } : {}),
+        ...(defect === 'cwd' ? { cwd: dirname(observation.cwd) } : {}),
+        ...(defect === 'command' ? { command: [observation.command[0], '-e', 'process.exit(0)'] } : {}),
+        ...(defect === 'input' ? { inputDigest: 'a'.repeat(64) } : {}),
+        ...(defect === 'exit' ? { exitCode: 1 } : {}),
+        ...(defect === 'closed' ? { closed: false as never } : {}),
+        ...(defect === 'stdout' ? { stdout: '{}' } : {}) } };
+    });
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked(defect === 'stdout' ? 'invalid_receipt' : 'invalid_execution'));
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+
+  it('requires cleanup before entering the synchronous ledger guard', async () => {
+    const fixture = await ownedNativeFactFixture();
+    fixture.completeExecution.mockRejectedValue(new Error('owned fixture cleanup failed'));
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked('cleanup_failed'));
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+});
+
+async function lessonFixture(repair = false, analysisCallId?: string) {
   const payload = { trigger: 'duplicate retry', rootCause: 'check then write race', rootCauseStatus: 'confirmed' as const,
     attempts: ['retry failed'], fix: 'Serialize read and write', prevention: ['Run competing retry regression'] };
-  const fixture = await setup('fact', true, true, proposal => ({ ...proposal, kind: 'lesson', payload }));
+  const fixture = await setup('fact', true, true, proposal => ({ ...proposal, kind: 'lesson', payload }), repair
+    ? [{ kind: 'qa.failed', reason: 'Competing retries duplicated publication' }, { kind: 'run.finished', outcome: 'failed' }] : [], analysisCallId);
   const events = new JsonlEventStore({ root: join(dirname(fixture.oracle), 'qa') });
   const revision = 'a'.repeat(40);
   const qa: LessonQaConfiguration = { scope, workItemId: `${scope}#1`, runId: 'independent-qa', targetRevision: revision,
@@ -150,6 +213,18 @@ async function lessonFixture() {
     correlationId: qa.runId, data })));
   const qaPath = events.pathFor(qa.runId);
   qa.auditDigest = createHash('sha256').update(readFileSync(qaPath)).digest('hex');
+  if (repair) {
+    const fix = new JsonlEventStore({ root: join(dirname(fixture.oracle), 'fix') });
+    const fixRunId = 'repair-fix';
+    await fix.append([{ kind: 'commit.recorded' as const, phase: 'implementation' as const, commitSha: revision, branch: 'repair' },
+      { kind: 'run.finished' as const, outcome: 'succeeded' as const }].map((data, index) => ({ id: `fix-${index}`,
+      schemaVersion: 1 as const, type: data.kind, occurredAt: '2026-11-10T00:00:00Z', context: { runId: fixRunId,
+        traceId: fixRunId, workItemId: qa.workItemId, profileId: 'fix', attempt: 1, actor: { kind: 'system' as const, id: 'fixture' } },
+      correlationId: fixRunId, data })));
+    qa.repair = { failure: { runId: fixture.source.request.sourceRunId!, root: dirname(fixture.sourcePath),
+      auditDigest: createHash('sha256').update(readFileSync(fixture.sourcePath)).digest('hex') },
+    fix: { runId: fixRunId, root: fix.root, auditDigest: createHash('sha256').update(readFileSync(fix.pathFor(fixRunId))).digest('hex') } };
+  }
   writeFileSync(fixture.oracle, JSON.stringify({ ...JSON.parse(readFileSync(fixture.oracle, 'utf8')),
     lesson: { ...payload, project: scope, environments: [], versions: [], applicabilityPreconditions: [], exclusions: [],
       invalidationConditions: [], fixTargetRevision: revision } }));
@@ -159,17 +234,19 @@ async function lessonFixture() {
   fixture.deps.readCommitSnapshot = (...args) => {
     const snapshot = readCommitSnapshot(...args);
     return { ...snapshot, checker: { ...snapshot.checker, qa: structuredClone(qa) },
-      qaAuditDigest: createHash('sha256').update(readFileSync(qaPath)).digest('hex') };
+      qaAuditDigest: createHash('sha256').update(readFileSync(qaPath)).digest('hex'),
+      ...(qa.repair ? { repairAuditDigests: {
+        failure: createHash('sha256').update(readFileSync(fixture.sourcePath)).digest('hex'),
+        fix: createHash('sha256').update(readFileSync(new JsonlEventStore({ root: qa.repair.fix.root }).pathFor(qa.repair.fix.runId))).digest('hex'),
+      } } : {}) };
   };
   return { ...fixture, qa, qaPath };
 }
 
 describe('validateLearningCandidate production boundary', () => {
   it.each(['analysisRunId', 'sessionId', 'distinct'] as const)('rechecks late analysis identity under the validation write lock: %s', async field => {
-    const fixture = await lessonFixture();
     const callId = 'pending-analysis';
-    fixture.store.startAnalysisAttempt({ requestKey: fixture.source.key, callId, day: '2026-11-12',
-      startedAt: '2026-11-12T00:00:00Z', limit: 5 });
+    const fixture = await lessonFixture(false, callId);
     const recordValidation = fixture.store.recordValidation.bind(fixture.store);
     vi.spyOn(fixture.store, 'recordValidation').mockImplementation((...args) => {
       fixture.store.recordAnalysisIdentity(callId, {
@@ -211,6 +288,83 @@ describe('validateLearningCandidate production boundary', () => {
     expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked(mode === 'unreadable' ? 'commit_guard_unavailable' : 'audit_changed'));
     expect(fixture.store.getCandidate(fixture.candidate.id)?.version).toBe(1);
     expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+
+  it.each(['failure', 'fix', 'matching'] as const)('guards repair audit digests after the checker returns and before validation commits: %s', async mode => {
+    const fixture = await lessonFixture(true);
+    const repair = fixture.qa.repair!;
+    const fixStore = new JsonlEventStore({ root: repair.fix.root });
+    const fixPath = fixStore.pathFor(repair.fix.runId);
+    const fixPack = await buildEvidencePack({ sources: [{ id: 'lesson-fix', kind: 'audit', path: fixPath,
+      allowedRoot: repair.fix.root, runId: repair.fix.runId, expectedDigest: repair.fix.auditDigest }] });
+    const failureEvents = fixture.pack.entries.map(entry => JSON.parse(entry.content));
+    const fixEvents = fixPack.entries.map(entry => JSON.parse(entry.content));
+    const failureRef = fixture.pack.entries.find(entry => JSON.parse(entry.content).id === 'source-0')!.ref;
+    const repairEvidence = [failureRef, ...fixPack.entries.map(entry => entry.ref)];
+    let changed: { path: string; bytes: Buffer; role: 'failure' | 'fix' } | undefined;
+    if (mode !== 'matching') {
+      const pin = repair[mode];
+      const events = new JsonlEventStore({ root: pin.root });
+      const path = events.pathFor(pin.runId);
+      const original = readFileSync(path);
+      await events.append([{ id: `${mode}-late-note`, schemaVersion: 1, type: 'decision.made',
+        occurredAt: '2026-11-12T00:00:00Z', context: { runId: pin.runId, traceId: pin.runId,
+          workItemId: fixture.qa.workItemId, profileId: mode, attempt: 1, actor: { kind: 'system', id: 'fixture' } },
+        correlationId: pin.runId, data: { kind: 'decision.made', command: 'repair.audit-note', accepted: true } }]);
+      changed = { path, bytes: readFileSync(path), role: mode };
+      writeFileSync(path, original);
+    }
+    const phases: string[] = [];
+    const verify = fixture.provider.verify.bind(fixture.provider);
+    fixture.provider.verify = vi.fn(async (...args) => {
+      const result = await verify(...args);
+      phases.push('checker-returned');
+      return result;
+    });
+    const readCommitSnapshot = fixture.deps.readCommitSnapshot;
+    const commitRead = vi.fn((...args: Parameters<typeof readCommitSnapshot>) => {
+      phases.push('commit-snapshot');
+      const snapshot = readCommitSnapshot(...args);
+      if (!changed) return snapshot;
+      writeFileSync(changed.path, changed.bytes);
+      return { ...snapshot, repairAuditDigests: { ...snapshot.repairAuditDigests!,
+        [changed.role]: createHash('sha256').update(readFileSync(changed.path)).digest('hex') } };
+    });
+    fixture.deps.readCommitSnapshot = commitRead;
+
+    const result = await validateLearningCandidate(fixture.input, fixture.deps);
+
+    expect(fixture.provider.verify).toHaveBeenCalledOnce();
+    expect(phases).toEqual(['checker-returned', 'commit-snapshot']);
+    expect(commitRead).toHaveBeenCalledOnce();
+    expect(commitRead.mock.results[0].value).toMatchObject({ source: { current: true }, qaAuditDigest: fixture.qa.auditDigest });
+    const envelope = JSON.parse(fixture.requests[0].target);
+    expect(envelope.binding.repair).toEqual({
+      failure: { runId: repair.failure.runId, auditDigest: repair.failure.auditDigest,
+        auditHead: failureEvents.at(-1).integrity.hash, auditSequence: failureEvents.at(-1).sequence },
+      fix: { runId: repair.fix.runId, auditDigest: repair.fix.auditDigest,
+        auditHead: fixEvents.at(-1).integrity.hash, auditSequence: fixEvents.at(-1).sequence },
+      failureEventId: 'source-0', fixCommitEventId: 'fix-0', fixCompletionEventId: 'fix-1',
+    });
+    expect(envelope.binding.qa).toMatchObject({ qaRunId: fixture.qa.runId, targetRevision: fixture.qa.targetRevision });
+    expect(new Set([repair.failure.runId, repair.fix.runId, fixture.qa.runId]).size).toBe(3);
+    expect(envelope.binding.repairEvidence).toEqual(repairEvidence);
+    for (const node of ['lesson.fix', 'lesson.prevention', 'lesson.fixTargetRevision']) {
+      expect(envelope.assertions.find((entry: Assertion) => entry.node === node).evidence).toEqual(expect.arrayContaining(
+        repairEvidence.map(({ id, digest, locator }) => ({ id, digest, locator }))));
+    }
+    if (mode === 'matching') {
+      expect(result).toMatchObject({ status: 'validated', candidateVersion: 1, validatedVersion: 2 });
+      expect(fixture.store.getCandidate(fixture.candidate.id)).toMatchObject({ state: 'validated', version: 2 });
+      const receipt = fixture.store.getValidation(fixture.candidate.id)!;
+      const audit = JSON.parse(Buffer.from(receipt.results.map(chunk => chunk.slice('json-base64-v1:'.length)).join(''), 'base64').toString('utf8'));
+      expect(audit.report.binding).toEqual(envelope.binding);
+    } else {
+      expect(commitRead.mock.results[0].value.repairAuditDigests[mode]).not.toBe(repair[mode].auditDigest);
+      expect(result).toEqual(blocked('audit_changed'));
+      expect(fixture.store.getCandidate(fixture.candidate.id)).toEqual(fixture.candidate);
+      expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+    }
   });
 
   it('rejects a semantic report that substitutes the oracle revision for the QA Git revision', async () => {
@@ -330,13 +484,30 @@ describe('validateLearningCandidate production boundary', () => {
     expect(fixture.store.getCandidate(fixture.candidate.id)?.state).toBe('candidate');
   });
 
+  it('rejects a missing final action even when it does not change the terminal state', async () => {
+    const fixture = await setup('process');
+    const policy = JSON.parse(readFileSync(fixture.oracle, 'utf8'));
+    policy.actions.push('archive-receipt');
+    writeFileSync(fixture.oracle, JSON.stringify(policy));
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked('assertion_failed'));
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
+  });
+
   it('checks every process node, including state changes, exceptions and terminal state', async () => {
-    for (const node of ['process.entry', 'process.systems', 'process.preconditions', 'process.steps.0.action',
+    for (const node of ['process.applicability.preconditions', 'process.applicability.exclusions', 'process.applicability.invalidationConditions',
+      'process.entry', 'process.systems', 'process.preconditions', 'process.stepCount', 'process.steps.0.action',
       'process.steps.0.stateChange', 'process.steps.1.action', 'process.steps.1.stateChange', 'process.exceptions', 'process.completion']) {
       const fixture = await setup('process');
       fixture.alter(report => ({ ...report, assertions: report.assertions.filter(entry => entry.node !== node) }));
       expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked('insufficient_coverage'));
     }
+  });
+
+  it('rejects a narrative prerequisite incorrectly copied into machine routing conditions', async () => {
+    const fixture = await setup('process', true, true, proposal => ({ ...proposal,
+      applicability: { ...proposal.applicability, preconditions: ['authenticated'] } }));
+    expect(await validateLearningCandidate(fixture.input, fixture.deps)).toEqual(blocked('assertion_failed'));
+    expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
   });
 
   it.each(['authorization', 'grant', 'version', 'source', 'target', 'checker', 'config', 'provider'])(
@@ -666,26 +837,32 @@ describe('validateLearningCandidate production boundary', () => {
     expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
   });
 
-  it('enforces a monotonic deadline after final doctor blocks the event loop', async () => {
+  it('enforces a monotonic deadline when the final doctor reaches it before the timer fires', async () => {
     const fixture = await setup();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    resources.push(() => clock.mockRestore());
     vi.mocked(fixture.provider.doctor!).mockImplementation(async () => {
-      if (vi.mocked(fixture.provider.doctor!).mock.calls.length === 2) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      if (vi.mocked(fixture.provider.doctor!).mock.calls.length === 2) clock.mockReturnValue(30);
       return [{ check: 'learning-validation-v1', ok: true }];
     });
-    const started = performance.now();
     expect(await validateLearningCandidate(fixture.input, fixture.deps, { timeoutMs: 30 })).toEqual(blocked('timed_out'));
-    expect(performance.now() - started).toBeGreaterThanOrEqual(100);
+    expect(fixture.provider.doctor).toHaveBeenCalledTimes(2);
     expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
   });
 
-  it('enforces the deadline after the synchronous commit snapshot itself blocks', async () => {
+  it('enforces the deadline reached during the synchronous commit snapshot', async () => {
     const fixture = await setup();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    resources.push(() => clock.mockRestore());
     const read = vi.mocked(fixture.deps.readCommitSnapshot).getMockImplementation()!;
     vi.mocked(fixture.deps.readCommitSnapshot).mockImplementation((...args) => {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      clock.mockReturnValue(30);
       return read(...args);
     });
     expect(await validateLearningCandidate(fixture.input, fixture.deps, { timeoutMs: 30 })).toEqual(blocked('timed_out'));
+    expect(fixture.deps.readCommitSnapshot).toHaveBeenCalledTimes(1);
     expect(fixture.store.getValidation(fixture.candidate.id)).toBeUndefined();
   });
 
@@ -748,23 +925,22 @@ describe('validateLearningCandidate production boundary', () => {
     `, { eval: true, workerData: { file, coordination } });
     resources.push(() => { void worker.terminate(); });
     await new Promise<void>((resolve, reject) => { worker.once('message', () => resolve()); worker.once('error', reject); });
-    let lockedAt = 0;
-    vi.mocked(fixture.provider.doctor!).mockImplementation(async () => {
-      if (vi.mocked(fixture.provider.doctor!).mock.calls.length === 2) {
-        Atomics.store(state, 0, 1);
-        Atomics.notify(state, 0);
-        if (Atomics.wait(state, 1, 0, 1000) === 'timed-out') throw new Error('writer lock not acquired');
-        lockedAt = performance.now();
-      }
-      return [{ check: 'learning-validation-v1', ok: true }];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const realNow = performance.now.bind(performance);
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    resources.push(() => clock.mockRestore());
+    const write = fixture.store.recordValidation.bind(fixture.store);
+    const record = vi.spyOn(fixture.store, 'recordValidation').mockImplementation((...args) => {
+      const startedAt = realNow();
+      Atomics.store(state, 0, 1);
+      Atomics.notify(state, 0);
+      if (Atomics.wait(state, 1, 0, 3000) === 'timed-out') throw new Error('writer lock not acquired');
+      clock.mockImplementation(() => realNow() - startedAt);
+      return write(...args);
     });
-    const record = vi.spyOn(fixture.store, 'recordValidation');
-    const startedAt = performance.now();
     const result = await validateLearningCandidate(fixture.input, fixture.deps, { timeoutMs: 100 });
     expect(record).toHaveBeenCalledTimes(1);
-    expect(lockedAt - startedAt).toBeGreaterThan(0);
-    expect(lockedAt - startedAt).toBeLessThan(100);
-    expect(performance.now() - startedAt).toBeGreaterThan(200);
+    expect(performance.now()).toBeGreaterThanOrEqual(250);
     expect(result).toEqual(blocked('timed_out'));
     expect(fixture.store.getCandidate(fixture.candidate.id)).toEqual(fixture.candidate);
     expect(fixture.store.getCandidateVersions(fixture.candidate.id)).toHaveLength(1);

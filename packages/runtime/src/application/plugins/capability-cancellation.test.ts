@@ -115,19 +115,21 @@ describe('trusted provider cancellation', () => {
     } finally { await runtime.close(); }
   });
 
-  it('blocks publication and notification after lifecycle verification is cancelled', async () => {
+  it('blocks publication and notification after lifecycle verification is cancelled', async ({ onTestFinished }) => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'capability-lifecycle-cancel-'));
+    onTestFinished(() => rm(worktreePath, { recursive: true, force: true }));
     const controller = new AbortController();
     const reason = new Error('verification cancelled');
     let publication = 0;
     let notification = 0;
     const runtime = await fixture(async () => { controller.abort(reason); return { passed: true, durationMs: 1 }; });
     const lifecycle = createCapabilityLifecycle(runtime, {
-      verifications: [{ provider: 'check', request: () => ({ target: '/workspace' }) }],
+      verifications: [{ provider: 'check', request: () => ({ target: worktreePath }) }],
       artifacts: [{ provider: 'never', artifact: () => { publication++; return { name: 'x', mediaType: 'text/plain', bytes: new Uint8Array() }; }, publish: () => {} }],
       notifications: [{ provider: 'never', message: () => { notification++; return { title: 'x', body: '' }; } }],
     });
     try {
-      await expect(new LifecycleDispatcher([lifecycle]).run('after-agent', { ...context, signal: controller.signal })).rejects.toBe(reason);
+      await expect(new LifecycleDispatcher([lifecycle]).run('after-agent', { ...context, worktreePath, signal: controller.signal })).rejects.toBe(reason);
       expect(publication).toBe(0);
       expect(notification).toBe(0);
     } finally { await runtime.close(); }

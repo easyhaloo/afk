@@ -1,5 +1,5 @@
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KnowledgeContextProvider, knowledgeConfigurationSchema, prepareConfiguredKnowledge, publishConfiguredKnowledge,
   reconcileConfiguredKnowledge } from './knowledge-runtime.js';
@@ -11,10 +11,27 @@ import { output } from './ledger-data.fixture.spec.js';
 const fixtures: ReturnType<typeof knowledgeFixture>[] = [];
 const open = () => { const fixture = knowledgeFixture(); fixtures.push(fixture); return fixture; };
 const options = (fixture: ReturnType<typeof open>) => ({ file: join(fixture.root, 'ledger.sqlite'), recoveryDirectory: fixture.recoveryDirectory,
+  validationConfigurationFile: fixture.validationConfigurationFile,
   config: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } });
 afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup(); });
 
 describe('configured knowledge application use cases', () => {
+  it('finds two Chinese process actions in a paraphrase without matching a lone fragment', async () => {
+    const fixture = knowledgeFixture(candidateProposalSchema.parse({ ...output.candidates[0], kind: 'process', targetRef: 'wiki:approval',
+      title: '退件交接', statement: 'Return handoff', payload: { entry: 'handoff', systems: ['register'], preconditions: [], exceptions: [],
+        steps: [{ id: 'check', action: '核对袋号', stateChange: 'checked', evidenceIds: ['e1'] },
+          { id: 'sign', action: '登记签收', stateChange: 'signed', evidenceIds: ['e1'] }], completion: 'signed' } }));
+    fixtures.push(fixture);
+    const input = options(fixture);
+    const scope = fixture.policy.scope;
+    const publication = await prepareConfiguredKnowledge({ ...input, scope, candidateId: fixture.candidate.id, expectedVersion: fixture.candidate.version });
+    await publishConfiguredKnowledge({ ...input, scope, key: publication.key });
+    const provider = new KnowledgeContextProvider(input);
+    const gather = (prompt: string) => provider.gather({ scope, prompt, applicability: { version: 'abc' } });
+    expect(await gather('逆向移交先查袋号还是先签收？')).toHaveLength(1);
+    expect(await gather('先查袋号还是先查重量？')).toEqual([]);
+  });
+
   it.each(['applicability', 'target'] as const)('does not promote inherited %s through the knowledge provider', async field => {
     const fixture = knowledgeFixture(candidateProposalSchema.parse({ ...output.candidates[0], targetRef: 'wiki:approval',
       applicability: { ...output.candidates[0]!.applicability, preconditions: ['approvalCondition'] } }));
@@ -165,5 +182,53 @@ describe('configured knowledge application use cases', () => {
     chmodSync(fixture.authorizationFile, 0o600);
     fixture.store.invalidateRequestSource(fixture.candidate.requestKey);
     expect(await provider.gather({ scope: fixture.policy.scope, prompt: 'Approval', applicability: { version: 'abc' } })).toEqual([]);
+  });
+
+  it('requires readable authorities and agreement among current rules for the queried version and environment', async () => {
+    const paths = ['primary.json', 'secondary.json'];
+    const fixture = knowledgeFixture(undefined, paths);
+    fixtures.push(fixture);
+    const scope = fixture.policy.scope;
+    const { key } = await prepareConfiguredKnowledge({ ...options(fixture), scope, candidateId: fixture.candidate.id, expectedVersion: fixture.candidate.version });
+    const { publication } = await publishConfiguredKnowledge({ ...options(fixture), scope, key });
+    const files = paths.map(path => join(dirname(fixture.validationTargetPath), path));
+    const sourceReadGrantFile = join(fixture.root, 'read.json');
+    const input = options(fixture);
+    const provider = new KnowledgeContextProvider({ ...input, config: { ...input.config, sourceReadGrantFile } });
+    const authorize = (paths: string[]) => writeFileSync(sourceReadGrantFile, JSON.stringify({ version: 1, grants: [{ scope,
+      targetRef: publication.targetRef, evidenceDigest: publication.evidenceDigest, revoked: false,
+      paths: [fixture.evidenceSourcePath, fixture.validationTargetPath, ...paths] }] }), { mode: 0o600 });
+    const query = { scope, prompt: 'Approval', applicability: { version: 'abc', environment: 'staging' } };
+    const statement = { scope, targetRef: publication.targetRef, subject: 'approval', rule: 'Approve before publishing',
+      version: 'abc', environment: 'staging', validUntil: '2099-01-01T00:00:00Z' };
+    const save = (file: string, record: Omit<typeof statement, 'environment'> & { environment?: string }) => writeFileSync(file, JSON.stringify(record));
+    files.forEach(file => save(file, statement));
+    authorize(files);
+    const hit = await provider.gather(query);
+    expect(hit).toMatchObject([{ origin: `knowledge:${key}; target:${publication.targetRef}`, content: expect.stringContaining(statement.rule) }]);
+    authorize([files[0]!]);
+    expect(await provider.gather(query)).toEqual([]);
+    authorize(files);
+    const contrary = { ...statement, rule: 'Publish immediately' };
+    save(files[0]!, { ...statement, environment: undefined });
+    expect(await provider.gather({ ...query, applicability: { version: 'abc' } })).toEqual([]);
+    save(files[0]!, statement);
+    for (const record of [{ ...contrary, version: 'older' }, { ...contrary, environment: 'production' }, { ...contrary, validUntil: '2000-01-01T00:00:00Z' }]) {
+      save(files[1]!, record);
+      expect(await provider.gather(query)).toEqual(hit);
+    }
+    for (const record of [contrary, { ...statement, scope: 'github:other/api' }, { ...statement, validUntil: 'unknown' }]) {
+      save(files[1]!, record);
+      expect(await provider.gather(query)).toEqual([]);
+    }
+    save(files[1]!, statement);
+    const deadline = Date.parse(statement.validUntil);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(deadline - 1);
+    try {
+      expect(await provider.gather(query)).toEqual(hit);
+      clock.mockReturnValue(deadline);
+      expect(await provider.gather(query)).toEqual([]);
+    } finally { clock.mockRestore(); }
+    expect(fixture.store.getPublication(key)).toEqual(publication);
   });
 });

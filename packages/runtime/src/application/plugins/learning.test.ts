@@ -274,6 +274,78 @@ describe('optional learning plugin', () => {
     await expect(runtime.dispatchSystemAction('learning.distill', { request, pack, state: 'published' })).rejects.toThrow();
   });
 
+  it('submits version-bound corrections through the public action without starting analysis or changing the old candidate', async () => {
+    const { runtime, homeDir } = await fixture({ enabled: true, dailyCalls: 0 });
+    const file = join(homeDir, 'review.txt');
+    writeFileSync(file, 'Require review before publishing.');
+    const pack = await buildEvidencePack({ sources: [{ id: 'review-1', kind: 'session', path: file, allowedRoot: homeDir }] });
+    const scope = 'github:acme/api';
+    const request = { version: 1, scope, sourceId: 'review-source', evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' };
+    const accepted = await runtime.dispatchSystemAction('learning.distill', { request, pack }) as { key: string };
+    const getProvider = vi.spyOn(runtime, 'getProvider');
+    const store = new CandidateStore({ file: join(homeDir, '.afk', 'learning', 'candidates.sqlite') });
+    try {
+      const id = store.completeRequest(accepted.key, { version: 1, warnings: [], candidates: [{ kind: 'fact', title: 'Review', statement: 'Require review.',
+        evidenceIds: [pack.entries[0].ref.id], applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] },
+        payload: { subject: 'publishing', rule: 'Require review', classification: 'proposal' } }] }).candidateIds[0];
+      const original = store.getCandidate(id)!;
+      const input = { scope, candidateId: id, expectedVersion: original.version, correction: 'Only releases require review. password=PRIVATE_TOKEN' };
+      const submitted = await runtime.dispatchSystemAction('learning.correct', input) as { jobId: string };
+      expect(submitted).toEqual({ jobId: expect.stringMatching(/^[a-f0-9]{64}$/), scope, candidateId: id, candidateVersion: original.version });
+      expect(await runtime.dispatchSystemAction('learning.correct', input)).toEqual(submitted);
+      expect(await runtime.dispatchSystemAction('learning.jobs', { scope })).toEqual(expect.arrayContaining([
+        expect.objectContaining({ jobId: submitted.jobId, status: 'pending', attempts: [] }),
+      ]));
+      expect(store.getCandidate(id)).toEqual(original);
+      expect(store.listCandidates()).toHaveLength(1);
+      expect(store.listAnalysisAttempts(submitted.jobId)).toEqual([]);
+      expect(existsSync(join(homeDir, '.afk', 'learning', 'distillation-queue.sqlite'))).toBe(false);
+      const correction = store.getRequest(submitted.jobId)!;
+      const evidence = store.getEvidencePack(correction.request.evidenceDigest)!;
+      expect(JSON.stringify(evidence)).not.toContain('PRIVATE_TOKEN');
+      expect(correction.evidence).toEqual(evidence.entries.map(entry => entry.ref));
+      expect(correction.request.reason).toBe('correction');
+      expect(submitted.jobId).not.toBe(accepted.key);
+      expect(store.getProcessingReceipt(submitted.jobId)).toBeUndefined();
+      for (const extra of [{ state: 'validated' }, { target: { candidateId: id, expectedVersion: 1 } }, { command: ['true'] },
+        { sourceId: 'forged' }, { directory: homeDir }, { pack }, { jobId: accepted.key }]) {
+        await expect(runtime.dispatchSystemAction('learning.correct', { ...input, ...extra })).rejects.toThrow();
+      }
+      for (const change of [{ scope: 'github:other/api' }, { expectedVersion: 2 }, { candidateId: 'f'.repeat(64) }]) {
+        await expect(runtime.dispatchSystemAction('learning.correct', { ...input, ...change })).rejects.toThrow('correction_target_unavailable');
+      }
+      expect(store.listRequests()).toHaveLength(2);
+      expect(getProvider).not.toHaveBeenCalled();
+      expect(store.getCandidate(id)).toEqual(original);
+      expect(store.getCandidateVersions(id)).toEqual([original]);
+    } finally { getProvider.mockRestore(); store.close(); }
+  });
+
+  it.each([
+    { correction: '' }, { correction: ' \t\n' }, { correction: 'Review\0before publishing' }, { correction: '纠'.repeat(10923) },
+    { expectedVersion: 0 }, { expectedVersion: -1 }, { expectedVersion: 0.5 }, { expectedVersion: Number.MAX_SAFE_INTEGER + 1 },
+    { expectedVersion: '1' }, { candidateId: 'A'.repeat(64) }, { candidateId: 'a'.repeat(63) }, { scope: 'not-a-project' },
+  ])('rejects malformed correction input case %# before creating a ledger or resolving a model', async invalid => {
+    const { runtime, homeDir } = await fixture({ enabled: true });
+    const getProvider = vi.spyOn(runtime, 'getProvider');
+    try {
+      await expect(runtime.dispatchSystemAction('learning.correct', { scope: 'github:acme/api', candidateId: 'a'.repeat(64),
+        expectedVersion: 1, correction: 'Require review.', ...invalid })).rejects.toMatchObject({ name: 'ZodError' });
+      expect(existsSync(join(homeDir, '.afk', 'learning'))).toBe(false);
+      expect(getProvider).not.toHaveBeenCalled();
+    } finally { getProvider.mockRestore(); }
+  });
+
+  it('keeps correction admission disabled with learning and leaves absent ledgers untouched on rejected targets', async () => {
+    const input = { scope: 'github:acme/api', candidateId: 'a'.repeat(64), expectedVersion: 1, correction: 'Require review.' };
+    const disabled = await fixture();
+    await expect(disabled.runtime.dispatchSystemAction('learning.correct', input)).rejects.toThrow('learning_disabled');
+    expect(existsSync(join(disabled.homeDir, '.afk', 'learning', 'candidates.sqlite'))).toBe(false);
+    const enabled = await fixture({ enabled: true });
+    await expect(enabled.runtime.dispatchSystemAction('learning.correct', input)).rejects.toThrow('correction_target_unavailable');
+    expect(existsSync(join(enabled.homeDir, '.afk', 'learning', 'candidates.sqlite'))).toBe(false);
+  });
+
   it('uses the existing configured plugin loader and rejects unknown configuration fields', async () => {
     const plugins = await createConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config: { enabled: false, dailyCalls: 0 } }] });
     expect(plugins[0]?.manifest.id).toBe('learning.distiller');

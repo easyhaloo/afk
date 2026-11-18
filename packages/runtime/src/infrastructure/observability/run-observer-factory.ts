@@ -5,7 +5,7 @@ import type { EvidenceRef, EventStorePort, MetricsPort, RunEventDraft, TracerPor
 import type { ArtifactSink, EvidenceStoreProvider, EventStoreProvider, MetricsProvider, TracerProvider, TraceContext, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { logger } from '../io/logger.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
-import { RunObserver, recordObservationDelivery, type RunObserverDependencies } from '../../observability/run-observer.js';
+import { RunObserver, getObservationSignal, recordObservationDelivery, type RunObserverDependencies } from '../../observability/run-observer.js';
 import { captureEventEvidence, createArtifactAudit, type ArtifactAuditOptions } from './artifact-audit.js';
 import { redactUtf8 } from './local-evidence-store.js';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
@@ -172,6 +172,7 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
         return;
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let rejectAbort: () => void = () => undefined;
       try {
         const remaining = scope.deadline - performance.now();
         if (remaining <= 0) {
@@ -180,24 +181,30 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
           return;
         }
         await Promise.race([
-          Promise.resolve().then(() => operation({ signal: scope.controller.signal })),
+          Promise.resolve().then(() => {
+            scope.controller.signal.throwIfAborted();
+            return operation({ signal: scope.controller.signal });
+          }),
           new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => {
-              scope.controller.abort();
-              reject(new Error('Observability export timed out'));
-            }, remaining);
+            rejectAbort = () => reject(new Error('Observability export stopped'));
+            scope.controller.signal.addEventListener('abort', rejectAbort, { once: true });
+            if (scope.controller.signal.aborted) rejectAbort();
+            timer = setTimeout(() => scope.controller.abort(), remaining);
           }),
         ]);
+        scope.controller.signal.throwIfAborted();
         recordObservationDelivery(signal, 'succeeded');
       } catch {
-        recordObservationDelivery(signal, scope.controller.signal.aborted ? 'timed_out' : 'failed');
-        if (!scope.warned) {
+        const cancelled = getObservationSignal()?.aborted === true;
+        recordObservationDelivery(signal, scope.controller.signal.aborted ? cancelled ? 'dropped' : 'timed_out' : 'failed');
+        if (!cancelled && !scope.warned) {
           scope.warned = true;
           try { logger.warn({ code: 'observability_export_failed' }, 'Observability export failed; local audit remains authoritative'); }
           catch { recordObservationDelivery('logging', 'failed'); }
         }
       } finally {
         clearTimeout(timer);
+        scope.controller.signal.removeEventListener('abort', rejectAbort);
       }
     });
   };
@@ -208,27 +215,35 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
         pending: Promise.resolve(),
         controller: new AbortController(), deadline: performance.now() + 5_000, warned: false,
       };
-      return scopes.run(scope, async () => {
-        const activeTracers = tracers.filter(provider => provider.capabilities?.span && typeof provider.startSpan === 'function');
-        for (const provider of tracers) {
-          if (!provider.capabilities?.span || typeof provider.startSpan !== 'function') recordObservationDelivery('tracing', 'skipped');
-        }
-        for (const provider of activeTracers) enqueue('tracing', options => provider.startSpan!(name, scope.context, {
-          ...options, attributes: { run_id: context.runId, work_item_id: context.workItemId, profile_id: context.profileId, attempt: context.attempt, actor_kind: context.actor.kind },
-        }));
-        let failed = true;
-        try {
-          const result = await operation();
-          failed = false;
-          return result;
-        } finally {
-          for (const provider of activeTracers) {
-            if (typeof provider.endSpan === 'function') enqueue('tracing', options => provider.endSpan!(scope.context, { ...options, error: failed }));
-            else recordObservationDelivery('tracing', 'skipped');
+      const signal = getObservationSignal();
+      const abort = () => scope.controller.abort();
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      try {
+        return await scopes.run(scope, async () => {
+          const activeTracers = tracers.filter(provider => provider.capabilities?.span && typeof provider.startSpan === 'function');
+          for (const provider of tracers) {
+            if (!provider.capabilities?.span || typeof provider.startSpan !== 'function') recordObservationDelivery('tracing', 'skipped');
           }
-          await scope.pending;
-        }
-      });
+          for (const provider of activeTracers) enqueue('tracing', options => provider.startSpan!(name, scope.context, {
+            ...options, attributes: { run_id: context.runId, work_item_id: context.workItemId, profile_id: context.profileId, attempt: context.attempt, actor_kind: context.actor.kind },
+          }));
+          let failed = true;
+          try {
+            const result = await operation();
+            failed = false;
+            return result;
+          } finally {
+            for (const provider of activeTracers) {
+              if (typeof provider.endSpan === 'function') enqueue('tracing', options => provider.endSpan!(scope.context, { ...options, error: failed }));
+              else recordObservationDelivery('tracing', 'skipped');
+            }
+            await scope.pending;
+          }
+        });
+      } finally {
+        signal?.removeEventListener('abort', abort);
+      }
     },
     addEvent(_context, name, attributes) {
       const scope = scopes.getStore();
@@ -272,16 +287,22 @@ export function createRunObserver(root = process.env.AFK_EVENT_STORE_DIR, provid
   return new RunObserver({ events: {
     ...mirroredEvents,
     async append(drafts) {
+      const signal = getObservationSignal();
+      const artifacts = options.artifacts && signal ? { ...options.artifacts,
+        signal: options.artifacts.signal ? AbortSignal.any([options.artifacts.signal, signal]) : signal } : options.artifacts;
+      const uploadArtifacts = artifacts === options.artifacts ? auditArtifacts : createArtifactAudit(mirroredEvents, artifacts);
+      const mirrorOptions = evidenceStore && signal ? { ...evidenceStore,
+        signal: evidenceStore.signal ? AbortSignal.any([evidenceStore.signal, signal]) : signal } : evidenceStore;
       const plans = await Promise.all(drafts.map(async draft => {
         const pinned = evidenceStore ? { ...draft, context: { ...draft.context, actor: { ...draft.context.actor } },
           data: { ...draft.data }, evidence: draft.evidence?.map(ref => ({ ...ref })) } : draft;
-        const source = await captureEventEvidence(pinned, options.artifacts);
-        return evidenceStore ? prepareEvidenceMirror(source, evidenceStore) : { source };
+        const source = await captureEventEvidence(pinned, artifacts);
+        return mirrorOptions ? prepareEvidenceMirror(source, mirrorOptions) : { source };
       }));
       const captured = plans.map(plan => plan.source);
       const receipt = await mirroredEvents.append(captured);
-      if (auditArtifacts) {
-        for (const [index, draft] of captured.entries()) await auditArtifacts(draft, receipt.firstSequence + index);
+      if (uploadArtifacts) {
+        for (const [index, draft] of captured.entries()) await uploadArtifacts(draft, receipt.firstSequence + index);
       }
       for (const [index, plan] of plans.entries()) {
         if ('mirror' in plan) await plan.mirror?.(receipt.firstSequence + index, events);

@@ -9,7 +9,7 @@ import { WorkflowRunner } from '../workflow-engine.js';
 import { QARunner } from '../runners/qa-runner.js';
 import { withLogContext } from '../../infrastructure/io/index.js';
 import { ExperienceStore } from './experience-store.js';
-import { experienceStorePath, prepareExperienceContext, resolveExperienceQueryContext } from './runtime.js';
+import { ExperienceFeedbackError, experienceStorePath, prepareExperienceContext, resolveExperienceQueryContext } from './runtime.js';
 import { knowledgeFixture } from './knowledge.fixture.spec.js';
 import { candidateProposalSchema } from './contracts.js';
 import { output } from './ledger-data.fixture.spec.js';
@@ -60,21 +60,22 @@ function workflow(plugins: any, experienceContext?: any) {
   return runner;
 }
 
-async function workflowPrompt(fixture: Awaited<ReturnType<typeof setup>>, experienceContext?: any) {
+async function workflowPrompt(fixture: Awaited<ReturnType<typeof setup>>, experienceContext?: any, topic = 'sqlite retry') {
   const runner = workflow(fixture.plugins, experienceContext);
   await runner.run({ backlogId: '42', session: 'review', targetBranch: 'main',
     observationRunId: 'review-workflow', observationWorkItemId: `${scope}#42` });
-  return (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry; prompt Node 99' }, undefined, fixture.checkout);
+  return (await (runner as any).resolveStepPrompt({ id: 'implement', prompt: `${topic}; prompt Node 99` }, undefined, fixture.checkout)).segments;
 }
 
-async function qaProcess(fixture: Awaited<ReturnType<typeof setup>>, experienceContext?: any, canonicalLog = true, extra: any = {}) {
-  const item = { id: '42', workItemId: `${scope}#42`, title: 'sqlite retry', description: 'sqlite retry; Node 99',
+async function qaProcess(fixture: Awaited<ReturnType<typeof setup>>, experienceContext?: any, canonicalLog = true, extra: any = {}, topic = 'sqlite retry') {
+  const item = { id: '42', workItemId: `${scope}#42`, title: topic, description: `${topic}; Node 99`,
     dependsOn: [], state: 'verification', executionMode: 'afk', tags: [], branchName: 'feat/review', providerRef: '42' };
   const providers = { backlog: { get: async () => ({ ...item }), transition: async () => {}, setExecutionMode: async () => {},
       getActiveRework: async () => undefined, createRework: async () => ({ id: 'r1', cycle: 1, attempt: 1 }), resolveRework: async () => {} },
     changes: { findForBacklog: async () => null, create: async () => ({ id: 'pr-42', url: 'https://example.test/pr/42', mergeState: 'mergeable' }),
       get: async () => ({ id: 'pr-42', state: 'open', sourceBranch: 'qa-42', targetBranch: 'main', mergeState: 'mergeable' }) },
     branches: { createVerificationWorktree: async () => ({ branchName: 'qa-42', worktreePath: fixture.checkout }),
+      verificationRevision: async () => (await fixture.git.revparse('HEAD')).trim(),
       commit: async () => ({ sha: fixture.revision, skippedBinaryFiles: [] }), mergeFeatureIntoBaseline: async () => ({ merged: true, conflicts: [] }),
       listUnresolvedConflicts: async () => [], push: async () => {}, cleanup: async () => {} } };
   const execution = { id: 'execution-review', metadata: { provider: 'claude-code', transport: 'process' },
@@ -102,12 +103,13 @@ describe('trusted context production integration', () => {
       { plugins: fixture.plugins, observer: { record: async () => {} } as any,
         agentProvider: { name: 'claude-code', capabilities: new Set() } as any });
     await expect(runner.run({ backlogId: '42', session: 'review', targetBranch: 'main', baseBranch: 'main', baseBranchExplicit: true,
+      workItemId: `${scope}#42`,
       ...(observationWorkItemId ? { observationRunId: 'canonical-context', observationWorkItemId } : {}) }))
       .rejects.toThrow('stop after canonical claim');
     return runner;
   }
 
-  it.each([undefined, `${scope}#42`, 'github:foreign/private#88'])('uses the claimed business identity with observation %s and excludes foreign assets', async observationWorkItemId => {
+  it.each([undefined, `${scope}#42`])('uses the claimed business identity with observation %s and excludes foreign assets', async observationWorkItemId => {
     const fixture = await setup();
     const store = new ExperienceStore({ file: experienceStorePath(fixture.root) });
     try {
@@ -117,11 +119,19 @@ describe('trusted context production integration', () => {
       store.verify(foreign.id, { runId: 'foreign-qa', evidence: ['run:foreign-qa#regression'] });
     } finally { store.close(); }
     const runner = await claimedWorkflow(fixture, observationWorkItemId);
-    const segments = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
+    const { segments } = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
     expect(segments.some((segment: any) => segment.label === 'verified experience reference')).toBe(true);
     const contents = await fs.readFile(join(fixture.checkout, '.afk/experience-context.md'), 'utf8');
     expect(contents).toContain(`experience:${fixture.record.id}`);
     expect(contents).not.toContain('FOREIGN_ONLY_CORRECTION_71');
+  });
+
+  it('rejects foreign workflow observation identity before preparing business context', async () => {
+    const fixture = await setup();
+    const runner = await claimedWorkflow(fixture, 'github:foreign/private#88');
+    await expect((runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout))
+      .rejects.toBeInstanceOf(ExperienceFeedbackError);
+    expect(await fs.stat(join(fixture.checkout, '.afk/experience-context.md')).then(() => true, () => false)).toBe(false);
   });
 
   it.each(['saved', 'explicit'] as const)('shares %s business conditions between implementation and QA when the execution repository is different', async source => {
@@ -133,7 +143,7 @@ describe('trusted context production integration', () => {
     await runner.run({ backlogId: '42', session: 'review', targetBranch: 'main',
       observationRunId: 'business-context', observationWorkItemId: `${scope}#42` });
     (runner as any).preparedRepositories = { repositories: [repository] };
-    const segments = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
+    const { segments } = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
     expect(segments.some((segment: any) => segment.label === 'verified experience reference')).toBe(true);
     expect(await fs.readFile(join(fixture.checkout, '.afk/experience-context.md'), 'utf8')).toContain(`experience:${fixture.record.id}`);
     const qa = await qaProcess(fixture, experienceContext, false, { repositories: [repository],
@@ -147,11 +157,13 @@ describe('trusted context production integration', () => {
     expect(await fs.readFile(join(fixture.checkout, '.afk/experience-context.md'), 'utf8')).toContain(`experience:${fixture.record.id}`);
   });
 
-  it('keeps the canonical QA business identity despite an unrelated logger scope', async () => {
+  it('rejects an unrelated QA logger identity before preparing business context', async () => {
     const fixture = await setup();
     const qa = await withLogContext({ runId: 'foreign-logger', workItemId: 'github:foreign/private#88' }, () => qaProcess(fixture, undefined, false));
-    expect(qa.result.success).toBe(true);
-    expect(qa.onExperienceTarget.mock.calls[0]?.[0]).toMatchObject(trusted);
+    expect(qa.result).toMatchObject({ success: false, failureCode: 'qa_execution_failed',
+      summary: expect.stringContaining('Experience feedback requires the exact execution run and work item') });
+    expect(qa.onExperienceTarget).not.toHaveBeenCalled();
+    expect(await fs.stat(join(fixture.checkout, '.afk/experience-context.md')).then(() => true, () => false)).toBe(false);
   });
 
   it('rejects a foreign explicit target instead of adopting the execution repository as the business scope', async () => {
@@ -162,7 +174,7 @@ describe('trusted context production integration', () => {
       observationRunId: 'foreign-target', observationWorkItemId: `${scope}#42` });
     (runner as any).preparedRepositories = { repositories: [{ platform: 'github', projectKey: 'acme/implementation', primary: true,
       checkoutPath: fixture.checkout, baseBranch: 'main', workingBranch: 'feat/review' }] };
-    const segments = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
+    const { segments } = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
     expect(segments.some((segment: any) => segment.label === 'verified experience reference')).toBe(false);
     const qa = await qaProcess(fixture, experienceContext, false);
     expect(qa.result.success).toBe(false);
@@ -176,8 +188,8 @@ describe('trusted context production integration', () => {
     await runner.run({ backlogId: '42', session: 'review', targetBranch: 'main',
       observationRunId: 'malformed-canonical', observationWorkItemId: `${scope}#42` });
     (runner as any).activeBacklog = { id: '42', workItemId: 'invalid:canonical', title: 'sqlite retry' };
-    const segments = await (runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout);
-    expect(segments.some((segment: any) => segment.label === 'verified experience reference')).toBe(false);
+    await expect((runner as any).resolveStepPrompt({ id: 'implement', prompt: 'sqlite retry' }, undefined, fixture.checkout))
+      .rejects.toBeInstanceOf(ExperienceFeedbackError);
     expect(await fs.stat(join(fixture.checkout, '.afk/experience-context.md')).then(() => true, () => false)).toBe(false);
   });
 
@@ -189,21 +201,26 @@ describe('trusted context production integration', () => {
     knowledge.policy.targets[0]!.snapshot = true;
     knowledge.persistGrant();
     const input = { file: join(knowledge.root, 'ledger.sqlite'), recoveryDirectory: knowledge.recoveryDirectory,
+      validationConfigurationFile: knowledge.validationConfigurationFile,
       config: { wikiScript: knowledge.wikiScript, grants: [knowledge.authorizationFile] } };
     const publication = await prepareConfiguredKnowledge({ ...input, scope, candidateId: knowledge.candidate.id, expectedVersion: knowledge.candidate.version });
     await publishConfiguredKnowledge({ ...input, scope, key: publication.key });
     knowledge.store.close();
     await fs.copyFile(input.file, join(fixture.root, '.afk/learning/candidates.sqlite'));
     await fs.cp(knowledge.recoveryDirectory, join(fixture.root, '.afk/learning/publications'), { recursive: true });
-    await fixture.manager.configure('learning.distiller', { enabled: false, executionContexts: [trusted], knowledge: input.config }, true);
+    await fixture.manager.configure('learning.distiller', { enabled: false, executionContexts: [trusted], knowledge: input.config,
+      validation: { configurationFile: knowledge.validationConfigurationFile } }, true);
     const plugins = await createDefaultPluginRuntime({ homeDir: fixture.root, workspaceRoot: fixture.checkout });
     cleanups.push(() => plugins.dispose());
     const configured = { ...fixture, plugins };
-    for (const run of [() => workflowPrompt(configured), () => qaProcess(configured)]) {
-      await run();
-      const content = await fs.readFile(join(fixture.checkout, '.afk/experience-context.md'), 'utf8');
-      expect(content).toContain(`experience:${fixture.record.id}`);
-      expect(content).toContain(`knowledge:${publication.key}`);
+    for (const run of [(topic: string) => workflowPrompt(configured, undefined, topic),
+      (topic: string) => qaProcess(configured, undefined, true, {}, topic)]) {
+      for (const topic of ['sqlite retry approval', 'sqlite retry']) {
+        await run(topic);
+        const content = await fs.readFile(join(fixture.checkout, '.afk/experience-context.md'), 'utf8');
+        expect(content).toContain(`experience:${fixture.record.id}`);
+        expect(content.includes(`knowledge:${publication.key}`)).toBe(topic.includes('approval'));
+      }
     }
   });
 
@@ -219,7 +236,7 @@ describe('trusted context production integration', () => {
       target: { project: scope, revision: 'a'.repeat(40), dirty: true } });
     expect(resolved).toMatchObject({ ...trusted, target: { ...trusted.target, revision: fixture.revision, dirty: false } });
     expect(await prepareExperienceContext({ workItemId: `${scope}#42`, worktreePath: fixture.checkout, plugins: fixture.plugins, prompt: 'sqlite retry; Node 99' }))
-      .toBe('.afk/experience-context.md');
+      .toMatchObject({ path: '.afk/experience-context.md', recordSelection: expect.any(Function) });
     expect((await workflowPrompt(fixture)).some((segment: any) => segment.label === 'verified experience reference')).toBe(true);
     const qa = await qaProcess(fixture);
     expect.soft(qa.onExperienceTarget.mock.calls[0]?.[0]).toMatchObject(trusted);
@@ -261,6 +278,7 @@ describe('trusted context production integration', () => {
     fixture.policy.targets[0]!.snapshot = true;
     fixture.persistGrant();
     const input = { file: join(fixture.root, 'ledger.sqlite'), recoveryDirectory: fixture.recoveryDirectory,
+      validationConfigurationFile: fixture.validationConfigurationFile,
       config: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } };
     const publication = await prepareConfiguredKnowledge({ ...input, scope: fixture.policy.scope, candidateId: fixture.candidate.id, expectedVersion: fixture.candidate.version });
     await publishConfiguredKnowledge({ ...input, scope: fixture.policy.scope, key: publication.key });

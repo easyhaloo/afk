@@ -26,6 +26,7 @@ import { AgentProviderRegistry } from '../../domain/agents/registry.js';
 import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.js';
 import { validateManifest } from '../../plugin-sdk/profile.js';
 import { withCancellation } from './cancellation.js';
+import { scopedVerifier } from './shared-verification.js';
 
 export interface PluginSystemActionOptions extends ProviderOperationOptions {
   readonly authorizedWorkspace?: string;
@@ -188,7 +189,7 @@ export class PluginRuntime {
   private readonly templates = new Map<string, { readonly pluginId: string; readonly template: WorkflowTemplate }>();
   private readonly activationDiagnostics: PluginDiagnostic[] = [];
 
-  async activate(plugin: Plugin | WorkflowPlugin, onCleanupConfirmed?: () => void | Promise<void>): Promise<void> {
+  async activate(plugin: Plugin | WorkflowPlugin, onCleanupConfirmed?: () => void | Promise<void>, permits?: (...targets: string[]) => Promise<boolean>): Promise<void> {
     const normalized = normalizePlugin(plugin);
     validateManifest(normalized.manifest);
     this.validateDependencies(normalized.manifest);
@@ -208,7 +209,7 @@ export class PluginRuntime {
     };
     this.lifetimes.set(normalized.manifest.id, batch);
     try {
-      await normalized.activate(this.createContext(normalized.manifest.id, batch));
+      await normalized.activate(this.createContext(normalized.manifest.id, batch, permits));
       if (!isPlugin(plugin)) {
         batch.plugin = { ...normalized, manifest: { ...normalized.manifest, provides: this.batchCapabilities(batch) } };
       }
@@ -221,8 +222,8 @@ export class PluginRuntime {
   }
 
   /** Compatibility alias for the exploratory API. */
-  async load(plugin: Plugin | WorkflowPlugin, onCleanupConfirmed?: () => void | Promise<void>): Promise<void> {
-    return this.activate(plugin, onCleanupConfirmed);
+  async load(plugin: Plugin | WorkflowPlugin, onCleanupConfirmed?: () => void | Promise<void>, permits?: (...targets: string[]) => Promise<boolean>): Promise<void> {
+    return this.activate(plugin, onCleanupConfirmed, permits);
   }
 
   hasPendingCleanup(id: string): boolean { return this.pendingCleanup.has(id); }
@@ -377,7 +378,7 @@ export class PluginRuntime {
 
   async close(): Promise<void> { return this.dispose(); }
 
-  private createContext(pluginId: string, batch: ActivationBatch): PluginSetupContext {
+  private createContext(pluginId: string, batch: ActivationBatch, permits?: (...targets: string[]) => Promise<boolean>): PluginSetupContext {
     const register = (capability: Capability, name: string, value: PluginProvider, kind: RegistrationKind | 'custom'): void => {
       this.assertName(name, `${capability} provider`);
       if (!isObject(value)) throw new Error(`plugin '${pluginId}' registered an invalid ${capability} provider`);
@@ -385,7 +386,8 @@ export class PluginRuntime {
         throw new Error(`duplicate ${capability} provider '${name}'`);
       }
       if (this.registrations.get(capability)?.has(name)) throw new Error(`duplicate ${capability} provider '${name}'`);
-      batch.registrations.push({ pluginId, capability, name, kind, value });
+      const registered = permits && capability === 'verification.provider' ? scopedVerifier(value as VerificationProvider, permits) : value;
+      batch.registrations.push({ pluginId, capability, name, kind, value: registered });
     };
     const registerKind = (kind: RegistrationKind, name: string, value: PluginProvider): void => {
       register(CAPABILITY_BY_KIND[kind], name, value, kind);

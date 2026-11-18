@@ -27,8 +27,8 @@ import type { BaselineMergeResult } from '../../infrastructure/git/branches/prov
 import { formatExecutionFailure, formatExecutionFailureReport } from '../workflow-engine.js';
 import { diagnoseExecutionFailure, createFailureDiagnostic, type FailureDiagnostic, type FailureEvidence } from '../workflows/failure-diagnostic.js';
 import { assemblePrompt, buildExecutionPromptSegments, type PromptSegment } from '../workflows/execution-protocol.js';
-import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from '../workflows/backlog-context.js';
-import { prepareExperienceContext, resolveExperienceQueryContext } from '../learning/runtime.js';
+import { BACKLOG_CONTEXT_PATH, buildGoalSegments, prepareManagedBacklogContext, writeBacklogContext } from '../workflows/backlog-context.js';
+import { ExperienceFeedbackError, prepareExperienceContext, resolveExperienceQueryContext } from '../learning/runtime.js';
 import { experienceQueryContextSchema, type ExperienceQueryContext } from '../learning/experience-store.js';
 import { measurePromptBudget } from '../../domain/agents/prompt-budget.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
@@ -42,9 +42,11 @@ import { collectAgentTelemetry } from '../../infrastructure/observability/agent-
 import { runQaPreflight } from './qa-preflight.js';
 import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecycle.js';
 import type { PluginRuntime } from '../plugins/runtime.js';
+import { createPluginRunObserver } from '../plugins/observability.js';
+import { getObservationSignal, withObservationSignal } from '../../observability/run-observer.js';
 import { withCancellation } from '../plugins/cancellation.js';
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
-import type { RunEventData, RunFailureReasonCode } from '@afk/core';
+import type { ObservationContext, RunEventData, RunFailureReasonCode } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
@@ -71,6 +73,8 @@ type PublicationVerdict =
   | { kind: 'baseline_advanced'; detail: string };
 
 export interface QARunnerDependencies {
+  observation?: LifecycleContext['observation'];
+  onObservationSignal?: (signal: AbortSignal) => void;
   sandboxProvider?: SandboxProvider;
   agentProvider?: AgentProvider;
   agentProviderRegistry?: AgentProviderRegistry;
@@ -151,6 +155,8 @@ export class QARunner {
   private readonly onSession?: QARunnerDependencies['onSession'];
   private readonly agentProviderRegistry: AgentProviderRegistry;
   private readonly plugins?: PluginRuntime;
+  private readonly observation?: LifecycleContext['observation'];
+  private readonly onObservationSignal?: QARunnerDependencies['onObservationSignal'];
   private readonly experienceContext?: ExperienceQueryContext;
   private readonly onExperienceTarget?: QARunnerDependencies['onExperienceTarget'];
   private activeConflictExecution?: AgentExecution;
@@ -173,6 +179,8 @@ export class QARunner {
     this.onCommit = deps.onCommit;
     this.onSession = deps.onSession;
     this.plugins = deps.plugins;
+    this.observation = deps.observation;
+    this.onObservationSignal = deps.onObservationSignal;
     this.experienceContext = deps.experienceContext ? experienceQueryContextSchema.parse(deps.experienceContext) : undefined;
     this.onExperienceTarget = deps.onExperienceTarget;
     this.agentProviderRegistry = deps.agentProviderRegistry ?? deps.plugins?.getAgentProviderRegistry() ?? defaultAgentProviderRegistry;
@@ -210,8 +218,13 @@ export class QARunner {
     const timer = setTimeout(() => controller.abort(new Error(`QA deadline exceeded (${timeout}ms)`)), timeout);
     const id = String(backlogId);
     const session = `qa-${id}-${Date.now()}`;
+    const source = getLogContext();
     try {
-      return await withLogContext(getLogContext() ?? { runId: `${session}-runtime`, workItemId: id }, () => this.processObserved(id, session, controller));
+      return await withObservationSignal(controller.signal, () => {
+        this.onObservationSignal?.(getObservationSignal()!);
+        return withLogContext(source ?? { runId: `${session}-runtime`, workItemId: id },
+          () => this.processObserved(id, session, controller, source));
+      });
     } finally {
       clearTimeout(timer);
       options?.signal?.removeEventListener('abort', abort);
@@ -230,7 +243,8 @@ export class QARunner {
     this.runtimeNeedsProbe = false;
   }
 
-  private async processObserved(id: string, session: string, controller: AbortController): Promise<QAProcessResult> {
+  private async processObserved(id: string, session: string, controller: AbortController,
+    source?: { runId: string; workItemId: string }): Promise<QAProcessResult> {
     const options = { signal: controller.signal };
     logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
     let worktreePath: string | undefined;
@@ -245,6 +259,11 @@ export class QARunner {
     let runError: unknown;
     let publication: ChangeRequest | undefined;
     let leaseError: unknown;
+    let standaloneContext: ObservationContext | undefined;
+    let standaloneObserver: ReturnType<typeof createPluginRunObserver> | undefined;
+    let standaloneStarted = false;
+    let processResult: QAProcessResult | undefined;
+    const complete = (result: QAProcessResult): QAProcessResult => { processResult = result; return result; };
     this.leaseFailure = undefined;
     const leaseScope = new RunResourceScope({ repoRoot: this.projectRoot, baseBranch: 'main', managePrimary: false,
       ownership: { workspaceRoot: this.projectRoot, repositories: this.repositories, owner: runtimeRunId } });
@@ -256,6 +275,19 @@ export class QARunner {
       const backlog = await this.providers.backlog.get(id);
       controller.signal.throwIfAborted();
       if (backlog.state !== 'verification') throw new Error(`QA for ${id} requires verification state`);
+      const canonicalId = backlog.workItemId ?? (backlog.id.includes(':') ? backlog.id : undefined);
+      if (!source && canonicalId) {
+        standaloneContext = { runId: runtimeRunId, traceId: runtimeRunId, workItemId: parseWorkItemId(canonicalId).id,
+          profileId: process.env.AFK_PROFILE ?? 'default', attempt: 1, actor: { kind: 'system', id: 'qa' } };
+        standaloneObserver = createPluginRunObserver(this.plugins);
+        await standaloneObserver.record(standaloneContext, { kind: 'run.requested', run: {
+          id: standaloneContext.runId, workItemId: standaloneContext.workItemId, profileId: standaloneContext.profileId,
+          attempt: standaloneContext.attempt, status: 'pending',
+        } });
+        await standaloneObserver.record(standaloneContext, { kind: 'run.started' });
+        standaloneStarted = true;
+        await standaloneObserver.record(standaloneContext, { kind: 'qa.started' });
+      }
       const budgetStore = new BudgetStore(this.projectRoot, backlog.workItemId ?? backlog.providerRef);
       const savedBudget = await budgetStore.load();
       const maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20);
@@ -265,7 +297,7 @@ export class QARunner {
       if (budget.isExhausted()) {
         const summary = `work item budget exhausted: ${budget.exhaustionReason()}`;
         await this.markBlocked(id, summary);
-        return { success: false, summary };
+        return complete({ success: false, summary });
       }
       const baselineBranch = await this.resolveExecutionBranch(backlog);
       controller.signal.throwIfAborted();
@@ -287,6 +319,11 @@ export class QARunner {
         repoRoot: workspace?.primary.repoRoot ?? this.projectRoot,
         repositories: workspace?.repositories,
         signal: controller.signal,
+        observation: this.observation ?? (standaloneContext && standaloneObserver ? {
+          context: standaloneContext,
+          record: (data: RunEventData, options?: Parameters<NonNullable<LifecycleContext['observation']>['record']>[1]) =>
+            standaloneObserver!.record(standaloneContext!, data, options),
+        } : undefined),
       };
       lifecycleContext = { ...lifecycleBase, worktreePath: '', sessionName: session };
       const heartbeat = async () => {
@@ -309,6 +346,9 @@ export class QARunner {
         () => this.providers.branches.cleanup(worktreePath!, { preserve: !!runtimeErrorSummary }));
       const context = { ...lifecycleBase, worktreePath, sessionName: session };
       lifecycleContext = context;
+      if (!workspace?.publish) {
+        await withCancellation(() => this.providers.branches.preparePush?.(handle.branchName, worktreePath!), options);
+      }
       await withCancellation(() => dispatcher.run('before-agent', context), options);
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
       await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
@@ -318,7 +358,7 @@ export class QARunner {
       if (!featureBranch) {
         const summary = 'QA execution failed: feature branch could not be resolved';
         await this.markBlocked(id, summary);
-        return { success: false, summary, failureCode: 'qa_execution_failed' };
+        return complete({ success: false, summary, failureCode: 'qa_execution_failed' });
       }
       // Merging the change branch into the target branch is where a conflict
       // shows up. It happens before the statusline and the sandbox, so the
@@ -365,7 +405,7 @@ export class QARunner {
         if (!resolution.resolved) {
           runtimeErrorSummary = resolution.summary;
           await this.markBlocked(id, resolution.summary);
-          return { success: false, summary: resolution.summary, failureCode: resolution.failureCode ?? 'merge_conflict' };
+          return complete({ success: false, summary: resolution.summary, failureCode: resolution.failureCode ?? 'merge_conflict' });
         }
       }
 
@@ -394,24 +434,32 @@ export class QARunner {
           }))),
         });
         await this.markBlocked(id, preflight.summary!);
-        return { success: false, summary: preflight.summary, failureCode: 'qa_environment_missing', ...(declaration.evidence.length > 0 ? { evidence: declaration.evidence } : {}) };
+        return complete({ success: false, summary: preflight.summary, failureCode: 'qa_environment_missing', ...(declaration.evidence.length > 0 ? { evidence: declaration.evidence } : {}) });
       }
       if (preflight.inconclusive.length > 0) {
         logger.info({ backlogId: id, inconclusive: preflight.inconclusive }, 'QA environment probe was not conclusive; continuing');
       }
+      const revision = (ownedContextPath?: string) => this.providers.branches.verificationRevision(worktreePath!, handle.branchName, ownedContextPath);
+      const verifiedCommit = await revision();
+      const assertVerified = async (ownedContextPath?: string) => {
+        if (await revision(ownedContextPath) !== verifiedCommit) throw new Error('QA checkout moved after verification started');
+      };
       // The acceptance criteria go into the worktree, not into the goal. A
       // goal condition has a character budget the provider enforces, and a
       // description with a full criteria list outgrows it — the provider
       // then refuses the goal in silence and the run dies on an idle
       // timeout half an hour later.
-      const contextPath = description
-        ? await writeBacklogContext(worktreePath, { id, title: backlog.title, description })
-        : undefined;
+      await using managedContext = workspace ? await prepareManagedBacklogContext(worktreePath, { ...backlog, id }) : undefined;
+      let contextPath = managedContext?.path;
+      if (description && !contextPath) {
+        await writeBacklogContext(worktreePath, { id, title: backlog.title, description });
+        contextPath = BACKLOG_CONTEXT_PATH;
+      }
       const segments = buildExecutionPromptSegments(
         buildGoalSegments({
           taskStatement: qaStep.prompt.replaceAll('{iid}', id),
           title: backlog.title,
-          ...(contextPath === undefined ? {} : { contextPath: BACKLOG_CONTEXT_PATH }),
+          ...(contextPath === undefined ? {} : { contextPath }),
         }),
         this.executionMode,
         'qa',
@@ -422,17 +470,20 @@ export class QARunner {
         segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       const experienceWorkItemId = backlog.workItemId ?? (backlog.id.includes(':') ? backlog.id : getLogContext()?.workItemId);
+      let experience: Awaited<ReturnType<typeof prepareExperienceContext>>;
       if (experienceWorkItemId?.includes(':')) {
         const context = await resolveExperienceQueryContext({ workItemId: experienceWorkItemId, worktreePath, plugins: this.plugins,
           applicability: this.experienceContext?.applicability, target: this.experienceContext?.target });
-        await this.onExperienceTarget?.(context);
         try {
-          const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
+          experience = await prepareExperienceContext({ source: source ?? { runId: runtimeRunId, workItemId: experienceWorkItemId },
+            workItemId: experienceWorkItemId, worktreePath,
             prompt: `${backlog.title}\n${backlog.description ?? ''}`, plugins: this.plugins, ...context });
-          if (path) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
-        } catch {
+          if (experience) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${experience.path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
+        } catch (error) {
+          if (error instanceof ExperienceFeedbackError) throw error;
           logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
         }
+        await this.onExperienceTarget?.(context);
       }
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
@@ -440,9 +491,10 @@ export class QARunner {
         runtimeErrorSummary = overBudget.message;
         logger.error({ backlogId: id, code: overBudget.code, message: overBudget.message }, 'QA prompt is over the provider budget');
         await this.markBlocked(id, overBudget.message);
-        return { success: false, summary: overBudget.message, failureCode: 'prompt_budget_exceeded', evidence: overBudget.evidence };
+        return complete({ success: false, summary: overBudget.message, failureCode: 'prompt_budget_exceeded', evidence: overBudget.evidence });
       }
       controller.signal.throwIfAborted();
+      await assertVerified(managedContext?.path);
       execution = await this.agentProvider.createExecution({
         sandbox,
         worktreePath,
@@ -454,6 +506,7 @@ export class QARunner {
         runtime: this.agentRuntime,
       });
       leaseScope.registerExecution(execution);
+      await experience?.recordSelection();
       controller.signal.throwIfAborted();
       if (leaseError) throw leaseError;
       await this.heartbeatRuntime(runtimeRunId, runtimeFieldsFromExecution(execution.metadata));
@@ -476,7 +529,7 @@ export class QARunner {
         const summary = `QA ${result.status}: ${diagnosis.message}`;
         runtimeErrorSummary = summary;
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
-        return { success: false, summary, failureCode: diagnosis.code };
+        return complete({ success: false, summary, failureCode: diagnosis.code });
       }
 
       const signal = asQAResult(result.structuredOutput);
@@ -484,21 +537,26 @@ export class QARunner {
         const summary = `${formatExecutionFailure(result)}; missing QA completion payload`;
         runtimeErrorSummary = summary;
         await this.markBlocked(id, summary);
-        return { success: false, summary, failureCode: 'qa_execution_failed' };
+        return complete({ success: false, summary, failureCode: 'qa_execution_failed' });
       }
       if (leaseError) throw leaseError;
       await heartbeat();
-      if (signal.result === 'PASS') await withCancellation(() => dispatcher.run('after-agent', context), options);
-      const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName,
+      await managedContext?.release();
+      if (signal.result === 'PASS') {
+        await assertVerified();
+        await withCancellation(() => dispatcher.run('after-agent', context), options);
+      }
+      const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName, verifiedCommit, assertVerified,
         () => withCancellation(() => dispatcher.run('before-publish', context), options), options,
         change => { publication = change; }, workspace?.publish && (async () => {
           await leaseScope.stopExecutions();
-          await workspace!.publish!();
+          await assertVerified();
+          await workspace!.publish!({ path: worktreePath!, commit: verifiedCommit });
         }));
       if (!outcome.success) {
         runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
       }
-      return outcome;
+      return complete(outcome);
     } catch (error) {
       runError = error;
       const message = `QA execution failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -510,7 +568,7 @@ export class QARunner {
         throw error;
       }
       logger.error({ backlogId: id, error }, 'QA execution failed');
-      return { success: false, summary: message, failureCode: 'qa_execution_failed' };
+      return complete({ success: false, summary: message, failureCode: 'qa_execution_failed' });
     } finally {
       controller.signal.removeEventListener('abort', stop);
       const cleanupErrors: Error[] = [];
@@ -534,6 +592,17 @@ export class QARunner {
       if (runtimeStarted) {
         await this.finishRuntime(runtimeRunId, runtimeErrorSummary ? 'blocked' : 'completed', runtimeErrorSummary);
       }
+      if (standaloneStarted && standaloneContext && standaloneObserver) await attempt('audit', async () => {
+        const succeeded = processResult?.success === true && cleanupErrors.length === 0 && !controller.signal.aborted;
+        await standaloneObserver!.record(standaloneContext!, succeeded ? { kind: 'qa.passed' } : {
+          kind: 'qa.failed', reason: processResult?.rework ? 'rework' : 'blocked',
+          reasonCode: processResult?.failureCode ?? 'qa_execution_failed', summary: runtimeErrorSummary ?? processResult?.summary,
+          ...(processResult?.failedCriteria ? { failedCriteria: processResult.failedCriteria } : {}),
+          ...(processResult?.evidence ? { evidence: processResult.evidence } : {}),
+        });
+        await standaloneObserver!.record(standaloneContext!, { kind: 'run.finished',
+          outcome: controller.signal.aborted ? 'cancelled' : succeeded ? 'succeeded' : 'failed' });
+      });
       if (cleanupErrors.length) throw new AggregateError(runError === undefined ? cleanupErrors : [runError, ...cleanupErrors], runtimeErrorSummary, {
         cause: { runError, publication, recovery: { runtimeRunId, worktreePath, execution, sandbox, workspace, scope: leaseScope } },
       });
@@ -733,7 +802,7 @@ export class QARunner {
       {
         kind: 'context',
         label: 'suggested action',
-        actual: `the backlog context is already written to ${BACKLOG_CONTEXT_PATH}; shorten the task statement or the completion protocol, or raise the goal limit the ${provider} provider declares`,
+        actual: `shorten the task statement or the completion protocol, or raise the goal limit the ${provider} provider declares`,
       },
     ];
     return createFailureDiagnostic({
@@ -767,6 +836,8 @@ export class QARunner {
     signal: QAResult,
     worktreePath: string,
     verificationBranch: string,
+    commitSha: string,
+    assertVerified: () => Promise<void>,
     beforePublish: () => Promise<void>,
     options?: ProviderOperationOptions,
     onPublished?: (change: ChangeRequest) => void,
@@ -779,19 +850,15 @@ export class QARunner {
       const backlog = await this.providers.backlog.get(backlogId);
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
       const targetBranch = (await this.resolvePlan(backlog)).targetRef;
+      await assertVerified();
+      await this.onCommit?.(commitSha, verificationBranch);
+      await beforePublish();
+      await assertVerified();
       await this.beforeChange?.('publish', backlog);
       await withCancellation(() => undefined, options);
-      const commit = await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
-      const commitSha = commit.sha;
-      await withCancellation(() => undefined, options);
-      if (commit.skippedBinaryFiles.length > 0) {
-        logger.warn({ backlogId, worktreePath, skippedBinaryFiles: commit.skippedBinaryFiles },
-          'binary files left out of the QA commit');
-      }
-      if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
-      await beforePublish();
+      await assertVerified();
       if (publishRepository) await publishRepository();
-      else await this.providers.branches.push(verificationBranch, worktreePath);
+      else await this.providers.branches.push(verificationBranch, worktreePath, commitSha);
       // A previous attempt may have left the change request behind (a re-run
       // of an already-published item). Look it up unconditionally: `beforeChange`
       // is an optional pre-publish hook, not a gate for the lookup. Without it
@@ -810,6 +877,7 @@ export class QARunner {
       };
       let mr = existing;
       await beforePublish();
+      await assertVerified();
       if (mr) {
         // A previous attempt left the review request behind. The evidence in
         // its body is the evidence of that attempt, so it is refreshed with

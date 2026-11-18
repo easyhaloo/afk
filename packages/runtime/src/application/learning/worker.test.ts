@@ -1,13 +1,19 @@
+import { fork } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeProvider } from '../../domain/agents/claude-code.js';
 import { DurableTriggerQueue } from '../plugins/trigger-queue.js';
 import { CandidateStore } from './candidate-store.js';
 import { buildEvidencePack, saveEvidencePack } from './evidence.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
-import { LearningWorker, queryLearningState, submitDistillation } from './worker.js';
+import { LearningWorker, queryLearningRequest, queryLearningState, submitDistillation } from './worker.js';
+import type { AnalysisExecutionInput } from './analysis-runner.js';
+import { DISTILLATION_LIMITS } from './contracts.js';
 
 const directories: string[] = [];
 const workers: LearningWorker[] = [];
@@ -22,7 +28,7 @@ async function fixture() {
   const directory = join(root, 'learning');
   const request = { version: 1 as const, scope, sourceId: 'run:r1', sourceRunId: 'r1', workItemId: `${scope}#42`,
     evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'completed' as const };
-  const analyze = vi.fn(async () => ({ analysisRunId: 'analysis-1', sessionId: 'analysis-session-1', output: {
+  const analyze = vi.fn(async (_input?: AnalysisExecutionInput) => ({ analysisRunId: 'analysis-1', sessionId: 'analysis-session-1', output: {
     type: 'goal_complete', distillation: { version: 1, warnings: [], candidates: [{
       kind: 'fact', title: 'Publishing approval', statement: 'Approval is required.',
       evidenceIds: [pack.entries[0]!.ref.id], applicability: { project: scope, environments: [], versions: [],
@@ -47,6 +53,186 @@ afterEach(async () => {
 });
 
 describe('distillation worker', () => {
+  it('does not retry a changed executable after a Worker restart', async () => {
+    const input = await fixture();
+    const analyze = vi.fn(async ({ onStarted }: AnalysisExecutionInput) => {
+      await onStarted!({ analysisRunId: 'analysis-1', sessionId: 'analysis-session-1' });
+      throw new Error('analysis_executable_changed');
+    });
+    const options = { ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() };
+    const target = { scope, requestKey: input.job.key };
+    const first = worker(options);
+    await first.runOnce(target);
+    await first.close();
+    const resumed = await worker(options).runOnce(target);
+    expect(analyze).toHaveBeenCalledTimes(1);
+    expect(resumed.job).toMatchObject({ status: 'blocked', reasonCode: 'analysis_executable_changed',
+      attempts: [{ status: 'failed', errorCode: 'analysis_executable_changed' }] });
+    expect(resumed.candidates).toEqual([]);
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    try { expect(store.getModelCallCount(resumed.job.attempts[0]!.day)).toBe(1); } finally { store.close(); }
+  });
+
+  it.each(['replay', 'source_invalidated'] as const)('refuses a reserved launch on %s at the Worker startup boundary', async scenario => {
+    const input = await fixture();
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    const launch = vi.fn();
+    const identity = { analysisRunId: 'analysis-1', sessionId: 'analysis-session-1' };
+    try {
+      const analyze = async ({ onStarted }: AnalysisExecutionInput) => {
+        if (scenario === 'source_invalidated') store.setRequestBlocked(input.job.key, scenario);
+        await onStarted!(identity);
+        launch();
+        if (scenario === 'replay') {
+          await onStarted!(identity);
+          launch();
+        }
+        return input.analyze();
+      };
+      const instance = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
+      const result = await instance.runOnce({ scope, requestKey: input.job.key });
+      expect(launch).toHaveBeenCalledTimes(scenario === 'replay' ? 1 : 0);
+      expect(result.job).toMatchObject({ status: 'blocked', reasonCode: scenario === 'replay' ? 'analysis_outcome_unknown' : scenario });
+      expect(result.candidates).toEqual([]);
+      const attempts = store.listAnalysisAttempts(input.job.key);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.analysisRunId).toBe(scenario === 'replay' ? identity.analysisRunId : undefined);
+      expect(store.getModelCallCount(attempts[0]!.day)).toBe(1);
+      await instance.close();
+      const resumed = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
+      expect((await resumed.runOnce({ scope, requestKey: input.job.key })).job).toEqual(result.job);
+      expect(store.listAnalysisAttempts(input.job.key)).toEqual(attempts);
+    } finally { store.close(); }
+  });
+
+  it('keeps an already processed request intact when it completes between reservation and launch', async () => {
+    const input = await fixture();
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    const launch = vi.fn();
+    try {
+      const result = await input.analyze();
+      const instance = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider(), analyze: async ({ onStarted }) => {
+        store.completeRequest(input.job.key, result.output.distillation);
+        await onStarted!({ analysisRunId: result.analysisRunId, sessionId: result.sessionId });
+        launch();
+        return result;
+      } });
+      const state = await instance.runOnce({ scope, requestKey: input.job.key });
+      expect(launch).not.toHaveBeenCalled();
+      expect(state.job.status).toBe('processed');
+      expect(state.job.reasonCode).toBeUndefined();
+      expect(state.candidates).toHaveLength(1);
+      expect(store.listAnalysisAttempts(input.job.key)).toMatchObject([{ status: 'cancelled', errorCode: 'already_processed' }]);
+    } finally { store.close(); }
+  });
+
+  it('processes only the exact request and leaves prequeued requests for a later global worker', async () => {
+    const input = await fixture();
+    const same = await submitDistillation({ ...input, request: { ...input.request, sourceId: 'run:r2', sourceRunId: 'r2' } });
+    const foreignScope = 'github:other/api';
+    const foreign = await submitDistillation({ ...input, request: { ...input.request, scope: foreignScope, workItemId: `${foreignScope}#42` } });
+    const queue = new DurableTriggerQueue(join(input.directory, 'distillation-queue.sqlite'), async () => {});
+    const deliveries = [same, foreign].map(entry => queue.enqueue('learning.distill', JSON.stringify({ jobId: entry.key, scope: entry.request.scope }), entry.key));
+    await queue.close();
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    try {
+      [same, foreign].forEach((entry, index) => store.markHandedOff(entry.key, deliveries[index]!.deliveryId));
+      const before = [same, foreign].map(entry => store.getRequest(entry.key));
+      const reconcileSources = vi.fn(async () => {});
+      const analyze = vi.fn(async ({ jobId }: { jobId: string }) => {
+        const result = await input.analyze();
+        result.output.distillation.candidates[0]!.applicability.project = jobId === foreign.key ? foreignScope : scope;
+        return result;
+      });
+      const target = { scope, requestKey: input.job.key };
+      const instance = worker({ ...input, analyze, reconcileSources, enabled: true, provider: new ClaudeCodeProvider() });
+      const result = await instance.runOnce(target);
+      expect(result.job).toMatchObject({ jobId: input.job.key, status: 'processed' });
+      expect(result.processing?.candidateIds).toEqual(result.candidates.map(candidate => candidate.id));
+      expect(result.candidates).toHaveLength(1);
+      expect(analyze).toHaveBeenCalledTimes(1);
+      expect(reconcileSources).toHaveBeenCalledTimes(1);
+      expect(reconcileSources).toHaveBeenCalledWith(target);
+      expect([same, foreign].map(entry => store.getRequest(entry.key))).toEqual(before);
+      expect([same, foreign].map(entry => store.listAnalysisAttempts(entry.key))).toEqual([[], []]);
+      await instance.close();
+      const pending = new DurableTriggerQueue(join(input.directory, 'distillation-queue.sqlite'), async () => {});
+      expect(deliveries.map(delivery => pending.status(delivery.deliveryId)[0])).toMatchObject([
+        { status: 'pending', attempts: 0 }, { status: 'pending', attempts: 0 },
+      ]);
+      await pending.close();
+      const replay = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
+      expect(await replay.runOnce(target)).toEqual(result);
+      expect(analyze).toHaveBeenCalledTimes(1);
+      await replay.close();
+      const global = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
+      expect(await global.runOnce()).toEqual({ processed: 3, pending: 0, blocked: 0 });
+      expect(analyze).toHaveBeenCalledTimes(3);
+      expect(queryLearningRequest({ directory: input.directory, scope: foreignScope, requestKey: foreign.key }).candidates)
+        .toMatchObject([{ requestKey: foreign.key, proposal: { applicability: { project: foreignScope } } }]);
+    } finally { store.close(); }
+  });
+
+  it.each(['scope', 'missing', 'malformed'] as const)('rejects a %s target before reconciliation or analysis', async invalid => {
+    const input = await fixture();
+    const reconcileSources = vi.fn(async () => {});
+    const instance = worker({ ...input, reconcileSources, enabled: true, provider: new ClaudeCodeProvider() });
+    const target = { scope: invalid === 'scope' ? 'github:other/api' : scope,
+      requestKey: invalid === 'missing' ? '0'.repeat(64) : invalid === 'malformed' ? 'bad' : input.job.key };
+    await expect(instance.runOnce(target)).rejects.toThrow();
+    expect(reconcileSources).not.toHaveBeenCalled();
+    expect(input.analyze).not.toHaveBeenCalled();
+    expect(queryLearningState({ directory: input.directory, scope }).jobs[0]).toMatchObject({ status: 'pending', attempts: [] });
+  });
+
+  it.each(['source_invalidated', 'budget_exhausted'] as const)('does not drain unrelated deliveries for a %s target', async reason => {
+    const input = await fixture();
+    const other = await submitDistillation({ ...input, request: { ...input.request, sourceId: 'run:other' } });
+    const queue = new DurableTriggerQueue(join(input.directory, 'distillation-queue.sqlite'), async () => {});
+    const delivery = queue.enqueue('learning.distill', JSON.stringify({ jobId: other.key, scope }), other.key);
+    await queue.close();
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    try {
+      store.markHandedOff(other.key, delivery.deliveryId);
+      const before = store.getRequest(other.key);
+      if (reason === 'source_invalidated') store.setRequestBlocked(input.job.key, reason);
+      const instance = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider(), dailyCalls: reason === 'budget_exhausted' ? 0 : 10 });
+      expect(await instance.runOnce({ scope, requestKey: input.job.key })).toMatchObject({
+        job: { status: 'blocked', reasonCode: reason, attempts: [] }, candidates: [],
+      });
+      expect(store.getRequest(other.key)).toEqual(before);
+      expect(store.listAnalysisAttempts(other.key)).toEqual([]);
+      expect(input.analyze).not.toHaveBeenCalled();
+      await instance.close();
+      const pending = new DurableTriggerQueue(join(input.directory, 'distillation-queue.sqlite'), async () => {});
+      expect(pending.status(delivery.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+      await pending.close();
+    } finally { store.close(); }
+  });
+
+  it('queries only receipt members and rejects corrupt membership instead of using a project-wide candidate', async () => {
+    const input = await fixture();
+    const target = { directory: input.directory, scope, requestKey: input.job.key };
+    expect(queryLearningRequest(target)).toMatchObject({ job: { status: 'pending' }, candidates: [] });
+    const other = await submitDistillation({ ...input, request: { ...input.request, sourceId: 'run:other' } });
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    let foreignId: string;
+    try {
+      const output = (await input.analyze()).output.distillation;
+      foreignId = store.completeRequest(other.key, output).candidateIds[0]!;
+      store.completeRequest(input.job.key, output);
+      expect(queryLearningRequest(target).candidates).toMatchObject([{ requestKey: input.job.key }]);
+    } finally { store.close(); }
+    const database = openSqlite({ file: join(input.directory, 'candidates.sqlite'), schema: '', version: 2 });
+    try {
+      for (const candidateIds of [[foreignId], ['0'.repeat(64)], [foreignId, foreignId]]) {
+        database.prepare("UPDATE learning_ledger SET payload = ? WHERE kind = 'processing' AND key = ?")
+          .run(JSON.stringify({ requestKey: input.job.key, outputDigest: '0'.repeat(64), candidateIds, warnings: [] }), input.job.key);
+        expect(() => queryLearningRequest(target)).toThrow('learning_processing_invalid');
+      }
+    } finally { database.close(); }
+  });
+
   it('upgrades a version-one request and consumes its original private file snapshot', async () => {
     const input = await fixture();
     await saveEvidencePack(join(input.directory, 'snapshots'), input.pack);
@@ -93,6 +279,32 @@ describe('distillation worker', () => {
       expect(store.listAnalysisAttempts(input.job.key)).toMatchObject([{ status: 'started' }]);
       expect(store.getModelCallCount(new Date().toISOString().slice(0, 10))).toBe(1);
     } finally { store.close(); }
+  });
+
+  it.each([false, true])('does not block a request when another owner claims its attempt before charging (prior failure: %s)', async priorFailure => {
+    const input = await fixture();
+    const start = CandidateStore.prototype.startAnalysisAttempt;
+    if (priorFailure) {
+      const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+      try {
+        const startedAt = new Date().toISOString();
+        store.startAnalysisAttempt({ requestKey: input.job.key, day: startedAt.slice(0, 10), startedAt, callId: 'first-failure', limit: 20 });
+        store.finishAnalysisAttempt('first-failure', { status: 'failed', finishedAt: startedAt, errorCode: 'analysis_failed' });
+      } finally { store.close(); }
+    }
+    const race = vi.spyOn(CandidateStore.prototype, 'startAnalysisAttempt').mockImplementationOnce(function (this: CandidateStore, attempt) {
+      start.call(this, { ...attempt, callId: 'competing-owner' });
+      return start.call(this, attempt);
+    });
+    const instance = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider() });
+    try {
+      const result = await instance.runOnce({ scope, requestKey: input.job.key });
+      expect(result.job.status).toBe('pending');
+      expect(result.job.attempts.filter(attempt => attempt.status === 'started'))
+        .toMatchObject([{ callId: 'competing-owner' }]);
+      expect(result.job).not.toHaveProperty('reasonCode');
+      expect(input.analyze).not.toHaveBeenCalled();
+    } finally { race.mockRestore(); }
   });
 
   it.each([undefined, 'evidence_unavailable', 'source_invalidated'])('keeps its own active attempt distinct from orphan recovery and preserves source blocks (%s)', async blockedReason => {
@@ -417,6 +629,77 @@ describe('distillation worker', () => {
     expect(input.analyze).toHaveBeenCalledTimes(1);
   });
 
+  it('drains accepted deliveries when full and resumes waiting requests after delivery retention', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-10T12:00:00Z'));
+    const input = await fixture();
+    const other = await submitDistillation({ ...input, request: { ...input.request, sourceId: 'run:queued' } });
+    const [waiting, queued] = input.job.key < other.key ? [input.job, other] : [other, input.job];
+    const file = join(input.directory, 'distillation-queue.sqlite');
+    const seed = new DurableTriggerQueue(file, async () => {});
+    try {
+      for (let index = 1; index < DISTILLATION_LIMITS.pendingRequests; index++) {
+        seed.enqueue('learning.distill', '{}', `delivered-${index}`);
+      }
+      seed.start();
+    } finally { await seed.close(); }
+    const pending = new DurableTriggerQueue(file, async () => {});
+    try { pending.enqueue('learning.distill', JSON.stringify({ jobId: queued.key, scope }), queued.key); }
+    finally { await pending.close(); }
+
+    const options = { ...input, enabled: true, provider: new ClaudeCodeProvider() };
+    const target = { scope, requestKey: waiting.key };
+    const selected = worker(options);
+    expect(await selected.runOnce(target)).toMatchObject({ job: { status: 'blocked', reasonCode: 'storage_blocked', attempts: [] } });
+    await selected.close();
+    expect(input.analyze).not.toHaveBeenCalled();
+
+    const global = worker(options);
+    expect(await global.runOnce()).toEqual({ processed: 1, pending: 0, blocked: 1 });
+    await global.close();
+    expect(input.analyze.mock.calls.map(([call]) => call?.jobId)).toEqual([queued.key]);
+
+    vi.setSystemTime(new Date('2026-11-17T12:00:00Z'));
+    const resumed = worker(options);
+    expect(await resumed.runOnce()).toEqual({ processed: 2, pending: 0, blocked: 0 });
+    expect(input.analyze.mock.calls.map(([call]) => call?.jobId)).toEqual([queued.key, waiting.key]);
+    const state = queryLearningState({ directory: input.directory, scope });
+    expect(new Set(state.candidates.map(candidate => candidate.requestKey))).toEqual(new Set([waiting.key, queued.key]));
+  });
+
+  it('rolls back candidates and receipts when the successful attempt cannot commit', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-16T10:00:00Z'));
+    const input = await fixture();
+    const file = join(input.directory, 'candidates.sqlite');
+    const database = openSqlite({ file, schema: '', version: 2 });
+    try {
+      database.exec(`CREATE TRIGGER reject_analysis_success BEFORE UPDATE ON learning_ledger
+        WHEN NEW.kind = 'analysis-attempt' AND json_extract(NEW.payload, '$.status') = 'succeeded'
+        BEGIN SELECT RAISE(ABORT, 'analysis completion interrupted'); END;`);
+    } finally { database.close(); }
+    const first = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider() });
+    expect(await first.runOnce()).toEqual({ processed: 0, pending: 0, blocked: 1 });
+    await first.close();
+    expect(queryLearningState({ directory: input.directory, scope })).toMatchObject({
+      candidates: [], jobs: [{ status: 'blocked', reasonCode: 'storage_blocked',
+        attempts: [{ status: 'failed', errorCode: 'storage_blocked' }] }],
+    });
+    expect(input.analyze).toHaveBeenCalledTimes(1);
+    const recovered = openSqlite({ file, schema: '', version: 2 });
+    try { recovered.exec('DROP TRIGGER reject_analysis_success'); } finally { recovered.close(); }
+    vi.setSystemTime(Date.now() + 2000);
+    const second = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider() });
+    expect((await second.runOnce()).processed).toBe(1);
+    expect(input.analyze).toHaveBeenCalledTimes(2);
+    const state = queryLearningState({ directory: input.directory, scope });
+    expect(state.candidates).toHaveLength(1);
+    expect(state.jobs[0]?.attempts.map(attempt => attempt.status).sort()).toEqual(['failed', 'succeeded']);
+    const store = new CandidateStore({ file });
+    try { expect(store.getModelCallCount(new Date().toISOString().slice(0, 10))).toBe(2); }
+    finally { store.close(); }
+  });
+
   it('does not call models while disabled or after budget exhaustion', async () => {
     const input = await fixture();
     const disabled = worker({ ...input, enabled: false, provider: new ClaudeCodeProvider() });
@@ -461,6 +744,59 @@ describe('distillation worker', () => {
     await instance.runOnce();
     expect(input.analyze).not.toHaveBeenCalled();
     expect(queryLearningState({ directory: input.directory, scope }).jobs[0]).toMatchObject({ status: 'blocked', reasonCode: 'analysis_outcome_unknown' });
+  });
+
+  it.skipIf(process.platform === 'win32')('recovers the queue after SIGKILL without retrying or refunding an uncertain analysis', async () => {
+    const input = await fixture();
+    const script = join(input.directory, 'crash-worker.mjs');
+    await build({ stdin: { contents: `
+      import { LearningWorker } from './worker.js';
+      import { ClaudeCodeProvider } from '../../domain/agents/claude-code.js';
+      const [directory, scope, requestKey] = process.argv.slice(2);
+      const worker = new LearningWorker({ directory, enabled: true, provider: new ClaudeCodeProvider(),
+        analyze: async ({ onStarted }) => {
+          onStarted({ analysisRunId: 'crash-run', sessionId: 'crash-session' });
+          await new Promise(() => {
+            setInterval(() => {}, 1000);
+            process.send('analysis-started');
+          });
+        },
+      });
+      await worker.runOnce({ scope, requestKey });
+    `, resolveDir: fileURLToPath(new URL('.', import.meta.url)) }, outfile: script,
+    bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
+    banner: { js: 'import { createRequire as createFixtureRequire } from "node:module"; const require = createFixtureRequire(import.meta.url);' } });
+    const child = fork(script, [input.directory, scope, input.job.key], { execArgv: [], env: {} });
+    const closed = once(child, 'close');
+    const waitForStart = AbortSignal.timeout(10000);
+    let other;
+    try {
+      const [message] = await Promise.race([
+        once(child, 'message', { signal: waitForStart }),
+        closed.then(status => { throw new Error(`Worker exited before analysis: ${status.join(', ')}`); }),
+      ]);
+      expect(message).toBe('analysis-started');
+      expect(() => new LearningWorker({ ...input, enabled: true, provider: new ClaudeCodeProvider() })).toThrow(/owner|consumer|already/i);
+      other = await submitDistillation({ ...input, request: { ...input.request, sourceId: 'run:accepted-during-analysis' } });
+    } finally {
+      child.kill('SIGKILL');
+      await closed;
+    }
+    expect(await closed).toEqual([null, 'SIGKILL']);
+    const target = { directory: input.directory, scope, requestKey: input.job.key };
+    const [attempt] = queryLearningRequest(target).job.attempts;
+    expect(attempt).toMatchObject({ status: 'started', analysisRunId: 'crash-run', sessionId: 'crash-session' });
+    const restarted = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider(), dailyCalls: 2 });
+    expect(await restarted.runOnce()).toEqual({ processed: 1, pending: 0, blocked: 1 });
+    expect(input.analyze.mock.calls.map(([call]) => call?.jobId)).toEqual([other.key]);
+    expect(queryLearningRequest(target)).toMatchObject({ job: { status: 'blocked', reasonCode: 'analysis_outcome_unknown',
+      attempts: [attempt] }, candidates: [] });
+    const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
+    try {
+      const [otherAttempt] = store.listAnalysisAttempts(other.key);
+      expect(otherAttempt).toMatchObject({ status: 'succeeded' });
+      expect(store.getModelCallCount(attempt!.day)).toBe(otherAttempt!.day === attempt!.day ? 2 : 1);
+    } finally { store.close(); }
   });
 
   it('rejects a second live consumer while allowing concurrent producers', async () => {

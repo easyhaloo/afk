@@ -2,17 +2,26 @@ import { workspaceDataDirectory, executionWorkspacePath, executionManifestPath }
 import { link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash, randomUUID } from 'node:crypto';
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { loadWorkItemExecution, replayRun } from '@afk/application';
 import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item.js';
 import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
-import { RunObserver } from '../../observability/run-observer.js';
+import { getObservationSignal, RunObserver } from '../../observability/run-observer.js';
+import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
+import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
+import * as workflowConfig from '../../infrastructure/config/manager.js';
+import type { EvidenceRecord, EvidenceStoreProvider } from '../../plugin-sdk/capabilities.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
 import { QARunner } from '../runners/qa-runner.js';
 import { getLogContext } from '../../infrastructure/io/index.js';
-import { experienceStorePath, verifyExperienceRun } from '../learning/runtime.js';
+import { ExperienceContextProvider, experienceStorePath, verifyExperienceRun } from '../learning/runtime.js';
 import { ExperienceStore } from '../learning/experience-store.js';
+import { PluginRuntime } from '../plugins/runtime.js';
+import { WorkflowRunner, type RunnerOptions } from '../workflow-engine.js';
+import { TemplateLoader } from '../../domain/templates/loader.js';
+import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -29,11 +38,15 @@ async function setup(overrides: Partial<BacklogItem> = {}) {
   const current = { ...item, ...overrides };
   const get = vi.fn(async (id: string) => id === '42' ? current : { ...item, id, state: 'done' as const });
   const isRunnable = vi.fn(async () => true);
-  const run = vi.fn(async () => { current.state = 'verification'; return { success: true }; });
+  const run = vi.fn<[RunnerOptions], Promise<{ success: boolean }>>(async () => { current.state = 'verification'; return { success: true }; });
   const process = vi.fn(async () => { current.state = 'merge_ready'; return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' }; });
-  const changes = {
-    findForBacklog: vi.fn(async () => current.state === 'merge_ready' || current.state === 'done' ? {
-      id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open',
+  const changes: {
+    get?: Mock<[], Promise<ChangeRequest>>;
+    findForBacklog: Mock<[], Promise<Pick<ChangeRequest, 'id' | 'url' | 'state'> | null>>;
+    verifyIssueAssociation: Mock<[], Promise<undefined>>;
+  } = {
+    findForBacklog: vi.fn<[], Promise<Pick<ChangeRequest, 'id' | 'url' | 'state'> | null>>(async () => current.state === 'merge_ready' || current.state === 'done' ? {
+      id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' as const,
     } : null),
     verifyIssueAssociation: vi.fn(async () => undefined),
   };
@@ -77,6 +90,105 @@ function lockProbe(status: 'alive' | 'dead' | 'unknown', pid = 8420) {
 }
 
 describe('executeWorkItem', () => {
+  it('uses the classified template in the default runner without reloading a changed source', async () => {
+    const { deps, process: verify, directory } = await setup();
+    vi.stubEnv('HOME', directory);
+    vi.stubEnv('AFK_EVENT_STORE_DIR', join(directory, 'events'));
+    const template = await new TemplateLoader().load('issue-implementation');
+    deps.template = template;
+    deps.createImplementation = undefined;
+    const loading = vi.spyOn(TemplateLoader.prototype, 'load').mockRejectedValue(new Error('template source changed'));
+    const observed = vi.spyOn(WorkflowRunner.prototype as unknown as {
+      runObserved: (...args: unknown[]) => Promise<{ success: boolean }>;
+    }, 'runObserved').mockImplementation(async (...args) => {
+      expect(args[3]).toEqual(template);
+      expect(args[3]).not.toBe(template);
+      return { success: false };
+    });
+    try {
+      expect(await executeWorkItem(input, deps)).toMatchObject({ status: 'blocked' });
+      expect(observed).toHaveBeenCalledOnce();
+      expect(loading).not.toHaveBeenCalled();
+      expect(verify).not.toHaveBeenCalled();
+    } finally { observed.mockRestore(); loading.mockRestore(); }
+  });
+  it('passes managed QA verification evidence to the existing execution audit owner', async () => {
+    const { deps, current, directory } = await setup();
+    deps.createQA = undefined;
+    const store = new JsonlEventStore({ root: join(directory, 'events') });
+    const observer = new RunObserver({ events: store });
+    deps.recordAudit = (context, data, options) => observer.record(context, data, options);
+    const evidence = { uri: `evidence://${'c'.repeat(64)}`, sha256: 'c'.repeat(64), mediaType: 'application/json',
+      classification: 'sensitive' as const, redactionStatus: 'not_required' as const };
+    const process = vi.spyOn(QARunner.prototype, 'process').mockImplementation(async function (this: QARunner) {
+      const { observation } = this as unknown as { observation: NonNullable<import('./lifecycle.js').LifecycleContext['observation']> };
+      expect(observation.context).toMatchObject({ runId: 'attempt-1', workItemId });
+      await observation.record({ kind: 'effect.completed', effectKind: 'verification',
+        idempotencyKey: 'qa-verification', outcome: 'succeeded' }, { idempotencyKey: 'qa-verification', evidence: [evidence] });
+      current.state = 'merge_ready';
+      return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' };
+    });
+    try {
+      expect(await executeWorkItem(input, deps)).toMatchObject({ status: 'merge_ready' });
+      const history = [];
+      for await (const event of store.read('attempt-1')) history.push(event);
+      expect(history.find(event => event.type === 'effect.completed')).toMatchObject({
+        context: { runId: 'attempt-1', workItemId }, idempotencyKey: 'qa-verification', evidence: [evidence],
+      });
+      expect((await store.verify('attempt-1')).valid).toBe(true);
+    } finally { process.mockRestore(); }
+  });
+  it.each(['selected-default', 'selected-configured', 'first-configured'] as const)(
+    'keeps independent QA failure collection within its configured feedback owner (%s)', async mode => {
+      const { deps, process, directory } = await setup();
+      vi.stubEnv('HOME', directory);
+      const eventRoot = join(directory, 'events');
+      vi.stubEnv('AFK_EVENT_STORE_DIR', eventRoot);
+      const scope = 'github:acme/api';
+      const source = { runId: input.executionId, workItemId };
+      const selected = mode !== 'first-configured';
+      const file = mode === 'selected-default' ? experienceStorePath(directory) : join(directory, 'configured.sqlite');
+      const store = new ExperienceStore({ file, now: () => new Date('2026-11-16T00:00:00.000Z') });
+      const plugins = new PluginRuntime();
+      try {
+        let before;
+        if (selected) {
+          const record = store.recordFailure({ scope, trigger: 'qa_rework', rootCause: 'Independent QA requires a correction.',
+            action: 'Inspect the qa_rework evidence and validate a correction before retrying.',
+            source: { runId: 'original', workItemId: `${scope}#1` }, evidence: ['run:original#qa.failed'] });
+          store.verify(record.id, { runId: 'independent-qa', evidence: ['run:independent-qa#regression'] });
+          const digest = createHash('sha256').update('selected QA context').digest('hex');
+          const retrieved = store.recordContextRetrieval({ id: record.id, scope, source, selectionId: randomUUID(), fragmentDigest: digest });
+          store.recordContextSelection({ retrieved, fragmentDigest: digest });
+          for (let sequence = 1000; sequence < 1256; sequence++) {
+            store.recordRunOutcome({ scope, source, event: { runId: source.runId, sequence, hash: digest,
+              type: 'run.finished', outcome: 'succeeded', occurredAt: '2026-11-16T00:00:01.000Z', observedAt: '2026-11-16T00:00:01.000Z' } });
+          }
+          before = store.get(record.id, scope);
+        }
+        await plugins.load({ manifest: { id: 'context.test-owner', version: '1.0.0', apiVersion: 1,
+          trusted: true, provides: ['context.provider'] }, activate(setup) {
+          setup.registerContextProvider('context.experience', new ExperienceContextProvider(file));
+        } });
+        deps.plugins = plugins;
+        delete deps.recordAudit;
+        process.mockResolvedValueOnce({ success: false, rework: true, summary: 'Independent QA requires a correction.' } as any);
+        expect((await executeWorkItem(input, deps)).status).toBe('rework');
+        const history = [];
+        for await (const event of new JsonlEventStore({ root: eventRoot }).read(source.runId)) history.push(event);
+        expect(history.map(event => event.type)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
+        expect((await new JsonlEventStore({ root: eventRoot }).verify(source.runId)).valid).toBe(true);
+        if (selected) {
+          expect(store.get(before!.id, scope)).toEqual(before);
+          expect(store.metrics({ scope }).recurrences).toBe(0);
+          expect(store.outcomeReceipts({ scope, source })).toHaveLength(256);
+        } else {
+          expect(store.list({ scope })).toMatchObject([{ status: 'candidate', source }]);
+        }
+        if (mode !== 'selected-default') await expect(lstat(experienceStorePath(directory))).rejects.toMatchObject({ code: 'ENOENT' });
+      } finally { await plugins.dispose(); store.close(); }
+    });
+
   it.each([undefined, 'execution', 'learning'] as const)('preserves QA failure audit and captures experience only for ordinary purpose (%s)', async purpose => {
     const { deps, process, directory } = await setup();
     vi.stubEnv('HOME', directory);
@@ -174,7 +286,7 @@ describe('executeWorkItem', () => {
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn<[], Promise<ChangeRequest>>(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     expect((await executeWorkItem(input, deps)).status).toBe('merge_ready');
     current.workItemId = undefined;
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
@@ -198,7 +310,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn();
     deps.createContext = vi.fn(async () => context);
     await executeWorkItem(input, deps);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/other', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn<[], Promise<ChangeRequest>>(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/other', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/identity/);
     changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' });
     changes.verifyIssueAssociation.mockRejectedValueOnce(new Error('not linked'));
@@ -217,7 +329,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
     await executeWorkItem(input, deps);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn<[], Promise<ChangeRequest>>(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     deps.recordAudit = vi.fn(async () => { throw new Error('audit unavailable'); });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('audit unavailable');
     expect((await deps.loadExecution('attempt-1')).summary.status).toBe('awaiting_merge');
@@ -236,7 +348,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn<[], Promise<ChangeRequest>>(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' }));
     const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
@@ -260,7 +372,7 @@ describe('executeWorkItem', () => {
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
     const change = { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' as const, sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' };
     changes.findForBacklog.mockResolvedValue(change);
-    changes.get = vi.fn(async () => change);
+    changes.get = vi.fn<[], Promise<ChangeRequest>>(async () => change);
     const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
@@ -278,7 +390,8 @@ describe('executeWorkItem', () => {
     const store = new JsonlEventStore({ root: join(directory, 'events') });
     const observer = new RunObserver({ events: store });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    run.mockImplementation(async (options: { observationRunId: string; observationWorkItemId: string; purpose?: 'execution' | 'learning' }) => {
+    run.mockImplementation(async options => {
+      if (!options.observationRunId || !options.observationWorkItemId) throw new Error('Missing execution observation identity');
       const context = { traceId: options.observationRunId, runId: options.observationRunId,
         workItemId: options.observationWorkItemId, profileId: 'test', attempt: 1,
         purpose: options.purpose,
@@ -328,7 +441,7 @@ describe('executeWorkItem', () => {
     expect(changes.verifyIssueAssociation).toHaveBeenCalledWith(expect.objectContaining({ id: '5' }), workItemId);
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.passed', 'change.published', 'human_gate.opened']);
     expect(vi.mocked(deps.recordAudit!).mock.calls.every(([context]) => context.runId === 'attempt-1' && context.workItemId === workItemId)).toBe(true);
-    const events = (await readFile(join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    const events = (await readFile(join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(entry => JSON.parse(entry));
     expect(events.map(event => event.phase)).toEqual(['requested', 'implementing', 'verifying', 'merge_ready']);
     expect(events.every(event => event.executionId === 'attempt-1' && event.workItemId === workItemId)).toBe(true);
   });
@@ -367,7 +480,7 @@ describe('executeWorkItem', () => {
     const { deps, run } = await setup(override);
     if ('dependsOn' in override) {
       const context = await deps.createContext!({} as any, input, {} as any);
-      context.providers.backlog.get = vi.fn(async (id: string) => id === '42' ? { ...item, ...override } : { ...item, state: 'ready' });
+      context.providers.backlog.get = vi.fn(async (id: string): Promise<BacklogItem> => id === '42' ? { ...item, ...override } : { ...item, state: 'ready' });
       deps.createContext = vi.fn(async () => context);
     }
     await expect(executeWorkItem(input, deps)).rejects.toThrow(message);
@@ -439,6 +552,92 @@ describe('executeWorkItem', () => {
       reason: 'blocked',
       summary: 'QA execution failed: provider unavailable',
     });
+  });
+
+  it.each(['returns', 'throws'] as const)('keeps caller audits cancelled when the default QA backlog read %s after its deadline', async outcome => {
+    const { deps, get, current, directory } = await setup();
+    vi.stubEnv('HOME', directory);
+    deps.createQA = undefined;
+    const eventRoot = join(directory, 'events');
+    const store = new JsonlEventStore({ root: eventRoot });
+    const evidence = await createLocalEncryptedEvidenceStore(directory);
+    const records = new Map<string, EvidenceRecord>();
+    const sdk: EvidenceStoreProvider = {
+      id: 'qa-caller-memory', capabilities: { put: true, get: true, classify: false },
+      put: vi.fn(async record => {
+        records.set(record.id, { ...record, bytes: Buffer.from(record.bytes) });
+        return { name: record.id, uri: `evidence://${record.id}` };
+      }),
+      get: vi.fn(async id => records.get(id)!),
+    };
+    const observer = createRunObserver(eventRoot, [], {
+      evidenceStore: { provider: sdk, evidence, scopes: ['github:acme/api'], timeoutMs: 2000 },
+    });
+    await observer.record({ traceId: 'mirror-control', runId: 'mirror-control', workItemId, profileId: 'local',
+      attempt: 1, actor: { kind: 'system', id: 'test' } }, { kind: 'qa.passed' });
+    expect(sdk.put).toHaveBeenCalledTimes(1);
+    expect(sdk.get).toHaveBeenCalledTimes(1);
+    const auditSignals: Array<{ kind: string; signal: AbortSignal | undefined; aborted: boolean | undefined }> = [];
+    deps.recordAudit = (context, data, options) => {
+      const signal = getObservationSignal();
+      auditSignals.push({ kind: data.kind, signal, aborted: signal?.aborted });
+      return observer.record(context, data, options);
+    };
+    let qaSignal: AbortSignal | undefined;
+    const original = new Error('backlog read failed after QA cancellation');
+    get.mockImplementation(async () => {
+      const signal = getObservationSignal();
+      if (!signal) return current;
+      qaSignal = signal;
+      expect(signal.aborted).toBe(false);
+      await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+      if (outcome === 'throws') throw original;
+      return current;
+    });
+    const context = await deps.createContext!({} as any, input, {} as any);
+    const transition = vi.fn(async () => { current.state = 'blocked'; });
+    context.providers.backlog.transition = transition;
+    deps.createContext = vi.fn(async () => context);
+    const config = workflowConfig.getWorkflowConfig();
+    const configured = vi.spyOn(workflowConfig, 'getWorkflowConfig').mockReturnValue({ ...config, qaTimeout: 25 });
+    try {
+      await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'blocked' });
+      expect(qaSignal?.aborted).toBe(true);
+      expect(qaSignal?.reason).toEqual(new Error('QA deadline exceeded (25ms)'));
+      expect(auditSignals).toEqual([
+        { kind: 'qa.started', signal: undefined, aborted: undefined },
+        { kind: 'qa.failed', signal: qaSignal, aborted: true },
+        { kind: 'run.finished', signal: qaSignal, aborted: true },
+      ]);
+      expect(getObservationSignal()).toBeUndefined();
+      expect(sdk.put).toHaveBeenCalledTimes(1);
+      expect(sdk.get).toHaveBeenCalledTimes(1);
+      expect([...records.values()].map(record => JSON.parse(Buffer.from(record.bytes).toString()).kind)).toEqual(['qa.passed']);
+      const history = [];
+      for await (const event of store.read(input.executionId)) history.push(event);
+      const summary = `QA execution failed: ${outcome === 'throws' ? original.message : 'QA deadline exceeded (25ms)'}`;
+      expect(history.find(event => event.type === 'qa.failed')?.data).toMatchObject({
+        kind: 'qa.failed', reason: 'blocked', reasonCode: 'qa_execution_failed', summary,
+      });
+      expect(history.find(event => event.type === 'run.finished')?.data).toMatchObject({
+        kind: 'run.finished', outcome: 'failed', reasonCode: 'qa_execution_failed', reason: summary,
+      });
+      expect(transition).toHaveBeenCalledWith('42', 'blocked', { reason: summary });
+      expect(await store.verify(input.executionId)).toMatchObject({ valid: true, lastSequence: history.length });
+      for (const event of history.filter(event => ['qa.failed', 'run.finished'].includes(event.type))) {
+        const captured = event.evidence!.at(-1)!;
+        const bytes = await evidence.get(captured);
+        expect(JSON.parse(Buffer.from(bytes).toString())).toMatchObject({ sourceEventId: event.id, kind: event.type });
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(captured.sha256);
+        expect((await readFile(join(evidence.root, `${captured.sha256}.bin`))).equals(Buffer.from(bytes))).toBe(false);
+      }
+      const mirrors = history.filter(event => event.data.kind === 'effect.completed' && event.data.effectKind === 'evidence.mirror');
+      expect(mirrors).toHaveLength(2);
+      for (const mirror of mirrors) {
+        expect(mirror.data).toMatchObject({ outcome: 'failed' });
+        expect(JSON.parse(mirror.data.kind === 'effect.completed' ? mirror.data.summary! : '{}')).toMatchObject({ reason: 'cancelled' });
+      }
+    } finally { configured.mockRestore(); }
   });
 
   it('persists qa.failed when the real QARunner throws and preserves the original provider error', async () => {
@@ -529,7 +728,7 @@ describe('executeWorkItem', () => {
     const journalPath = join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl');
     const original = await readFile(journalPath, 'utf8');
     const identity = await lstat(journalPath);
-    expect(original.trim().split('\n').map(JSON.parse)).toMatchObject([
+    expect(original.trim().split('\n').map(entry => JSON.parse(entry))).toMatchObject([
       { phase: 'requested' }, { phase: 'failed', reason: 'temporary provider failure' },
     ]);
 
@@ -582,7 +781,7 @@ describe('executeWorkItem', () => {
     ['malformed failure', [requested, { ...failed, reason: null }].map(entry => JSON.stringify(entry)).join('\n') + '\n'],
     ['oversize', (JSON.stringify(requested) + '\n').repeat(1024)],
     ...['unknown', 'implementing', 'verifying', 'publication_requested', 'published', 'merge_ready', 'done', 'blocked', 'not_claimed', 'rework']
-      .map(phase => [phase, [requested, { ...requested, phase }, failed].map(entry => JSON.stringify(entry)).join('\n') + '\n']),
+      .map((phase): [string, string] => [phase, [requested, { ...requested, phase }, failed].map(entry => JSON.stringify(entry)).join('\n') + '\n']),
   ])('refuses a %s journal before provider access and preserves its evidence', async (_label, contents) => {
     const { deps, run, process, directory } = await setup();
     const journalDirectory = join(workspaceDataDirectory(directory), 'executions');

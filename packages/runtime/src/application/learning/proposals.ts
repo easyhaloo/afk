@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, opendirSync, openSync, readSync, realpathSync, statSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import Ajv from 'ajv';
 import { load } from 'js-yaml';
 import { z } from 'zod';
 import { candidateProposalSchema, DISTILLATION_LIMITS, type CandidateProposal } from './contracts.js';
@@ -9,10 +8,13 @@ import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } f
 import type { RepositoryWorkspace, VerificationProvider, VerificationResult, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import type { Sandbox, IsolationLevel } from '../../infrastructure/sandbox/types.js';
 import { LocalSandbox } from '../../infrastructure/sandbox/providers/local.js';
+import { recallTerms } from '../../domain/context/terms.js';
+import { checkProposalToolParameterPaths, compileProposalToolSchema } from './proposal-tool-schema.js';
 
 export interface ProposalInventory {
   skills: { name: string; description: string; 'disable-model-invocation': boolean; 'user-invocable': boolean;
-    'allowed-tools': string | string[]; 'disallowed-tools': string | string[]; source: { root: string; file: string } }[];
+    'allowed-tools': string | string[]; 'disallowed-tools': string | string[]; source: { root: string; file: string };
+    resources?: { path: string; digest: string }[] }[];
   tools: { kind: 'cli' | 'script' | 'plugin'; ref: string; name: string; description: string; provenance: string;
     source?: { root: string; file: string } }[];
   toolSearches: ('cli' | 'script' | 'plugin')[];
@@ -25,24 +27,7 @@ export interface ProposalCheck {
   expected: string;
 }
 
-export function compareProposalActual(actual: unknown, expected: unknown): boolean {
-  const encode = (value: unknown): string => {
-    let entries = 0;
-    const inspect = (entry: unknown, depth: number): void => {
-      if (++entries > 4096 || depth > 32) throw new Error('Proposal oracle actual exceeds structure limit');
-      if (entry === null || typeof entry === 'string' || typeof entry === 'boolean') return;
-      if (typeof entry === 'number' && Number.isFinite(entry)) return;
-      if (Array.isArray(entry)) { for (const item of entry) inspect(item, depth + 1); return; }
-      if (typeof entry !== 'object' || Object.getPrototypeOf(entry) !== Object.prototype) throw new Error('Proposal oracle requires JSON actual and expected');
-      for (const item of Object.values(entry)) inspect(item, depth + 1);
-    };
-    inspect(value, 0);
-    const encoded = canonicalLearningJson(value);
-    if (Buffer.byteLength(encoded) > DISTILLATION_LIMITS.outputBytes) throw new Error('Proposal oracle actual exceeds byte limit');
-    return encoded;
-  };
-  return encode(actual) === encode(expected);
-}
+export { compareProposalActual } from './proposal-semantics.js';
 
 export interface PreparedAssetProposal {
   status: 'verification-prepared';
@@ -271,36 +256,9 @@ function readAsset(root: string, file: string): string {
   }
 }
 
-function matches(query: string, name: string, description: string): boolean {
-  const terms = new Set(query.toLowerCase().match(/[\p{L}\p{N}-]{3,}/gu) ?? []);
-  return [...terms].some(term => `${name} ${description}`.toLowerCase().includes(term));
-}
-
-type ToolInputSchema = Extract<CandidateProposal, { kind: 'tool' }>['payload']['inputSchema'];
-
-function compileSchema(schema: ToolInputSchema) {
-  if (Buffer.byteLength(canonicalLearningJson(schema)) > 8192) throw new Error('Tool schema exceeds byte limit');
-  const inspect = (value: unknown, depth: number): void => {
-    if (depth > 16) throw new Error('Tool schema exceeds depth limit');
-    if (!value || typeof value !== 'object') return;
-    for (const [key, entry] of Object.entries(value)) {
-      if (['$ref', '$dynamicRef', 'patternProperties'].includes(key)) throw new Error('Tool schema references and patternProperties are unsupported');
-      if (key === 'pattern' && (typeof entry !== 'string' || !/^\^\[[a-zA-Z0-9_.\/-]+\][+*?]?\$$/.test(entry))) {
-        throw new Error('Tool schema pattern must be a bounded character class');
-      }
-      inspect(entry, depth + 1);
-    }
-  };
-  inspect(schema, 0);
-  return new Ajv({ strict: true }).compile(schema);
-}
-
-function checkParameterPaths(value: unknown): void {
-  if (typeof value === 'string' && (/^[/\\]|^[a-zA-Z]:[/\\]|^file:/i.test(value))) throw new Error('Model parameters cannot select absolute paths');
-  if (value && typeof value === 'object') for (const [key, entry] of Object.entries(value)) {
-    checkParameterPaths(key);
-    checkParameterPaths(entry);
-  }
+function matches(terms: Set<string>, name: string, description: string): boolean {
+  for (const term of recallTerms(`${name} ${description}`)) if (terms.has(term)) return true;
+  return false;
 }
 
 export function prepareAssetProposal(input: unknown, inventory: ProposalInventory): PreparedAssetProposal {
@@ -322,7 +280,8 @@ export function prepareAssetProposal(input: unknown, inventory: ProposalInventor
     }
     const inputs = payload.evaluationCases.map(entry => entry.input.trim().toLowerCase());
     if (new Set(inputs).size !== inputs.length) throw new Error('Skill behavior cases must have distinct independent inputs');
-    const existing = inventory.skills.filter(entry => matches(`${query} ${payload.triggers.join(' ')}`, entry.name, entry.description));
+    const terms = recallTerms(`${query} ${payload.triggers.join(' ')}`);
+    const existing = inventory.skills.filter(entry => matches(terms, entry.name, entry.description));
     const target = payload.targetSkill ? inventory.skills.find(entry => `skill:${entry.name}` === payload.targetSkill) : undefined;
     if (payload.targetSkill && !target) throw new Error('Target skill is missing from the existing catalog');
     if (!target && existing.length) throw new Error(`Prefer an existing skill patch: ${existing.map(entry => entry.name).join(', ')}`);
@@ -365,16 +324,17 @@ export function prepareAssetProposal(input: unknown, inventory: ProposalInventor
       if (!target.source) throw new Error('Explicit tool target requires trusted source bytes');
       originalDigest = hash(readAsset(target.source.root, target.source.file));
     }
+    const terms = recallTerms(query);
     const existing = inventory.tools.filter(entry => payload.existingTools.includes(entry.ref) || payload.existingTools.includes(entry.name)
-      || matches(query, entry.name, entry.description));
+      || matches(terms, entry.name, entry.description));
     if (!targetRef && existing.length) throw new Error(`Reuse existing tools before proposing source: ${existing.map(entry => entry.ref).join(', ')}`);
     if (payload.existingTools.some(ref => !inventory.tools.some(entry => entry.ref === ref || entry.name === ref))) throw new Error('Existing tool claims are absent from searched inventory');
-    const validInput = compileSchema(payload.inputSchema);
-    const validOutput = compileSchema(payload.outputSchema);
+    const validInput = compileProposalToolSchema(payload.inputSchema);
+    const validOutput = compileProposalToolSchema(payload.outputSchema);
     const normal = payload.tests.filter(entry => entry.kind === 'normal');
     const parameters = normal.map(entry => {
       const value: unknown = JSON.parse(entry.input);
-      checkParameterPaths(value);
+      checkProposalToolParameterPaths(value);
       if (!validInput(value) || !validOutput(JSON.parse(entry.expected))) throw new Error('Normal tool case does not satisfy input/output schemas');
       return canonicalLearningJson(value);
     });

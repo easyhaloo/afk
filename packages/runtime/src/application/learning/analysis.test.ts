@@ -21,6 +21,7 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('"workItemId":"github:acme/api#1"');
     expect(prompt).toContain('untrusted');
     expect(prompt).toMatch(/incomplete|partial/i);
+    expect(prompt).toContain('For this pack, every process candidate requires a step with missingEvidence');
     expect(prompt).not.toContain('--add-dir');
     expect(() => buildAnalysisPrompt({ ...pack, digest: '0'.repeat(64) }, requestFor(pack))).toThrow();
     expect(() => buildAnalysisPrompt(pack, { ...requestFor(pack), evidenceDigest: '0'.repeat(64) })).toThrow(/digest/i);
@@ -42,6 +43,10 @@ describe('shared analysis without model execution', () => {
     const pack = await buildEvidencePack({ sources: [] });
     const prompt = buildAnalysisPrompt(pack, requestFor(pack));
     for (const field of ['applicability', 'evidenceIds', 'rootCauseStatus', 'evaluationCases', 'sideEffects']) expect(prompt).toContain(field);
+    expect(prompt).toContain('preserve both verbatim in the fact payload');
+    expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
+    expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
+    expect(prompt).toContain('report the gap in warnings and omit that process candidate');
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

@@ -272,9 +272,8 @@ function appleQuote(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/** Single-quotes a value for safe interpolation into a PowerShell string. */
-function powerShellQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+function powerShellString(value: string): string {
+  return `[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(value, 'utf8').toString('base64')}'))`;
 }
 
 function desktopUrgency(urgency: NotificationMessage['urgency']): string {
@@ -300,10 +299,27 @@ export function desktopNotificationCommand(platform: DesktopPlatform, message: N
       return { command: 'notify-send', args: ['-u', desktopUrgency(message.urgency), title, body] };
     case 'win32': {
       const script = [
+        "$ErrorActionPreference = 'Stop'",
         'Add-Type -AssemblyName System.Windows.Forms',
-        `[System.Windows.Forms.MessageBox]::Show(${powerShellQuote(body)}, ${powerShellQuote(title)})`,
+        'Add-Type -AssemblyName System.Drawing',
+        '$notification = $null',
+        'try {',
+        '  $notification = New-Object System.Windows.Forms.NotifyIcon',
+        '  $notification.Icon = [System.Drawing.SystemIcons]::Information',
+        `  $notification.BalloonTipTitle = ${powerShellString(title)}`,
+        `  $notification.BalloonTipText = ${powerShellString(body)}`,
+        '  $notification.Visible = $true',
+        '  $notification.ShowBalloonTip(3000)',
+        '  Start-Sleep -Milliseconds 3000',
+        '} finally {',
+        '  if ($null -ne $notification) {',
+        '    $notification.Dispose()',
+        '  }',
+        '}',
+        '',
+        '',
       ].join('\n');
-      return { command: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command', '-'], input: script };
+      return { command: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', '-'], input: script };
     }
   }
 }

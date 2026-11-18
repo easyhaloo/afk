@@ -7,14 +7,14 @@ import type { CandidateStore, PublicationRecord } from './candidate-store.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
 import { experienceQueryContextSchema } from './experience-store.js';
 import { withKnowledgePublicationLock } from './publication-lock.js';
-import { assertCurrentLessonPublication } from './lesson-publication-guard.js';
-import { assertKnowledgeCandidate, assertKnowledgeDirectory, assertKnowledgeNavigationReplacement, assertKnowledgePlanUnwritten,
+import { sourceReadCheck } from './source-read-grant.js';
+import { assertKnowledgeCandidate, assertKnowledgeDirectory, assertKnowledgeNavigationReplacement, assertKnowledgePlanUnwritten, assertKnowledgeValidation,
   knowledgeDigest, knowledgeFile, knowledgeTargetDigest,
   planKnowledgePublication, readKnowledgeAuthorization, refreshKnowledgeNavigation, runWikiIngest, verifyKnowledgePlan, withKnowledgePublicationDescriptor, WikiIngestError,
-  type KnowledgePlan, type KnowledgePlanningInput, type KnowledgePolicy, type WikiPlan, type WikiResult } from './knowledge.js';
+  type KnowledgePlan, type KnowledgePlanningInput, type KnowledgePolicy, type KnowledgeRecallCheck, type WikiPlan, type WikiResult } from './knowledge.js';
 
 export type PublicationOptions = { store: CandidateStore; policy: KnowledgePolicy; wikiScript: string; recoveryDirectory: string; authorizationFile: string;
-  validationConfigurationFile?: string; signal?: AbortSignal };
+  validationConfigurationFile?: string; homeDir?: string; signal?: AbortSignal };
 export type KnowledgeWithdrawal = { key: string; candidateVersion: number; candidateDigest: string; evidenceDigest: string;
   status: 'withdrawn' | 'rollback_blocked'; observedDigest: string; reason: string; recovery?: string };
 export type KnowledgePublicationResult = { publication: PublicationRecord; wikiStatus?: WikiResult['status']; recovery?: string; errorCode?: number;
@@ -122,7 +122,7 @@ function supersessionBinding(previous: PublicationRecord, next: PublicationRecor
   return { previousKey: previous.key, nextKey: next.key, previousTargetDigest: previous.targetDigest, nextTargetDigest: next.targetDigest };
 }
 
-export function resolveKnowledgePublication(input: PublicationOptions & { key: string }): PublicationRecord {
+export function resolveKnowledgePublication(input: PublicationOptions & { key: string }, authorize?: (record: PublicationRecord) => void): PublicationRecord {
   const visited = new Set<string>();
   let key = input.key;
   for (let depth = 0; depth < 32; depth++) {
@@ -132,6 +132,7 @@ export function resolveKnowledgePublication(input: PublicationOptions & { key: s
     visited.add(key);
     const publication = input.store.getPublication(key);
     if (!publication) throw new Error('Knowledge publication not found');
+    authorize?.(publication);
     if (publication.phase !== 'superseded') {
       if (publication.supersededBy !== undefined) throw new Error('Unexpected publication successor');
       return publication;
@@ -142,6 +143,7 @@ export function resolveKnowledgePublication(input: PublicationOptions & { key: s
     if (wikiRecoveryReceipts(input, publication, prepared.plan).length) throw new Error('Superseded publication has recovery writes');
     const next = input.store.getPublication(learningDigestSchema.parse(publication.supersededBy));
     if (!next) throw new Error('Publication successor not found');
+    authorize?.(next);
     assertKnowledgeNavigationReplacement(prepared, readSnapshot(input, next), input.policy);
     const receipt = optionalReceipt(input, next.key, 'supersession.json');
     if (!receipt || receipt !== canonicalLearningJson(supersessionBinding(publication, next))) {
@@ -207,7 +209,7 @@ function currentCandidate(input: PublicationOptions, prepared: KnowledgePlan): v
     || input.store.getValidation(candidate.id)?.validatorVersion !== prepared.validatorVersion) throw new Error('Publication validation changed');
 }
 
-function committedCandidate(input: PublicationOptions, publication: PublicationRecord): void {
+function committedCandidate(input: PublicationOptions, publication: PublicationRecord, recall?: KnowledgeRecallCheck): void {
   checkAbort(input);
   readKnowledgeAuthorization(input);
   const candidate = input.store.getCandidate(publication.candidateId);
@@ -220,16 +222,16 @@ function committedCandidate(input: PublicationOptions, publication: PublicationR
     || !receipt?.passed || receipt.validatedVersion !== publication.candidateVersion
     || receipt.validatorVersion !== publication.validatorVersion || receipt.candidateDigest !== publication.candidateDigest
     || receipt.evidenceDigest !== publication.evidenceDigest) throw new Error('Knowledge source or candidate invalidated');
-  if (candidate.proposal.kind === 'lesson') assertCurrentLessonPublication({ store: input.store, candidate,
-    configurationFile: input.validationConfigurationFile });
+  assertKnowledgeValidation(input, candidate, recall);
 }
 
-function committedKnowledge(input: PublicationOptions, publication: PublicationRecord, prepared: KnowledgePlan): { path: string; content: string } {
-  committedCandidate(input, publication);
+function committedKnowledge(input: PublicationOptions, publication: PublicationRecord, prepared: KnowledgePlan, recall?: KnowledgeRecallCheck): { path: string; content: string } {
+  committedCandidate(input, publication, recall);
   const change = prepared.plan.changes[0]!;
+  recall?.checkSourceRead?.();
   const content = readFileSync(knowledgeFile(input.policy.vault, change.path), 'utf8');
   if (content !== change.content) throw new Error('Committed knowledge content changed');
-  committedCandidate(input, publication);
+  committedCandidate(input, publication, recall);
   return { path: change.path, content };
 }
 
@@ -301,33 +303,54 @@ async function stopPublication(input: PublicationOptions, publication: Publicati
   return { publication: receipt, withdrawal: await withdrawKnowledge(input, receipt, prepared), ...(wikiStatus ? { wikiStatus } : {}) };
 }
 
-export async function readPublishedKnowledge(input: PublicationOptions & { key: string;
-  applicability?: ContextQuery['applicability']; target?: ContextQuery['target'] }): Promise<{ path: string; content: string;
-    classification: KnowledgePlan['classification']; applicability: KnowledgePlan['applicability'] } | null> {
+export function readCurrentPublishedKnowledge(input: PublicationOptions & { key: string; sourceReadGrantFile?: string;
+  applicability?: ContextQuery['applicability']; target?: ContextQuery['target'] }): { path: string; content: string;
+    classification: KnowledgePlan['classification']; applicability: KnowledgePlan['applicability'] } | null {
   try {
     checkAbort(input);
     if ((input.target && !Object.hasOwn(input, 'target')) || (input.applicability && !Object.hasOwn(input, 'applicability'))) return null;
     const context = experienceQueryContextSchema.safeParse({ applicability: input.applicability, target: input.target });
     if (!context.success) return null;
     const { applicability, target } = context.data;
-    const publication = resolveKnowledgePublication(input);
+    if (target && target.project !== input.policy.scope) return null;
+    const publication = resolveKnowledgePublication(input, record => {
+      sourceReadCheck(input.sourceReadGrantFile, input.policy.scope, record)?.();
+      if (!input.policy.targets.some(entry => entry.ref === record.targetRef)
+        || input.store.getCandidate(record.candidateId)?.proposal.applicability.project !== input.policy.scope) throw new Error('knowledge_target_mismatch');
+    });
+    const checkSourceRead = sourceReadCheck(input.sourceReadGrantFile, input.policy.scope, publication);
     if (publication.phase !== 'committed' || optionalReceipt(input, publication.key, 'withdrawal.json')) return null;
     const prepared = readSnapshot(input, publication);
-    if (target && target.project !== input.policy.scope) return null;
     if (prepared.classification === 'proposal' || prepared.classification === 'unverified' || prepared.classification === 'partial') return null;
+    let version = applicability?.version;
+    if (prepared.classification === 'lesson') {
+      if (prepared.proposal.kind !== 'lesson' || Object.keys(target?.runtimeVersions ?? {}).length) return null;
+      const { productId } = prepared.proposal.applicability;
+      const products = Object.entries(target?.productVersions ?? {});
+      if (productId !== undefined || products.length) {
+        if (products.length !== 1 || products[0][0] !== productId) return null;
+        const namedVersion = products[0][1];
+        if (version !== undefined && version !== namedVersion) return null;
+        version = namedVersion;
+      }
+    }
     if (prepared.applicability.environments.length && (!applicability?.environment
       || !prepared.applicability.environments.includes(applicability.environment))) return null;
-    if (prepared.applicability.versions.length && (!applicability?.version
-      || !prepared.applicability.versions.includes(applicability.version))) return null;
+    if (prepared.applicability.versions.length && (!version || !prepared.applicability.versions.includes(version))) return null;
     const matchesCondition = (name: string, expected: boolean) => target?.conditions !== undefined
       && Object.hasOwn(target.conditions, name) && target.conditions[name] === expected;
     if (prepared.applicability.preconditions.some(name => !matchesCondition(name, true))
       || prepared.applicability.exclusions.some(name => !matchesCondition(name, false))
       || prepared.applicability.invalidationConditions.some(name => !matchesCondition(name, false))) return null;
-    const current = committedKnowledge(input, publication, prepared);
+    const current = committedKnowledge(input, publication, prepared, { checkSourceRead, version, environment: applicability?.environment });
     if (optionalReceipt(input, publication.key, 'withdrawal.json')) return null;
-    return { ...current, classification: prepared.classification, applicability: prepared.applicability };
+    checkSourceRead?.();
+    return { ...current, classification: prepared.classification, applicability: { ...prepared.applicability, project: input.policy.scope } };
   } catch { checkAbort(input); return null; }
+}
+
+export async function readPublishedKnowledge(input: Parameters<typeof readCurrentPublishedKnowledge>[0]): Promise<ReturnType<typeof readCurrentPublishedKnowledge>> {
+  return readCurrentPublishedKnowledge(input);
 }
 
 function wikiRecoveryReceipts(input: PublicationOptions, publication: PublicationRecord, plan: WikiPlan, withdrawal = false): string[] {
@@ -371,13 +394,11 @@ async function prepareCandidate(input: KnowledgePlanningInput & { recoveryDirect
     let prepared = readSnapshot(input, publication);
     if (input.expectedVersion !== prepared.candidateVersion) throw new Error('Publication candidate version changed');
     if (input.targetRef && input.targetRef !== prepared.targetRef) throw new Error('Publication target differs from prepared plan');
-    try {
-      currentCandidate(input, prepared);
-      publication = await refreshPreparedPublication(input, publication, prepared);
-      prepared = readSnapshot(input, publication);
-      await verifyKnowledgePlan(prepared, input.policy, input.wikiScript, input.signal);
-      currentCandidate(input, prepared);
-    } catch (error) { await stopPublication(input, publication, prepared); throw error; }
+    currentCandidate(input, prepared);
+    publication = await refreshPreparedPublication(input, publication, prepared);
+    prepared = readSnapshot(input, publication);
+    await verifyKnowledgePlan(prepared, input.policy, input.wikiScript, input.signal);
+    currentCandidate(input, prepared);
     return publication;
   }
   const prepared = await planKnowledgePublication(input);

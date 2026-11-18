@@ -1,3 +1,6 @@
+import * as childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NotificationMessage } from '../../plugin-sdk/capabilities.js';
 import {
@@ -9,10 +12,12 @@ import {
 } from './notifications.js';
 import type { CommandExecutor, CommandRequest, FetchTransport } from './dependencies.js';
 
+vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
+
 const WEBHOOK = 'https://hooks.example.test/secret-token-abc';
 
 beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Unexpected network request'); })); });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 const message: NotificationMessage = {
   title: 'Build failed',
@@ -228,6 +233,48 @@ describe('EmailNotificationProvider', () => {
 });
 
 describe('DesktopNotificationProvider', () => {
+  function windowsScriptContract(input: string, expected: NotificationMessage) {
+    const script = new RegExp([
+      "^\\$ErrorActionPreference = 'Stop'",
+      'Add-Type -AssemblyName System.Windows.Forms',
+      'Add-Type -AssemblyName System.Drawing',
+      '\\$notification = \\$null',
+      'try \\{',
+      '  \\$notification = New-Object System.Windows.Forms.NotifyIcon',
+      '  \\$notification.Icon = \\[System.Drawing.SystemIcons\\]::Information',
+      "  \\$notification.BalloonTipTitle = \\[System.Text.Encoding\\]::UTF8.GetString\\(\\[System.Convert\\]::FromBase64String\\('([A-Za-z0-9+/=]*)'\\)\\)",
+      "  \\$notification.BalloonTipText = \\[System.Text.Encoding\\]::UTF8.GetString\\(\\[System.Convert\\]::FromBase64String\\('([A-Za-z0-9+/=]*)'\\)\\)",
+      '  \\$notification.Visible = \\$true',
+      '  \\$notification.ShowBalloonTip\\((\\d+)\\)',
+      '  Start-Sleep -Milliseconds (\\d+)',
+      '\\} finally \\{',
+      '  if \\(\\$null -ne \\$notification\\) \\{',
+      '    \\$notification.Dispose\\(\\)',
+      '  \\}',
+      '\\}',
+      '',
+      '$',
+    ].join('\n'));
+    const matched = input.match(script);
+    expect(matched).not.toBeNull();
+    expect(Buffer.from(matched![1], 'base64').toString('utf8')).toBe(expected.title);
+    expect(Buffer.from(matched![2], 'base64').toString('utf8')).toBe(expected.body);
+    expect(Number(matched![3])).toBe(3000);
+    expect(Number(matched![4])).toBe(3000);
+  }
+
+  function commandProcess() {
+    const events = new EventEmitter();
+    const child = Object.assign(events, {
+      stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+      kill: vi.fn(() => { events.emit('close', null); return true; }),
+    });
+    const spawn = vi.mocked(childProcess.spawn).mockReset().mockReturnValue(child as unknown as ReturnType<typeof childProcess.spawn>);
+    let input = '';
+    child.stdin.on('data', chunk => { input += chunk.toString(); });
+    return { child, spawn, input: () => input };
+  }
+
   it('uses osascript with an escaped script on macOS', async () => {
     const { executor, calls } = fakeExecutor();
     const provider = new DesktopNotificationProvider({ platform: 'darwin', executor });
@@ -259,19 +306,80 @@ describe('DesktopNotificationProvider', () => {
     expect(calls[0].args).toEqual(['-u', 'critical', 'Build failed', 'Unit tests are red on main']);
   });
 
-  it('pipes the PowerShell script through stdin on Windows', async () => {
+  it('passes an unattended Windows notification with bounded lifetime and finally disposal through stdin', async () => {
     const { executor, calls } = fakeExecutor();
     const provider = new DesktopNotificationProvider({ platform: 'win32', executor });
 
     const receipt = await provider.notify({ ...message, title: "it's", body: "body's" });
 
-    expect(receipt.delivered).toBe(true);
+    expect(provider.id).toBe('notification.desktop');
+    expect(receipt).toEqual({ delivered: true, channel: 'desktop' });
+    expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe('powershell');
-    expect(calls[0].args).toEqual(['-NoProfile', '-NonInteractive', '-Command', '-']);
-    // Script content (with escaped single quotes) goes via stdin, not argv.
-    expect(calls[0].input).toContain("it''s");
-    expect(calls[0].input).toContain("body''s");
-    expect(calls[0].args.every(argument => !argument.includes('body'))).toBe(true);
+    windowsScriptContract(calls[0].input!, { ...message, title: "it's", body: "body's" });
+    expect(calls[0].args).toEqual(['-NoProfile', '-NonInteractive', '-STA', '-Command', '-']);
+  });
+
+  it.each([
+    "'; Stop-Process -Id $PID; #",
+    '$(Start-Process calc.exe) `" \\ \r\n} finally { throw "INJECTION_CANARY" }\n#',
+    '\u2018\u2019\u201c\u201d 中文 🚨\n-Command injected',
+  ])('keeps hostile Windows message text inert and preserves it exactly: %j', async payload => {
+    const { executor, calls } = fakeExecutor();
+    const provider = new DesktopNotificationProvider({ platform: 'win32', executor, channel: 'configured-channel' });
+    const notification = { title: payload, body: `BODY_CANARY\n${payload}`, channel: 'selected-channel' };
+    await expect(provider.notify(notification)).resolves.toEqual({ delivered: true, channel: 'selected-channel' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe('powershell');
+    expect(calls[0].args).toEqual(['-NoProfile', '-NonInteractive', '-STA', '-Command', '-']);
+    windowsScriptContract(calls[0].input!, notification);
+    expect(calls[0].input).not.toContain(payload);
+    expect(JSON.stringify(calls[0].args)).not.toContain(payload);
+  });
+
+  it('sends the actual Windows process argv and stdin without a shell and clears the termination timer on exit', async () => {
+    vi.useFakeTimers();
+    const process = commandProcess();
+    const provider = new DesktopNotificationProvider({ platform: 'win32' });
+    const pending = provider.notify(message);
+    windowsScriptContract(process.input(), message);
+    expect(process.spawn).toHaveBeenCalledTimes(1);
+    expect(process.spawn).toHaveBeenCalledWith('powershell', ['-NoProfile', '-NonInteractive', '-STA', '-Command', '-'],
+      { cwd: undefined, shell: false, stdio: 'pipe' });
+    process.child.emit('close', 0);
+    await expect(pending).resolves.toEqual({ delivered: true, channel: 'desktop' });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(process.child.kill).not.toHaveBeenCalled();
+  });
+
+  it('bounds a stuck Windows command with the existing executor timeout', async () => {
+    vi.useFakeTimers();
+    const process = commandProcess();
+    const provider = new DesktopNotificationProvider({ platform: 'win32' });
+    const pending = provider.notify(message);
+    const receipt = expect(pending).resolves.toEqual({ delivered: false, channel: 'desktop', error: 'Provider command timed out' });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(process.child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await receipt;
+    expect(process.child.kill).toHaveBeenCalledTimes(1);
+    expect(process.child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('propagates cancellation to the Windows command and removes the executor abort listener on exit', async () => {
+    vi.useFakeTimers();
+    const process = commandProcess();
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    const provider = new DesktopNotificationProvider({ platform: 'win32', channel: 'builds' });
+    const pending = provider.notify(message, { signal: controller.signal });
+    controller.abort(new Error('SECRET_CANARY'));
+    await expect(pending).resolves.toEqual({ delivered: false, channel: 'builds', error: 'Provider command aborted' });
+    expect(process.child.kill).toHaveBeenCalledTimes(1);
+    expect(process.child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('reports executor failures as a failed receipt', async () => {

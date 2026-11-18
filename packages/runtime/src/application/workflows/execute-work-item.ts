@@ -23,6 +23,7 @@ import { getWorkflowConfig, repositoryExecutionDefaults, type WorkflowConfig } f
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createPluginRunObserver } from '../plugins/observability.js';
+import { withObservationSignal } from '../../observability/run-observer.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
 import { parseExecutionManifest, readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
 import { executionManifestPath, executionWorkspacePath } from '../../infrastructure/workspace.js';
@@ -30,9 +31,11 @@ import { resolveWorkflowRunRequest, type WorkflowRunRequest, type WorkflowRunCli
 import { withLogContext, logger } from '../../infrastructure/io/index.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import type { PluginRuntime } from '../plugins/runtime.js';
+import type { LifecycleContext } from './lifecycle.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
 import { recordExecutionExperience, recordSuccessfulExperience } from '../learning/runtime.js';
 import { createFailureDiagnostic } from './failure-diagnostic.js';
+import type { WorkflowTemplate } from '../../domain/templates/types.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -249,6 +252,7 @@ async function openExecutionJournal(journalPath: string, workItemId: string, exe
 
 export interface ExecuteWorkItemDependencies {
   plugins?: PluginRuntime;
+  template?: WorkflowTemplate;
   agentProviderRegistry?: AgentProviderRegistry;
   readManifest?: typeof readExecutionManifest;
   lookupWorkItem?: (id: string) => Promise<GlobalWorkItem>;
@@ -258,7 +262,8 @@ export interface ExecuteWorkItemDependencies {
   }>;
   createImplementation?: (providers: ProviderBundle, config: WorkflowConfig, request: WorkflowRunRequest) => Implementation;
   createQA?: (providers: ManagementProviderBundle, config: WorkflowConfig, request: WorkflowRunRequest) => Verification;
-  recordAudit?: (context: ObservationContext, data: RunEventData) => Promise<unknown>;
+  recordAudit?: (context: ObservationContext, data: RunEventData,
+    options?: Parameters<NonNullable<LifecycleContext['observation']>['record']>[1]) => Promise<unknown>;
   loadExecution?: (runId: string) => Promise<WorkItemExecution>;
   lockProbe?: LockProbe;
 }
@@ -430,13 +435,17 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const workItemId = parseWorkItemId(context.workItemId).id;
   const executionId = context.runId;
   const observer = dependencies.recordAudit ? undefined : createPluginRunObserver(dependencies.plugins);
-  const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
-  const audit = async (data: RunEventData) => {
-    await recordAudit(context, data);
+  const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData,
+    options?: Parameters<NonNullable<LifecycleContext['observation']>['record']>[1]) => observer!.record(auditContext, data, options));
+  let qaObservationSignal: AbortSignal | undefined;
+  const audit = async (data: RunEventData, options?: Parameters<NonNullable<LifecycleContext['observation']>['record']>[1]) => {
+    const persist = () => options === undefined ? recordAudit(context, data) : recordAudit(context, data, options);
+    if (qaObservationSignal) await withObservationSignal(qaObservationSignal, persist);
+    else await persist();
     if (context.purpose === 'learning') return;
     if (data.kind === 'qa.failed') {
       try {
-        recordExecutionExperience({ runId: context.runId, workItemId, sourceEvent: 'qa.failed',
+        recordExecutionExperience({ runId: context.runId, workItemId, sourceEvent: 'qa.failed', plugins: dependencies.plugins,
           failure: createFailureDiagnostic({ code: data.reasonCode ?? (data.reason === 'rework' ? 'qa_rework' : 'qa_execution_failed'),
             message: data.summary ?? `Independent QA ${data.reason ?? 'failed'}` }) });
       } catch { logger.warn({ workItemId, runId: context.runId }, 'QA failure experience could not be recorded'); }
@@ -496,7 +505,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
           await record('implementing');
           const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
-            new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createPluginRunObserver(dependencies.plugins) })))(providers, config, request);
+            new WorkflowRunner(bundle, { config: workflowConfig, plugins: dependencies.plugins, template: dependencies.template, agentRuntime: runRequest.agentRuntime, agentProviderRegistry, observer: createPluginRunObserver(dependencies.plugins) })))(providers, config, request);
           const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
             purpose: input.purpose,
             executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
@@ -521,6 +530,8 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
             new QARunner(bundle, workflowConfig, {
               plugins: dependencies.plugins,
+              observation: { context, record: audit },
+              onObservationSignal: signal => { qaObservationSignal = signal; },
               agentProviderRegistry,
               agentProvider: agentProviderRegistry.require(runRequest.agentProvider ?? workflowConfig.agentDefault ?? 'claude-code'),
               sandboxProvider: dependencies.plugins?.getSandboxProviderRegistry().create(runRequest.sandboxProvider ?? 'local', {

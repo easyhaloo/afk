@@ -85,11 +85,27 @@ export const WorkflowTemplateSchema = z.object({
   name: z.string().min(1).regex(/^[a-z0-9-]+$/, 'template name must be kebab-case'),
   version: z.literal(1),
   description: z.string().optional(),
+  purpose: z.enum(['execution', 'learning']).optional(),
   /** Default branch strategy for steps that don't specify their own. */
   defaultBranch: BranchStrategyConfigSchema.optional(),
   /** Default agent provider for steps. */
   defaultProvider: z.string().min(1).optional(),
   steps: z.array(StepSchema).min(1),
+}).superRefine((template, ctx) => {
+  if (template.purpose !== 'learning') return;
+  for (const field of ['defaultBranch', 'defaultProvider'] as const) {
+    if (template[field] !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom,
+      message: `learning template cannot declare ${field}`, path: [field] });
+  }
+  template.steps.forEach((step, index) => {
+    if (step.kind !== 'system' || !step.action?.startsWith('learning.')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'learning template requires learning system actions', path: ['steps', index] });
+    }
+    for (const field of ['role', 'prompt', 'completion', 'provider', 'executionMode', 'branch'] as const) {
+      if (step[field] !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom,
+        message: `learning step cannot declare ${field}`, path: ['steps', index, field] });
+    }
+  });
 });
 
 /** Inferred TS types from the Zod schemas. */

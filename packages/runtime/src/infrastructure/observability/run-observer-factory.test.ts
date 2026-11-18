@@ -4,10 +4,11 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../io/logger.js';
-import type { EvidenceRecord, EvidenceStoreProvider, MetricsProvider, TracerProvider, EventStoreProvider, ProviderAbortSignal } from '../../plugin-sdk/capabilities.js';
+import type { ArtifactSink, EvidenceRecord, EvidenceStoreProvider, MetricsProvider, TracerProvider, EventStoreProvider, ProviderAbortSignal } from '../../plugin-sdk/capabilities.js';
 import { JsonlEventStore } from './jsonl-event-store.js';
 import { createRunObserver } from './run-observer-factory.js';
 import { createLocalEncryptedEvidenceStore, type LocalEncryptedEvidenceStore } from './local-evidence-store.js';
+import { withObservationSignal } from '../../observability/run-observer.js';
 
 const roots: string[] = [];
 
@@ -36,6 +37,134 @@ async function deliveryHistory(root: string, runId = context.runId) {
 }
 
 describe('D10 durable delivery accounting', () => {
+  it('persists local evidence and drops every remote export when the run was already cancelled', async () => {
+    const root = await directory();
+    const capture = provider();
+    const append = vi.fn(async () => undefined);
+    const controller = new AbortController();
+    controller.abort(new Error('PRIVATE_CANCEL_CANARY'));
+    const observer = createRunObserver(root, [
+      { provider: capture, signals: ['tracing', 'metrics'] },
+      { provider: { id: 'selected', capabilities: { append: true }, append }, signals: ['events'] },
+    ]);
+    await withObservationSignal(controller.signal, () => observer.record(context, { kind: 'qa.passed' }));
+    expect(capture.startSpan).not.toHaveBeenCalled();
+    expect(capture.addEvent).not.toHaveBeenCalled();
+    expect(capture.endSpan).not.toHaveBeenCalled();
+    expect(capture.record).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    const { history, counts } = await deliveryHistory(root);
+    expect(history[0].type).toBe('qa.passed');
+    expect(counts[0]).toMatchObject({ counts: {
+      tracing: { dropped: 3, succeeded: 0, failed: 0, timed_out: 0 },
+      metrics: { dropped: 2, succeeded: 0, failed: 0, timed_out: 0 },
+      events: { dropped: 1, succeeded: 0, failed: 0, timed_out: 0 },
+    } });
+    expect(JSON.stringify(history)).not.toContain('CANARY');
+    expect(await new JsonlEventStore({ root }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  });
+
+  it.each(['tracing', 'metrics', 'events'] as const)('stops an in-flight %s export on run cancellation and ignores its late failure', async signal => {
+    const root = await directory();
+    const capture = provider();
+    const append = vi.fn(async (): Promise<void> => undefined);
+    let fail!: (error: Error) => void;
+    const stalled = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const exporter = signal === 'tracing' ? capture.startSpan : signal === 'metrics' ? capture.record : append;
+    exporter.mockImplementationOnce(() => stalled);
+    const controller = new AbortController();
+    const observer = createRunObserver(root, [
+      { provider: capture, signals: ['tracing', 'metrics'] },
+      { provider: { id: 'selected', capabilities: { append: true }, append }, signals: ['events'] },
+    ]);
+    const recording = withObservationSignal(controller.signal, () => observer.record(context, { kind: 'qa.passed' }));
+    let completed = false;
+    void recording.then(() => { completed = true; });
+    try {
+      await vi.waitFor(() => expect(exporter).toHaveBeenCalledTimes(1));
+      const calls = exporter.mock.calls as unknown[][];
+      const options = calls[0][signal === 'tracing' ? 2 : 1] as { signal: AbortSignal };
+      controller.abort(new Error('PRIVATE_CANCEL_CANARY'));
+      await vi.waitFor(() => expect(completed).toBe(true), { timeout: 1_000 });
+      expect(options.signal.aborted).toBe(true);
+      await recording;
+      const before = await deliveryHistory(root);
+      expect(before.summaries).toHaveLength(1);
+      expect(before.counts[0].counts[signal]).toMatchObject({ dropped: expect.any(Number), failed: 0, timed_out: 0 });
+      expect(before.counts[0].counts[signal].dropped).toBeGreaterThan(0);
+      expect(JSON.stringify(before)).not.toContain('CANARY');
+      expect(await new JsonlEventStore({ root }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+      fail(new Error('LATE_PRIVATE_CANARY'));
+      await Promise.resolve();
+      expect(await deliveryHistory(root)).toEqual(before);
+    } finally {
+      controller.abort();
+      fail(new Error('CLEANUP_PRIVATE_CANARY'));
+      await recording;
+    }
+  });
+
+  it('isolates cancellation between concurrent runs on one observer and ignores late export success', async () => {
+    const root = await directory();
+    let enter!: (signal: ProviderAbortSignal) => void;
+    const entered = new Promise<ProviderAbortSignal>(resolve => { enter = resolve; });
+    let release!: () => void;
+    const stalled = new Promise<void>(resolve => { release = resolve; });
+    const append = vi.fn<Parameters<EventStoreProvider['append']>, ReturnType<EventStoreProvider['append']>>(async () => undefined);
+    append.mockImplementationOnce(async (_events, options) => {
+      enter(options!.signal!);
+      await stalled;
+    });
+    const observer = createRunObserver(root, [
+      { provider: { id: 'selected', capabilities: { append: true }, append }, signals: ['events'] },
+    ]);
+    const first = new AbortController();
+    const second = new AbortController();
+    const recording = withObservationSignal(first.signal, () => observer.record(context, { kind: 'qa.failed' }));
+    try {
+      const exportSignal = await entered;
+      await withObservationSignal(second.signal, () => observer.record({ ...context, runId: 'other-run' }, { kind: 'qa.passed' }));
+      first.abort();
+      await recording;
+      expect(exportSignal.aborted).toBe(true);
+      expect(second.signal.aborted).toBe(false);
+      expect(append.mock.calls[1][1]?.signal?.aborted).toBe(false);
+      const before = await deliveryHistory(root);
+      expect(before.counts[0]).toMatchObject({ counts: { events: { dropped: 1, succeeded: 0, timed_out: 0, failed: 0 } } });
+      const healthy = await deliveryHistory(root, 'other-run');
+      expect(healthy.summaries).toHaveLength(0);
+      expect(healthy.history).toHaveLength(1);
+      release();
+      await Promise.resolve();
+      expect(await deliveryHistory(root)).toEqual(before);
+      expect(await deliveryHistory(root, 'other-run')).toEqual(healthy);
+      expect(append).toHaveBeenCalledTimes(2);
+    } finally {
+      first.abort();
+      release();
+      await recording;
+    }
+  });
+
+  it.each(['completed', 'source-failed'] as const)('releases its run cancellation listener when recording is %s', async outcome => {
+    const root = await directory();
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const original = new Error('PRIVATE_SOURCE_CANARY');
+    if (outcome === 'source-failed') vi.spyOn(JsonlEventStore.prototype, 'append').mockRejectedValue(original);
+    const capture = provider();
+    const observer = createRunObserver(root, [{ provider: capture, signals: ['tracing', 'metrics'] }]);
+    const recording = withObservationSignal(controller.signal, () => observer.record(context, { kind: 'qa.passed' }));
+    if (outcome === 'source-failed') await expect(recording).rejects.toBe(original);
+    else await recording;
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0][1]);
+    const exportSignal = capture.startSpan.mock.calls[0][2]?.signal;
+    controller.abort();
+    expect(exportSignal?.aborted).toBe(false);
+  });
+
   it('isolates capture counts across concurrent records and surfaces diagnostic append failure unchanged', async () => {
     const root = await directory();
     const evidence = plainEvidence();
@@ -115,6 +244,142 @@ describe('D10 durable delivery accounting', () => {
     expect(summaries).toHaveLength(1);
     expect(counts[0]).toMatchObject({ evidenceCaptureFailures: { failed: 0, timed_out: 0, cancelled: 1 } });
   });
+
+  it('propagates a pre-cancelled run to artifact capture while preserving its local source audit', async () => {
+    const root = await directory();
+    const evidence = plainEvidence();
+    const localPut = vi.spyOn(evidence, 'put');
+    const remotePut = vi.fn();
+    const controller = new AbortController();
+    controller.abort(new Error('PRIVATE_CANCEL_CANARY'));
+    const observer = createRunObserver(root, [], { artifacts: {
+      provider: { id: 'fixture', capabilities: { write: true, read: false, list: false }, put: remotePut },
+      evidence, captureEvents: true,
+    } });
+    await withObservationSignal(controller.signal, () => observer.record(context, { kind: 'qa.passed' }));
+    expect(localPut).not.toHaveBeenCalled();
+    expect(remotePut).not.toHaveBeenCalled();
+    const { history, counts } = await deliveryHistory(root);
+    expect(history[0].type).toBe('qa.passed');
+    expect(counts[0]).toMatchObject({ evidenceCaptureFailures: { failed: 0, timed_out: 0, cancelled: 1 } });
+    expect(JSON.stringify(history)).not.toContain('CANARY');
+    expect(await new JsonlEventStore({ root }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  });
+
+  it('stops waiting for artifact capture on run cancellation and ignores its late failure', async () => {
+    const root = await directory();
+    const evidence = plainEvidence();
+    let fail!: (error: Error) => void;
+    const stalled = new Promise<Awaited<ReturnType<typeof evidence.put>>>((_resolve, reject) => { fail = reject; });
+    const localPut = vi.spyOn(evidence, 'put').mockReturnValueOnce(stalled);
+    const remotePut = vi.fn();
+    const controller = new AbortController();
+    const observer = createRunObserver(root, [], { artifacts: {
+      provider: { id: 'fixture', capabilities: { write: true, read: false, list: false }, put: remotePut },
+      evidence, captureEvents: true,
+    } });
+    const recording = withObservationSignal(controller.signal, () => observer.record(context, { kind: 'qa.passed' }));
+    let completed = false;
+    void recording.then(() => { completed = true; });
+    try {
+      await vi.waitFor(() => expect(localPut).toHaveBeenCalledTimes(1));
+      controller.abort(new Error('PRIVATE_CANCEL_CANARY'));
+      await vi.waitFor(() => expect(completed).toBe(true), { timeout: 1_000 });
+      await recording;
+      const before = await deliveryHistory(root);
+      expect(before.counts[0]).toMatchObject({ evidenceCaptureFailures: { failed: 0, timed_out: 0, cancelled: 1 } });
+      expect(remotePut).not.toHaveBeenCalled();
+      expect(JSON.stringify(before)).not.toContain('CANARY');
+      fail(new Error('LATE_PRIVATE_CANARY'));
+      await Promise.resolve();
+      expect(await deliveryHistory(root)).toEqual(before);
+    } finally {
+      controller.abort();
+      fail(new Error('CLEANUP_PRIVATE_CANARY'));
+      await recording;
+    }
+  }, 15_000);
+
+  it.each(['run', 'configuration'] as const)('merges %s cancellation with the other artifact signal and ignores late upload success', async origin => {
+    const root = await directory();
+    const evidence = plainEvidence();
+    const ref = await evidence.put({ bytes: Buffer.from('local audit evidence'), mediaType: 'text/plain', classification: 'internal', redactionStatus: 'applied' });
+    let finish!: (artifact: { uri: string; name: string }) => void;
+    const stalled = new Promise<{ uri: string; name: string }>(resolve => { finish = resolve; });
+    const remotePut = vi.fn<Parameters<ArtifactSink['put']>, ReturnType<ArtifactSink['put']>>(() => stalled);
+    const controller = new AbortController();
+    const configured = new AbortController();
+    const observer = createRunObserver(root, [], { artifacts: {
+      provider: { id: 'fixture', capabilities: { write: true, read: false, list: false }, put: remotePut },
+      evidence, signal: configured.signal,
+    } });
+    const recording = withObservationSignal(controller.signal, () => observer.record(context, { kind: 'qa.passed' }, { evidence: [ref] }));
+    let completed = false;
+    void recording.then(() => { completed = true; });
+    try {
+      await vi.waitFor(() => expect(remotePut).toHaveBeenCalledTimes(1));
+      (origin === 'run' ? controller : configured).abort(new Error('PRIVATE_CANCEL_CANARY'));
+      await vi.waitFor(() => expect(completed).toBe(true), { timeout: 1_000 });
+      await recording;
+      expect(remotePut.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect((origin === 'run' ? configured : controller).signal.aborted).toBe(false);
+      const before = await deliveryHistory(root);
+      const receipt = before.history.find(event => event.data.kind === 'effect.completed' && event.data.effectKind === 'artifact.upload');
+      expect(receipt?.data).toMatchObject({ outcome: 'failed', summary: expect.stringContaining('"reason":"aborted"') });
+      expect(before.history[0].evidence).toEqual([ref]);
+      expect(JSON.stringify(before)).not.toContain('CANARY');
+      expect(await new JsonlEventStore({ root }).verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+      finish({ uri: 'https://report.example/late', name: 'late' });
+      await Promise.resolve();
+      expect(await deliveryHistory(root)).toEqual(before);
+    } finally {
+      controller.abort();
+      configured.abort();
+      finish({ uri: 'https://report.example/cleanup', name: 'cleanup' });
+      await recording;
+    }
+  }, 15_000);
+
+  it('isolates artifact upload cancellation between concurrent runs on the same observer', async () => {
+    const root = await directory();
+    const evidence = plainEvidence();
+    const ref = await evidence.put({ bytes: Buffer.from('shared local evidence'), mediaType: 'text/plain', classification: 'internal', redactionStatus: 'applied' });
+    let finish!: (artifact: { uri: string; name: string }) => void;
+    const stalled = new Promise<{ uri: string; name: string }>(resolve => { finish = resolve; });
+    const remotePut = vi.fn<Parameters<ArtifactSink['put']>, ReturnType<ArtifactSink['put']>>(async artifact => ({ uri: 'https://report.example/healthy', name: artifact.name }))
+      .mockImplementationOnce(() => stalled);
+    const observer = createRunObserver(root, [], { artifacts: {
+      provider: { id: 'fixture', capabilities: { write: true, read: false, list: false }, put: remotePut }, evidence,
+    } });
+    const first = new AbortController();
+    const second = new AbortController();
+    const healthyContext = { ...context, runId: 'healthy-artifact-run' };
+    const recording = withObservationSignal(first.signal, () => observer.record(context, { kind: 'qa.passed' }, { evidence: [ref] }));
+    let completed = false;
+    void recording.then(() => { completed = true; });
+    try {
+      await vi.waitFor(() => expect(remotePut).toHaveBeenCalledTimes(1));
+      await withObservationSignal(second.signal, () => observer.record(healthyContext, { kind: 'qa.passed' }, { evidence: [ref] }));
+      first.abort();
+      await vi.waitFor(() => expect(completed).toBe(true), { timeout: 1_000 });
+      await recording;
+      expect(remotePut.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(remotePut.mock.calls[1][1]?.signal?.aborted).toBe(false);
+      expect(second.signal.aborted).toBe(false);
+      const cancelled = await deliveryHistory(root);
+      const healthy = await deliveryHistory(root, healthyContext.runId);
+      expect(cancelled.history[1].data).toMatchObject({ effectKind: 'artifact.upload', outcome: 'failed' });
+      expect(healthy.history[1].data).toMatchObject({ effectKind: 'artifact.upload', outcome: 'succeeded' });
+      finish({ uri: 'https://report.example/late', name: 'late' });
+      await Promise.resolve();
+      expect(await deliveryHistory(root)).toEqual(cancelled);
+      expect(await deliveryHistory(root, healthyContext.runId)).toEqual(healthy);
+    } finally {
+      first.abort();
+      finish({ uri: 'https://report.example/cleanup', name: 'cleanup' });
+      await recording;
+    }
+  }, 15_000);
 
   it.each(['deadline', 'cancelled'] as const)('retains a real remote %s receipt separately from capture accounting', async stage => {
     const { events, evidence, sdk, history } = await sdkEvidence(true);

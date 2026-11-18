@@ -4,18 +4,19 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const runtime = path => import(pathToFileURL(join(process.env.MATRIX_RUNTIME, path + '.js')).href);
-const { createDefaultPluginRuntime } = await runtime('plugin-sdk/index');
+const { createDefaultPluginRuntime, createPluginRunObserver } = await runtime('plugin-sdk/index');
 const { WorkflowRunner } = await runtime('application/workflow-engine');
 const [agent, sandbox, mode] = process.argv.slice(2);
 const workspace = process.cwd();
 const plugins = await createDefaultPluginRuntime({ homeDir: process.env.HOME, workspaceRoot: workspace });
 const events = [];
+const audit = process.env.MATRIX_PERSIST_AUDIT === '1' ? createPluginRunObserver(plugins) : undefined;
 const transitions = [];
 let released = 0;
 let cleaned = 0;
 const item = {
-  id: '42', workItemId: 'github:matrix/repo#42', issueNumber: 42,
-  providerRef: 'github:matrix/repo#42', title: 'Simulated agent matrix', description: 'Run the deterministic subprocess fixture.',
+  id: '42', workItemId: process.env.MATRIX_WORK_ITEM_ID ?? 'github:matrix/repo#42', issueNumber: 42,
+  providerRef: process.env.MATRIX_WORK_ITEM_ID ?? 'github:matrix/repo#42', title: process.env.MATRIX_WORK_TITLE ?? 'Simulated agent matrix', description: 'Run the deterministic subprocess fixture.',
   kind: 'task', state: 'ready', executionMode: 'afk', branchName: 'feat/matrix', dependsOn: [], tags: [],
 };
 const providers = {
@@ -40,14 +41,17 @@ let armed = false;
 let outcome;
 try {
   const runner = new WorkflowRunner(providers, {
-    plugins, observer: { record: async (_context, event) => { events.push(event); } },
+    plugins, observer: { record: async (context, event) => {
+      events.push(event);
+      return audit?.record(context, event);
+    } },
     prepareRuntime: async selection => selection,
     watchdog: { arm() { armed = true; }, disarm() { armed = false; } },
     tmux: { killSession: async () => {}, closeSession: async () => {}, capturePane: async () => '' },
   });
   const result = await runner.run({
     backlogId: item.id, workItemId: item.workItemId, session: 'matrix-42',
-    observationRunId: 'matrix-42', observationWorkItemId: item.workItemId,
+    observationRunId: process.env.MATRIX_RUN_ID ?? 'matrix-42', observationWorkItemId: item.workItemId,
     targetBranch: 'feat/matrix', baseBranch: 'main', baseBranchExplicit: true,
     repoRoot: workspace, workspaceRoot: workspace, template: join(workspace, '.afk', 'workflows', 'matrix.yml'),
     agentProvider: agent, sandboxProvider: sandbox, executionMode: 'batch',

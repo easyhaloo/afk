@@ -4,13 +4,14 @@ import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { RunEvent } from '@afk/core';
 import { z } from 'zod';
+import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import { CandidateStore, type StoredDistillationRequest } from './candidate-store.js';
-import { learningScopeSchema } from './contracts.js';
+import { distillationKey, learningScopeSchema } from './contracts.js';
 import { buildEvidencePack, readEvidenceSource, redactEvidenceText, type EvidencePack, type EvidenceSourceInput } from './evidence.js';
-import { canonicalLearningJson, learningIdentitySchema } from './requests.js';
-import { experienceScope, successfulRunEvidenceFromEvents } from './run-evidence.js';
-import { submitDistillation } from './worker.js';
+import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
+import { experienceScope, failedRunEvidenceFromEvents, successfulRunEvidenceFromEvents } from './run-evidence.js';
+import { queryLearningState, submitDistillation } from './worker.js';
 
 export interface ReconcileDistillationOptions {
   directory: string;
@@ -18,18 +19,21 @@ export interface ReconcileDistillationOptions {
   homeDir?: string;
   scope?: string;
   runId?: string;
+  workItemId?: string;
   analyzerVersion?: string;
+  includeFailed?: boolean;
 }
 
 export interface DistillationReconciliation {
   scanned: number;
   submitted: number;
+  requestKeys: string[];
   invalidated: number;
   checkedSources: Array<{ runId: string; eventRoot: string }>;
   blocked: Array<{ runId: string; code: string; eventRoot?: string }>;
 }
 
-const intakeCodes = new Set(['audit_invalid', 'audit_changed', 'audit_unstable', 'source_not_allowed', 'source_limit', 'evidence_unavailable', 'storage_blocked']);
+const intakeCodes = new Set(['audit_invalid', 'audit_changed', 'audit_unstable', 'source_work_item_mismatch', 'source_not_allowed', 'source_limit', 'evidence_unavailable', 'storage_blocked']);
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 function contains(root: string, path: string): boolean {
@@ -48,12 +52,14 @@ function withdraw(store: CandidateStore, requests: readonly StoredDistillationRe
 export async function reconcileDistillationSources(input: ReconcileDistillationOptions): Promise<DistillationReconciliation> {
   const scopeFilter = input.scope === undefined ? undefined : learningScopeSchema.parse(input.scope);
   const runFilter = input.runId === undefined ? undefined : learningIdentitySchema.parse(input.runId);
+  const workItemFilter = input.workItemId === undefined ? undefined : parseWorkItemId(input.workItemId).id;
+  if (input.includeFailed && (!scopeFilter || !runFilter || !workItemFilter)) throw new Error('failure_source_identity_required');
   const analyzerVersion = learningIdentitySchema.parse(input.analyzerVersion ?? '1');
   const home = await fs.realpath(input.homeDir ?? homedir());
   const defaultRoot = resolve(input.eventRoot ?? process.env.AFK_EVENT_STORE_DIR ?? join(home, '.afk', 'events'));
   const allowedRoots = [join(home, '.afk', 'transcripts'), join(home, '.claude', 'projects'),
     join(home, '.codex', 'sessions'), join(home, '.codex', 'archived_sessions')];
-  const result: DistillationReconciliation = { scanned: 0, submitted: 0, invalidated: 0, checkedSources: [], blocked: [] };
+  const result: DistillationReconciliation = { scanned: 0, submitted: 0, requestKeys: [], invalidated: 0, checkedSources: [], blocked: [] };
   const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
   try {
     const knownSources = [...store.listScanSources().map(source => ({ runId: source.runId, root: source.sourceRoot, scope: source.scope })), ...store.listRequests().flatMap(entry => {
@@ -118,6 +124,7 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
         if (!history.length && incomplete) throw new Error('audit_unstable');
         if (!history.length || history.every(event => event.context.purpose === 'learning')) continue;
         if (history.some(event => event.context.purpose === 'learning')) throw new Error('audit_invalid');
+        if (workItemFilter !== undefined && history[0].context.workItemId !== workItemFilter) throw new Error('source_work_item_mismatch');
         scope = experienceScope(history[0].context.workItemId);
         if (scopeFilter && scopeFilter !== scope) continue;
         if (history.some(event => event.context.runId !== runId || event.context.workItemId !== history[0].context.workItemId)) throw new Error('audit_invalid');
@@ -129,7 +136,11 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
         const prior = priorRun.filter(entry => entry.request.scope === scope);
         const negative = history.filter(event => event.data.kind === 'qa.failed'
           || event.data.kind === 'run.finished' && event.data.outcome !== 'succeeded').at(-1)?.sequence ?? 0;
+        const terminal = history.filter(event => event.data.kind === 'run.finished').at(-1);
+        const failureEpoch = (sourceId: string) => sourceId.match(/:failure:(\d+):failed:sessions:[a-f0-9]{64}$/)?.[1];
         result.invalidated += withdraw(store, prior.filter(entry => {
+          const failed = failureEpoch(entry.request.sourceId);
+          if (failed) return Math.max(negative, terminal?.sequence ?? 0) > Number(failed);
           const epoch = entry.request.sourceId.match(/:qa:(\d+):(?:complete|handoff|ready|merged)(?::sessions:[a-f0-9]{64})?$/)?.[1];
           return negative > Number(epoch ?? 0);
         }));
@@ -137,12 +148,15 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
         let completion: ReturnType<typeof successfulRunEvidenceFromEvents> | undefined;
         try { completion = successfulRunEvidenceFromEvents({ scope, runId, workItemId: history[0].context.workItemId, evidence: [] }, history); }
         catch {}
+        let failure: ReturnType<typeof failedRunEvidenceFromEvents> | undefined;
+        if (!completion && (input.includeFailed || prior.some(entry => failureEpoch(entry.request.sourceId)))) {
+          try { failure = failedRunEvidenceFromEvents({ scope, runId, workItemId: history[0].context.workItemId, evidence: [] }, history); }
+          catch {}
+        }
         const requests = [];
         const snapshots: EvidencePack[] = [];
-        if (completion) {
-          const qa = history.filter(event => event.data.kind === 'qa.started').at(-1)!;
-          const phase = history.some(event => event.data.kind === 'change.merge_verified' && !event.data.child && event.data.changeId === completion!.publishedChange)
-            ? 'merged' : 'ready';
+        let requestKey: string | undefined;
+        if (completion || failure) {
           const recorded = history.flatMap(event => event.data.kind === 'agent.session_recorded' ? [event.data] : []);
           const sessions = [...new Map(recorded.map(data => [data.sessionId, data])).values()]
             .sort((first, second) => first.sessionId < second.sessionId ? -1 : first.sessionId > second.sessionId ? 1 : 0);
@@ -156,22 +170,33 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
           }
           const pack = await buildEvidencePack({ sources });
           const signature = hash(canonicalLearningJson({ sessions, sources: pack.sources.slice(1) }));
-          const sourceId = `run:${hash(runId)}:qa:${qa.sequence}:${phase}:sessions:${signature}`;
-          if (!prior.some(entry => entry.request.analyzerVersion === analyzerVersion && entry.request.sourceId === sourceId)) {
+          const qa = history.filter(event => event.data.kind === 'qa.started').at(-1);
+          const phase = completion && history.some(event => event.data.kind === 'change.merge_verified' && !event.data.child && event.data.changeId === completion.publishedChange)
+            ? 'merged' : 'ready';
+          const epoch = failure ? `failure:${terminal!.sequence}:failed` : `qa:${qa!.sequence}:${phase}`;
+          const sourceId = `run:${hash(runId)}:${epoch}:sessions:${signature}`;
+          const existing = prior.find(entry => entry.request.analyzerVersion === analyzerVersion && entry.request.sourceId === sourceId);
+          if (existing) {
+            requestKey = existing.key;
+          } else {
             snapshots.push(pack);
-            requests.push({ request: { version: 1 as const, scope, sourceId, sourceRunId: runId,
+            const request = { version: 1 as const, scope, sourceId, sourceRunId: runId,
               workItemId: history[0].context.workItemId, evidenceDigest: pack.digest, analyzerVersion,
-              reason: history.some(event => event.data.kind === 'qa.failed' || event.data.kind === 'failure.classified') ? 'repaired' as const : 'completed' as const },
-              evidence: pack.entries.map(entry => entry.ref) });
+              reason: failure ? 'failed' as const
+                : history.some(event => event.data.kind === 'qa.failed' || event.data.kind === 'failure.classified') ? 'repaired' as const : 'completed' as const };
+            requests.push({ request, evidence: pack.entries.map(entry => entry.ref) });
+            requestKey = distillationKey(request);
           }
         }
         if (cursor?.sequence !== last.sequence || requests.length) {
           store.commitScan({ ...identity, sourceRoot: events.root, expectedCursor: cursor, cursor: { sequence: last.sequence, head: last.integrity.hash }, requests }, snapshots);
         }
-        if (completion) {
+        if (completion || failure) {
           for (const entry of prior.filter(entry => entry.blockedReason === 'source_unstable')) {
             store.setRequestBlocked(entry.key, null, 'source_unstable');
           }
+          const current = requestKey ? store.getRequest(requestKey) : undefined;
+          if (current && !current.blockedReason) result.requestKeys.push(current.key);
           result.checkedSources.push({ runId, eventRoot: events.root });
         }
         result.submitted += requests.length;
@@ -196,12 +221,20 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
 
 export async function submitLearningCorrection(input: {
   directory: string; scope: string; sourceId: string; correction: string; analyzerVersion?: string;
+  target?: { candidateId: string; expectedVersion: number };
 }): Promise<StoredDistillationRequest> {
   const scope = learningScopeSchema.parse(input.scope);
   const sourceId = learningIdentitySchema.parse(input.sourceId);
-  const correction = redactEvidenceText(z.string().trim().min(1).max(32 * 1024).parse(input.correction));
+  const correction = redactEvidenceText(z.string().max(32 * 1024)
+    .refine(value => !value.includes('\0') && Buffer.byteLength(value) <= 32 * 1024)
+    .pipe(z.string().trim().min(1)).parse(input.correction));
+  const reference = z.object({ candidateId: learningDigestSchema, expectedVersion: z.number().int().positive().safe() }).strict().optional().parse(input.target);
+  const candidate = reference && queryLearningState({ directory: input.directory, scope }).candidates.find(entry => entry.id === reference.candidateId);
+  if (reference && (!candidate || candidate.version !== reference.expectedVersion)) throw new Error('correction_target_unavailable');
   const actor = hash(String(process.getuid?.() ?? process.platform));
-  const document = { origin: 'current-user-command', actor, source: hash(sourceId), scope, correction };
+  const document = { origin: 'current-user-command', actor, source: hash(sourceId), scope, correction,
+    ...(candidate ? { target: { candidateId: candidate.id, candidateVersion: candidate.version, candidateDigest: candidate.digest,
+      evidenceDigest: candidate.evidenceDigest, state: candidate.state, proposal: candidate.proposal } } : {}) };
   const directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'learning-correction-'));
   try {
     const path = join(directory, 'correction.jsonl');

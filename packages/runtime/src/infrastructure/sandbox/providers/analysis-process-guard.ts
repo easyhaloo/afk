@@ -37,6 +37,9 @@ const analysisGuardSource = String.raw`
 
 export function spawnGuardedAnalysis(argv: string[], options: SpawnOptions) {
   if (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')) throw new Error('analysis_unsupported');
+  const env = { ...(options.env ?? process.env) };
+  delete env.NODE_OPTIONS;
+  delete env.NODE_PATH;
   return spawn(process.execPath, ['--input-type=commonjs', '-e', analysisGuardSource, ...argv],
-    { ...options, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+    { ...options, env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
 }

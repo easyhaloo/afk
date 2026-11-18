@@ -1,7 +1,9 @@
+import { resolve } from 'node:path';
 import { createRunObserver, evidenceStoreSelectionSchema, type ObservabilityProviderSelection, type RunObserverOptions } from '../../infrastructure/observability/run-observer-factory.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import type { EvidenceStoreProvider } from '../../plugin-sdk/capabilities.js';
 import type { PluginRuntime } from './runtime.js';
-import { experienceScope } from '../learning/runtime.js';
+import { ExperienceContextProvider, experienceScope } from '../learning/runtime.js';
 
 export interface PluginRunObserverOptions {
   readonly artifacts?: Omit<NonNullable<RunObserverOptions['artifacts']>, 'provider'> & { readonly provider: string };
@@ -35,6 +37,7 @@ export function setPluginAuditArtifacts(runtime: PluginRuntime, options: NonNull
 }
 
 export function createPluginRunObserver(plugins?: PluginRuntime, root = process.env.AFK_EVENT_STORE_DIR, options: PluginRunObserverOptions = {}) {
+  const eventRoot = resolve(new JsonlEventStore({ root }).root);
   const providers: ObservabilityProviderSelection[] = [];
   const registrations = {
     'observability.provider': ['events', 'tracing', 'metrics'],
@@ -61,7 +64,7 @@ export function createPluginRunObserver(plugins?: PluginRuntime, root = process.
       try { evidence.onFailure?.('provider_unavailable'); } catch {}
     }
   }
-  return createRunObserver(root, providers, {
+  return createRunObserver(eventRoot, providers, {
     artifacts: artifacts && provider ? { ...artifacts, provider } : undefined,
     evidenceStore: evidence && evidenceProvider ? {
       ...evidence, provider: evidenceProvider,
@@ -71,16 +74,28 @@ export function createPluginRunObserver(plugins?: PluginRuntime, root = process.
         catch { return false; }
       },
     } : undefined,
-    onPersisted: plugins ? async draft => {
-      if (draft.context.purpose === 'learning'
-        || !['run.finished', 'qa.failed', 'human_gate.opened', 'change.merge_verified', 'agent.session_recorded'].includes(draft.type)
-        || !plugins.listSystemActions().includes('learning.capture')) return;
-      const settings = await plugins.dispatchSystemAction('learning.settings', {}) as { enabled: boolean };
-      if (!settings.enabled) return;
-      const result = await plugins.dispatchSystemAction('learning.capture', {
-        scope: experienceScope(draft.context.workItemId), runId: draft.context.runId, ...(root ? { eventRoot: root } : {}),
-      }) as { blocked: readonly unknown[] };
-      if (result.blocked.length) throw new Error('learning_capture_degraded');
+    onPersisted: plugins ? async (draft, receipt) => {
+      if (draft.context.purpose === 'learning') return;
+      let outcomeFailed = false;
+      const experience = plugins.getContextProvider('context.experience');
+      if (experience instanceof ExperienceContextProvider
+        && ['run.finished', 'qa.failed', 'failure.classified'].includes(draft.type)) {
+        try {
+          await experience.recordOutcomes({ runId: draft.context.runId, workItemId: draft.context.workItemId, root: eventRoot,
+            event: { sequence: receipt.lastSequence, hash: receipt.lastHash } });
+        } catch { outcomeFailed = true; }
+      }
+      if (['run.finished', 'qa.failed', 'human_gate.opened', 'change.merge_verified', 'agent.session_recorded'].includes(draft.type)
+        && plugins.listSystemActions().includes('learning.capture')) {
+        const settings = await plugins.dispatchSystemAction('learning.settings', {}) as { enabled: boolean };
+        if (settings.enabled) {
+          const result = await plugins.dispatchSystemAction('learning.capture', {
+            scope: experienceScope(draft.context.workItemId), runId: draft.context.runId, eventRoot,
+          }) as { blocked: readonly unknown[] };
+          if (result.blocked.length) throw new Error('learning_capture_degraded');
+        }
+      }
+      if (outcomeFailed) throw new Error('experience_outcome_degraded');
     } : undefined,
   });
 }

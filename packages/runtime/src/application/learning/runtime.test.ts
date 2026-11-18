@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { simpleGit } from 'simple-git';
@@ -10,6 +11,7 @@ import { PluginManager } from '../plugins/manager.js';
 import { createDefaultPluginRuntime } from '../plugins/default-runtime.js';
 import { createFailureDiagnostic } from '../workflows/failure-diagnostic.js';
 import { ExperienceStore } from './experience-store.js';
+import { canonicalLearningJson } from './requests.js';
 import { ExperienceContextProvider, experienceScope, experienceStorePath, prepareExperienceContext, recordExecutionExperience, recordSuccessfulExperience, successfulRunEvidenceFromEvents, verifyAdoptionRun, verifyExperienceRun, verifyApplicableExperience, resolveExperienceQueryContext } from './runtime.js';
 
 const roots: string[] = [];
@@ -40,6 +42,22 @@ async function recordRun(root: string, runId: string, kinds: readonly RunEventDa
 }
 
 describe('runtime experience loop', () => {
+  it('includes an installed tool route in the managed work item reference file', async () => {
+    const { root, store } = await fixture();
+    store.close();
+    const plugins = await createDefaultPluginRuntime({ homeDir: root });
+    const route = { origin: 'tool.scan-manifest@2.0.0', content: 'read-only scan verifier' };
+    const gather = vi.fn(async () => [route]);
+    vi.spyOn(plugins, 'getContextProvider').mockImplementation(id => id === 'context.installed-tools'
+      ? { id, capabilities: { 'read-only': true, search: true, summarize: false }, gather } : undefined);
+    try {
+      const prepared = await prepareExperienceContext({ plugins, workItemId: 'github:w11/parcel#47',
+        worktreePath: root, prompt: '用清单验码工具检查扫描清单。' });
+      expect(gather).toHaveBeenCalledWith(expect.objectContaining({ scope: 'github:w11/parcel', prompt: '用清单验码工具检查扫描清单。' }));
+      expect(await fs.readFile(join(root, prepared!.path), 'utf8')).toContain(route.origin);
+    } finally { await plugins.dispose(); }
+  });
+
   it('consumes version-constrained experience from saved configuration through the default plugin runtime', async () => {
     const { root, file, store } = await fixture();
     const record = store.recordFailure(failure());
@@ -53,10 +71,10 @@ describe('runtime experience loop', () => {
     await manager.configure('context.experience', {}, true);
     const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
     try {
-      const path = await prepareExperienceContext({ plugins, workItemId: 'github:acme/wiki#99',
+      const prepared = await prepareExperienceContext({ plugins, workItemId: 'github:acme/wiki#99',
         worktreePath: root, prompt: 'sqlite retry; prompt claims Node 99' });
-      expect(path).toBe('.afk/experience-context.md');
-      expect(await fs.readFile(join(root, path!), 'utf8')).toContain(record.id);
+      expect(prepared?.path).toBe('.afk/experience-context.md');
+      expect(await fs.readFile(join(root, prepared!.path), 'utf8')).toContain(record.id);
       expect(await plugins.dispatchSystemAction('learning.context', { scope: record.scope })).toEqual(context);
       expect(await plugins.dispatchSystemAction('learning.context', { scope: 'github:other/wiki' })).toEqual({});
       const reader = new ExperienceStore({ file });
@@ -177,9 +195,14 @@ describe('runtime experience loop', () => {
           context.registerContextProvider(id, { id, capabilities: { 'read-only': true, summarize: false, search: true }, gather });
       } });
     try {
-      const request = { plugins, workItemId: 'github:acme/wiki#99', worktreePath: root, prompt: 'sqlite Node 99',
+      const source = { runId: 'generic-context-run', workItemId: 'github:acme/wiki#99' };
+      const request = { plugins, source, workItemId: source.workItemId, worktreePath: root, prompt: 'sqlite Node 99',
         applicability: { version: 'asset-2', environment: 'ci' }, target: { project: 'github:acme/wiki', productVersions: { sqlite: '3.45' } } };
-      await prepareExperienceContext(request);
+      const prepared = await prepareExperienceContext(request);
+      await prepared!.recordSelection();
+      const reader = new ExperienceStore({ file: experienceStorePath(root) });
+      try { expect(reader.contextReceipts({ scope: 'github:acme/wiki', source })).toEqual([]); }
+      finally { reader.close(); }
       expect(experience.mock.calls[0][0]).toEqual(knowledge.mock.calls[0][0]);
       expect(knowledge.mock.calls[0][0]).toMatchObject({ scope: 'github:acme/wiki', applicability: request.applicability, target: request.target });
       const content = await fs.readFile(join(root, '.afk/experience-context.md'), 'utf8');
@@ -191,6 +214,169 @@ describe('runtime experience loop', () => {
       expect(knowledge).toHaveBeenCalledTimes(1);
       await expect(fs.readFile(join(root, '.afk/experience-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally { await plugins.dispose(); }
+  });
+
+  it('records actual builtin retrievals separately from retained references and preserves them after reopening', async () => {
+    const { root, file, store } = await fixture();
+    const ids: string[] = [];
+    for (let index = 0; index < 5; index++) {
+      const record = store.recordFailure({ ...failure(), trigger: `sqlite retry ${index}` });
+      store.verify(record.id, { runId: `qa-${index}`, evidence: [`run:qa-${index}#regression`] });
+      ids.push(record.id);
+    }
+    store.close();
+    const plugins = new PluginRuntime();
+    const provider = new ExperienceContextProvider(file);
+    await plugins.activate({ manifest: { id: 'run-feedback-context', version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) {
+        context.registerContextProvider(provider.id, provider);
+        context.registerContextProvider('context.knowledge', { id: 'context.knowledge', capabilities: provider.capabilities,
+          async gather() { return Array.from({ length: 5 }, (_, index) => ({ origin: `knowledge:${index}`, content: 'independent reference' })); } });
+      } });
+    const source = { runId: 'context-consumer', workItemId: 'github:acme/wiki#99' };
+    const receipts = () => {
+      const reader = new ExperienceStore({ file });
+      try { return reader.contextReceipts({ scope: 'github:acme/wiki', source }); } finally { reader.close(); }
+    };
+    try {
+      await provider.gather({ scope: 'github:acme/wiki', prompt: 'sqlite retry' });
+      expect(receipts()).toEqual([]);
+      const prepared = await prepareExperienceContext({ source, workItemId: source.workItemId, plugins, worktreePath: root, prompt: 'sqlite retry' });
+      const before = receipts();
+      expect(before).toHaveLength(5);
+      expect(before.every(receipt => receipt.stage === 'retrieved')).toBe(true);
+      expect(before.map(receipt => receipt.experienceId).sort()).toEqual(ids.sort());
+      const written = await fs.readFile(join(root, prepared!.path), 'utf8');
+      expect(written.match(/\nSource:/g)).toHaveLength(5);
+      await prepared!.recordSelection();
+      const after = receipts();
+      const selected = after.filter(receipt => receipt.stage === 'selected');
+      expect(selected).toHaveLength(3);
+      for (const receipt of selected) {
+        expect(written).toContain(`experience:${receipt.experienceId};`);
+        expect(receipt).toMatchObject({ source, verificationDigest: before.find(parent => parent.selectionId === receipt.selectionId)!.verificationDigest });
+      }
+      await prepared!.recordSelection();
+      expect(receipts()).toEqual(after);
+      const reader = new ExperienceStore({ file });
+      try { expect(reader.metrics({ scope: 'github:acme/wiki' }).adoptions).toBe(0); } finally { reader.close(); }
+    } finally { await plugins.dispose(); }
+  });
+
+  it('binds selection to the retained fragment and refuses feedback after the reference file changes', async () => {
+    const { root, file, store } = await fixture();
+    const record = store.recordFailure({ ...failure(), action: 'validated sqlite correction '.repeat(100) });
+    store.verify(record.id, { runId: 'qa-long', evidence: ['run:qa-long#regression'] });
+    store.close();
+    const plugins = new PluginRuntime();
+    const provider = new ExperienceContextProvider(file);
+    await plugins.activate({ manifest: { id: 'bounded-feedback-context', version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) {
+        context.registerContextProvider(provider.id, provider);
+        context.registerContextProvider('context.knowledge', { id: 'context.knowledge', capabilities: provider.capabilities,
+          async gather() { return Array.from({ length: 5 }, (_, index) => ({ origin: `knowledge:${index}`, content: 'reference '.repeat(500) })); } });
+      } });
+    const source = { runId: 'bounded-consumer', workItemId: 'github:acme/wiki#99' };
+    try {
+      const prepared = await prepareExperienceContext({ source, workItemId: source.workItemId, plugins, worktreePath: root, prompt: 'sqlite retry' });
+      const written = await fs.readFile(join(root, prepared!.path), 'utf8');
+      const section = written.split(/\nSource: /).find(part => part.startsWith(`experience:${record.id};`))!;
+      const content = section.slice(section.indexOf('\n\n') + 2, -1);
+      await prepared!.recordSelection();
+      const reader = new ExperienceStore({ file });
+      try {
+        const selected = reader.contextReceipts({ scope: record.scope, source }).find(receipt => receipt.stage === 'selected')!;
+        expect(selected.fragmentDigest).toBe(createHash('sha256').update(content).digest('hex'));
+        expect(selected.fragmentDigest).not.toBe(selected.retrievedFragmentDigest);
+      } finally { reader.close(); }
+      const other = { ...source, runId: 'changed-file-consumer' };
+      const changed = await prepareExperienceContext({ source: other, workItemId: other.workItemId, plugins, worktreePath: root, prompt: 'sqlite retry' });
+      await fs.appendFile(join(root, changed!.path), '\nchanged reference');
+      await expect(changed!.recordSelection()).rejects.toThrow('selection feedback is incomplete');
+      const cold = new ExperienceStore({ file });
+      try { expect(cold.contextReceipts({ scope: record.scope, source: other }).map(receipt => receipt.stage)).toEqual(['retrieved']); }
+      finally { cold.close(); }
+    } finally { await plugins.dispose(); }
+  });
+
+  it('refuses to bind an already-rendered fragment to a concurrently reverified experience', async () => {
+    const { root, file, store } = await fixture();
+    const record = store.recordFailure(failure());
+    store.verify(record.id, { runId: 'qa-original', evidence: ['run:qa-original#regression'] });
+    store.close();
+    const plugins = new PluginRuntime();
+    const provider = new ExperienceContextProvider(file);
+    await plugins.activate({ manifest: { id: provider.id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) { context.registerContextProvider(provider.id, provider); } });
+    const recordRetrieval = ExperienceStore.prototype.recordContextRetrieval;
+    const race = vi.spyOn(ExperienceStore.prototype, 'recordContextRetrieval').mockImplementationOnce(function (this: ExperienceStore, input, actual) {
+      const writer = new ExperienceStore({ file });
+      try { writer.verify(record.id, { runId: 'qa-replacement', evidence: ['run:qa-replacement#regression'] }); }
+      finally { writer.close(); }
+      return recordRetrieval.call(this, input, actual);
+    });
+    const source = { runId: 'racing-consumer', workItemId: 'github:acme/wiki#99' };
+    try {
+      await expect(prepareExperienceContext({ source, workItemId: source.workItemId, plugins, worktreePath: root, prompt: 'sqlite retry' }))
+        .rejects.toMatchObject({ name: 'ExperienceFeedbackError', cause: expect.objectContaining({ message: expect.stringMatching(/changed|snapshot|conflict/i) }) });
+      await expect(fs.readFile(join(root, '.afk/experience-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+      const reader = new ExperienceStore({ file });
+      try { expect(reader.contextReceipts({ scope: record.scope, source })).toEqual([]); }
+      finally { reader.close(); }
+    } finally { race.mockRestore(); await plugins.dispose(); }
+  });
+
+  it.each(['overwrite', 'symlink'] as const)('rejects a reference %s during preparation or selection without recording selection', async replacement => {
+    const { root, file, store } = await fixture();
+    const record = store.recordFailure(failure());
+    store.verify(record.id, { runId: 'qa-reference', evidence: ['run:qa-reference#regression'] });
+    store.close();
+    const plugins = new PluginRuntime();
+    const provider = new ExperienceContextProvider(file);
+    await plugins.activate({ manifest: { id: provider.id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) { context.registerContextProvider(provider.id, provider); } });
+    const source = { runId: `reference-${replacement}`, workItemId: 'github:acme/wiki#99' };
+    const directory = join(await fs.realpath(root), '.afk');
+    const target = join(directory, 'experience-context.md');
+    const rename = fs.rename;
+    const overwritten = replacement === 'overwrite' ? vi.spyOn(fs, 'rename').mockImplementationOnce(async (from, to) => {
+      await rename(from, to);
+      await fs.writeFile(to, 'another preparation replaced this reference');
+    }) : undefined;
+    let swapped: { mockRestore(): void } | undefined;
+    try {
+      const prepared = await prepareExperienceContext({ source, workItemId: source.workItemId, plugins, worktreePath: root, prompt: 'sqlite retry' });
+      if (replacement === 'symlink') {
+        const outside = join(root, 'copied-reference.md');
+        await fs.copyFile(target, outside);
+        swapped = vi.spyOn(fs, 'realpath').mockImplementationOnce(async () => {
+          await fs.unlink(target);
+          await fs.symlink(outside, target);
+          return directory;
+        });
+      }
+      await expect(prepared!.recordSelection()).rejects.toThrow('selection feedback is incomplete');
+      const reader = new ExperienceStore({ file });
+      try { expect(reader.contextReceipts({ scope: record.scope, source }).map(receipt => receipt.stage)).toEqual(['retrieved']); }
+      finally { reader.close(); }
+    } finally { overwritten?.mockRestore(); swapped?.mockRestore(); await plugins.dispose(); }
+  });
+
+  it.each([
+    { runId: 'foreign-run', workItemId: 'github:acme/wiki#98' },
+    { runId: '', workItemId: 'github:acme/wiki#99' },
+    { runId: ' padded-run ', workItemId: 'github:acme/wiki#99' },
+    { runId: 'invalid\0run', workItemId: 'github:acme/wiki#99' },
+    { runId: 'x'.repeat(513), workItemId: 'github:acme/wiki#99' },
+  ])('rejects invalid feedback source %# before replacing a prepared reference', async source => {
+    const { root, store } = await fixture();
+    store.close();
+    await fs.mkdir(join(root, '.afk'), { recursive: true });
+    const target = join(root, '.afk', 'experience-context.md');
+    await fs.writeFile(target, 'previous reference');
+    await expect(prepareExperienceContext({ source,
+      workItemId: 'github:acme/wiki#99', worktreePath: root, prompt: 'sqlite retry' })).rejects.toMatchObject({ name: 'ExperienceFeedbackError' });
+    expect(await fs.readFile(target, 'utf8')).toBe('previous reference');
   });
 
   it('uses the same successful-run gate for frozen history and refuses learning-purpose or mismatched run evidence', async () => {
@@ -251,8 +437,8 @@ describe('runtime experience loop', () => {
     store.verify(record.id, { runId: 'qa-proof', evidence: ['run:qa-proof#qa.passed'] });
     const workItemId = record.source.workItemId;
     const acknowledge = async (runId: string) => {
-      await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId });
-      return store.adopt({ id: record.id, scope: record.scope, source: { runId, workItemId } });
+      const context = await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId });
+      return store.adopt({ id: record.id, scope: record.scope, source: { runId, workItemId } }, context);
     };
     await expect(acknowledge('missing')).rejects.toThrow('intact recorded run');
     await recordRun(root, 'other-task', [{ kind: 'run.started' }], 'github:acme/wiki#43');
@@ -268,9 +454,175 @@ describe('runtime experience loop', () => {
     await recordRun(root, 'active', [{ kind: 'run.started' }]);
     await verifyAdoptionRun({ root, scope: record.scope, runId: 'active', workItemId });
     expect(store.metrics({ scope: record.scope }).adoptions).toBe(0);
-    expect(await acknowledge('active')).toEqual({ retrievals: 0, adoptions: 1, recurrences: 0 });
-    expect(await acknowledge('active')).toEqual({ retrievals: 0, adoptions: 1, recurrences: 0 });
+    const adoption = await acknowledge('active');
+    expect(adoption).toMatchObject({ retrievals: 0, adoptions: 1, recurrences: 0,
+      receipt: { binding: 'verified-version', contextStatus: 'unavailable', experienceId: record.id, source: { runId: 'active', workItemId } } });
+    expect(await acknowledge('active')).toEqual(adoption);
     store.close();
+  });
+
+  it.each(['snapshot and finish', 'qa.passed', 'qa.failed', 'run.finished'] as const)(
+    'binds an active trusted target and rejects drift after agent %s without granting successful QA qualification', async claim => {
+    const { root, file, store } = await fixture();
+    let ledger = store;
+    try {
+      const record = store.recordFailure(failure());
+      store.verify(record.id, { runId: 'qa-proof', evidence: ['run:qa-proof#qa.passed'] });
+      const runId = 'active-target';
+      const workItemId = `${record.scope}#99`;
+      const actual = { target: { project: record.scope, revision: 'a'.repeat(40), dirty: false } };
+      await recordRun(root, runId, [{ kind: 'qa.started' },
+        { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(actual) }], workItemId);
+      const context = await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId });
+      expect(context).toEqual({ actual });
+      const adoption = { id: record.id, scope: record.scope, source: { runId, workItemId } };
+      const result = store.adopt(adoption, context);
+      expect(result.receipt).toMatchObject({ contextStatus: 'recorded',
+        contextDigest: createHash('sha256').update(canonicalLearningJson(actual)).digest('hex') });
+      expect(store.adopt(adoption, await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId }))).toEqual(result);
+      const claims: RunEventData[] = claim === 'snapshot and finish' ? [
+        { kind: 'decision.made', command: 'experience.qa-target', accepted: true,
+          reason: JSON.stringify({ target: { ...actual.target, revision: 'c'.repeat(40) } }) },
+        { kind: 'run.finished', outcome: 'succeeded' },
+      ] : [claim === 'run.finished' ? { kind: claim, outcome: 'succeeded' } : { kind: claim }];
+      await new JsonlEventStore({ root }).append(claims.map((data, index) => ({ id: `active-target-agent-${index}`, schemaVersion: 1, type: data.kind,
+        occurredAt: new Date().toISOString(), context: { traceId: runId, runId, workItemId, profileId: 'local', attempt: 1,
+          actor: { kind: 'agent', id: 'claim' } }, correlationId: runId, data } as const)));
+      expect(await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId })).toEqual({ actual });
+      ledger.close();
+      ledger = new ExperienceStore({ file });
+      expect(ledger.adopt(adoption, await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId }))).toEqual(result);
+      const changed = { target: { ...actual.target, revision: 'b'.repeat(40) } };
+      await new JsonlEventStore({ root }).append([{ id: 'active-target-changed', schemaVersion: 1, type: 'decision.made',
+        occurredAt: new Date().toISOString(), context: { traceId: runId, runId, workItemId, profileId: 'local', attempt: 1,
+          actor: { kind: 'system', id: 'test' } }, correlationId: runId,
+        data: { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(changed) } }]);
+      const drifted = await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId });
+      expect(drifted).toEqual({ actual: changed });
+      expect(() => ledger.adopt(adoption, drifted)).toThrow('binding');
+      ledger.close();
+      ledger = new ExperienceStore({ file });
+      expect(await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId })).toEqual(drifted);
+      expect(() => ledger.adopt(adoption, drifted)).toThrow('binding');
+      expect(ledger.metrics({ scope: record.scope }).adoptions).toBe(1);
+    } finally { ledger.close(); }
+  });
+
+  it('keeps unknown-product adoption blocked after agent QA claims and reopening the persisted audit and store', async () => {
+    const { root, file, store } = await fixture();
+    let ledger = store;
+    try {
+      const record = ledger.recordFailure(failure());
+      ledger.verify(record.id, { runId: 'qa-proof', evidence: ['run:qa-proof#qa.passed'] });
+      const runId = 'unknown-product-agent-claims';
+      const workItemId = `${record.scope}#99`;
+      const actual = { target: { project: record.scope, revision: 'a'.repeat(40), dirty: false,
+        productVersions: { sqlite: '3.45' } } };
+      const input = { root, scope: record.scope, runId, workItemId };
+      const adoption = { id: record.id, scope: record.scope, source: { runId, workItemId } };
+      await recordRun(root, runId, [{ kind: 'qa.started' },
+        { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(actual) },
+        { kind: 'commit.recorded', phase: 'qa', commitSha: actual.target.revision, branch: 'qa' }], workItemId);
+      const active = await verifyAdoptionRun(input);
+      expect(active).toEqual({ actual });
+      expect(() => ledger.adopt(adoption, active)).toThrow('applicability');
+      await new JsonlEventStore({ root }).append(([
+        { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' },
+      ] satisfies RunEventData[]).map((data, index) => ({ id: `unknown-product-agent-${index}`, schemaVersion: 1, type: data.kind,
+        occurredAt: new Date().toISOString(), context: { traceId: runId, runId, workItemId, profileId: 'local', attempt: 1,
+          actor: { kind: 'agent', id: 'claim' } }, correlationId: runId, data } as const)));
+      const claimed = await verifyAdoptionRun(input);
+      expect(claimed).toEqual({ actual });
+      expect(() => ledger.adopt(adoption, claimed)).toThrow('applicability');
+      expect(ledger.metrics({ scope: record.scope }).adoptions).toBe(0);
+      ledger.close();
+      ledger = new ExperienceStore({ file });
+      expect(await new JsonlEventStore({ root }).verify(runId)).toMatchObject({ valid: true, lastSequence: 5 });
+      const replayed = await verifyAdoptionRun(input);
+      expect(replayed).toEqual({ actual });
+      expect(() => ledger.adopt(adoption, replayed)).toThrow('applicability');
+      expect(ledger.metrics({ scope: record.scope }).adoptions).toBe(0);
+    } finally { ledger.close(); }
+  });
+
+  it.each<{ name: string; completion: RunEventData; outcome?: 'failed' | 'cancelled'; qualified: boolean }>([
+    { name: 'matching merge gate', completion: { kind: 'human_gate.opened', gateId: 'merge:5', reason: 'review' }, qualified: true },
+    { name: 'matching merged change', completion: { kind: 'change.merge_verified', changeId: '5', targetBranch: 'main' }, qualified: true },
+    { name: 'wrong merge gate', completion: { kind: 'human_gate.opened', gateId: 'merge:6', reason: 'review' }, qualified: false },
+    { name: 'wrong merged change', completion: { kind: 'change.merge_verified', changeId: '6', targetBranch: 'main' }, qualified: false },
+    { name: 'failure after matching gate', completion: { kind: 'human_gate.opened', gateId: 'merge:5', reason: 'review' }, outcome: 'failed', qualified: false },
+    { name: 'cancellation after matching merge', completion: { kind: 'change.merge_verified', changeId: '5', targetBranch: 'main' }, outcome: 'cancelled', qualified: false },
+  ])('separates persisted actual context from QA qualification for $name', async ({ completion, outcome, qualified }) => {
+    const { root, store } = await fixture();
+    store.close();
+    const scope = 'github:acme/wiki';
+    const workItemId = `${scope}#99`;
+    const runId = 'published-target';
+    const actual = { applicability: { environment: 'ci' }, target: { project: scope, revision: 'a'.repeat(40), dirty: false } };
+    await recordRun(root, runId, [{ kind: 'qa.started' },
+      { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(actual) },
+      { kind: 'commit.recorded', phase: 'qa', commitSha: actual.target.revision, branch: 'qa' },
+      { kind: 'qa.passed' }, { kind: 'change.published', changeId: '5', url: 'https://example.test/pull/5' },
+      completion, ...(outcome ? [{ kind: 'run.finished' as const, outcome }] : [])], workItemId);
+    const expected = qualified ? { actual, verified: actual } : { actual };
+    expect(await verifyAdoptionRun({ root, scope, runId, workItemId })).toEqual(expected);
+  });
+
+  it.each<RunEventData>([
+    { kind: 'human_gate.opened', gateId: 'merge:5', reason: 'review' },
+    { kind: 'change.merge_verified', changeId: '5', targetBranch: 'main' },
+    { kind: 'run.finished', outcome: 'succeeded' },
+  ])('retains persisted actual without granting QA qualification from agent $kind', async completion => {
+    const { root, store } = await fixture();
+    store.close();
+    const scope = 'github:acme/wiki';
+    const workItemId = `${scope}#99`;
+    const runId = 'agent-completion';
+    const actual = { target: { project: scope, revision: 'a'.repeat(40), dirty: false } };
+    await recordRun(root, runId, [{ kind: 'qa.started' },
+      { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(actual) },
+      { kind: 'commit.recorded', phase: 'qa', commitSha: actual.target.revision, branch: 'qa' },
+      { kind: 'qa.passed' }, { kind: 'change.published', changeId: '5', url: 'https://example.test/pull/5' }], workItemId);
+    await new JsonlEventStore({ root }).append([{ id: 'agent-completion-claim', schemaVersion: 1, type: completion.kind,
+      occurredAt: new Date().toISOString(), context: { traceId: runId, runId, workItemId, profileId: 'local', attempt: 1,
+        actor: { kind: 'agent', id: 'claim' } }, correlationId: runId, data: completion }]);
+    expect(await verifyAdoptionRun({ root, scope, runId, workItemId })).toEqual({ actual });
+  });
+
+  it('adopts constrained lessons only with a trusted successful target from the exact task audit', async () => {
+    const { root, store } = await fixture();
+    try {
+      const record = store.recordFailure(failure());
+      const context = { applicability: { environment: 'ci' }, target: { project: record.scope,
+        revision: 'a'.repeat(40), dirty: false, productVersions: { sqlite: '3.45' } } };
+      store.verify(record.id, { runId: 'qa-original', evidence: ['run:qa-original#qa.passed'] }, context);
+      const workItemId = `${record.scope}#99`;
+      const history = (target = context, commit = context.target.revision): RunEventData[] => [
+        { kind: 'qa.started' },
+        { kind: 'decision.made', command: 'experience.qa-target', accepted: true, reason: JSON.stringify(target) },
+        { kind: 'commit.recorded', phase: 'qa', commitSha: commit, branch: 'qa-fixture' },
+        { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' },
+      ];
+      const acknowledge = async (runId: string) => {
+        const actual = await verifyAdoptionRun({ root, scope: record.scope, runId, workItemId });
+        return store.adopt({ id: record.id, scope: record.scope, source: { runId, workItemId } }, actual);
+      };
+      await recordRun(root, 'active-constrained', [{ kind: 'run.started' }], workItemId);
+      await expect(acknowledge('active-constrained')).rejects.toThrow('applicability');
+      await recordRun(root, 'active-with-target', history().slice(0, 2), workItemId);
+      await expect(acknowledge('active-with-target')).rejects.toThrow('applicability');
+      await recordRun(root, 'agent-claim', history(), workItemId, 'agent');
+      await expect(acknowledge('agent-claim')).rejects.toThrow('applicability');
+      await recordRun(root, 'wrong-commit', history(context, 'b'.repeat(40)), workItemId);
+      await expect(acknowledge('wrong-commit')).rejects.toThrow('applicability');
+      await recordRun(root, 'wrong-environment', history({ ...context, applicability: { environment: 'production' } }), workItemId);
+      await expect(acknowledge('wrong-environment')).rejects.toThrow('applicability');
+      expect(store.metrics({ scope: record.scope }).adoptions).toBe(0);
+      await recordRun(root, 'compatible', history(), workItemId);
+      expect(await verifyAdoptionRun({ root, scope: record.scope, runId: 'compatible', workItemId })).toEqual({ actual: context, verified: context });
+      expect((await acknowledge('compatible')).adoptions).toBe(1);
+      expect((await acknowledge('compatible')).adoptions).toBe(1);
+    } finally { store.close(); }
   });
 
   it('refuses same-project re-import of a revoked local origin after a real audited verification', async () => {
@@ -399,7 +751,8 @@ describe('runtime experience loop', () => {
       await recordRun(join(root, 'events'), 'qa-1', [{ kind: 'qa.started' }, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]);
       const evidence = await verifyExperienceRun({ root: join(root, 'events'), scope: candidate.scope, runId: 'qa-1', evidence: ['run:qa-1#regression-test'] });
       store.verify(candidate.id, { runId: 'qa-1', evidence });
-      const path = await prepareExperienceContext(request);
+      const prepared = await prepareExperienceContext(request);
+      const path = prepared?.path;
       expect(path).toBe('.afk/experience-context.md');
       const context = await fs.readFile(join(root, path!), 'utf8');
       expect(context).toContain('BEGIN IMMEDIATE');
@@ -448,6 +801,8 @@ describe('runtime experience loop', () => {
     store.close();
     vi.stubEnv('HOME', root);
     const record = recordExecutionExperience({ failure: createFailureDiagnostic({ code: 'upstream_model_error', message: 'sqlite request failed token=synthetic-secret' }), runId: 'failed-runtime', workItemId: 'github:acme/wiki#42' });
+    expect(record).toBeDefined();
+    if (!record) throw new Error('An unselected failure must create a candidate');
     expect(record.status).toBe('candidate');
     expect(record.scope).toBe('github:acme/wiki');
     expect(record.evidence).toEqual(['run:failed-runtime#failure.classified']);

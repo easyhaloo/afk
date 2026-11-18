@@ -160,6 +160,47 @@ describe('repository frozen proposal production orchestration', () => {
     expect(engine.buildFrozenImage).not.toHaveBeenCalled();
   });
 
+  it.each(['cancellation', 'timeout'] as const)('delivers %s business bytes while retaining the scenario receipt when execution exits early', async kind => {
+    const { options, prepared, repository, engine } = fixture();
+    const check = prepared.checks.find(entry => entry.kind === kind)!;
+    engine.killFrozenContainer = vi.fn(async () => {});
+    const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
+    const callInput = '{ "key": "alpha" }';
+    configured.argv = ['node', '/workspace/asset.js', callInput];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input, callInput,
+      control: { kind, afterMs: 1 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
+        { id: 'host', source: 'control', path: ['outcome'], expected: 'triggered' }] };
+    const result = await verifyRepositoryAssetProposal(prepared, options);
+    expect(result.status).toBe('verification-observed');
+    if (result.status !== 'verification-observed') throw new Error('Missing observations');
+    const comparison = result.comparisons.find(entry => entry.checkId === check.id)!;
+    for (const observation of [comparison.original!, comparison.proposed]) {
+      expect(observation.execution.evidence.argv.at(-1)).toBe(callInput);
+      expect(observation.receipt.binding.inputDigest).toBe(bytesDigest(check.input));
+      expect(observation.receipt.semantic?.deliveredInputDigest).toBe(bytesDigest(callInput));
+      expect(observation.receipt.semantic?.passed).toBe(false);
+      expect(observation.receipt.passed).toBe(false);
+      expect(observation.execution.evidence.control?.outcome).toBe('not-triggered');
+    }
+    expect(repository.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it.each(['missing', 'schema', 'argv'] as const)('rejects %s control input before allocating a repository', async drift => {
+    const { options, prepared, repository, engine } = fixture();
+    const check = prepared.checks.find(entry => entry.kind === 'timeout')!;
+    const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
+    const callInput = '{"key":"alpha"}';
+    configured.argv = ['node', '/workspace/asset.js', drift === 'argv' ? check.input : callInput];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: check.kind, input: check.input,
+      ...(drift === 'missing' ? {} : { callInput: drift === 'schema' ? '{}' : callInput }),
+      control: { kind: 'timeout', afterMs: 1 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
+        { id: 'host', source: 'control', path: ['outcome'], expected: 'triggered' }] };
+    if (drift === 'missing') expect(await verifyRepositoryAssetProposal(prepared, options)).toMatchObject({ status: 'blocked', code: 'oracle_unsupported' });
+    else await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow(drift === 'schema' ? /input schema/i : /bound input/i);
+    expect(repository.prepare).not.toHaveBeenCalled();
+    expect(engine.buildFrozenImage).not.toHaveBeenCalled();
+  });
+
   it.each([
     { status: 'inferred', actual: { value: 'observed' }, assertions: 1 },
     { actual: { value: 'observed' }, assertions: 1 },
@@ -395,6 +436,95 @@ describe('repository frozen proposal production orchestration', () => {
     expect(repository.cleanup).toHaveBeenCalledTimes(1);
     expect(git(root, 'status', '--porcelain')).toBe('');
     expect(options.recordOwnership).toHaveBeenCalledTimes(prepared.checks.length * 2);
+  });
+
+  it.each(['matched', 'drifted', 'missing'] as const)('reconciles %s catalog skill resources before staging either variant', async state => {
+    const { root, options, prepared, workspace, engine } = fixture();
+    const content = 'Recovery resource';
+    const skillFile = join(root, 'SKILL.md');
+    writeFileSync(skillFile, 'Test skill');
+    git(root, 'add', 'SKILL.md');
+    if (state === 'missing') {
+      rmSync(join(root, 'helper.txt'));
+      git(root, 'add', '-u', 'helper.txt');
+    } else if (state === 'matched') {
+      writeFileSync(join(root, 'helper.txt'), content);
+      git(root, 'add', 'helper.txt');
+    }
+    git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'add test skill');
+    options.expectedCommit = git(root, 'rev-parse', 'HEAD');
+    const committed = { ...workspace, snapshot: { ...workspace.snapshot, commit: options.expectedCommit } };
+    vi.mocked(options.repository.snapshot).mockResolvedValue(committed.snapshot);
+    vi.mocked(options.repository.prepare!).mockResolvedValue(committed);
+    vi.mocked(options.repository.checkout!).mockResolvedValue(committed);
+    options.inventory.skills.push({ name: 'review', description: 'Unrelated skill', 'disable-model-invocation': true,
+      'user-invocable': true, 'allowed-tools': [], 'disallowed-tools': [], source: { root, file: skillFile },
+      resources: [{ path: 'helper.txt', digest: createHash('sha256').update(content).digest('hex') }] });
+    const execute = vi.spyOn(options.sandbox, 'executeFrozen');
+    if (state !== 'matched') {
+      await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow('Proposal skill resource differs from committed baseline');
+      expect(execute).not.toHaveBeenCalled();
+      expect(engine.buildFrozenImage).not.toHaveBeenCalled();
+      expect(options.repository.cleanup).toHaveBeenCalledTimes(1);
+      return;
+    }
+    const result = await verifyRepositoryAssetProposal(prepared, options);
+    expect(result.status).toBe('verification-observed');
+    const [original, proposed] = execute.mock.calls.map(([request]) => request.input.manifest);
+    const nonAsset = original.filter(entry => entry.path !== 'asset.js');
+    expect(nonAsset).toContainEqual(expect.objectContaining({ path: 'helper.txt', digest: options.inventory.skills[0].resources![0].digest }));
+    expect(proposed.filter(entry => entry.path !== 'asset.js')).toEqual(nonAsset);
+  });
+
+  it.each([true, false])('builds only the selected skill and resources (existing: %s)', async existing => {
+    const { root, options, workspace, engine } = fixture();
+    const artifactPath = 'skills/review/SKILL.md';
+    const resourcePath = 'skills/review/docs/guide.txt';
+    const original = '---\nname: review\ndescription: Review changes\ndisable-model-invocation: true\n---\nReview the changes.\n';
+    const resource = 'Declared reference bytes';
+    mkdirSync(join(root, 'skills/review/docs'), { recursive: true });
+    mkdirSync(join(root, 'skills/other'));
+    if (existing) writeFileSync(join(root, artifactPath), original);
+    writeFileSync(join(root, resourcePath), resource);
+    writeFileSync(join(root, 'skills/review/docs/extra.txt'), 'Undeclared bytes');
+    writeFileSync(join(root, 'skills/other/SKILL.md'), 'Other skill bytes');
+    writeFileSync(join(root, 'config.json'), 'Unrelated config bytes');
+    git(root, 'add', '.');
+    git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'skill isolation fixture');
+    options.expectedCommit = git(root, 'rev-parse', 'HEAD');
+    const committed = { ...workspace, snapshot: { ...workspace.snapshot, commit: options.expectedCommit } };
+    vi.mocked(options.repository.snapshot).mockResolvedValue(committed.snapshot);
+    vi.mocked(options.repository.prepare!).mockResolvedValue(committed);
+    vi.mocked(options.repository.checkout!).mockResolvedValue(committed);
+    if (existing) options.inventory.skills.push({ name: 'review', description: 'Review changes', 'disable-model-invocation': true,
+      'user-invocable': true, 'allowed-tools': [], 'disallowed-tools': [], source: { root, file: join(root, artifactPath) },
+      resources: [{ path: 'docs/guide.txt', digest: bytesDigest(resource) }] });
+    const prepared = prepareAssetProposal({ ...output.candidates[0], kind: 'skill', title: 'Review changes', payload: {
+      ...(existing ? { targetSkill: 'skill:review', originalDigest: bytesDigest(original) } : { newReason: 'No existing skill covers this task' }),
+      triggers: ['Manual review'], prohibitedConditions: ['No authorization'], inputs: [{ name: 'change', description: 'Change', required: true }],
+      branches: ['Check the change'], recovery: ['Restore the checkpoint'], completion: 'Review recorded', patch: 'Parameterize the change.',
+      evaluationCases: [{ kind: 'normal', input: 'Change A', expected: 'Reviewed' },
+        { kind: 'recovery', input: 'Interrupted review', expected: 'Resumed' }, { kind: 'refusal', input: 'Unauthorized review', expected: 'Denied' }],
+    } }, options.inventory);
+    options.artifactPath = artifactPath;
+    options.harness = { ...options.harness!, kind: 'skill', cases: prepared.checks.map(check => ({
+      checkId: check.id, checkDigest: digest(check), argv: ['fixture'], expected: { value: 'new' },
+    })) };
+    const execute = vi.spyOn(options.sandbox, 'executeFrozen');
+    const result = await verifyRepositoryAssetProposal(prepared, options);
+    expect(result.status).toBe('verification-observed');
+    const [first, second] = execute.mock.calls.map(([request]) => request.input.manifest);
+    expect(first.map(entry => entry.path)).toEqual(existing
+      ? ['skills', 'skills/review', artifactPath, 'skills/review/docs', resourcePath] : ['skills', 'skills/review', artifactPath]);
+    expect(second.filter(entry => entry.path !== artifactPath)).toEqual(first.filter(entry => entry.path !== artifactPath));
+    expect(first.find(entry => entry.path === artifactPath)?.digest).toBe(existing ? bytesDigest(original) : prepared.artifact.digest);
+    expect(second.find(entry => entry.path === artifactPath)?.digest).toBe(prepared.artifact.digest);
+    for (const [, , archive] of vi.mocked(engine.buildFrozenImage).mock.calls) {
+      expect(archive.includes(Buffer.from(resource))).toBe(existing);
+      for (const excluded of ['Undeclared bytes', 'Other skill bytes', 'Unrelated config bytes', 'input/asset.js']) {
+        expect(archive.includes(Buffer.from(excluded))).toBe(false);
+      }
+    }
   });
 
   it.each(['dirty', 'untracked', 'ignored', 'commit', 'inventory', 'asset-path'] as const)('refuses %s before candidate execution', async change => {
@@ -733,6 +863,36 @@ function managedFixture() {
 }
 
 describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real temporary Git and Docker production orchestration', () => {
+  it.each(['cancellation', 'timeout'] as const)('compares a naturally exited baseline with an actually triggered %s proposal', async kind => {
+    const { options, prepared, owned } = managedFixture();
+    if (prepared.proposal.kind !== 'tool') throw new Error('Expected tool');
+    const changed = prepareAssetProposal({ ...prepared.proposal,
+      payload: { ...prepared.proposal.payload, source: 'setInterval(()=>{},1000);', timeoutMs: 5000 } }, options.inventory);
+    for (const configured of options.harness!.cases) {
+      configured.checkDigest = digest(changed.checks.find(check => check.id === configured.checkId)!);
+    }
+    const check = changed.checks.find(entry => entry.kind === kind)!;
+    const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
+    const callInput = '{"key":"alpha"}';
+    configured.argv = ['node', '/workspace/asset.js', callInput];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input, callInput,
+      control: { kind, afterMs: 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
+        { id: 'trigger', source: 'control', path: ['kind'], expected: kind }] };
+    options.harness!.cases = [configured, ...options.harness!.cases.filter(entry => entry !== configured)];
+    options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Remaining experiments are not configured' }));
+    const operations: string[] = [];
+    options.recordOwnership = async ownership => { operations.push(ownership.operationId); };
+    const result = await verifyRepositoryAssetProposal(changed, options);
+    if (result.status !== 'blocked') throw new Error('Remaining experiments must stay blocked');
+    expect(result.observations).toHaveLength(2);
+    expect(result.observations.map(observation => observation.receipt.passed)).toEqual([false, true]);
+    expect(result.observations[0].execution.evidence.control).toMatchObject({ outcome: 'not-triggered', reason: 'early-exit', exitCode: 0 });
+    expect(result.observations[1].execution.evidence.control).toMatchObject({ outcome: 'triggered', signal: 'SIGKILL', exitCode: 137 });
+    expect([...owned].every(path => !existsSync(path))).toBe(true);
+    for (const operation of operations) assertNoDockerResources(operation);
+    realEvidence.push({ kind: `early-baseline-then-triggered-${kind}`, operations, result, cleanup: 'confirmed' });
+  }, 120_000);
+
   it.each(['cancellation', 'timeout'] as const)('binds actual host %s control to the proposal observation', async kind => {
     const { options, prepared, owned } = managedFixture();
     if (prepared.proposal.kind !== 'tool') throw new Error('Expected tool');
@@ -747,8 +907,9 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real temporary Git a
     }
     const check = changed.checks.find(entry => entry.kind === kind)!;
     const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
-    configured.argv = ['node', '/workspace/new.js', check.input];
-    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input,
+    const callInput = '{"key":"alpha"}';
+    configured.argv = ['node', '/workspace/new.js', callInput];
+    configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input, callInput,
       control: { kind, afterMs: 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
         { id: 'trigger', source: 'control', path: ['kind'], expected: kind }] };
     options.harness!.cases = [configured, ...options.harness!.cases.filter(entry => entry !== configured)];

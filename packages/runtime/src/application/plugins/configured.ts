@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { complianceSettings } from './shared-verification.js';
 import { configuredExternalTools } from './builtin-manifests.js';
 import { resolve } from 'node:path';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import type { ProviderDiagnostic, ProviderHealth, TriggerDescriptor, TriggerProv
 import type { Plugin, PluginSetupContext } from './runtime.js';
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
 import { ExperienceContextProvider, experienceStorePath } from '../learning/runtime.js';
+import type { KnowledgeRuntimeOptions } from '../learning/knowledge-runtime.js';
 import { createJumpserverPlugin } from './builtins.js';
 import { AgentProviderRegistry, ensureBuiltinAgentProviders } from '../../domain/agents/index.js';
 import { createSshHostConnection, createAwsSsmHostConnection, createKubernetesExecHostConnection } from '../../infrastructure/host/index.js';
@@ -47,11 +49,13 @@ export interface ConfiguredTriggerEvent {
 }
 
 export interface ConfiguredPluginsOptions {
+  readonly readToolSourcePolicy?: () => unknown;
   readonly configurations: readonly {
     readonly id: string;
     readonly config?: { readonly [key: string]: PluginConfigValue };
   }[];
   readonly homeDir?: string;
+  readonly knowledge?: KnowledgeRuntimeOptions;
   readonly workspaceRoot?: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly fetch?: FetchTransport;
@@ -82,12 +86,13 @@ export interface ConfiguredPluginMetadata {
 }
 type Definition = {
   readonly provides: readonly string[];
+  readonly credentialDependencies?: readonly string[];
   inspect(config: unknown): { readonly provides: readonly string[]; readonly credentialDependencies: readonly string[] };
   create(config: unknown): PreparedPlugin;
 };
 
 export function configuredPluginManifests(): readonly PluginManifest[] {
-  return Object.entries(configuredDefinitions({ configurations: [] }).definitions).map(([id, definition]) => configuredManifest(id, definition.provides));
+  return Object.entries(configuredDefinitions({ configurations: [] }).definitions).map(([id, definition]) => configuredManifest(id, definition.provides, definition.credentialDependencies));
 }
 
 function configuredManifest(id: string, provides: readonly string[], dependencies: readonly string[] = []): PluginManifest {
@@ -143,6 +148,11 @@ const port = z.number().int().min(1).max(65535);
 const milliseconds = z.number().int().positive().max(2_147_483_647);
 const scalar = z.union([z.string(), z.number().finite(), z.boolean()]);
 const filters = z.record(scalar);
+
+function compliancePolicy(config: z.infer<typeof complianceSettings>) {
+  return new CompliancePolicyProvider({ ...config, rules: config.rules.map(rule => ({ ...rule,
+    when: rule.when && (context => Object.entries(rule.when!).every(([key, value]) => context[key] === value)) })) });
+}
 const jsonValue: z.ZodType<PluginConfigValue> = z.lazy(() => z.union([z.string(), z.number().finite(), z.boolean(), z.null(), z.array(jsonValue), z.record(jsonValue)]));
 const triggerPayload = z.record(jsonValue);
 const webhookDescriptors = z.array(z.object({ id: text, kind: z.literal('webhook'), payload: triggerPayload.optional(), input: triggerPayload.optional() }).strict()).min(1);
@@ -220,8 +230,6 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
   ]);
   const fetch: FetchTransport = (input, init) => (options.fetch ?? globalThis.fetch)(input, init);
   const execute = options.execute ?? executeCommand;
-  let googleCredentialProvider: GoogleOAuthCredentialProvider | undefined;
-  const googleCredentials = () => googleCredentialProvider ??= new GoogleOAuthCredentialProvider({ fetch: options.fetch, store: new OAuthKeychainStore(execute), homeDir: options.homeDir });
   const path = (value: string): string => {
     if (value === '~' || value.startsWith('~/')) return resolve(options.homeDir ?? homedir(), value.slice(2));
     return resolve(options.workspaceRoot ?? process.cwd(), value);
@@ -230,10 +238,11 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     for (const value of [...secrets].sort((left, right) => right.length - left.length)) message = message.split(value).join('[redacted]');
     return message;
   };
-  const defineWithSecret = <SecretSchema extends z.ZodTypeAny>(secretFactory: (context?: PluginSetupContext, dependencies?: Set<string>) => SecretSchema, referenceSchema: typeof credentialReference | typeof operationCredentialReference = credentialReference) => <Schema extends z.ZodTypeAny>(provides: string | readonly string[], schema: Schema | ((value: SecretSchema) => Schema), create: (config: z.output<Schema>) => PreparedPlugin, providesForConfig?: (config: z.output<Schema>) => readonly string[]): Definition => ({
+  const defineWithSecret = <SecretSchema extends z.ZodTypeAny>(secretFactory: (context?: PluginSetupContext, dependencies?: Set<string>) => SecretSchema, referenceSchema: typeof credentialReference | typeof operationCredentialReference = credentialReference) => <Schema extends z.ZodTypeAny>(provides: string | readonly string[], schema: Schema | ((value: SecretSchema) => Schema), create: (config: z.output<Schema>) => PreparedPlugin, providesForConfig?: (config: z.output<Schema>) => readonly string[], credentialDependencies: readonly string[] = []): Definition => ({
     provides: typeof provides === 'string' ? [provides] : provides,
+    credentialDependencies,
     inspect(config) {
-      const dependencies = new Set<string>();
+      const dependencies = new Set(credentialDependencies);
       const shapeSecret = z.union([
         environmentReference.transform(() => 'https://credential.invalid/shape-only'),
         referenceSchema.transform(ref => { dependencies.add(ref.provider); return 'https://credential.invalid/shape-only'; }),
@@ -245,7 +254,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       return { provides: providesForConfig?.(result.data) ?? (typeof provides === 'string' ? [provides] : provides), credentialDependencies: [...dependencies] };
     },
     create(config) {
-      const dependencies = new Set<string>();
+      const dependencies = new Set(credentialDependencies);
       const parse = (parsed: z.SafeParseReturnType<unknown, z.output<Schema>>): z.output<Schema> => {
         if (!parsed.success) {
           const fields = parsed.error.issues.map(issue => {
@@ -263,7 +272,7 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
         dependencies: [...dependencies],
         prepare: dependencies.size && typeof schema === 'function'
           ? async context => create(parse(await schema(secretFactory(context)).safeParseAsync(config)))
-          : undefined,
+          : prepared.prepare,
       };
     },
   });
@@ -357,10 +366,15 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new EmailNotificationProvider({ ...config, executor: execute });
       return capability(provider, { notifications: [provider] });
     }),
-    'notification.gmail': define('notification.provider', z.object({ to: z.string().email().optional(), channel: text.optional() }).strict(), config => {
-      const provider = new GmailNotificationProvider({ ...config, credentials: googleCredentials(), fetch: options.fetch });
-      return capability(provider, { notifications: [provider] });
-    }),
+    'notification.gmail': define('notification.provider', z.object({ to: z.string().email().optional(), channel: text.optional() }).strict(), config => ({
+      ...direct({}, 'notification.provider', () => undefined),
+      prepare: async context => {
+        const credentials = context.getCredentialProvider('credential.google-oauth');
+        if (!(credentials instanceof GoogleOAuthCredentialProvider)) throw new Error("credential provider 'credential.google-oauth' is not active or does not support Google accounts");
+        const provider = new GmailNotificationProvider({ ...config, credentials, fetch: options.fetch });
+        return capability(provider, { notifications: [provider] });
+      },
+    }), undefined, ['credential.google-oauth']),
     'notification.desktop': define('notification.provider', z.object({ platform: z.enum(['darwin', 'linux', 'win32']).optional(), channel: text.optional() }).strict(), config => {
       const provider = new DesktopNotificationProvider({ ...config, executor: execute });
       return capability(provider, { notifications: [provider] });
@@ -372,14 +386,18 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     'learning.distiller': define('workflow.action', learningConfigurationSchema, config => ({ provider: {}, plugin: createLearningPlugin({ homeDir: options.homeDir, config }) }),
       config => config.knowledge ? [...learningPluginManifest.provides, 'context.provider'] : learningPluginManifest.provides),
     'context.experience': define('context.provider', z.object({}).strict(), () => {
-      const provider = new ExperienceContextProvider(experienceStorePath(options.homeDir ?? homedir()));
+      const homeDir = options.homeDir ?? homedir();
+      const provider = new ExperienceContextProvider(experienceStorePath(homeDir), { homeDir, knowledge: options.knowledge });
       return capability(provider, { contexts: [provider] });
     }),
     'context.code': define('context.provider', z.object({ root: text }).strict(), config => {
       const provider = new CodeContextProvider({ root: path(config.root) });
       return capability(provider, { contexts: [provider] });
     }),
-    'context.knowledge-base': define('context.provider', z.object({ endpoint: httpUrl }).strict(), config => {
+    'context.knowledge-base': defineOperation('context.provider', secret => z.object({ endpoint: httpUrl, token: secret.optional(), timeoutMs: milliseconds.max(300_000).optional() }).strict().refine(
+      config => config.token === undefined || httpsUrl.safeParse(config.endpoint).success,
+      { path: ['endpoint'], message: 'bearer token requires HTTPS' },
+    ), config => {
       const provider = new KnowledgeBaseProvider({ ...config, fetch });
       return capability(provider, { contexts: [provider] });
     }),
@@ -395,7 +413,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new SystemKeychainProvider({ ...config, execute });
       return capability(provider, { credentials: [provider] });
     }),
-    'credential.google-oauth': define('credential.provider', z.object({}).strict(), () => { const provider = googleCredentials(); return capability(provider, { credentials: [provider] }); }),
+    'credential.google-oauth': define('credential.provider', z.object({}).strict(), () => {
+      const provider = new GoogleOAuthCredentialProvider({ fetch: options.fetch, store: new OAuthKeychainStore(execute), homeDir: options.homeDir });
+      return capability(provider, { credentials: [provider] });
+    }),
     'credential.oauth': defineOperation('credential.provider', secret => z.object({ tokenEndpoint: httpsUrl, clientId: text, clientSecret: secret, authMethod: z.enum(['client_secret_basic', 'client_secret_post']).optional(), timeoutMs: milliseconds.optional() }).strict(), config => {
       const provider = new OAuthCredentialProvider({ ...config, fetch });
       return capability(provider, { credentials: [provider] });
@@ -448,8 +469,12 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
         managed: config.managed && { workspaceRoot: path(config.managed.workspaceRoot) } });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.remote-workspace': defineOperation('repository.provider', secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional() }).strict(), config => {
-      const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch });
+    'repository.remote-workspace': defineOperation('repository.provider', secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional(),
+      managed: z.object({ workspaceRoot: text, repositories: z.array(z.object({ name: text, gitDirectory: text, leaseKey: text, remoteUrl: text }).strict()).min(1) }).strict().optional(),
+    }).strict(), config => {
+      const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch, managed: config.managed && {
+        workspaceRoot: path(config.managed.workspaceRoot), repositories: config.managed.repositories.map(repo => ({ ...repo, gitDirectory: path(repo.gitDirectory) })),
+      } });
       return capability(provider, { repositories: [provider] });
     }),
     'repository.special-git-backend': define('repository.provider', z.object({ backend: text, lifecycle: repositoryLifecycle.optional() }).strict(), config => {
@@ -464,8 +489,15 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new LicensePolicyProvider(config);
       return capability(provider, { policies: [provider] });
     }),
-    'policy.compliance-policy': define('policy.provider', z.object({ rules: z.array(z.object({ id: text, effect: z.enum(['allow', 'deny']), actions: strings.optional(), when: filters.optional(), reason: text.optional() }).strict()).min(1), defaultEffect: z.enum(['allow', 'deny']).optional() }).strict(), config => {
-      const provider = new CompliancePolicyProvider({ ...config, rules: config.rules.map(rule => ({ ...rule, when: rule.when && (context => Object.entries(rule.when!).every(([key, value]) => context[key] === value)) })) });
+    'policy.compliance-policy': define('policy.provider', complianceSettings, config => {
+      const provider = compliancePolicy(config);
+      const evaluate = provider.evaluate.bind(provider);
+      provider.evaluate = (input, operation) => {
+        if (input.action !== 'tool.source.read' || !options.readToolSourcePolicy) return evaluate(input, operation);
+        const current = complianceSettings.safeParse(options.readToolSourcePolicy());
+        if (!current.success) return Promise.resolve({ allowed: false, rule: 'default-deny' });
+        return compliancePolicy(current.data).evaluate(input, operation);
+      };
       return capability(provider, { policies: [provider] });
     }),
     'verification.test-runner': define('verification.provider', commandConfig, config => {

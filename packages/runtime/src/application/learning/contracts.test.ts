@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertCandidateTransition, distillationKey, distillationOutputSchema,
-  distillationRequestSchema, evidenceRefSchema, parseDistillationOutput,
+  distillationRequestSchema, evidenceRefSchema, LearningReviewIncompleteError, learningReviewIncompleteSchema, parseDistillationOutput,
 } from './contracts.js';
 
 const request = {
@@ -22,13 +22,32 @@ const fact = {
 const output = { version: 1, candidates: [fact], warnings: [] };
 
 describe('distillation contracts', () => {
+  it('exposes only bounded structured receipts from an incomplete review', () => {
+    const receipt = { status: 'validated' as const, candidateId: 'c'.repeat(64), candidateVersion: 7, validatedVersion: 8,
+      executionId: 'validation:1', receiptDigest: 'd'.repeat(64) };
+    const result = { status: 'incomplete' as const, scope: request.scope, runId: 'source-run', requestKey: 'a'.repeat(64),
+      validated: [receipt], interruptedCandidateId: 'b'.repeat(64), reason: 'validation_failed' as const };
+    const cause = new Error('private-provider-detail');
+    const error = new LearningReviewIncompleteError(result, { cause });
+    expect(error.output).toEqual(result);
+    expect(error.cause).toBe(cause);
+    expect(error.message).toBe('learning_review_incomplete');
+    expect(JSON.stringify(error.output)).not.toContain(cause.message);
+    for (const change of [{ validated: [] }, { validated: Array(11).fill(receipt) },
+      { validated: [{ ...receipt, secret: 'private' }] }, { validated: [{ ...receipt, receiptDigest: 'unknown' }] },
+      { reason: cause.message }, { scope: 'another-project' }, { detail: cause.message }]) {
+      expect(learningReviewIncompleteSchema.safeParse({ ...result, ...change }).success).toBe(false);
+    }
+  });
+
   it('keeps canonical source identities separate and rejects scope drift', () => {
     expect(distillationRequestSchema.parse(request)).toEqual(request);
+    expect(distillationRequestSchema.parse({ ...request, reason: 'failed' }).reason).toBe('failed');
     for (const change of [
       { scope: 'acme/api' }, { scope: 'github:acme/api/extra' },
       { workItemId: '42' }, { workItemId: 'github:other/api#42' },
       { workItemId: 'github:acme/api#0' }, { sourceRunId: 'bad\nidentity' },
-      { evidenceDigest: 'unknown' }, { reason: 'failed' }, { state: 'verified' },
+      { evidenceDigest: 'unknown' }, { reason: 'unknown' }, { state: 'verified' },
     ]) expect(distillationRequestSchema.safeParse({ ...request, ...change }).success).toBe(false);
   });
 
@@ -104,6 +123,10 @@ describe('distillation contracts', () => {
     expect(parseDistillationOutput({ ...output, candidates: proposals }, request, [evidence]).candidates.map(candidate => candidate.kind))
       .toEqual(['fact', 'process', 'lesson', 'skill', 'tool']);
     const process = proposals[1]!;
+    const lesson = proposals[2]!;
+    for (const triggerAliases of [[], Array(9).fill('double enqueue'), ['line\nbreak'], ['界'.repeat(43)], ['---'], ['the']]) {
+      expect(distillationOutputSchema.safeParse({ ...output, candidates: [{ ...lesson, payload: { ...lesson.payload, triggerAliases } }] }).success).toBe(false);
+    }
     expect(() => parseDistillationOutput({ ...output, candidates: [{ ...process, payload: {
       ...(process.payload as object), steps: [{ id: 's1', action: 'approve', stateChange: 'approved', evidenceIds: ['unknown'] }],
     } }] }, request, [evidence])).toThrow(/evidence/i);

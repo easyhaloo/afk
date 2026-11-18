@@ -225,6 +225,21 @@ describe('controlled asset preparation', () => {
     expect(() => prepareAssetProposal({ ...duplicate, payload: { ...payload, newReason: 'Another recovery skill' } }, catalog)).toThrow(/existing|patch/i);
   });
 
+  it('finds an existing skill within an unspaced Chinese request', () => {
+    const catalog = inventory();
+    catalog.skills[0].description = '发布审批';
+    const candidate = skill();
+    const { targetSkill: _target, originalDigest: _original, ...payload } = candidate.payload;
+    expect(() => prepareAssetProposal({ ...candidate, title: '检查发布审批流程', statement: '检查发布审批流程',
+      payload: { ...payload, triggers: ['检查发布审批流程'], newReason: '新增审批技能' } }, catalog)).toThrow(/existing skill patch/);
+  });
+
+  it('does not confuse port with report in the tool catalog', () => {
+    const catalog = inventory();
+    catalog.tools.push({ kind: 'cli', ref: 'cli:report', name: 'report', description: 'summary', provenance: 'fixture' });
+    expect(prepareAssetProposal({ ...tool(), title: 'port', statement: 'port' }, catalog).execution.autoInstall).toBe(false);
+  });
+
   it('rejects reused behavior inputs and incomplete generalization', () => {
     const candidate = skill();
     candidate.payload.evaluationCases[1].input = candidate.payload.evaluationCases[0].input;
@@ -587,6 +602,7 @@ describe.skipIf(process.platform !== 'darwin')('case-bound trusted harness recei
     { phase: 'cleanup', position: 'last', abortAt: 2 },
   ].flatMap(testCase => [new Error(`Cancelled during ${testCase.phase}`), null, undefined].map(reason => ({ ...testCase, reason }))))('preserves cancellation $reason during $phase of the $position case without later execution', async ({ phase, abortAt, reason }) => {
     const candidate = tool();
+    candidate.payload.timeoutMs = 5_000;
     candidate.payload.source = 'process.stdout.write(JSON.stringify({ok:true}));';
     const prepared = prepareAssetProposal(candidate, inventory());
     prepared.checks = prepared.checks.filter(check => check.kind === 'normal');

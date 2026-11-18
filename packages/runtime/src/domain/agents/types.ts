@@ -71,6 +71,8 @@ export type ExecutionMode = 'interactive' | 'batch';
 
 /** Options for building an agent command. */
 export interface AgentCommandOptions {
+  skillTask?: { workspace: string; taskId: string; runId: string; applicability: { environment: string };
+    target: { project: string; productVersions: Readonly<Record<string, string>> } };
   /** Path the agent should operate in. */
   worktreePath: string;
   /** Session identifier (used for resume/restore). */

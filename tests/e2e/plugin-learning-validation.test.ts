@@ -10,7 +10,7 @@ import { createLessonPublicationFixture } from '../../packages/runtime/src/appli
 import { JsonlEventStore } from '../../packages/runtime/src/infrastructure/observability/jsonl-event-store.js';
 
 const execute = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
 const fixtures: ReturnType<typeof knowledgeFixture>[] = [];
 const lessonCleanups: Array<() => void> = [];
 afterEach(() => {
@@ -18,7 +18,7 @@ afterEach(() => {
   for (const cleanup of lessonCleanups.splice(0).reverse()) cleanup();
 });
 
-async function setup() {
+async function setup(kind: 'fact' | 'tool' | 'process' = 'fact') {
   const fixture = knowledgeFixture();
   fixtures.push(fixture);
   const home = join(fixture.root, 'home');
@@ -27,7 +27,7 @@ async function setup() {
   const extension = join(fixture.root, 'checker-package');
   await Promise.all([home, workspace, targetRoot, extension].map(directory => fs.mkdir(directory)));
   const env = { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config'),
-    PATH: ['/usr/bin', '/bin'].join(delimiter), AFK_EVENT_STORE_DIR: join(fixture.root, 'events'),
+    PATH: kind === 'process' ? process.env.PATH : ['/usr/bin', '/bin'].join(delimiter), AFK_EVENT_STORE_DIR: join(fixture.root, 'events'),
     AFK_LOG_DIR: join(fixture.root, 'logs'), NO_COLOR: '1', LANG: 'C', LC_ALL: 'C' };
   const command = async (...args: string[]) => {
     try {
@@ -58,13 +58,27 @@ async function setup() {
   const pack = await buildEvidencePack({ sources: [audit] });
   const file = join(home, '.afk', 'learning', 'candidates.sqlite');
   const store = new CandidateStore({ file });
+  const evidenceIds = pack.entries.map(entry => entry.ref.id);
   let candidate;
   try {
     const source = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:approval-source',
-      sourceRunId: 'approval-source', evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
+      sourceRunId: 'approval-source', workItemId: `${scope}#42`, evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
       evidence: pack.entries.map(entry => entry.ref) }, pack);
+    const proposal = kind === 'tool' ? { ...fixture.candidate.proposal, kind, targetRef: 'script:fixture', payload: {
+      existingTools: ['script:fixture'], inputSchema: { type: 'object', properties: { key: { type: 'string' } },
+        required: ['key'], additionalProperties: false }, outputSchema: { type: 'object' }, dependencies: [], permissions: [],
+      timeoutMs: 500, sideEffects: 'none', idempotency: 'Pure', recovery: 'Retry', source: 'console.log("{}");',
+      tests: [{ kind: 'normal', input: '{"key":"alpha"}', expected: '{}' },
+        { kind: 'normal', input: '{"key":"beta"}', expected: '{}' }, { kind: 'refusal', input: '../unsafe', expected: 'Refuse' }],
+    } } : kind === 'process' ? { ...fixture.candidate.proposal, kind,
+      applicability: { ...fixture.candidate.proposal.applicability, versions: ['fixture-v1'] },
+      payload: { entry: 'draft', systems: ['release-service'], preconditions: ['authenticated'],
+        steps: [{ id: 'approval', action: 'approve', stateChange: 'draft -> approved', evidenceIds },
+          { id: 'release', action: 'publish', stateChange: 'approved -> published', evidenceIds }],
+        exceptions: ['denied -> draft'], completion: 'published' },
+    } : fixture.candidate.proposal;
     const receipt = store.completeRequest(source.key, { version: 1, warnings: [],
-      candidates: [{ ...fixture.candidate.proposal, evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
+      candidates: [{ ...proposal, evidenceIds }] });
     candidate = store.getCandidate(receipt.candidateIds[0]!)!;
     expect(candidate).toMatchObject({ state: 'candidate', version: 1 });
     expect(store.getValidation(candidate.id)).toBeUndefined();
@@ -75,7 +89,9 @@ async function setup() {
     finally { reopened.close(); }
   };
   const identity = { scope, checkerId: 'approval-rules', providerId: 'approval-oracle', version: '1' };
-  const authority = { subject: 'approval', rule: 'Approve before publishing', authority: pack.entries.map(entry => entry.ref.locator) };
+  const authority = { subject: 'approval', rule: 'Approve before publishing', authority: pack.entries.map(entry => entry.ref.locator),
+    entry: 'draft', systems: ['release-service'], preconditions: ['authenticated'], exceptions: ['denied -> draft'], completion: 'published',
+    steps: [{ action: 'approve', stateChange: 'draft -> approved' }, { action: 'publish', stateChange: 'approved -> published' }] };
   const authorityFile = join(targetRoot, 'approval.json');
   const callsFile = join(fixture.root, 'checker-calls.jsonl');
   await fs.writeFile(authorityFile, JSON.stringify(authority), { mode: 0o600 });
@@ -106,6 +122,13 @@ async function setup() {
           appendFileSync(configuration.callsFile, JSON.stringify({ operation: 'verify', pid: process.pid }) + '\\n');
           const observed = JSON.parse(readFileSync(configuration.authorityFile, 'utf8'));
           const actual = new Map([['fact.subject', observed.subject], ['fact.rule', observed.rule], ['fact.authority', observed.authority]]);
+          for (const field of ['entry', 'systems', 'preconditions', 'exceptions', 'completion']) actual.set('process.' + field, observed[field]);
+          actual.set('process.stepCount', String(observed.steps.length));
+          for (const field of ['preconditions', 'exclusions', 'invalidationConditions']) actual.set('process.applicability.' + field, []);
+          observed.steps.forEach((step, index) => {
+            actual.set('process.steps.' + index + '.action', step.action);
+            actual.set('process.steps.' + index + '.stateChange', step.stateChange);
+          });
           const envelope = JSON.parse(request.target);
           return { passed: true, durationMs: 1, output: JSON.stringify({ protocol: 'learning-validation-v1', binding: envelope.binding,
             assertions: envelope.assertions.map(assertion => ({ ...assertion, actual: actual.get(assertion.node), status: 'observed' })) }) };
@@ -116,7 +139,8 @@ async function setup() {
   expect(await command('plugin', 'install', extension)).toMatchObject({ code: 0 });
   expect(await fs.readFile(join(home, '.afk', 'plugins', manifest.id, 'install.json'), 'utf8')).toContain(manifest.id);
   await configure(manifest.id, { authorityFile, callsFile }, false);
-  const learningConfig = { enabled: true, dailyCalls: 0, validation: { configurationFile } };
+  const learningConfig = { enabled: true, dailyCalls: 0, validation: { configurationFile },
+    ...(kind === 'process' ? { knowledge: { wikiScript, grants: [fixture.authorizationFile] } } : {}) };
   await configure('learning.distiller', learningConfig);
   const validate = (options: { scope?: string; expectedVersion?: number } = {}) => command('experience', 'validate', candidate.id,
     '--scope', options.scope ?? scope, '--expected-version', String(options.expectedVersion ?? 1), '--checker', identity.checkerId, '--json');
@@ -127,6 +151,68 @@ async function setup() {
 }
 
 describe('built CLI installed learning validation checker', () => {
+  it('requires separate asset execution authorization through saved CLI configuration', async () => {
+    const fixture = await setup('tool');
+    const grant = join(fixture.root, 'absent-execution-grant.json');
+    const checker = { mode: 'repository-asset', scope: fixture.identity.scope, checkerId: fixture.identity.checkerId,
+      version: 'v1', kind: 'tool', executionAuthorizationFile: grant,
+      repository: { providerId: 'managed', repository: { url: 'fixture', ref: 'main' },
+        root: join(fixture.root, 'workspace'), expectedCommit: 'a'.repeat(40) },
+      asset: { ref: 'script:fixture', path: 'script/fixture.js' },
+      inventory: { file: join(fixture.root, 'catalog.json'), digest: 'b'.repeat(64) },
+      sandbox: { engine: 'docker', baseImageId: `sha256:${'c'.repeat(64)}` },
+      semantic: { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', revision: 'v1',
+        cases: [{ checkId: 'normal-1', checkDigest: 'd'.repeat(64), experiment: {
+          protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: 'normal', input: '{"key":"alpha"}',
+          assertions: [{ id: 'exit', source: 'exit-code', expected: 0 }, { id: 'output', source: 'stdout-json', expected: {} }],
+        } }] }, evidence: fixture.validation.checkers[0].evidence };
+    await fs.writeFile(fixture.configurationFile, JSON.stringify({ version: 2, checkers: [checker] }), { mode: 0o600 });
+    const before = fixture.inspect();
+    const result = await fixture.validate();
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({ status: 'blocked', code: 'unauthorized' });
+    expect(result.stdout + result.stderr).not.toContain(grant);
+    expect(await fixture.calls()).toEqual([]);
+    expect(fixture.inspect()).toEqual(before);
+  }, 60_000);
+
+  it('validates, publishes, recalls and withdraws a process through the built CLI', async () => {
+    const fixture = await setup('process');
+    const scope = fixture.policy.scope;
+    const invoke = async (...args: string[]) => {
+      const result = await fixture.command(...args, '--json');
+      expect(result.code, `${args.slice(0, 3).join(' ')}: ${result.stderr}`).toBe(0);
+      return JSON.parse(result.stdout);
+    };
+    const validated = await fixture.validate();
+    expect(validated.code).toBe(0);
+    expect(JSON.parse(validated.stdout)).toMatchObject({ status: 'validated', candidateId: fixture.candidate.id, validatedVersion: 2 });
+    const prepared = await invoke('experience', 'knowledge', 'prepare', fixture.candidate.id, '--scope', scope, '--expected-version', '2');
+    expect(prepared).toMatchObject({ phase: 'prepared', candidateId: fixture.candidate.id });
+    expect(await invoke('experience', 'knowledge', 'publish', prepared.key, '--scope', scope))
+      .toMatchObject({ publication: { phase: 'committed', key: prepared.key } });
+    const target = join(fixture.vault, '知识/Approval.md');
+    const content = await fs.readFile(target, 'utf8');
+    expect(content).toContain('approved -> published');
+    const input = join(fixture.root, 'process-context.json');
+    const recall = async (version: string) => {
+      await fs.writeFile(input, JSON.stringify({ scope, prompt: 'Approval', applicability: { version } }));
+      return invoke('plugin', 'invoke', 'context.provider', 'context.knowledge', 'gather', '--input', input);
+    };
+    expect(await recall('fixture-v1')).toEqual([{ origin: `knowledge:${prepared.key}; target:wiki:approval`, content }]);
+    expect(await recall('fixture-v2')).toEqual([]);
+    await fs.writeFile(fixture.authorityFile, JSON.stringify({ ...fixture.authority, completion: 'denied' }));
+    expect(await recall('fixture-v1')).toEqual([]);
+    expect(await fs.readFile(target, 'utf8')).toBe(content);
+    expect(await invoke('experience', 'knowledge', 'reconcile', '--scope', scope)).toMatchObject({ blocked: [], results: [
+      { publication: { key: prepared.key }, withdrawal: { key: prepared.key, status: 'withdrawn' } },
+    ] });
+    expect(await fs.readFile(target, 'utf8')).toContain('knowledge_status: revoked');
+    await fs.writeFile(fixture.authorityFile, JSON.stringify(fixture.authority));
+    expect(await recall('fixture-v1')).toEqual([]);
+    expect(await fixture.calls()).toHaveLength(1);
+  }, 60_000);
+
   it('prepares, publishes, recalls and withdraws a QA-validated lesson through the built CLI', async () => {
     const current = await createLessonPublicationFixture({ registerCleanup: cleanup => lessonCleanups.push(cleanup),
       versions: ['fixture-v1'], includeFact: true });
@@ -215,6 +301,17 @@ describe('built CLI installed learning validation checker', () => {
     expect(result.code).toBe(1);
     expect(JSON.parse(result.stdout)).toEqual({ status: 'blocked', code: 'assertion_failed' });
     expect(await fixture.calls()).toHaveLength(1);
+    expect(fixture.inspect()).toMatchObject({ candidate: { state: 'candidate', version: 1 }, receipt: undefined });
+  }, 60_000);
+
+  it('keeps a process unpublished when the independent procedure has another required action', async () => {
+    const fixture = await setup('process');
+    await fs.writeFile(fixture.authorityFile, JSON.stringify({ ...fixture.authority, steps: [
+      ...fixture.authority.steps, { action: 'archive receipt', stateChange: 'published -> published' },
+    ] }));
+    const result = await fixture.validate();
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({ status: 'blocked', code: 'assertion_failed' });
     expect(fixture.inspect()).toMatchObject({ candidate: { state: 'candidate', version: 1 }, receipt: undefined });
   }, 60_000);
 

@@ -392,6 +392,20 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.cwd).toBe('/tmp/worktree');
     });
 
+    it('isolates scoped batch runs and keeps the task out of other launches', () => {
+      const skillTask = { workspace: '/tmp/worktree', taskId: 'github:w11/parcel#42', runId: 'parcel-run',
+        target: { project: 'github:w11/parcel', productVersions: { parcel: '2.0' } }, applicability: { environment: 'staging' } };
+      const options = { ...opts(), skillTask };
+      const batch = p.buildCommand({ ...options, executionMode: 'batch' });
+      expect(batch.argv).toContain('--standalone');
+      expect(batch.env?.AFK_SKILL_TASK_CONTEXT).toBe(JSON.stringify(skillTask));
+      for (const other of [p.buildCommand({ ...options, worktreePath: '/tmp/other', executionMode: 'batch' }),
+        p.buildCommand({ ...options, executionMode: 'interactive' })]) {
+        expect(other.argv).not.toContain('--standalone');
+        expect(other.env?.AFK_SKILL_TASK_CONTEXT).toBeUndefined();
+      }
+    });
+
     it('resolves --model from the environment and never hardcodes one', () => {
       const interactive = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
       expect(interactive.argv).not.toContain('--model');

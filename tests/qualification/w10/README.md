@@ -6,10 +6,10 @@
 | --- | ---: | --- |
 | `account` | 4 | 有真实账户侧操作或用户收件记录，范围见该行 |
 | `service` | 6 | 有独立工具进程、引擎、接收服务或远端主机的回执 |
-| `native` | 8 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
+| `native` | 9 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
 | `local` | 10 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 2 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 25 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 24 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
@@ -83,4 +83,20 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 
 ```sh
 bash tests/qualification/w10/static-scan.sh "$O/.codex/validation/request-lifecycle-20261118/release-142.saPyl47d/profile/bin/afk" "$V"
+```
+
+## [BR] 安装版浏览器渲染检查
+
+在独立配置中，AFK 0.2.142 通过 `plugin configure verification.browser-check` 保存检查命令。两次 `plugin invoke verification.provider browser-check verify` 的输入均为同一个 `target`。Playwright 1.62.1 启动 Chromium 159.0.8154.6，在离线上下文中打开本地合成页面并点击按钮。两次 DOM 的文字均变为 `Parcel ready`。两个提交只改动 CSS 的 `display` 值。
+
+| 测试提交 | 状态元素渲染结果 | 产品回执 | CLI 退出码 |
+| --- | --- | --- | ---: |
+| `7581c99b6bfdb198a5c26b24812ccf22c615ba3d` | 隐藏，宽 0 px | `passed=false` | 1 |
+| `6fa340db336323349102edb43a4127526b5fe1f2` | 可见，宽 1264 px | `passed=true` | 0 |
+
+`$V/browser-check.kd4Dtz/` 保存 `tools.txt`、合成 Git 项目和 `hidden`、`visible` 两组记录。每组的 `.json` 是产品返回值，`.render.json` 和 `.png` 是浏览器观测和截图，`.revision` 和 `.exit` 是受测提交和 CLI 退出码。复跑命令在每次执行时创建新的配置与证据目录。
+
+```sh
+browser="$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-mac-arm64/chrome-headless-shell"
+bash tests/qualification/w10/browser-check.sh "$O/.codex/validation/request-lifecycle-20261118/release-142.saPyl47d/profile/bin/afk" "$browser" "$V"
 ```

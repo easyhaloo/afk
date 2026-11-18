@@ -19,7 +19,7 @@
     "docs:check": "node scripts/check-doc-links.mjs",
     "dev": "pnpm --filter afk dev",
     "pretest": "npm run build",
-    "test": "pnpm -r --filter \"!afk-control-electron\" test && vitest run",
+    "test": "node --test scripts/learning-benefit-report.test.mjs && pnpm -r --filter \"!afk-control-electron\" test && vitest run",
     "test:coverage": "pnpm build && node --test scripts/coverage-report.test.mjs && node scripts/coverage-report.mjs --run",
     "test:coverage:report": "node scripts/coverage-report.mjs",
     "test:e2e:codex": "tsx tests/e2e/codex-runtime.ts",

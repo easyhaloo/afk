@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { Command } from 'commander';
 
 const REPOSITORY = 'easyhaloo/afk';
@@ -56,22 +56,26 @@ async function getLatestRelease(fetchImpl: typeof fetch = fetch): Promise<Latest
   return parseLatestRelease(await response.json());
 }
 
-async function findManagedInstallPrefix(): Promise<string> {
-  const storage = resolve(homedir(), '.afk/cli/versions');
-  for (const directory of (process.env.PATH ?? '').split(delimiter).filter(Boolean)) {
+export async function findManagedInstallPrefix(entry = process.argv[1], searchPath = process.env.PATH ?? '', profile = process.env.AFK_HOME ?? join(homedir(), '.afk')): Promise<string> {
+  if (!isAbsolute(profile)) throw new Error('AFK_HOME must be an absolute path');
+  const storage = await realpath(join(profile, 'cli/versions')).catch(() => undefined);
+  const running = await realpath(entry);
+  const directories = searchPath.split(delimiter).filter(Boolean);
+  if (basename(entry) === 'afk') directories.unshift(dirname(resolve(entry)));
+  for (const directory of directories) {
     const executable = join(directory, 'afk');
     try {
       const stat = await lstat(executable);
       if (!stat.isSymbolicLink()) continue;
       const target = await realpath(executable);
-      if (target.startsWith(`${storage}/`) && target.endsWith('/dist/index.js')) return directory;
+      if (storage && target === running && target.startsWith(`${storage}${sep}`) && target.endsWith(`${sep}dist${sep}index.js`)) return directory;
     } catch {
       // Ignore PATH entries that do not contain a managed AFK installation.
     }
   }
   throw new Error(
     'Self-update is supported for AFK releases installed by install.sh. ' +
-    'This executable is not linked from ~/.afk/cli/versions; reinstall with the official installer first.',
+    'Run the installed executable with its installation profile selected in AFK_HOME.',
   );
 }
 

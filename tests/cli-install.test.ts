@@ -29,7 +29,7 @@ async function fixture() {
     await writeFile(file, '#!/bin/sh\necho "unexpected build tool" >&2\nexit 99\n');
     await chmod(file, 0o755);
   }
-  const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, SHELL: '/bin/zsh' };
+  const env = { ...process.env, HOME: home, AFK_HOME: undefined, PATH: `${bin}:${process.env.PATH}`, SHELL: '/bin/zsh' };
   const install = (...args: string[]) => exec('bash', [join(root, 'install.sh'), '--skip-completion', ...args], { cwd: root, env });
   const command = join(home, '.local/bin/afk');
   return { root, home, env, command, install };
@@ -54,6 +54,24 @@ async function archive(root: string, version = '0.1.0', options: { broken?: bool
 }
 
 describe('precompiled CLI installer', () => {
+  it('preserves releases used by other prefixes and installs into the selected profile', async () => {
+    const { root, env, command, install } = await fixture();
+    for (const version of ['0.1.0', '0.1.1', '0.1.2']) {
+      const release = await archive(root, version);
+      await install('--archive', release.file, '--checksum', release.checksum,
+        ...(version === '0.1.0' ? [] : ['--prefix', join(root, version)]));
+    }
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+    const release = await archive(root, '0.1.3');
+    const profile = join(root, 'isolated');
+    const prefix = join(root, 'isolated-bin');
+    await exec('bash', [join(root, 'install.sh'), '--skip-completion', '--prefix', prefix, '--archive', release.file, '--checksum', release.checksum],
+      { env: { ...env, AFK_HOME: profile } });
+    expect(await readlink(join(prefix, 'afk'))).toContain(join(profile, 'cli/versions/'));
+    expect(await readdir(join(profile, 'cli/versions'))).toHaveLength(1);
+    expect(await readdir(join(env.HOME, '.afk/cli/versions'))).toHaveLength(3);
+  });
+
   it('installs outside the repository without build tools and supports repeated installation', async () => {
     const { root, env, home, command, install } = await fixture();
     const { file, checksum } = await archive(root);

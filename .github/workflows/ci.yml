@@ -246,7 +246,10 @@ jobs:
           NODE
       - name: Test skill guard adapters and installer
         if: needs.changes.outputs.plugin == 'true'
-        run: node --test skills/jev-agent-guard/tests/*.test.mjs
+        working-directory: skills/jev-agent-guard
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
 
   prd-validator-tests:
     name: PRD Validator Tests

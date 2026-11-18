@@ -96,6 +96,9 @@ jobs:
               skills/afk-to-prd/*)
                 prd_tests=true
                 ;;
+              skills/jev-agent-guard/*)
+                plugin=true
+                ;;
             esac
             case "$path" in
               skills/*/SKILL.md|skills/*/*/SKILL.md|skills/*/*/*/SKILL.md|skills/*/*/*/*/SKILL.md)
@@ -241,6 +244,9 @@ jobs:
           }
           console.log(`Plugin manifests valid; version ${manifests[0].value.version}`);
           NODE
+      - name: Test skill guard adapters and installer
+        if: needs.changes.outputs.plugin == 'true'
+        run: node --test skills/jev-agent-guard/tests/*.test.mjs
 
   prd-validator-tests:
     name: PRD Validator Tests

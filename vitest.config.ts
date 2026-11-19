@@ -8,6 +8,7 @@ import { resolveE2eRuntime } from './tests/e2e/installed-runtime.js';
 // real terminal live in tests/pty/ and are opt-in via `pnpm test:e2e:pty`
 // (vitest.pty.config.ts) — drop new ones there, no config edit needed.
 export default defineConfig({
+  esbuild: { target: 'node22' },
   test: {
     environment: 'node',
     ...(process.env.AFK_E2E_CLI_ENTRY !== undefined && { env: {

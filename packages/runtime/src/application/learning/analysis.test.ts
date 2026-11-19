@@ -10,6 +10,13 @@ function requestFor(pack: EvidencePack) {
 }
 
 describe('shared analysis without model execution', () => {
+  it('requires complete observations for lesson citations and separates target identity from publication authority', async () => {
+    const pack = await buildEvidencePack({ sources: [] });
+    const prompt = buildAnalysisPrompt(pack, requestFor(pack));
+    expect(prompt).toContain('For a lesson, every candidate.evidenceIds entry must have authority="observed" and completeness="complete"');
+    expect(prompt).toContain('A target in evidence does not confer publication authority');
+  });
+
   it('puts only validated inline evidence in an untrusted data block and requires the completion envelope', async () => {
     const pack = await buildEvidencePack({ sources: [] });
     const prompt = buildAnalysisPrompt(pack, requestFor(pack));

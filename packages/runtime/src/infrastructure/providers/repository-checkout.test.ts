@@ -74,6 +74,17 @@ function remote() {
 }
 
 describe('Repository requested checkout branch and source', () => {
+  it('rejects checkout of the configured base before invoking the special backend', async () => {
+    const workspace = { ...prepare, id: 'special-owned', snapshot: { commit: baseCommit, branch: 'HEAD', dirty: false } };
+    const executor = vi.fn(async () => ({ stdout: JSON.stringify(workspace), stderr: '' }));
+    const provider = new SpecialGitBackendProvider({ backend: 'unused', executor,
+      lifecycle: { repositories: [prepare.repository], operations: ['prepare', 'checkout'] } });
+    await provider.prepare(prepare);
+    executor.mockClear();
+    await expect(provider.checkout({ workspaceId: workspace.id, branch: prepare.repository.ref })).rejects.toThrow(/configured base branch/);
+    expect(executor).not.toHaveBeenCalled();
+  });
+
   it.each(['checkout', 'snapshot'])('interrupts a cooperative special-backend %s at its deadline', async phase => {
     const workspace: RepositoryWorkspace = { ...prepare, id: 'special-owned', snapshot: { commit: baseCommit, branch: 'HEAD', dirty: false } };
     let received: CommandRequest | undefined;

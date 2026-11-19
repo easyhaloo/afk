@@ -531,7 +531,7 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `artifact.object-storage`、`artifact.report-platform` | `endpoint`；报告平台另接受 secret `token?` |
 | `repository.multi-repository` | 非空 `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`，名称唯一；可选 `managed: {workspaceRoot}` 要求各仓库提供 remote URL、base branch 和规范 lease key |
 | `repository.remote-workspace`、`repository.special-git-backend` | 分别为 `baseUrl` 加 secret `token?`，或 `backend`；可选 `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` 选择支持的操作 |
-| `repository.remote-workspace` 受管执行 | 增加 `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`。`workspaceRoot` 使用共享挂载的规范绝对路径，`gitDirectory` 指向 Git 公共目录的绝对路径。每个名称须对应声明了来源 ref 的生命周期仓库。多个执行器共用同一份租约存储和仓库对应的 Tracker 租约键。 |
+| `repository.remote-workspace`、`repository.special-git-backend` 受管执行 | 增加 `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`。`workspaceRoot` 使用共享挂载的规范绝对路径。后端在 `<workspaceRoot>/<name>@<runId>` 创建 Git 关联工作树，`gitDirectory` 指向 Git 公共目录的绝对路径。每个名称须对应声明了来源 ref 的生命周期仓库。多个执行器共用同一份租约存储和仓库对应的 Tracker 租约键。 |
 | `policy.secret-scan` | 兜底 `root`、非空 `files?`、`maxFileBytes?`；评估优先使用可信 lifecycle 的 `context.worktreePath` |
 | `policy.license-policy` | 非空 `allowlist`、非空 `licenses?` |
 | `policy.compliance-policy` | 非空 `rules[{id,effect,actions?,when?,reason?}]`、`defaultEffect?`；effect 为 `allow`/`deny`，actions 非空，`when` 为 scalar 相等条件映射 |

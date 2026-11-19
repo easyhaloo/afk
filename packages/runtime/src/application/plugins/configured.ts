@@ -308,6 +308,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     repositories: z.array(z.object({ url: text, ref: text.optional() }).strict()).min(1),
     operations: z.array(z.enum(['prepare', 'checkout', 'publish', 'cleanup'])).min(1),
   }).strict();
+  const managedMount = z.object({ workspaceRoot: text, repositories: z.array(z.object({ name: text, gitDirectory: text, leaseKey: text, remoteUrl: text }).strict()).min(1) }).strict();
+  const resolveMount = (mount?: z.infer<typeof managedMount>) => mount && ({ workspaceRoot: path(mount.workspaceRoot),
+    repositories: mount.repositories.map(repo => ({ ...repo, gitDirectory: path(repo.gitDirectory) })),
+  });
   const definitions: Record<string, Definition> = {
     'observability.otlp': defineOperation('observability.provider', secret => z.object({
       endpoint: baseUrl.refine(value => !/[?#]/.test(value), 'must not contain a query or fragment'),
@@ -471,15 +475,13 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       return capability(provider, { repositories: [provider] });
     }),
     'repository.remote-workspace': defineOperation('repository.provider', secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional(),
-      managed: z.object({ workspaceRoot: text, repositories: z.array(z.object({ name: text, gitDirectory: text, leaseKey: text, remoteUrl: text }).strict()).min(1) }).strict().optional(),
+      managed: managedMount.optional(),
     }).strict(), config => {
-      const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch, managed: config.managed && {
-        workspaceRoot: path(config.managed.workspaceRoot), repositories: config.managed.repositories.map(repo => ({ ...repo, gitDirectory: path(repo.gitDirectory) })),
-      } });
+      const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch, managed: resolveMount(config.managed) });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.special-git-backend': define('repository.provider', z.object({ backend: text, lifecycle: repositoryLifecycle.optional() }).strict(), config => {
-      const provider = new SpecialGitBackendProvider({ ...config, executor: execute });
+    'repository.special-git-backend': define('repository.provider', z.object({ backend: text, lifecycle: repositoryLifecycle.optional(), managed: managedMount.optional() }).strict(), config => {
+      const provider = new SpecialGitBackendProvider({ ...config, managed: resolveMount(config.managed), executor: execute });
       return capability(provider, { repositories: [provider] });
     }),
     'policy.secret-scan': define('policy.provider', z.object({ root: text, files: strings.optional(), maxFileBytes: z.number().int().positive().optional() }).strict(), config => {

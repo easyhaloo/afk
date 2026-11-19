@@ -646,6 +646,65 @@ it.each([true, false])('uses the caller reason only while the diagnosed attempt 
   expect(f.push).not.toHaveBeenCalled();
 });
 
+it('preserves pre-cancellation on reuse after a classified failure', async () => {
+  const f = await fixture('workflow', 'init');
+  f.stopHanging();
+  f.execution.waitForResult.mockResolvedValueOnce({ version: 1, runId: 'local-agent', provider: 'batch', commits: [], status: 'failed',
+    error: { code: 'NON_ZERO_EXIT', message: 'first run failed' } });
+  expect(await f.run()).toMatchObject({ success: false });
+  expect(f.observer.record.mock.calls.map(([, data]) => data)).toContainEqual(expect.objectContaining({
+    kind: 'run.finished', outcome: 'failed', reasonCode: 'agent_process_failed',
+  }));
+  vi.clearAllMocks();
+  const caller = AbortSignal.abort(new Error('second run cancelled before entry'));
+  const result = await f.run({ signal: caller }) as { error: unknown };
+  expect(result.error).toBe(caller.reason);
+  expect(f.observer.record).not.toHaveBeenCalled();
+  expect(f.providers.backlog.get).not.toHaveBeenCalled();
+  expect(f.providers.backlog.claim).not.toHaveBeenCalled();
+  expect(f.runtimeManager.finish).not.toHaveBeenCalled();
+});
+
+it.each(['scope', 'dispatcher'] as const)('preserves caller cancellation when %s cleanup throws', async stage => {
+  const f = await fixture('workflow', 'before-agent');
+  const caller = new AbortController();
+  const cleanupError = new Error(`${stage} failed`);
+  if (stage === 'scope') f.release.mockRejectedValue(cleanupError);
+  else {
+    const dispatch = LifecycleDispatcher.prototype.run;
+    vi.spyOn(LifecycleDispatcher.prototype, 'run').mockImplementation(async function(this: LifecycleDispatcher, phase, context) {
+      await dispatch.call(this, phase, context);
+      if (phase === 'cleanup') throw cleanupError;
+    });
+  }
+  const pending = f.run({ signal: caller.signal });
+  try {
+    expect(await bounded(f.entered.promise)).not.toBe('still pending');
+    caller.abort(new Error('operator stopped work'));
+    const result = await bounded(pending) as { error: AggregateError & { cause: { recovery: { scope: RunResourceScope } } } };
+    expect(result.error).toBeInstanceOf(AggregateError);
+    expect(result.error.errors[0]).toBe(caller.signal.reason);
+    expect(result.error.errors[1]).toBe(cleanupError);
+    const events = f.observer.record.mock.calls.map(([, data]) => data);
+    expect(events.filter(data => data.kind === 'run.finished')).toEqual([
+      { kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: 'operator stopped work' },
+    ]);
+    expect(events.some(data => data.kind === 'failure.classified')).toBe(false);
+    expect(f.cleanupSignals).toHaveLength(1);
+    expect(f.create).not.toHaveBeenCalled();
+    const terminal = f.runtimeManager.finish.mock.calls.at(-1)?.[1];
+    expect(terminal).toMatchObject({ status: 'blocked', errorSummary: expect.stringContaining('operator stopped work') });
+    if (stage === 'scope') {
+      expect(terminal?.errorSummary).toContain(cleanupError.message);
+      const scope = result.error.cause.recovery.scope;
+      const attempts = f.release.mock.calls.length;
+      f.release.mockResolvedValue();
+      await scope.finish({ status: 'failed' });
+      expect(f.release).toHaveBeenCalledTimes(attempts + 1);
+    }
+  } finally { f.stopHanging(); await pending; }
+});
+
 it('releases a late claim without starting another operation', async () => {
   const f = await fixture('workflow', 'before-agent');
   const gate = deferred<void>();
@@ -707,6 +766,8 @@ describe.each(['late-cancel', 'rework', 'run.started', 'lease.granted'] as const
         expect(runError).toBeInstanceOf(AuditPersistenceError);
         expect(runError).toMatchObject({ cause: original });
       } else expect(runError).toBe(original);
+      if (stage === 'late-cancel') expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+        .toEqual([{ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: original.message }]);
       if (releaseFails) {
         expect(result.error).toBeInstanceOf(AggregateError);
         expect(result.error.errors).toEqual([runError, earlyClaimIo.errors[0]]);

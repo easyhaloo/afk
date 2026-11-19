@@ -131,6 +131,10 @@ function formatReworkContext(rework: import('../domain/backlog/index.js').Rework
   return `\n\nAn open QA rework record (${rework.id}, ${round}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
+class WorkflowScopeCleanupError extends AggregateError {
+  declare readonly cause: { runError: unknown; recovery: unknown };
+}
+
 function callerCancellationReason(error: unknown): string {
   const reason = error instanceof Error ? error.message : error;
   return typeof reason === 'string' && reason.trim() ? reason : 'Cancelled by caller';
@@ -509,6 +513,7 @@ export class WorkflowRunner {
     return withObservationSignal(controller.signal, async () => {
       const operationOptions = { signal: controller.signal };
       this.operationOptions = operationOptions;
+      this.failureChain = [];
       this.resourceScope = undefined;
       this.lifecycleDispatcher = undefined;
       this.modules = [];
@@ -528,6 +533,7 @@ export class WorkflowRunner {
       controller.signal.addEventListener('abort', stop, { once: true });
       const timer = setTimeout(() => controller.abort(new Error(`workflow deadline exceeded (${timeout}ms)`)), timeout);
       let incompleteFailure: LearningReviewIncompleteError | undefined;
+      let cancelledExecution: unknown;
       try {
         await withCancellation(() => undefined, operationOptions);
         const template = await withCancellation(() => this.template
@@ -556,8 +562,9 @@ export class WorkflowRunner {
           try {
             return await this.runObserved(options, context, controller, template, isCallerCancellation);
           } catch (error) {
-            if (isCallerCancellation(error)) {
-              await this.recordObservation({ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: callerCancellationReason(error) });
+            if (isCallerCancellation(error) || (error instanceof WorkflowScopeCleanupError && isCallerCancellation(error.cause.runError))) {
+              await this.recordObservation({ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: callerCancellationReason(controller.signal.reason) });
+              cancelledExecution = error;
             }
             throw error;
           }
@@ -579,6 +586,9 @@ export class WorkflowRunner {
           if (incompleteFailure) throw new LearningReviewIncompleteError(incompleteFailure.output, {
             cause: new AggregateError([incompleteFailure, error], 'Learning workflow and finalization failed'),
           });
+          if (cancelledExecution !== undefined) throw new AggregateError([cancelledExecution, error],
+            `${callerCancellationReason(controller.signal.reason)}; workflow finalization failed: ${String(error)}`,
+            { cause: cancelledExecution instanceof WorkflowScopeCleanupError ? cancelledExecution.cause : { runError: cancelledExecution } });
           throw error;
         }
       }
@@ -706,7 +716,6 @@ export class WorkflowRunner {
     this.implementationHandedOff = false;
     this.leaseLost = false;
     this.runtimeRunId = undefined;
-    this.failureChain = [];
     this.preparedRepositories = undefined;
     this.stopRepositoryHeartbeat = undefined;
     this.preparedRepositoryFinish = undefined;
@@ -785,7 +794,7 @@ export class WorkflowRunner {
         if (this.resourceScope === resourceScope) this.resourceScope = undefined;
         try { await resourceScope.finish({ status: 'failed' }); }
         catch (cleanupError) {
-          throw new AggregateError([error, cleanupError], `workflow claim setup failed: ${String(error)}; cleanup unconfirmed: ${String(cleanupError)}`, { cause: {
+          throw new WorkflowScopeCleanupError([error, cleanupError], `workflow claim setup failed: ${String(error)}; cleanup unconfirmed: ${String(cleanupError)}`, { cause: {
             runError: error,
             implementationHandedOff: false,
             recovery: { runtimeRunId: context.runId, worktreePath: options.repoRoot ?? process.cwd(), scope: resourceScope },
@@ -878,7 +887,7 @@ export class WorkflowRunner {
       catch (cleanupError) {
         const summary = `${reason}; cleanup ownership unconfirmed for run ${context.runId} at ${this.repoRoot}`;
         await this.finishRuntime('blocked', summary);
-        throw new AggregateError([error, cleanupError], summary, { cause: { runError: error,
+        throw new WorkflowScopeCleanupError([error, cleanupError], summary, { cause: { runError: error,
           implementationHandedOff: false, recovery: { runtimeRunId: context.runId, worktreePath: this.repoRoot, scope: this.resourceScope } } });
       }
       await this.finishRuntime('blocked', reason, reason);
@@ -975,17 +984,18 @@ export class WorkflowRunner {
       this.activeClaim = undefined;
       this.activeRework = undefined;
       const recovery = { runtimeRunId: this.runtimeRunId, worktreePath: (this.primaryHandle as BranchHandle | undefined)?.path ?? this.repoRoot, scope: this.resourceScope };
-      const cleanupSummary = scopeError === undefined ? undefined : [this.runtimeErrorSummary,
+      const runSummary = isCallerCancellation(runError) ? callerCancellationReason(runError) : this.runtimeErrorSummary;
+      const cleanupSummary = scopeError === undefined ? undefined : [runSummary,
         `workflow terminal cleanup failed: ${scopeError instanceof Error ? scopeError.message : String(scopeError)}; cleanup ownership unconfirmed for run ${this.runtimeRunId ?? session} at ${recovery.worktreePath}; implementation handoff ${this.implementationHandedOff ? 'already performed' : 'not completed'}`,
       ].filter(Boolean).join('; ');
       await this.finishRuntime(
         scopeError === undefined && terminalOutcome === 'success' ? 'completed' : 'blocked',
         terminalOutcome === 'success' ? 'implementation handed to QA' : 'implementation stopped',
-        cleanupSummary ?? (isCallerCancellation(runError) ? callerCancellationReason(runError) : undefined),
+        cleanupSummary ?? runSummary,
       );
       if (scopeError !== undefined) {
         await this.markBacklogBlocked(cleanupSummary!);
-        throw new AggregateError(runError === undefined ? [scopeError] : [runError, scopeError], cleanupSummary, { cause: {
+        throw new WorkflowScopeCleanupError(runError === undefined ? [scopeError] : [runError, scopeError], cleanupSummary, { cause: {
           runError,
           implementationHandedOff: this.implementationHandedOff,
           recovery,

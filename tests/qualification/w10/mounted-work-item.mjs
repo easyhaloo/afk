@@ -1,4 +1,4 @@
-// Run as an unprivileged user: node mounted-work-item.mjs /path/to/afk-darwin-arm64.tar.gz > receipt.json
+// Run as an unprivileged user: node mounted-work-item.mjs /path/to/afk-darwin-arm64.tar.gz [expected-sha256] > receipt.json
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -65,9 +65,9 @@ async function withHandoffFault(tracker, root) {
     close: () => new Promise(resolve => server.close(resolve)) };
 }
 
-async function qualify(root, archive, standalone) {
+async function qualify(root, archive, standalone, expectedDigest) {
   const archiveSha256 = digest(await readFile(archive));
-  assert.equal(archiveSha256, '2052628b8c6cc81cce726df6c4a8a7df0bc224c73daa2e5499f61c0f05bdf0bf');
+  assert.equal(archiveSha256, expectedDigest);
   const env = { HOME: root, USERPROFILE: root, PATH: `${root}/bin:/usr/bin:/bin`, NO_COLOR: '1', GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL: 'http', NODE_EXTRA_CA_CERTS: join(root, 'tls.pem') };
   const run = async (command, ...args) => (await execute(command, args, { cwd: root, env, timeout: 90_000 })).stdout.trim();
@@ -236,10 +236,11 @@ async function qualify(root, archive, standalone) {
 if (process.argv[2] === '--sample') await sample(process.argv[3]);
 else {
   const archive = await realpath(process.argv[2]);
+  const expectedDigest = process.argv[3] ?? '2052628b8c6cc81cce726df6c4a8a7df0bc224c73daa2e5499f61c0f05bdf0bf';
   const results = [];
   for (const standalone of [false, true]) {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'afk-mounted-item-')));
-    try { results.push(await qualify(root, archive, standalone)); }
+    try { results.push(await qualify(root, archive, standalone, expectedDigest)); }
     finally {
       if (process.env.AFK_E2E_KEEP_REPOSITORY === '1') console.error(`Fixture: ${root}`);
       else await rm(root, { recursive: true, force: true });

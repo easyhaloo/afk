@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
+import { relative } from 'node:path';
 import { z } from 'zod';
 import type { ProviderOperationOptions, RepositoryProvider } from '../../plugin-sdk/capabilities.js';
 import { DockerContainerProvider } from '../../infrastructure/sandbox/container/docker.js';
@@ -128,11 +129,42 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
       || prepared.execution.permissions.length || prepared.execution.sideEffects !== 'none'
       || prepared.execution.timeoutMs > initial.grant.limits.timeoutMs) return { status: 'blocked', code: 'unauthorized' };
     failureCode = 'insufficient_coverage';
-    if (initial.entry.semantic.cases.length !== prepared.checks.length) return { status: 'blocked', code: failureCode };
+    const semantic = initial.entry.semantic;
+    if (semantic.protocol === 'claude-explicit-load-v1') {
+      const { skillObservation, ...grant } = initial.grant;
+      if (!skillObservation) return { status: 'blocked', code: failureCode };
+      failureCode = 'binding_mismatch';
+      const target = catalog.inventory.skills.find(skill => `skill:${skill.name}` === prepared.artifact.targetRef);
+      if (!target || relative(grant.repository.root, target.source.file) !== grant.asset.path || !prepared.invocation?.userInvocable
+        || skillObservation.grantDigest !== digest(grant) || skillObservation.hostBinaryDigest !== semantic.hostBinaryDigest) {
+        return { status: 'blocked', code: failureCode };
+      }
+      const sha256 = (text: Buffer | string) => createHash('sha256').update(text).digest('hex');
+      const original = readValidationSnapshotFile(target.source.file, grant.repository.root, 1024 * 1024);
+      if (sha256(original) !== prepared.artifact.originalDigest) return { status: 'blocked', code: failureCode };
+      const normal = prepared.checks.filter(check => check.kind === 'normal');
+      if (semantic.cases.length !== normal.length || skillObservation.loads.length !== normal.length * 2) return { status: 'blocked', code: failureCode };
+      for (const check of normal) {
+        const configured = semantic.cases.find(entry => entry.checkId === check.id);
+        const resource = target.resources?.find(entry => entry.path === configured?.resource);
+        if (!resource || configured?.checkDigest !== digest(check) || !/^[A-Za-z0-9_-]{1,128}$/.test(check.input)) return { status: 'blocked', code: failureCode };
+        for (const edition of ['original', 'proposed'] as const) {
+          const text = edition === 'original' ? new TextDecoder('utf-8', { fatal: true }).decode(original) : prepared.artifact.content;
+          const body = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(text)?.[1];
+          const load = skillObservation.loads.find(entry => entry.edition === edition && entry.checkId === check.id);
+          if (!body?.includes('$ARGUMENTS') || !load || load.artifactDigest !== sha256(text) || load.inputDigest !== sha256(check.input)
+            || load.expandedBodyDigest !== sha256(body.replaceAll('$ARGUMENTS', check.input)) || load.resource !== resource.path
+            || load.resourceDigest !== resource.digest) return { status: 'blocked', code: failureCode };
+        }
+      }
+      authorization(options);
+      return { status: 'blocked', code: 'insufficient_coverage', skillLoadEvidenceDigest: digest(skillObservation) };
+    }
+    if (semantic.cases.length !== prepared.checks.length) return { status: 'blocked', code: failureCode };
     const cases: ProposalRuntimeHarness['cases'] = [];
     for (const check of prepared.checks) {
       options.checkBudget(options);
-      const configured = initial.entry.semantic.cases.find(entry => entry.checkId === check.id);
+      const configured = semantic.cases.find(entry => entry.checkId === check.id);
       if (!configured || configured.checkDigest !== digest(check)) return { status: 'blocked', code: failureCode };
       const experiment = prepareProposalExperiment(prepared.kind, initial.entry.asset.path, check, configured.experiment,
         prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);

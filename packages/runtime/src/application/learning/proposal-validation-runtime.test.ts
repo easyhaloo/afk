@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -130,6 +132,87 @@ function bindScratchHelper(test: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('saved repository-asset production validation routing', () => {
+  it('binds explicit skill loads to the operator grant without promoting the candidate', async () => {
+    const test = await fixture();
+    const { root, expectedCommit } = test.entry.repository;
+    const directory = join(root, 'skills/proof');
+    mkdirSync(join(directory, 'references'), { recursive: true });
+    const original = '---\nname: proof\ndescription: Local fixture\ndisable-model-invocation: true\nuser-invocable: true\n---\nORIGINAL_SKILL_CONTENT_e791a1\nRead references/$ARGUMENTS.md. If alpha is unavailable, beta is the fallback.\n';
+    const resources = ['Inventory fixture ALPHA_5f0129', 'Inventory fixture BETA_7de381'].map((text, index) => {
+      const path = `references/${index ? 'beta' : 'alpha'}.md`;
+      writeFileSync(join(directory, path), text);
+      return { path, digest: bytesDigest(text) };
+    });
+    const skill = { source: { root, file: join(directory, 'SKILL.md') }, name: 'proof', description: 'Local fixture',
+      'disable-model-invocation': true, 'user-invocable': true, 'allowed-tools': ['Read'], 'disallowed-tools': ['Bash'], resources };
+    writeFileSync(skill.source.file, original);
+    const catalog = JSON.stringify({ ...test.manifest, skills: [{ ...skill, scope, expectedCommit, digest: bytesDigest(original) }] });
+    writeFileSync(test.inventoryFile, catalog);
+    const request = test.store.submitRequest({ request: { ...test.request.request, sourceId: 'import:skill' }, evidence: test.request.evidence }, test.pack);
+    const payload = { targetSkill: 'skill:proof', originalDigest: bytesDigest(original), inputs: [{ name: 'ref', required: true, description: 'Reference' }],
+      branches: ['Read reference'], triggers: ['Manual read'], recovery: ['Use fallback'], prohibitedConditions: ['Unauthorized'],
+      completion: 'Read complete', patch: 'PROPOSED_SKILL_CONTENT_7dd82f', evaluationCases: [
+        { kind: 'normal', input: 'alpha', expected: 'Read alpha' }, { kind: 'normal', input: 'beta', expected: 'Read beta' },
+        { kind: 'refusal', input: 'denied', expected: 'Reject' }, { kind: 'recovery', input: 'fallback', expected: 'Recover' }] };
+    const submitted = test.store.completeRequest(request.key, { version: 1, warnings: [], candidates: [{ ...test.proposal, kind: 'skill', targetRef: 'skill:proof', payload }] });
+    const candidate = test.store.getCandidate(submitted.candidateIds[0])!;
+    const prepared = prepareAssetProposal(candidate.proposal, { ...test.inventory, skills: [skill] });
+    const normal = prepared.checks.filter(check => check.kind === 'normal');
+    const native = process.env.AFK_QUALIFY_NATIVE_SKILL === '1';
+    const hostBinaryDigest = native ? bytesDigest(readFileSync(execFileSync('which', ['claude'], { encoding: 'utf8' }).trim())) : 'c'.repeat(64);
+    const entry = { ...test.entry, kind: 'skill', inventory: { file: test.inventoryFile, digest: bytesDigest(catalog) },
+      asset: { ref: 'skill:proof', path: 'skills/proof/SKILL.md' }, semantic: { protocol: 'claude-explicit-load-v1', adapter: 'skill-trace-v1', revision: 'v1',
+        hostBinaryDigest, cases: normal.map((check, index) => ({ checkId: check.id, checkDigest: digest(check), resource: resources[index].path })) } };
+    const grant = { ...test.grant, kind: 'skill', candidateId: candidate.id, candidateVersion: candidate.version, candidateDigest: candidate.digest,
+      checkerDigest: digest(entry), asset: entry.asset, inventoryDigest: entry.inventory.digest, adapter: { ...test.grant.adapter, id: 'skill-trace-v1' },
+      limits: { ...test.grant.limits, timeoutMs: prepared.execution.timeoutMs } };
+    writeFileSync(test.configurationFile, JSON.stringify({ version: 2, checkers: [entry] }));
+    writeFileSync(test.grantFile, JSON.stringify(grant));
+    const loads = [original, prepared.artifact.content].flatMap((text, edition) => normal.map((check, index) => ({
+      edition: edition ? 'proposed' : 'original', checkId: check.id, artifactDigest: bytesDigest(text), inputDigest: bytesDigest(check.input),
+      expandedBodyDigest: bytesDigest(text.split('---\n').at(-1)!.replace('$ARGUMENTS', check.input)), resource: resources[index].path, resourceDigest: resources[index].digest })));
+    let observation = { grantDigest: digest(grant), hostBinaryDigest, loads };
+    let hostVersion: string | undefined;
+    if (native) {
+      const script = fileURLToPath(new URL('../../../../../tests/qualification/w05/native-skill.mjs', import.meta.url));
+      const issued = JSON.parse(readFileSync(test.grantFile, 'utf8'));
+      const receipt = JSON.parse(execFileSync(process.execPath, [script, digest(issued)], { encoding: 'utf8', timeout: 90000 }));
+      expect(receipt.passed).toBe(true);
+      expect(receipt.skillObservation).toEqual(observation);
+      observation = receipt.skillObservation;
+      hostVersion = receipt.version;
+    }
+    const validate = async (authorization: unknown) => {
+      writeFileSync(test.grantFile, JSON.stringify(authorization));
+      return validateConfiguredLearningCandidate({ ...test.input, candidateId: candidate.id, expectedVersion: candidate.version }, test.options);
+    };
+    const result = await validate({ ...grant, skillObservation: observation });
+    expect(result).toEqual({ status: 'blocked', code: 'insufficient_coverage', skillLoadEvidenceDigest: digest(observation) });
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    await runtime.activate(createLearningPlugin({ homeDir: test.root, config: { enabled: true, validation: { configurationFile: test.configurationFile } } }));
+    const actionInput = { ...test.input, candidateId: candidate.id, expectedVersion: candidate.version };
+    expect(await runtime.dispatchSystemAction('learning.validate', actionInput)).toEqual(result);
+    expect(await runtime.dispatchSystemAction('learning.validate', { ...actionInput, skillObservation: observation })).toEqual({ status: 'blocked', code: 'invalid_input' });
+    expect(await validate(grant)).toEqual({ status: 'blocked', code: 'insufficient_coverage' });
+    expect(await validate({ ...grant, revoked: true, skillObservation: observation })).toEqual({ status: 'blocked', code: 'unauthorized' });
+    expect(await validate({ ...grant, candidateVersion: candidate.version + 1, skillObservation: observation })).toEqual({ status: 'blocked', code: 'unauthorized' });
+    for (const mismatch of [{ grantDigest: '0'.repeat(64) }, { hostBinaryDigest: '0'.repeat(64) }, { loads: loads.slice(1) },
+      ...[{ artifactDigest: loads[2].artifactDigest }, { inputDigest: loads[1].inputDigest }, { expandedBodyDigest: loads[2].expandedBodyDigest },
+        { edition: 'proposed' }, { resource: resources[1].path }, { resource: 'references/unknown.md' }, { resourceDigest: resources[1].digest }]
+        .map(change => ({ loads: [{ ...loads[0], ...change }, ...loads.slice(1)] }))]) {
+      expect(await validate({ ...grant, skillObservation: { ...observation, ...mismatch } })).toEqual({ status: 'blocked', code: 'binding_mismatch' });
+    }
+    expect(await validate({ ...grant, skillObservation: { passed: true } })).toEqual({ status: 'blocked', code: 'unauthorized' });
+    writeFileSync(join(directory, resources[0].path), 'catalog refresh');
+    expect(await validate({ ...grant, skillObservation: observation })).toEqual({ status: 'blocked', code: 'source_unavailable' });
+    expect(test.store.getValidation(candidate.id)).toBeUndefined();
+    expect(test.store.getCandidate(candidate.id)).toEqual(candidate);
+    expect(test.resolveRepository).not.toHaveBeenCalled();
+    if (native) console.log('SKILL_LOAD_RECEIPT', JSON.stringify({ candidateId: candidate.id, candidateVersion: candidate.version,
+      candidateDigest: candidate.digest, hostVersion, observation, result, state: candidate.state }));
+  }, 120000);
+
   it('rejects a different candidate with the same checks before reading source evidence or selecting a repository', async () => {
     const test = await fixture();
     const request = test.store.submitRequest({ request: { ...test.request.request, sourceId: 'import:alternate' },

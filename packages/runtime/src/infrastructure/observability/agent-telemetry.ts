@@ -5,7 +5,7 @@
  */
 
 import type { AgentToolCallSummary } from '@afk/core';
-import { codexTokenUsage } from '../../domain/agents/codex-usage.js';
+import { codexTokenUsage, type CodexUsageSnapshot } from '../../domain/agents/codex-usage.js';
 import type { AgentExecution, ExecutionResult, TokenUsage } from '../../domain/agents/types.js';
 import { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 export { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
@@ -208,7 +208,7 @@ function isCostStateEntry(v: unknown): v is CostStateEntry {
 interface TokenCountPayload {
   type: 'token_count';
   info: {
-    total_token_usage?: Record<string, unknown> | null;
+    total_token_usage?: CodexUsageSnapshot | null;
   } | null;
 }
 

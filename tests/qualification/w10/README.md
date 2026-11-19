@@ -6,10 +6,10 @@
 | --- | ---: | --- |
 | `account` | 4 | 有真实账户侧操作或用户收件记录，范围见该行 |
 | `service` | 6 | 有独立工具进程、引擎、接收服务或远端主机的回执 |
-| `native` | 9 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
+| `native` | 10 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
 | `local` | 10 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 2 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 24 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 23 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
@@ -99,4 +99,21 @@ bash tests/qualification/w10/static-scan.sh "$O/.codex/validation/request-lifecy
 ```sh
 browser="$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-mac-arm64/chrome-headless-shell"
 bash tests/qualification/w10/browser-check.sh "$O/.codex/validation/request-lifecycle-20261118/release-142.saPyl47d/profile/bin/afk" "$browser" "$V"
+```
+
+## [GP] 裸仓接收真实推送
+
+Git 2.39.5 向自建裸仓推送。验收脚本安装的 `post-receive` 钩子读取 Git 交给它的 `before after ref`，生成事件 ID，用一次性 HMAC 密钥向回环上的 AFK 0.2.142 `plugin listen` 投递。两次推送均先用错误签名得到 401，再用正确签名得到 202。原样重投得到同一 delivery ID 和 `duplicate=true`。
+
+| 接收端 ref 更新 | 队列回执 | 本地动作 |
+| --- | --- | --- |
+| 新建 `preview`，指向 `def5585` | `delivered`，1 次处理 | 分支过滤后 0 次 |
+| `main` 从 `5928e59` 快进至 `def5585` | `delivered`，1 次处理 | `capability.invoke` 经 `test-runner` 在裸仓读取 `refs/heads/main`，记录 1 次 `def5585` |
+
+`$V/git-push.cTC65J/` 保存 Git 钩子输入与 HTTP 回执 `post-receive.ndjson`、产品 CLI 导出的 `{preview,main}-deliveries.json`、动作记录 `actions.txt`、完整提交号 `verified.json` 和裸仓 `parcel.git`。本轮覆盖本地 Git 接收和产品消费。托管平台原生投递、平台项目身份、跨服务重试及 Issue 生命周期待验。
+
+```sh
+receipts=$(mktemp -d)
+node tests/qualification/w10/git-push.mjs "$(command -v afk)" "$receipts"
+git --git-dir="$(find "$receipts" -type d -name parcel.git)" show-ref --heads
 ```

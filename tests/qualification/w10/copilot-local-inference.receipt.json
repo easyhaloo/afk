@@ -95,5 +95,57 @@
       },
       "passed": true
     }
-  ]
+  ],
+  "parentQualification": {
+    "sourceCommit": "a4d88c3c",
+    "platform": "darwin-arm64",
+    "archiveSha256": "729ae594a729a81211cd1bb3b384c34b347f3ec0361081a332c88fdf21ab7a80",
+    "attempts": [
+      {
+        "passed": false,
+        "observation": "No generated text observed before interrupt",
+        "observationTimeoutSeconds": 90
+      },
+      {
+        "afk": "0.2.170",
+        "copilot": "GitHub Copilot CLI 1.0.114.",
+        "ollama": "0.40.16",
+        "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "model": "w10-qwen:latest",
+        "operands": [
+          16,
+          22
+        ],
+        "status": "completed",
+        "errorCode": null,
+        "answer": "38",
+        "nativeUsage": {
+          "inputTokens": 13326,
+          "outputTokens": 49,
+          "totalTokens": 13375
+        },
+        "afkUsage": {
+          "inputTokens": 13326,
+          "outputTokens": 49,
+          "totalTokens": 13375
+        },
+        "checks": {
+          "completed": true,
+          "answer": true,
+          "nativeSession": true,
+          "local": true,
+          "noToolCalls": true,
+          "usage": true
+        },
+        "cancel": {
+          "afterTextDelta": true,
+          "acknowledged": true,
+          "status": "aborted",
+          "launcherExitedBeforeClose": true,
+          "closed": true
+        },
+        "passed": true
+      }
+    ]
+  }
 }

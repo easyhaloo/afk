@@ -96,7 +96,18 @@ def qualify(afk, copilot, root, stack):
             break
         time.sleep(0.05)
     else:
-        raise RuntimeError('No generated text observed before interrupt')
+        transcripts = [path for path in transcript.parent.parent.glob('*/events.jsonl') if path != transcript]
+        event_types = set()
+        for path in transcripts:
+            for line in path.read_text().splitlines():
+                try:
+                    event_types.add(json.loads(line)['type'])
+                except json.JSONDecodeError:
+                    continue
+        closed = call('sandbox.close', sandboxId=reference['sandboxId'])
+        receipt.update(cancel=dict(afterTextDelta=False, observationTimeoutSeconds=90,
+                                   nativeEventTypes=sorted(event_types), closed=closed == {'ok': True}), passed=False)
+        return receipt
     pid = int(pidfile.read_text())
     os.kill(pid, 0)
     ack = call('agent.interrupt', **reference, reason='manual')

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "oidc-provider": "9.5.1"
+  }
+}

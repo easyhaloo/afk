@@ -10,6 +10,8 @@ Gitea's webhook history form also resends a selected event. Replaying `opened` t
 
 ## Reproduce
 
+CLI 0.2.164 also retained Gitea's second UUID across a second listener restart. The harness sent a correctly signed payload with one additional space using that UUID and received HTTP 409. Sending the original bytes returned the original receipt. All three deliveries had one attempt and the business action ran once. See the [alias persistence receipt](issue-event-alias.receipt.json).
+
 Run from this directory with ordinary Python 3, Git and Node on PATH. Supply the installed release launcher and extracted Gitea binary. The script creates its own profiles and database, binds both services to loopback, and stops them on exit. Raw hook history and credentials are deleted with the temporary directory.
 
 ```sh

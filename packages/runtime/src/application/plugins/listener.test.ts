@@ -8,7 +8,7 @@ import { startPluginListener } from './listener.js';
 import { PluginRuntime } from './runtime.js';
 import { GitPushTriggerProvider, IssueEventTriggerProvider, WebhookTriggerProvider } from '../../infrastructure/providers/triggers.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
-import { currentTriggerDeliveryId } from './trigger-queue.js';
+import { currentTriggerDeliveryId, triggerQueueSchemaVersion } from './trigger-queue.js';
 
 const token = 'fixture-trigger-secret-value';
 const cleanup: Array<() => Promise<void>> = [];
@@ -49,6 +49,7 @@ describe('plugin trigger listener', () => {
     expect(original.duplicate).toBe(false);
     expect(await (await deliver('second', 'opened')).json()).toMatchObject({ duplicate: true, deliveryId: original.deliveryId });
     expect((await deliver('first', 'closed')).status).toBe(409);
+    expect((await deliver('second', 'closed')).status).toBe(409);
     expect(await (await deliver('explicit', 'opened', true)).json()).toMatchObject({ duplicate: false });
     for (const id of ['close-1', 'close-2']) expect(await (await deliver(id, 'closed')).json()).toMatchObject({ duplicate: false });
   });
@@ -122,7 +123,7 @@ describe('plugin trigger listener', () => {
       const receipt = await response.json();
       expect(receipt).toMatchObject({ duplicate: false, status: 'pending', attempts: 0 });
       await entered;
-      const connection = openSqlite({ file: queuePath, schema: '', version: 2 });
+      const connection = openSqlite({ file: queuePath, schema: '', version: triggerQueueSchemaVersion });
       try { expect(connection.prepare('SELECT deliveryId, body FROM trigger_deliveries').get()).toEqual({ deliveryId: receipt.deliveryId, body }); }
       finally { connection.close(); }
       expect(await (await send(provider.id, body, headers)).json()).toMatchObject({ deliveryId: receipt.deliveryId, duplicate: true });
@@ -268,7 +269,7 @@ describe('plugin trigger listener', () => {
     const retained = await prune();
     expect(retained.status).toBe(200);
     expect(await retained.json()).toEqual({ removed: 0 });
-    const connection = openSqlite({ file: queuePath, schema: '', version: 2 });
+    const connection = openSqlite({ file: queuePath, schema: '', version: triggerQueueSchemaVersion });
     try { connection.exec('UPDATE trigger_deliveries SET deliveredAt = 0'); }
     finally { connection.close(); }
     const pruneDelivered = vi.spyOn(listener.queue!, 'pruneDelivered');
@@ -365,7 +366,7 @@ describe('plugin trigger listener', () => {
     const queuePath = durablePath();
     const onPush = vi.fn();
     const { listener, send } = await listen([new GitPushTriggerProvider({ onPush })], { queuePath });
-    const connection = openSqlite({ file: queuePath, schema: '', version: 2 });
+    const connection = openSqlite({ file: queuePath, schema: '', version: triggerQueueSchemaVersion });
     try { connection.exec("CREATE TRIGGER fail_receipt BEFORE INSERT ON trigger_deliveries BEGIN SELECT RAISE(ABORT, 'disk full'); END"); }
     finally { connection.close(); }
     expect((await send('trigger.git-push', '{"ref":"main"}')).status).toBe(503);
@@ -385,7 +386,7 @@ describe('plugin trigger listener', () => {
     const receipt = await response.json();
     await vi.waitFor(() => expect(first.listener.queue!.status(receipt.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 1 }));
     await first.listener.close();
-    const connection = openSqlite({ file: queuePath, schema: '', version: 2 });
+    const connection = openSqlite({ file: queuePath, schema: '', version: triggerQueueSchemaVersion });
     try { connection.exec('UPDATE trigger_deliveries SET nextAttemptAt = 0'); }
     finally { connection.close(); }
     const onEvent = vi.fn();

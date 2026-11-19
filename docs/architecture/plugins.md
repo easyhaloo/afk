@@ -1241,7 +1241,11 @@ duplicate flag; this acknowledges receipt, not completed work.
 
 Delivery identity combines provider name with `Idempotency-Key`,
 `X-GitHub-Delivery`, `X-GitLab-Event-UUID` (in that order), or a body hash.
-Reusing an ID with different bytes returns `409`. A private, single-owner
+For a Gitea `opened` issue with matching Gitea and GitHub delivery headers and no
+explicit key, a byte-identical redelivery to the same provider returns the retained
+receipt even if Gitea assigns a new UUID. Each new UUID consumes one record slot
+and expires when the original receipt is pruned. Reusing any retained ID with
+different bytes returns `409`. A private, single-owner
 SQLite queue retains `pending/processing/delivered/failed` states and recovers
 interrupted deliveries. Defaults are five attempts, 1000 ms retry delay, 10000
 retained rows and 64 MiB payloads. There is no automatic silent eviction: a full

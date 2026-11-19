@@ -144,7 +144,7 @@ ENABLED = false
             return rows if len(rows) == len(tasks) and all(row['status'] == 'delivered' for row in rows) else None
         before_restart = wait_for(settled)
         stop_listener()
-        restarted_port, _ = start_listener('restarted-listener', listener_port)
+        restarted_port, stop_restarted = start_listener('restarted-listener', listener_port)
         assert restarted_port == listener_port
         receipts = []
         for row in tasks:
@@ -204,8 +204,18 @@ ENABLED = false
         upstream = json.loads(accepted['body'])
         assert upstream['duplicate'] and upstream['deliveryId'] == opened['accepted']['deliveryId'], (source_id == opened['sourceId'], upstream)
         assert source_id != opened['sourceId']
+        stop_restarted()
+        assert start_listener('alias-restart', listener_port)[0] == listener_port
+        changed = body + b' '
+        def signed(payload):
+            return {'X-GitHub-Delivery':source_id, 'X-Gitea-Delivery':source_id, 'Content-Type':'application/json',
+                    'X-Hub-Signature-256':'sha256='+hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()}
+        conflict, _ = request(listener_port, 'POST', endpoint, changed, signed(changed))
+        assert conflict == 409, conflict
+        status, raw = request(listener_port, 'POST', endpoint, body, signed(body))
+        assert status == 202 and json.loads(raw)['deliveryId'] == upstream['deliveryId'] and json.loads(raw)['duplicate']
         assert len(settled()) == 3 and effects.read_text().splitlines() == ['verified']
-        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, upstreamReplay={'sourceId': source_id, 'receipt': upstream}, actionCount=1)
+        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, upstreamReplay={'sourceId': source_id, 'receipt': upstream, 'conflictAfterRestart': conflict}, actionCount=1)
 
 
 if __name__ == '__main__':

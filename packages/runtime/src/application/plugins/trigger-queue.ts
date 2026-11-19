@@ -36,6 +36,14 @@ export function currentTriggerDeliveryId(): string | undefined {
 }
 
 const statusColumns = 'deliveryId, providerId, status, attempts, receivedAt, nextAttemptAt';
+export const triggerQueueSchemaVersion = 3;
+const aliasSchema = `
+  CREATE TABLE trigger_delivery_aliases (
+    aliasId TEXT PRIMARY KEY,
+    deliveryId TEXT NOT NULL REFERENCES trigger_deliveries(deliveryId) ON DELETE CASCADE
+  );
+  CREATE INDEX trigger_alias_delivery ON trigger_delivery_aliases(deliveryId);
+`;
 const schema = `
   CREATE TABLE trigger_deliveries (
     deliveryId TEXT PRIMARY KEY,
@@ -51,6 +59,7 @@ const schema = `
   );
   CREATE INDEX trigger_deliveries_pending ON trigger_deliveries(status, nextAttemptAt);
   CREATE TABLE trigger_queue_owner (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), pid INTEGER NOT NULL, host TEXT NOT NULL, nonce TEXT NOT NULL);
+  ${aliasSchema}
 `;
 
 function privateFile(file: string): void {
@@ -114,12 +123,17 @@ export class DurableTriggerQueue {
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
       privateFile(path + suffix);
     }
-    this.database = openSqlite({ file: path, schema, durability: 'FULL', version: 2, migrations: [{
+    this.database = openSqlite({ file: path, schema, durability: 'FULL', version: triggerQueueSchemaVersion, migrations: [{
       from: 1, to: 2, migrate: database => {
         assertOwnerAvailable(database);
         database.exec('ALTER TABLE trigger_deliveries ADD COLUMN bodyBytes INTEGER NOT NULL DEFAULT 0; ALTER TABLE trigger_deliveries ADD COLUMN deliveredAt INTEGER');
         database.exec('UPDATE trigger_deliveries SET bodyBytes = length(CAST(body AS BLOB))');
         database.prepare("UPDATE trigger_deliveries SET deliveredAt = ? WHERE status = 'delivered'").run(Date.now());
+      },
+    }, {
+      from: 2, to: 3, migrate: database => {
+        assertOwnerAvailable(database);
+        database.exec(aliasSchema);
       },
     }] });
     try {
@@ -139,19 +153,26 @@ export class DurableTriggerQueue {
     const digest = createHash('sha256').update(body).digest('hex');
     const deliveryId = createHash('sha256').update(`${providerId}\0${sourceId === undefined ? `body:${digest}` : `id:${sourceId}`}`).digest('hex');
     const receipt = transaction(this.database, () => {
-      const existing = this.database.prepare('SELECT digest FROM trigger_deliveries WHERE deliveryId = ?').get(deliveryId);
-      if (existing && existing.digest !== digest) throw new TriggerDeliveryConflict('Delivery id was already used for another payload');
-      if (!existing) {
-        if (matchPreviousBody) {
-          const prior = this.database.prepare('SELECT deliveryId FROM trigger_deliveries WHERE providerId = ? AND digest = ? ORDER BY receivedAt, deliveryId LIMIT 1').get(providerId, digest);
-          if (prior) return { ...this.status(String(prior.deliveryId))[0], duplicate: true };
-        }
-        const usage = this.storageUsage();
-        if (usage.records >= this.maxRecords || bodyBytes > this.maxBytes - usage.bytes) throw new TriggerQueueFull('Trigger queue is full');
-        const now = Date.now();
-        this.database.prepare("INSERT INTO trigger_deliveries (deliveryId, providerId, body, digest, status, attempts, receivedAt, nextAttemptAt, bodyBytes) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)").run(deliveryId, providerId, body, digest, now, now, bodyBytes);
+      const existing = this.database.prepare(`SELECT deliveryId, digest FROM trigger_deliveries
+        WHERE deliveryId = COALESCE((SELECT deliveryId FROM trigger_delivery_aliases WHERE aliasId = ?), ?)`)
+        .get(deliveryId, deliveryId);
+      if (existing) {
+        if (existing.digest !== digest) throw new TriggerDeliveryConflict('Delivery id was already used for another payload');
+        return { ...this.status(String(existing.deliveryId))[0], duplicate: true };
       }
-      return { ...this.status(deliveryId)[0], duplicate: Boolean(existing) };
+      const usage = this.storageUsage();
+      if (usage.records >= this.maxRecords) throw new TriggerQueueFull('Trigger queue is full');
+      if (matchPreviousBody) {
+        const prior = this.database.prepare('SELECT deliveryId FROM trigger_deliveries WHERE providerId = ? AND digest = ? ORDER BY receivedAt, deliveryId LIMIT 1').get(providerId, digest);
+        if (prior) {
+          this.database.prepare('INSERT INTO trigger_delivery_aliases (aliasId, deliveryId) VALUES (?, ?)').run(deliveryId, prior.deliveryId);
+          return { ...this.status(String(prior.deliveryId))[0], duplicate: true };
+        }
+      }
+      if (bodyBytes > this.maxBytes - usage.bytes) throw new TriggerQueueFull('Trigger queue is full');
+      const now = Date.now();
+      this.database.prepare("INSERT INTO trigger_deliveries (deliveryId, providerId, body, digest, status, attempts, receivedAt, nextAttemptAt, bodyBytes) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)").run(deliveryId, providerId, body, digest, now, now, bodyBytes);
+      return { ...this.status(deliveryId)[0], duplicate: false };
     });
     this.wake();
     return receipt;
@@ -168,7 +189,7 @@ export class DurableTriggerQueue {
   }
 
   storageUsage(): { records: number; bytes: number; maxRecords: number; maxBytes: number } {
-    const row = this.database.prepare('SELECT COUNT(*) AS records, COALESCE(SUM(bodyBytes), 0) AS bytes FROM trigger_deliveries').get()!;
+    const row = this.database.prepare('SELECT COUNT(*) + (SELECT COUNT(*) FROM trigger_delivery_aliases) AS records, COALESCE(SUM(bodyBytes), 0) AS bytes FROM trigger_deliveries').get()!;
     return { records: Number(row.records), bytes: Number(row.bytes), maxRecords: this.maxRecords, maxBytes: this.maxBytes };
   }
 

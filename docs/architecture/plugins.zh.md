@@ -967,7 +967,9 @@ bearer 不能绕过。持久化前校验 payload；入队成功返回 `202` 和 
 尝试次数及 duplicate 标记，表示持久接收，不代表工作完成。
 
 投递身份由 Provider 名称与依次优先的 `Idempotency-Key`、`X-GitHub-Delivery`、
-`X-GitLab-Event-UUID` 或 body hash 组成。同一 ID 不同字节返回 `409`。私有、单拥有者
+`X-GitLab-Event-UUID` 或 body hash 组成。Gitea 重投工单 `opened` 事件时，若未指定显式幂等键、
+Gitea 与 GitHub 投递头一致，同一 Provider 收到字节完全相同的正文会返回保留的原回执。
+每个新 UUID 占一个记录名额，随原回执清理。任何已保留 ID 携带不同正文均返回 `409`。私有、单拥有者
 SQLite 队列保存 `pending/processing/delivered/failed` 并恢复中断投递；默认最多五次
 尝试、1000 ms 重试间隔、10000 行、64 MiB payload，不自动静默淘汰。队列满返回
 `503`，body 超限 `413`，未知路由/Provider `404`，认证失败 `401`，无效 payload `400`。

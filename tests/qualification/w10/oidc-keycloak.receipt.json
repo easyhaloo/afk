@@ -1,12 +1,12 @@
 {
-  "observed": "2026-11-19T12:39:07.507031+00:00",
+  "observed": "2026-11-19T14:35:29.512474+00:00",
   "release": {
-    "version": "0.2.156",
+    "version": "0.2.159",
     "platform": "darwin",
     "arch": "arm64",
     "nodeMinimum": "22.16.0"
   },
-  "archiveSha256": "aea5c328e7e9a396d0af74aae51baefecc303bdd64270463832c1a3393ff3419",
+  "archiveSha256": "957e237b6bbbbe651c8e259b75e9b8775a43619c2ce3c1d8f003fdecde3c8e72",
   "idpImage": "quay.io/keycloak/keycloak@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007",
   "entry": "plugin invoke artifact.provider report-platform put",
   "cases": {
@@ -38,8 +38,8 @@
         "issuerMatches": true,
         "client": "w10-exchanger",
         "scope": "report.write",
-        "issuedAt": 1795091930,
-        "expiresAt": 1795091945,
+        "issuedAt": 1795098912,
+        "expiresAt": 1795098927,
         "resourceHttp": 200
       }
     },
@@ -164,14 +164,54 @@
         "issuerMatches": true,
         "client": "w10-exchanger",
         "scope": "report.write",
-        "issuedAt": 1795091936,
-        "expiresAt": 1795091951,
+        "issuedAt": 1795098919,
+        "expiresAt": 1795098934,
+        "resourceHttp": 200
+      }
+    },
+    "revokedBearerReplay": {
+      "checkedAt": 1795098919,
+      "expiresAt": 1795098934,
+      "active": false,
+      "resourceHttp": 401,
+      "revocationHttp": 200
+    },
+    "newExchangeAfterRevocation": {
+      "cliExit": 0,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 200,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-reports"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "urn:ietf:params:oauth:token-type:access_token"
+        }
+      ],
+      "reportRequests": 1,
+      "report": {
+        "active": true,
+        "audiences": [
+          "w10-reports"
+        ],
+        "issuerMatches": true,
+        "client": "w10-exchanger",
+        "scope": "report.write",
+        "issuedAt": 1795098919,
+        "expiresAt": 1795098934,
         "resourceHttp": 200
       }
     },
     "expiredBearerReplay": {
-      "checkedAt": 1795091947,
-      "expiresAt": 1795091945,
+      "checkedAt": 1795098929,
+      "expiresAt": 1795098927,
       "active": false,
       "resourceHttp": 401
     }

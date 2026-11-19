@@ -47,7 +47,7 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 
 | 引用 | 相对定位 | 核对内容 |
 | --- | --- | --- |
-| [OIDC] | [脚本说明](oidc-keycloak.md) · [脱敏回执](oidc-keycloak.receipt.json) | 0.2.156 经 Keycloak 交换凭据后上传报告。禁用目标客户端阻止新交换，恢复后上传成功，原 bearer 到期重放返回 401。 |
+| [OIDC] | [脚本说明](oidc-keycloak.md) · [脱敏回执](oidc-keycloak.receipt.json) | 0.2.159 经 Keycloak 交换凭据后上传报告。显式撤销后，报告服务在令牌到期前 15 秒返回 401，随后新交换成功。另有禁用目标客户端以及自然到期的独立用例。 |
 | [PUT] | `python3 tests/qualification/w10/object-storage.py release/cli` | macOS Apache WebDAV 返回 201，重启后 GET 和磁盘 SHA-256 一致，覆盖返回 403 后原内容完整 |
 | [SMTP] | `email-loopback.py`、`email-receipt.json` | 0.2.148 经 BusyBox sendmail 将测试邮件交给回环 SMTP；收端逐字节核对换行、点转义和信封地址 |
 | [ISSUE] | `issue-event.md`、`issue-event.receipt.json` | 本地 Gitea 直送三个签名事件；仅打开事件执行一次，重复投递复用原收据 |

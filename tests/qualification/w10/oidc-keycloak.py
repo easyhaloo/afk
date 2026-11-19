@@ -244,18 +244,32 @@ def exercise(root, archive, digest):
             invoke('disabledAudienceClient', expected_status=400, expected_error='invalid_client')
             admin('update', path, '-r', 'w10', '-s', 'enabled=true')
             invoke('restoredAudienceClient')
+            revoke_token, revoke_report = reports[-1]
+            require(revoke_token != first_token, 'expected distinct tokens for expiry and revocation')
+
+            def rejected_report(token, expires_at):
+                conn = http.client.HTTPSConnection('127.0.0.1', server.server_port, timeout=8, context=ssl.create_default_context(cafile=root/'tls.crt'))
+                try:
+                    conn.request('POST', '/reports', document, {'Authorization': 'Bearer '+token})
+                    response = conn.getresponse()
+                    require(response.status == 401 and reports[-1][0] == token and reports[-1][1]['active'] is False,
+                            'expected inactive bearer and resource rejection')
+                    return dict(checkedAt=int(time.time()), expiresAt=expires_at, active=False, resourceHttp=response.status)
+                finally:
+                    conn.close()
+
+            form = urlencode(dict(token=revoke_token, token_type_hint='access_token', client_id=CLIENT,
+                                  client_assertion_type='urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+                                  client_assertion=assertion(issuer)))
+            status, _ = upstream('POST', REALM+'/protocol/openid-connect/revoke', form, {'Content-Type': 'application/x-www-form-urlencoded'})
+            require(status == 200, f'access-token revocation returned {status}')
+            rejected = rejected_report(revoke_token, revoke_report['expiresAt'])
+            require(rejected['checkedAt'] < rejected['expiresAt'], 'bearer expired before revocation could be observed')
+            evidence['revokedBearerReplay'] = dict(rejected, revocationHttp=status)
+            invoke('newExchangeAfterRevocation')
             time.sleep(max(0, first_report['expiresAt']+2-time.time()))
-            conn = http.client.HTTPSConnection('127.0.0.1', server.server_port, context=ssl.create_default_context(cafile=root/'tls.crt'))
-            try:
-                conn.request('POST', '/reports', document, {'Authorization': 'Bearer '+first_token})
-                response = conn.getresponse()
-                require(response.status == 401 and reports[-1][0] == first_token and reports[-1][1]['active'] is False,
-                        'expired bearer remained accepted')
-                evidence['expiredBearerReplay'] = dict(checkedAt=int(time.time()), expiresAt=first_report['expiresAt'],
-                                                        active=False, resourceHttp=response.status)
-            finally:
-                conn.close()
-                server.shutdown()
+            evidence['expiredBearerReplay'] = rejected_report(first_token, first_report['expiresAt'])
+            server.shutdown()
             return dict(observed=datetime.now(timezone.utc).isoformat(), release=release, archiveSha256=digest, idpImage=IMAGE,
                         entry='plugin invoke artifact.provider report-platform put', cases=evidence)
         finally:

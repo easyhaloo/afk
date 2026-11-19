@@ -1,0 +1,62 @@
+{
+  "checkedAt": "2026-11-19T19:41:49.480Z",
+  "model": "Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "source": "cached safetensors / ephemeral loopback Ollama",
+  "passed": true,
+  "ollama": "0.40.16",
+  "pi": "1.5.2",
+  "standaloneControl": {
+    "operands": [
+      12,
+      22
+    ],
+    "exactAnswer": true
+  },
+  "appAsarSha256": "2db15e8959c58c86ce7a74ce8a1002069a38e17aaa2175240d46dbfd2cdfb180",
+  "phase": "observed",
+  "desktop": {
+    "version": "0.1.0",
+    "packaged": true,
+    "isolated": true
+  },
+  "workItem": {
+    "issue": 1,
+    "branch": "main",
+    "status": "failed",
+    "exitCode": 1,
+    "phases": [
+      "requested",
+      "implementing",
+      "blocked"
+    ]
+  },
+  "trackerRead": true,
+  "workerControl": {
+    "missingManifest": true,
+    "exitCode": 1,
+    "workerEntryNotFound": false,
+    "reachedManifestValidation": true
+  },
+  "native": {
+    "sessions": 1,
+    "matched": true,
+    "markerInContext": true,
+    "checkoutMatched": true,
+    "contextFilenameInPromptAndReply": true,
+    "replySha256": "8ef45b455a51ae9a5e912043bec7bee3daebff90861ae24f96459ac2a9874c32",
+    "inputTokens": 940,
+    "outputTokens": 180,
+    "totalTokens": 1120
+  },
+  "scope": {
+    "entry": "packaged Desktop / work item / start / create run",
+    "resultRequired": "correlated native reply",
+    "tracker": "synthetic loopback GitLab",
+    "git": "temporary local bare repository",
+    "network": "loopback only",
+    "agentTools": "disabled",
+    "processIdentity": "host ps start time for sandbox descendants",
+    "workflowLimitMs": 45000
+  }
+}

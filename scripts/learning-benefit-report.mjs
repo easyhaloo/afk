@@ -71,11 +71,13 @@ function observe(record, expected, scope) {
     checkBinding(receipt.selected);
     const { event } = receipt;
     assert.equal(event.runId, source.runId, 'wrong event run');
-    assert.ok(typeof receipt.recurrence === 'boolean' && ['run.finished', 'qa.failed', 'failure.classified'].includes(event.type), 'invalid outcome event');
-    assert.ok(event.type === 'run.finished' ? ['succeeded', 'failed', 'cancelled'].includes(event.outcome) : event.outcome === 'failed', 'invalid event outcome');
+    assert.ok(typeof receipt.recurrence === 'boolean' && ['run.finished', 'qa.failed', 'failure.classified', 'human_gate.opened'].includes(event.type), 'invalid outcome event');
     if (event.type === 'run.finished') {
+      assert.ok(['succeeded', 'failed', 'cancelled'].includes(event.outcome), 'invalid event outcome');
       assert.ok(outcome === null || outcome === event.outcome, 'conflicting terminal outcome');
       outcome = event.outcome;
+    } else {
+      assert.equal(event.outcome, event.type === 'human_gate.opened' ? 'awaiting_merge' : 'failed', 'invalid event outcome');
     }
     if (receipt.recurrence) {
       assert.notEqual(recurrence, false, 'conflicting recurrence');

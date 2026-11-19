@@ -183,6 +183,16 @@ async function expectDecision(operation: Promise<unknown>, expected: object) {
   }
 }
 
+async function expectArtifactRef(ref: unknown, provider: string, output: string, name: string) {
+  const path = join(output, name);
+  const stored = await readFile(path);
+  expect(ref).toEqual({
+    name, uri: pathToFileURL(path).href,
+    ...(provider === 'evidence-bundle' && { storedContent: { sha256: digest(stored), mediaType: 'application/json' } }),
+  });
+  return stored;
+}
+
 async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
   const { provider } = test;
   const result = JSON.parse((await test.run()).stdout);
@@ -194,8 +204,7 @@ async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
     expect(result).toEqual([{ origin, content: provider.id === 'context.retrieval' ? content.trim() : content, score: 2 }]);
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
   } else if (provider.capability === 'artifact.provider') {
-    expect(result).toEqual({ name: 'result.txt', uri: pathToFileURL(join(test.output, 'result.txt')).href });
-    const stored = await readFile(join(test.output, 'result.txt'), 'utf8');
+    const stored = (await expectArtifactRef(result, provider.provider, test.output, 'result.txt')).toString('utf8');
     if (provider.provider === 'test-report-local') expect(stored).toBe(content);
     else {
       const records = [{ id: 'result.txt', mediaType: 'text/plain', sha256: digest(content), size: Buffer.byteLength(content) }];
@@ -710,7 +719,7 @@ it('cross-validates context → verification → report → evidence digests wit
   for (const provider of ['test-report-local', 'evidence-bundle']) {
     const name = provider === 'test-report-local' ? 'verification-report.json' : 'verification-evidence.json';
     const ref = JSON.parse((await test.invoke('artifact.provider', provider, 'put', { name, mediaType: 'application/json', bytes: report.toString('base64') })).stdout);
-    expect(ref).toEqual({ name, uri: pathToFileURL(join(test.output, name)).href });
+    await expectArtifactRef(ref, provider, test.output, name);
   }
   expect(await readFile(join(test.output, 'verification-report.json'))).toEqual(report);
   const bundle = JSON.parse(await readFile(join(test.output, 'verification-evidence.json'), 'utf8'));

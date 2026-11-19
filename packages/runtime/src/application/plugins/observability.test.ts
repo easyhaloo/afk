@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PluginRuntime } from './runtime.js';
+import { createConfiguredPlugins } from './configured.js';
 import { createPluginRunObserver, setPluginAuditArtifacts, setPluginAuditEvidence } from './observability.js';
 import { createHash } from 'node:crypto';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
@@ -115,6 +116,46 @@ it('uploads audit evidence through only the explicitly selected artifact registr
     expect(selected.put).toHaveBeenCalledTimes(1);
     expect(await store.verify('r')).toMatchObject({ valid: true, lastSequence: 3 });
   } finally { await runtime.dispose(); }
+});
+
+it.each(['evidence-bundle', 'test-report-local'])('binds the configured %s audit refs to their stored bytes and types', async provider => {
+  const root = await mkdtemp(join(tmpdir(), 'artifact-ref-'));
+  roots.push(root);
+  const runtime = new PluginRuntime();
+  try {
+    const [plugin] = await createConfiguredPlugins({ workspaceRoot: root, configurations: [{ id: `artifact.${provider}`, config: { root: 'exports' } }] });
+    await runtime.activate(plugin);
+    const evidence = await createLocalEncryptedEvidenceStore(root);
+    const bytes = Buffer.from('synthetic audit proof\n');
+    const local = await evidence.put({ bytes, mediaType: 'text/plain', classification: 'internal', redactionStatus: 'not_required' });
+    setPluginAuditArtifacts(runtime, { provider, evidence });
+    const context = { traceId: 't', runId: 'r', workItemId: 'github:org/repo#1', profileId: 'local', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+    await createPluginRunObserver(runtime, root).record(context, { kind: 'qa.passed' }, { evidence: [local] });
+    const store = new JsonlEventStore({ root });
+    const events = [];
+    for await (const event of store.read('r')) events.push(event);
+    const [source, upload] = events;
+    const input = source.evidence![0];
+    const output = upload.evidence![0];
+    const localBytes = Buffer.from(await evidence.get(input));
+    expect(localBytes).toEqual(bytes);
+    const localSha256 = createHash('sha256').update(localBytes).digest('hex');
+    expect(input).toMatchObject({ uri: `evidence://${localSha256}`, sha256: localSha256, mediaType: 'text/plain' });
+    const exported = await readFile(new URL(output.uri));
+    const outputSha256 = createHash('sha256').update(exported).digest('hex');
+    if (provider === 'evidence-bundle') {
+      const manifest = JSON.parse(exported.toString('utf8'));
+      expect(manifest.records).toEqual([{ id: `${localSha256}.bin`, sha256: localSha256, mediaType: input.mediaType, size: bytes.length }]);
+      expect(outputSha256).not.toBe(manifest.bundleSha256);
+      expect(output).toMatchObject({ sha256: outputSha256, mediaType: 'application/json' });
+    } else {
+      expect(exported).toEqual(bytes);
+      expect(output).toMatchObject({ sha256: outputSha256, mediaType: input.mediaType });
+    }
+    expect(upload.data).toMatchObject({ kind: 'effect.completed', effectKind: 'artifact.upload', outcome: 'succeeded' });
+    expect(JSON.parse((upload.data as { summary: string }).summary)).toMatchObject({ localUri: input.uri, localSha256, sha256: outputSha256, artifact: { uri: output.uri } });
+    expect(await store.verify('r')).toMatchObject({ valid: true, lastSequence: 2 });
+  } finally { await runtime.close(); }
 });
 
 it('rejects an explicitly selected artifact registration that is unavailable', () => {

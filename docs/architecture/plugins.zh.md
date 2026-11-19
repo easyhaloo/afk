@@ -194,7 +194,9 @@ integrations:
 的有界摘要，源审计追加后上传引用的证据；校验内容 hash、拒绝 restricted 证据、对
 支持的文本格式脱敏，并移除返回 URI 中的凭据、query 和 fragment。
 `artifact.upload` 的 `effect.completed` 记录关联源事件/序号、本地摘要、远端引用或
-安全失败原因。上传异常/超时不替代本地审计，上传回执不递归触发上传。既有 after-agent
+安全失败原因。上传异常/超时不替代本地审计，上传回执不递归触发上传。转换上传内容的 sink
+通过 `storedContent` 返回其 URI 对应对象的 SHA-256 和媒体类型。`evidence-bundle` 对序列化的 JSON
+清单计算摘要。原样保存字节和类型的 sink 可以只返回 `uri` 和 `name`。既有 after-agent
 报告 hook 独立消费。SDK 调用方可通过 `createPluginRunObserver`、
 `setPluginAuditArtifacts`、`PluginRunObserverOptions` 选择同一 bridge，
 `createLocalEncryptedEvidenceStore` 提供持久本地证据；key 初始化加锁并复用已有 key，

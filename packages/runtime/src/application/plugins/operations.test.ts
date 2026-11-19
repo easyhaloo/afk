@@ -382,6 +382,14 @@ describe('invokeCapability', () => {
     }
   });
 
+  it('preserves stored content metadata in artifact operation receipts', async () => {
+    const { runtime, artifact } = await fixture();
+    const result = { name: 'bundle.json', uri: 'file:///bundle.json', storedContent: { sha256: 'd'.repeat(64), mediaType: 'application/json' } };
+    artifact.put.mockResolvedValue(result);
+    await expect(invokeCapability(runtime, { capability: 'artifact.provider', provider: 'artifact', operation: 'put',
+      input: { name: 'record.txt', mediaType: 'text/plain', bytes: 'b2s=' } })).resolves.toEqual(result);
+  });
+
   it('registers and unregisters typed triggers', async () => {
     const { runtime, trigger } = await fixture();
     const input = { id: 'nightly', kind: 'schedule', schedule: '0 0 * * *', payload: { enabled: true } };

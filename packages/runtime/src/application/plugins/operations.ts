@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { artifactRefSchema } from '../../plugin-sdk/artifact-ref.js';
 import type { PluginRuntime, PluginSystemActionOptions } from './runtime.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import { withCancellation } from './cancellation.js';
@@ -65,7 +66,7 @@ export const contextFragmentsSchema = z.array(z.object({
 export const policyDecisionSchema = z.object({
   allowed: z.boolean(), rule: z.string().optional(), reason: z.string().optional(),
 });
-export const artifactRefSchema = z.object({ uri: text, name: text });
+export { artifactRefSchema };
 export const notificationReceiptSchema = z.object({ delivered: z.boolean(), channel: z.string(), error: z.string().optional() });
 const issue = z.object({
   id: text, key: text, projectId: text, title: z.string(), description: z.string(),

@@ -260,12 +260,14 @@ export class EvidenceBundleProvider implements ArtifactSink {
     assertSafeArtifactName(request.name);
     const bundle = this.build(request.records);
     const bytes = Buffer.from(JSON.stringify(bundle, null, 2), 'utf8');
+    const mediaType = 'application/json';
+    const sha256 = sha256Hex(bytes);
     checkAbort(options);
     const ref = await this.put(
-      { name: request.name, mediaType: 'application/json', bytes },
+      { name: request.name, mediaType, bytes },
       options,
     );
-    return { ref, bundle };
+    return { ref: { ...ref, storedContent: ref.storedContent ?? { sha256, mediaType } }, bundle };
   }
 
   private build(records: readonly EvidenceBundleRecord[]): EvidenceBundle {

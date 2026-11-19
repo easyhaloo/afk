@@ -241,7 +241,10 @@ supported text formats and strips credentials/query/fragment from returned URIs.
 An `effect.completed` record for `artifact.upload` links the source event/sequence,
 local digest, remote reference or safe failure reason. Upload failures/timeouts
 preserve local audit authority; upload receipts do not recursively upload
-themselves. Existing after-agent report hooks remain a separate consumer.
+themselves. A sink that transforms the upload returns `storedContent` with the SHA-256
+and media type of the object at its URI. For `evidence-bundle` this covers the serialized
+JSON manifest. Sinks that preserve bytes and type can return just `uri` and `name`.
+Existing after-agent report hooks remain a separate consumer.
 SDK consumers can select the same bridge with `createPluginRunObserver`,
 `setPluginAuditArtifacts` and `PluginRunObserverOptions`, using
 `createLocalEncryptedEvidenceStore` for persistent local evidence. Key initialization

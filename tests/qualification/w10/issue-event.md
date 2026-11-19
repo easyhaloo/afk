@@ -6,6 +6,8 @@ The harness created and closed issue #1 with label `ready` in the private loopba
 
 ## Reproduce
 
+On November 20, 2026, CLI 0.2.162 consumed the same three event types from Gitea 28.4.0. After all deliveries settled, the harness stopped the AFK listener and started a fresh process on the same address using the same SQLite queue. After restart each original signed body returned the same delivery ID and each modified body received HTTP 401. The queue retained three delivered entries with one attempt each, and the action file contained one line. See [restart receipt](issue-event-restart.receipt.json). The harness initiated these replays.
+
 Run from this directory with ordinary Python 3, Git and Node on PATH. Supply the installed release launcher and extracted Gitea binary. The script creates its own profiles and database, binds both services to loopback, and stops them on exit. Raw hook history and credentials are deleted with the temporary directory.
 
 ```sh

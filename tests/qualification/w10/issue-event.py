@@ -96,10 +96,14 @@ ENABLED = false
                     proc.kill()
                     proc.wait()
             stack.callback(stop)
-            return logfile
+            return logfile, stop
 
-        listener_log = start('listener', [afk, 'plugin', 'listen', '--host', '127.0.0.1', '--port', '0', '--queue', str(root/'queue.sqlite'), '--token-env', 'ISSUE_AUTH'], listener_env)
-        listener_port = int(wait_for(lambda: re.search(r'listener ready at 127\.0\.0\.1:(\d+)', listener_log.read_text())).group(1))
+        def start_listener(name, port):
+            log, stop = start(name, [afk, 'plugin', 'listen', '--host', '127.0.0.1', '--port', str(port), '--queue', str(root/'queue.sqlite'), '--token-env', 'ISSUE_AUTH'], listener_env)
+            address = wait_for(lambda: re.search(r'listener ready at 127\.0\.0\.1:(\d+)', log.read_text()))
+            return int(address.group(1)), stop
+
+        listener_port, stop_listener = start_listener('listener', 0)
         listener = f'http://127.0.0.1:{listener_port}'
         endpoint = '/triggers/trigger.issue-event'
         start('gitea', [*service, 'web'], env)
@@ -131,8 +135,16 @@ ENABLED = false
                 connection.row_factory = sqlite3.Row
                 rows = connection.execute('SELECT * FROM hook_task WHERE hook_id=? AND is_delivered=1 ORDER BY id', (hook['id'],)).fetchall()
                 return rows if len(rows) == 3 else None
+        tasks = wait_for(completed_tasks)
+        def settled():
+            rows = json.loads(run(afk, 'plugin', 'deliveries', '--url', listener, '--token-env', 'ISSUE_AUTH', environment=listener_env))['deliveries']
+            return rows if len(rows) == len(tasks) and all(row['status'] == 'delivered' for row in rows) else None
+        before_restart = wait_for(settled)
+        stop_listener()
+        restarted_port, _ = start_listener('restarted-listener', listener_port)
+        assert restarted_port == listener_port
         receipts = []
-        for row in wait_for(completed_tasks):
+        for row in tasks:
             outgoing = json.loads(row['request_content'])
             incoming = json.loads(row['response_content'])
             assert outgoing['url'] == listener+endpoint and outgoing['http_method'] == 'POST'
@@ -156,14 +168,12 @@ ENABLED = false
             assert status == 202 and repeated['duplicate'] and repeated['deliveryId'] == accepted['deliveryId']
             receipts.append(dict(action=payload['action'], sourceId=delivery, bodySha256=hashlib.sha256(body).hexdigest(), accepted=accepted, replay=repeated, tamperedStatus=401))
         assert sorted(item['action'] for item in receipts) == ['closed', 'label_updated', 'opened']
-        def settled():
-            rows = json.loads(run(afk, 'plugin', 'deliveries', '--url', listener, '--token-env', 'ISSUE_AUTH', environment=listener_env))['deliveries']
-            return rows if len(rows) == len(receipts) and all(row['status'] == 'delivered' for row in rows) else None
         deliveries = wait_for(settled)
+        assert {row['deliveryId']: row['attempts'] for row in before_restart} == {row['deliveryId']: row['attempts'] for row in deliveries}
         assert {row['deliveryId'] for row in deliveries} == {event['accepted']['deliveryId'] for event in receipts}
         assert all(row['providerId'] == 'trigger.issue-event' and row['attempts'] == 1 for row in deliveries)
         assert effects.read_text().splitlines() == ['verified']
-        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, actionCount=1)
+        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, actionCount=1)
 
 
 if __name__ == '__main__':

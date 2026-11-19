@@ -79,7 +79,7 @@ export function createPluginRunObserver(plugins?: PluginRuntime, root = process.
       let outcomeFailed = false;
       const experience = plugins.getContextProvider('context.experience');
       if (experience instanceof ExperienceContextProvider
-        && ['run.finished', 'qa.failed', 'failure.classified'].includes(draft.type)) {
+        && ['run.finished', 'qa.failed', 'failure.classified', 'human_gate.opened'].includes(draft.type)) {
         try {
           await experience.recordOutcomes({ runId: draft.context.runId, workItemId: draft.context.workItemId, root: eventRoot,
             event: { sequence: receipt.lastSequence, hash: receipt.lastHash } });

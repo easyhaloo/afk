@@ -1540,6 +1540,7 @@ outcome insertion share one SQLite transaction. Event replay preserves original 
 and recurrence, while changed content at the same sequence conflicts. Each experience retains
 at most 256 outcome receipts within the existing store bounds. Historical selections remain
 readable after correction or revocation; they grant no fresh retrieval authority.
+After trusted QA starts and passes, publishing a change and opening its matching merge gate in the same attempt records `awaiting_merge`. Benefit remains `unknown`.
 
 The plugin observer derives feedback after audit persistence through the configured builtin
 Provider, even with model-based learning disabled. A derived-write failure retains the audit

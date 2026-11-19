@@ -2750,6 +2750,8 @@ Provisional total63–103 person-days. With four to five effective parallel writ
 
 #### Committed slice and current delivery evidence
 
+On November 20, 2026 (Asia/Shanghai), GitHub Actions run `44559190766` succeeded for `7012631d`. The coverage suite passed 8,913 tests and skipped 241. Across core, application, workflow-graph, runtime and CLI, line and statement coverage were 89.98%, function coverage was 86.78%, and branch coverage was 88.75%. The separate Desktop E2E suite passed 106 tests.
+
 On November 19, 2026, the `w11-recall-v1` audit checked historical installed releases against all six second-consumer cases for each of five asset types. All 10 expected hits and 20 expected exclusions matched.
 
 | Asset | Consumer CLI | Provenance |

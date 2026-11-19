@@ -1,0 +1,179 @@
+{
+  "observed": "2026-11-19T12:39:07.507031+00:00",
+  "release": {
+    "version": "0.2.156",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMinimum": "22.16.0"
+  },
+  "archiveSha256": "aea5c328e7e9a396d0af74aae51baefecc303bdd64270463832c1a3393ff3419",
+  "idpImage": "quay.io/keycloak/keycloak@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007",
+  "entry": "plugin invoke artifact.provider report-platform put",
+  "cases": {
+    "validExchange": {
+      "cliExit": 0,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 200,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-reports"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "urn:ietf:params:oauth:token-type:access_token"
+        }
+      ],
+      "reportRequests": 1,
+      "report": {
+        "active": true,
+        "audiences": [
+          "w10-reports"
+        ],
+        "issuerMatches": true,
+        "client": "w10-exchanger",
+        "scope": "report.write",
+        "issuedAt": 1795091930,
+        "expiresAt": 1795091945,
+        "resourceHttp": 200
+      }
+    },
+    "wrongEndpointPin": {
+      "cliExit": 1,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        }
+      ],
+      "reportRequests": 0
+    },
+    "wrongAssertionAudience": {
+      "cliExit": 1,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 400,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-reports"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "invalid_client"
+        }
+      ],
+      "reportRequests": 0
+    },
+    "expiredAssertion": {
+      "cliExit": 1,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 400,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-reports"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "invalid_client"
+        }
+      ],
+      "reportRequests": 0
+    },
+    "ungrantedTargetAudience": {
+      "cliExit": 1,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 400,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-other"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "invalid_request"
+        }
+      ],
+      "reportRequests": 0
+    },
+    "disabledAudienceClient": {
+      "cliExit": 1,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 400,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-reports"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "invalid_client"
+        }
+      ],
+      "reportRequests": 0
+    },
+    "restoredAudienceClient": {
+      "cliExit": 0,
+      "requests": [
+        {
+          "discoveryHttp": 200
+        },
+        {
+          "tokenHttp": 200,
+          "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+          "audience": [
+            "w10-reports"
+          ],
+          "assertionType": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+          "scope": [
+            "report.write"
+          ],
+          "result": "urn:ietf:params:oauth:token-type:access_token"
+        }
+      ],
+      "reportRequests": 1,
+      "report": {
+        "active": true,
+        "audiences": [
+          "w10-reports"
+        ],
+        "issuerMatches": true,
+        "client": "w10-exchanger",
+        "scope": "report.write",
+        "issuedAt": 1795091936,
+        "expiresAt": 1795091951,
+        "resourceHttp": 200
+      }
+    },
+    "expiredBearerReplay": {
+      "checkedAt": 1795091947,
+      "expiresAt": 1795091945,
+      "active": false,
+      "resourceHttp": 401
+    }
+  }
+}

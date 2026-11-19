@@ -492,10 +492,31 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('usage')).toBe(true);
     });
 
-    it('buildCommand uses --allow-all when non-interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: false }));
-      expect(cmd.argv[0]).toBe('copilot');
-      expect(cmd.argv).toContain('--allow-all');
+    it('uses stdin JSONL in batch and leaves the interactive command alone', () => {
+      expect(p.buildCommand(opts()).argv).toEqual(['copilot', '--output-format', 'json', '--stream', 'on']);
+      expect(p.buildCommand(opts({ interactive: true })).argv).toEqual(['copilot']);
+    });
+
+    it('accepts assistant content only on a matching successful terminal event', () => {
+      class Probe extends CopilotProvider { parser() { return this.createParser(); } }
+      const parse = new Probe().parser();
+      const row = (type: string, data: unknown) => parse(JSON.stringify({ type, data }));
+      const terminal = (exitCode: number, sessionId = 'native') => parse(JSON.stringify({ type: 'result', exitCode, sessionId }));
+      expect(row('session.start', { sessionId: 'native', context: { cwd: '/tmp/work' } })).toEqual([
+        { type: 'session', sessionId: 'native', worktreePath: '/tmp/work' },
+      ]);
+      expect(row('user.message', { content: 'goal_complete' })).toEqual([]);
+      expect(row('assistant.message_delta', { deltaContent: 'part' })).toEqual([{ type: 'text', text: 'part' }]);
+      expect(terminal(0)[0]?.type).toBe('error');
+      expect(row('assistant.message', { content: 'final', toolRequests: [] })).toEqual([]);
+      expect(terminal(1)[0]?.type).toBe('error');
+      expect(terminal(0, 'other')[0]?.type).toBe('error');
+      expect(terminal(0)).toEqual([{ type: 'result', result: 'final' }]);
+      row('assistant.turn_start', {});
+      row('assistant.message', { content: 'unfinished', toolRequests: [{ name: 'read' }] });
+      expect(terminal(0)[0]?.type).toBe('error');
+      expect(row('session.error', { message: 'offline' })[0]?.type).toBe('error');
+      expect(parse('not json')).toEqual([]);
     });
   });
 });

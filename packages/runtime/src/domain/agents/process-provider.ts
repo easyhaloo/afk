@@ -111,6 +111,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
       waitForEvent: () => source.waitForEvent(),
       waitForResult: async resultOptions => {
         const result = await source.waitForResult(resultOptions);
+        usage = result.usage ?? usage;
         const error = result.exitCode !== undefined && result.exitCode !== 0
           ? { code: 'NON_ZERO_EXIT', message: result.error?.message || `process exited with code ${result.exitCode}` }
           : sessionError

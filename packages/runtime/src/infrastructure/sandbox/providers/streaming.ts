@@ -39,6 +39,7 @@ import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js'
 import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 import { spawnGuardedAnalysis } from './analysis-process-guard.js';
+import { createCopilotUsageReport } from './copilot-usage.js';
 
 const OUTPUT_DRAIN_TIMEOUT_MS = 1000;
 
@@ -57,6 +58,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private _mutableMetadata: AgentExecutionMetadata;
 
   private proc: ChildProcess | null = null;
+  private copilotReport?: ReturnType<typeof createCopilotUsageReport>;
   private readonly processOwner = randomUUID();
   private done = false;
   private analysisClosed = false;
@@ -108,7 +110,11 @@ export class StreamingAgentExecution implements AgentExecution {
     if (this.proc) return;
 
     // prompt already contains the `/goal ` prefix (from the template).
-    const argv = this.command.argv;
+    const argv = [...this.command.argv];
+    if (this.metadata.provider === 'copilot' && argv[0] === 'copilot') {
+      this.copilotReport = createCopilotUsageReport();
+      argv.push('--usage-output-file', this.copilotReport.path);
+    }
 
     const spawnOptions: SpawnOptions = {
       cwd: this.command.cwd ?? this.worktreePath,
@@ -223,7 +229,7 @@ export class StreamingAgentExecution implements AgentExecution {
             const extracted = this.extractSignal(raw);
             if (extracted) {
               this.structuredOutput = extracted;
-              if (this.analysisSessionId === undefined && this.hasExpectedSignal()) this.done = true;
+              if (this.analysisSessionId === undefined && !this.copilotReport && this.hasExpectedSignal()) this.done = true;
             }
             break;
           }
@@ -582,6 +588,10 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   private closeOutput(): void {
+    if (this.copilotReport) {
+      this.usage = this.copilotReport.finish();
+      this.copilotReport = undefined;
+    }
     clearTimeout(this.outputDrainTimer);
     this.outputDrainTimer = undefined;
     this.proc?.stdout?.destroy();
@@ -600,7 +610,7 @@ export class StreamingAgentExecution implements AgentExecution {
     } catch {
       // The buffer may instead contain a provider's raw completion marker.
     }
-    if (/^\s*[{["]/.test(this.stdoutBuffer)) return;
+    if (this.metadata.provider === 'copilot' || /^\s*[{["]/.test(this.stdoutBuffer)) return;
     const extracted = extractGoalComplete(this.stdoutBuffer);
     if (!extracted) return;
     this.structuredOutput = extracted;

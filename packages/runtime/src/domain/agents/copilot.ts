@@ -1,57 +1,50 @@
-/**
- * GitHub Copilot CLI agent provider.
- *
- * Copilot CLI flag surface (verified partial via WebSearch 2026-08):
- *   --prompt <text>            one-shot prompt (non-interactive)
- *   --allow-all                allow all tool permissions
- *   --model <name>             select model
- *
- * Resume: GitHub Copilot CLI does NOT expose a documented --resume flag.
- * Capability: NO 'resume'.
- *
- * Reference: GitHub Copilot CLI documentation (npm: @github/copilot).
- */
-
-import type {
-  AgentProviderName,
-  AgentCapability,
-  AgentCommand,
-  AgentCommandOptions,
-  AgentEvent,
-  TokenUsage,
-} from './types.js';
+import type { AgentCapability, AgentCommand, AgentCommandOptions, AgentEvent } from './types.js';
 import { ProcessAgentProvider } from './process-provider.js';
 
-const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
-  'streaming',
-  'usage',
-  'interactive',
-] as const);
-
 export class CopilotProvider extends ProcessAgentProvider {
-  readonly name: AgentProviderName = 'copilot';
-  readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
+  readonly name = 'copilot';
+  readonly capabilities: ReadonlySet<AgentCapability> = new Set(['streaming', 'usage', 'interactive']);
+  protected readonly nativeSessions = true;
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
-    const argv = ['copilot'];
-    if (!options.interactive) {
-      argv.push('--allow-all');
-    }
-    return { argv, cwd: options.worktreePath };
+    const batch = (options.executionMode ?? (options.interactive ? 'interactive' : 'batch')) === 'batch';
+    return { argv: batch ? ['copilot', '--output-format', 'json', '--stream', 'on'] : ['copilot'], cwd: options.worktreePath };
   }
 
-  parseLine(line: string): AgentEvent[] {
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed.type === 'usage' && parsed.usage) {
-        return [{ type: 'usage', usage: parsed.usage as TokenUsage }];
+  override async restoreSession(): Promise<void> {
+    throw new Error('Copilot native resume is not supported');
+  }
+
+  protected override createParser(): (line: string) => AgentEvent[] {
+    let sessionId: string | undefined;
+    let answer: string | undefined;
+    return line => {
+      let row;
+      try { row = JSON.parse(line); } catch { return []; }
+      const data = row?.data;
+      switch (row?.type) {
+        case 'session.start':
+          if (typeof data?.sessionId !== 'string' || typeof data.context?.cwd !== 'string') return [];
+          sessionId = data.sessionId;
+          return [{ type: 'session', sessionId: data.sessionId, worktreePath: data.context.cwd }];
+        case 'assistant.turn_start':
+          answer = undefined;
+          return [];
+        case 'assistant.message_delta':
+          return typeof data?.deltaContent === 'string' ? [{ type: 'text', text: data.deltaContent }] : [];
+        case 'assistant.message':
+          answer = typeof data?.content === 'string' && Array.isArray(data.toolRequests) && !data.toolRequests.length ? data.content : undefined;
+          return [];
+        case 'session.error':
+          return [{ type: 'error', error: new Error(typeof data?.message === 'string' ? data.message : 'Copilot session failed') }];
+        case 'result':
+          if (!sessionId || row.sessionId !== sessionId || row.exitCode !== 0 || answer === undefined) {
+            return [{ type: 'error', error: new Error('Copilot did not confirm a completed assistant response') }];
+          }
+          return [{ type: 'result', result: answer }];
+        default:
+          return [];
       }
-      if (parsed.type === 'result') {
-        return [{ type: 'result', result: parsed.result }];
-      }
-    } catch {
-      // Not JSON — text
-    }
-    return [{ type: 'text', text: line }];
+    };
   }
 }

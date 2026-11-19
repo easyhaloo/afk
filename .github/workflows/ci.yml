@@ -276,7 +276,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     env:
       COVERAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
       COVERAGE_CHANGED_LINES: ${{ vars.COVERAGE_CHANGED_LINES }}

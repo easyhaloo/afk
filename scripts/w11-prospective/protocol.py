@@ -1,4 +1,4 @@
-"""Prospective W11: template | freeze SPEC NEW_DIR | run DIR SCENARIO REPEAT CENTS | replay DIR."""
+"""Prospective W11: template | freeze SPEC NEW_DIR | run DIR SCENARIO REPEAT CENTS | replay DIR | check-live DIR."""
 import fcntl
 import base64
 import hashlib
@@ -9,9 +9,11 @@ import sqlite3
 import subprocess
 import sys
 import time
+import tempfile
 import uuid
 import re
 from contextlib import closing
+from decimal import Decimal
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -23,12 +25,15 @@ MODEL = 'claude-sonnet-4-6'
 PROMPTS = {'environment': '在 staging 快照中定位指定包裹的运行日志并返回对应记录。',
            'repair': '修复指定面单的纵向偏移，使用同一标签验证修复结果。',
            'process': '按 staging 的非自提退件流程办理指定包裹的交接，给出签收记录。'}
-SYSTEM = '使用本地测试台。通过 python3 station.py help 查看操作。环境题仅返回原始 JSON，修复题用同一面单连续试印两张，流程题报告袋号和签收状态。'
+SYSTEM = ('只串行执行 python3 station.py 参数，可用 help 查看操作。最终仅返回 JSON 对象，answer 填站点原始记录'
+          '（修复题填同一面单最后连续两次试印记录的数组）。adoption 默认 null；若使用所附资料，填对象，'
+          'origin 为其来源，quote 为实际采用的原文，steps 为对应站点调用序号数组（从 1 计，含 help）。')
 ARMS = ('none', 'old', 'new')
 PARAMETERS = ('W11-101', 'W11-202')
 KINDS = {'environment': 'fact', 'repair': 'lesson', 'process': 'process'}
 FILES = ('stdout.jsonl', 'stderr', 'exit.json', 'argv.json', 'journal.jsonl', 'workspace/station.py',
-         'gather/stdout.json', 'gather/command.json', 'gather/stderr', 'reservation.json')
+         'gather/stdout.json', 'gather/command.json', 'gather/stderr', 'gather/health.json', 'reservation.json')
+POSITIVE_FILES = tuple('gather/positive/'+name for name in ('stdout.json', 'command.json', 'stderr', 'health.json'))
 
 
 def require(condition, message):
@@ -48,6 +53,12 @@ def read(file):
     return json.loads(file.read_bytes())
 
 
+def unique_keys(pairs):
+    obj = dict(pairs)
+    require(len(obj) == len(pairs), 'ambiguous JSON record')
+    return obj
+
+
 def save(file, value):
     with file.open('x') as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
@@ -56,6 +67,25 @@ def save(file, value):
 
 def manifest(directory):
     return {str(path.relative_to(directory)): sha(path.read_bytes()) for path in sorted(directory.rglob('*')) if path.is_file()}
+
+
+def package_digest(cli):
+    entry = Path(cli).resolve(strict=True)
+    root = entry.parent.parent
+    require(entry.parent.name == 'dist' and all((root/name).is_file() for name in ('release.json', 'package.json'))
+            and (root/'node_modules').is_dir(), 'installed AFK package required')
+    files = {}
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            require(path.resolve(strict=True).is_relative_to(root), 'external installed dependency')
+            value = ['link', os.readlink(path)]
+        elif path.is_file():
+            value = ['file', sha(path.read_bytes())]
+        else:
+            require(path.is_dir(), 'unsupported installed entry')
+            continue
+        files[str(path.relative_to(root))] = value
+    return digest(files)
 
 
 def audit_edition(directory, query, page, name):
@@ -124,7 +154,11 @@ def gather(config, queryfile, edition, expected, directory):
     if edition:
         source = edition/'profile'
         plan = read(edition/'plan.json')
-        require(digest(read(Path(plan['authorizationFile']))) == plan['authorizationDigest'], 'live grant changed')
+        authority = Path(plan['authorizationFile'])
+        require(authority.is_absolute() and authority.is_file(), 'live grant unavailable')
+        live = read(authority)
+        require(live.get('revoked') is False, 'live grant revoked')
+        require(digest(live) == plan['authorizationDigest'], 'live grant changed')
         target = profile/'.afk'
         target.mkdir()
         shutil.copyfile(source/'plugins.yml', target/'plugins.yml')
@@ -132,12 +166,24 @@ def gather(config, queryfile, edition, expected, directory):
             if (edition/'source-home.json').exists():
                 profile = Path(read(edition/'source-home.json'))
                 active = profile/'.afk'
+                require(active.is_dir(), 'source profile unavailable')
                 require(profile.resolve() == profile and profile != Path.home().resolve() and
                         all((active/path).is_file() and sha((active/path).read_bytes()) == checksum
                             for path, checksum in manifest(source).items() if not path.endswith(('-wal','-shm'))) and
                         not any(path.stat().st_size for path in (active/'learning').glob('*-wal')), 'source profile drift')
             else:
                 shutil.copytree(source, target, dirs_exist_ok=True)
+        else:
+            positive = gather(config, queryfile, edition, read(edition.parent/'bindings.json')['old'], directory/'positive')
+            if (source/'plugins').is_dir():
+                shutil.copytree(source/'plugins', target/'plugins')
+            (target/'learning').mkdir()
+            database = target/'learning/candidates.sqlite'
+            shutil.copyfile(edition/'candidates.sqlite', database)
+            with closing(sqlite3.connect(database)) as ledger, ledger:
+                ledger.execute('delete from learning_ledger')
+                require(ledger.execute('pragma quick_check').fetchall() == [('ok',)] and
+                        ledger.execute('select count(*) from learning_ledger').fetchone() == (0,), 'empty ledger unhealthy')
     args = [config['node'], config['cli'], 'plugin', 'invoke', 'context.provider', 'context.knowledge', 'gather', '--input', str(queryfile), '--json']
     result = subprocess.run(args, cwd=profile, env={'HOME': str(profile), 'USERPROFILE':str(profile),
                             'AFK_EVENT_STORE_DIR':str(profile/'events'), 'PATH': os.environ['PATH']}, capture_output=True, timeout=60)
@@ -149,11 +195,13 @@ def gather(config, queryfile, edition, expected, directory):
     require([item['origin'] for item in fragments] == ([expected['origin']] if expected else []), 'assigned publication not uniquely recalled')
     if expected:
         require(sha(fragments[0]['content'].encode()) == expected['content'], 'published page differs from recall')
+    save(directory/'health.json', dict(query=digest(read(queryfile)), plugins=sha((source/'plugins.yml').read_bytes()),
+                                      positive=digest(fragments if expected else positive), emptyLedger=not bool(expected)))
     return fragments
 
 
 def template():
-    return dict(protocol='w11-prospective-v1', cli='/absolute/path/dist/index.js', agent='/absolute/path/claude',
+    return dict(protocol='w11-prospective-v2', cli='/absolute/path/dist/index.js', agent='/absolute/path/claude',
                 node=shutil.which('node'), perSlotCents=75, totalCents=1350, groups={name: None for name in PROMPTS})
 
 
@@ -169,6 +217,7 @@ def freeze(spec, root):
     for name in ['protocol.py', 'station.py']:
         shutil.copyfile(HERE/name, frozen/name)
     tools = {name: sha(Path(config[name]).read_bytes()) for name in ['cli', 'node', 'agent']}
+    tools['installedPackage'] = package_digest(config['cli'])
     home = root/'version-home'
     home.mkdir()
     for name, args in [('afkVersion', [config['node'], config['cli']]), ('agentVersion', [config['agent']])]:
@@ -218,6 +267,12 @@ def freeze(spec, root):
         for arm in ARMS:
             selected = gather(config, target/'query.json', target/('old' if arm == 'none' else arm), bindings.get(arm), root/f'preflight-{name}-{arm}')
             save(target/f'{arm}-gather.json', selected)
+            shutil.copyfile(root/f'preflight-{name}-{arm}'/'health.json', target/f'{arm}-health.json')
+            rule = group.get(arm, {}).get('adoption')
+            if rule is not None:
+                require(isinstance(rule.get('quote'), str) and rule['quote'] and rule['quote'] in selected[0]['content'] and
+                        isinstance(rule.get('commands'), list) and rule['commands'] and all(isinstance(cmd, list) and cmd and
+                        cmd != ['help'] and all(isinstance(arg, str) for arg in cmd) for cmd in rule['commands']), 'invalid adoption rule')
     slots = [f'{name}-{repeat}-{arm}' for name in PROMPTS for repeat in [1,2] for arm in (ARMS if repeat == 1 else ARMS[::-1])]
     save(frozen/'schedule.json', slots)
     save(root/'lock.json', manifest(frozen))
@@ -233,21 +288,65 @@ def verify(root):
 
 
 def arguments(config, name, parameter, fragments):
-    prompt = SYSTEM + ('\n\n'+fragments[0]['content'] if fragments else '')
+    prompt = SYSTEM + ('\n\n'+fragments[0]['origin']+'\n'+fragments[0]['content'] if fragments else '')
     return [config['agent'], '--print', '--safe-mode', '--restricted', '--strict-mcp-config', '--no-session-persistence',
             '--disable-slash-commands','--tools','Bash','--allowedTools','Bash(python3 station.py *)','--permission-mode','dontAsk',
             '--model', MODEL,'--effort','low','--max-budget-usd', f"{config['perSlotCents']/100:.2f}",
             '--output-format','stream-json','--verbose','--system-prompt',prompt,'--',PROMPTS[name]+'\n参数：'+parameter]
 
 
+def verify_tools(config, frozen):
+    tools = read(frozen/'tools.json')
+    require(package_digest(config['cli']) == tools['installedPackage'], 'installed package drift')
+    require(all(sha(Path(config[key]).read_bytes()) == tools[key] for key in ['cli','node','agent']) and sys.version == tools['python'], 'tool drift')
+    require(tools['stationPython'] == sha(Path(shutil.which('python3')).read_bytes()) and
+            tools['endpointHash'] == sha(os.environ.get('ANTHROPIC_BASE_URL','').encode()), 'station or provider drift')
+
+
+def live_reason(error):
+    if isinstance(error, ValueError) and str(error) in ('live grant revoked', 'live grant changed', 'live grant unavailable',
+            'source profile unavailable', 'source profile drift', 'installed package drift', 'tool drift', 'station or provider drift',
+            'assigned publication not uniquely recalled', 'published page differs from recall'):
+        return str(error)
+    return 'live dependency unavailable'
+
+
+def check_live(root):
+    config = verify(root)
+    frozen = root/'frozen'
+    report = {'archive': 'verified', 'modelCalls': 0, 'groups': {}}
+    replay(root)
+    try:
+        verify_tools(config, frozen)
+        report['tools'] = 'verified'
+    except (ValueError, OSError, RuntimeError) as error:
+        report['tools'] = live_reason(error)
+    with tempfile.TemporaryDirectory() as scratch:
+        for name, group in config['groups'].items():
+            states = report['groups'][name] = {}
+            for arm in ARMS:
+                if group is None:
+                    states[arm] = 'missing-publications'
+                    continue
+                if report['tools'] != 'verified':
+                    states[arm] = 'unavailable'
+                    continue
+                folder = frozen/name
+                try:
+                    selection = gather(config, folder/'query.json', folder/('old' if arm == 'none' else arm),
+                                       read(folder/'bindings.json').get(arm), Path(scratch)/(name+arm))
+                    require(selection == read(folder/f'{arm}-gather.json'), 'recall drift')
+                    states[arm] = 'healthy'
+                except (ValueError, OSError, KeyError, sqlite3.Error, subprocess.SubprocessError) as error:
+                    states[arm] = live_reason(error)
+    return report
+
+
 def run(root, name, repeat, allowance):
     config = verify(root)
     require(name in PROMPTS and repeat in (1,2) and config['groups'][name], 'group lacks admitted editions')
     frozen = root/'frozen'
-    tools = read(frozen/'tools.json')
-    require(all(sha(Path(config[key]).read_bytes()) == tools[key] for key in ['cli','node','agent']) and sys.version == tools['python'], 'tool drift')
-    require(tools['stationPython'] == sha(Path(shutil.which('python3')).read_bytes()) and
-            tools['endpointHash'] == sha(os.environ.get('ANTHROPIC_BASE_URL','').encode()), 'station or provider drift')
+    verify_tools(config, frozen)
     slots = [slot for slot in read(frozen/'schedule.json') if slot.startswith(f'{name}-{repeat}-')]
     attempts = root/'attempts'
     attempts.mkdir(exist_ok=True)
@@ -256,17 +355,20 @@ def run(root, name, repeat, allowance):
         pending = [slot for slot in slots if not (attempts/slot).exists()]
         prior = replay(root)['rows']
         require(not any(row['status'] == 'interrupted' or (row['status'] in ('failed','passed') and
-                    (row['estimatedUSD'] is None or row['estimatedUSD']*100 > config['perSlotCents'])) for row in prior), 'prior attempt has unresolved spend')
+                    row['spend'] != 'within-cap') for row in prior), 'prior attempt has unresolved spend')
         cap = config['perSlotCents']
-        require(pending and len(pending)*cap <= allowance and (len(list(attempts.iterdir()))+len(pending))*cap <= config['totalCents'], 'no open slots or insufficient budget')
+        require(pending and len(pending)*cap <= allowance and (sum('reservation' in row for row in prior)+len(pending))*cap <= config['totalCents'], 'no open slots or insufficient budget')
         for slot in pending:
             arm = slot.split('-')[-1]
             directory = attempts/slot
             directory.mkdir()
             parameter = PARAMETERS[repeat-1]
-            save(directory/'reservation.json', dict(slot=slot, capCents=cap, runId=str(uuid.uuid4()), workItemId=f'{SCOPE}#{time.time_ns()//1000}', lock=sha((root/'lock.json').read_bytes())))
-            selected = gather(config, frozen/name/'query.json', frozen/name/('old' if arm == 'none' else arm), read(frozen/name/'bindings.json').get(arm), directory/'gather')
-            require(selected == read(frozen/name/f'{arm}-gather.json'), 'recall drift')
+            try:
+                selected = gather(config, frozen/name/'query.json', frozen/name/('old' if arm == 'none' else arm), read(frozen/name/'bindings.json').get(arm), directory/'gather')
+                require(selected == read(frozen/name/f'{arm}-gather.json'), 'recall drift')
+            except (ValueError, OSError, KeyError, sqlite3.Error, subprocess.SubprocessError) as error:
+                save(directory/'prelaunch.json', {'reason': live_reason(error)})
+                raise
             workspace = directory/'workspace'
             workspace.mkdir()
             home = directory/'agent-home'
@@ -281,15 +383,83 @@ def run(root, name, repeat, allowance):
                     env[key] = os.environ[key]
             args = arguments(config, name, parameter, selected)
             save(directory/'argv.json', args)
+            save(directory/'reservation.json', dict(slot=slot, capCents=cap, runId=str(uuid.uuid4()), workItemId=f'{SCOPE}#{time.time_ns()//1000}', lock=sha((root/'lock.json').read_bytes())))
             with (directory/'stdout.jsonl').open('xb') as stdout, (directory/'stderr').open('xb') as stderr:
                 try:
                     exitcode = subprocess.run(args, cwd=workspace, env=env, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=180).returncode
                 except subprocess.TimeoutExpired:
                     exitcode = 'timeout'
             save(directory/'exit.json', exitcode)
-            save(directory/'files.json', {file: sha((directory/file).read_bytes()) for file in FILES})
+            files = FILES + (POSITIVE_FILES if arm == 'none' else ())
+            save(directory/'files.json', {file: sha((directory/file).read_bytes()) for file in files})
             row = next(row for row in replay(root)['rows'] if row['slot'] == slot)
-            require(row['estimatedUSD'] is not None and row['estimatedUSD'] * 100 <= cap, 'unknown cost or native cap exceeded')
+            require(row['spend'] == 'within-cap', 'unresolved spend: '+row['spend'])
+
+
+def spend_status(cost, cap):
+    if cost is None:
+        return 'unknown'
+    if type(cost) not in (int, Decimal) or not Decimal(cost).is_finite() or cost < 0:
+        return 'invalid'
+    return 'within-cap' if cost <= Decimal(cap).scaleb(-2) else 'over-cap'
+
+
+def station_trace(events, session, journal):
+    ids = []
+    pending = None
+    for event in events:
+        require(event.get('type') in ('system', 'assistant', 'user', 'result', 'rate_limit_event'), 'unexpected native event')
+        for block in event.get('message', {}).get('content', []):
+            kind = block.get('type')
+            if kind in ('text', 'thinking', 'redacted_thinking'):
+                continue
+            require(event.get('session_id') == session and session and not event.get('parent_tool_use_id'), 'foreign tool event')
+            require(len(ids) < len(journal), 'extra tool event')
+            entry = journal[len(ids)]
+            if kind == 'tool_use':
+                ident = block.get('id')
+                require(event['type'] == 'assistant' and pending is None and isinstance(ident, str) and ident and ident not in ids,
+                        'duplicate or unordered tool call')
+                data = block['input']
+                require(block.get('name') == 'Bash' and set(data) <= {'command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'}
+                        and data.get('run_in_background', False) is False and data.get('dangerouslyDisableSandbox', False) is False,
+                        'tool boundary')
+                command = entry['command']
+                require(command and all(re.fullmatch(r'[\w.-]+', arg) for arg in command) and
+                        data['command'] == ' '.join(['python3', 'station.py', *command]), 'station command mismatch')
+                pending = ident
+            else:
+                require(kind == 'tool_result' and event['type'] == 'user' and pending and block.get('tool_use_id') == pending,
+                        'unmatched tool result')
+                content = block['content']
+                if isinstance(content, list):
+                    require(len(content) == 1 and content[0]['type'] == 'text', 'ambiguous tool output')
+                    content = content[0]['text']
+                failed = 'error' in entry['result']
+                require(block.get('is_error', False) is failed, 'station exit mismatch')
+                if failed:
+                    content = content.removeprefix('Exit code 1\n')
+                require(digest(json.loads(content, object_pairs_hook=unique_keys)) == digest(entry['result']), 'station output mismatch')
+                ids.append(pending)
+                pending = None
+    require(not pending and len(ids) == len(journal), 'missing native tool evidence')
+    return ids
+
+
+def adoption_status(fragments, rule, claim, journal, ids, parcel):
+    if not fragments:
+        return 'inapplicable', []
+    if not rule:
+        return 'unregistered', []
+    if not isinstance(claim, dict) or claim.get('origin') != fragments[0]['origin'] or claim.get('quote') != rule['quote']:
+        return 'unobserved', []
+    steps = claim.get('steps')
+    if not isinstance(steps, list) or not all(type(step) is int and 1 <= step <= len(ids) for step in steps) or steps != sorted(set(steps)):
+        return 'unobserved', []
+    expected = [[arg.replace('{parcel}', parcel) for arg in cmd] for cmd in rule['commands']]
+    if [journal[step-1]['command'] for step in steps] != expected:
+        return 'unobserved', []
+    return 'observed', [ids[step-1] for step in steps]
 
 
 def replay(root):
@@ -307,6 +477,10 @@ def replay(root):
             expected = bindings.get(arm)
             require([(item['origin'],sha(item['content'].encode())) for item in fragments] ==
                     ([(expected['origin'],expected['content'])] if expected else []), 'frozen delivery mismatch')
+            source = arm if expected else 'old'
+            require(read(folder/f'{arm}-health.json') == dict(query=digest(read(folder/'query.json')),
+                    plugins=sha((folder/source/'profile/plugins.yml').read_bytes()), positive=digest(read(folder/f'{source}-gather.json')),
+                    emptyLedger=not bool(expected)), 'frozen health mismatch')
     rows = []
     identities = {key: set() for key in ['session','runId','workItemId']}
     for slot in read(frozen/'schedule.json'):
@@ -320,44 +494,86 @@ def replay(root):
         row['status'] = 'interrupted'
         if (directory/'reservation.json').exists():
             row['reservation'] = read(directory/'reservation.json')
+        elif (directory/'prelaunch.json').is_file():
+            row.update(status='prelaunch-blocked', reason=read(directory/'prelaunch.json')['reason'], spend='not-launched')
         if not (directory/'files.json').exists():
             continue
         hashes = read(directory/'files.json')
-        require(set(hashes) == set(FILES), 'incomplete attempt manifest')
+        require(set(hashes) == set(FILES + (POSITIVE_FILES if arm == 'none' else ())), 'incomplete attempt manifest')
         for path, checksum in hashes.items():
             require(sha((directory/path).read_bytes()) == checksum, 'attempt artifacts changed')
         require((directory/'workspace/station.py').read_bytes() == (frozen/'station.py').read_bytes(), 'station drift')
         reservation = read(directory/'reservation.json')
         require(reservation['slot'] == slot and reservation['capCents'] == config['perSlotCents'] and reservation['lock'] == sha((root/'lock.json').read_bytes()), 'reservation binding')
         fragments = read(directory/'gather/stdout.json')
+        if arm == 'none':
+            require(read(directory/'gather/positive/stdout.json') == read(frozen/name/'old-gather.json') and
+                    read(directory/'gather/positive/command.json')['exit'] == 0, 'missing positive control')
+        require(read(directory/'gather/health.json') == read(frozen/name/f'{arm}-health.json') and
+                read(directory/'gather/command.json')['exit'] == 0, 'attempt health mismatch')
         require(fragments == read(frozen/name/f'{arm}-gather.json') and read(directory/'argv.json') == arguments(config,name,parameter,fragments), 'delivery drift')
         events = []
+        costs = []
+        valid_stream = True
         for line in (directory/'stdout.jsonl').read_bytes().splitlines():
             try:
-                events.append(json.loads(line))
+                event = json.loads(line, object_pairs_hook=unique_keys)
+                require(isinstance(event, dict), 'invalid native event')
+                events.append(event)
+                if event.get('type') == 'result':
+                    costs.append(json.loads(line, parse_float=Decimal).get('total_cost_usd'))
             except ValueError:
-                require(read(directory/'exit.json') != 0, 'invalid native stream')
-        init = next((event for event in events if event.get('subtype') == 'init'), {})
+                valid_stream = False
+        inits = [event for event in events if event.get('type') == 'system' and event.get('subtype') == 'init']
+        init = inits[0] if len(inits) == 1 else {}
         result = next((event for event in reversed(events) if event.get('type') == 'result'), {})
         session = init.get('session_id')
         if session:
             require(init['model'] == MODEL and init['tools'] == ['Bash'] and not init['mcp_servers'] and
-                    init['permissionMode'] == 'dontAsk' and (not result or result['session_id'] == session), 'native controls/session drift')
+                    init['permissionMode'] == 'dontAsk', 'native controls/session drift')
         for key, value in [('session',session),('runId',reservation['runId']),('workItemId',reservation['workItemId'])]:
             if value:
                 require(value not in identities[key], 'reused '+key)
                 identities[key].add(value)
         journal = [json.loads(line) for line in (directory/'journal.jsonl').read_bytes().splitlines()]
-        checked = score(name, parameter, journal, result.get('result') or '')
-        passed = bool(session and result.get('subtype') == 'success' and not result.get('is_error') and read(directory/'exit.json') == 0 and checked['passed'])
+        terminal = bool(valid_stream and session and len(costs) == 1 and events[-1] is result and result.get('session_id') == session)
+        spend = spend_status(costs[0] if terminal else None, config['perSlotCents'])
+        try:
+            final = json.loads(result.get('result') or '', object_pairs_hook=unique_keys)
+            if type(final) is not dict or set(final) != {'answer','adoption'}:
+                final = {}
+        except (ValueError, TypeError):
+            final = {}
+        ids = []
+        try:
+            require(terminal and all(event.get('session_id') == session for event in events if event.get('type') in ('assistant','user')) and
+                    events.index(init) < min((index for index,event in enumerate(events) if event.get('type') in ('assistant','user','result')), default=len(events)),
+                    'invalid session stream')
+            ids = station_trace(events, session, journal)
+            checked = score(name, parameter, journal, final.get('answer'))
+            trace = 'verified'
+        except (KeyError, ValueError, TypeError, AttributeError, IndexError):
+            checked = {'passed': None, 'recurrence': None, 'stationCommands': None}
+            trace = 'invalid'
+        completed = result.get('subtype') == 'success' and not result.get('is_error') and read(directory/'exit.json') == 0
+        passed = bool(trace == 'verified' and spend == 'within-cap' and completed and checked['passed'])
+        adoption, cited = ('unassessable', [])
+        if trace == 'verified' and completed:
+            adoption, cited = adoption_status(fragments, config['groups'][name].get(arm, {}).get('adoption'), final.get('adoption'), journal, ids, parameter)
         usage = result.get('usage', {})
         tokens = [usage.get(key) for key in ('input_tokens','output_tokens','cache_read_input_tokens','cache_creation_input_tokens')]
         controls = {key: init.get(key) for key in ('model','claude_code_version','permissionMode','tools','plugins','skills','mcp_servers','output_style')}
         controls['argv'] = arguments(config,name,parameter,[])
         controls['freeze'] = reservation['lock']
         row.update(status='passed' if passed else 'failed', session=session, reservation=reservation, selected=[item['origin'] for item in fragments],
+                   gatherHealth='verified',
                    controls=digest(controls) if session else None, checker=checked, durationMs=result.get('duration_ms'),
-                   tokens=sum(tokens) if all(type(value) is int for value in tokens) else None, estimatedUSD=result.get('total_cost_usd'))
+                   delivery='empty' if not fragments else 'delivered', trace=trace, adoption=adoption, adoptionToolIds=cited,
+                   spend=spend, reportedUSD=str(costs[0]) if terminal and spend in ('over-cap','within-cap') else None,
+                   tokens=sum(tokens) if all(type(value) is int and value >= 0 for value in tokens) else None,
+                   estimatedUSD=float(costs[0]) if spend == 'within-cap' else None)
+    reserved = sum(row['reservation']['capCents'] for row in rows if 'reservation' in row)
+    require(reserved <= config['totalCents'], 'reservation total exceeds frozen budget')
     comparisons = []
     for offset in range(0, len(rows), 3):
         triad = {row['slot'].split('-')[-1]: row for row in rows[offset:offset+3]}
@@ -365,7 +581,7 @@ def replay(root):
         comparisons.append(item)
         keys = {row.get('controls') for row in triad.values() if row.get('controls')}
         require(len(keys) <= 1, 'native controls differed across arms')
-        if not all(row.get('controls') and row['status'] in ('passed','failed') for row in triad.values()):
+        if not all(row.get('controls') and row['trace'] == 'verified' and row['spend'] == 'within-cap' for row in triad.values()):
             continue
         item['matched'] = True
         for baseline, treatment in [('none','old'),('old','new'),('none','new')]:
@@ -375,7 +591,7 @@ def replay(root):
             delta.update(success=int(second['status']=='passed')-int(first['status']=='passed'))
             delta.update({key: second['checker'][key]-first['checker'][key] for key in ('recurrence','stationCommands')})
             item['deltas'][treatment+'-'+baseline] = delta
-    return {'rows':rows, 'comparisons':comparisons}
+    return {'rows':rows, 'comparisons':comparisons, 'reservedCents':reserved, 'capCents':config['totalCents']}
 
 
 if __name__ == '__main__':
@@ -389,5 +605,7 @@ if __name__ == '__main__':
         run(Path(args[0]).resolve(), args[1], int(args[2]), int(args[3]))
     elif command == 'replay':
         print(json.dumps(replay(Path(args[0]).resolve()), ensure_ascii=False, indent=2))
+    elif command == 'check-live':
+        print(json.dumps(check_live(Path(args[0]).resolve()), ensure_ascii=False, indent=2))
     else:
         sys.exit(__doc__)

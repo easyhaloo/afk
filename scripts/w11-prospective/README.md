@@ -36,6 +36,7 @@ Fill in `node`, `cli` (installed `dist/index.js`), `agent`, `perSlotCents`, `tot
 ```sh
 runner=scripts/w11-prospective/protocol.py
 python3 "$runner" freeze "$study/spec.json" "$study/queue" > "$study/freeze.sha256"
+python3 "$runner" check-live "$study/queue"
 python3 "$runner" run "$study/queue" process 1 225
 python3 "$study/queue/frozen/protocol.py" replay "$study/queue" > "$study/report.json"
 ```
@@ -43,6 +44,20 @@ python3 "$study/queue/frozen/protocol.py" replay "$study/queue" > "$study/report
 `freeze` requires a new output directory. It binds the runner, station, schedule, tool identities, per-edition ledger and QA material and the three preflight selections. Save the printed SHA-256 separately for comparison with `lock.json`. Each formal seat gathers again. AFK must return exactly the registered origin and bytes, or an empty array for `none`. The collector delivers the gathered text in the system prompt. Each seat gets a new benchmark work item, run ID, workspace and native session. These local identities allow correlation. Product adoption requires its own AFK receipt.
 
 The last `run` argument authorizes a maximum number of cents for that invocation. Each seat reserves its full allowance before launch and has one attempt. The default is 75¢ per seat, $2.25 per triad, $13.50 for 18. Lower `totalCents` at freeze time to limit total reservations. A shared file lock covers reservations and execution. Claude receives `--max-budget-usd`; its reported costs are estimates. An interrupted attempt, unknown spend or exceeded native cap stops further launches. Producer and independent QA costs belong to their own receipts.
+
+### V2 observation fields
+
+Generate a V2 spec from `template` and reuse the existing release-pair inputs. Replay a V1 queue with its own frozen runner. V2 hashes the installed AFK tree containing `dist/`, `node_modules/`, `release.json` and `package.json`, including internal link targets. `check-live` verifies the archive, then tests the currently configured installations, authority and recall per arm with zero model calls. After moving only the queue, historical replay is portable. Live recall still uses the original authorized paths. Explicit revocation, missing grant, missing source HOME, changed package and empty selection each have separate reports when observable. A provider that only returns an unexpected empty array gets a selection failure with the cause undetermined.
+
+The `none` gather first requires the old edition's unique positive result on the same query and provider registration. Its separate empty HOME gets the same plugin configuration and an integrity-checked empty copy of the product ledger schema. Replay verifies the recorded positive and empty selections. `prelaunch-blocked` records a gather failure before reservation. A reserved seat with incomplete evidence remains `interrupted`. Both launch and replay use the terminal native result's exact decimal USD value to check the frozen cent limit. Invalid, unknown and over-cap spend excludes the triad from comparisons and blocks further reservations.
+
+Each station operation must match a serial native Bash call and result in the same session by ID, command, payload and error flag. `trace` reports this check. `checker.passed` requires the exact staging or signature record, or both final consecutive print records in order. `delivery` describes the supplied prompt. To measure `adoption`, preregister a verbatim passage and its distinguishing ordered actions in the edition's spec before freeze, for example on the edition containing the quoted passage:
+
+```json
+{"adoption":{"quote":"先核对袋号，再登记签收","commands":[["核对袋号","{parcel}"],["登记签收","{parcel}"]]}}
+```
+
+Choose commands that distinguish the edition's advice for both parameters. The final response cites the delivered origin, exact passage and one-based station steps. `observed` binds that claim to matching actions and reports their native tool IDs, even when the final task answer is wrong. With a registered rule and no matching citation the result is `unobserved`. An edition without a rule is `unregistered`. `none` is `inapplicable`. Use the AFK product receipt for product-level adoption.
 
 ### Independent replay
 

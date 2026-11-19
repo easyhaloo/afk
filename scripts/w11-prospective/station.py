@@ -1,5 +1,6 @@
 """Local parcel station. One append-only command journal per native session."""
 import json
+import fcntl
 import os
 import sys
 from pathlib import Path
@@ -49,26 +50,32 @@ def transition(scenario, parcel, commands):
     return results
 
 
+def same_record(actual, expected):
+    if type(actual) is not dict or actual.keys() != expected.keys():
+        return False
+    return all(type(actual[key]) in (float, int) and actual[key] == value if type(value) in (float, int)
+               else actual[key] == value for key, value in expected.items())
+
+
 def score(scenario, parcel, journal, answer):
     commands = [row['command'] for row in journal]
     results = transition(scenario, parcel, commands)
-    if results != [row['result'] for row in journal]:
+    if not all(same_record(row['result'], expected) for row, expected in zip(journal, results)):
         raise ValueError('station journal does not replay')
     if scenario == 'environment':
         target = {'parcel': parcel, 'environment': 'staging', 'record': {'W11-101': 's-78bf', 'W11-202': 's-f501'}[parcel]}
-        try:
-            final = json.loads(answer)
-        except ValueError:
-            final = None
-        passed = target in results and final == target
+        passed = target in results and same_record(answer, target)
         detour = any(cmd[:2] == ['lookup', 'production'] for cmd in commands)
     elif scenario == 'process':
-        passed = any(row.get('state') == '已签收' for row in results) and parcel in answer and '已签收' in answer
+        target = {'parcel': parcel, 'state': '已签收'}
+        passed = target in results and same_record(answer, target)
         first_check = next((index for index, row in enumerate(results) if row.get('state') == '已核对'), len(results))
         detour = ['登记签收', parcel] in commands[:first_check]
     else:
         measured = {'W11-101': 104, 'W11-202': 84}[parcel]
-        passed = len(results) >= 2 and all(row.get('pitch') == measured and abs(row['offset']) <= 0.25 for row in results[-2:]) and parcel in answer
+        passed = (len(results) >= 2 and all(row.get('pitch') == measured and abs(row['offset']) <= 0.25 for row in results[-2:])
+                  and type(answer) is list and len(answer) == 2
+                  and all(same_record(actual, expected) for actual, expected in zip(answer, results[-2:])))
         detour = sum(cmd[:2] == ['layout', parcel] and row.get('setting') != measured
                      for cmd, row in zip(commands, results) if 'setting' in row) >= 2
     return {'passed': passed, 'recurrence': detour, 'stationCommands': len(commands)}
@@ -76,10 +83,12 @@ def score(scenario, parcel, journal, answer):
 
 if __name__ == '__main__':
     journal = Path(os.environ['W11_JOURNAL'])
-    prior = [json.loads(line)['command'] for line in journal.read_text().splitlines()]
-    command = sys.argv[1:]
-    result = transition(os.environ['W11_SCENARIO'], os.environ['W11_PARCEL'], [*prior, command])[-1]
-    with journal.open('a') as stream:
+    with journal.open('a+') as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        stream.seek(0)
+        prior = [json.loads(line)['command'] for line in stream]
+        command = sys.argv[1:]
+        result = transition(os.environ['W11_SCENARIO'], os.environ['W11_PARCEL'], [*prior, command])[-1]
         print(json.dumps({'command': command, 'result': result}, ensure_ascii=False), file=stream)
     print(json.dumps(result, ensure_ascii=False))
     sys.exit(int('error' in result))

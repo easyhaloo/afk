@@ -1,24 +1,29 @@
 """Offline protocol regressions. Both subprocess stand-ins are deliberately synthetic."""
 import base64
+import copy
 import json
 import sqlite3
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from contextlib import closing
+from decimal import Decimal
 
 import protocol
 from station import score, transition
 
 
-PROVIDER = '''import json, sys
+PROVIDER = '''import json, sys, sqlite3
 from pathlib import Path
 if '--version' in sys.argv:
     print('fixture-provider')
 else:
     plans = list((Path.home()/'.afk/learning/publications').glob('*/plan.json'))
     assert (Path.home()/'.afk/plugins.yml').is_file()
+    with sqlite3.connect('file:'+str(Path.home()/'.afk/learning/candidates.sqlite')+'?mode=ro', uri=True) as db:
+        assert db.execute('select count(*) from learning_ledger where kind="publication"').fetchone()[0] == len(plans)
     print(json.dumps([{'origin':'knowledge:'+plan.parent.name+'; target:'+json.loads(plan.read_text())['targetRef'],
                        'content':json.loads(plan.read_text())['plan']['changes'][0]['content']} for plan in plans]))
 '''
@@ -32,9 +37,18 @@ print(json.dumps(dict(type='system',subtype='init',model='claude-sonnet-4-6',ses
                       tools=['Bash'],permissionMode='dontAsk',plugins=[],skills=[],mcp_servers=[],claude_code_version='fixture')))
 commands = {'environment':[['lookup','staging',parcel]], 'process':[['核对袋号',parcel],['登记签收',parcel]],
             'repair':[['pitch',parcel,'104' if parcel=='W11-101' else '84'],['print',parcel],['print',parcel]]}
-for command in commands[name]:
+outputs = []
+for index, command in enumerate(commands[name], 1):
+    ident = 'tool-'+str(index)
+    block = dict(type='tool_use',id=ident,name='Bash',input=dict(command=' '.join(['python3','station.py',*command])))
+    print(json.dumps(dict(type='assistant',session_id=session,message=dict(content=[block]))))
     output = subprocess.check_output(['python3','station.py',*command],text=True)
-answer = output if name=='environment' else parcel+' 已签收'
+    outputs.append(json.loads(output))
+    block = dict(type='tool_result',tool_use_id=ident,content=[dict(type='text',text=output)])
+    print(json.dumps(dict(type='user',session_id=session,message=dict(content=[block]))))
+prompt = sys.argv[sys.argv.index('--system-prompt')+1].splitlines()
+claim = None if len(prompt)==1 else dict(origin=prompt[-2],quote=prompt[-1],steps=list(range(1,len(outputs)+1)))
+answer = json.dumps(dict(answer=outputs[-2:] if name=='repair' else outputs[-1],adoption=claim))
 print(json.dumps(dict(type='result',subtype='success',session_id=session,result=answer,duration_ms=1,
                       usage=dict(input_tokens=1,output_tokens=1,cache_creation_input_tokens=0,cache_read_input_tokens=0),total_cost_usd=.01)))
 '''
@@ -47,7 +61,12 @@ class QueueTest(unittest.TestCase):
         self.base = Path(scratch.name).resolve()
         self.spec = self.base/'spec.json'
         self.root = self.base/'run'
-        cli, agent = self.base/'provider.py', self.base/'agent'
+        package = self.base/'installed'
+        (package/'dist').mkdir(parents=True)
+        (package/'node_modules').mkdir()
+        for file in ('release.json','package.json'):
+            protocol.save(package/file, {'version':'fixture'})
+        cli, agent = package/'dist/index.js', self.base/'agent'
         cli.write_text(PROVIDER)
         agent.write_text('#!'+sys.executable+'\n'+AGENT)
         agent.chmod(0o700)
@@ -89,7 +108,11 @@ class QueueTest(unittest.TestCase):
             for kind, data in [('publication',pub),('validation',{**common,'passed':True,'candidateVersion':1,'validatedVersion':2,'results':['json-base64-v1:'+encoded]}),
                                ('snapshot',dict(entries=[entry],digest=common['evidenceDigest'],completeness='complete'))]:
                 db.execute('insert into learning_ledger values (?,?)',(kind,json.dumps(data)))
-        return key, dict(profile=str(folder),evidence=str(folder),page=page)
+        commands = {'process': [['核对袋号','{parcel}'], ['登记签收','{parcel}']], 'environment': [['lookup','staging','{parcel}']]}
+        edition = dict(profile=str(folder),evidence=str(folder),page=page)
+        if name in commands:
+            edition['adoption'] = dict(quote=content,commands=commands[name])
+        return key, edition
 
     def group(self, name, linked=True):
         old_key, old = self.edition(name,'old')
@@ -114,6 +137,9 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(len(report['rows']),18)
         self.assertEqual({row['status'] for row in report['rows']},{'passed'})
         self.assertEqual(len({row['session'] for row in report['rows']}),18)
+        self.assertEqual(report['reservedCents'], 1350)
+        self.assertEqual([row['adoption'] for row in report['rows'][:3]], ['inapplicable', 'observed', 'observed'])
+        self.assertEqual(report['rows'][7]['adoption'], 'unregistered')
         for item in report['comparisons']:
             self.assertTrue(item['matched'])
             self.assertEqual(set(item['deltas']),{'new-old','new-none','old-none'})
@@ -142,11 +168,11 @@ class QueueTest(unittest.TestCase):
         self.freeze()
         file = self.base/'processold/grant.json'
         file.write_text(json.dumps({**protocol.read(file),'revoked':True}))
-        with self.assertRaisesRegex(ValueError,'live grant changed'):
+        with self.assertRaisesRegex(ValueError,'live grant revoked'):
             protocol.run(self.root,'process',1,225)
-        with self.assertRaisesRegex(ValueError,'unresolved spend'):
-            protocol.run(self.root,'process',1,225)
-        self.assertEqual(protocol.replay(self.root)['rows'][12]['status'],'interrupted')
+        row = protocol.replay(self.root)['rows'][12]
+        self.assertEqual((row['status'], row['spend']), ('prelaunch-blocked','not-launched'))
+        self.assertEqual(protocol.check_live(self.root)['groups']['process'], dict(none='live grant revoked',old='live grant revoked',new='healthy'))
 
     def test_closed_source_home_recall_and_budget(self):
         self.group('process')
@@ -182,6 +208,102 @@ class QueueTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'frozen inputs changed'):
             protocol.replay(self.root)
 
+    def test_negative_spend_stops_first_launch_and_replay(self):
+        self.group('process')
+        agent = Path(self.config['agent'])
+        agent.write_text(agent.read_text().replace('total_cost_usd=.01', 'total_cost_usd=-1'))
+        self.freeze()
+        with self.assertRaisesRegex(ValueError, 'unresolved spend: invalid'):
+            protocol.run(self.root,'process',1,225)
+        report = protocol.replay(self.root)
+        self.assertEqual(report['reservedCents'], 75)
+        self.assertEqual([row['status'] for row in report['rows'][12:15]], ['failed','pending','pending'])
+        self.assertFalse(report['comparisons'][4]['matched'])
+        with self.assertRaisesRegex(ValueError, 'prior attempt has unresolved spend'):
+            protocol.run(self.root,'process',2,225)
+
+    def test_native_cost_limits(self):
+        for cost, expected in [(None,'unknown'), (True,'invalid'), ('0','invalid'), (float('nan'),'invalid'),
+                               (Decimal('Infinity'),'invalid'), (-1,'invalid'), (0,'within-cap'), (Decimal('.7500'),'within-cap'),
+                               (Decimal('.750000000000000000000001'),'over-cap')]:
+            with self.subTest(cost=cost):
+                self.assertEqual(protocol.spend_status(cost,75), expected)
+
+    def test_invalid_receipts_and_unobserved_adoption(self):
+        self.group('process')
+        self.freeze()
+        protocol.run(self.root,'process',1,225)
+        seat = self.root/'attempts/process-1-old'
+        output = seat/'stdout.jsonl'
+        original = [json.loads(line) for line in output.read_text().splitlines()]
+        def block(events, index):
+            return events[index]['message']['content'][0]
+        def change_final(events, **values):
+            events[-1]['result'] = json.dumps({**json.loads(events[-1]['result']), **values})
+        def replay_with(events):
+            output.write_text(''.join(json.dumps(event)+'\n' for event in events))
+            hashes = protocol.read(seat/'files.json')
+            hashes['stdout.jsonl'] = protocol.sha(output.read_bytes())
+            (seat/'files.json').write_text(json.dumps(hashes))
+            report = protocol.replay(self.root)
+            return report['rows'][13], report['comparisons'][4]['matched']
+        for mutation in (lambda ev: ev.pop(2), lambda ev: ev.insert(3,ev[2]), lambda ev: ev.reverse(),
+                         lambda ev: block(ev,1).update(name='Read'), lambda ev: block(ev,1)['input'].update(command='python3 station.py help; pwd'),
+                         lambda ev: block(ev,1)['input'].update(run_in_background=True), lambda ev: ev[1].update(session_id='other'),
+                         lambda ev: block(ev,2).update(tool_use_id='other'), lambda ev: block(ev,2).update(content='{}'),
+                         lambda ev: block(ev,2).update(is_error=True), lambda ev: block(ev,3).update(id=block(ev,1)['id'])):
+            events = copy.deepcopy(original)
+            mutation(events)
+            row, matched = replay_with(events)
+            self.assertEqual((row['status'],row['trace'],row['adoption'],matched), ('failed','invalid','unassessable',False))
+        claim = json.loads(original[-1]['result'])['adoption']
+        for altered in (None,{**claim,'origin':'other'},{**claim,'steps':[2,1]},{**claim,'steps':[True,2]},{**claim,'quote':'other'}):
+            events = copy.deepcopy(original)
+            change_final(events,adoption=altered)
+            row, matched = replay_with(events)
+            self.assertEqual((row['status'],row['delivery'],row['adoption'],matched), ('passed','delivered','unobserved',True))
+        for answer in ('W11-101 未完成，不能说已签收', {'parcel':'W11-101','state':'未签收'}, {'parcel':'W11-101','state':'已签收','extra':True}):
+            events = copy.deepcopy(original)
+            change_final(events,answer=answer)
+            row, matched = replay_with(events)
+            self.assertEqual((row['status'],row['adoption'],matched), ('failed','observed',True))
+        for cost in (None,False,'free',float('nan'),float('inf'),-1,.751):
+            events = copy.deepcopy(original)
+            events[-1]['total_cost_usd'] = cost
+            row, matched = replay_with(events)
+            self.assertEqual((row['status'],row['estimatedUSD'],matched), ('failed',None,False))
+
+    def test_archive_relocation_authority_and_dependency_drift(self):
+        self.group('process')
+        self.config['groups']['process']['old']['sourceHome'] = True
+        self.freeze()
+        protocol.run(self.root,'process',1,225)
+        before = protocol.replay(self.root)
+        moved = self.base/'moved queue'
+        self.root.rename(moved)
+        self.assertEqual(protocol.replay(moved), before)
+        self.assertEqual(set(protocol.check_live(moved)['groups']['process'].values()), {'healthy'})
+        (self.base/'processold/.afk').rename(self.base/'removed-home')
+        self.assertEqual(protocol.check_live(moved)['groups']['process']['old'], 'source profile unavailable')
+        (self.base/'processold/grant.json').unlink()
+        self.assertEqual(protocol.check_live(moved)['groups']['process']['old'], 'live grant unavailable')
+        (self.base/'installed/node_modules/dependency.js').write_text('drift')
+        self.assertEqual(protocol.check_live(moved)['tools'], 'installed package drift')
+        with self.assertRaisesRegex(ValueError, 'installed package drift'):
+            protocol.run(moved,'process',2,225)
+        shutil.rmtree(self.base/'installed')
+        Path(self.config['agent']).unlink()
+        self.assertEqual(protocol.check_live(moved)['groups']['process']['new'], 'unavailable')
+        self.assertEqual(protocol.replay(moved), before)
+
+    def test_silent_provider_failure_is_not_healthy_empty(self):
+        self.group('process')
+        provider = Path(self.config['cli'])
+        provider.write_text(PROVIDER[:PROVIDER.index('    plans =')] + "    print('[]')\n")
+        with self.assertRaisesRegex(ValueError, 'uniquely recalled'):
+            self.freeze()
+        self.assertFalse((self.root/'preflight-process-none/health.json').exists())
+
     def test_station_independent_negatives(self):
         parcel = 'W11-101'
         def check(name, commands, answer=parcel):
@@ -192,5 +314,10 @@ class QueueTest(unittest.TestCase):
         self.assertFalse(check('process',[['登记签收',parcel]],parcel+' 已签收')['passed'])
         self.assertFalse(check('repair',[['pitch',parcel,'103.99'],['print',parcel],['print',parcel]])['passed'])
         self.assertFalse(check('repair',[['pitch',parcel,'104'],['print',parcel],['media',parcel],['print',parcel]])['passed'])
+        commands = [['pitch',parcel,'104'],['print',parcel],['print',parcel]]
+        prints = transition('repair',parcel,commands)[-2:]
+        self.assertTrue(check('repair',commands,prints)['passed'])
+        self.assertFalse(check('repair',commands,[prints[1],prints[0]])['passed'])
+        self.assertFalse(check('repair',commands,[{**prints[0],'offset':False},prints[1]])['passed'])
         with self.assertRaisesRegex(ValueError,'journal'):
             score('process',parcel,[dict(command=['登记签收',parcel],result={'state':'已签收'})],parcel+' 已签收')

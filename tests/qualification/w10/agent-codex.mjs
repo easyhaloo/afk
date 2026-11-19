@@ -39,7 +39,9 @@ try {
   receipt.phase = 'workflow';
   plugins = await createDefaultPluginRuntime({homeDir:process.env.HOME,workspaceRoot:workspace});
   const events = [];
-  const runner = new WorkflowRunner(providers,{plugins,agentRuntime:runtime,observer:{record:async(_context,event)=>{events.push(event);}}});
+  const { createPluginRunObserver } = await load('application/plugins/observability');
+  const observer = createPluginRunObserver(plugins, process.env.AFK_EVENT_STORE_DIR);
+  const runner = new WorkflowRunner(providers,{plugins,agentRuntime:runtime,observer});
   if(scenario==='failure') {
     assert.ok(process.env.QUAL_MODEL_AUTH);
     delete process.env.QUAL_MODEL_AUTH;
@@ -53,6 +55,14 @@ try {
       if(scenario!=='failure' && scenario!=='cancel') throw error;
       return {success:false};
     });
+  const { JsonlEventStore } = await load('infrastructure/observability/jsonl-event-store');
+  const store = new JsonlEventStore({root:process.env.AFK_EVENT_STORE_DIR});
+  receipt.auditValid = (await store.verify(runId)).valid;
+  assert.ok(receipt.auditValid);
+  for await (const event of store.read(runId)) {
+    assert.equal(event.context.workItemId,workItemId);
+    events.push(event.data);
+  }
   const telemetry = events.find(event=>event.kind==='agent.session_recorded');
   receipt.workflowSuccess = result.success;
   receipt.sessionId = telemetry?.sessionId;
@@ -61,12 +71,21 @@ try {
   receipt.finalState=item.state;
   receipt.outputExists=existsSync('total.txt');
   receipt.eventKinds=[...new Set(events.map(event=>event.kind))];
-  receipt.classifications=events.filter(event=>event.kind==='failure.classified').map(event=>({category:event.category,code:event.code}));
+  receipt.classifications=events.filter(event=>event.kind==='failure.classified').map(event=>({category:event.failureClass,code:event.code,causeCode:event.cause?.code}));
   receipt.phase='assertions';
   const codes = receipt.classifications.map(failure => failure.code);
   const terminal = events.find(event => event.kind === 'run.finished');
   receipt.terminalOutcome = terminal?.outcome;
+  if (scenario==='cancel' || scenario==='failure') {
+    receipt.terminalCount = events.filter(event=>event.kind==='run.finished').length;
+    receipt.reasonCode = terminal?.reasonCode;
+    receipt.qaStarted = events.some(event=>event.kind==='qa.started');
+    assert.equal(receipt.terminalCount,1);
+    assert.equal(receipt.qaStarted,false);
+  }
   if(scenario==='failure'){
+    assert.equal(receipt.terminalOutcome,'failed');
+    assert.equal(receipt.reasonCode,'agent_process_failed');
     assert.ok(codes.includes('agent_process_failed'));
     assert.ok(terminal);assert.equal(item.state,'blocked');
     assert.match(receipt.sessionId,/^[0-9a-f-]{36}$/);
@@ -76,6 +95,12 @@ try {
     assert.ok(terminal);assert.equal(item.state,'blocked');
     receipt.cancelAfterStart=controller.signal.aborted && existsSync('started');assert.equal(receipt.cancelAfterStart,true);assert.equal(result.success,false);assert.equal(receipt.queueStep,false);
     await delay(13000);receipt.delayedWrite=existsSync('late');assert.equal(receipt.delayedWrite,false);
+    receipt.observationMs = 13000;
+    receipt.reasonMatchesCaller = terminal.reason===controller.signal.reason.message;
+    assert.ok(receipt.reasonMatchesCaller);
+    assert.equal(receipt.terminalOutcome,'cancelled');
+    assert.equal(receipt.reasonCode,'user_cancelled');
+    assert.deepEqual(codes,[]);
   } else {
     assert.equal(result.success,true);receipt.expected=value+40;receipt.actual=Number(readFileSync('total.txt','utf8').trim());assert.equal(receipt.actual,receipt.expected);
     assert.match(receipt.sessionId,/^[0-9a-f-]{36}$/);

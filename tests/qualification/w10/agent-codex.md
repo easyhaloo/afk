@@ -25,4 +25,7 @@ done
 
 首次探测的配置目录与用量采集路径不同，后续已统一至临时 `HOME/.codex`。一次 `exec` 生成文件后工单仍被阻塞，另一次成功执行的产品和原生用量不同。`cancel` 实测运行终态为 `failed`，分类为 `workflow_crash`。收据中的 `passed` 仅覆盖上表断言。
 
-0.2.150 的 macOS arm64 安装包已在新临时项目重跑 `exec`。工单进入 `verification`，计算结果正确，同一原生线程和产品均记录 70,560 tokens。取消分类仍待修复与复验。
+0.2.150 的 macOS arm64 安装包已在新临时项目重跑 `exec`。工单进入 `verification`，计算结果正确，同一原生线程和产品均记录 70,560 tokens。
+
+0.2.151 的安装回归从工单的持久审计读取事件，并校验审计链。`cancel` 要求恰好一个 `cancelled` 终态、`user_cancelled` 原因码和调用方原因原文。`failure` 要求恰好一个 `failed` 终态并保留 `agent_process_failed` 根因。两个场景都要求工单进入 `blocked` 且无 `qa.started`。正常 `qa` 场景继续验证独立原生线程、`qa.passed` 和 `merge_ready`。
+父工作树以 macOS arm64 安装包 `0.2.152` 重跑了 `cancel`、`failure` 和 `qa`。取消后只有一个 `cancelled/user_cancelled` 终态，原因为调用方传入的消息，随后 13 秒未出现延迟写入。撤去认证时终态为 `failed/agent_process_failed`。两个工单均停在 `blocked`。正常任务由独立 Codex 会话记录 `qa.passed`，工单进入 `merge_ready`。

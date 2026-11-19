@@ -17,6 +17,7 @@ import { LifecycleDispatcher } from './workflows/lifecycle.js';
 import type { RunResourceScope } from './workflows/resource-scope.js';
 import type { WorkflowRunRepository } from './workflows/run-request.js';
 import type { BranchHandle } from '../domain/branches/types.js';
+import type { ExecutionResult } from '../domain/agents/types.js';
 import { CommandVerificationProvider } from '../infrastructure/verification/command.js';
 import { FilesystemClaimLock, type ClaimLease } from '../domain/backlog/claim.js';
 import { createPluginRunObserver, setPluginAuditEvidence } from './plugins/observability.js';
@@ -128,7 +129,7 @@ async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verific
     changes: { findForBacklog: vi.fn(async () => null), create, get: vi.fn(async () => change) },
   };
   const execution = { id: 'local-agent', metadata: { provider: 'claude-code', transport: 'process' },
-    waitForResult: vi.fn(async () => ({ version: 1, runId: 'local-agent', status: 'completed', provider: 'batch', commits: [],
+    waitForResult: vi.fn(async (): Promise<ExecutionResult> => ({ version: 1, runId: 'local-agent', status: 'completed', provider: 'batch', commits: [],
       structuredOutput: { type: 'goal_complete', kind: kind === 'qa' ? 'qa' : 'task', result: 'PASS', summary: 'local success' } })),
     kill: vi.fn(async () => {}), captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined) };
   const agentProvider = { name: 'claude-code', capabilities: new Set<string>(), createExecution: vi.fn(async () => execution) };
@@ -274,6 +275,14 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
       const result = await bounded(pending);
       expect(result).not.toBe('still pending');
       expect(result).toMatchObject({ success: false, summary: expect.stringContaining(cause.message) });
+      if (kind === 'workflow') {
+        const events = f.observer.record.mock.calls.map(([, data]) => data);
+        expect(events.filter(data => data.kind === 'run.finished')).toEqual([
+          { kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: cause.message },
+        ]);
+        expect(events.some(data => data.kind === 'failure.classified')).toBe(false);
+        expect(f.runtimeManager.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'blocked', errorSummary: cause.message }));
+      }
       expect(f.contexts.length).toBeGreaterThan(0);
       expect(f.providerSignals.every(signal => signal === f.contexts[0])).toBe(true);
       expect(f.contexts[0].reason).toBe(cause);
@@ -297,6 +306,8 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
       expect(await bounded(f.entered.promise)).not.toBe('still pending');
       await vi.advanceTimersByTimeAsync(60_000);
       expect(await bounded(pending)).toMatchObject({ success: false, summary: expect.stringMatching(/timeout|deadline/i) });
+      if (kind === 'workflow') expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+        .toEqual([expect.objectContaining({ outcome: 'failed' })]);
       expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
       expect(f.cleanupSignals).toHaveLength(1);
     } finally { f.stopHanging(); await pending; }
@@ -312,6 +323,8 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
       else f.providers.backlog.get.mockRejectedValueOnce(new Error('QA repository lease lost'));
       await vi.advanceTimersByTimeAsync(10_000);
       expect(await bounded(pending)).toMatchObject({ success: false, summary: expect.stringContaining('lost') });
+      if (kind === 'workflow') expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+        .toEqual([expect.objectContaining({ outcome: 'failed' })]);
       expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
       expect(f.cleanupSignals).toHaveLength(1);
     } finally { f.stopHanging(); await pending; }
@@ -611,6 +624,28 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
   });
 });
 
+it.each([true, false])('uses the caller reason only while the diagnosed attempt can retry (retryable: %s)', async retryable => {
+  const f = await fixture('workflow', 'init');
+  f.stopHanging();
+  f.config.maxRetries = 1;
+  const caller = new AbortController();
+  const code = retryable ? 'agent_turn_failed' : 'agent_process_failed';
+  f.execution.waitForResult.mockResolvedValueOnce({ version: 1, runId: 'local-agent', provider: 'batch', commits: [], status: 'failed',
+    error: { code: retryable ? 'AGENT_TURN_FAILED' : 'NON_ZERO_EXIT', message: 'fixture process failure' } });
+  f.observer.record.mockImplementation(async (_context, data) => {
+    if (data.kind === 'failure.classified' && data.code === code) caller.abort('operator stopped work');
+  });
+  expect(await f.run({ signal: caller.signal })).toMatchObject({ success: false });
+  expect(caller.signal.aborted).toBe(true);
+  const events = f.observer.record.mock.calls.map(([, data]) => data);
+  expect(events.filter(data => data.kind === 'run.finished')).toEqual([expect.objectContaining(retryable
+    ? { outcome: 'cancelled', reasonCode: 'user_cancelled', reason: 'operator stopped work' }
+    : { outcome: 'failed', reasonCode: 'agent_process_failed' })]);
+  expect(events.filter(data => data.kind === 'failure.classified').map(data => data.code))
+    .toEqual(retryable ? [code] : [code, 'workflow_crash']);
+  expect(f.push).not.toHaveBeenCalled();
+});
+
 it('releases a late claim without starting another operation', async () => {
   const f = await fixture('workflow', 'before-agent');
   const gate = deferred<void>();
@@ -626,6 +661,8 @@ it('releases a late claim without starting another operation', async () => {
     gate.resolve();
     expect(await bounded(pending)).toMatchObject({ success: false });
     expect(f.release).toHaveBeenCalledTimes(1);
+    expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+      .toEqual([{ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: 'cancel claim acquisition' }]);
     expect(f.providers.branches.createBranch).not.toHaveBeenCalled();
     expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
   } finally { f.stopHanging(); gate.resolve(); await pending; }

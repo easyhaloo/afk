@@ -62,3 +62,7 @@ python3 tests/qualification/w10/agent-codex-resume-loopback.py .afk/resume-proof
 ```
 
 驱动从本树的构建产物进入 `WorkflowRunner`。模型响应由回环 HTTP 服务提供，工单、分支和变更 provider 使用本地 fixture。Codex app-server、原生线程持久化、恢复协议、审计和预算存储均实际运行，不需要账户凭据。首次用量达到交接阈值后，下一代重新启动 app-server 并恢复同一线程。验收核对两条审计的增量为 12、17，原生文件与预算表均累计 29，一次交接后工单进入 `verification`。以 29 为上限再次进入该工单时，必须记录 `budget_exhausted`、进入 `blocked`、预算保持 29，且新增线程数为零。
+
+2026-11-20 在集成提交 `e7c9115a`（CLI 0.2.166）复跑。Codex CLI 0.169.0 使用一个原生线程完成两轮，增量分别为 12、17，预算表累计 29。再次进入同一工单时返回 `budget_exhausted`，新增线程数为零。三个相关文件的测试共 104 项通过。
+
+同一提交的 macOS arm64 归档 SHA-256 为 `02bb3dd673d3aca95699b4bbfc4984180b76a355ed4ca62ff2a67a5babafe678`。仓库外安装验证了 23 个命令入口。安装版工作流模板 12 项通过，源码 Desktop 与安装版 CLI 竞争和恢复 1 项通过。`tests/qualification/cli-upgrade.sh` 验证了 0.2.165 升级到 0.2.166、错误校验和拒绝、回滚至原版本和插件配置字节一致。

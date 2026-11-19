@@ -1,4 +1,4 @@
-/** macOS: node desktop-pi-offline.mjs <AFK Control.app> <@playwright/test directory> <cached Qwen3.5-2B snapshot> */
+/** macOS: node desktop-pi-offline.mjs <AFK Control.app> <@playwright/test directory> <cached Qwen3.5-2B snapshot> [--work-item] */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const [bundle, playwright, snapshot] = process.argv.slice(2).map(value => resolve(value));
+const ticket = process.argv[5] === '--work-item';
 const pin = '15852e8c16360a2fea060d615a32b45270f8a8fc';
 assert(process.platform === 'darwin' && basename(snapshot) === pin && readdirSync(snapshot).some(name => name.endsWith('.safetensors')));
 const policy = '(version 1)(allow default)(deny network-outbound (remote ip "*:*"))(allow network-outbound (remote ip "localhost:*"))';
@@ -40,10 +41,11 @@ if (!root) {
     }).listen(0, '127.0.0.1');
     await once(ps, 'listening');
     writeFileSync(join(bin, 'ps'), `#!/bin/sh\n[ "$#" = 4 ] && [ "$1" = -o ] && [ "$2" = lstart= ] && [ "$3" = -p ] || exit 1\ncase "$4" in ''|*[!0-9]*) exit 1;; esac\nexec /usr/bin/curl -qfsS --max-time 2 http://127.0.0.1:${ps.address().port}/"$4"\n`, { mode: 0o700 });
-    const child = spawn('/usr/bin/sandbox-exec', ['-p', policy, process.execPath, fileURLToPath(import.meta.url), bundle, playwright, snapshot],
+    if (ticket) Object.assign(env, { AFK_WORKFLOW_HARD_TIMEOUT: '180000', AFK_COMPLETION_TIMEOUT: '120000', GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@invalid', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@invalid' });
+    const child = spawn('/usr/bin/sandbox-exec', ['-p', policy, process.execPath, fileURLToPath(import.meta.url), bundle, playwright, snapshot, ...(ticket ? ['--work-item'] : [])],
       { env, cwd: scratch, detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
     const kill = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} };
-    const timer = setTimeout(kill, 300_000);
+    const timer = setTimeout(kill, ticket ? 600_000 : 300_000);
     try { const [code] = await once(child, 'exit'); process.exitCode = code ?? 1; }
     finally { clearTimeout(timer); kill(); ps.close(); }
   } finally { rmSync(scratch, { recursive: true, force: true }); }
@@ -78,7 +80,9 @@ async function qualify() {
     writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { local: { baseUrl: `${endpoint}/v1`, api: 'openai-completions',
       apiKey: 'loopback', models: [{ id: model, contextWindow: 4096, maxTokens: 1024 }] } } }));
     const launcher = join(root, 'bin/pi');
-    writeFileSync(launcher, '#!/bin/sh\nexec native-pi --offline --no-tools --no-mcp --no-extensions --no-skills --no-context-files --no-prompt-templates --provider local --model desktop-qwen:latest --thinking off "$@"\n');
+    const tools = ticket ? '--no-builtin-tools --tools read_ticket,create_answer,read_answer,write_signal -e "$HOME/ticket-tools.mjs"' : '--no-tools';
+    if (ticket) writeFileSync(join(root, 'ticket-tools.mjs'), readFileSync(new URL('./desktop-pi-work-item-tools.mjs', import.meta.url)));
+    writeFileSync(launcher, `#!/bin/sh\nexec native-pi --offline ${tools} --no-mcp --no-extensions --no-skills --no-context-files --no-prompt-templates --provider local --model desktop-qwen:latest --thinking off "$@"\n`);
     chmodSync(launcher, 0o700);
     report.pi = run('native-pi', '--version');
     const operands = [randomInt(11,20), randomInt(21,30)];
@@ -86,13 +90,19 @@ async function qualify() {
     const control = run('pi', '--no-session', '-p', prompt);
     report.standaloneControl = { operands, exactAnswer: control === String(operands[0] + operands[1]) };
     assert(report.standaloneControl.exactAnswer);
-    const title = 'Identify the assigned backlog context file';
-    const description = `Quote the backlog-context filename assigned to this work item. Work item marker ${randomInt(100000,999999)}.`;
+    const expected = `ticket-${randomInt(100000,999999)}`;
+    const title = ticket ? 'Read the ticket with read_ticket and deliver answer.txt' : 'Identify the assigned backlog context file';
+    const description = ticket ? `Acceptance criterion: answer.txt must contain exactly one line: ${expected}. Implementer: call create_answer with that line. Verifier: use read_answer to compare the file with this criterion. Then call write_signal with the kind requested by AFK and your own summary and verdict.` : `Quote the backlog-context filename assigned to this work item. Work item marker ${randomInt(100000,999999)}.`;
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const origin = `http://127.0.0.1:${server.address().port}`;
     const repoUrl = `${origin}/acme/api.git`;
+    process.env.DESKTOP_PI_CHECKOUT = join(root,'.loop-workspace/gitlab/127.0.0.1',new URL(origin).port,'acme/api/1/repositories/api');
     run('git', 'init', '-q', '-b', 'main');
+    if (ticket) {
+      writeFileSync(join(work,'.gitignore'), '/.claude/settings.local.json\n/.afk-signal.json\n');
+      run('git','add','.gitignore');
+    }
     run('git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid', 'commit', '-qm', 'Synthetic input', '--allow-empty');
     const bare = join(root, 'api.git');
     run('git', 'clone', '--bare', work, bare);
@@ -103,11 +113,25 @@ async function qualify() {
     const issue = { id: 101, iid: 1, project_id: 1, title, description, state: 'opened', labels: ['stage::ready-for-issues','mode::afk'],
       web_url: `${project.web_url}/-/issues/1`, updated_at: new Date().toISOString(), created_at: new Date().toISOString(), assignees: [] };
     const routes = new Set();
+    let change;
     server.on('request', async (request, response) => {
       const path = decodeURIComponent(new URL(request.url, origin).pathname).replace('/acme/api/', '/1/').replace(/\/acme\/api$/, '/1');
+      if (ticket && request.method === 'POST' && path === '/api/v4/projects/1/merge_requests') {
+        routes.add('POST /api/v4/projects/1/merge_requests');
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        const fields = body.startsWith('{') ? JSON.parse(body) : Object.fromEntries(new URLSearchParams(body));
+        const source = fields.source_branch;
+        if (!/^afk\/backlog-1(?:-qa)?$/.test(source) || fields.target_branch !== 'main' ||
+          spawnSync('git',['--git-dir',bare,'merge-base','--is-ancestor','main',source]).status !== 0 ||
+          spawnSync('git',['--git-dir',bare,'diff','--quiet','main',source,'--','answer.txt']).status !== 1) return response.writeHead(409).end();
+        change = { ...fields, id: 2, iid: 2, state: 'opened', web_url: `${project.web_url}/-/merge_requests/2`, detailed_merge_status: 'mergeable' };
+        return response.writeHead(201, {'Content-Type':'application/json'}).end(JSON.stringify(change));
+      }
       const data = { '/api/v4/user': { id: 1, username: 'fixture' }, '/api/v4/projects': [project], '/api/v4/projects/1': project,
         '/api/v4/projects/1/issues': [issue], '/api/v4/projects/1/issues/1': issue, '/api/v4/projects/1/issues/1/notes': [], '/api/v4/projects/1/merge_requests': [], '/api/v4/projects/1/issues/1/links': [],
-        '/api/v4/projects/1/repository/branches': [{ name: 'main', default: true }] }[path];
+        '/api/v4/projects/1/repository/branches': [{ name: 'main', default: true }], '/api/v4/projects/1/merge_requests/2': change,
+        '/api/v4/projects/1/merge_requests/2/closes_issues': change && (/\bcloses\s+#1\b/i.test(change.description) ? [issue] : []) }[path];
       routes.add(`${request.method} ${path}`);
       const update = request.method === 'PUT' && path === '/api/v4/projects/1/issues/1';
       if (update) {
@@ -118,7 +142,7 @@ async function qualify() {
         issue.labels = [...new Set([...(fields.labels ? labels(fields.labels) : issue.labels), ...labels(fields.add_labels)])].filter(label => !labels(fields.remove_labels).includes(label));
       }
       const ok = update || (request.method === 'GET' && data !== undefined);
-      response.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(ok ? data : { message: 'fixture route unavailable' }));
+      response.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(ok ? (change && path.endsWith('/merge_requests') ? [change] : data) : { message: 'fixture route unavailable' }));
     });
     const archive = join(bundle, 'Contents/Resources/app.asar');
     report.appAsarSha256 = createHash('sha256').update(readFileSync(archive)).digest('hex');
@@ -146,7 +170,7 @@ async function qualify() {
     report.phase = 'await-run';
     let checkout;
     const contexts = new Set();
-    for (let attempt = 0; attempt < 180; attempt++) {
+    for (let attempt = 0; attempt < (ticket ? 850 : 180); attempt++) {
       const recordsDir = join(root, '.afk/workspaces');
       for (const entry of existsSync(recordsDir) ? readdirSync(recordsDir) : []) {
         const folder = join(recordsDir, entry);
@@ -164,7 +188,7 @@ async function qualify() {
         report.workItem = { issue: 1, branch: manifest.repositories[0].baseBranch, status: record.status };
         if (/^afk run exited with code \d+$/.test(record.error ?? '')) report.workItem.exitCode = Number(record.error.split(' ').pop());
         const journal = join(folder, 'executions', `${record.id}.jsonl`);
-        if (record.status === 'failed' && existsSync(journal)) {
+        if (['completed','failed'].includes(record.status) && existsSync(journal)) {
           const entries = readFileSync(journal, 'utf8').trim().split('\n').map(line => JSON.parse(line));
           assert(entries.every(row => row.executionId === record.id && row.workItemId === manifest.workItemId));
           report.workItem.phases = entries.map(row => row.phase);
@@ -205,6 +229,47 @@ async function qualify() {
       tracker: 'synthetic loopback GitLab', git: 'temporary local bare repository', network: 'loopback only', agentTools: 'disabled',
       processIdentity: 'host ps start time for sandbox descendants', workflowLimitMs: 45000 };
     report.passed = report.trackerRead && report.native.matched && ['completed','failed'].includes(report.workItem?.status);
+    if (ticket) {
+      const eventDir = join(root,'.afk/events');
+      const eventRows = readdirSync(eventDir).filter(name => name.endsWith('.jsonl')).flatMap(name => readFileSync(join(eventDir,name),'utf8').trim().split('\n').map(line => JSON.parse(line)));
+      report.qaEvents = eventRows.map(row => row.data).filter(data => data?.kind?.startsWith('qa.')).map(data => ({ kind: data.kind, reasonCode: data.reasonCode, summary: data.summary?.replaceAll(root,'<scratch>').replace(/127\.0\.0\.1:\d+/g,'loopback').slice(0,350) }));
+      report.routes = [...routes].sort();
+      const logDir = join(root,'.afk/logs');
+      report.checkoutChecks = readdirSync(logDir).filter(name => name.endsWith('.log')).flatMap(name => readFileSync(join(logDir,name),'utf8').trim().split('\n').flatMap(line => {
+        let row;
+        try { row = JSON.parse(line); } catch { return []; }
+        return row.msg === 'QA worktree diagnostics' ? [{ phase: row.phase, status: row.diagnostics.status }] : [];
+      }));
+      report.scope.resultRequired = 'completed work item, committed answer and fresh native QA';
+      report.scope.agentTools = ['read_ticket', 'create_answer (exclusive create)', 'read_answer','write_signal'];
+      report.scope.workflowLimitMs = 180000;
+      report.scope.agentPrompt = 'local tool guidance added for task / AC / QA; verdict supplied by Pi';
+      const expectedBytes = expected + '\n';
+      const digest = value => createHash('sha256').update(value).digest('hex');
+      const branches = run('git', '--git-dir', bare, 'for-each-ref', '--format=%(refname)', 'refs/heads').split('\n');
+      const commits = branches.filter(branch => branch !== 'refs/heads/main').flatMap(branch => {
+        const file = spawnSync('git', ['--git-dir', bare, 'show', `${branch}:answer.txt`]);
+        return file.status === 0 && file.stdout.toString() === expectedBytes ? [{ branch, commit: run('git', '--git-dir', bare, 'rev-parse', branch) }] : [];
+      });
+      report.artifact = { path: 'answer.txt', expected, sha256: digest(expectedBytes), checkoutMatches: !!checkout && existsSync(join(checkout,'answer.txt')) && readFileSync(join(checkout,'answer.txt'),'utf8') === expectedBytes, commits };
+      report.native = { sessions: files.map(file => {
+        const rows = readFileSync(join(sessions,file),'utf8').trim().split('\n').map(line => JSON.parse(line));
+        const messages = rows.map(row => row.message).filter(Boolean);
+        const replies = messages.filter(msg => msg.role === 'assistant');
+        const results = messages.filter(msg => msg.role === 'toolResult');
+        return { implementationCheckout: rows[0].cwd === checkout, qaCheckout: rows[0].cwd === join(checkout,'.worktrees/afk-backlog-1-qa'), local: replies.length > 0 && replies.every(msg => msg.provider === 'local' && msg.model === model),
+          stopReasons: replies.map(msg => msg.stopReason), toolResults: results.map(msg => ({ name: msg.toolName, error: !!msg.isError })),
+          readTicket: results.some(msg => msg.toolName === 'read_ticket' && !msg.isError && JSON.stringify(msg.content).includes(description)),
+          readArtifact: results.some(msg => msg.toolName === 'read_answer' && !msg.isError && msg.content.some(block => block.text === expectedBytes)),
+          qaPassSignal: replies.some(msg => msg.content.some(block => block.type === 'toolCall' && block.name === 'write_signal' && block.arguments?.kind === 'qa' && block.arguments?.result === 'PASS' && results.some(result => !result.isError && result.toolCallId === block.id))),
+          unsupportedTools: replies.some(msg => /does not support tools/i.test(msg.errorMessage || '')) };
+      }) };
+      report.localChange = change ? { iid: change.iid, branch: change.source_branch, target: change.target_branch } : null;
+      report.passed = report.trackerRead && report.workItem?.status === 'completed' && report.workItem.phases.includes('merge_ready') &&
+        report.qaEvents.some(event => event.kind === 'qa.passed') && commits.some(row => row.branch === `refs/heads/${change?.source_branch}`) &&
+        report.native.sessions.some(session => session.implementationCheckout && session.local && session.readTicket && session.toolResults.some(tool => tool.name === 'create_answer' && !tool.error)) &&
+        report.native.sessions.some(session => session.qaCheckout && session.local && session.readArtifact && session.readTicket && session.qaPassSignal);
+    }
     report.phase = 'observed';
   } catch (error) {
     report.failure = error.name;

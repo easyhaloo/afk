@@ -1,0 +1,240 @@
+{
+  "checkedAt": "2026-11-19T20:15:27.235Z",
+  "model": "Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "source": "cached safetensors / ephemeral loopback Ollama",
+  "passed": true,
+  "ollama": "0.40.16",
+  "pi": "1.5.2",
+  "standaloneControl": {
+    "operands": [
+      17,
+      24
+    ],
+    "exactAnswer": true
+  },
+  "appAsarSha256": "2db15e8959c58c86ce7a74ce8a1002069a38e17aaa2175240d46dbfd2cdfb180",
+  "phase": "observed",
+  "desktop": {
+    "version": "0.1.0",
+    "packaged": true,
+    "isolated": true
+  },
+  "workItem": {
+    "issue": 1,
+    "branch": "main",
+    "status": "completed",
+    "phases": [
+      "requested",
+      "implementing",
+      "verifying",
+      "publication_requested",
+      "published",
+      "merge_ready"
+    ]
+  },
+  "trackerRead": true,
+  "native": {
+    "sessions": [
+      {
+        "implementationCheckout": true,
+        "qaCheckout": false,
+        "local": true,
+        "stopReasons": [
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "aborted"
+        ],
+        "toolResults": [
+          {
+            "name": "read_ticket",
+            "error": false
+          },
+          {
+            "name": "create_answer",
+            "error": false
+          },
+          {
+            "name": "write_signal",
+            "error": true
+          },
+          {
+            "name": "write_signal",
+            "error": true
+          },
+          {
+            "name": "read_answer",
+            "error": false
+          },
+          {
+            "name": "write_signal",
+            "error": true
+          },
+          {
+            "name": "write_signal",
+            "error": true
+          },
+          {
+            "name": "write_signal",
+            "error": false
+          }
+        ],
+        "readTicket": true,
+        "readArtifact": true,
+        "qaPassSignal": false,
+        "unsupportedTools": false
+      },
+      {
+        "implementationCheckout": true,
+        "qaCheckout": false,
+        "local": true,
+        "stopReasons": [
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "aborted"
+        ],
+        "toolResults": [
+          {
+            "name": "read_ticket",
+            "error": false
+          },
+          {
+            "name": "read_answer",
+            "error": false
+          },
+          {
+            "name": "write_signal",
+            "error": false
+          },
+          {
+            "name": "read_ticket",
+            "error": true
+          }
+        ],
+        "readTicket": true,
+        "readArtifact": true,
+        "qaPassSignal": false,
+        "unsupportedTools": false
+      },
+      {
+        "implementationCheckout": false,
+        "qaCheckout": true,
+        "local": true,
+        "stopReasons": [
+          "toolUse",
+          "toolUse",
+          "toolUse",
+          "aborted"
+        ],
+        "toolResults": [
+          {
+            "name": "read_ticket",
+            "error": false
+          },
+          {
+            "name": "read_answer",
+            "error": false
+          },
+          {
+            "name": "write_signal",
+            "error": false
+          }
+        ],
+        "readTicket": true,
+        "readArtifact": true,
+        "qaPassSignal": true,
+        "unsupportedTools": false
+      }
+    ]
+  },
+  "scope": {
+    "entry": "packaged Desktop / work item / start / create run",
+    "resultRequired": "completed work item, committed answer and fresh native QA",
+    "tracker": "synthetic loopback GitLab",
+    "git": "temporary local bare repository",
+    "network": "loopback only",
+    "agentTools": [
+      "read_ticket",
+      "create_answer (exclusive create)",
+      "read_answer",
+      "write_signal"
+    ],
+    "processIdentity": "host ps start time for sandbox descendants",
+    "workflowLimitMs": 180000,
+    "agentPrompt": "local tool guidance added for task / AC / QA; verdict supplied by Pi"
+  },
+  "qaEvents": [
+    {
+      "kind": "qa.started"
+    },
+    {
+      "kind": "qa.passed"
+    }
+  ],
+  "routes": [
+    "GET /api/v4/projects",
+    "GET /api/v4/projects/1",
+    "GET /api/v4/projects/1/issues",
+    "GET /api/v4/projects/1/issues/1",
+    "GET /api/v4/projects/1/issues/1/notes",
+    "GET /api/v4/projects/1/merge_requests",
+    "GET /api/v4/projects/1/merge_requests/2",
+    "GET /api/v4/projects/1/merge_requests/2/closes_issues",
+    "GET /api/v4/user",
+    "POST /api/v4/projects/1/merge_requests",
+    "PUT /api/v4/projects/1/issues/1"
+  ],
+  "checkoutChecks": [
+    {
+      "phase": "worktree-created",
+      "status": []
+    },
+    {
+      "phase": "branches-merged",
+      "status": []
+    },
+    {
+      "phase": "statusline-configured",
+      "status": []
+    },
+    {
+      "phase": "before-agent-start",
+      "status": []
+    },
+    {
+      "phase": "agent-completed",
+      "status": [
+        "?? .afk/"
+      ]
+    }
+  ],
+  "artifact": {
+    "path": "answer.txt",
+    "expected": "ticket-571985",
+    "sha256": "6770732eae5b82eedeb85432ad9abd2b2efb1e325c18ccbe94b5a369d6b11f67",
+    "checkoutMatches": false,
+    "commits": [
+      {
+        "branch": "refs/heads/afk/backlog-1",
+        "commit": "861b31b38319587715eb2deca46a5a0d8e7e823e"
+      },
+      {
+        "branch": "refs/heads/afk/backlog-1-qa",
+        "commit": "9b73ebcfcc0ee41f0bd28853437391e10fec5edc"
+      }
+    ]
+  },
+  "localChange": {
+    "iid": 2,
+    "branch": "afk/backlog-1-qa",
+    "target": "main"
+  }
+}

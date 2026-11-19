@@ -101,10 +101,26 @@ with tempfile.TemporaryDirectory(prefix='installed-jaeger-') as directory:
         settings.write_text(json.dumps({'endpoint': f'http://{ingest}', 'serviceName': 'installed-query'}))
         subprocess.run(['node', release / 'dist/index.js', 'plugin', 'configure', 'observability.otlp', '--builtin', '--file', settings],
                        env=env, cwd=root, check=True, timeout=30)
-        result = subprocess.run(['node', driver, run_id], env=env, cwd=root, check=True, capture_output=True, text=True, timeout=30)
-        report = json.loads(next(line.removeprefix('OBSERVABILITY_RESULT=') for line in result.stdout.splitlines()
-                                 if line.startswith('OBSERVABILITY_RESULT=')))
-        assert report['result']['status'] == 'not_claimed' and report['integrity']['valid']
+        def execute(identifier):
+            result = subprocess.run(['node', driver, identifier], env=env, cwd=root, check=True, capture_output=True, text=True, timeout=30)
+            report = json.loads(next(line.removeprefix('OBSERVABILITY_RESULT=') for line in result.stdout.splitlines()
+                                     if line.startswith('OBSERVABILITY_RESULT=')))
+            assert report['result']['status'] == 'not_claimed' and report['integrity']['valid']
+            return report
+
+        def deliveries(identifier):
+            output = subprocess.check_output(['node', release / 'dist/index.js', 'observe', 'timeline', identifier, '--root', env['AFK_EVENT_STORE_DIR'], '--json'], env=env, cwd=root, timeout=30)
+            timeline = json.loads(output)
+            assert timeline['integrity']['valid']
+            sources = {event['id']: event['data']['kind'] for event in timeline['events'] if event['data']['kind'] in ('run.requested', 'run.finished')}
+            assert sorted(sources.values()) == ['run.finished', 'run.requested']
+            for event in timeline['events']:
+                if event['data'].get('effectKind') == 'observability.delivery':
+                    summary = json.loads(event['data']['summary'])
+                    assert summary['sourceEventId'] == event['causationId']
+                    yield sources[event['causationId']], summary['counts']
+
+        report = execute(run_id)
         for _ in range(50):
             traces = lookup(run_id)
             if traces:
@@ -135,11 +151,20 @@ with tempfile.TemporaryDirectory(prefix='installed-jaeger-') as directory:
                 assert samples['afk_run_events_total', event] == samples['run_event_persistence_ms_count', event] == 1
                 assert samples['run_event_persistence_ms_sum', event] >= 0
             assert not metrics('unknown-service')
-            timeline = subprocess.check_output(['node', release / 'dist/index.js', 'observe', 'timeline', run_id, '--root', env['AFK_EVENT_STORE_DIR'], '--json'], env=env, cwd=root, timeout=30)
-            for event in json.loads(timeline)['events']:
-                if event['data'].get('effectKind') == 'observability.delivery':
-                    counts = json.loads(event['data']['summary'])['counts']
-                    for signal in ('metrics', 'tracing'):
-                        assert counts[signal]['succeeded'] > 0 and not any(counts[signal][key] for key in ('failed', 'timed_out', 'dropped', 'skipped')), counts[signal]
+            for _, counts in deliveries(run_id):
+                for signal in ('metrics', 'tracing'):
+                    assert counts[signal]['succeeded'] > 0 and not any(counts[signal][key] for key in ('failed', 'timed_out', 'dropped', 'skipped')), counts[signal]
             receipt['metricSamples'] = len(samples)
+            backend.kill()
+            backend.wait(timeout=8)
+            offline_run = str(uuid.uuid4())
+            execute(offline_run)
+            offline = list(deliveries(offline_run))
+            assert [kind for kind, _ in offline] == ['run.requested', 'run.finished']
+            for _, counts in offline:
+                for signal, failures, successes in [('metrics', 2, 0), ('tracing', 1, 2)]:
+                    assert counts[signal] == dict(failed=failures, succeeded=successes, timed_out=0, dropped=0, skipped=0), counts[signal]
+            assert metrics('installed-query') == samples
+            receipt['offlineRunId'] = offline_run
+            receipt['offlineFailures'] = {kind: {signal: counts[signal]['failed'] for signal in ('metrics', 'tracing')} for kind, counts in offline}
         print(json.dumps(receipt))

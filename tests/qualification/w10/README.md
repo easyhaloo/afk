@@ -19,6 +19,8 @@
 
 在上述命令末尾追加 Prometheus 可执行文件，即可验证同一运行的指标。Jaeger 将 OTLP 指标转发至启用了增量转累计的 Prometheus 3.5.0。运行 `09581dbd-608a-4bb5-acae-52ed2aca88c6` 的开始请求与结束事件分别产生一次计数和一次耗时采样，按服务名查回 8 个时间序列样本。随机运行 ID 和不存在的服务都返回空结果，AFK 审计中的 trace 与 metrics 投递失败数均为零。该 Prometheus Darwin arm64 压缩包 SHA-256 为 `c17bc2c992f0b5515eebe2b4ccd626214f8e309a0fe6ec40ed13c42ec13d05fb`。
 
+带 Prometheus 的命令还会在正常运行后停止测试 Collector，再执行一次受管任务。运行 `b20cfd94-14d5-41f6-ab05-b4bb8e7e29cc` 的本地审计链有效，`run.requested` 和 `run.finished` 各关联一份失败回执。每份回执记录两次指标投递失败和一次追踪投递失败。独立运行的 Prometheus 查询结果与停机前一致。
+
 另一次对照将 AFK 的 OTLP 地址直接指向 Prometheus 3.5.0。Prometheus 存入指标并返回 HTTP 200 空响应，AFK 要求接收端返回 OTLP JSON 确认。运行 `bf8fd597-8d9c-480b-bbca-5744c8d8fe8d` 的审计因此记录四次指标投递失败。部署时可使用本节验证过的 Collector 转发配置。
 
 Linux 桌面通知的安装验收通过 Docker 将 `notify-send` 的参数原样送入隔离的 X11 桌面。运行器确认 Dunst 显示一条通知、窗口处于可见状态、历史记录中的标题、正文和紧急程度正确。停止该桌面后，CLI 返回失败回执。macOS 和 Windows 的原生展示仍待验收。

@@ -49,6 +49,8 @@ The last `run` argument authorizes a maximum number of cents for that invocation
 
 Generate a V2 spec from `template` and reuse the existing release-pair inputs. Replay a V1 queue with its own frozen runner. V2 hashes the installed AFK tree containing `dist/`, `node_modules/`, `release.json` and `package.json`, including internal link targets. `check-live` verifies the archive, then tests the currently configured installations, authority and recall per arm with zero model calls. After moving only the queue, historical replay is portable. Live recall still uses the original authorized paths. Explicit revocation, missing grant, missing source HOME, changed package and empty selection each have separate reports when observable. A provider that only returns an unexpected empty array gets a selection failure with the cause undetermined.
 
+Freeze and replay look up each product evidence pack by its SQLite snapshot key. They recompute the pack digest and every entry digest and check source completeness, provenance and locators. A cross-page predecessor counts only when independent QA cites the observed audit entry by ID, digest and locator.
+
 The `none` gather first requires the old edition's unique positive result on the same query and provider registration. Its separate empty HOME gets the same plugin configuration and an integrity-checked empty copy of the product ledger schema. Replay verifies the recorded positive and empty selections. `prelaunch-blocked` records a gather failure before reservation. A reserved seat with incomplete evidence remains `interrupted`. Both launch and replay use the terminal native result's exact decimal USD value to check the frozen cent limit. Invalid, unknown and over-cap spend excludes the triad from comparisons and blocks further reservations.
 
 Each station operation must match a serial native Bash call and result in the same session by ID, command, payload and error flag. `trace` reports this check. `checker.passed` requires the exact staging or signature record, or both final consecutive print records in order. `delivery` describes the supplied prompt. To measure `adoption`, preregister a verbatim passage and its distinguishing ordered actions in the edition's spec before freeze, for example on the edition containing the quoted passage:
@@ -59,6 +61,8 @@ Each station operation must match a serial native Bash call and result in the sa
 
 Choose commands that distinguish the edition's advice for both parameters. The final response cites the delivered origin, exact passage and one-based station steps. `observed` binds that claim to matching actions and reports their native tool IDs, even when the final task answer is wrong. With a registered rule and no matching citation the result is `unobserved`. An edition without a rule is `unregistered`. `none` is `inapplicable`. Use the AFK product receipt for product-level adoption.
 
+Every cited step must succeed in both the native tool result and the replayed station journal. A later successful retry supports adoption only if the claim cites that retry. Spend attribution also requires one native session across the stream. A foreign assistant message makes the cost `unknown` even if the terminal result reports a price within the cap. The current reservation remains charged against the seat budget and further launches stop.
+
 ### Independent replay
 
 Archive `frozen/`, `lock.json`, `preflight-*` and `attempts/` privately. Pin the archive digest outside the queue when handing it off. Replay checks file hashes, reconstructs argv from the frozen prompt and recalled body, compares native model and controls, checks session uniqueness, replays station transitions, and scores the native final answer. It reads local files without starting AFK or Claude. `rows` includes failed, interrupted, pending and missing-publication seats. `comparisons` gives treatment minus baseline for success, recurrence, command count, time, tokens and estimated USD. Missing measurements stay null. Two repeats describe only these tasks.
@@ -68,3 +72,5 @@ python3 -B -m unittest discover -s scripts/w11-prospective -p 'test_*.py' -v
 ```
 
 Regression subprocesses generate fixture provider and agent records in temporary directories. Live results require product receipts and independent native model sessions. The historical fixed queue retains its own plan and observations.
+
+The offline tests use `fixtures/product-audit-pack.json`, produced by AFK's `JsonlEventStore.append` and `buildEvidencePack` from one synthetic audit event and checked with `validateEvidencePack`. The tests derive linked editions for temporary publication keys and invoke the archived runner from a different working directory after relocation.

@@ -88,6 +88,45 @@ def package_digest(cli):
     return digest(files)
 
 
+def evidence_predecessors(pack, expected_digest, assertions):
+    body = {key: value for key, value in pack.items() if key != 'digest'}
+    require(set(body) == {'version','completeness','sources','entries','warnings'} and type(body['version']) is int
+            and body['version'] == 1 and body['completeness'] == 'complete' and body['warnings'] == [] and body['entries'],
+            'complete product evidence pack required')
+    require(digest(body) == pack['digest'] == expected_digest, 'evidence pack digest mismatch')
+    sources = {source['id']: source for source in pack['sources']}
+    require(len(sources) == len(pack['sources']), 'duplicate evidence source')
+    counts = dict.fromkeys(sources, 0)
+    seen = set()
+    references = {(ref['id'], ref['digest'], ref['locator']) for assertion in assertions for ref in assertion['evidence']}
+    predecessors = set()
+    for entry in pack['entries']:
+        position, ref = entry['position'], entry['ref']
+        source_id = position['sourceId']
+        require(source_id in sources, 'unknown evidence source')
+        source = sources[source_id]
+        counts[source_id] += 1
+        index = counts[source_id]
+        require(type(position['messageIndex']) is int and position['messageIndex'] == index, 'evidence message index')
+        checksum = digest(dict(content=entry['content'], position=position, completeness=source['completeness']))
+        locator = f'source:{source_id}/messages/{index}'
+        require(isinstance(entry['content'], str) and ref['digest'] == checksum and ref['id'] == 'evidence:'+checksum
+                and ref['locator'] == locator and checksum not in seen, 'evidence entry digest or locator mismatch')
+        seen.add(checksum)
+        observed = source['kind'] == 'audit'
+        require(source['kind'] in ('audit','journal','session') and ref['completeness'] == source['completeness'] == 'complete'
+                and ref['authority'] == ('observed' if observed else 'declared') and ref['kind'] in
+                (('message','tool-result') if source['kind'] == 'session' else ('audit',)), 'invalid evidence provenance')
+        if observed and (ref['id'], checksum, locator) in references:
+            predecessors.update(re.findall(r'W11 supersedes ([0-9a-f]{64})\b', entry['content']))
+    for source_id, source in sources.items():
+        count = counts[source_id]
+        require(count > 0 and type(source['messageCount']) is int and count == source['messageCount'] and
+                source.get('range', {'start':1,'end':count}) == {'start':1,'end':count} and
+                re.fullmatch(r'[a-f0-9]{64}', source['sourceDigest']), 'incomplete evidence source')
+    return predecessors
+
+
 def audit_edition(directory, query, page, name):
     pub = read(directory/'publication.json')
     grant = read(directory/'grant.json')
@@ -121,13 +160,9 @@ def audit_edition(directory, query, page, name):
         require(chunks and all(item.startswith('json-base64-v1:') for item in chunks), 'checker envelope encoding')
         envelope = json.loads(base64.b64decode(''.join(item.split(':',1)[1] for item in chunks), validate=True))
         require(envelope == {'report': check, 'receiptDigest': digest(check)}, 'independent report differs from ledger')
-        evidence, = [pack for pack in records('snapshot') if pack['digest'] == pub['evidenceDigest'] and pack['completeness'] == 'complete']
-        references = {ref['id'] for assertion in check['assertions'] for ref in assertion['evidence']}
-        predecessors = set()
-        for entry in evidence['entries']:
-            ref = entry['ref']
-            if ref['id'] in references and ref['authority'] == 'observed' and ref['completeness'] == 'complete':
-                predecessors.update(re.findall(r'W11 supersedes ([0-9a-f]{64})\b', entry['content']))
+        snapshots = ledger.execute("select payload from learning_ledger where kind='snapshot' and key=?", (pub['evidenceDigest'],)).fetchall()
+        require(len(snapshots) == 1, 'missing or ambiguous product snapshot')
+        predecessors = evidence_predecessors(json.loads(snapshots[0][0], object_pairs_hook=unique_keys), pub['evidenceDigest'], check['assertions'])
     require(all(prepared[key] == pub[key] for key in ('candidateId','candidateVersion','candidateDigest','evidenceDigest','targetRef','validatorVersion')), 'prepared publication binding')
     changes = prepared['plan']['changes']
     require(pub['originalDigest'] == digest([{'path': item['path'], 'sha256': item['expected_sha256']} for item in changes]) and
@@ -457,7 +492,8 @@ def adoption_status(fragments, rule, claim, journal, ids, parcel):
     if not isinstance(steps, list) or not all(type(step) is int and 1 <= step <= len(ids) for step in steps) or steps != sorted(set(steps)):
         return 'unobserved', []
     expected = [[arg.replace('{parcel}', parcel) for arg in cmd] for cmd in rule['commands']]
-    if [journal[step-1]['command'] for step in steps] != expected:
+    cited = [journal[step-1] for step in steps]
+    if any('error' in row['result'] for row in cited) or [row['command'] for row in cited] != expected:
         return 'unobserved', []
     return 'observed', [ids[step-1] for step in steps]
 
@@ -536,7 +572,10 @@ def replay(root):
                 require(value not in identities[key], 'reused '+key)
                 identities[key].add(value)
         journal = [json.loads(line) for line in (directory/'journal.jsonl').read_bytes().splitlines()]
-        terminal = bool(valid_stream and session and len(costs) == 1 and events[-1] is result and result.get('session_id') == session)
+        terminal = bool(valid_stream and isinstance(session, str) and session and len(costs) == 1 and events[-1] is result and
+                        all(event.get('session_id') == session for event in events if 'session_id' in event or
+                            event.get('type') in ('assistant','user','result')) and
+                        not any(event.get('type') in ('assistant','user','result') for event in events[:events.index(init)]))
         spend = spend_status(costs[0] if terminal else None, config['perSlotCents'])
         try:
             final = json.loads(result.get('result') or '', object_pairs_hook=unique_keys)
@@ -546,9 +585,7 @@ def replay(root):
             final = {}
         ids = []
         try:
-            require(terminal and all(event.get('session_id') == session for event in events if event.get('type') in ('assistant','user')) and
-                    events.index(init) < min((index for index,event in enumerate(events) if event.get('type') in ('assistant','user','result')), default=len(events)),
-                    'invalid session stream')
+            require(terminal, 'invalid session stream')
             ids = station_trace(events, session, journal)
             checked = score(name, parameter, journal, final.get('answer'))
             trace = 'verified'

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "digest": "c9e465629229beed111d43d1b5130af354755ea836feecc40488d6d3832fd72c",
+  "completeness": "complete",
+  "sources": [
+    {
+      "id": "audit",
+      "kind": "audit",
+      "sourceDigest": "9103c4bf3ec8cd58d7e7b282da8d18cad875d56bdfc6b744da6f8bb28a34b84f",
+      "completeness": "complete",
+      "messageCount": 1
+    }
+  ],
+  "entries": [
+    {
+      "ref": {
+        "id": "evidence:01154badf6f43baa898100133033a6819314d794db34d7068f0912edebd0d9f4",
+        "kind": "audit",
+        "digest": "01154badf6f43baa898100133033a6819314d794db34d7068f0912edebd0d9f4",
+        "locator": "source:audit/messages/1",
+        "completeness": "complete",
+        "authority": "observed"
+      },
+      "content": "{\"context\":{\"actor\":{\"id\":\"test\",\"kind\":\"system\"},\"attempt\":1,\"profileId\":\"qa\",\"runId\":\"run\",\"traceId\":\"trace\",\"workItemId\":\"parcel\"},\"correlationId\":\"run\",\"data\":{\"kind\":\"qa.started\",\"note\":\"W11 supersedes aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"id\":\"event\",\"integrity\":{\"hash\":\"10205a938e4a0c72f62f4833f34642355c1886d8cf5589d8010ea144049e5bbc\"},\"observedAt\":\"2026-11-19T16:49:34.280Z\",\"occurredAt\":\"2026-11-09T00:00:00Z\",\"schemaVersion\":1,\"sequence\":1,\"type\":\"qa.started\"}",
+      "position": {
+        "sourceId": "audit",
+        "messageIndex": 1,
+        "line": 1,
+        "auditSequence": 1
+      }
+    }
+  ],
+  "warnings": []
+}

@@ -1,4 +1,4 @@
-# W10 逐实现验收矩阵 · 2026-11-19
+# W10 逐实现验收矩阵 · 2026-11-20
 
 `matrix.tsv` 沿用 11 月 13 日交付审计的 55 个行名和顺序。`implementation_src` 和 `wiring` 定位实现与产品调用路径。`contract_suite` 指向契约测试，`fixture_or_local` 说明测试实际驱动的对象。`audit_cases` 对应历史安装版用例，`config_inputs` 是当时的配置字段提示。`independent_or_account` 记录可观察的效果或待验对象，`gap_next` 给出逐行补验步骤。
 
@@ -6,14 +6,16 @@
 | --- | ---: | --- |
 | `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
 | `service` | 14 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)及 [Grafana 报告读回](report-platform.md) |
-| `native` | 13 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
+| `native` | 14 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
 | `local` | 9 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 13 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 12 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
 ## 核对行清单与历史用例
+
+2026-11-20，安装版 0.2.162 通过 `plugin invoke repository.provider special-git-backend run` 驱动独立 Git 命令后端。首次执行因动作查询失败而清理工作树，裸仓库只有 `main`。同一 runId 重试后，裸仓库的 `review` 指向 `9e3aabe46203670a9a56bf61b08e2ac61ce91e92`，读回 `parcel.txt` 的内容为 `ready for review`。基线 `main` 仍指向 `d7e85a8f44cb3bb06a302f3b8c970e37176adeea`，临时工作树已移除。运行 `python3 tests/qualification/w10/special-git-backend.py <安装版 CLI 可执行文件>` 可在独立临时仓库复验。WorkflowRunner/QA 的工作区租约及路径路由仍待验证。
 
 2026-11-19，安装版 0.2.158 经 `plugin configure` 启用 OTLP，受管工作项在 `not_claimed` 结束。隔离的 Jaeger 2.23.0 内存后端按服务名和 `run_id` 查回一条匹配 trace，span 包含预期的工单 ID。写入前和随机运行 ID 的查询均为空，本地审计链通过（序号 4）。运行 ID 为 `8583cc99-467e-4b73-86ab-ecbe4e994341`。复现命令为 `python3 tests/qualification/w10/jaeger-query.py <安装目录> <jaeger可执行文件>`。此次使用的官方 Darwin arm64 压缩包 SHA-256 为 `ed4f00636e5a909cf8ce3fcdaf26a1ea7977163fe29da8fb5031b37a6a9682c4`。远端部署鉴权、丢弃计数和时间序列指标查询另行验收。
 

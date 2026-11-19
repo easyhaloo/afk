@@ -54,6 +54,10 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
     expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
     expect(prompt).toContain('report the gap in warnings and omit that process candidate');
+    expect(prompt).toContain('at least two distinct normal inputs');
+    expect(prompt).toContain('Encode each normal input and expected output as JSON text');
+    expect(prompt).toContain('Include a refusal with a schema-invalid input');
+    expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

@@ -1,0 +1,37 @@
+name: W10 installed Podman x64
+
+on:
+  push:
+    branches: [fix/podman-installed-x64-run]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: tests/qualification/w10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+      - name: Download CLI 0.2.168 release verification artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download 44595292353 -R "$GITHUB_REPOSITORY" -n cli-linux-x64 -D "$RUNNER_TEMP/qualification/assets"
+      - name: Run installed Podman outside checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          test "$(node -p process.arch)" = x64
+          cp tests/qualification/w10/{podman-native,podman-installed-entry}.mjs "$RUNNER_TEMP/qualification/"
+          cd "$RUNNER_TEMP/qualification"
+          if git rev-parse --is-inside-work-tree 2>/dev/null; then exit 1; fi
+          node ./podman-native.mjs --installed ./assets | tee output.log
+          sed -n 's/^AFK_PODMAN_RECEIPT //p' output.log | jq -se 'length == 1 and (.[0] | .engine.arch == "amd64" and .cli == "0.2.168" and .mode == "installed-cli")'

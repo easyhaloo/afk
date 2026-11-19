@@ -17,6 +17,10 @@
 
 2026-11-19，安装版 0.2.158 经 `plugin configure` 启用 OTLP，受管工作项在 `not_claimed` 结束。隔离的 Jaeger 2.23.0 内存后端按服务名和 `run_id` 查回一条匹配 trace，span 包含预期的工单 ID。写入前和随机运行 ID 的查询均为空，本地审计链通过（序号 4）。运行 ID 为 `8583cc99-467e-4b73-86ab-ecbe4e994341`。复现命令为 `python3 tests/qualification/w10/jaeger-query.py <安装目录> <jaeger可执行文件>`。此次使用的官方 Darwin arm64 压缩包 SHA-256 为 `ed4f00636e5a909cf8ce3fcdaf26a1ea7977163fe29da8fb5031b37a6a9682c4`。远端部署鉴权、丢弃计数和时间序列指标查询另行验收。
 
+在上述命令末尾追加 Prometheus 可执行文件，即可验证同一运行的指标。Jaeger 将 OTLP 指标转发至启用了增量转累计的 Prometheus 3.5.0。运行 `09581dbd-608a-4bb5-acae-52ed2aca88c6` 的开始请求与结束事件分别产生一次计数和一次耗时采样，按服务名查回 8 个时间序列样本。随机运行 ID 和不存在的服务都返回空结果，AFK 审计中的 trace 与 metrics 投递失败数均为零。该 Prometheus Darwin arm64 压缩包 SHA-256 为 `c17bc2c992f0b5515eebe2b4ccd626214f8e309a0fe6ec40ed13c42ec13d05fb`。
+
+另一次对照将 AFK 的 OTLP 地址直接指向 Prometheus 3.5.0。Prometheus 存入指标并返回 HTTP 200 空响应，AFK 要求接收端返回 OTLP JSON 确认。运行 `bf8fd597-8d9c-480b-bbca-5744c8d8fe8d` 的审计因此记录四次指标投递失败。部署时可使用本节验证过的 Collector 转发配置。
+
 Linux 桌面通知的安装验收通过 Docker 将 `notify-send` 的参数原样送入隔离的 X11 桌面。运行器确认 Dunst 显示一条通知、窗口处于可见状态、历史记录中的标题、正文和紧急程度正确。停止该桌面后，CLI 返回失败回执。macOS 和 Windows 的原生展示仍待验收。
 
 ```sh

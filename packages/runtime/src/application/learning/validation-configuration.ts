@@ -109,6 +109,7 @@ const semanticExperimentSchema = proposalSemanticConfigurationSchema.extend({ ad
       || Number(assertion.expected) < 0 || Number(assertion.expected) > 255)) reject();
   }
   const controlled = value.kind === 'cancellation' || value.kind === 'timeout';
+  if (value.skillTrace && value.adapter !== 'skill-trace-v1') reject();
   const recovering = value.kind === 'recovery';
   if (value.recovery !== undefined && !recovering) reject();
   if (!controlled && !recovering && value.callInput !== undefined) reject();
@@ -125,7 +126,7 @@ const semanticExperimentSchema = proposalSemanticConfigurationSchema.extend({ ad
   else if (controlled ? exits[0].expected !== 137 : value.kind === 'normal' || value.recovery !== undefined ? exits[0].expected !== 0
     : value.kind === 'refusal' && exits[0].expected === 0) reject();
   if (controlled && !value.assertions.some(assertion => assertion.source === 'control')) reject();
-  if (value.kind === 'normal') {
+  if (value.kind === 'normal' && value.adapter === 'node-json-argv-v1') {
     try { if (!boundedJson(JSON.parse(value.input))) reject(); } catch { reject(); }
   }
 });
@@ -169,6 +170,7 @@ const assetCheckerSchema = z.object({ mode: z.literal('repository-asset'), scope
 }).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.semantic.adapter))
   .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || !value.semantic.cases.some(entry => entry.experiment.recovery !== undefined) || value.sandbox.scratchHelper !== undefined)
   .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || value.kind !== 'skill' || value.semantic.cases.every(entry => ['normal', 'refusal', 'recovery'].includes(entry.experiment.kind)))
+  .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || value.kind !== 'skill' || new Set(value.semantic.cases.map(entry => entry.experiment.skillTrace?.checkerDigest)).size === 1)
   .refine(value => {
     const location = relative(value.repository.root, value.executionAuthorizationFile);
     return isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`);

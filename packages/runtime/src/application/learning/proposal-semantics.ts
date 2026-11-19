@@ -8,6 +8,7 @@ import type { FrozenScratchBaselineFailure } from '../../infrastructure/sandbox/
 import { DISTILLATION_LIMITS } from './contracts.js';
 import { canonicalLearningJson, learningIdentitySchema } from './requests.js';
 import type { PreparedAssetProposal, ProposalCheck } from './proposals.js';
+import { observeSkillTrace, skillTraceArgv, skillTraceBindingSchema } from './skill-trace.js';
 import { checkProposalToolParameterPaths, compileProposalToolSchema, type ProposalToolSchema } from './proposal-tool-schema.js';
 
 export function compareProposalActual(actual: unknown, expected: unknown): boolean {
@@ -69,7 +70,8 @@ const recoverySchema = z.object({
     > DISTILLATION_LIMITS.outputBytes) reject();
 });
 const experimentSchema = z.object({
-  protocol: z.literal('proposal-semantic-v1'), adapter: z.literal('node-json-argv-v1'),
+  protocol: z.literal('proposal-semantic-v1'), adapter: z.enum(['node-json-argv-v1', 'skill-trace-v1']),
+  skillTrace: skillTraceBindingSchema.optional(),
   kind: z.enum(['normal', 'refusal', 'recovery', 'cancellation', 'timeout', 'permission-denied']),
   input: z.string().max(2048), callInput: z.string().max(2048).refine(value => !value.includes('\0')).optional(),
   assertions: z.array(assertionSchema).min(2).max(32),
@@ -88,6 +90,7 @@ export interface ProposalSemanticExecutionContext {
 }
 export interface ProposalSemanticObservation {
   protocol: 'proposal-semantic-v1'; experimentDigest: string; deliveredInputDigest: string;
+  skillTrace?: ReturnType<typeof observeSkillTrace>['trace'];
   baselineFailure?: { phase: FrozenScratchBaselineFailure['failedPhase']; reason: FrozenScratchBaselineFailure['reason'];
     expectedExitCode: number; observedExitCode: number; phasesObserved: number; evidenceDigest: string };
   assertions: { id: string; source: ProposalSemanticConfiguration['assertions'][number]['source']; path?: string[];
@@ -114,6 +117,22 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
     }
   }
   if (recovery !== undefined && check.kind !== 'recovery') throw new Error('Semantic recovery differs from check kind');
+  if (configured.adapter === 'skill-trace-v1') {
+    const binding = configured.skillTrace;
+    if (kind !== 'skill' || !binding) return { status: 'unsupported', reason: 'skill_interpreter_unavailable' };
+    const exits = configured.assertions.filter(assertion => assertion.source === 'exit-code');
+    if (!['normal', 'refusal', 'recovery'].includes(check.kind) || configured.callInput !== undefined || configured.control || recovery
+      || !configured.input.trim() || configured.input.includes('\0') || !artifactPath.endsWith('/SKILL.md')
+      || (check.kind === 'normal') !== (binding.reads.length > 0) || exits.length !== 1
+      || (check.kind === 'refusal') === (exits[0]!.expected === 0)
+      || !configured.assertions.some(assertion => assertion.source.startsWith('stdout'))
+      || configured.assertions.some(assertion => !['exit-code', 'stdout', 'stdout-json'].includes(assertion.source))) {
+      throw new Error('Invalid read-only skill trace contract');
+    }
+    return { status: 'prepared', experiment: { ...configured, checkId: check.id, checkDigest: digest(check), artifactPath,
+      argv: skillTraceArgv(artifactPath, check.input, binding.checkerDigest) } };
+  }
+  if (configured.skillTrace) throw new Error('Unexpected skill trace binding on tool experiment');
   if (kind !== 'tool') return { status: 'unsupported', reason: 'skill_interpreter_unavailable' };
   if (!['normal', 'refusal', 'recovery', 'cancellation', 'timeout'].includes(check.kind)) return { status: 'unsupported', reason: 'control_experiment_unavailable' };
   const recovering = check.kind === 'recovery';
@@ -192,10 +211,11 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
   const argv = ['/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/scratch', 'TMPDIR=/scratch',
     ...(experiment.recovery ? frozenExecutionArgv(context!.options, context!.operationId) : experiment.argv)];
   if (canonicalLearningJson(execution.evidence.argv) !== canonicalLearningJson(argv)
-    || experiment.argv[2] !== (experiment.callInput ?? experiment.input) || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) {
+    || (experiment.adapter === 'node-json-argv-v1' && experiment.argv[2] !== (experiment.callInput ?? experiment.input)) || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) {
     throw new Error('Semantic input delivery or cleanup differs from experiment');
   }
   const control = execution.evidence.control;
+  const skill = experiment.adapter === 'skill-trace-v1' ? observeSkillTrace(experiment, execution, context) : undefined;
   let controlTriggered = experiment.control === undefined;
   if (experiment.control !== undefined) {
     if (!control || control.kind !== experiment.control.kind || control.afterMs !== experiment.control.afterMs
@@ -247,5 +267,6 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
   return { protocol: 'proposal-semantic-v1', experimentDigest: digest(experiment),
     deliveredInputDigest: createHash('sha256').update(experiment.callInput ?? experiment.input).digest('hex'), assertions,
     ...(baselineFailure ? { baselineFailure } : {}),
-    passed: !baselineFailure && controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
+    ...(skill && { skillTrace: skill.trace }),
+    passed: (skill?.passed ?? true) && !baselineFailure && controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
 }

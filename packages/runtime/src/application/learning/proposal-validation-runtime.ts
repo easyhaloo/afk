@@ -221,7 +221,10 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
       || typeof repository.withLifecycleLease !== 'function') return { status: 'blocked', code: failureCode };
     const identity = [repository.snapshot, repository.prepare, repository.checkout, repository.cleanup, repository.withLifecycleLease];
     const capabilities = canonicalLearningJson(repository.capabilities);
-    const baseline = snapshotSchema.parse(await repository.snapshot(current.entry.repository.repository, options));
+    const ref = current.entry.repository.repository;
+    const frozenSkill = semantic.adapter === 'skill-trace-v1';
+    const baseline = snapshotSchema.parse(await repository.snapshot(frozenSkill ? { url: ref.url } : ref, options));
+    if (frozenSkill && ref.ref !== undefined && baseline.branch !== ref.ref) throw new Error('proposal_repository_changed');
     authorization(options);
     const gitSnapshot = (operation: ProviderOperationOptions) => {
       options.checkBudget(operation);

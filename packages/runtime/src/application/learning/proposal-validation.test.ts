@@ -14,6 +14,7 @@ import { canonicalLearningJson } from './requests.js';
 import type { ProposalValidationChecker, ProposalValidationDependencies } from './proposal-validation.js';
 import * as proposalRuntime from './proposal-runtime.js';
 import * as proposalSemantics from './proposal-semantics.js';
+import { skillTraceArgv } from './skill-trace.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { DockerContainerProvider } from '../../infrastructure/sandbox/container/docker.js';
 import { executeFrozenContainer, type FrozenExecutionOptions } from '../../infrastructure/sandbox/container/frozen-execution.js';
@@ -38,7 +39,8 @@ async function validate(...args: Parameters<typeof import('./proposal-validation
 }
 
 async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidence: 'audit' | 'journal' | 'partial' = 'audit',
-  identity: { sourceRunId?: string | null; sourceId?: string; auditRunId?: string; secondAuditRunId?: string; validationRunId?: string; analysisCallId?: string; imported?: boolean } = {}) {
+  identity: { sourceRunId?: string | null; sourceId?: string; auditRunId?: string; secondAuditRunId?: string; validationRunId?: string; analysisCallId?: string; imported?: boolean } = {},
+  frozenSkill = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'proposal-validation-')));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, 'private', 'ledger.sqlite');
@@ -62,8 +64,12 @@ async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidenc
     analyzerVersion: 'fixture-v1', evidenceDigest: pack.digest, reason: identity.imported ? 'import' : 'completed' }, evidence: pack.entries.map(entry => entry.ref) }, pack);
   const repositoryRoot = join(root, 'repo');
   mkdirSync(repositoryRoot);
-  const artifactPath = kind === 'tool' ? 'asset.js' : 'SKILL.md';
-  const original = kind === 'tool' ? 'console.log("baseline");\n' : '---\nname: recover\ndescription: Recover fixture\ndisable-model-invocation: true\nuser-invocable: false\n---\nRecover fixture safely.\n';
+  const artifactPath = kind === 'tool' ? 'asset.js' : frozenSkill ? 'recover/SKILL.md' : 'SKILL.md';
+  const original = kind === 'tool' ? 'console.log("baseline");\n' : `---\nname: recover\ndescription: Recover fixture\ndisable-model-invocation: true\nuser-invocable: ${frozenSkill}\n${frozenSkill ? 'allowed-tools: [Read]\n' : ''}---\nRecover fixture safely.\n`;
+  if (frozenSkill) {
+    mkdirSync(join(repositoryRoot, 'recover'));
+    writeFileSync(join(repositoryRoot, 'recover/handoff.json'), 'fixture');
+  }
   if (existing) writeFileSync(join(repositoryRoot, artifactPath), original);
   writeFileSync(join(repositoryRoot, 'helper.txt'), 'fixed baseline');
   const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
@@ -74,7 +80,8 @@ async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidenc
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'baseline');
   const commit = git('rev-parse', 'HEAD');
   const inventory: ProposalInventory = { skills: kind === 'skill' && existing ? [{ name: 'recover', description: 'Recover fixture',
-    'disable-model-invocation': true, 'user-invocable': false, 'allowed-tools': [], 'disallowed-tools': [],
+    'disable-model-invocation': true, 'user-invocable': frozenSkill, 'allowed-tools': frozenSkill ? ['Read'] : [], 'disallowed-tools': [],
+    ...(frozenSkill && { resources: [{ path: 'handoff.json', digest: bytesDigest('fixture') }] }),
     source: { root: repositoryRoot, file: join(repositoryRoot, artifactPath) } }] : [],
     toolSearches: ['cli', 'script', 'plugin'], tools: kind === 'tool' && existing ? [{ kind: 'script', ref: 'script:fixture', name: 'fixture',
       description: 'Existing fixture', provenance: 'configured-repository', source: { root: repositoryRoot, file: join(repositoryRoot, artifactPath) } }] : [] };
@@ -335,6 +342,39 @@ describe('shared proposal candidate validation foundation', () => {
     const reopened = new CandidateStore({ file: test.file });
     try { expect(reopened.getCandidate(test.candidate.id)?.state).toBe('validated'); expect(reopened.getValidation(test.candidate.id)).toEqual(receipt); }
     finally { reopened.close(); }
+  });
+
+  it.each(['improved', 'tie', 'missing', 'regressed'] as const)('checks paired frozen skill receipts before recording %s', async outcome => {
+    const test = await fixture('skill', true, 'audit', {}, true);
+    const { runtime } = test.checker;
+    const checkerDigest = bytesDigest('frozen observer');
+    const resource = { path: '/business/handoff.json', digest: bytesDigest('fixture') };
+    runtime.harness!.cases = test.prepared.checks.map(check => ({ checkId: check.id, checkDigest: digest(check), expected: 'business',
+      argv: skillTraceArgv(runtime.artifactPath, check.input, checkerDigest), experiment: { protocol: 'proposal-semantic-v1', adapter: 'skill-trace-v1',
+        kind: check.kind, input: check.input, skillTrace: { checkerDigest, reads: check.kind === 'normal' ? [resource] : [] },
+        assertions: [{ id: 'exit', source: 'exit-code', expected: check.kind === 'refusal' ? 1 : 0 }, { id: 'answer', source: 'stdout', expected: 'business' }] } }));
+    let active: FrozenExecutionOptions;
+    const execute = runtime.sandbox.executeFrozen;
+    runtime.sandbox = { executeFrozen: request => { active = request; return execute(request); } };
+    const start = vi.mocked(test.engine.startFrozenContainer).getMockImplementation()!;
+    vi.mocked(test.engine.startFrozenContainer).mockImplementation(async (...args) => {
+      const check = test.prepared.checks.find(entry => entry.input === active.argv.at(-2))!;
+      const artifactDigest = active.input.manifest.find(entry => entry.path === runtime.artifactPath)!.digest;
+      const baseline = artifactDigest === test.prepared.artifact.originalDigest;
+      const invalid = check.kind === 'normal' && (baseline ? outcome === 'improved' : outcome === 'regressed');
+      test.execution.code = invalid ? 2 : check.kind === 'refusal' ? 1 : 0;
+      test.execution.stdout = invalid ? 'unparseable answer' : 'business';
+      const result = await start(...args);
+      return { ...result, stderr: baseline && outcome === 'missing' ? '' : JSON.stringify({ protocol: 'skill-trace-v1', completed: true,
+        inputDigest: bytesDigest(check.input), outputDigest: bytesDigest(result.stdout), businessValid: !invalid,
+        loaded: { path: `/workspace/${runtime.artifactPath}`, digest: artifactDigest }, calls: check.kind === 'normal' ? [{ tool: 'Read', result: resource }] : [] }) };
+    });
+    const result = await validate(test.input, test.dependencies);
+    if (outcome === 'improved') expect(result).toMatchObject({ status: 'validated', validatedVersion: 2 });
+    else {
+      expect(result).toEqual(blocked(outcome === 'missing' ? 'verification_failed' : 'assertion_failed'));
+      test.unchanged();
+    }
   });
 
   it.each(['run:source', 'import:unrelated-name'] as const)('rejects provenance source run reuse with absent optional sourceRunId and sourceId %s', async sourceId => {

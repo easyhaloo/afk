@@ -170,6 +170,7 @@ export interface RunnerOptions {
   workItemId?: string;
   observationRunId?: string;
   observationWorkItemId?: string;
+  observationRunOwner?: 'workflow' | 'caller';
   auditRequired?: boolean;
   /** Local-only numeric worktree key for older git helpers. */
   iid?: number;
@@ -560,7 +561,11 @@ export class WorkflowRunner {
         const context = this.createObservationContext(options.backlogId, options.session, options);
         return await withLogContext(context, async () => {
           try {
-            return await this.runObserved(options, context, controller, template, isCallerCancellation);
+            const result = await this.runObserved(options, context, controller, template, isCallerCancellation);
+            if (options.observationRunOwner !== 'caller' && result.success && this.implementationHandedOff) {
+              await this.recordObservation({ kind: 'run.finished', outcome: 'succeeded', reason: 'implementation handed to QA' });
+            }
+            return result;
           } catch (error) {
             if (isCallerCancellation(error) || (error instanceof WorkflowScopeCleanupError && isCallerCancellation(error.cause.runError))) {
               await this.recordObservation({ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: callerCancellationReason(controller.signal.reason) });

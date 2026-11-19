@@ -550,7 +550,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
             purpose: input.purpose,
             executionMode: input.runOptions?.executionMode === undefined ? 'interactive' : request.executionMode,
-            observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
+            observationRunId: executionId, observationWorkItemId: workItemId, observationRunOwner: 'caller', auditRequired: true });
           if (!implementationResult.success) {
             const status = implementationResult.skipped === 'not_claimed' ? 'not_claimed' : 'blocked';
             await record(status);

@@ -437,7 +437,7 @@ describe('executeWorkItem', () => {
     expect(result).toMatchObject({ status: 'merge_ready', changeUrl: 'https://github.com/acme/api/pull/5' });
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42', session: 'attempt-1', template: 'implement', executionMode: 'interactive',
-      observationRunId: 'attempt-1', observationWorkItemId: workItemId, auditRequired: true }));
+      observationRunId: 'attempt-1', observationWorkItemId: workItemId, observationRunOwner: 'caller', auditRequired: true }));
     expect(process).toHaveBeenCalledWith('42');
     expect(changes.verifyIssueAssociation).toHaveBeenCalledWith(expect.objectContaining({ id: '5' }), workItemId);
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.passed', 'change.published', 'human_gate.opened']);

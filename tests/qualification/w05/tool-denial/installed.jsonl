@@ -1,0 +1,7 @@
+{"phase":"invalid-line","action":"tool.source.read","sourceDigest":"295e07217f82fd32deebbb03d129d1a9e7d242456871ca8e9060086e799ad8ea","allowed":true,"rule":"tool.scan-manifest"}
+{"phase":"baseline","action":"tool.source.read","sourceDigest":"295e07217f82fd32deebbb03d129d1a9e7d242456871ca8e9060086e799ad8ea","allowed":true,"rule":"tool.scan-manifest"}
+{"phase":"revoked","action":"tool.source.read","sourceDigest":"295e07217f82fd32deebbb03d129d1a9e7d242456871ca8e9060086e799ad8ea","allowed":false,"rule":"revoke"}
+{"phase":"restored","action":"tool.source.read","sourceDigest":"295e07217f82fd32deebbb03d129d1a9e7d242456871ca8e9060086e799ad8ea","allowed":true,"rule":"tool.scan-manifest"}
+{"phase":"replay","action":"tool.source.read","sourceDigest":"295e07217f82fd32deebbb03d129d1a9e7d242456871ca8e9060086e799ad8ea","allowed":true,"rule":"tool.scan-manifest"}
+{"selections":[{"project":"github:w11/parcel","origins":["tool.scan-manifest@2.0.2"]},{"project":"github:w11/returns","origins":["tool.returns@2.0.2"]}],"concurrentResults":[{"checked":1,"invalidLines":[]},{"checked":2,"invalidLines":[2]}],"revokedReaders":2,"counterId":"verification.carton-count","counts":["1","2"],"dependencyChangeDeniedReaders":2,"freshLoadDenied":true,"revokedSharedReaders":2}
+{"installedAndGranted":["tool.bad-json","tool.bad-names","tool.bad-versions","tool.bad-description","tool.returns","tool.scan-manifest"],"discovered":["tool.scan-manifest@2.0.2"]}

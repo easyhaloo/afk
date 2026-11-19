@@ -1,0 +1,28 @@
+{
+  "candidateId": "e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584",
+  "command": [
+    "experience",
+    "validate",
+    "e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584",
+    "--scope",
+    "github:w11/parcel",
+    "--expected-version",
+    "1",
+    "--checker",
+    "parcel-ean13",
+    "--json"
+  ],
+  "expectedCommit": "8b000c6686f72d0a06f4aff94e9c092833e64439",
+  "checkerDigest": "57eeeecd222e76c2d10cec20b53c90f0a46dcf865c6dbac93835f3639ce5df9c",
+  "preparation": "prepared",
+  "permissionProbe": {
+    "status": "unsupported",
+    "reason": "control_experiment_unavailable"
+  },
+  "result": {
+    "status": "blocked",
+    "code": "insufficient_coverage"
+  },
+  "exit": 1,
+  "state": "candidate"
+}

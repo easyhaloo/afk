@@ -34,6 +34,7 @@ export class GitLabBacklogProvider implements BacklogProvider {
   applyMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.implementation.applyMode(id, mode); }
   applyExecutionBase(id: string, baseBranch: string): Promise<void> { return this.implementation.applyExecutionBase(id, baseBranch); }
   applyPrdBaseline(id: string, branch: string): Promise<void> { return this.implementation.applyPrdBaseline(id, branch); }
+  applyDescription(id: string, description: string): Promise<void> { return this.implementation.applyDescription(id, description); }
   initialize(): Promise<void> { return this.implementation.initialize(); }
   isRunnable(item: BacklogItem): Promise<boolean> { return this.implementation.isRunnable(item); }
   explainRunnability(item: BacklogItem): Promise<Runnability> { return this.implementation.explainRunnability(item); }

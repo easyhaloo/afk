@@ -34,3 +34,5 @@ export { validateConfiguredLearningCandidate, validationConfigurationSchema, typ
 export type { KnowledgeSourceReadGrant } from './application/learning/source-read-grant.js';
 export { KnowledgeContextProvider, knowledgeConfigurationSchema, prepareConfiguredKnowledge, publishConfiguredKnowledge,
   reconcileConfiguredKnowledge, type KnowledgeConfiguration, type KnowledgeRuntimeOptions } from './application/learning/knowledge-runtime.js';
+export { reclaimWorkspaces, type ReclaimWorkspacesOptions, type WorkspaceReclamationReport } from './application/workflows/workspace-gc.js';
+export { loadReclamationConfig, type ReclamationConfig } from './infrastructure/config/manager.js';

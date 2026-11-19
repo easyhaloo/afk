@@ -56,6 +56,7 @@ import {
   resolveExpectedTargetBranch,
   removeBacklogTag,
   retryBacklog,
+  reviseBacklogDescription,
   reviseBacklogRework,
   showBacklog,
   type BacklogChangeProvider,
@@ -65,9 +66,11 @@ import {
 import type { BacklogCreateInput, BacklogItem, BacklogKind, BacklogRelationUpdate, BacklogState, QABacklogProvider, ReworkRecord } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
 import { applyExecutionBaseBranch } from '@afk/runtime/domain/backlog/index';
+import { planDescriptionRevision, expectedManagedSections, type DescriptionRevisionPlan } from '@afk/runtime/domain/backlog/revision';
 import { parsePrdBaselineBranch, prdBaselineBranchName, prdIssueNumber } from '@afk/runtime/domain/backlog/prd-baseline';
 import { parseExecutionPlan } from '@afk/runtime/domain/backlog/execution-plan';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
+import { logger } from '@afk/runtime/infrastructure/io/index';
 import { handleCommandError, success, warning, detail } from '../output.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import {
@@ -79,7 +82,7 @@ import {
 const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const kinds: BacklogKind[] = ['prd'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
-const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'all'];
+const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'geelib', 'all'];
 
 function asPlatform(value: unknown): TrackerPlatform | undefined {
   return value === 'github' || value === 'gitlab' ? value : undefined;
@@ -163,7 +166,11 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
     // that already carries the change is the other one: it needs a person
     // too, but for a different reason — the baseline moved, so a person has
     // to decide whether it keeps the commits.
-    const verdict = change.mergeState === 'conflict'
+    // The verdict is about the merge gate, and only a change that is still
+    // open has one: "can be merged" on a change that has already landed
+    // describes a decision nobody has to make, and a conflict on a change
+    // that was closed long ago describes a merge nobody is going to do.
+    const verdict = change.state !== 'open' ? '' : change.mergeState === 'conflict'
       ? ' — CONFLICTS with the target branch, it cannot be merged as it stands'
       : change.mergeState === 'baseline_advanced'
         ? ' — the target branch already carries this change, a person has to decide what to do with the baseline'
@@ -202,6 +209,48 @@ function recordInventory(items: readonly GlobalWorkItem[]): void {
   }
   for (const group of groups.values()) {
     recordTrackerActivity({ ...group, cwd: process.cwd() });
+  }
+}
+
+export interface BacklogAssociateOptions extends JsonMode {
+  /** The canonical project to bind: `platform:projectKey` (a geelib project is its numeric id). */
+  project: string;
+  /** The directory to bind; defaults to the working directory. */
+  directory?: string;
+}
+
+/**
+ * Bind a repository directory to a provider project in the local index.
+ *
+ * An inventory run binds every project the credentials reach, which is far
+ * too broad to resolve a directory by. This command writes the one precise
+ * binding, and later commands run from that directory resolve the project
+ * without flags.
+ */
+export async function runBacklogAssociate(
+  options: BacklogAssociateOptions,
+  storage?: { root?: string },
+): Promise<void> {
+  const kind = 'backlog.associate';
+  const parsed = parseProjectArgument(options.project);
+  if (!parsed) {
+    throw new Error(`--project must be a canonical platform:projectKey identity (for example geelib:6856): ${options.project}`);
+  }
+  const directory = options.directory ?? process.cwd();
+  recordTrackerActivity({
+    platform: parsed.platform,
+    project: parsed.projectId,
+    ...(parsed.host ? { host: parsed.host } : {}),
+    cwd: directory,
+  }, storage?.root);
+  emitSuccess(kind, {
+    platform: parsed.platform,
+    project: parsed.projectId,
+    ...(parsed.host ? { host: parsed.host } : {}),
+    directory,
+  });
+  if (!options.json) {
+    detail(`Bound ${directory} to ${parsed.platform}:${parsed.projectId}. Commands in this directory now resolve this project without flags.`);
   }
 }
 
@@ -1183,6 +1232,102 @@ export async function runBacklogReworkRevise(
 }
 
 /**
+ * Replace the body of a backlog item.
+ *
+ * The body of an item is where its contract is written down — the acceptance
+ * criteria above all. A contract that changed but was not written into the
+ * body is a contract the reviewer never heard of, so a revision writes the
+ * new body over the old one.
+ *
+ * Only the body is written. The state, the tags, the relationships and the
+ * role of the item stay exactly where they are: a revision of a contract is
+ * not a change of the work's position in the backlog.
+ */
+export async function runBacklogRevise(
+  provider: BacklogManagementProvider,
+  id: string,
+  description: string,
+  options: BacklogReviseOptions = {},
+): Promise<void> {
+  const kind = 'backlog.revise';
+  try {
+    if (!id) throw new Error('backlog id is required');
+    if (!description.trim()) {
+      throw new Error('empty backlog description. Provide --description-file or --description-stdin.');
+    }
+    if (options.reason !== undefined && !options.reason.trim()) {
+      throw new Error('reason must not be empty');
+    }
+    const current = await showBacklog(provider, id);
+    const plan = planDescriptionRevision(current.description ?? '', description, expectedManagedSections(current));
+    reportManagedBody(plan);
+    if (options.dryRun) {
+      // A dry run reports the body that would be written and the diff that
+      // would come of it, and writes nothing at all.
+      if (options.json) {
+        emitSuccess(kind, { dryRun: true, plan, description });
+        return;
+      }
+      success(`Dry run: backlog ${id} body would be revised`);
+      detail(`sections: ${describeSections(plan)}`);
+      process.stdout.write(`\n${description}\n`);
+      return;
+    }
+    const result = await reviseBacklogDescription(provider, id, description);
+    logger.info({ backlogId: id, ...(options.reason ? { reason: options.reason } : {}) }, 'backlog body revised');
+    if (options.json) {
+      emitSuccess(kind, {
+        plan: result.plan,
+        ...(options.reason ? { reason: options.reason } : {}),
+        item: result.item,
+      });
+      return;
+    }
+    success(`Backlog ${id} body revised`);
+    detail(`sections: ${describeSections(result.plan)}`);
+    if (options.reason) detail(`reason: ${options.reason}`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
+/** The options one body revision carries. */
+export interface BacklogReviseOptions extends JsonMode {
+  /** Why the body is being revised. */
+  reason?: string;
+  /** Report the revision without writing anything. */
+  dryRun?: boolean;
+}
+
+/**
+ * Report the AFK-managed parts of a body that a revision puts at stake.
+ *
+ * A missing managed section is not rebuilt: the body is written as it was
+ * given, and what the revision risks is reported instead.
+ */
+function reportManagedBody(plan: DescriptionRevisionPlan): void {
+  if (plan.missingManagedSections.length) {
+    warning(`body has no AFK-managed section: ${plan.missingManagedSections.join(', ')}`);
+  }
+  if (plan.droppedManagedSections.length) {
+    warning(`this revision removes AFK-managed section(s): ${plan.droppedManagedSections.join(', ')}`);
+  }
+  if (plan.dropsRetryMarker) {
+    warning('this revision removes the retry marker that identifies the record');
+  }
+}
+
+/** The sections a revision changed, in one line. */
+function describeSections(plan: DescriptionRevisionPlan): string {
+  if (!plan.sections.length) return 'none';
+  return plan.sections.map(section => `${section.heading || '(preamble)'} ${section.status}`).join(', ');
+}
+
+/**
  * Who is correcting a rework record.
  *
  * A correction that does not say who made it is a silent overwrite, so the
@@ -1288,7 +1433,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Explicitly adopt an open manual issue into ready AFK work')
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--project <project>', 'Provider project/repository')
-    .addOption(new Option('--platform <platform>', 'Provider platform').choices(['github', 'gitlab']).makeOptionMandatory())
+    .addOption(new Option('--platform <platform>', 'Provider platform').choices(['github', 'gitlab', 'geelib']).makeOptionMandatory())
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1307,7 +1452,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   backlog.command('init')
     .description('Initialize provider metadata for backlog state and mode')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1353,6 +1498,23 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       }
     });
 
+  backlog.command('associate')
+    .description('Bind a repository directory to a provider project in the local index')
+    .requiredOption('--project <project>', 'Canonical project identity (platform:projectKey; a geelib project is its numeric id)')
+    .option('--directory <directory>', 'Directory to bind (defaults to the working directory)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogAssociate(options, {});
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.associate', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
   backlog.command('list')
     .description('List backlog items')
     .option('--state <state>', `Filter by state (${states.join('|')})`)
@@ -1361,7 +1523,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--tag <tag>', 'Filter by business tag')
     .option('--parent <id>', 'Filter by parent backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1379,7 +1541,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Show one backlog item')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1398,7 +1560,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('List the issues that belong to one work item')
     .argument('<prd-id>', 'Issue number or canonical work item ID (platform:projectKey#issueNumber)')
     .option('--project <project>', 'Project the item belongs to, when the id does not name one')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async (prdId: string, options) => {
       try {
@@ -1417,7 +1579,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Create the backlog records a provider-neutral manifest names')
     .argument('<manifest>', 'Manifest file (YAML)')
     .option('--project <project>', 'Default target project (platform:projectKey)')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--idempotency-key <key>', 'Prefix for the per-item retry keys')
     .option('--dry-run', 'Report the plan without writing anything')
     .option('--json', 'Emit structured JSON envelope to stdout')
@@ -1451,7 +1613,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--idempotency-key <key>', 'Return the existing issue when this project already contains the key')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async (title: string, options) => {
       try {
@@ -1470,7 +1632,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--reason <text>', 'Interruption reason')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1490,7 +1652,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--reason <text>', 'Retry reason')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1509,7 +1671,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Merge an approved backlog change and mark it done')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
@@ -1529,7 +1691,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Complete a backlog whose change is already merged on the provider')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--target-branch <ref>', 'The branch the change has to have targeted (defaults to the branch the item declares)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
@@ -1551,7 +1713,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--tag <tag>', 'Tag name')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1570,7 +1732,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--tag <tag>', 'Tag name')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1592,7 +1754,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--base <id>', 'Execution base backlog ID or platform:project#id')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1613,7 +1775,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--base', 'Drop the execution base edge')
     .option('-d, --depends-on <id>', 'Backlog ID or platform:project#id to stop waiting for', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1649,7 +1811,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--summary <text>', 'The fact statement that replaces the record summary')
     .option('--reason <text>', 'Why the statement is being corrected')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1680,7 +1842,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--kind <kind>', `Organizational role (${kinds.join('|')})`)
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1706,7 +1868,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--mode <mode>', `Execution mode (${modes.join('|')})`)
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1732,7 +1894,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--branch <branch>', 'Ref the work starts from')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1758,7 +1920,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .requiredOption('--id <id>', 'Backlog ID of the PRD')
     .option('--branch <branch>', 'Record this branch as the baseline branch of the PRD')
     .option('--project <project>', 'Provider project/repository')
-    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
@@ -1779,7 +1941,67 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'baseline')!, 'backlog.baseline', argv);
 
+  backlog.command('revise')
+    .description('Replace the body of a backlog item (its contract and acceptance criteria)')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab|geelib)')
+    .option('--description-file <path>', 'Markdown body file to write')
+    .option('--description-stdin', 'Read the body from stdin')
+    .option('--reason <text>', 'Why the body is being revised')
+    .option('--dry-run', 'Report the revision without writing anything')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const description = await readRevisionBody(options);
+        await runBacklogRevise(
+          await backlogProviderFor(options.project, options.platform, options.id),
+          options.id,
+          description,
+          options,
+        );
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.revise', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'revise')!, 'backlog.revise', argv);
+
   backlog.action(() => backlog.outputHelp());
+}
+
+/**
+ * Read the body a revision writes.
+ *
+ * The body is long and full of characters a shell would eat, so it comes
+ * from a file or from stdin — and the caller says which. A revision never
+ * guesses: an empty body would silently replace the contract of an item with
+ * nothing at all.
+ */
+async function readRevisionBody(options: { descriptionFile?: string; descriptionStdin?: boolean }): Promise<string> {
+  const { readFile } = await import('node:fs/promises');
+  if (options.descriptionFile && options.descriptionStdin) {
+    throw new Error('pass either --description-file or --description-stdin, not both');
+  }
+  if (options.descriptionFile) {
+    try {
+      return await readFile(options.descriptionFile, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`description file not found: ${options.descriptionFile}`);
+      }
+      throw error;
+    }
+  }
+  if (options.descriptionStdin) {
+    if (process.stdin.isTTY) throw new Error('--description-stdin needs the body on stdin');
+    return readFile('/dev/stdin', 'utf8');
+  }
+  throw new Error('a body is required: pass --description-file <path> or --description-stdin');
 }
 
 async function readDescription(path?: string): Promise<string> {

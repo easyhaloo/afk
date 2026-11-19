@@ -46,7 +46,7 @@ export const WORK_ITEM_AGENT_IDS = ["claude", "codex", "cursor", "pi", "opencode
 export type WorkItemAgentId = typeof WORK_ITEM_AGENT_IDS[number];
 export type WorkItemTerminalId = SshExternalTerminalId;
 
-export const BACKLOG_PLATFORMS = ["github", "gitlab"] as const;
+export const BACKLOG_PLATFORMS = ["github", "gitlab", "geelib"] as const;
 export type BacklogPlatform = typeof BACKLOG_PLATFORMS[number];
 export type WorkItemId = string;
 
@@ -62,7 +62,7 @@ export type ProviderProjectRef = {
 
 export type WorkItemSourceRef = {
   id: string;
-  type: "github_issue" | "gitlab_issue" | "external" | "local";
+  type: "github_issue" | "gitlab_issue" | "geelib_issue" | "external" | "local";
   title: string;
   reference: string;
   role?: string;
@@ -504,7 +504,7 @@ function parseWorkItemSource(input: unknown): WorkItemSourceRef {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item source must be an object");
   const candidate = input as Record<string, unknown>;
   assertExactKeys(candidate, ["id", "type", "title", "reference", "role", "platform", "projectKey", "issueNumber", "webUrl"], "work item source");
-  if (typeof candidate.type !== "string" || !["github_issue", "gitlab_issue", "external", "local"].includes(candidate.type)) throw new Error("work item source: type is invalid");
+  if (typeof candidate.type !== "string" || !["github_issue", "gitlab_issue", "geelib_issue", "external", "local"].includes(candidate.type)) throw new Error("work item source: type is invalid");
   const result: WorkItemSourceRef = {
     id: parseRequiredString(candidate.id, "work item source: id"),
     type: candidate.type as WorkItemSourceRef["type"],

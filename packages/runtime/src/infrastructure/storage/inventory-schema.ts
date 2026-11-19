@@ -5,10 +5,10 @@ CREATE TABLE inventory_meta (
  singleton INTEGER PRIMARY KEY CHECK (singleton = 1), namespace_key TEXT NOT NULL CHECK (length(namespace_key) = 64), namespace_kind TEXT NOT NULL CHECK (namespace_kind IN ('authenticated','legacy_unverified')), revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0), created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0)
 ) STRICT;
 CREATE TABLE sync_scopes (
- id INTEGER PRIMARY KEY, platform TEXT NOT NULL CHECK (platform IN ('github','gitlab')), host_key TEXT NOT NULL, scope_kind TEXT NOT NULL CHECK (scope_kind IN ('catalog','issues')), project_key TEXT NOT NULL DEFAULT '', attempt_seq INTEGER NOT NULL DEFAULT 0 CHECK (attempt_seq >= 0), published_seq INTEGER NOT NULL DEFAULT 0 CHECK (published_seq <= attempt_seq), last_attempt_at_ms INTEGER, last_success_at_ms INTEGER, last_status TEXT NOT NULL DEFAULT 'never' CHECK (last_status IN ('never','running','success','partial','failed','interrupted')), CHECK ((scope_kind='catalog' AND project_key='') OR (scope_kind='issues' AND project_key <> '')), UNIQUE(platform,host_key,scope_kind,project_key)
+ id INTEGER PRIMARY KEY, platform TEXT NOT NULL CHECK (platform IN ('github','gitlab','geelib')), host_key TEXT NOT NULL, scope_kind TEXT NOT NULL CHECK (scope_kind IN ('catalog','issues')), project_key TEXT NOT NULL DEFAULT '', attempt_seq INTEGER NOT NULL DEFAULT 0 CHECK (attempt_seq >= 0), published_seq INTEGER NOT NULL DEFAULT 0 CHECK (published_seq <= attempt_seq), last_attempt_at_ms INTEGER, last_success_at_ms INTEGER, last_status TEXT NOT NULL DEFAULT 'never' CHECK (last_status IN ('never','running','success','partial','failed','interrupted')), CHECK ((scope_kind='catalog' AND project_key='') OR (scope_kind='issues' AND project_key <> '')), UNIQUE(platform,host_key,scope_kind,project_key)
 ) STRICT;
 CREATE TABLE repositories (
- id INTEGER PRIMARY KEY, platform TEXT NOT NULL CHECK (platform IN ('github','gitlab')), project_key TEXT NOT NULL, host_key TEXT NOT NULL, provider_host TEXT, provider_project_id TEXT, name TEXT NOT NULL, default_branch TEXT, web_url TEXT, catalog_scope_id INTEGER NOT NULL REFERENCES sync_scopes(id) ON DELETE RESTRICT, catalog_listed INTEGER NOT NULL DEFAULT 0 CHECK (catalog_listed IN (0,1)), last_listed_seq INTEGER NOT NULL DEFAULT 0, observed_at_ms INTEGER NOT NULL, UNIQUE(platform,project_key)
+ id INTEGER PRIMARY KEY, platform TEXT NOT NULL CHECK (platform IN ('github','gitlab','geelib')), project_key TEXT NOT NULL, host_key TEXT NOT NULL, provider_host TEXT, provider_project_id TEXT, name TEXT NOT NULL, default_branch TEXT, web_url TEXT, catalog_scope_id INTEGER NOT NULL REFERENCES sync_scopes(id) ON DELETE RESTRICT, catalog_listed INTEGER NOT NULL DEFAULT 0 CHECK (catalog_listed IN (0,1)), last_listed_seq INTEGER NOT NULL DEFAULT 0, observed_at_ms INTEGER NOT NULL, UNIQUE(platform,project_key)
 ) STRICT;
 CREATE TABLE work_items (
  row_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, owner_repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE RESTRICT, issue_number INTEGER NOT NULL CHECK (issue_number > 0), origin_scope_id INTEGER NOT NULL REFERENCES sync_scopes(id) ON DELETE RESTRICT, title TEXT NOT NULL CHECK (length(title)>0), description TEXT, managed INTEGER NOT NULL CHECK (managed IN (0,1)), execution_eligible INTEGER NOT NULL CHECK (execution_eligible IN (0,1) AND execution_eligible <= managed), state TEXT NOT NULL, kind TEXT, execution_mode TEXT NOT NULL, parent_id TEXT, branch_name TEXT NOT NULL, provider_ref TEXT NOT NULL, web_url TEXT, owner TEXT, priority TEXT, provider_updated_at TEXT, sort_updated_at TEXT GENERATED ALWAYS AS (coalesce(provider_updated_at,'')) STORED, sources_present INTEGER NOT NULL DEFAULT 0, repositories_present INTEGER NOT NULL DEFAULT 0, execution_plan_present INTEGER NOT NULL DEFAULT 0, runs_present INTEGER NOT NULL DEFAULT 0, is_present INTEGER NOT NULL DEFAULT 1, last_seen_seq INTEGER NOT NULL DEFAULT 0, observed_at_ms INTEGER NOT NULL
@@ -47,7 +47,7 @@ CREATE TRIGGER repositories_search_delete AFTER DELETE ON repositories BEGIN DEL
  * lifecycle position, so the mirror stores it with an empty state and the
  * role in its own column.
  */
-export const INVENTORY_SCHEMA_VERSION = 2;
+export const INVENTORY_SCHEMA_VERSION = 3;
 
 /**
  * The steps that bring an older mirror up to the current version.
@@ -63,6 +63,34 @@ export const INVENTORY_MIGRATIONS = [
     migrate: (database: SqliteDatabase): void => {
       database.exec('ALTER TABLE work_items ADD COLUMN kind TEXT');
       database.exec('CREATE INDEX IF NOT EXISTS idx_items_kind ON work_items(kind)');
+    },
+  },
+  {
+    /**
+     * Version 3 widens the platform CHECK to geelib. SQLite cannot alter a
+     * CHECK, so both constrained tables are rebuilt around copied rows. The
+     * mirror is a cache: the rows themselves are provider reports and are
+     * carried over unchanged. `work_item_sources` and the other platform
+     * columns have no CHECK and keep their values as they are.
+     */
+    from: 2,
+    to: 3,
+    foreignKeys: 'off',
+    migrate: (database: SqliteDatabase): void => {
+      database.exec(`
+        CREATE TABLE sync_scopes_v3 (
+          id INTEGER PRIMARY KEY, platform TEXT NOT NULL CHECK (platform IN ('github','gitlab','geelib')), host_key TEXT NOT NULL, scope_kind TEXT NOT NULL CHECK (scope_kind IN ('catalog','issues')), project_key TEXT NOT NULL DEFAULT '', attempt_seq INTEGER NOT NULL DEFAULT 0 CHECK (attempt_seq >= 0), published_seq INTEGER NOT NULL DEFAULT 0 CHECK (published_seq <= attempt_seq), last_attempt_at_ms INTEGER, last_success_at_ms INTEGER, last_status TEXT NOT NULL DEFAULT 'never' CHECK (last_status IN ('never','running','success','partial','failed','interrupted')), CHECK ((scope_kind='catalog' AND project_key='') OR (scope_kind='issues' AND project_key <> '')), UNIQUE(platform,host_key,scope_kind,project_key)
+        ) STRICT;
+        CREATE TABLE repositories_v3 (
+          id INTEGER PRIMARY KEY, platform TEXT NOT NULL CHECK (platform IN ('github','gitlab','geelib')), project_key TEXT NOT NULL, host_key TEXT NOT NULL, provider_host TEXT, provider_project_id TEXT, name TEXT NOT NULL, default_branch TEXT, web_url TEXT, catalog_scope_id INTEGER NOT NULL REFERENCES sync_scopes_v3(id) ON DELETE RESTRICT, catalog_listed INTEGER NOT NULL DEFAULT 0 CHECK (catalog_listed IN (0,1)), last_listed_seq INTEGER NOT NULL DEFAULT 0, observed_at_ms INTEGER NOT NULL, UNIQUE(platform,project_key)
+        ) STRICT;
+        INSERT INTO sync_scopes_v3 SELECT * FROM sync_scopes;
+        INSERT INTO repositories_v3 SELECT * FROM repositories;
+        DROP TABLE repositories;
+        DROP TABLE sync_scopes;
+        ALTER TABLE sync_scopes_v3 RENAME TO sync_scopes;
+        ALTER TABLE repositories_v3 RENAME TO repositories;
+      `);
     },
   },
 ] as const satisfies readonly SqliteMigration[];

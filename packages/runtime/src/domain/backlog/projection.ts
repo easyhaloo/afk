@@ -69,7 +69,11 @@ export function projectBacklogItem(issue: BacklogIssueView, scope: BacklogMetada
     ...(kind ? { kind } : {}),
     parentId: metadata.relations.parentId,
     baseBacklogId: metadata.relations.baseBacklogId ?? metadata.relations.legacyBaseRef,
-    dependsOn: metadata.relations.dependsOn, state, executionMode, tags: metadata.tags,
+    dependsOn: metadata.relations.dependsOn,
+    ...(metadata.relations.contractDependencies?.length
+      ? { contractDependencies: metadata.relations.contractDependencies }
+      : {}),
+    state, executionMode, tags: metadata.tags,
     ...(labeledState ? { labeledState } : {}),
     branchName: deriveBacklogBranchName(String(issue.issueNumber)), providerRef: id,
     ...(issue.webUrl === undefined ? {} : { webUrl: issue.webUrl }),

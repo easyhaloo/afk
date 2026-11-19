@@ -22,6 +22,7 @@ import { PluginRuntime } from '../plugins/runtime.js';
 import { WorkflowRunner, type RunnerOptions } from '../workflow-engine.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
+import type { TrackerProvider } from '../../domain/tracker/types.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -949,5 +950,151 @@ describe('executeWorkItem', () => {
     await expect(executeWorkItem(input, deps)).rejects.toThrow(/identity/);
     expect(await readdir(join(workspaceDataDirectory(directory), 'executions'))).toEqual([]);
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('contract dependencies', () => {
+  it('runs while the contract dependency is still unmerged, and refuses to publish', async () => {
+    const { deps, get, current, run } = await setup({ contractDependencies: ['github:acme/api#7'] });
+    get.mockImplementation(async (id: string) => (id === '42'
+      ? current
+      : { ...item, id, state: 'ready' as const }));
+
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(/contract dependencies unresolved/);
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('publishes once the contract dependency is done', async () => {
+    const { deps } = await setup({ contractDependencies: ['github:acme/api#7'] });
+    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
+  });
+});
+
+describe('executeWorkItem hybrid geelib assembly', () => {
+  const geelibItemId = 'geelib:6856#1083121';
+  const matter = {
+    id: 1083121, sub_id: 6856, type_id: 20655, title: '集酷工作项', mkd_content: '正文',
+    matter_status: 1, label_name: 'mode::afk', update_time: '2026-11-15 10:00:00',
+  };
+  function stubGeelibPlatform(): void {
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('Matter/getMatterStatus')) {
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: [
+          { id: 1, status_name: '新建', status_stage: '未开始' },
+          { id: 46, status_name: '修复中', status_stage: '进行中' },
+          { id: 47, status_name: '已修复', status_stage: '进行中' },
+          { id: 23, status_name: '已验证', status_stage: '已完成' },
+        ] }), { status: 200 });
+      }
+      if (url.pathname.endsWith('OpenApiResourcesMgr/getDemandReourcesList')) {
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: { matter: [], list: [] } }), { status: 200 });
+      }
+      if (url.pathname.endsWith('Matter/edit')) {
+        const body = JSON.parse(String(init?.body));
+        const requested = body.data?.find((entry: { cf_name?: string }) => entry.cf_name === '状态')?.cf_value;
+        if (requested) matter.matter_status = requested === '已验证' ? 23 : matter.matter_status;
+        return new Response(JSON.stringify({ errno: 2000, errmsg: '批量编辑工作项成功', data: '' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errno: 2000, errmsg: '', data: { total: 1, matterList: [matter] } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv('GELIB_TOKEN', 'geelib-token');
+    vi.stubEnv('GELIB_USER_MAIL', 'afk@example.com');
+    vi.stubEnv('GELIB_URL', 'https://geelib.example');
+  }
+
+  function gitTracker(): TrackerProvider {
+    const change = { platform: 'github', projectId: 'acme/api', title: 'QA', state: 'opened', sourceBranch: 'afk/backlog-1083121-qa', targetBranch: 'main' } as const;
+    const tracker: Partial<TrackerProvider> = {
+      platform: 'github', projectId: 'acme/api', providerHost: 'github.com',
+      getMR: async (id: number) => ({
+        ...change, id,
+        url: `https://github.com/acme/api/pull/${id}`, description: 'QA: PASS\nRefs geelib:6856#1083121',
+      }),
+      // The listing answers what the platform knows: the change request of
+      // this item exists only once QA has published it.
+      listMRs: async () => published ? [{ ...change, id: 5, url: 'https://github.com/acme/api/pull/5' }] : [],
+      isMRLinkedToIssue: async () => false,
+    };
+    return tracker as TrackerProvider;
+  }
+
+  let published = false;
+
+  async function hybridSetup() {
+    directory = await mkdtemp(join(tmpdir(), 'afk-execute-geelib-'));
+    stubGeelibPlatform();
+    const manifest = {
+      schemaVersion: 1, workItemId: geelibItemId, providerBacklogId: '1083121',
+      tracker: { platform: 'geelib', projectKey: '6856' },
+      workingBranch: 'afk/backlog-1083121',
+      repositories: [{ platform: 'geelib', projectKey: '6856', name: '6856', checkoutPath: 'repositories/6856',
+        baseBranch: 'main', targetBranch: 'main', workingBranch: 'afk/backlog-1083121', primary: true }],
+    };
+    const manifestPath = join(directory, 'manifest.json');
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const run = vi.fn(async () => {
+      matter.matter_status = 47; // 已修复 → verification
+      return { success: true };
+    });
+    const process = vi.fn(async () => {
+      published = true;
+      matter.matter_status = 23; // 已验证 → merge_ready (the real QA runner transitions the geelib item)
+      return { success: true, mrUrl: 'https://github.com/acme/api/pull/5' };
+    });
+    const createChangesTracker = vi.fn(async () => gitTracker());
+    let hybridProviders: { backlog: unknown; changes: unknown } | undefined;
+    const deps: ExecuteWorkItemDependencies = {
+      lookupWorkItem: vi.fn(async () => ({
+        id: geelibItemId, issueNumber: 1083121, managed: true, executionEligible: true, executionMode: 'afk', state: 'ready',
+        project: { platform: 'geelib', projectKey: '6856', name: '6856', defaultBranch: 'main' },
+        branchName: 'afk/backlog-1083121',
+      } as any)),
+      readManifest: vi.fn(async () => ({
+        workItemId: geelibItemId, providerBacklogId: '1083121', tracker: { platform: 'geelib', projectKey: '6856' },
+        workspaceRoot: directory, manifestPath,
+      } as any)),
+      createChangesTracker,
+      createImplementation: vi.fn((providers: any) => {
+        hybridProviders = providers;
+        return { run } as any;
+      }),
+      createQA: vi.fn(() => ({ process }) as any),
+      recordAudit: vi.fn(async () => undefined),
+    };
+    return { deps, run, process, createChangesTracker, providers: () => hybridProviders! };
+  }
+
+  it('assembles the hybrid bundle for a geelib run request: geelib backlog, git change channel', async () => {
+    const { deps, run, process, createChangesTracker, providers } = await hybridSetup();
+
+    const result = await executeWorkItem({ workItemId: geelibItemId, executionId: 'hybrid-1', manifestPath: join(directory, 'manifest.json'), template: 'implement' }, deps);
+
+    expect(result).toMatchObject({ status: 'merge_ready', changeUrl: 'https://github.com/acme/api/pull/5' });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(process).toHaveBeenCalledWith('1083121');
+    // The change channel was resolved for the geelib run request.
+    expect(createChangesTracker).toHaveBeenCalledWith(expect.objectContaining({
+      backlogId: '1083121', trackerPlatform: 'geelib', trackerProjectKey: '6856',
+    }));
+    const bundle = providers();
+    // The backlog port serves the geelib item.
+    const item = await (bundle.backlog as { get(id: string): Promise<{ id: string; state: string; branchName: string }> }).get(geelibItemId);
+    expect(item).toMatchObject({ id: geelibItemId, state: 'merge_ready', branchName: 'afk/backlog-1083121' });
+    // The change port routes to the git platform, not the refusing channel.
+    const change = await (bundle.changes as { get(id: string): Promise<{ id: string; url: string }> }).get('5');
+    expect(change).toMatchObject({ id: '5', url: 'https://github.com/acme/api/pull/5' });
+  });
+
+  it('fails a geelib run with a readable error when the repository has no git platform remote', async () => {
+    const { deps } = await hybridSetup();
+    deps.createChangesTracker = vi.fn(async () => {
+      throw new Error("A geelib work item's change requests live on the git platform that hosts the repository, "
+        + 'but no origin remote pointing at GitHub or GitLab was found.');
+    });
+
+    await expect(executeWorkItem({ workItemId: geelibItemId, executionId: 'hybrid-2', manifestPath: join(directory, 'manifest.json'), template: 'implement' }, deps))
+      .rejects.toThrow(/git platform.*GitHub or GitLab/s);
   });
 });

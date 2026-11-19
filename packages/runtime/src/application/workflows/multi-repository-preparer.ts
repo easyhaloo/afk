@@ -12,6 +12,7 @@ import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { DependencyPool } from '../../infrastructure/git/dependency-pool.js';
+import { loadReclamationConfig } from '../../infrastructure/config/manager.js';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 
@@ -298,15 +299,48 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
   }
 }
 
-export function cloneUrl(repository: Pick<WorkflowRunRepository, 'platform' | 'projectKey' | 'providerHost'>): string {
+export function cloneUrl(repository: Pick<WorkflowRunRepository, 'platform' | 'projectKey' | 'providerHost' | 'cloneUrl'>): string {
+  // The manifest may name the clone URL explicitly — the geelib project key
+  // does not name one, and even on github/gitlab the manifest URL is more
+  // authoritative than a derived one.
+  if (repository.cloneUrl) return repository.cloneUrl;
   if (repository.platform === 'github') return `https://github.com/${repository.projectKey}.git`;
+  // A geelib item's repository is hosted on its git platform; the geelib
+  // project key does not name a clone URL. A readable error beats silently
+  // cloning the gitlab.com rendering of a numeric key.
+  if (repository.platform === 'geelib') {
+    throw new Error(
+      `A geelib work item's repository is hosted on its git platform, so its clone URL is not derivable from the geelib project key '${repository.projectKey}'. `
+      + 'Set repositories[*].cloneUrl in the execution manifest, or prepare the execution checkout from the hosted repository before the run.',
+    );
+  }
   return gitLabCloneUrl(repository.projectKey, repository.providerHost);
 }
 
 export function assertRepositoryOrigin(
-  repository: Pick<WorkflowRunRepository, 'platform' | 'projectKey' | 'providerHost'>,
+  repository: Pick<WorkflowRunRepository, 'platform' | 'projectKey' | 'providerHost' | 'cloneUrl'>,
   originUrl: string,
 ): void {
+  // When the manifest names the clone URL explicitly, the origin only has to
+  // live on the same host: https and ssh clone URLs of one repository differ
+  // in protocol and sometimes in path, and neither difference is a mismatch.
+  if (repository.cloneUrl) {
+    const expected = parseRemoteIdentity(repository.cloneUrl);
+    const actual = parseRemoteIdentity(originUrl);
+    if (!expected || !actual || actual.host !== expected.host) {
+      throw new Error(`repository origin does not match ${repository.platform}:${repository.projectKey}`);
+    }
+    return;
+  }
+  // The checkout of a geelib item was prepared from the hosted repository, so
+  // its origin cannot be compared against a URL derived from the geelib key;
+  // it is only required to be a usable git remote.
+  if (repository.platform === 'geelib') {
+    if (!parseRemoteIdentity(originUrl)) {
+      throw new Error(`repository origin is not a usable git remote for ${repository.platform}:${repository.projectKey}`);
+    }
+    return;
+  }
   const expected = parseRemoteIdentity(cloneUrl(repository));
   const actual = parseRemoteIdentity(originUrl);
   const expectedPath = repository.platform === 'github' ? expected?.path.toLowerCase() : expected?.path;
@@ -365,7 +399,7 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
     },
     repositoryStore,
     repositoryLeases: new RepositoryLeases(),
-    dependencies: new DependencyPool(),
+    dependencies: new DependencyPool(undefined, loadReclamationConfig().dependencyPoolBudget),
     git: {
       isRepository: async repoRoot => {
         try {

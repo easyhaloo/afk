@@ -6,7 +6,28 @@ import { join } from 'node:path';
 const manifestPath = '/workspace/.afk/execution-manifest.json';
 const backlogId = 'github:acme/api#42';
 
-function validManifest() {
+type ManifestFixture = {
+  schemaVersion: 1;
+  workItemId: string;
+  providerBacklogId: string;
+  tracker: { platform: string; projectKey: string; providerProjectId?: string; providerHost?: string };
+  workingBranch: string;
+  repositories: Array<{
+    platform: string;
+    projectKey: string;
+    providerProjectId?: string;
+    providerHost?: string;
+    name: string;
+    checkoutPath: string;
+    baseBranch: string;
+    role?: string;
+    workingBranch: string;
+    primary: boolean;
+    cloneUrl?: string;
+  }>;
+};
+
+function validManifest(): ManifestFixture {
   return {
     schemaVersion: 1,
     workItemId: backlogId,
@@ -73,6 +94,34 @@ describe('parseExecutionManifest', () => {
     });
   });
 
+  it('accepts a geelib tracker platform', () => {
+    const value = validManifest();
+    value.tracker = { platform: 'geelib', projectKey: '6856' };
+
+    expect(parseExecutionManifest(value, { manifestPath, backlogId })).toMatchObject({
+      tracker: { platform: 'geelib', projectKey: '6856' },
+    });
+  });
+
+  it('preserves an explicit cloneUrl on a repository', () => {
+    const value = validManifest();
+    value.repositories[0].cloneUrl = '  git@github.com:acme/api.git  ';
+
+    const manifest = parseExecutionManifest(value, { manifestPath, backlogId });
+
+    expect(manifest.repositories[0].cloneUrl).toBe('git@github.com:acme/api.git');
+    expect(manifest.repositories[1]).not.toHaveProperty('cloneUrl');
+  });
+
+  it('treats a blank cloneUrl as not provided', () => {
+    for (const blank of ['', '   ']) {
+      const value = validManifest();
+      value.repositories[1].cloneUrl = blank;
+
+      expect(parseExecutionManifest(value, { manifestPath, backlogId }).repositories[1]).not.toHaveProperty('cloneUrl');
+    }
+  });
+
   it.each([
     ['non-object manifest', null, /manifest must be an object/],
     ['unknown manifest field', { ...validManifest(), extra: true }, /manifest has unknown field: extra/],
@@ -84,7 +133,7 @@ describe('parseExecutionManifest', () => {
     ['invalid provider backlog id', { ...validManifest(), providerBacklogId: 'WI-42' }, /providerBacklogId.*positive integer/],
     ['missing tracker', missingTracker, /tracker must be an object/],
     ['malformed tracker', { ...validManifest(), tracker: null }, /tracker must be an object/],
-    ['invalid tracker platform', { ...validManifest(), tracker: { platform: 'bitbucket', projectKey: 'acme/api' } }, /tracker\.platform must be github or gitlab/],
+    ['invalid tracker platform', { ...validManifest(), tracker: { platform: 'bitbucket', projectKey: 'acme/api' } }, /tracker\.platform must be github, gitlab or geelib/],
     ['missing tracker project key', { ...validManifest(), tracker: { platform: 'github' } }, /tracker\.projectKey/],
     ['empty repositories', { ...validManifest(), repositories: [] }, /repositories must be a non-empty array/],
     ['zero primary repositories', {
@@ -119,6 +168,14 @@ describe('parseExecutionManifest', () => {
       repositories: [{ ...validManifest().repositories[0], baseBranch: 'refs/../main' }],
     }, /repositories\[0\]\.baseBranch is invalid/],
     ['invalid working branch', { ...validManifest(), workingBranch: 'refs/../work' }, /workingBranch is invalid/],
+    ['non-string cloneUrl', {
+      ...validManifest(),
+      repositories: [{ ...validManifest().repositories[0], cloneUrl: 42 }],
+    }, /repositories\[0\]\.cloneUrl is invalid/],
+    ['cloneUrl with control characters', {
+      ...validManifest(),
+      repositories: [{ ...validManifest().repositories[0], cloneUrl: 'https://gitlab.company.com/a\tb.git' }],
+    }, /repositories\[0\]\.cloneUrl is invalid/],
     ['repository branch mismatch', {
       ...validManifest(),
       repositories: [{ ...validManifest().repositories[0], workingBranch: 'other' }],

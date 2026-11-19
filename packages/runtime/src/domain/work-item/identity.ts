@@ -1,6 +1,6 @@
 import { isWorkItemProjectKey } from '@afk/core';
 
-export const WORK_ITEM_PLATFORMS = ['github', 'gitlab'] as const;
+export const WORK_ITEM_PLATFORMS = ['github', 'gitlab', 'geelib'] as const;
 
 export type WorkItemPlatform = typeof WORK_ITEM_PLATFORMS[number];
 
@@ -51,6 +51,16 @@ export function canonicalProjectKey(platform: WorkItemPlatform, projectId: strin
     if (segments.length !== 2) throw new Error('GitHub project key must use owner/repo');
     return segments.join('/');
   }
+  if (platform === 'geelib') {
+    // Geelib projects are named by their numeric project id. The platform has
+    // one instance per deployment in this integration, so the host never
+    // enters the key; multi-instance support would add a host prefix here.
+    const segments = path.split('/').filter(Boolean);
+    if (segments.length !== 1 || !/^\d+$/.test(segments[0] ?? '')) {
+      throw new Error('Geelib project key must be the numeric project id');
+    }
+    return segments[0] as string;
+  }
   const host = (providerHost ?? 'gitlab.com').trim().toLowerCase();
   const prefix = `${host}/`;
   const projectPath = path.toLowerCase().startsWith(prefix) ? path.slice(prefix.length) : path;
@@ -90,6 +100,9 @@ export function parseCanonicalProject(value: string): CanonicalProject {
   if (platform === 'github') {
     return { platform, projectKey, projectId: projectKey };
   }
+  if (platform === 'geelib') {
+    return { platform, projectKey, projectId: projectKey };
+  }
   const host = gitLabProjectHost(projectKey);
   const projectId = host === undefined ? projectKey : projectKey.slice(host.length + 1);
   if (!projectId) throw new Error(`GitLab project key must include a project path: ${value}`);
@@ -117,7 +130,7 @@ export function parseProjectArgument(value: string): { platform: WorkItemPlatfor
   const separator = value.indexOf(':');
   if (separator < 0) return undefined;
   const prefix = value.slice(0, separator);
-  if (prefix !== 'github' && prefix !== 'gitlab') return undefined;
+  if (!(WORK_ITEM_PLATFORMS as readonly string[]).includes(prefix)) return undefined;
   const parsed = parseCanonicalProject(value);
   return { platform: parsed.platform, projectId: parsed.projectId, host: parsed.host };
 }

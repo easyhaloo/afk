@@ -9,11 +9,12 @@ import { promisify } from 'node:util';
 import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { QARunner } from '../runners/qa-runner.js';
-import { createGlobalWorkItemCatalogs } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { createGlobalWorkItemCatalogs, createGeelibChangesTracker } from '../../infrastructure/provider/tracker-provider-factory.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
 import { asManagementProviders, type ProviderBundle, type ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
 import { assembleProviders } from '../../infrastructure/provider/assembly.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
+import type { TrackerProvider } from '../../domain/tracker/types.js';
 import { createExecutionPlan, parseExecutionPlan } from '../../domain/backlog/execution-plan.js';
 import { resolveParentPrdBaseline, resolvePrdExecutionPlan } from '../../domain/backlog/prd-baseline.js';
 import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
@@ -256,6 +257,14 @@ export interface ExecuteWorkItemDependencies {
   agentProviderRegistry?: AgentProviderRegistry;
   readManifest?: typeof readExecutionManifest;
   lookupWorkItem?: (id: string) => Promise<GlobalWorkItem>;
+  /**
+   * The change-channel tracker of a geelib item's hybrid bundle.
+   *
+   * A geelib item's change requests live on the git platform that hosts the
+   * repository; the default resolves that platform from the execution
+   * repository's origin remote. Tests inject a fake here.
+   */
+  createChangesTracker?: (request: WorkflowRunRequest) => Promise<TrackerProvider>;
   createContext?: (manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) => Promise<{
     request: WorkflowRunRequest;
     providers: ProviderBundle;
@@ -374,7 +383,8 @@ function resolveAgentRegistry(dependencies: ExecuteWorkItemDependencies): AgentP
 }
 
 async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig,
-  agentProviderRegistry: AgentProviderRegistry, plugins?: PluginRuntime) {
+  agentProviderRegistry: AgentProviderRegistry, plugins?: PluginRuntime,
+  createChangesTracker?: ExecuteWorkItemDependencies['createChangesTracker']) {
   const request = await resolveWorkflowRunRequest({
     ...input.runOptions,
     backlogId: input.workItemId,
@@ -385,10 +395,41 @@ async function createContext(manifest: ResolvedExecutionManifest, input: Execute
     // batch/exec. Do not "simplify" this back to 'batch'.
     executionMode: input.runOptions?.executionMode ?? 'interactive',
   }, config, { agentProviderRegistry });
-  const { providers } = await assembleProviders({ workItemId: input.workItemId,
+  const { providers } = await assembleProviders({
+    workItemId: input.workItemId,
     projectId: request.trackerProjectId ?? request.projectName, projectKey: request.trackerProjectKey,
-    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost, plugins });
+    cwd: request.repoRoot, platform: request.trackerPlatform, providerHost: request.trackerHost, plugins,
+    // Hybrid assembly: a geelib item's backlog lives on geelib, but its
+    // change requests live on the git platform that hosts the repository.
+    // The change channel is therefore resolved from the repository's remote;
+    // a repository without one cannot publish a change request and fails
+    // with a readable error instead of reaching the refusing channel.
+    ...(request.trackerPlatform === 'geelib'
+      ? { options: { changesTracker: await (createChangesTracker
+        ?? ((runRequest: WorkflowRunRequest) => createGeelibChangesTracker(runRequest.repoRoot, runRequest.originalCwd)))(request) } }
+      : {}),
+  });
   return { request, providers };
+}
+
+/**
+ * Contract dependencies gate publication, never execution.
+ *
+ * A slice may be implemented against a frozen contract and a mock while the
+ * owning slice is still unmerged (see `depends-on-contract::`); what it may not
+ * do is publish a change that calls an endpoint nobody has shipped. Execution
+ * therefore proceeds, and publication stops here.
+ */
+async function unresolvedContractDependencies(
+  item: BacklogItem,
+  backlog: { get(id: string): Promise<BacklogItem> },
+): Promise<string[]> {
+  const unresolved: string[] = [];
+  for (const id of item.contractDependencies ?? []) {
+    const dependency = await backlog.get(id);
+    if (dependency.state !== 'done') unresolved.push(id);
+  }
+  return unresolved;
 }
 
 function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest: ResolvedExecutionManifest, workItemId: string): void {
@@ -476,7 +517,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
           const agentProviderRegistry = resolveAgentRegistry(dependencies);
           const { request, providers } = await (dependencies.createContext
             ? dependencies.createContext(manifest, input, config)
-            : createContext(manifest, input, config, agentProviderRegistry, dependencies.plugins));
+            : createContext(manifest, input, config, agentProviderRegistry, dependencies.plugins, dependencies.createChangesTracker));
           if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
           const item = await providers.backlog.get(request.backlogId);
           const inventoryItem = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
@@ -572,6 +613,14 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
             ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
             ...(qaResult.evidence ? { evidence: qaResult.evidence } : {}),
           });
+          if (qaResult.success) {
+            const unresolved = await unresolvedContractDependencies(item, providers.backlog);
+            if (unresolved.length) {
+              throw new Error(
+                `contract dependencies unresolved: ${unresolved.join(', ')} — publication waits for their implementation to land`,
+              );
+            }
+          }
           const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
           const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
           const published = change && change.id && change.url && change.url === qaResult.mrUrl
@@ -681,7 +730,7 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     const config = getWorkflowConfig();
     const { request, providers } = await (dependencies.createContext
       ? dependencies.createContext(manifest, input, config)
-      : createContext(manifest, input, config, resolveAgentRegistry(dependencies), dependencies.plugins));
+      : createContext(manifest, input, config, resolveAgentRegistry(dependencies), dependencies.plugins, dependencies.createChangesTracker));
     if (request.backlogId !== manifest.providerBacklogId) throw new Error('resolved request backlog identity mismatch');
     const item = await providers.backlog.get(request.backlogId);
     if (item.parentId || item.id !== workItemId

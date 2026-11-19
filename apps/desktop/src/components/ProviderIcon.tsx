@@ -1,7 +1,8 @@
 import githubIcon from "../assets/provider-icons/github.svg";
 import gitlabIcon from "../assets/provider-icons/gitlab.svg";
+import geelibIcon from "../assets/provider-icons/geelib.svg";
 
-export type ProviderIconName = "github" | "gitlab";
+export type ProviderIconName = "github" | "gitlab" | "geelib";
 
 type ProviderIconProps = {
   provider: ProviderIconName;
@@ -12,11 +13,13 @@ type ProviderIconProps = {
 const providerLabels: Record<ProviderIconName, string> = {
   github: "GitHub",
   gitlab: "GitLab",
+  geelib: "Geelib",
 };
 
 const providerAssets: Record<ProviderIconName, string> = {
   github: githubIcon,
   gitlab: gitlabIcon,
+  geelib: geelibIcon,
 };
 
 export function ProviderIcon({ provider, size = 14, className }: ProviderIconProps) {

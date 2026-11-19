@@ -1,0 +1,35 @@
+name: Release plugin tag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-plugin-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag plugin-v<version> when missing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(node -p "require('./.claude-plugin/plugin.json').version")
+          TAG="plugin-v${V}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "${TAG} already exists — nothing to do"
+          else
+            git config user.name "plugin-release-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "${TAG}"
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}"
+            echo "tagged ${TAG} at $(git rev-parse --short HEAD)"
+          fi

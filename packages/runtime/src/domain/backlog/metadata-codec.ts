@@ -23,6 +23,12 @@ export const BACKLOG_RELATION_PREFIX = {
   parent: 'parent::',
   base: 'base::',
   dependsOn: 'depends-on::',
+  /**
+   * A dependency whose *contract* is frozen but whose implementation has not
+   * landed. Such an edge never blocks execution (a slice may be built against
+   * a mock), but it does block publication.
+   */
+  dependsOnContract: 'depends-on-contract::',
 } as const;
 
 /** Historical spelling still readable on providers that carry it. */
@@ -57,6 +63,12 @@ export interface BacklogRelations {
   legacyBaseRef?: string;
   /** All work items that must reach done before this item becomes runnable. */
   dependsOn: WorkItemId[];
+  /**
+   * Work items whose contract this item builds against, without blocking
+   * execution. Publication waits for them instead. Absent when the item
+   * declares no such edge.
+   */
+  contractDependencies?: WorkItemId[];
 }
 
 /** Everything the codec reads out of one issue's labels. */
@@ -90,6 +102,7 @@ export interface BacklogMetadataOptions {
 export function isBacklogRelationLabel(label: string): boolean {
   return label.startsWith(BACKLOG_RELATION_PREFIX.parent)
     || label.startsWith(BACKLOG_RELATION_PREFIX.base)
+    || label.startsWith(BACKLOG_RELATION_PREFIX.dependsOnContract)
     || label.startsWith(BACKLOG_RELATION_PREFIX.dependsOn)
     || label.startsWith(LEGACY_DEPENDS_ON_PREFIX);
 }
@@ -142,6 +155,7 @@ export function decodeBacklogRelations(
   const parentLabels = unique.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.parent));
   const baseLabels = unique.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.base));
   const dependencyLabels = unique.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.dependsOn));
+  const contractLabels = unique.filter(label => label.startsWith(BACKLOG_RELATION_PREFIX.dependsOnContract));
   if (options.strict
     && (relationLabels.length !== unique.length || parentLabels.length > 1 || baseLabels.length > 1)) {
     throw new Error('invalid backlog relationship metadata: duplicate parent, base, or dependency');
@@ -175,6 +189,15 @@ export function decodeBacklogRelations(
   for (const label of dependencyLabels) {
     const reference = decodeReference(label.slice(BACKLOG_RELATION_PREFIX.dependsOn.length), scope, options, 'dependency');
     if (reference && !relations.dependsOn.includes(reference)) relations.dependsOn.push(reference);
+  }
+
+  if (contractLabels.length) {
+    const contractDependencies: WorkItemId[] = [];
+    for (const label of contractLabels) {
+      const reference = decodeReference(label.slice(BACKLOG_RELATION_PREFIX.dependsOnContract.length), scope, options, 'dependency');
+      if (reference && !contractDependencies.includes(reference)) contractDependencies.push(reference);
+    }
+    if (contractDependencies.length) relations.contractDependencies = contractDependencies;
   }
 
   return relations;
@@ -281,6 +304,7 @@ export function encodeBacklogRelations(
     ...(relations.parentId ? [`${BACKLOG_RELATION_PREFIX.parent}${value(relations.parentId)}`] : []),
     ...(relations.baseBacklogId ? [`${BACKLOG_RELATION_PREFIX.base}${value(relations.baseBacklogId)}`] : []),
     ...relations.dependsOn.map(id => `${BACKLOG_RELATION_PREFIX.dependsOn}${value(id)}`),
+    ...(relations.contractDependencies ?? []).map(id => `${BACKLOG_RELATION_PREFIX.dependsOnContract}${value(id)}`),
   ];
 }
 

@@ -61,6 +61,13 @@ export interface SqliteMigration {
   from: number;
   /** The stored version this step produces. */
   to: number;
+  /**
+   * Run with foreign-key enforcement disabled, then re-enabled and
+   * integrity-checked. Only a migration that rebuilds referenced tables
+   * (SQLite cannot alter a CHECK constraint) needs this; the migration is
+   * still atomic, and a leftover violation fails the open.
+   */
+  foreignKeys?: 'off';
   migrate: (database: SqliteDatabase) => void;
 }
 
@@ -127,7 +134,9 @@ export function openSqlite(options: {
       }
     }
     database.exec(`PRAGMA busy_timeout = 3000; PRAGMA synchronous = ${options.durability ?? 'NORMAL'};`);
-    transaction(database, () => {
+    const pendingMigrations = (options.migrations ?? []).filter(migration => migration.from >= version);
+    const needsForeignKeysOff = pendingMigrations.some(migration => migration.foreignKeys === 'off');
+    const run = () => transaction(database, () => {
       const lockedVersion = Number(database.prepare('PRAGMA user_version').get()?.user_version);
       if (lockedVersion > expectedVersion) throw new Error(`Unsupported AFK storage schema version: ${lockedVersion}`);
       if (lockedVersion === 0) {
@@ -138,6 +147,25 @@ export function openSqlite(options: {
       }
       options.initialize?.(database);
     });
+    if (needsForeignKeysOff) {
+      // A migration that rebuilds referenced tables needs foreign-key
+      // enforcement off for its DDL. The pragma is a no-op inside an open
+      // transaction, so it is toggled around the migration's own
+      // transaction — which still makes the step atomic — and enforcement
+      // is restored with a full integrity check afterwards.
+      database.exec('PRAGMA foreign_keys = OFF;');
+      try {
+        run();
+        const violations = database.prepare('PRAGMA foreign_key_check').all();
+        if (violations.length > 0) {
+          throw new Error(`AFK storage migration left foreign-key violations in: ${[...new Set(violations.map(entry => String(entry.table)))].join(', ')}`);
+        }
+      } finally {
+        database.exec('PRAGMA foreign_keys = ON;');
+      }
+    } else {
+      run();
+    }
     return database;
   } catch (error) {
     database.close();

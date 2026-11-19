@@ -102,6 +102,10 @@ An item is runnable only when its state is `ready` or `rework`, its execution mo
 
 `afk backlog confirm-merge` explicitly initiates a merge at the operator's request. `afk backlog reconcile-merge` only reconciles a change that has already been merged by a person. AFK never merges without explicit authorization.
 
+The change request of an item is chosen by a rule, not by the order a listing happens to answer in: the change that has landed comes first, then the change that targets the branch the work was headed for, then a change that is still open. One source branch can carry several changes — a probe, a retry, a change that was opened by mistake — and the wrong one leaves the books of an item open even though the work has landed.
+
+The rule answers two different questions, and both sides use the same rule and the same candidates. The reconciliation of a merged change asks for the change that has landed, because that is the fact the books of an item are about. The display of an item asks for the change that is still alive, because a branch that was reworked carries the change of the earlier round that has landed and the change of the current round that is open — and only the second one is the merge gate. The state of a candidate is read back from the provider in both cases, because a listing can under-report a change that has landed.
+
 ## End-to-end execution path
 
 ```mermaid

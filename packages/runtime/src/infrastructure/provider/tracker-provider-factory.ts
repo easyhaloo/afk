@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { Octokit } from '@octokit/rest';
+import { GeelibClient } from '../geelib/client.js';
+import { GeelibProviderCatalog } from './catalogs.js';
 import { GitHubClient } from '../github/client.js';
 import { GitLabClient } from '../gitlab/index.js';
 import {
   resolveGitHubRepository,
   resolveGitLabProject,
+  resolveRemoteTarget,
 } from '../tracker/resolver.js';
 import {
   resolveTrackerTarget,
@@ -94,6 +97,8 @@ export interface GlobalWorkItemCatalogDependencies {
   listGlabTokens(): GlabTokenConfig[];
   createGitHubCatalog(token: string): ProviderCatalog;
   createGitLabCatalog(host: string, url: string, token: string): ProviderCatalog;
+  /** Optional so hand-built dependency sets from before geelib keep compiling. */
+  createGeelibCatalog?(auth: { userMail: string; token: string; baseUrl: string }): ProviderCatalog;
 }
 
 export function createGlobalWorkItemCatalogs(
@@ -113,8 +118,17 @@ export function createGlobalWorkItemCatalogs(
       throw new Error('GitLab authentication is required. Set GITLAB_TOKEN or authenticate with glab auth login.');
     }
   }
+  if (platform === 'all' || platform === 'geelib') {
+    const auth = resolveGeelibAuth(dependencies.env);
+    if (auth && dependencies.createGeelibCatalog) catalogs.push(dependencies.createGeelibCatalog(auth));
+    else if (platform === 'geelib') {
+      throw new Error(dependencies.createGeelibCatalog
+        ? 'Geelib authentication is required. Set GELIB_TOKEN and GELIB_USER_MAIL.'
+        : 'Geelib catalog support is not wired into this dependency set.');
+    }
+  }
   if (catalogs.length === 0) {
-    throw new Error('Provider authentication is required. Configure GitHub or GitLab credentials.');
+    throw new Error('Provider authentication is required. Configure GitHub, GitLab or Geelib credentials.');
   }
   return catalogs;
 }
@@ -163,7 +177,20 @@ function detectTrackerCredentials(env: NodeJS.ProcessEnv = process.env): Tracker
   return {
     github: Boolean(env.GITHUB_TOKEN ?? env.GH_TOKEN ?? readGhToken()),
     gitlab: Boolean(env.GITLAB_TOKEN) || listGlabTokens().length > 0,
+    geelib: Boolean(env.GELIB_TOKEN && env.GELIB_USER_MAIL),
   };
+}
+
+/**
+ * The Geelib OpenAPI authenticates per request with the account mail and a
+ * signed timestamp, so a token alone is not enough — AFK reads both from the
+ * environment, mirroring the GITLAB_TOKEN/GITLAB_URL convention.
+ */
+function resolveGeelibAuth(env: NodeJS.ProcessEnv = process.env): { userMail: string; token: string; baseUrl: string } | undefined {
+  const token = env.GELIB_TOKEN;
+  const userMail = env.GELIB_USER_MAIL;
+  if (!token?.trim() || !userMail?.trim()) return undefined;
+  return { userMail, token, baseUrl: env.GELIB_URL?.trim() || 'https://geelib.qihoo.net' };
 }
 
 /**
@@ -186,9 +213,55 @@ export async function createTracker(
     cwd,
     credentials: () => detectTrackerCredentials(),
   });
+  if (target.platform === 'geelib') {
+    return createGeelibTracker(target.projectId);
+  }
   return target.platform === 'github'
     ? createGitHubTracker(target.projectId, cwd)
     : createGitLabTracker(target.projectId, cwd, preferredHost);
+}
+
+/**
+ * The geelib tracker for one numeric project id, built from the environment
+ * credentials. Separate from `createTracker` so the inventory provider can
+ * route a geelib project without re-resolving a target from the git remote,
+ * which a geelib-backed repository never names.
+ */
+export async function createGeelibTracker(projectId: string): Promise<TrackerProvider> {
+  const auth = resolveGeelibAuth();
+  if (!auth) {
+    throw new Error('Geelib authentication is required. Set GELIB_TOKEN and GELIB_USER_MAIL (and GELIB_URL for a non-default instance).');
+  }
+  const subId = Number(projectId);
+  if (!Number.isSafeInteger(subId) || subId <= 0) throw new Error(`geelib project key must be the numeric project id: ${projectId}`);
+  return new GeelibClient({ ...auth, subId });
+}
+
+/**
+ * The git-platform tracker for the change channel of a geelib item.
+ *
+ * Hybrid mode: a geelib work item's change requests live on the git platform
+ * that hosts the repository, not on geelib. The tracker is therefore resolved
+ * from the `origin` remote of the repository — the execution checkout first,
+ * then the directory the run was invoked from (a first attempt has no
+ * checkout yet). A directory pair without such a remote cannot publish a
+ * change request, and that is a readable error rather than a silent fall
+ * back to the refusing channel.
+ */
+export async function createGeelibChangesTracker(repositoryRoot?: string, invocationRoot?: string): Promise<TrackerProvider> {
+  const directories = [repositoryRoot, invocationRoot].filter((directory): directory is string => Boolean(directory));
+  for (const directory of directories) {
+    const remote = await resolveRemoteTarget(directory);
+    if (!remote) continue;
+    return remote.platform === 'github'
+      ? createGitHubTracker(remote.projectId, directory)
+      : createGitLabTracker(remote.projectId, directory, remote.host);
+  }
+  throw new Error(
+    "A geelib work item's change requests live on the git platform that hosts the repository, "
+    + `but no origin remote pointing at GitHub or GitLab was found in: ${directories.join(', ') || '(no directory given)'}. `
+    + 'Run inside the hosted repository checkout, or add its remote (git remote add origin <url>) to the execution repository.',
+  );
 }
 
 export async function createWorkflowProviders(
@@ -219,6 +292,7 @@ function defaultCatalogDependencies(): GlobalWorkItemCatalogDependencies {
     listGlabTokens,
     createGitHubCatalog: createGitHubProviderCatalog,
     createGitLabCatalog: createGitLabProviderCatalog,
+    createGeelibCatalog: createGeelibProviderCatalog,
   };
 }
 
@@ -241,6 +315,11 @@ function configuredGitLabTokens(
     if (!unique.has(entry.host)) unique.set(entry.host, { host: entry.host, url, token: entry.token });
   }
   return [...unique.values()].sort((left, right) => left.host.localeCompare(right.host));
+}
+
+function createGeelibProviderCatalog(auth: { userMail: string; token: string; baseUrl: string }): ProviderCatalog {
+  const client = new GeelibClient({ ...auth, subId: 0 });
+  return new GeelibProviderCatalog(client, new URL(auth.baseUrl).host);
 }
 
 function createGitHubProviderCatalog(token: string): ProviderCatalog {

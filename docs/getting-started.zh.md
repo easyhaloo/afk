@@ -94,7 +94,15 @@ export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 # GitLab：GITLAB_TOKEN 加可选的 GITLAB_URL，或 `glab auth login`
 export GITLAB_TOKEN=glpat_xxxxxxxxxxxxx
 export GITLAB_URL=https://gitlab.company.com   # 可选，默认 gitlab.com
+
+# 集酷云（Geelib）：OpenAPI token 及其所属账号邮箱
+export GELIB_TOKEN=xxxxxxxxxxxxxxxx
+export GELIB_USER_MAIL=you@company.com
+export GELIB_URL=https://geelib.qihoo.net      # 可选，此为默认值
 ```
+
+集酷云 OpenAPI 的每个请求都用签名查询认证（账号邮箱 + 时间戳 + 摘要），
+而非 Bearer 头，因此两个变量都必须配置。
 
 ### Tracker 目标
 
@@ -164,6 +172,7 @@ AFK 默认从当前仓库探测 Provider；需要时可显式选择：
 ```bash
 afk backlog list --platform github
 afk backlog show --id 42 --platform gitlab
+afk backlog show --id 42 --platform geelib   # 集酷云：签名 backlog provider 的平台
 ```
 
 在 git 仓库之外执行时，显式给出项目名：
@@ -174,7 +183,14 @@ afk backlog show --id 42 --project my-org/my-repo --platform github
 
 `--project` 既接受裸 provider 路径，也接受规范项目键（`platform:projectKey`；实例
 不是默认实例时，键里带实例主机名）。两者指的是同一个仓库，因此手里已经拿着规范
-键的调用方不必再剥前缀。
+键的调用方不必再剥前缀。集酷云的项目键是数字项目 ID：`--project geelib:1843`。
+
+要把仓库目录钉到一个项目——此后在该目录内执行的命令无需 flag 即可解析项目——
+把关联写入本地索引一次即可：
+
+```bash
+afk backlog associate --project geelib:1843   # 在仓库目录内执行
+```
 
 Provider 分配规范 Backlog ID；变更单创建与合并由类型化工作流步骤完成，不再提供独立 MR 公共命令。
 

@@ -25,6 +25,21 @@ describe('RepositoryLeases', () => {
     expect(await recoverRepositoryLease(claim, { registry: registry as never, tmux, dead: () => false })).toBe(false);
   });
 
+  it('recovers a dead manual owner only when no registered resource claims the generation', async () => {
+    const claim = { claimId: 'generation-2', owner: JSON.stringify({ pid: 4242, host: 'localhost', recovery: 'manual' }),
+      createdAt: '', heartbeatAt: '', expiresAt: '', ttlMs: 1000 };
+    const emptyRegistry = { listAllActive: vi.fn(() => []), markClosed: vi.fn() };
+    expect(await recoverRepositoryLease(claim, { registry: emptyRegistry as never, dead: () => true })).toBe(true);
+    const otherClaim = { kind: 'tmux', name: 'other-run', metadata: { repositoryClaims: ['generation-3'] } };
+    const unrelated = { listAllActive: vi.fn(() => [otherClaim]), markClosed: vi.fn() };
+    expect(await recoverRepositoryLease(claim, { registry: unrelated as never, dead: () => true })).toBe(true);
+    const claimed = { kind: 'tmux', name: 'owned-session', metadata: { repositoryClaims: ['generation-2'] } };
+    const busy = { listAllActive: vi.fn(() => [claimed]), markClosed: vi.fn() };
+    expect(await recoverRepositoryLease(claim, { registry: busy as never, dead: () => true })).toBe(false);
+    expect(await recoverRepositoryLease(claim, { registry: emptyRegistry as never, dead: () => false })).toBe(false);
+    expect(emptyRegistry.markClosed).not.toHaveBeenCalled();
+  });
+
   it('binds nested phases to the same repository generations', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-repo-lease-scope-'));
     try {

@@ -119,7 +119,12 @@ export class DependencyPool {
           const destination = resolve(dirname(absolute), linkValue);
           const destinationRelative = relative(repoRoot, destination);
           if (destinationRelative.startsWith('..') || isAbsolute(destinationRelative)) return false;
-          if (!destinationRelative.split(sep).includes('node_modules') && link.split('/').length > (link.startsWith('@') ? 2 : 1)) return false;
+          // Workspace links legitimately point outside node_modules. The top
+          // level carries them shallowly; pnpm 10+ also mirrors them under
+          // the virtual store at `.pnpm/node_modules/<name>`, and those deep
+          // links are expected, not a layout this pool must reject.
+          const insideVirtualStore = link.split('/').includes('.pnpm');
+          if (!insideVirtualStore && !destinationRelative.split(sep).includes('node_modules') && link.split('/').length > (link.startsWith('@') ? 2 : 1)) return false;
           if (isAbsolute(linkValue)) {
             await rm(absolute);
             await symlink(relative(dirname(absolute), destination), absolute);
@@ -170,6 +175,24 @@ export class DependencyPool {
         for (const path of paths.filter(path => path.split('/').filter(segment => segment === 'node_modules').length === 1)) {
           await validateTarget(repoRoot, join(repoRoot, path));
           await rm(join(repoRoot, path), { recursive: true, force: true });
+        }
+      }
+      await this.pruneUnlocked();
+    });
+  }
+
+  /**
+   * Reclaim crashed staging directories and run the budget-bounded LRU
+   * eviction. Safe to call at any time; never touches pinned entries.
+   */
+  async prune(now = Date.now()): Promise<void> {
+    await this.locks.withExclusiveOperation('dependencies/pool/operations', async () => {
+      for (const name of await readdir(this.root).catch(() => [])) {
+        if (!/^[a-f0-9]{64}\..+\.tmp$/.test(name)) continue;
+        const staging = join(this.root, name);
+        const metadata = await lstat(staging).catch(() => undefined);
+        if (metadata && now - metadata.mtimeMs > 3_600_000) {
+          await rm(staging, { recursive: true, force: true });
         }
       }
       await this.pruneUnlocked();

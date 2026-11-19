@@ -103,6 +103,40 @@ describe('work-item identity', () => {
   });
 });
 
+describe('geelib identity', () => {
+  it('names a Geelib project by its numeric project id', () => {
+    expect(canonicalProjectKey('geelib', '6856')).toBe('6856');
+    expect(() => canonicalProjectKey('geelib', '')).toThrow('must not be empty');
+  });
+
+  it('formats and parses a Geelib identity', () => {
+    const id = formatWorkItemId({ platform: 'geelib', projectKey: '6856', issueNumber: 1083121 });
+
+    expect(id).toBe('geelib:6856#1083121');
+    expect(parseWorkItemId(id)).toEqual({
+      id,
+      platform: 'geelib',
+      projectKey: '6856',
+      issueNumber: 1083121,
+    });
+  });
+
+  it('reads a geelib project argument back without a host', () => {
+    expect(parseProjectArgument('geelib:6856')).toEqual({
+      platform: 'geelib',
+      projectId: '6856',
+      host: undefined,
+    });
+  });
+
+  it('keeps a Geelib identity distinct from the same numbers on other platforms', () => {
+    const geelib = formatWorkItemId({ platform: 'geelib', projectKey: '6856', issueNumber: 42 });
+    const github = formatWorkItemId({ platform: 'github', projectKey: '6856', issueNumber: 42 });
+
+    expect(geelib).not.toBe(github);
+  });
+});
+
 describe('project argument', () => {
   it('reads a canonical project key into the parts a provider needs', () => {
     expect(parseProjectArgument('gitlab:group/subgroup/project')).toEqual({

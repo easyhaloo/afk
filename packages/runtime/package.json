@@ -112,6 +112,10 @@
       "types": "./dist/domain/backlog/prd-baseline.d.ts",
       "import": "./dist/domain/backlog/prd-baseline.js"
     },
+    "./domain/backlog/revision": {
+      "types": "./dist/domain/backlog/revision.d.ts",
+      "import": "./dist/domain/backlog/revision.js"
+    },
     "./domain/backlog/runnability": {
       "types": "./dist/domain/backlog/runnability.d.ts",
       "import": "./dist/domain/backlog/runnability.js"

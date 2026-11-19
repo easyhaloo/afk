@@ -112,7 +112,16 @@ export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 # GitLab: GITLAB_TOKEN plus the optional GITLAB_URL, or `glab auth login`
 export GITLAB_TOKEN=glpat_xxxxxxxxxxxxx
 export GITLAB_URL=https://gitlab.company.com   # Optional, defaults to gitlab.com
+
+# Geelib (集酷云): the OpenAPI token plus the account mail it belongs to
+export GELIB_TOKEN=xxxxxxxxxxxxxxxx
+export GELIB_USER_MAIL=you@company.com
+export GELIB_URL=https://geelib.qihoo.net      # Optional, this is the default
 ```
+
+The Geelib OpenAPI authenticates every request with a signed query (account
+mail + timestamp + digest) rather than a bearer header, so both variables are
+required.
 
 ### Tracker target
 
@@ -188,6 +197,7 @@ management commands can explicitly select a supported provider when needed:
 ```bash
 afk backlog list --platform github
 afk backlog show --id 42 --platform gitlab
+afk backlog show --id 42 --platform geelib   # 集酷云: the platform of the signed backlog provider
 ```
 
 Outside a git repository, name the project explicitly instead:
@@ -199,7 +209,16 @@ afk backlog show --id 42 --project my-org/my-repo --platform github
 `--project` accepts either a bare provider path or the canonical project key
 (`platform:projectKey`, with the instance host in the key when the instance is
 not the default one). Both name the same repository, so a caller that already
-holds a canonical key does not have to strip the prefix.
+holds a canonical key does not have to strip the prefix. A geelib project key
+is the numeric project id: `--project geelib:1843`.
+
+To pin a repository directory to one project — so every command run inside it
+resolves the project without flags — write the association into the local
+index once:
+
+```bash
+afk backlog associate --project geelib:1843   # run inside the repository
+```
 
 The provider owns the canonical Backlog ID. AFK creates and merges change
 requests as typed workflow steps rather than through a separate public MR command.

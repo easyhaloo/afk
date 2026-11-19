@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   registerBacklogCommands,
   runBacklogAdopt,
+  runBacklogAssociate,
   runBacklogConfirmMerge,
   runBacklogCreate,
   runBacklogChildren,
@@ -16,6 +17,7 @@ import {
   runBacklogRelationAdd,
   runBacklogRelationRemove,
   runBacklogRetry,
+  runBacklogRevise,
   runBacklogReworkRevise,
   runBacklogRole,
   runBacklogExecutionBase,
@@ -108,8 +110,21 @@ describe('hard-cutover command surface', () => {
     expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
   });
 
-  it('exposes backlog creation relationship options', () => {
+  it('exposes a body revision that names its body source and nothing else', () => {
     const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    const revise = backlog?.commands.find(command => command.name() === 'revise');
+
+    expect(revise).toBeDefined();
+    expect(revise?.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--id', '--project', '--platform', '--description-file', '--description-stdin', '--reason', '--dry-run', '--json',
+    ]));
+    // The body is the only thing a revision writes, so there is no option that
+    // moves the item in the backlog.
+    expect(revise?.options.map(option => option.long)).not.toEqual(expect.arrayContaining(['--title', '--state', '--tag', '--kind', '--mode']));
+  });
+
+  it('exposes backlog creation relationship options', () => {    const program = commandTree(registerBacklogCommands);
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const create = backlog?.commands.find(command => command.name() === 'create');
 
@@ -524,6 +539,13 @@ function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider
       const item = items.find(candidate => candidate.id === id);
       if (!item) throw new Error(`backlog ${id} not found`);
       item.executionMode = mode;
+    },
+    async applyDescription(id: string, description: string) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      // Only the body changes: the state, the tags and the relationships of
+      // the item stay exactly where they are.
+      item.description = description;
     },
     async initialize() { /* noop */ },
     async transition(id, state) {
@@ -1090,6 +1112,81 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     });
   });
 
+  it('runBacklogRevise replaces the body of an item and leaves everything else alone', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const items = [{ ...stubItem, description: '## Acceptance Criteria\n\n- [ ] the old criterion\n' }];
+    try {
+      await runBacklogRevise(stubProvider(items), '42', '## Acceptance Criteria\n\n- [ ] the new criterion\n', {
+        json: true,
+        reason: 'the contract changed with the sibling slice',
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.revise',
+      data: {
+        reason: 'the contract changed with the sibling slice',
+        plan: { sections: [{ heading: 'Acceptance Criteria', status: 'modified' }] },
+        item: { description: '## Acceptance Criteria\n\n- [ ] the new criterion\n' },
+      },
+    });
+    // A revision of a contract is not a change of the work's position.
+    expect(envelope.data.item.tags).toEqual(['billing']);
+    expect(envelope.data.item.state).toBe('ready');
+  });
+
+  it('runBacklogRevise writes nothing on a dry run', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const items = [{ ...stubItem, description: '## Acceptance Criteria\n\n- [ ] the old criterion\n' }];
+    const provider = stubProvider(items);
+    const applyDescription = vi.spyOn(provider, 'applyDescription');
+    try {
+      await runBacklogRevise(provider, '42', '## Acceptance Criteria\n\n- [ ] the new criterion\n', {
+        json: true,
+        dryRun: true,
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope).toMatchObject({ ok: true, kind: 'backlog.revise', data: { dryRun: true } });
+    expect(envelope.data.description).toContain('the new criterion');
+    expect(applyDescription).not.toHaveBeenCalled();
+    expect(items[0].description).toBe('## Acceptance Criteria\n\n- [ ] the old criterion\n');
+  });
+
+  it('runBacklogRevise reports a body that is empty', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRevise(stubProvider([stubItem]), '42', '   ', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.revise',
+      error: { message: expect.stringContaining('empty backlog description') },
+    });
+  });
+
   it('runBacklogConfirmMerge emits the completed root backlog', async () => {
     const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);
@@ -1413,5 +1510,32 @@ describe('backlog children identity', () => {
   it('refuses an id that is neither an issue number nor a canonical identity', async () => {
     await expect(resolveBacklogChildrenIdentity('not-an-id', {}, { target: async () => target }))
       .rejects.toThrow(/must be an issue number or platform:projectKey#issueNumber/);
+  });
+});
+
+describe('runBacklogAssociate', () => {
+  async function gitRepo(): Promise<string> {
+    const { mkdir } = await import('node:fs/promises');
+    const root = await mkdtemp(join(tmpdir(), 'afk-associate-'));
+    await mkdir(join(root, '.git'), { recursive: true });
+    return root;
+  }
+
+  it('binds the repository directory to a geelib project in the local index', async () => {
+    const root = await gitRepo();
+
+    await runBacklogAssociate({ project: 'geelib:6856', directory: root }, { root });
+
+    const { readTrackerStore } = await import('@afk/runtime/infrastructure/tracker/store');
+    const store = readTrackerStore(root);
+    expect(store.projects['geelib::6856']).toMatchObject({ platform: 'geelib', project: '6856' });
+    expect(store.projects['geelib::6856'].paths).toContain(root);
+  });
+
+  it('refuses a bare provider path that names no platform', async () => {
+    const root = await gitRepo();
+
+    await expect(runBacklogAssociate({ project: 'group/api', directory: root }, { root }))
+      .rejects.toThrow(/platform:project/);
   });
 });

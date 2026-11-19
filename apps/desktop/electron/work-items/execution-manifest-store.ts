@@ -32,6 +32,7 @@ const REPOSITORY_KEYS = new Set([
   "checkoutPath",
   "baseBranch",
   "role",
+  "cloneUrl",
   "workingBranch",
   "primary",
 ]);
@@ -39,6 +40,8 @@ const REPOSITORY_KEYS = new Set([
 export type WorkItemExecutionManifestRepository = WorkItemRunRepositorySelection & {
   workingBranch: string;
   primary: boolean;
+  /** Full git clone URL, carried through for platforms that cannot derive one (geelib). */
+  cloneUrl?: string;
 };
 
 export type WorkItemExecutionManifest = {
@@ -128,7 +131,12 @@ function parseManifest(value: unknown): WorkItemExecutionManifest {
   const repositories = selections.map((selection, index): WorkItemExecutionManifestRepository => {
     const repository = repositoryCandidates[index];
     if (repository.workingBranch !== workingBranch) throw new Error(`repositories[${index}].workingBranch must match workingBranch`);
-    return { ...selection, workingBranch: repository.workingBranch, primary: repository.primary };
+    return {
+      ...selection,
+      workingBranch: repository.workingBranch,
+      primary: repository.primary,
+      ...(repository.cloneUrl === undefined ? {} : { cloneUrl: repository.cloneUrl }),
+    };
   });
   if (repositories.filter(repository => repository.primary).length !== 1) throw new Error("repositories must contain exactly one primary repository");
 
@@ -147,7 +155,7 @@ function parseTracker(value: unknown): WorkItemExecutionManifest["tracker"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("tracker must be an object");
   const candidate = value as Record<string, unknown>;
   assertExactKeys(candidate, TRACKER_KEYS, "tracker");
-  if (candidate.platform !== "github" && candidate.platform !== "gitlab") throw new Error("tracker.platform is invalid");
+  if (candidate.platform !== "github" && candidate.platform !== "gitlab" && candidate.platform !== "geelib") throw new Error("tracker.platform is invalid");
   if (typeof candidate.projectKey !== "string" || !candidate.projectKey.trim()) throw new Error("tracker.projectKey is invalid");
   for (const key of ["providerHost", "providerProjectId"] as const) {
     if (candidate[key] !== undefined && (typeof candidate[key] !== "string" || !candidate[key].trim())) throw new Error(`tracker.${key} is invalid`);
@@ -164,6 +172,7 @@ function parseRepositoryCandidate(value: unknown, index: number): {
   selection: Record<string, unknown>;
   workingBranch: string;
   primary: boolean;
+  cloneUrl?: string;
 } {
   const label = `repositories[${index}]`;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
@@ -180,11 +189,24 @@ function parseRepositoryCandidate(value: unknown, index: number): {
   for (const key of ["providerHost", "providerProjectId", "role"] as const) {
     if (candidate[key] !== undefined) selection[key] = candidate[key];
   }
+  const cloneUrl = parseCloneUrl(candidate.cloneUrl, `${label}.cloneUrl`);
   return {
     selection,
     workingBranch: validateBaseBranch(candidate.workingBranch, `${label}.workingBranch`),
     primary: candidate.primary,
+    ...(cloneUrl === undefined ? {} : { cloneUrl }),
   };
+}
+
+/**
+ * An optional clone URL: absent, or a string that survives trimming. A blank
+ * value is treated as not provided rather than as an error, matching the
+ * runtime manifest parser.
+ */
+function parseCloneUrl(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid`);
+  return value.trim() || undefined;
 }
 
 function assertExactKeys(candidate: Record<string, unknown>, allowed: ReadonlySet<string>, label: string): void {

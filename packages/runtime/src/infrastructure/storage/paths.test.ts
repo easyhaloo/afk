@@ -20,6 +20,14 @@ describe('shared storage paths', () => {
     expect(() => inventoryNamespace([{ ...github, host: 'https://example.invalid/path' }])).toThrow(/host/i);
   });
 
+  it('names a geelib account its own isolated namespace', () => {
+    const geelib = { platform: 'geelib' as const, host: 'geelib.qihoo.net', accountId: '789' };
+    const github = { platform: 'github' as const, host: 'github.com', accountId: '789' };
+
+    expect(inventoryNamespace([geelib])).toBe(inventoryNamespace([{ ...geelib }]));
+    expect(inventoryNamespace([geelib])).not.toBe(inventoryNamespace([github]));
+  });
+
   it('refuses a namespace while an account of the set is unverified', () => {
     const github = { platform: 'github' as const, host: 'github.com', accountId: '123' };
     const gitlab = { platform: 'gitlab' as const, host: 'gitlab.example', accountId: '456' };

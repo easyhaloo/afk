@@ -11,6 +11,15 @@
 
 本次选择取消作为生命周期用例。Resume、交互模式、真实模型账单、远端工单及其他平台留待单独验收。回环服务只绑定 `127.0.0.1` 的随机端口，以固定 SSE 响应提供工具调用和用量。Pi 进程、工具执行、会话文件、产品事件及取消均走实际路径。
 
+## 0.2.152 安装版对照
+
+2026-11-19 在同一平台使用父工作树已安装的 0.2.152 和 Pi 1.5.2 复跑。两版均通过产品 `WorkflowRunner` 在合成 Git 项目中运行原生 Pi，模型来源均为 `isolated-loopback-fixture`。进程、会话和产品事件的证据等级为 `native`，模型响应和用量数值来源为 `fixture`。详见 [0.2.152 脱敏收据](agent-pi-0.2.152.receipt.json)。
+
+| `agent.pi` 场景 | 0.2.150 基线 | 0.2.152 实测 |
+| --- | --- | --- |
+| 成功、session、usage | 通过，随机输入求和 6396 | 通过（退出码 0），随机输入求和 1497 与产物一致，记录 `implementation.completed`，进入 `verification`。两版均匹配原生 session，3 轮输入 93、输出 21、总计 114，产品与 Pi 一致。 |
+| 活跃任务取消 | 失败，终态 `failed`，分类 `workflow_crash` | 通过（退出码 0），`run.finished` 记录 `cancelled` 和 `user_cancelled`，无 `failure.classified`。两版均在命令启动后取消，原生进程退出，9 秒后无延迟写，工单 `blocked`，未入 QA。 |
+
 ## 复跑
 
 从上述基线的仓库根目录执行，需要项目支持的 Node ≥22.16、pnpm、Python 3、Git、`ps` 和已安装的原生 `pi`。已有对应安装包时可直接将 `AFK_BIN` 指向安装器创建的可执行文件。首次构建及安装使用以下命令。
@@ -30,5 +39,7 @@ receipts=$(mktemp -d)
 python3 tests/qualification/w10/agent-pi.py "$AFK_BIN" success "$receipts/success.json"
 python3 tests/qualification/w10/agent-pi.py "$AFK_BIN" cancel "$receipts/cancel.json"
 ```
+
+复跑 0.2.152 时，将 `AFK_BIN` 指向该安装目录的 `dist/index.js`，新建收据目录，在两条命令末尾各加 `--expected-version 0.2.152`。启动器核对目录名、`release.json` 和 CLI 实报版本。
 
 两条命令独立运行，收据必须使用新文件名。退出码 0 表示该用例全部断言通过。当前基线的回环结果分别为 0 和 1。配置模型也可单独复跑，在 `success` 命令末尾追加 `--model-dir "$APPROVED_PI_MODEL_DIR"` 并更换收据文件名。该选项使用指定目录里 `settings.json` 选中的默认 provider 和 model，以及 `models.json` 的简单 API key 配置，可能消耗模型额度。默认回环模式无需账号。启动器使用进程环境传递配置模型的密钥，临时目录在运行结束后删除。收据仅保留断言、计数、版本及归档校验值。

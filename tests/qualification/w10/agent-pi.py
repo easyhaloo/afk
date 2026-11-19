@@ -35,6 +35,7 @@ def main():
     parser.add_argument('afk', type=Path, help='executable created by install.sh')
     parser.add_argument('scenario', choices=['success', 'cancel'])
     parser.add_argument('receipt', type=Path)
+    parser.add_argument('--expected-version', default='0.2.150', help='required installed AFK CLI version')
     parser.add_argument('--model-dir', type=Path, help='opt into approved Pi default model instead of the loopback fixture')
     args = parser.parse_args()
     os.umask(0o077)
@@ -62,12 +63,15 @@ def main():
         def version(binary):
             return subprocess.check_output([binary, '--version'], env=env, cwd=work, stderr=subprocess.DEVNULL,
                                            timeout=15, text=True).strip()
+        manifest = json.loads((release / 'release.json').read_text())
         report = dict(scenario=args.scenario, passed=False, phase='installation', evidenceLevel='native',
-                      modelSource=mode, platform=json.loads((release / 'release.json').read_text())['platform'])
+                      modelSource=mode, platform=manifest['platform'])
         try:
             report['afk'], report['pi'] = version(afk), version(pi)
-            match = re.fullmatch(r'0\.2\.150-(darwin|linux)-(arm64|x64)-([a-f0-9]{64})', release.name)
-            if not match or report['afk'] != '0.2.150' or not re.fullmatch(r'\d+\.\d+\.\d+', report['pi']):
+            match = re.fullmatch(re.escape(args.expected_version) + r'-(darwin|linux)-(arm64|x64)-([a-f0-9]{64})', release.name)
+            if (not match or not (report['afk'] == args.expected_version == manifest['version'])
+                    or (match[1], match[2]) != (manifest['platform'], manifest['arch'])
+                    or not re.fullmatch(r'\d+\.\d+\.\d+', report['pi'])):
                 raise ValueError('unexpected installation')
             report.update(archiveSha256=match[3], arch=match[2], phase='driver')
             with subprocess.Popen([node, driver, release, args.scenario, mode], cwd=work, env=env,

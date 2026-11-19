@@ -84,8 +84,9 @@ try {
     workspaceRoot: workspace, template, agentProvider: 'pi', sandboxProvider: 'local', executionMode: 'batch',
     completionTimeoutMs: 65000, hardTimeoutMs: 90000, maxRetries: 0, maxHandoffs: 1, signal: controller.signal,
   }).catch(error => { if (error !== reason) throw error; return { success: false }; });
+  const finished = events.findLast(event => event.kind === 'run.finished');
   Object.assign(receipt, { workflowSuccess: result.success, state: item.state, queued,
-    terminal: events.findLast(event => event.kind === 'run.finished')?.outcome,
+    terminal: finished?.outcome, reasonCode: finished?.reasonCode,
     failureCodes: events.filter(event => event.kind === 'failure.classified').map(event => event.code) });
   if (cancel) {
     receipt.phase = 'cancellation';

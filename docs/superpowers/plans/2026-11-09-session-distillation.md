@@ -2752,6 +2752,8 @@ Provisional total63–103 person-days. With four to five effective parallel writ
 
 #### Committed slice and current delivery evidence
 
+On November 20, 2026, the [four-platform build](https://github.com/easyhaloo/afk/actions/runs/44595292353) for `987eac6c` passed installation, workflow and artifact audit checks on Linux and macOS, each on x64 and arm64. All four downloaded archives matched their SHA-256 checksums. Using that macOS arm64 archive (`19ba337c1977027d422d8946508a18f2ee386f2f6873a138314740ce7fe59eb2`) outside the source tree, Pi answered `16 + 23 = 39` using local Ollama. The native session and AFK both recorded 514 input tokens and 80 output tokens. The two-repository work item passed implementation and standalone QA checks. Both scenarios ended with zero leases and zero managed worktrees. The work item used a scripted agent and a loopback tracker. Cross-host mounts still need qualification.
+
 On November 20, 2026 (Asia/Shanghai), GitHub Actions run `44559190766` succeeded for `7012631d`. The coverage suite passed 8,913 tests and skipped 241. Across core, application, workflow-graph, runtime and CLI, line and statement coverage were 89.98%, function coverage was 86.78%, and branch coverage was 88.75%. The separate Desktop E2E suite passed 106 tests.
 
 On November 19, 2026, the `w11-recall-v1` audit checked historical installed releases against all six second-consumer cases for each of five asset types. All 10 expected hits and 20 expected exclusions matched.

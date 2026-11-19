@@ -15,6 +15,8 @@
 
 ## 核对行清单与历史用例
 
+安装版 0.2.168 通过 `afk run` 在两个共享挂载仓库完成实施、验收检查和 QA，停在人工合并门。另一工单在实施发布后遇到一次 HTTP 409，随后 `afk qa` 使用新租约完成独立 QA。两组均从裸仓读回输出，并核对租约与工作树清理。该场景使用回环 HTTPS、合成 Tracker 和脚本 Agent。跨主机挂载和真实模型 QA 待验。[双仓工单回执](mounted-work-item.receipt.json)
+
 2026-11-20，Cursor CLI `2026.07.09-a3815c0` 的 `cursor-agent status --format json` 返回 `authenticated`。安装版 0.2.162 在空白项目经本地 Sandbox 调用 Cursor 后收到 `NON_ZERO_EXIT`（退出码 1）。在同一目录直接运行原生批处理也收到 `Authentication required`。重新执行 `cursor-agent login` 后，需用实际批处理回包验证账号可用。Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
 
 安装版 0.2.168 经 Local Sandbox、Pi 1.5.2 和临时 Ollama 服务运行 Qwen3.5-2B。Pi 正确回答随机算术题，AFK 会话 ID 与 Pi 原生记录一致，输入 513、输出 80、合计 593 token，工具调用为零。使用本地缓存权重和隔离配置可[复跑](pi-local-inference.py)。执行中取消待验。云端 `wiscode-aiproxy` 的独立请求曾返回 HTTP 402。[本地回执](pi-local-inference.receipt.json) · [云端回执](agent-pi.receipt.json)

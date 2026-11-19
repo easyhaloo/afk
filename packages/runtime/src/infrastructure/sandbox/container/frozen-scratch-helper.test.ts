@@ -198,6 +198,23 @@ ${behavior === 'ignored-replay' ? 'else process.exit(0);' : ''}
 ${behavior === 'unobserved-effects' ? "fs.appendFileSync('/scratch/unobserved-effects','effect\\n');" : ''}
 ${behavior === 'aggregate-output' ? 'process.stdout.write(Buffer.alloc(30000));' : ''}`;
 
+    it('distinguishes original business exit from observer failure on the same bounded contract', async () => {
+      const returned = { exitCode: 0, signal: null, stdoutHex: Buffer.from('constant\n').toString('hex'), stderrHex: '' };
+      const contract = { ...request(), returnAssertions: { fault: { ...returned, exitCode: 23 }, recovery: returned, replay: returned } };
+      const original = await execute("console.log('constant');", 'original', faultInput, 'state.json', undefined, contract);
+      const failure = original.evidence.scratch!.baselineFailure!;
+      expect(failure).toMatchObject({ failedPhase: 'fault', reason: 'exit-code', helperRevision: 'linux-native-original-exit-v1' });
+      expect(failure.phases.map(phase => phase.invocation.exitCode)).toEqual([0]);
+      expect(failure.phases[0]!.final.resources[0]!.present).toBe(false);
+      const proposed = await execute(source(), 'proposed', faultInput, 'state.json', undefined, contract);
+      expect(proposed.evidence.scratch!.recovery!.qualification).toBe('qualified-bounded-returns-and-state');
+      expect(proposed.evidence.scratch!.recovery!.phases.map(phase => phase.invocation.exitCode)).toEqual([23, 0, 0]);
+      expect(original.evidence.operationId).not.toBe(proposed.evidence.operationId);
+      await expect(execute("console.log('constant');", 'proposed', faultInput, 'state.json', undefined, contract)).rejects.toThrow(/helper did not complete safely/);
+      const failedHelper = compile(Buffer.from('int main(void) { return 42; }'));
+      await expect(execute(source(), 'original', faultInput, 'state.json', failedHelper, contract)).rejects.toThrow(/helper did not complete safely/);
+    }, 120_000);
+
     it('observes real fault, recovery and identical-input replay bytes under one owned operation', async () => {
       const create = vi.spyOn(provider, 'createFrozenContainer');
       try {

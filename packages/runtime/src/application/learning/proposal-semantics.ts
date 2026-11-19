@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { frozenExecutionArgv, verifyFrozenScratchRecoveryEvidence, type FrozenExecutionOptions,
+import { frozenExecutionArgv, verifyFrozenScratchRecoveryOutcome, type FrozenExecutionOptions,
   type FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import { buildFrozenContext } from '../../infrastructure/sandbox/container/frozen-input.js';
+import type { FrozenScratchBaselineFailure } from '../../infrastructure/sandbox/container/types.js';
 import { DISTILLATION_LIMITS } from './contracts.js';
 import { canonicalLearningJson, learningIdentitySchema } from './requests.js';
 import type { PreparedAssetProposal, ProposalCheck } from './proposals.js';
@@ -87,6 +88,8 @@ export interface ProposalSemanticExecutionContext {
 }
 export interface ProposalSemanticObservation {
   protocol: 'proposal-semantic-v1'; experimentDigest: string; deliveredInputDigest: string;
+  baselineFailure?: { phase: FrozenScratchBaselineFailure['failedPhase']; reason: FrozenScratchBaselineFailure['reason'];
+    expectedExitCode: number; observedExitCode: number; phasesObserved: number; evidenceDigest: string };
   assertions: { id: string; source: ProposalSemanticConfiguration['assertions'][number]['source']; path?: string[];
     expected: unknown; actual?: unknown; status: 'observed' | 'unknown'; passed: boolean }[];
   passed: boolean;
@@ -153,6 +156,7 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
 
 export function observeProposalExperiment(experiment: PreparedProposalExperiment, execution: Readonly<FrozenExecutionResult>,
   context?: ProposalSemanticExecutionContext): ProposalSemanticObservation {
+  let baselineFailure: ProposalSemanticObservation['baselineFailure'];
   if (experiment.recovery !== undefined) {
     if (!context?.options.scratch?.recovery) throw new Error('Semantic recovery requires trusted execution context');
     const { options, operationId, containerId } = context;
@@ -166,15 +170,22 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
       || execution.evidence.contextDigest !== buildFrozenContext(options.input, options.baseImageId, operationId, scratch.helper).digest
       || execution.evidence.mechanism !== 'docker-frozen-image' || execution.evidence.cwd !== '/workspace'
       || execution.exitCode !== 0) throw new Error('Semantic recovery differs from trusted execution context');
-    const verified = verifyFrozenScratchRecoveryEvidence(options, execution.evidence.scratch?.recovery, operationId, containerId);
-    if (verified.contractRevision !== experiment.recovery.contractRevision || verified.qualification !== 'qualified-bounded-returns-and-state'
-      || execution.stdout !== verified.phases.map(phase => Buffer.from(phase.stdoutHex, 'hex').toString('utf8')).join('')
+    const observation = execution.evidence.scratch;
+    const verified = verifyFrozenScratchRecoveryOutcome(options, observation?.baselineFailure ?? observation?.recovery, operationId, containerId);
+    if ('failedPhase' in verified) {
+      const phase = verified.phases.find(entry => entry.phase === verified.failedPhase)!;
+      baselineFailure = { phase: phase.phase, reason: verified.reason, expectedExitCode: recovery.returnAssertions[phase.phase].exitCode,
+        observedExitCode: phase.invocation.exitCode!, phasesObserved: verified.phases.length, evidenceDigest: digest(verified) };
+    } else if (verified.contractRevision !== experiment.recovery.contractRevision || verified.qualification !== 'qualified-bounded-returns-and-state') {
+      throw new Error('Semantic recovery qualification differs from saved returns');
+    }
+    if (execution.stdout !== verified.phases.map(phase => Buffer.from(phase.stdoutHex, 'hex').toString('utf8')).join('')
       || execution.stderr !== verified.phases.map(phase => Buffer.from(phase.stderrHex, 'hex').toString('utf8')).join('')) {
       throw new Error('Semantic recovery output or qualification differs from saved returns');
     }
     const { phase: _phase, ordinal: _ordinal, invocationId: _invocationId, stdoutHex: _stdoutHex, stderrHex: _stderrHex,
       ...firstEvidence } = verified.phases[0]!;
-    if (!isDeepStrictEqual(execution.evidence.scratch, { ...firstEvidence, recovery: verified })) {
+    if (!isDeepStrictEqual(observation, { ...firstEvidence, [baselineFailure ? 'baselineFailure' : 'recovery']: verified })) {
       throw new Error('Semantic recovery outer evidence differs from verified phases');
     }
   }
@@ -235,5 +246,6 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
   });
   return { protocol: 'proposal-semantic-v1', experimentDigest: digest(experiment),
     deliveredInputDigest: createHash('sha256').update(experiment.callInput ?? experiment.input).digest('hex'), assertions,
-    passed: controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
+    ...(baselineFailure ? { baselineFailure } : {}),
+    passed: !baselineFailure && controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
 }

@@ -57,7 +57,8 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(returnAssertions: RecoveryConfiguration['returnAssertions'] = returns) {
+type BaselineCase = 'fault-exit' | 'recovery-exit' | 'replay-exit' | 'phase-output' | 'checkpoint' | 'observer-stderr' | 'foreign-frame';
+function fixture(returnAssertions: RecoveryConfiguration['returnAssertions'] = returns, baselineCase?: BaselineCase) {
   const root = directory();
   const original = 'console.log(JSON.stringify({value:"old"}));\n';
   writeFileSync(join(root, 'asset.js'), original);
@@ -146,6 +147,18 @@ function fixture(returnAssertions: RecoveryConfiguration['returnAssertions'] = r
           sampledMs: index * 3 + 4, final: wireState(index === 0 ? 'partial:saved' : 'ready:saved'),
           stdoutHex: returnAssertions[phase].stdoutHex, stderrHex: returnAssertions[phase].stderrHex,
         })) };
+      if (scratch.candidateVersion === 'original' && baselineCase) {
+        if (baselineCase === 'observer-stderr') return { code: 0, stdout: '', stderr: 'observer failure' };
+        if (baselineCase === 'foreign-frame') frame.operationId = 'unrelated-operation';
+        if (baselineCase === 'checkpoint') frame.phases[1]!.final = wireState('partial:saved');
+        if (baselineCase === 'phase-output') frame.phases[1]!.stdoutHex = '';
+        const stop = ['fault-exit', 'recovery-exit', 'replay-exit'].indexOf(baselineCase);
+        if (stop >= 0) {
+          frame.revision = 'linux-native-original-exit-v1';
+          frame.phases.length = stop + 1;
+          frame.phases[stop]!.invocation.exitCode = stop === 0 ? 0 : 7;
+        }
+      }
       return { code: 0, stdout: JSON.stringify(frame), stderr: '' };
     }),
     cleanupFrozenOperation: vi.fn(async () => {}),
@@ -197,6 +210,36 @@ function contextFor(observation: ProposalRuntimeObservation): ProposalSemanticEx
 }
 
 describe('proposal recovery runtime with synthetic frozen operations', () => {
+  it.each([
+    ['fault-exit', 'fault', 'exit-code', 1, 0], ['recovery-exit', 'recovery', 'exit-code', 2, 7],
+    ['replay-exit', 'replay', 'exit-code', 3, 7], ['phase-output', 'recovery', 'phase-output', 3, 0],
+    ['checkpoint', 'recovery', 'checkpoint', 3, 0],
+  ] as const)('keeps the observed %s baseline and compares the proposal', async (mode, phase, reason, count, exitCode) => {
+    const test = fixture(returns, mode);
+    const { observations } = await observeRecovery(test);
+    const [original, proposed] = observations as [ProposalRuntimeObservation, ProposalRuntimeObservation];
+    expect(observations.map(item => [item.receipt.binding.version, item.receipt.passed])).toEqual([['original', false], ['proposed', true]]);
+    const failure = original.execution.evidence.scratch!.baselineFailure!;
+    expect(original.receipt.semantic?.baselineFailure).toEqual({ phase, reason, phasesObserved: count, observedExitCode: exitCode,
+      expectedExitCode: returns[phase].exitCode, evidenceDigest: digest(failure) });
+    expect(original.execution.evidence.scratch!.recovery).toBeUndefined();
+    expect(failure.phases.map(entry => entry.phase)).toEqual(names.slice(0, count));
+    expect(proposed.execution.evidence.scratch!.recovery!.qualification).toBe('qualified-bounded-returns-and-state');
+    if (mode === 'checkpoint') expect(original.receipt.semantic!.assertions.every(assertion => assertion.passed)).toBe(true);
+    const context = contextFor(original);
+    expect(() => verifyFrozenScratchRecoveryEvidence(context.options, failure, context.operationId, context.containerId)).toThrow();
+    const changed = { ...original.execution.evidence.scratch!, baselineFailure: { ...failure, contractDigest: '0'.repeat(64) } };
+    expect(() => observeProposalExperiment(test.experiment, { ...original.execution,
+      evidence: { ...original.execution.evidence, scratch: changed } }, context)).toThrow();
+  });
+
+  it.each(['observer-stderr', 'foreign-frame'] as const)('stops the comparison on %s', async mode => {
+    const test = fixture(returns, mode);
+    await expect(verifyRepositoryAssetProposal(test.prepared, test.options)).rejects.toThrow(/scratch/i);
+    expect(test.requests.filter(request => request.scratch).map(request => request.scratch!.candidateVersion)).toEqual(['original']);
+    expect(test.repository.cleanup).toHaveBeenCalledOnce();
+  });
+
   it('observes original and proposed recovery with owned helper and independently saved options and identities', async () => {
     const test = fixture();
     const { result, observations } = await observeRecovery(test);

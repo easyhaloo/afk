@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import http.client
+import http.cookiejar
 import json
 import os
 import re
@@ -14,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -173,7 +176,36 @@ ENABLED = false
         assert {row['deliveryId'] for row in deliveries} == {event['accepted']['deliveryId'] for event in receipts}
         assert all(row['providerId'] == 'trigger.issue-event' and row['attempts'] == 1 for row in deliveries)
         assert effects.read_text().splitlines() == ['verified']
-        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, actionCount=1)
+
+        client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        def web(path, form=None):
+            data = urllib.parse.urlencode(form).encode() if form is not None else None
+            req = urllib.request.Request(base + path, data=data, headers={'Origin': base, 'Referer': base + path})
+            with client.open(req, timeout=5) as response:
+                return response.read().decode()
+
+        web('/user/login')
+        password = re.search(r"generated random password is '([^']+)'", admin).group(1)
+        web('/user/login', {'user_name': 'qualifier', 'password': password})
+        history = f'/{project}/settings/hooks/{hook["id"]}'
+        opened = next(event for event in receipts if event['action'] == 'opened')
+        replay = history + '/replay/' + opened['sourceId']
+        assert f'action="{replay}"' in web(history)
+        web(replay, {})
+
+        def upstream_result():
+            with sqlite3.connect(f'file:{database}?mode=ro', uri=True) as connection:
+                return connection.execute('SELECT uuid, request_content, response_content FROM hook_task WHERE hook_id=? AND id>? AND is_delivered=1', (hook['id'], tasks[-1]['id'])).fetchone()
+        source_id, sent, response = wait_for(upstream_result)
+        body = json.loads(sent)['body'].encode()
+        assert hashlib.sha256(body).hexdigest() == opened['bodySha256']
+        accepted = json.loads(response)
+        assert accepted['status'] == 202
+        upstream = json.loads(accepted['body'])
+        assert upstream['duplicate'] and upstream['deliveryId'] == opened['accepted']['deliveryId'], (source_id == opened['sourceId'], upstream)
+        assert source_id != opened['sourceId']
+        assert len(settled()) == 3 and effects.read_text().splitlines() == ['verified']
+        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, upstreamReplay={'sourceId': source_id, 'receipt': upstream}, actionCount=1)
 
 
 if __name__ == '__main__':

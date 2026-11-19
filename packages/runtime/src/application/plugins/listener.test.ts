@@ -36,6 +36,22 @@ async function listen(providers: Array<GitPushTriggerProvider | WebhookTriggerPr
 }
 
 describe('plugin trigger listener', () => {
+  it('coalesces a Gitea issue opening redelivered under a new UUID, but preserves explicit keys and repeatable actions', async () => {
+    const provider = new IssueEventTriggerProvider({});
+    const { send } = await listen([provider], { queuePath: durablePath() });
+    const deliver = async (id: string, action: string, explicit = false) => {
+      const body = JSON.stringify({ action, repository: { full_name: 'qualifier/parcel', id: 1 }, issue: { number: 1 } });
+      const signature = `sha256=${createHmac('sha256', token).update(body).digest('hex')}`;
+      return send(provider.id, body, { 'x-hub-signature-256': signature, 'x-github-delivery': id, 'x-gitea-delivery': id,
+        ...(explicit && { 'idempotency-key': id }) });
+    };
+    const original = await (await deliver('first', 'opened')).json();
+    expect(original.duplicate).toBe(false);
+    expect(await (await deliver('second', 'opened')).json()).toMatchObject({ duplicate: true, deliveryId: original.deliveryId });
+    expect((await deliver('first', 'closed')).status).toBe(409);
+    expect(await (await deliver('explicit', 'opened', true)).json()).toMatchObject({ duplicate: false });
+    for (const id of ['close-1', 'close-2']) expect(await (await deliver(id, 'closed')).json()).toMatchObject({ duplicate: false });
+  });
   it('waits for an accepted action before completing shutdown', async () => {
     let finish: () => void = () => {};
     let started: () => void = () => {};

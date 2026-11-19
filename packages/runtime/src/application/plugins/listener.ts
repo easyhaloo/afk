@@ -159,11 +159,16 @@ export async function startPluginListener(runtime: PluginRuntime, options: Plugi
         if (provider instanceof WebhookTriggerProvider && (typeof signature !== 'string' || !provider.verifySignature(raw, signature))) {
           response.writeHead(401).end('{"error":"Trigger authentication failed"}'); return;
         }
-        provider.validatePayload(parsePayload(raw));
+        const payload = parsePayload(raw);
+        provider.validatePayload(payload);
         const sourceId = request.headers['idempotency-key'] ?? request.headers['x-github-delivery'] ?? request.headers['x-gitlab-event-uuid'];
         if (sourceId !== undefined && typeof sourceId !== 'string') throw new InvalidTriggerDelivery('Invalid delivery id');
         try {
-          const receipt = queue.enqueue(match[1], raw.toString('utf8'), sourceId);
+          const giteaIssueOpened = provider instanceof IssueEventTriggerProvider && request.headers['idempotency-key'] === undefined
+            && typeof request.headers['x-gitea-delivery'] === 'string' && sourceId === request.headers['x-gitea-delivery']
+            && z.object({ action: z.literal('opened'), repository: z.object({ full_name: z.string().min(1), id: z.number().int().positive() }),
+              issue: z.object({ number: z.number().int().positive() }) }).safeParse(payload).success;
+          const receipt = queue.enqueue(match[1], raw.toString('utf8'), sourceId, giteaIssueOpened);
           response.writeHead(202).end(JSON.stringify(receipt));
         } catch (error) {
           if (error instanceof TriggerDeliveryConflict || error instanceof InvalidTriggerDelivery) {

@@ -131,7 +131,7 @@ export class DurableTriggerQueue {
     } catch (error) { this.database.close(); throw error; }
   }
 
-  enqueue(providerId: string, body: string, sourceId?: string): TriggerDeliveryStatus & { readonly duplicate: boolean } {
+  enqueue(providerId: string, body: string, sourceId?: string, matchPreviousBody = false): TriggerDeliveryStatus & { readonly duplicate: boolean } {
     this.assertWritable();
     const bodyBytes = Buffer.byteLength(body);
     if (providerId.length > 200 || !/^[a-z][a-z0-9.-]*$/.test(providerId) || bodyBytes > 1024 * 1024
@@ -142,6 +142,10 @@ export class DurableTriggerQueue {
       const existing = this.database.prepare('SELECT digest FROM trigger_deliveries WHERE deliveryId = ?').get(deliveryId);
       if (existing && existing.digest !== digest) throw new TriggerDeliveryConflict('Delivery id was already used for another payload');
       if (!existing) {
+        if (matchPreviousBody) {
+          const prior = this.database.prepare('SELECT deliveryId FROM trigger_deliveries WHERE providerId = ? AND digest = ? ORDER BY receivedAt, deliveryId LIMIT 1').get(providerId, digest);
+          if (prior) return { ...this.status(String(prior.deliveryId))[0], duplicate: true };
+        }
         const usage = this.storageUsage();
         if (usage.records >= this.maxRecords || bodyBytes > this.maxBytes - usage.bytes) throw new TriggerQueueFull('Trigger queue is full');
         const now = Date.now();

@@ -5,6 +5,19 @@ import path from 'node:path';
 import test from 'node:test';
 import { extractContract, findSkill, listSkillMetadata, recommendSkill, skillRoots } from '../scripts/skill-catalog.mjs';
 
+test('managed batch recommendations rank the task and title without workflow boilerplate', async () => {
+  const catalog = [{ name: 'audit', description: '库存盘点（货品清点）' },
+    { name: 'test-runner', description: 'run JavaScript tests using vitest' }];
+  const task = { project: 'gitlab:team/shop', environment: 'qa', productVersions: { shop: '1' } };
+  const envelope = 'AFK batch goal:\n请核对。\n\nBacklog title: 请用库存盘点。';
+  for (const boundary of ['Backlog context:', 'AFK batch completion protocol:']) {
+    const prompt = `${envelope}\n\n${boundary} run JavaScript tests using vitest`;
+    assert.equal(await recommendSkill(prompt, catalog, undefined, task), 'audit');
+    assert.equal(await recommendSkill(prompt, catalog.slice(1), undefined, task), null);
+    assert.equal(await recommendSkill(prompt, catalog), 'test-runner');
+  }
+});
+
 test('prompt routing recognizes complete Han labels and aliases in installed descriptions', async () => {
   const skill = { name: 'stock-audit', description: '库存盘点（货品清点），只读。' };
   const manual = { ...skill, name: 'manual-audit', 'disable-model-invocation': true };

@@ -102,7 +102,11 @@ export function skillRoots(host, projectRoot, env = process.env) {
 }
 
 export async function recommendSkill(prompt, catalog, choose, task) {
-  const cleaned = prompt.slice(0, 2000).replace(/\b(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+/gi, '');
+  const bounded = prompt.slice(0, 2000);
+  const goal = task && bounded.startsWith('AFK batch goal:\n')
+    ? bounded.slice('AFK batch goal:\n'.length).split(/\n\n(?:Backlog context:|AFK batch completion protocol:)/, 1)[0]
+    : bounded;
+  const cleaned = goal.replace(/\b(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+/gi, '');
   const terms = [...new Set((cleaned.toLowerCase().match(/[\p{L}\p{N}-]{3,}/gu) ?? []).slice(0, 32))];
   const ranked = catalog.filter(skill => !skill['disable-model-invocation'] && matchesSkillScope(skill.recallScope, task))
     .map(skill => {

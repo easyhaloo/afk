@@ -1,0 +1,275 @@
+{
+  "version": "0.2.162",
+  "archiveSha256": "47e451118faf7d990d84ca713eeabe168fa5922c81a0d34823666ec7b5082e2f",
+  "originalFormalSha256": "79c77750cb43aee3ef145fd1e567ea70495214b30916e7a62a6c47318a8d1986",
+  "queued": {
+    "jobId": "7dd37bfa2430d47a4f547f8815af0da7c0eb564b3c4e8c597f62556e33874501",
+    "scope": "github:w11/parcel",
+    "candidateId": "e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584",
+    "candidateVersion": 1
+  },
+  "correctionEvidence": "a5e0a9ae59f4b9a84acf69aea352736818d7c9e7fda1872ec63b475cb19a4d81",
+  "dailyCalls": 0,
+  "job": {
+    "status": "blocked",
+    "reason": "budget_exhausted",
+    "attempts": [],
+    "newCandidates": []
+  },
+  "originalCandidate": {
+    "id": "e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584",
+    "digest": "98dcf046d6f231d60aee3f02565a30187e17b7688b06d15be672424ef95c34ff",
+    "version": 1,
+    "state": "candidate"
+  },
+  "sourceDigests": {
+    "original": "2ae3a06ca5fd0059dff855c705025862312493881f0463816be03064baaa2902",
+    "frozenCandidate": "200564c2a4394ef30f393587a9aa680048fb042bcb0edb2b96499103eab821d0",
+    "requestedRevision": "b598fe5cf0a9e88456c5b2b717fbeaade32b6a388c277d1c4210750158b346e9"
+  },
+  "originalGate": {
+    "status": "blocked",
+    "code": "insufficient_coverage"
+  },
+  "originalCheckerDigest": "57eeeecd222e76c2d10cec20b53c90f0a46dcf865c6dbac93835f3639ce5df9c",
+  "checkerDigest": "e9e3a805c5ad7272d2cf8944aadcf2806f587ac849a351a3705ff18631c27ce8",
+  "changedCheckerGate": {
+    "status": "blocked",
+    "code": "unauthorized"
+  },
+  "preparedCases": [
+    "behavior-1",
+    "behavior-2",
+    "behavior-3",
+    "behavior-4",
+    "control-cancellation",
+    "control-timeout"
+  ],
+  "assurance": "diagnostic-only / darwin-seatbelt",
+  "observations": [
+    {
+      "id": "behavior-1",
+      "raw": "\"9780306406157\\n5901234123457\"",
+      "results": {
+        "original": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 36
+        },
+        "frozenCandidate": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 38
+        },
+        "requestedRevision": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "{\"checked\":2,\"invalidLines\":[]}",
+          "stderr": "",
+          "elapsedMs": 39
+        }
+      }
+    },
+    {
+      "id": "behavior-2",
+      "raw": "\"\\n0012345678905\\n０\\n\"",
+      "results": {
+        "original": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 31
+        },
+        "frozenCandidate": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 30
+        },
+        "requestedRevision": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "{\"checked\":4,\"invalidLines\":[1,3,4]}",
+          "stderr": "",
+          "elapsedMs": 31
+        }
+      }
+    },
+    {
+      "id": "behavior-3",
+      "raw": "\"1234567890128\\n1234567890129\"",
+      "results": {
+        "original": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 31
+        },
+        "frozenCandidate": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 32
+        },
+        "requestedRevision": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "{\"checked\":2,\"invalidLines\":[2]}",
+          "stderr": "",
+          "elapsedMs": 33
+        }
+      }
+    },
+    {
+      "id": "behavior-4",
+      "raw": "null",
+      "results": {
+        "original": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 49
+        },
+        "frozenCandidate": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 27
+        },
+        "requestedRevision": {
+          "exit": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "error: input must be a string",
+          "elapsedMs": 32
+        }
+      }
+    },
+    {
+      "id": "control-cancellation",
+      "raw": "\"9780306406157\\n5901234123457\"",
+      "results": {
+        "original": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 32,
+          "controlSent": false
+        },
+        "frozenCandidate": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 30,
+          "controlSent": false
+        },
+        "requestedRevision": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "{\"checked\":2,\"invalidLines\":[]}",
+          "stderr": "",
+          "elapsedMs": 31,
+          "controlSent": false
+        }
+      }
+    },
+    {
+      "id": "control-timeout",
+      "raw": "\"9780306406157\\n5901234123457\"",
+      "results": {
+        "original": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 32,
+          "controlSent": false
+        },
+        "frozenCandidate": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "",
+          "stderr": "",
+          "elapsedMs": 33,
+          "controlSent": false
+        },
+        "requestedRevision": {
+          "exit": 0,
+          "signal": null,
+          "stdout": "{\"checked\":2,\"invalidLines\":[]}",
+          "stderr": "",
+          "elapsedMs": 38,
+          "controlSent": false
+        }
+      }
+    }
+  ],
+  "guards": [
+    {
+      "args": [],
+      "result": {
+        "exit": 1,
+        "signal": null,
+        "stdout": "",
+        "stderr": "error: expected one JSON argument",
+        "elapsedMs": 50
+      }
+    },
+    {
+      "args": [
+        "null",
+        "null"
+      ],
+      "result": {
+        "exit": 1,
+        "signal": null,
+        "stdout": "",
+        "stderr": "error: expected one JSON argument",
+        "elapsedMs": 30
+      }
+    },
+    {
+      "args": [
+        "{"
+      ],
+      "result": {
+        "exit": 1,
+        "signal": null,
+        "stdout": "",
+        "stderr": "error: invalid JSON",
+        "elapsedMs": 29
+      }
+    },
+    {
+      "args": [
+        "{}"
+      ],
+      "result": {
+        "exit": 1,
+        "signal": null,
+        "stdout": "",
+        "stderr": "error: input must be a string",
+        "elapsedMs": 30
+      }
+    }
+  ],
+  "imported": {
+    "exit": 0,
+    "signal": null,
+    "stdout": "{\"checked\":1,\"invalidLines\":[1]}",
+    "stderr": "",
+    "elapsedMs": 30
+  }
+}

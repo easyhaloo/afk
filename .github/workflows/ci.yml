@@ -105,7 +105,7 @@ jobs:
                 skill_docs=true
                 docs=true
                 ;;
-              plugin.json|.claude-plugin/*)
+              plugin.json|.claude-plugin/*|.opencode-pkg/*)
                 plugin=true
                 ;;
             esac
@@ -244,6 +244,9 @@ jobs:
           }
           console.log(`Plugin manifests valid; version ${manifests[0].value.version}`);
           NODE
+      - name: Test OpenCode skill installation and rollback
+        if: needs.changes.outputs.plugin == 'true'
+        run: node --test .opencode-pkg/install-skills.test.mjs
       - name: Test skill guard adapters and installer
         if: needs.changes.outputs.plugin == 'true'
         working-directory: skills/jev-agent-guard

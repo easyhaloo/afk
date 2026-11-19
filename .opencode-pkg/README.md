@@ -29,7 +29,9 @@ This happens on **two** paths (same shared installer):
 
 Either way the copy is:
 
-- **Idempotent** — safe to reinstall; AFK-owned skill dirs are refreshed.
+- **Idempotent** — both install paths compare regular files byte for byte. An
+  equal-length edit to `SKILL.md` or a bundled resource refreshes the AFK-owned
+  skill directory on upgrade or rollback. Identical files keep their timestamps.
 - **Cheap on repeat** — a skill dir is only rewritten when its content actually
   differs, and repeat sessions log at most one concise line.
 - **Non-destructive** — never deletes unrelated skills already in the directory.

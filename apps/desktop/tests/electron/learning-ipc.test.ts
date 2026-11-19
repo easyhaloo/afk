@@ -33,6 +33,7 @@ const scope = "github:acme/api";
 const candidateId = "a".repeat(64);
 const trusted = { senderFrame: { url: "http://localhost:5174" } };
 const selection = { scope, candidateId, expectedVersion: 1, checkerId: "verify.domain" };
+const correctionInput = { scope, candidateId, expectedVersion: 1, correction: "PRIVATE_CORRECTION" };
 
 function invoke(channel: string, input?: unknown, event: unknown = trusted) {
   const handler = mocks.handlers.get(channel);
@@ -84,6 +85,33 @@ describe("learning Main and preload integration", () => {
     expect(mocks.withRuntime).not.toHaveBeenCalled();
   });
 
+  it("admits correction through the fixed channel with one runtime and bounded receipt", async () => {
+    const row = { id: candidateId, requestKey: "c".repeat(64), version: 1, state: "candidate",
+      proposal: { kind: "fact", title: "Approval rule", evidenceIds: ["PRIVATE_EVIDENCE"], applicability: { project: scope } } };
+    const receipt = { jobId: "b".repeat(64), scope, candidateId, candidateVersion: 1 };
+    mocks.dispatch.mockImplementation(async action => {
+      if (action === "learning.candidates") return [row];
+      if (action === "learning.correct") return receipt;
+      throw new Error("Unexpected dispatch");
+    });
+    expect(await invoke(IPC_CHANNELS.learningCorrect, correctionInput)).toEqual(receipt);
+    expect(mocks.withRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatch.mock.calls.map(([action]) => action)).toEqual(["learning.candidates", "learning.correct", "learning.candidates"]);
+    expect(mocks.dispatch).toHaveBeenCalledWith("learning.correct", correctionInput);
+    expect(row.version).toBe(1);
+    expect(row.state).toBe("candidate");
+  });
+
+  it("rejects untrusted and invalid correction requests before creating a runtime", async () => {
+    await expect(invoke(IPC_CHANNELS.learningCorrect, correctionInput, { senderFrame: { url: "https://untrusted.invalid" } })).rejects.toThrow();
+    await expect(invoke(IPC_CHANNELS.learningCorrect, { ...correctionInput, scope: "github:acme/foreign" })).rejects.toThrow("项目");
+    for (const change of [{ correction: "界".repeat(10923) }, { correction: "PRIVATE\0" }, { passed: true }, { expectedVersion: 0 }]) {
+      await expect(invoke(IPC_CHANNELS.learningCorrect, { ...correctionInput, ...change })).rejects.toThrow();
+    }
+    expect(mocks.withRuntime).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
   it("does not expose runtime errors or secrets across Main", async () => {
     mocks.dispatch.mockRejectedValueOnce(new Error("PRIVATE_RUNTIME_SECRET"));
     await expect(invoke(IPC_CHANNELS.learningJobs, { scope })).rejects.toThrow("学习操作失败，请检查学习配置、候选版本与授权后重试。");
@@ -91,17 +119,19 @@ describe("learning Main and preload integration", () => {
 
   it("exposes exactly the fixed learning methods and matching wire channels", async () => {
     const api = mocks.api!.learning;
-    expect(Object.keys(api).sort()).toEqual(["candidates", "jobs", "knowledge", "projects", "validate"]);
+    expect(Object.keys(api).sort()).toEqual(["candidates", "correct", "jobs", "knowledge", "projects", "validate"]);
     expect(Object.keys(api.knowledge).sort()).toEqual(["prepare", "publish", "reconcile"]);
     await api.projects();
     await api.jobs({ scope });
     await api.candidates({ scope });
+    await api.correct(correctionInput);
     await api.validate(selection);
     await api.knowledge.prepare({ scope, candidateId, expectedVersion: 1 });
     await api.knowledge.publish({ scope, key: "e".repeat(64) });
     await api.knowledge.reconcile({ scope });
     expect(mocks.invoke.mock.calls).toEqual([
       [IPC_CHANNELS.learningProjects], [IPC_CHANNELS.learningJobs, { scope }], [IPC_CHANNELS.learningCandidates, { scope }],
+      [IPC_CHANNELS.learningCorrect, correctionInput],
       [IPC_CHANNELS.learningValidate, selection], [IPC_CHANNELS.learningKnowledgePrepare, { scope, candidateId, expectedVersion: 1 }],
       [IPC_CHANNELS.learningKnowledgePublish, { scope, key: "e".repeat(64) }], [IPC_CHANNELS.learningKnowledgeReconcile, { scope }],
     ]);

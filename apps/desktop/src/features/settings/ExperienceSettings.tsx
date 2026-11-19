@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, RefreshCw, Search, Trash2 } from "lucide-react";
-import type { DesktopExperience } from "../../../shared/experience-contract.js";
+import { parseExperienceOutcomeQuery, type DesktopExperience, type DesktopExperienceOutcome } from "../../../shared/experience-contract.js";
 import { SelectMenu } from "../../components/SelectMenu.js";
 import { SshConfirmDialog } from "../ssh/SshConfirmDialog.js";
 import "./plugins.css";
@@ -18,6 +18,13 @@ export function ExperienceSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [outcomeRunId, setOutcomeRunId] = useState("");
+  const [outcomeWorkItemId, setOutcomeWorkItemId] = useState("");
+  const [outcomes, setOutcomes] = useState<DesktopExperienceOutcome[]>([]);
+  const [outcomeBusy, setOutcomeBusy] = useState(false);
+  const [outcomeError, setOutcomeError] = useState("");
+  const [outcomeQueried, setOutcomeQueried] = useState(false);
+  const outcomeRevision = useRef(0);
   const mounted = useRef(false);
   const revision = useRef(0);
   const changing = useRef(false);
@@ -53,13 +60,37 @@ export function ExperienceSettings() {
     }
   }
 
+  async function loadOutcomes() {
+    if (!scope || outcomeBusy || busy) return;
+    const version = ++outcomeRevision.current;
+    setOutcomeBusy(true);
+    setOutcomeError("");
+    setOutcomes([]);
+    setOutcomeQueried(false);
+    try {
+      const input = parseExperienceOutcomeQuery({ scope, runId: outcomeRunId.trim(), workItemId: outcomeWorkItemId });
+      const result = await window.afkDesktop.experiences.outcomes({ scope: input.scope, runId: input.runId, workItemId: input.workItemId });
+      if (mounted.current && version === outcomeRevision.current) { setOutcomes(result); setOutcomeQueried(true); }
+    } catch (failure) {
+      if (mounted.current && version === outcomeRevision.current) setOutcomeError(failure instanceof Error ? failure.message : "经验结果读取失败，请重试。");
+    } finally {
+      if (mounted.current && version === outcomeRevision.current) setOutcomeBusy(false);
+    }
+  }
+
+  function invalidateOutcomes() {
+    outcomeRevision.current++;
+    setOutcomes([]); setOutcomeError(""); setOutcomeQueried(false); setOutcomeBusy(false);
+  }
+
   useEffect(() => {
     mounted.current = true;
     void loadProjects();
-    return () => { mounted.current = false; revision.current++; };
+    return () => { mounted.current = false; revision.current++; outcomeRevision.current++; };
   }, []);
   useEffect(() => {
     revision.current++;
+    invalidateOutcomes(); setOutcomeRunId(""); setOutcomeWorkItemId("");
     setRecords([]); setSelected(undefined); setRevoking(undefined); setPrompt(""); setAppliedPrompt(""); setError(""); setMessage("");
     if (scope) void load(scope, "");
     else setBusy(false);
@@ -84,6 +115,27 @@ export function ExperienceSettings() {
         <button type="button" aria-label={`撤销 ${record.id}`} title="撤销经验" disabled={busy || record.status === "revoked"} onClick={() => setRevoking(record)}><Trash2 size={16} /></button>
       </div>
     </li>)}</ul>
+    <section aria-label="经验结果收据" aria-busy={outcomeBusy}>
+      <b>运行结果与复发记录</b>
+      <p className="plugin-notice">按运行和规范工作项 ID 读取历史收据。成功或已选择不代表已采纳或产生收益；未记录复发不保证没有复发。</p>
+      <form className="plugin-install" aria-label="查询经验结果" onSubmit={event => { event.preventDefault(); void loadOutcomes(); }}>
+        <label>运行 ID<input aria-label="结果运行 ID" value={outcomeRunId} maxLength={512} disabled={!scope || busy || outcomeBusy} required onChange={event => { invalidateOutcomes(); setOutcomeRunId(event.target.value); }} /></label>
+        <label>规范工作项 ID<input aria-label="结果工作项 ID" value={outcomeWorkItemId} maxLength={1024} placeholder={scope ? `${scope}#123` : "platform:project#123"} disabled={!scope || busy || outcomeBusy} required onChange={event => { invalidateOutcomes(); setOutcomeWorkItemId(event.target.value); }} /></label>
+        <button type="submit" aria-label="提交结果查询" title="查询结果收据" disabled={!scope || busy || outcomeBusy || !outcomeRunId.trim() || !outcomeWorkItemId.trim()}><Search size={16} /></button>
+      </form>
+      {outcomeError ? <p role="alert">{outcomeError}</p> : null}
+      {outcomeBusy ? <p className="plugin-notice" role="status">正在读取结果收据…</p> : outcomeQueried ? <p className="plugin-notice" role="status">{outcomes.length ? `结果收据 ${outcomes.length} 条（最多 20 条）` : "没有结果收据"}</p> : null}
+      <ul className="plugin-list">{outcomes.map(receipt => <li key={`${receipt.experienceId}:${receipt.selectionId}:${receipt.event.sequence}`}>
+        <div className="plugin-description">
+          <b>{({ succeeded: "成功", failed: "失败", cancelled: "已取消" })[receipt.event.outcome]} · {receipt.recurrence ? "已记录复发" : "本收据未记录复发"} · 收益未知</b>
+          <small>经验：{receipt.experienceId} · 选择：{receipt.selectionId}</small>
+          <small>运行：{receipt.runId} · 工作项：{receipt.workItemId}</small>
+          <small>事件：{receipt.event.type} · 序号 {receipt.event.sequence} · {receipt.event.occurredAt}</small>
+          <small>记录时间：{receipt.recordedAt}</small>
+          {receipt.publication ? <small>发布：{receipt.publication.key} · 候选 {receipt.publication.candidateId} · {`验证版本 ${receipt.publication.validatedVersion}`}</small> : null}
+        </div>
+      </li>)}</ul>
+    </section>
     {selected ? <form className="plugin-install" aria-label="独立验证经验" onSubmit={event => { event.preventDefault(); void load(scope, appliedPrompt, () => window.afkDesktop.experiences.verify({ scope, id: selected.id, runId: runId.trim(), action: action.trim() })); }}>
       <p className="plugin-notice">{selected.trigger}：独立运行必须属于同一项目并已通过完整 QA。主进程检查审计完整性、运行结果和新证据；候选失败运行不能验证自身。</p>
       <label>独立验证运行<input aria-label="独立验证运行" value={runId} maxLength={512} disabled={busy} onChange={event => setRunId(event.target.value)} required /></label>

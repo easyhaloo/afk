@@ -2,19 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import {
   parseLearningProjects, parseLearningCandidates, parseLearningJobs, parseLearningValidate,
   parseLearningValidationResult, parseLearningPublication, parseLearningPublicationResult, parseLearningReconciliation,
+  parseLearningCorrectionInput, parseLearningCorrectionResult,
   type DesktopLearningApi, type DesktopLearningCandidate, type DesktopLearningJob, type DesktopLearningPublication,
-  type DesktopLearningPublicationResult, type DesktopLearningReconciliation,
+  type DesktopLearningPublicationResult, type DesktopLearningReconciliation, type DesktopLearningCorrection,
 } from "../../../shared/learning-contract.js";
 
 type LearningState = {
   projects: string[]; scope: string; candidates: DesktopLearningCandidate[]; jobs: DesktopLearningJob[];
   selectedId: string; loading: boolean; mutating: boolean; error: string; notice: string;
   preview?: DesktopLearningPublication; publication?: DesktopLearningPublicationResult; reconciliation?: DesktopLearningReconciliation;
+  correction?: DesktopLearningCorrection;
 };
-type Operation = "validate" | "prepare" | "publish" | "reconcile";
+type Operation = "validate" | "prepare" | "publish" | "reconcile" | "correct";
 const initial: LearningState = { projects: [], scope: "", candidates: [], jobs: [], selectedId: "", loading: false, mutating: false, error: "", notice: "" };
 const readFailure = "学习数据读取失败，请检查项目来源、学习插件与验证／知识配置后重试。";
 const writeFailure = "学习操作未确认，请重新读取数据并检查候选版本、验证／知识配置与授权后重试。";
+const receiptReadFailure = "操作结果已保留，当前数据未能完成核对。请重新读取数据并核对操作结果。";
 
 export function useLearning(api: DesktopLearningApi | undefined, enabled: boolean) {
   const [state, setState] = useState<LearningState>(initial);
@@ -36,7 +39,7 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
   async function load(scope: string, inventory: boolean) {
     if (!api || !enabled || changing.current) return;
     const ticket = ++revision.current;
-    update({ scope, loading: true, error: "", notice: "", preview: undefined, publication: undefined, reconciliation: undefined,
+    update({ scope, loading: true, error: "", notice: "", preview: undefined, publication: undefined, reconciliation: undefined, correction: undefined,
       candidates: [], jobs: [], selectedId: "" });
     try {
       if (inventory) {
@@ -77,10 +80,10 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
   function selectCandidate(id: string) {
     if (changing.current || current.current.loading || !current.current.candidates.some(candidate => candidate.id === id)) return;
     revision.current++;
-    update({ selectedId: id, preview: undefined, publication: undefined, reconciliation: undefined, error: "", notice: "" });
+    update({ selectedId: id, preview: undefined, publication: undefined, reconciliation: undefined, correction: undefined, error: "", notice: "" });
   }
 
-  async function run(operation: Operation, checkerId = "") {
+  async function run(operation: Operation, value = "") {
     const snapshot = current.current;
     if (!api || !enabled || !mounted.current || changing.current || snapshot.loading || !snapshot.scope) return;
     const candidate = snapshot.candidates.find(entry => entry.id === snapshot.selectedId && entry.scope === snapshot.scope);
@@ -91,12 +94,18 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
     if (operation === "publish" && (!preview || !candidate || preview.scope !== snapshot.scope || preview.candidateId !== candidate.id
       || preview.candidateVersion !== candidate.version || !["prepared", "applied"].includes(preview.phase))) return;
     let validationInput;
+    let correctionInput;
     try {
-      if (operation === "validate" && candidate) validationInput = parseLearningValidate({ scope: snapshot.scope, candidateId: candidate.id, expectedVersion: candidate.version, checkerId });
-    } catch { return; }
+      if (operation === "validate" && candidate) validationInput = parseLearningValidate({ scope: snapshot.scope, candidateId: candidate.id, expectedVersion: candidate.version, checkerId: value });
+      if (operation === "correct" && candidate) correctionInput = parseLearningCorrectionInput({ scope: snapshot.scope, candidateId: candidate.id,
+        expectedVersion: candidate.version, correction: value });
+    } catch {
+      if (operation === "correct") update({ error: "纠正内容须为非空文本，不含空字符，且 UTF-8 不超过 32768 字节。" });
+      return;
+    }
     changing.current = true;
     const ticket = ++revision.current;
-    update({ mutating: true, error: "", notice: "", preview: undefined, publication: undefined, reconciliation: undefined });
+    update({ mutating: true, error: "", notice: "", preview: undefined, publication: undefined, reconciliation: undefined, correction: undefined });
     let next: Partial<LearningState> = {};
     try {
       let validatedVersion: number | undefined;
@@ -106,6 +115,11 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
         if (result.status === "validated" && (result.candidateId !== candidate.id || result.candidateVersion !== candidate.version)) throw new Error();
         if (result.status === "validated") validatedVersion = result.validatedVersion;
         next.notice = result.status === "validated" ? `验证通过 · v${result.candidateVersion} → v${result.validatedVersion}` : `验证受阻 · ${result.code}`;
+      } else if (operation === "correct" && correctionInput && candidate) {
+        const result = parseLearningCorrectionResult(await api.correct(correctionInput));
+        if (!active(ticket)) return;
+        if (result.scope !== snapshot.scope || result.candidateId !== candidate.id || result.candidateVersion !== candidate.version) throw new Error();
+        next = { correction: result, notice: "纠正已入队；原候选保持不变，后续提炼与验证另行执行。" };
       } else if (operation === "prepare" && candidate) {
         const result = parseLearningPublication(await api.knowledge.prepare({ scope: snapshot.scope, candidateId: candidate.id, expectedVersion: candidate.version }));
         if (!active(ticket)) return;
@@ -120,6 +134,7 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
         const notice = result.withdrawal?.status === "withdrawn" ? "知识发布已撤回，历史提交记录保留。"
           : result.withdrawal?.status === "rollback_blocked" ? "知识发布撤回受阻，需要处理恢复状态。"
           : result.errorCode !== undefined ? "知识发布返回错误，请检查发布结果。"
+          : result.experienceProjection?.blocked.length ? "知识发布已返回，经验入库受阻，请修复本机经验库后核对知识发布。"
           : result.publication.phase === "committed" ? "知识发布已提交。" : "发布尚未提交，请检查发布状态。";
         next = { publication: result, notice };
       } else if (operation === "reconcile") {
@@ -128,10 +143,13 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
         next = { reconciliation: { ...result, results: result.results.filter(entry => entry.publication.scope === snapshot.scope) }, notice: "知识发布核对已返回，请检查结果与阻断项。" };
       }
       if (!active(ticket)) return;
+      if (next.publication?.candidateRefresh === "unavailable" || next.reconciliation?.candidateRefresh === "unavailable"
+        || next.correction?.candidateRefresh === "unavailable") throw new Error();
       const result = await records(api, snapshot.scope);
       if (!active(ticket)) return;
       const updated = candidate && result.candidates.find(entry => entry.id === candidate.id);
       if (operation !== "reconcile" && !updated) throw new Error();
+      if (next.correction && updated && (updated.version !== next.correction.candidateVersion || updated.state !== candidate?.state)) throw new Error();
       if (validatedVersion !== undefined && (!updated || updated.version !== validatedVersion || updated.state !== "validated")) throw new Error();
       if (next.preview && (!updated || updated.version !== next.preview.candidateVersion || updated.state !== "validated")) throw new Error();
       if (next.publication && updated && (updated.version < next.publication.publication.candidateVersion
@@ -141,11 +159,13 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
         if (results.some(entry => entry.withdrawal?.status === "rollback_blocked")) next.notice = "知识发布核对发现撤回受阻，请处理恢复状态。";
         else if (results.some(entry => entry.withdrawal?.status === "withdrawn")) next.notice = "知识发布核对包含已撤回记录，历史提交不表示当前发布成功。";
         else if (results.some(entry => entry.errorCode !== undefined)) next.notice = "知识发布核对返回错误，请检查结果与阻断项。";
+        else if (results.some(entry => entry.experienceProjection?.blocked.length)
+          || next.reconciliation.blocked.some(entry => entry.code === "experience_projection_blocked")) next.notice = "知识发布核对发现经验入库受阻，请修复本机经验库后再次核对。";
       }
       update({ ...result, ...next });
     } catch {
-      if (active(ticket)) update({ error: writeFailure, candidates: [], jobs: [], selectedId: "", preview: undefined,
-        publication: next.publication, reconciliation: next.reconciliation });
+      if (active(ticket)) update({ error: next.publication || next.reconciliation || next.correction ? receiptReadFailure : writeFailure, candidates: [], jobs: [], selectedId: "", preview: undefined,
+        publication: next.publication, reconciliation: next.reconciliation, correction: next.correction });
     } finally {
       changing.current = false;
       if (mounted.current) update({ mutating: false });
@@ -154,5 +174,6 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
 
   return { ...state, selected: state.candidates.find(candidate => candidate.id === state.selectedId), selectScope, selectCandidate,
     refresh: () => load(current.current.scope, true), validate: (checkerId: string) => run("validate", checkerId),
+    correct: (correction: string) => run("correct", correction),
     prepare: () => run("prepare"), publish: () => run("publish"), reconcile: () => run("reconcile") };
 }

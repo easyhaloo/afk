@@ -1,5 +1,6 @@
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 import { isWorkItemProjectKey } from "@afk/core";
+import { parseWorkItemId } from "./backlog-contract.js";
 
 export type DesktopExperience = {
   id: string;
@@ -18,9 +19,22 @@ export type DesktopExperience = {
 export type ExperienceQuery = { scope: string; prompt?: string };
 export type ExperienceSelection = { scope: string; id: string };
 export type ExperienceVerifyInput = ExperienceSelection & { runId: string; action: string };
+export type ExperienceOutcomeQuery = { scope: string; runId: string; workItemId: string; limit?: number };
+export type DesktopExperienceOutcome = {
+  experienceId: string;
+  selectionId: string;
+  runId: string;
+  workItemId: string;
+  event: { sequence: number; type: "run.finished" | "qa.failed" | "failure.classified"; outcome: "succeeded" | "failed" | "cancelled"; occurredAt: string };
+  recurrence: boolean;
+  benefit: "unknown";
+  recordedAt: string;
+  publication?: { key: string; candidateId: string; validatedVersion: number };
+};
 export type DesktopExperienceApi = {
   projects(): Promise<string[]>;
   list(input: ExperienceQuery): Promise<DesktopExperience[]>;
+  outcomes(input: ExperienceOutcomeQuery): Promise<DesktopExperienceOutcome[]>;
   verify(input: ExperienceVerifyInput): Promise<DesktopExperience>;
   revoke(input: ExperienceSelection): Promise<DesktopExperience>;
 };
@@ -41,6 +55,18 @@ export function parseExperienceQuery(value: unknown): ExperienceQuery {
   const input = parseObject(value, "经验查询");
   assertExactKeys(input, ["scope", "prompt"], "经验查询");
   return { scope: parseExperienceScope(input.scope), ...(input.prompt === undefined ? {} : { prompt: text(input.prompt, "召回内容", 2000) }) };
+}
+
+export function parseExperienceOutcomeQuery(value: unknown): ExperienceOutcomeQuery & { limit: number } {
+  const input = parseObject(value, "经验结果查询");
+  assertExactKeys(input, ["scope", "runId", "workItemId", "limit"], "经验结果查询");
+  const scope = parseExperienceScope(input.scope);
+  const runId = text(input.runId, "运行 ID", 512);
+  const workItemId = parseWorkItemId(input.workItemId);
+  if (workItemId.slice(0, workItemId.lastIndexOf("#")) !== scope) throw new Error("工作项必须属于所选项目");
+  const limit = input.limit === undefined ? 20 : input.limit;
+  if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 0 || limit > 100) throw new Error("结果数量必须是 0 到 100 的安全整数");
+  return { scope, runId, workItemId, limit };
 }
 
 export function parseExperienceSelection(value: unknown): ExperienceSelection {

@@ -54,11 +54,14 @@ const workspace = join(process.env.TMPDIR, 'workspace');
 const targetRoot = join(fixture.root, 'authority');
 const extension = join(fixture.root, 'checker-package');
 for (const directory of [join(workspace, '.afk'), targetRoot, extension]) mkdirSync(directory, { recursive: true });
-const scope = fixture.policy.scope;
+const scope = process.argv[2] ?? fixture.policy.scope;
+fixture.policy.scope = scope;
+fixture.persistGrant();
+const workItemId = scope + '#42';
 const events = new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR });
 await events.append([{ id: 'observed-approval', schemaVersion: 1, type: 'agent.session_recorded',
   occurredAt: '2026-11-11T00:00:00Z', correlationId: 'approval-source',
-  context: { runId: 'approval-source', traceId: 'approval-trace', workItemId: scope + '#42',
+  context: { runId: 'approval-source', traceId: 'approval-trace', workItemId,
     profileId: 'default', attempt: 1, actor: { kind: 'system', id: 'desktop-e2e' } },
   data: { kind: 'agent.session_recorded', sessionId: 'approval-session' } }]);
 const audit = { id: 'audit-1', kind: 'audit', path: events.pathFor('approval-source'),
@@ -69,7 +72,7 @@ const store = new CandidateStore({ file });
 let candidate;
 try {
   const request = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:approval-source',
-    sourceRunId: 'approval-source', evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
+    sourceRunId: 'approval-source', workItemId, evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
     evidence: pack.entries.map(entry => entry.ref) }, pack);
   const proposal = lesson ? { ...fixture.candidate.proposal, kind: 'lesson', payload: {
     trigger: 'Publication started before approval', rootCause: 'The approval guard was missing', rootCauseStatus: 'confirmed',
@@ -77,7 +80,8 @@ try {
     prevention: ['Keep an independent approval regression'],
   } } : fixture.candidate.proposal;
   const completed = store.completeRequest(request.key, { version: 1, warnings: [],
-    candidates: [{ ...proposal, evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
+    candidates: [{ ...proposal, applicability: { ...proposal.applicability, project: scope },
+      evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
   candidate = store.getCandidate(completed.candidateIds[0]);
   assert.equal(candidate.state, 'candidate');
   assert.equal(candidate.version, 1);
@@ -126,7 +130,7 @@ console.log(JSON.stringify({ root: fixture.root, home, workspace, vault: fixture
   configurationFile, authorizationFile: fixture.authorizationFile, wikiScript: fixture.wikiScript }));
 `;
 
-export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact') {
+export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', scopeOverride?: string) {
   const temporary = mkdtempSync(path.join(realpathSync(tmpdir()), "afk-desktop-learning-"));
   const home = path.join(temporary, "home");
   const env: Record<string, string> = {
@@ -170,12 +174,11 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact') {
       }
     }
     env.PATH = [bin, "/usr/bin", "/bin"].join(path.delimiter);
-    const fixture = await node(seedScript, [kind]) as FixtureMetadata;
-    const binary = path.join(repository, "apps/cli/dist/index.js");
-    if (!existsSync(binary)) throw new Error("Build the CLI before running the Desktop learning E2E; this test does not build it.");
-    const command = async (...args: string[]) => {
-      await execute(process.execPath, [binary, ...args], { cwd: fixture.workspace, env, timeout: 15_000 });
-    };
+    const fixture = await node(seedScript, scopeOverride === undefined ? [kind] : [kind, scopeOverride]) as FixtureMetadata;
+    const binary = path.resolve(process.env.AFK_E2E_CLI_ENTRY ?? path.join(repository, "apps/cli/dist/index.js"));
+    if (!existsSync(binary)) throw new Error(`CLI entry not found: ${binary}. Build the CLI or set AFK_E2E_CLI_ENTRY.`);
+    const command = (...args: string[]) =>
+      execute(process.execPath, [binary, ...args], { cwd: fixture.workspace, env, timeout: 15_000 });
     let sequence = 0;
     const configure = async (id: string, configuration: unknown, builtin: boolean) => {
       const file = path.join(temporary, `configuration-${sequence++}.json`);
@@ -191,6 +194,38 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact') {
       knowledge: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } }, true);
     return {
       ...fixture, temporary, env, dependencies,
+      submitCorrectionFromCli: async (correction: string) => {
+        const file = path.join(temporary, "cli-correction.txt");
+        writeFileSync(file, correction, { mode: 0o600 });
+        const { stdout } = await command("experience", "correct", fixture.candidateId, "--scope", fixture.scope,
+          "--expected-version", "1", "--file", file, "--json");
+        return JSON.parse(stdout) as { jobId: string; scope: string; candidateId: string; candidateVersion: number };
+      },
+      processCorrection: (jobId: string) => node(`
+        import { dirname } from 'node:path';
+        import { CandidateStore } from ${JSON.stringify(storeModule)};
+        import { LearningWorker } from ${JSON.stringify(source("packages/runtime/src/application/learning/worker.ts"))};
+        import { ClaudeCodeProvider } from ${JSON.stringify(source("packages/runtime/src/domain/agents/claude-code.ts"))};
+        const [file, scope, requestKey] = process.argv.slice(1);
+        let calls = 0;
+        for (let pass = 0; pass < 2; pass++) {
+          const worker = new LearningWorker({ directory: dirname(file), enabled: true, dailyCalls: 2,
+            provider: new ClaudeCodeProvider(), analyze: async () => {
+              calls++;
+              return { analysisRunId: 'correction-test-analysis', output: { type: 'goal_complete',
+                distillation: { version: 1, warnings: [], candidates: [] } } };
+            } });
+          try { await worker.runOnce({ scope, requestKey }); } finally { await worker.close(); }
+        }
+        const store = new CandidateStore({ file });
+        try {
+          const attempts = store.listAnalysisAttempts(requestKey);
+          const reservedCalls = [...new Set(attempts.map(attempt => attempt.day))]
+            .reduce((total, day) => total + store.getModelCallCount(day), 0);
+          console.log(JSON.stringify({ calls, attempts: attempts.map(attempt => attempt.status), reservedCalls,
+            receipt: store.getProcessingReceipt(requestKey) }));
+        } finally { store.close(); }
+      `, [fixture.file, fixture.scope, jobId]),
       inspect: () => node(`
         import { CandidateStore } from ${JSON.stringify(storeModule)};
         const store = new CandidateStore({ file: process.argv[1] });
@@ -210,10 +245,12 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact') {
       gatherKnowledge: () => node(`
         import { KnowledgeContextProvider } from ${JSON.stringify(source("packages/runtime/src/application/learning/knowledge-runtime.ts"))};
         const provider = new KnowledgeContextProvider({ file: process.argv[1], recoveryDirectory: process.argv[2],
-          config: { wikiScript: process.argv[3], grants: [process.argv[4]] } });
+          config: { wikiScript: process.argv[3], grants: [process.argv[4]] },
+          validationConfigurationFile: process.argv[6], homeDir: process.env.HOME });
         console.log(JSON.stringify(await provider.gather({ scope: process.argv[5], prompt: 'Approval',
           applicability: { version: 'abc' }, target: { project: process.argv[5], conditions: {} } })));
-      `, [fixture.file, path.join(home, ".afk", "learning", "publications"), fixture.wikiScript, fixture.authorizationFile, fixture.scope]) as Promise<{ origin: string; content: string }[]>,
+      `, [fixture.file, path.join(home, ".afk", "learning", "publications"), fixture.wikiScript, fixture.authorizationFile,
+        fixture.scope, fixture.configurationFile]) as Promise<{ origin: string; content: string }[]>,
       calls: () => readFileSync(fixture.callsFile, "utf8").split("\n").filter(Boolean)
         .map(line => JSON.parse(line) as { operation: string; pid: number }),
       setObservedRule: (rule: string) => {

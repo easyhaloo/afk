@@ -1,24 +1,36 @@
 import { test, expect, _electron as electron, type ElectronApplication } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import path from "node:path";
 import { E2E_ENTRY, RENDERER_URL } from "./_helpers/launch.js";
 import { createLearningFixture, type LearningFixture } from "./_helpers/learning.js";
 
-async function launchLearning(fixture: LearningFixture) {
+async function launchLearning(fixture: LearningFixture, packaged?: { executable: string; gitlabUrl: string }) {
   const display: Record<string, string> = {};
   for (const name of ["DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SystemRoot"]) {
     if (process.env[name]) display[name] = process.env[name]!;
   }
   const app = await electron.launch({
-    args: [E2E_ENTRY, `--user-data-dir=${path.join(fixture.temporary, "user-data")}`],
-    env: { ...fixture.env, ...display, CI: "", AFK_E2E_NO_WINDOW: "1", AFK_E2E_PRODUCTION_MAIN: "1",
-      AFK_WORKSPACE: fixture.workspace, ELECTRON_RENDERER_URL: RENDERER_URL },
+    executablePath: packaged?.executable,
+    cwd: fixture.workspace,
+    args: [...(packaged ? (process.platform === 'darwin' ? ['--use-mock-keychain'] : []) : [E2E_ENTRY]),
+      `--user-data-dir=${path.join(fixture.temporary, "user-data")}`],
+    env: { ...fixture.env, ...display, AFK_WORKSPACE: fixture.workspace, ...(packaged
+      ? { GITLAB_URL: packaged.gitlabUrl, GITLAB_TOKEN: "local-fixture" }
+      : { CI: "", AFK_E2E_NO_WINDOW: "1", AFK_E2E_PRODUCTION_MAIN: "1", ELECTRON_RENDERER_URL: RENDERER_URL }) },
     timeout: 30_000,
   });
   try {
     const page = await app.firstWindow();
     await expect(page.locator(".primary-nav")).toBeVisible();
-    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(window => !window.isVisible()))).toBe(true);
+    if (packaged) {
+      expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true);
+      expect(new URL(page.url()).protocol).toBe("file:");
+      expect(new URL(page.url()).pathname).toContain("/app.asar/dist/");
+    } else {
+      expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(window => !window.isVisible()))).toBe(true);
+    }
     const snapshot = await page.evaluate(() => window.afkDesktop.snapshot(""));
     expect(snapshot.afk).toMatchObject({ available: true, executable: "@afk/runtime" });
     expect(snapshot.workspace.root).toBe(fixture.workspace);
@@ -32,6 +44,65 @@ async function launchLearning(fixture: LearningFixture) {
 }
 
 test.describe("production Main learning IPC with a deterministic saved oracle (no live model)", () => {
+  test("deduplicates concurrent CLI and Desktop corrections and consumes the request once", async () => {
+    const fixture = await createLearningFixture();
+    let app: ElectronApplication | undefined;
+    try {
+      const initial = await fixture.inspect();
+      const launched = await launchLearning(fixture);
+      app = launched.app;
+      const { page } = launched;
+      const beforeJobs = await page.evaluate(scope => window.afkDesktop.learning.jobs({ scope }), fixture.scope);
+      expect(await page.evaluate(() => typeof window.afkDesktop.learning.correct)).toBe("function");
+      await page.locator(".sidebar-bottom .settings-entry").click();
+      const learning = page.getByRole("region", { name: "学习治理", exact: true });
+      await learning.getByRole("button", { name: "学习项目", exact: true }).click();
+      await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
+      await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
+      await learning.getByRole("button", { name: `选择候选 ${fixture.candidateId}`, exact: true }).click();
+      const correction = "PRIVATE_CORRECTION_E2E: approval requires two independent reviewers.";
+      const input = learning.getByRole("textbox", { name: "纠正内容", exact: true });
+      await input.fill(correction);
+      expect(await page.evaluate(scope => window.afkDesktop.learning.jobs({ scope }), fixture.scope)).toEqual(beforeJobs);
+      const [cliReceipt] = await Promise.all([
+        fixture.submitCorrectionFromCli(correction),
+        learning.getByRole("button", { name: "提交纠正", exact: true }).click(),
+      ]);
+      const receipt = learning.getByRole("region", { name: "本次纠正结果", exact: true });
+      await expect(receipt).toBeVisible();
+      await expect(input).toHaveValue("");
+      await expect(learning).not.toContainText("PRIVATE_CORRECTION_E2E");
+      const jobId = await receipt.locator("code").innerText();
+      expect(jobId).toMatch(/^[a-f0-9]{64}$/);
+      expect(cliReceipt).toEqual({ jobId, scope: fixture.scope, candidateId: fixture.candidateId, candidateVersion: 1 });
+      const jobs = await page.evaluate(scope => window.afkDesktop.learning.jobs({ scope }), fixture.scope);
+      expect(jobs).toHaveLength(beforeJobs.length + 1);
+      expect(jobs.find(job => job.jobId === jobId)).toMatchObject({ scope: fixture.scope, status: "pending", attemptCount: 0 });
+      expect(await fixture.inspect()).toEqual(initial);
+      expect(fixture.calls()).toEqual([]);
+      expect(existsSync(fixture.asset)).toBe(false);
+      await input.fill(correction);
+      await learning.getByRole("button", { name: "提交纠正", exact: true }).click();
+      await expect(receipt.locator("code")).toHaveText(jobId);
+      expect(await page.evaluate(scope => window.afkDesktop.learning.jobs({ scope }), fixture.scope)).toEqual(jobs);
+      const selection = { scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1, correction };
+      for (const change of [{ expectedVersion: 2 }, { scope: "github:acme/web" }, { correction: "界".repeat(10923) }]) {
+        await expect(page.evaluate(value => window.afkDesktop.learning.correct(value), { ...selection, ...change })).rejects.toThrow();
+      }
+      expect(await fixture.inspect()).toEqual(initial);
+      expect(await page.evaluate(scope => window.afkDesktop.learning.jobs({ scope }), fixture.scope)).toEqual(jobs);
+      expect(fixture.calls()).toEqual([]);
+      expect(await fixture.processCorrection(jobId)).toEqual({ calls: 1, attempts: ["succeeded"], reservedCalls: 1,
+        receipt: expect.objectContaining({ requestKey: jobId, candidateIds: [] }) });
+      const processed = await page.evaluate(scope => window.afkDesktop.learning.jobs({ scope }), fixture.scope);
+      expect(processed).toHaveLength(jobs.length);
+      expect(processed.find(job => job.jobId === jobId)).toMatchObject({ scope: fixture.scope, status: "processed", attemptCount: 1 });
+      expect(await fixture.inspect()).toEqual(initial);
+    } finally {
+      try { await app?.close(); } finally { fixture.cleanup(); }
+    }
+  });
+
   test("preserves display authentication while isolating unrelated parent environment", async () => {
     const fixture = await createLearningFixture();
     const previousAuthority = process.env.XAUTHORITY;
@@ -57,24 +128,50 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
 
   test.setTimeout(120_000);
 
-  test("uses Settings to validate, publish and withdraw actual Wiki content after source invalidation", async () => {
-    const fixture = await createLearningFixture();
+  const executable = process.env.AFK_E2E_DESKTOP_EXECUTABLE;
+  async function checkWikiPublication(host: "localhost" | "127.0.0.1") {
+    const requests = new Set<string>();
+    const gitlab = createServer((request, response) => {
+      const route = new URL(request.url!, 'http://127.0.0.1').pathname;
+      if (request.method !== 'GET' || request.headers['private-token'] !== 'local-fixture') {
+        response.writeHead(403).end();
+        return;
+      }
+      requests.add(route);
+      const projects = ['api', 'web'].map((name, index) => ({ id: index + 1, name, path_with_namespace: `acme/${name}`,
+        default_branch: 'main', web_url: `http://${request.headers.host}/acme/${name}` }));
+      const body = route === '/api/v4/user' ? { id: 1 } : route === '/api/v4/projects' ? projects
+        : /^\/api\/v4\/projects\/[12]\/issues$/.test(route) ? [] : undefined;
+      response.writeHead(body ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
+    });
+    let fixture: LearningFixture | undefined;
     let app: ElectronApplication | undefined;
     try {
+      let packaged: { executable: string; gitlabUrl: string } | undefined;
+      if (executable) {
+        gitlab.listen(0, '127.0.0.1');
+        await once(gitlab, 'listening');
+        const address = gitlab.address();
+        if (!address || typeof address === 'string') throw new Error('Missing loopback port');
+        packaged = { executable: path.resolve(executable), gitlabUrl: `http://${host}:${address.port}` };
+      }
+      fixture = await createLearningFixture('fact', packaged && `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`);
+      const otherProject = fixture.scope.replace(/\/api$/, '/web');
       const initial = await fixture.inspect();
       expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
       const navigation = fixture.navigation();
       expect(existsSync(fixture.asset)).toBe(false);
-      const launched = await launchLearning(fixture);
+      const launched = await launchLearning(fixture, packaged);
       app = launched.app;
       const { page } = launched;
       expect(await page.evaluate(() => window.afkDesktop.learning.projects())).toContain(fixture.scope);
       expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), fixture.scope))
         .toEqual([expect.objectContaining({ id: fixture.candidateId, state: "candidate", version: 1 })]);
-      expect(await page.evaluate(() => window.afkDesktop.learning.candidates({ scope: "github:acme/web" }))).toEqual([]);
+      expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), otherProject)).toEqual([]);
+      if (packaged) expect([...requests]).toEqual(expect.arrayContaining(['/api/v4/user', '/api/v4/projects', '/api/v4/projects/1/issues']));
       const selection = { scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1, checkerId: fixture.checkerId };
       await expect(page.evaluate(input => window.afkDesktop.learning.validate(input), { ...selection, expectedVersion: 2 })).rejects.toThrow();
-      await expect(page.evaluate(input => window.afkDesktop.learning.validate(input), { ...selection, scope: "github:acme/web" })).rejects.toThrow();
+      await expect(page.evaluate(input => window.afkDesktop.learning.validate(input), { ...selection, scope: otherProject })).rejects.toThrow();
       await expect(page.evaluate(input => window.afkDesktop.learning.knowledge.prepare(input), {
         scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1,
       })).rejects.toThrow();
@@ -125,6 +222,7 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
       await expect(candidate).toContainText("已发布 · v3");
       const asset = readFileSync(fixture.asset, "utf8");
       expect(asset).toContain("Approve before publishing");
+      if (host === "127.0.0.1") expect(asset).not.toContain(host);
       for (const contents of fixture.navigation()) expect(contents.split("[[知识/Approval]]")).toHaveLength(2);
       const committed = await fixture.inspect();
       expect(committed.candidate).toMatchObject({ state: "published", version: 3 });
@@ -169,12 +267,29 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
         withdrawal: { status: "withdrawn" } })]);
       const staleReplay = await page.evaluate(input => window.afkDesktop.learning.knowledge.publish(input), publicationInput);
       expect(staleReplay.withdrawal).toEqual({ status: "withdrawn" });
+      if (packaged) {
+        await app.close();
+        app = undefined;
+        const restarted = await launchLearning(fixture, packaged);
+        app = restarted.app;
+        const replay = await restarted.page.evaluate(input => window.afkDesktop.learning.knowledge.publish(input), publicationInput);
+        expect(replay.withdrawal).toEqual({ status: "withdrawn" });
+        expect(await fixture.gatherKnowledge()).toEqual([]);
+        expect(readFileSync(fixture.asset, "utf8")).toContain("knowledge_status: revoked");
+      }
       expect(fixture.calls()).toHaveLength(1);
       expect(await fixture.inspect()).toEqual(invalidated);
     } finally {
-      try { await app?.close(); } finally { fixture.cleanup(); }
+      try { await app?.close(); } finally {
+        if (gitlab.listening) await new Promise<void>((resolve, reject) => gitlab.close(error => error ? reject(error) : resolve()));
+        fixture?.cleanup();
+      }
     }
-  });
+  }
+
+  test(`uses Settings to validate, publish and withdraw actual Wiki content after source invalidation (${executable ? 'packaged' : 'source'})`,
+    () => checkWikiPublication("localhost"));
+  if (executable) test("publishes and withdraws knowledge without exposing the project IP (packaged)", () => checkWikiPublication("127.0.0.1"));
 
   test("shows missing independent lesson QA without validating or publishing", async () => {
     const fixture = await createLearningFixture("lesson");

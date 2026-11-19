@@ -34,6 +34,7 @@
       "assets/**",
       "dist/**",
       "dist-electron/**",
+      "!dist-electron/e2e/**",
       "package.json"
     ],
     "icon": "assets/afk-control.png",

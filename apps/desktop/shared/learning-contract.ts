@@ -7,6 +7,7 @@ type RuntimePublicationResult = Awaited<ReturnType<typeof publishConfiguredKnowl
 type Validated = Extract<LearningValidationResult, { status: "validated" }>;
 export type LearningQuery = { scope: string };
 export type LearningSelection = LearningQuery & { candidateId: string; expectedVersion: number };
+export type LearningCorrectionInput = LearningSelection & { correction: string };
 export type LearningValidateInput = LearningSelection & { checkerId: string };
 export type KnowledgePrepareInput = LearningSelection & { targetRef?: string };
 export type KnowledgePublishInput = LearningQuery & { key: string };
@@ -14,16 +15,21 @@ export type DesktopLearningJob = Pick<LearningJob, "jobId" | "scope" | "status">
 export type DesktopLearningCandidate = Pick<LearningCandidate, "id" | "requestKey" | "version" | "state"> & {
   scope: string; kind: LearningCandidate["proposal"]["kind"]; title: string; evidenceCount: number; targetRef?: string;
 };
+export type DesktopLearningCorrection = { jobId: string; scope: string; candidateId: string; candidateVersion: number;
+  candidateRefresh?: "unavailable" };
 export type DesktopLearningValidationResult = Extract<LearningValidationResult, { status: "blocked" }>
   | Pick<Validated, "status" | "candidateId" | "candidateVersion" | "validatedVersion">;
 export type DesktopLearningPublication = Pick<RuntimePublication, "key" | "candidateId" | "candidateVersion" | "targetRef" | "phase" | "supersededBy"> & { scope: string };
 export type DesktopLearningPublicationResult = { publication: DesktopLearningPublication; wikiStatus?: RuntimePublicationResult["wikiStatus"];
-  errorCode?: number; withdrawal?: { status: NonNullable<RuntimePublicationResult["withdrawal"]>["status"] } };
-export type DesktopLearningReconciliation = { results: DesktopLearningPublicationResult[]; blocked: { code: typeof BLOCKED_CODES[number] }[] };
+  errorCode?: number; withdrawal?: { status: NonNullable<RuntimePublicationResult["withdrawal"]>["status"] };
+  experienceProjection?: RuntimePublicationResult["experienceProjection"]; candidateRefresh?: "unavailable" };
+export type DesktopLearningReconciliation = { results: DesktopLearningPublicationResult[]; blocked: { code: typeof BLOCKED_CODES[number] }[];
+  candidateRefresh?: "unavailable" };
 export type DesktopLearningApi = {
   projects(): Promise<string[]>;
   jobs(input: LearningQuery): Promise<DesktopLearningJob[]>;
   candidates(input: LearningQuery): Promise<DesktopLearningCandidate[]>;
+  correct(input: LearningCorrectionInput): Promise<DesktopLearningCorrection>;
   validate(input: LearningValidateInput): Promise<DesktopLearningValidationResult>;
   knowledge: {
     prepare(input: KnowledgePrepareInput): Promise<DesktopLearningPublication>;
@@ -32,7 +38,7 @@ export type DesktopLearningApi = {
   };
 };
 
-export const LEARNING_LIMITS = { records: 100, backendRecords: 2000, projects: 2000, bytes: 256 * 1024 } as const;
+export const LEARNING_LIMITS = { records: 100, backendRecords: 2000, projects: 2000, bytes: 256 * 1024, correctionBytes: 32 * 1024 } as const;
 const STATES = ["candidate", "conflict", "validated", "published", "rejected", "superseded", "revoked"] as const;
 const KINDS = ["fact", "process", "lesson", "skill", "tool"] as const satisfies readonly LearningCandidate["proposal"]["kind"][];
 const PHASES = ["prepared", "applied", "committed", "conflict", "superseded"] as const;
@@ -41,7 +47,7 @@ const VALIDATION_CODES = ["invalid_input", "candidate_unavailable", "scope_misma
   "checker_changed", "target_mismatch", "verification_failed", "invalid_receipt", "output_limit", "binding_mismatch", "insufficient_coverage",
   "assertion_failed", "cancelled", "timed_out", "storage_failed", "commit_guard_unavailable", "qa_unconfigured", "qa_not_independent",
   "audit_unavailable", "audit_changed", "qa_unverified"] as const satisfies readonly Extract<LearningValidationResult, { status: "blocked" }>["code"][];
-const BLOCKED_CODES = ["publication_recovery_blocked", "knowledge_grant_unavailable", "knowledge_target_ambiguous", "knowledge_configuration_unavailable"] as const;
+const BLOCKED_CODES = ["publication_recovery_blocked", "knowledge_grant_unavailable", "knowledge_target_ambiguous", "knowledge_configuration_unavailable", "experience_projection_blocked"] as const;
 
 function checked<Result>(operation: () => Result): Result {
   try {
@@ -123,6 +129,31 @@ export function parseLearningQuery(value: unknown): LearningQuery {
   return checked(() => ({ scope: parseLearningScope(object(value, ["scope"]).scope) }));
 }
 
+export function parseLearningCorrectionInput(value: unknown): LearningCorrectionInput {
+  return checked(() => {
+    const keys = ["scope", "candidateId", "expectedVersion", "correction"];
+    const input = object(value, keys);
+    if (!keys.every(key => Object.hasOwn(input, key))) throw new Error();
+    const correction = input.correction;
+    if (typeof correction !== "string" || correction.length > LEARNING_LIMITS.correctionBytes || correction.includes("\0")
+      || new TextEncoder().encode(correction).length > LEARNING_LIMITS.correctionBytes || !correction.trim()) throw new Error();
+    return { scope: parseLearningScope(input.scope), candidateId: digest(input.candidateId),
+      expectedVersion: integer(input.expectedVersion, 1), correction };
+  });
+}
+
+export function parseLearningCorrectionResult(value: unknown): DesktopLearningCorrection {
+  return checked(() => {
+    const keys = ["jobId", "scope", "candidateId", "candidateVersion"];
+    const input = object(value, [...keys, "candidateRefresh"]);
+    if (!keys.every(key => Object.hasOwn(input, key))) throw new Error();
+    return { jobId: digest(input.jobId), scope: parseLearningScope(input.scope), candidateId: digest(input.candidateId),
+      candidateVersion: integer(input.candidateVersion, 1),
+      ...(Object.hasOwn(input, "candidateRefresh") && input.candidateRefresh !== undefined
+        ? { candidateRefresh: choice(input.candidateRefresh, ["unavailable"]) } : {}) };
+  });
+}
+
 export function parseLearningValidate(value: unknown): LearningValidateInput {
   return checked(() => {
     const input = object(value, ["scope", "candidateId", "expectedVersion", "checkerId"]);
@@ -194,19 +225,22 @@ export function parseLearningPublication(value: unknown): DesktopLearningPublica
 
 export function parseLearningPublicationResult(value: unknown): DesktopLearningPublicationResult {
   return checked(() => {
-    const input = object(value, ["publication", "wikiStatus", "errorCode", "withdrawal"]);
+    const input = object(value, ["publication", "wikiStatus", "errorCode", "withdrawal", "experienceProjection", "candidateRefresh"]);
     return { publication: parseLearningPublication(input.publication),
       ...(input.wikiStatus === undefined ? {} : { wikiStatus: choice(input.wikiStatus, ["preview", "applied", "unchanged"]) }),
       ...(input.errorCode === undefined ? {} : { errorCode: integer(input.errorCode, 1, 255) }),
-      ...(input.withdrawal === undefined ? {} : { withdrawal: { status: choice(object(input.withdrawal, ["status"]).status, ["withdrawn", "rollback_blocked"]) } }) };
+      ...(input.withdrawal === undefined ? {} : { withdrawal: { status: choice(object(input.withdrawal, ["status"]).status, ["withdrawn", "rollback_blocked"]) } }),
+      ...(input.experienceProjection === undefined ? {} : { experienceProjection: { blocked: list(object(input.experienceProjection, ["blocked"]).blocked, digest) } }),
+      ...(input.candidateRefresh === undefined ? {} : { candidateRefresh: choice(input.candidateRefresh, ["unavailable"]) }) };
   });
 }
 
 export function parseLearningReconciliation(value: unknown): DesktopLearningReconciliation {
   return checked(() => {
-    const input = object(value, ["results", "blocked"]);
+    const input = object(value, ["results", "blocked", "candidateRefresh"]);
     return { results: list(input.results, parseLearningPublicationResult),
-      blocked: list(input.blocked, entry => ({ code: choice(object(entry, ["code"]).code, BLOCKED_CODES) })) };
+      blocked: list(input.blocked, entry => ({ code: choice(object(entry, ["code"]).code, BLOCKED_CODES) })),
+      ...(input.candidateRefresh === undefined ? {} : { candidateRefresh: choice(input.candidateRefresh, ["unavailable"]) }) };
   });
 }
 

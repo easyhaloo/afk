@@ -56,8 +56,8 @@ import { createPluginService } from "../services/plugin-service.js";
 import { createGoogleAuthService } from "../services/google-auth-service.js";
 import { createExperienceService } from "../services/experience-service.js";
 import { createLearningService } from "../services/learning-service.js";
-import { parseLearningQuery, parseLearningValidate, parseKnowledgePrepare, parseKnowledgePublish } from "../../shared/learning-contract.js";
-import { parseExperienceQuery, parseExperienceSelection, parseExperienceVerify, parseNoInput } from "../../shared/experience-contract.js";
+import { parseLearningQuery, parseLearningValidate, parseLearningCorrectionInput, parseKnowledgePrepare, parseKnowledgePublish } from "../../shared/learning-contract.js";
+import { parseExperienceOutcomeQuery, parseExperienceQuery, parseExperienceSelection, parseExperienceVerify, parseNoInput } from "../../shared/experience-contract.js";
 import { parsePluginEnabled, parsePluginId, parsePluginInstall } from "../../shared/plugin-contract.js";
 
 type HandlerSchema = (value: unknown) => unknown;
@@ -390,11 +390,13 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   });
   registerHandler(IPC_CHANNELS.experiencesProjects, parseNoInput, () => experienceService.projects());
   registerHandler(IPC_CHANNELS.experiencesList, parseExperienceQuery, input => experienceService.list(input));
+  registerHandler(IPC_CHANNELS.experiencesOutcomes, parseExperienceOutcomeQuery, input => experienceService.outcomes(input));
   registerHandler(IPC_CHANNELS.experiencesVerify, parseExperienceVerify, input => experienceService.verify(input));
   registerHandler(IPC_CHANNELS.experiencesRevoke, parseExperienceSelection, input => experienceService.revoke(input));
   registerHandler(IPC_CHANNELS.learningProjects, parseNoInput, () => learningService.projects());
   registerHandler(IPC_CHANNELS.learningJobs, parseLearningQuery, input => learningService.jobs(input));
   registerHandler(IPC_CHANNELS.learningCandidates, parseLearningQuery, input => learningService.candidates(input));
+  registerHandler(IPC_CHANNELS.learningCorrect, parseLearningCorrectionInput, input => learningService.correct(input));
   registerHandler(IPC_CHANNELS.learningValidate, parseLearningValidate, input => learningService.validate(input));
   registerHandler(IPC_CHANNELS.learningKnowledgePrepare, parseKnowledgePrepare, input => learningService.knowledge.prepare(input));
   registerHandler(IPC_CHANNELS.learningKnowledgePublish, parseKnowledgePublish, input => learningService.knowledge.publish(input));

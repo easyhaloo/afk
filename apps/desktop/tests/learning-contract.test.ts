@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   parseLearningScope, parseLearningQuery, parseLearningValidate, parseKnowledgePrepare, parseKnowledgePublish,
   parseLearningCandidate, parseLearningJob, parseLearningValidationResult, parseLearningPublication,
   parseLearningPublicationResult, parseLearningReconciliation, parseLearningCandidates,
+  parseLearningCorrectionInput, parseLearningCorrectionResult,
 } from "../shared/learning-contract.js";
 
 const scope = "github:acme/api";
@@ -12,6 +13,58 @@ const candidate = { id: candidateId, requestKey: key, scope, version: 2, state: 
 const publication = { key, scope, candidateId, candidateVersion: 3, phase: "prepared", targetRef: "wiki:approval" };
 
 describe("desktop learning wire contract", () => {
+  it("accepts bounded corrections and safe version boundaries without normalizing the raw text", () => {
+    for (const correction of ["  Correction\nwith details  ", "x".repeat(32768), "界".repeat(10922) + "ab"]) {
+      const input = { scope, candidateId, expectedVersion: Number.MAX_SAFE_INTEGER, correction };
+      expect(parseLearningCorrectionInput(input)).toEqual(input);
+      expect(parseLearningCorrectionInput(Object.assign(Object.create(null), input))).toEqual(input);
+    }
+    const receipt = { jobId: key, scope, candidateId, candidateVersion: Number.MAX_SAFE_INTEGER };
+    expect(parseLearningCorrectionResult(receipt)).toEqual(receipt);
+    expect(parseLearningCorrectionResult({ ...receipt, candidateRefresh: "unavailable" }))
+      .toEqual({ ...receipt, candidateRefresh: "unavailable" });
+  });
+
+  it.each(["", " \n\t", "SECRET\0correction", "x".repeat(32769), "界".repeat(10923), " ".repeat(32768) + "x", 123, null])(
+    "rejects invalid raw correction case %# without returning its contents", correction => {
+      expect(() => parseLearningCorrectionInput({ scope, candidateId, expectedVersion: 1, correction }))
+        .toThrow(/^学习数据无效，请刷新后重试。$/);
+    });
+
+  it("rejects correction requests with foreign object shapes without invoking accessors", () => {
+    const input = { scope, candidateId, expectedVersion: 1, correction: "SECRET correction" };
+    const accessor = vi.fn(() => { throw new Error("SECRET getter"); });
+    const getter = Object.defineProperty({ ...input }, "correction", { enumerable: true, get: accessor });
+    for (const value of [Object.create(input), Object.assign(Object.create({ hidden: true }), input), getter,
+      { ...input, [Symbol("secret")]: true }, Object.defineProperty({ ...input }, "hidden", { value: "SECRET" }),
+      { ...input, command: "SECRET" }, { ...input, correction: undefined }]) {
+      expect(() => parseLearningCorrectionInput(value)).toThrow(/^学习数据无效，请刷新后重试。$/);
+    }
+    expect(accessor).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid correction identities, versions and noncanonical scopes", () => {
+    const input = { scope, candidateId, expectedVersion: 1, correction: "Correction" };
+    for (const change of [{ scope: "github:acme/api " }, { scope: "github:acme" }, { candidateId: "A".repeat(64) },
+      { candidateId: key.slice(1) }, ...[0, -1, 1.5, "1", Infinity, NaN, Number.MAX_SAFE_INTEGER + 1].map(expectedVersion => ({ expectedVersion }))]) {
+      expect(() => parseLearningCorrectionInput({ ...input, ...change })).toThrow("学习数据无效");
+    }
+  });
+
+  it("strictly parses correction receipts without text, diagnostics or unsafe versions", () => {
+    const receipt = { jobId: key, scope, candidateId, candidateVersion: 1 };
+    for (const change of [{ jobId: "A".repeat(64) }, { candidateId: "a" }, { scope: "github:acme/api " },
+      { correction: "SECRET correction" }, { error: "SECRET" }, { candidateRefresh: "SECRET" }, { candidateRefresh: null },
+      ...[0, -1, 1.5, "1", Number.MAX_SAFE_INTEGER + 1].map(candidateVersion => ({ candidateVersion }))]) {
+      expect(() => parseLearningCorrectionResult({ ...receipt, ...change })).toThrow(/^学习数据无效，请刷新后重试。$/);
+    }
+    expect(() => parseLearningCorrectionResult(Object.create(receipt))).toThrow("学习数据无效");
+    expect(() => parseLearningCorrectionResult({ ...receipt, [Symbol("secret")]: true })).toThrow("学习数据无效");
+    expect(() => parseLearningCorrectionResult(Object.defineProperty({ ...receipt }, "jobId", {
+      enumerable: true, get() { throw new Error("SECRET getter"); },
+    }))).toThrow(/^学习数据无效，请刷新后重试。$/);
+  });
+
   it("accepts canonical project scopes and fixed object requests", () => {
     for (const value of [scope, "gitlab:group/sub/repo", "gitlab:git.example:8443/group/repo"]) expect(parseLearningScope(value)).toBe(value);
     expect(parseLearningQuery({ scope })).toEqual({ scope });
@@ -81,10 +134,37 @@ describe("desktop learning wire contract", () => {
     expect(() => parseLearningValidationResult({ status: "blocked", code, audit: "/private/qa.jsonl" })).toThrow();
   });
 
+  it.each([false, true])("preserves committed receipts and bounded experience projection metadata (blocked: %s)", blocked => {
+    const result = { publication: { ...publication, phase: "committed" }, experienceProjection: { blocked: blocked ? [key] : [] } };
+    expect(parseLearningPublicationResult(result)).toEqual(result);
+    expect(parseLearningReconciliation({ results: [result], blocked: [{ code: "experience_projection_blocked" }] }))
+      .toEqual({ results: [result], blocked: [{ code: "experience_projection_blocked" }] });
+    expect(JSON.parse(JSON.stringify(parseLearningPublicationResult(result)))).toEqual(result);
+  });
+
+  it.each([null, {}, { blocked: key }, { blocked: ["/private/experience.sqlite"] }, { blocked: ["A".repeat(64)] },
+    { blocked: Array.from({ length: 101 }, () => key) }, { blocked: [key], diagnostic: "SECRET" }])("rejects malformed experience projection metadata %j", experienceProjection => {
+    expect(() => parseLearningPublicationResult({ publication, experienceProjection })).toThrow("学习数据无效");
+  });
+
+  it("preserves bounded candidate refresh failures with publication and reconciliation receipts", () => {
+    const result = { publication, candidateRefresh: "unavailable" };
+    expect(parseLearningPublicationResult(result)).toEqual(result);
+    const reconciliation = { results: [result], blocked: [], candidateRefresh: "unavailable" };
+    expect(parseLearningReconciliation(reconciliation)).toEqual(reconciliation);
+  });
+
+  it.each([true, false, null, "SECRET", { message: "SECRET" }])("rejects invalid candidate refresh status %j", candidateRefresh => {
+    expect(() => parseLearningPublicationResult({ publication, candidateRefresh })).toThrow("学习数据无效");
+    expect(() => parseLearningReconciliation({ results: [], blocked: [], candidateRefresh })).toThrow("学习数据无效");
+  });
+
   it("bounds reconciliation DTOs and refuses raw blocked keys and diagnostic text", () => {
     expect(parseLearningReconciliation({ results: [{ publication }], blocked: [{ code: "knowledge_grant_unavailable" }] }).results).toHaveLength(1);
     expect(() => parseLearningReconciliation({ results: Array.from({ length: 101 }, () => ({ publication })), blocked: [] })).toThrow();
     expect(() => parseLearningReconciliation({ results: [], blocked: [{ code: "publication_recovery_blocked", key }] })).toThrow();
+    expect(() => parseLearningReconciliation({ results: [], blocked: [{ code: "experience_projection_blocked", key }] })).toThrow();
+    expect(() => parseLearningReconciliation({ results: [], blocked: [{ code: "experience_projection_blocked", diagnostic: "SECRET" }] })).toThrow();
     expect(() => parseLearningReconciliation({ results: [], blocked: [{ code: "SECRET" }] })).toThrow();
   });
 

@@ -1,5 +1,6 @@
-import { ExperienceStore, experienceScope, experienceStorePath, verifyExperienceRun, type ExperienceRecord } from "@afk/runtime/execution";
-import { parseExperienceQuery, parseExperienceScope, parseExperienceSelection, parseExperienceVerify, type DesktopExperience, type ExperienceQuery, type ExperienceSelection, type ExperienceVerifyInput } from "../../shared/experience-contract.js";
+import { homedir } from "node:os";
+import { ExperienceStore, experienceScope, experienceStorePath, verifyExperienceRun, type ExperienceRecord, type ExperienceOutcomeReceipt, type KnowledgeRuntimeOptions } from "@afk/runtime/execution";
+import { parseExperienceOutcomeQuery, parseExperienceQuery, parseExperienceScope, parseExperienceSelection, parseExperienceVerify, type DesktopExperience, type DesktopExperienceOutcome, type ExperienceOutcomeQuery, type ExperienceQuery, type ExperienceSelection, type ExperienceVerifyInput } from "../../shared/experience-contract.js";
 
 function project(record: ExperienceRecord): DesktopExperience {
   return { id: record.id, scope: record.scope, status: record.status, trigger: record.trigger, rootCause: record.rootCause, action: record.action,
@@ -7,12 +8,23 @@ function project(record: ExperienceRecord): DesktopExperience {
     ...(record.verifiedEvidence ? { verifiedEvidence: { runId: record.verifiedEvidence.runId, evidence: [...record.verifiedEvidence.evidence], verifiedAt: record.verifiedEvidence.verifiedAt } } : {}) };
 }
 
+function projectOutcome(receipt: ExperienceOutcomeReceipt): DesktopExperienceOutcome {
+  const { selected, event } = receipt;
+  return { experienceId: selected.experienceId, selectionId: selected.selectionId, runId: selected.source.runId, workItemId: selected.source.workItemId,
+    event: { sequence: event.sequence, type: event.type, outcome: event.outcome, occurredAt: event.occurredAt },
+    recurrence: receipt.recurrence, benefit: receipt.benefit, recordedAt: receipt.recordedAt,
+    ...(selected.publication ? { publication: { key: selected.publication.key, candidateId: selected.publication.candidateId, validatedVersion: selected.publication.validatedVersion } } : {}) };
+}
+
 export function createExperienceService(options: {
   projects: () => Promise<string[]>;
   file?: string;
+  homeDir?: string;
+  knowledge?: KnowledgeRuntimeOptions;
   verifyRun?: typeof verifyExperienceRun;
 }) {
-  const file = options.file ?? experienceStorePath();
+  const homeDir = options.homeDir ?? (options.file === undefined ? homedir() : undefined);
+  const file = options.file ?? experienceStorePath(homeDir);
   async function projects() {
     try { return [...new Set((await options.projects()).map(parseExperienceScope))]; }
     catch { throw new Error("无法读取项目范围，请刷新工作项来源并检查 Provider 配置。"); }
@@ -21,16 +33,22 @@ export function createExperienceService(options: {
     if (!(await projects()).includes(scope)) throw new Error("该项目不在当前工作项来源中，请重新选择项目。");
     experienceScope(`${scope}#1`);
     let store: ExperienceStore | undefined;
+    let result: Result;
     try {
-      store = new ExperienceStore({ file });
-      return await operation(store);
+      store = new ExperienceStore({ file, homeDir, knowledge: options.knowledge });
+      result = await operation(store);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (message === "Experience not found") throw new Error("当前项目中找不到该经验，请刷新列表。");
       if (/independent|new evidence|fresh run|another project|intact recorded run|successful/.test(message)) throw new Error("验证未通过：需要同一项目中完整、成功的独立 QA 运行及新证据，不能使用原失败运行。");
       if (/revoked|Revoked|Expired|expired|saturated|limit reached/.test(message)) throw new Error("经验已撤销、过期或达到证据上限，无法验证。请刷新并检查记录。");
       throw new Error("经验操作失败，请检查本机经验库、审计记录和已验证修正后重试。");
-    } finally { store?.close(); }
+    } finally {
+      try { store?.close(); }
+      catch { throw new Error("经验操作失败，请检查本机经验库、审计记录和已验证修正后重试。"); }
+    }
+    if (!(await projects()).includes(scope)) throw new Error("该项目不在当前工作项来源中，请重新选择项目。");
+    return result;
   }
   function requireRecord(store: ExperienceStore, input: ExperienceSelection) {
     const record = store.get(input.id, input.scope);
@@ -39,6 +57,11 @@ export function createExperienceService(options: {
   }
   return {
     projects,
+    async outcomes(raw: ExperienceOutcomeQuery): Promise<DesktopExperienceOutcome[]> {
+      const input = parseExperienceOutcomeQuery(raw);
+      return scoped(input.scope, store => store.outcomeReceipts({ scope: input.scope,
+        source: { runId: input.runId, workItemId: input.workItemId }, limit: input.limit }).map(projectOutcome));
+    },
     async list(raw: ExperienceQuery): Promise<DesktopExperience[]> {
       const input = parseExperienceQuery(raw);
       return scoped(input.scope, store => (input.prompt ? store.recall({ ...input, prompt: input.prompt, limit: 20, maxChars: 32000 }) : store.list({ scope: input.scope, limit: 100 })).map(project));

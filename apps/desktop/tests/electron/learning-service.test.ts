@@ -11,6 +11,8 @@ const foreignId = "f".repeat(64);
 const key = "b".repeat(64);
 const requestKey = "c".repeat(64);
 const selection = { scope, candidateId, expectedVersion: 2 };
+const correctionInput = { ...selection, correction: "  SECRET correction\nwith details  " };
+const correctionReceipt = { jobId: key, scope, candidateId, candidateVersion: 2 };
 const validated: LearningValidationResult = { status: "validated", candidateId, candidateVersion: 2, validatedVersion: 3,
   executionId: "11111111-1111-4111-8111-111111111111", receiptDigest: "d".repeat(64) };
 
@@ -32,6 +34,7 @@ function fixture() {
   const dispatchSystemAction = vi.fn(async (action: string, _input: unknown): Promise<unknown> => {
     if (action === "learning.jobs") return [job, { ...job, scope: other, jobId: foreignId }];
     if (action === "learning.candidates") return rows;
+    if (action === "learning.correct") return correctionReceipt;
     if (action === "learning.validate") { rows = rows.map(row => row.id === candidateId ? { ...row, version: 3, state: "validated" } : row); return validated; }
     if (action === "learning.knowledge.prepare") return publication;
     if (action === "learning.knowledge.publish") {
@@ -46,6 +49,275 @@ function fixture() {
 }
 
 describe("desktop learning service", () => {
+  it("submits only a correction action and returns the bound receipt without changing the candidate", async () => {
+    const data = fixture();
+    const before = structuredClone(data.rows);
+    expect(await data.service.correct(correctionInput)).toEqual(correctionReceipt);
+    expect(data.dispatchSystemAction.mock.calls).toEqual([
+      ["learning.candidates", { scope }], ["learning.correct", correctionInput], ["learning.candidates", { scope }],
+    ]);
+    expect(data.rows).toEqual(before);
+    expect(JSON.stringify(await data.service.correct(correctionInput))).not.toContain("SECRET");
+  });
+
+  it.each(["x".repeat(32768), "界".repeat(10922) + "ab"])("dispatches a raw correction at the UTF-8 limit, case %#", async correction => {
+    const { service, dispatchSystemAction } = fixture();
+    expect(await service.correct({ ...selection, correction })).toEqual(correctionReceipt);
+    expect(dispatchSystemAction).toHaveBeenCalledWith("learning.correct", { ...selection, correction });
+  });
+
+  it("accepts the maximum safe version without requiring a successor version", async () => {
+    const data = fixture();
+    data.rows = [{ ...candidate(), version: Number.MAX_SAFE_INTEGER }];
+    data.dispatchSystemAction.mockImplementation(async action => action === "learning.candidates" ? data.rows
+      : { ...correctionReceipt, candidateVersion: Number.MAX_SAFE_INTEGER });
+    expect(await data.service.correct({ ...correctionInput, expectedVersion: Number.MAX_SAFE_INTEGER }))
+      .toEqual({ ...correctionReceipt, candidateVersion: Number.MAX_SAFE_INTEGER });
+  });
+
+  it("rejects inventory revocation during lease release after a valid correction postflight", async () => {
+    const data = fixture();
+    const service = createLearningService({ projects: data.projects, withRuntime: async operation => {
+      try { return await operation({ dispatchSystemAction: data.dispatchSystemAction }); }
+      finally { data.projects.mockResolvedValue([]); }
+    } });
+    await expect(service.correct(correctionInput)).rejects.toThrow("不在当前工作项来源");
+    expect(data.dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.candidates", "learning.correct", "learning.candidates"]);
+  });
+
+  it("rejects malformed input before inventory lookup or acquiring a runtime", async () => {
+    const data = fixture();
+    let acquired = 0;
+    const service = createLearningService({ projects: data.projects, withRuntime: operation => {
+      acquired++;
+      return operation({ dispatchSystemAction: data.dispatchSystemAction });
+    } });
+    for (const change of [{ correction: "" }, { correction: " \n\t" }, { correction: "SECRET\0" },
+      { correction: "x".repeat(32769) }, { correction: "界".repeat(10923) }, { correction: " ".repeat(32768) + "x" },
+      { expectedVersion: 0 }, { expectedVersion: 1.5 }, { expectedVersion: Number.MAX_SAFE_INTEGER + 1 },
+      { scope: "github:acme/api " }, { candidateId: "A".repeat(64) }, { command: "SECRET" }]) {
+      await expect(service.correct({ ...correctionInput, ...change } as never)).rejects.toThrow(/^学习数据无效，请刷新后重试。$/);
+    }
+    expect(acquired).toBe(0);
+    expect(data.projects).not.toHaveBeenCalled();
+    expect(data.dispatchSystemAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown projects before acquiring a runtime", async () => {
+    const data = fixture();
+    let acquired = 0;
+    const service = createLearningService({ projects: data.projects, withRuntime: operation => {
+      acquired++;
+      return operation({ dispatchSystemAction: data.dispatchSystemAction });
+    } });
+    await expect(service.correct({ ...correctionInput, scope: "github:unknown/repo" })).rejects.toThrow("不在当前工作项来源");
+    expect(acquired).toBe(0);
+    expect(data.dispatchSystemAction).not.toHaveBeenCalled();
+  });
+
+  it.each([{ candidateId: foreignId }, { candidateId: "e".repeat(64) }, { expectedVersion: 1 }, { expectedVersion: 3 }])(
+    "refuses wrong-scope, missing or stale correction targets, case %#", async change => {
+      const { service, dispatchSystemAction } = fixture();
+      await expect(service.correct({ ...correctionInput, ...change })).rejects.toThrow("当前项目");
+      expect(dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.candidates"]);
+    });
+
+  it.each([false, true])("rechecks permission before dispatch and after submission (submitted: %s)", async submitted => {
+    const data = fixture();
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") {
+        if (!submitted) data.projects.mockResolvedValue([]);
+        return data.rows;
+      }
+      data.projects.mockResolvedValue([]);
+      return correctionReceipt;
+    });
+    await expect(data.service.correct(correctionInput)).rejects.toThrow();
+    expect(data.dispatchSystemAction.mock.calls.filter(([action]) => action === "learning.correct")).toHaveLength(submitted ? 1 : 0);
+  });
+
+  it.each([{ scope: other }, { candidateId: foreignId }, { candidateVersion: 1 }, { candidateVersion: 99 },
+    { candidateVersion: 0 }, { candidateVersion: Number.MAX_SAFE_INTEGER + 1 }, { jobId: "A".repeat(64) },
+    { correction: "SECRET" }, { diagnostics: "SECRET" }, { candidateRefresh: "unavailable" }])(
+    "rejects unbound or malformed backend receipts before any degraded refresh, case %#", async change => {
+      const data = fixture();
+      let submitted = false;
+      data.dispatchSystemAction.mockImplementation(async action => {
+        if (action === "learning.candidates") {
+          if (submitted) throw new Error("SECRET postflight");
+          return data.rows;
+        }
+        submitted = true;
+        return { ...correctionReceipt, ...change };
+      });
+      await expect(data.service.correct(correctionInput)).rejects.toThrow(/^学习操作失败，请检查学习配置、候选版本与授权后重试。$/);
+      expect(data.dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.candidates", "learning.correct"]);
+    });
+
+  it.each([false, true])("preserves an accepted receipt on read failure but still rejects revoked projects (%s)", async revoked => {
+    const data = fixture();
+    let submitted = false;
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") {
+        if (submitted) {
+          if (revoked) data.projects.mockResolvedValue([]);
+          throw new Error("SECRET read failure");
+        }
+        return data.rows;
+      }
+      submitted = true;
+      return correctionReceipt;
+    });
+    const pending = data.service.correct(correctionInput);
+    if (revoked) await expect(pending).rejects.toThrow();
+    else expect(await pending).toEqual({ ...correctionReceipt, candidateRefresh: "unavailable" });
+    expect(data.dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.candidates", "learning.correct", "learning.candidates"]);
+  });
+
+  it.each([null, {}, [], [candidate(other)], [{ ...candidate(), version: 1 }], [{ ...candidate(), version: "SECRET" }]])(
+    "preserves an accepted receipt for malformed, missing, foreign or regressed postflight targets, case %#", async after => {
+      const data = fixture();
+      let submitted = false;
+      data.dispatchSystemAction.mockImplementation(async action => {
+        if (action === "learning.candidates") return submitted ? after : data.rows;
+        submitted = true;
+        return correctionReceipt;
+      });
+      expect(await data.service.correct(correctionInput)).toEqual({ ...correctionReceipt, candidateRefresh: "unavailable" });
+      expect(data.dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.candidates", "learning.correct", "learning.candidates"]);
+    });
+
+  it("preserves a receipt when a concurrent operation advances the original candidate", async () => {
+    const data = fixture();
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") return data.rows;
+      data.rows = [{ ...candidate(), version: 3, state: "validated" }];
+      return correctionReceipt;
+    });
+    expect(await data.service.correct(correctionInput)).toEqual(correctionReceipt);
+  });
+
+  it.each(["success", "read-outage", "dispatch-error", "receipt-error", "postflight-error", "revoked"])(
+    "holds one runtime lease through correction postflight and releases it on %s", async outcome => {
+      const data = fixture();
+      let leased = false;
+      let released = 0;
+      let submitted = false;
+      let finish!: () => void;
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      data.dispatchSystemAction.mockImplementation(async action => {
+        expect(leased).toBe(true);
+        if (action === "learning.candidates") {
+          if (submitted) {
+            await gate;
+            if (outcome === "read-outage") throw new Error("SECRET refresh");
+            if (outcome === "postflight-error") return {};
+            if (outcome === "revoked") data.projects.mockResolvedValue([]);
+          }
+          return data.rows;
+        }
+        submitted = true;
+        if (outcome === "dispatch-error") throw new Error("SECRET provider");
+        return outcome === "receipt-error" ? { ...correctionReceipt, candidateVersion: 99 } : correctionReceipt;
+      });
+      const withRuntime = vi.fn();
+      const service = createLearningService({ projects: data.projects, withRuntime: async operation => {
+        withRuntime();
+        leased = true;
+        try { return await operation({ dispatchSystemAction: data.dispatchSystemAction }); }
+        finally { leased = false; released++; }
+      } });
+      const pending = service.correct(correctionInput);
+      const checked = outcome === "success" || outcome === "read-outage" || outcome === "postflight-error"
+        ? expect(pending).resolves.toEqual({ ...correctionReceipt, ...(outcome !== "success" ? { candidateRefresh: "unavailable" } : {}) })
+        : expect(pending).rejects.not.toThrow("SECRET");
+      if (outcome !== "dispatch-error" && outcome !== "receipt-error") {
+        await vi.waitFor(() => expect(data.dispatchSystemAction).toHaveBeenCalledTimes(3));
+        expect(leased).toBe(true);
+        expect(released).toBe(0);
+      }
+      finish();
+      await checked;
+      expect(withRuntime).toHaveBeenCalledTimes(1);
+      expect(leased).toBe(false);
+      expect(released).toBe(1);
+    });
+
+  it.each(["accepted", "read-outage", "revoked", "dispatch-error", "receipt-error"] as const)(
+    "awaits failed lease cleanup and recovers only an authorized, validated correction receipt: %s", async outcome => {
+      const data = fixture();
+      let submitted = false;
+      let operationCompleted = false;
+      let cleanupCompleted = false;
+      let settled = false;
+      let enterCleanup!: () => void;
+      let finishCleanup!: () => void;
+      const cleanupEntered = new Promise<void>(resolve => { enterCleanup = resolve; });
+      const cleanupGate = new Promise<void>(resolve => { finishCleanup = resolve; });
+      data.dispatchSystemAction.mockImplementation(async action => {
+        if (action === "learning.candidates") {
+          if (submitted && outcome === "read-outage") throw new Error("SECRET postflight");
+          return data.rows;
+        }
+        submitted = true;
+        if (outcome === "dispatch-error") throw new Error("SECRET provider /private/credentials");
+        return outcome === "receipt-error" ? { ...correctionReceipt, candidateVersion: 99 } : correctionReceipt;
+      });
+      const withRuntime = vi.fn();
+      const service = createLearningService({ projects: data.projects, withRuntime: async operation => {
+        withRuntime();
+        try {
+          const result = await operation({ dispatchSystemAction: data.dispatchSystemAction });
+          operationCompleted = true;
+          return result;
+        } finally {
+          enterCleanup();
+          await cleanupGate;
+          if (outcome === "revoked") data.projects.mockResolvedValue([]);
+          cleanupCompleted = true;
+          throw new Error("SECRET lease cleanup /private/credentials");
+        }
+      } });
+      const pending = service.correct(correctionInput);
+      void pending.then(() => { settled = true; }, () => { settled = true; });
+      const checked = outcome === "accepted" || outcome === "read-outage"
+        ? expect(pending).resolves.toEqual({ ...correctionReceipt, candidateRefresh: "unavailable" })
+        : outcome === "revoked"
+          ? expect(pending).rejects.toThrow("不在当前工作项来源")
+          : expect(pending).rejects.toThrow(/^学习操作失败，请检查学习配置、候选版本与授权后重试。$/);
+      await cleanupEntered;
+      expect(operationCompleted).toBe(outcome !== "dispatch-error" && outcome !== "receipt-error");
+      expect(cleanupCompleted).toBe(false);
+      expect(settled).toBe(false);
+      expect(withRuntime).toHaveBeenCalledTimes(1);
+      const projectChecksBeforeRelease = data.projects.mock.calls.length;
+      finishCleanup();
+      await checked;
+      expect(cleanupCompleted).toBe(true);
+      expect(settled).toBe(true);
+      expect(data.dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(
+        outcome === "dispatch-error" || outcome === "receipt-error"
+          ? ["learning.candidates", "learning.correct"]
+          : ["learning.candidates", "learning.correct", "learning.candidates"],
+      );
+      if (outcome === "accepted" || outcome === "read-outage" || outcome === "revoked") {
+        expect(data.projects.mock.calls.length).toBeGreaterThan(projectChecksBeforeRelease);
+      }
+    });
+
+  it("sanitizes runtime acquisition, dispatch and inventory errors for corrections", async () => {
+    const data = fixture();
+    const service = createLearningService({ projects: data.projects, withRuntime: async () => { throw new Error("SECRET runtime creation"); } });
+    await expect(service.correct(correctionInput)).rejects.toThrow(/^学习操作失败，请检查学习配置、候选版本与授权后重试。$/);
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") return data.rows;
+      throw new Error("SECRET provider /private/credentials");
+    });
+    await expect(data.service.correct(correctionInput)).rejects.toThrow(/^学习操作失败，请检查学习配置、候选版本与授权后重试。$/);
+    data.projects.mockRejectedValue(new Error("SECRET inventory"));
+    await expect(data.service.correct(correctionInput)).rejects.toThrow(/^无法读取项目范围，请刷新工作项来源并检查 Provider 配置。$/);
+  });
+
   it("queries only existing read actions and projects bounded metadata without secrets", async () => {
     const { service, dispatchSystemAction } = fixture();
     expect(await service.projects()).toEqual([scope, other]);
@@ -54,7 +326,7 @@ describe("desktop learning service", () => {
     expect(records).toEqual([{ id: candidateId, requestKey, scope, version: 2, state: "candidate", kind: "fact", title: "Approval", evidenceCount: 1, targetRef: "wiki:approval" }]);
     expect(JSON.stringify(records)).not.toContain("SECRET");
     expect(dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.jobs", "learning.candidates"]);
-    expect(Object.keys(service).sort()).toEqual(["candidates", "jobs", "knowledge", "projects", "validate"]);
+    expect(Object.keys(service).sort()).toEqual(["candidates", "correct", "jobs", "knowledge", "projects", "validate"]);
     expect(Object.keys(service.knowledge).sort()).toEqual(["prepare", "publish", "reconcile"]);
   });
 
@@ -129,13 +401,80 @@ describe("desktop learning service", () => {
     expect(await data.service.knowledge.reconcile({ scope })).toEqual({ results: [], blocked: [] });
   });
 
-  it("accepts a scoped successor publication key instead of demanding the superseded input key", async () => {
+  it.each([false, true])("preserves a scoped committed successor and its experience projection (blocked: %s)", async blocked => {
     const data = fixture();
     data.rows = [{ ...candidate(), version: 4, state: "published" }];
     const successorKey = "d".repeat(64);
+    const experienceProjection = { blocked: blocked ? [successorKey] : [] };
     data.dispatchSystemAction.mockImplementation(async action => action === "learning.candidates" ? data.rows
-      : { publication: { ...data.publication, key: successorKey, phase: "committed" } });
-    expect((await data.service.knowledge.publish({ scope, key })).publication.key).toBe(successorKey);
+      : { publication: { ...data.publication, key: successorKey, phase: "committed" }, experienceProjection });
+    const result = await data.service.knowledge.publish({ scope, key });
+    expect(result).toEqual({ publication: { key: successorKey, scope, candidateId, candidateVersion: 3,
+      targetRef: "wiki:approval", phase: "committed" }, experienceProjection });
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+  });
+
+  it.each([["publish", false], ["reconcile", false], ["publish", true], ["reconcile", true]] as const)(
+    "checks inventory revocation=%s/%s when the postflight candidate read fails", async (operation, revoked) => {
+    const data = fixture();
+    data.rows = [{ ...candidate(), version: 3, state: "validated" }];
+    let completed = false;
+    const result = { publication: { ...data.publication, phase: "committed" }, experienceProjection: { blocked: [key] } };
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") {
+        if (completed) throw new Error("SECRET_CANDIDATE_READ_ERROR");
+        return data.rows;
+      }
+      completed = true;
+      if (revoked) data.projects.mockResolvedValue([]);
+      return operation === "publish" ? result : { results: [result], blocked: [{ key, code: "experience_projection_blocked" }] };
+    });
+    const pending = operation === "publish" ? data.service.knowledge.publish({ scope, key })
+      : data.service.knowledge.reconcile({ scope });
+    if (revoked) {
+      await expect(pending).rejects.toThrow("不在当前工作项来源");
+      expect(data.dispatchSystemAction.mock.calls.filter(([action]) => action === "learning.candidates")).toHaveLength(2);
+      return;
+    }
+    const response = await pending;
+    const projected = { publication: { key, scope, candidateId, candidateVersion: 3, targetRef: "wiki:approval", phase: "committed" },
+      experienceProjection: { blocked: [key] } };
+    expect(response).toEqual(operation === "publish" ? { ...projected, candidateRefresh: "unavailable" }
+      : { results: [projected], blocked: [{ code: "experience_projection_blocked" }], candidateRefresh: "unavailable" });
+    expect(JSON.stringify(response)).not.toContain("SECRET");
+    expect(data.dispatchSystemAction.mock.calls.filter(([action]) => action === "learning.candidates")).toHaveLength(2);
+  });
+
+  it.each(["publish", "reconcile"] as const)("rejects malformed postflight candidates instead of treating %s as a read outage", async operation => {
+    const data = fixture();
+    data.rows = [{ ...candidate(), version: 3, state: "validated" }];
+    let completed = false;
+    const result = { publication: { ...data.publication, phase: "committed" } };
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") return completed ? { secret: "SECRET" } : data.rows;
+      completed = true;
+      return operation === "publish" ? result : { results: [result], blocked: [] };
+    });
+    const pending = operation === "publish" ? data.service.knowledge.publish({ scope, key })
+      : data.service.knowledge.reconcile({ scope });
+    await expect(pending).rejects.toThrow("学习操作失败");
+  });
+
+  it.each(["publish", "reconcile"] as const)("rejects a future candidate version in %s before accepting unavailable postflight data", async operation => {
+    const data = fixture();
+    let completed = false;
+    const result = { publication: { ...data.publication, candidateVersion: 99, phase: "committed" } };
+    data.dispatchSystemAction.mockImplementation(async action => {
+      if (action === "learning.candidates") {
+        if (completed) throw new Error("SECRET");
+        return data.rows;
+      }
+      completed = true;
+      return operation === "publish" ? result : { results: [result], blocked: [] };
+    });
+    const pending = operation === "publish" ? data.service.knowledge.publish({ scope, key })
+      : data.service.knowledge.reconcile({ scope });
+    await expect(pending).rejects.toThrow("学习操作失败");
   });
 
   it("rechecks inventory after awaiting a backend response", async () => {
@@ -209,6 +548,19 @@ describe("desktop learning service", () => {
     expect(result.blocked).toEqual([{ code: "publication_recovery_blocked" }, { code: "knowledge_grant_unavailable" }]);
     expect(JSON.stringify(result)).not.toContain(foreignId);
     expect(JSON.stringify(result)).not.toContain("SECRET");
+  });
+
+  it("preserves committed reconciliation receipts when experience projection needs repair", async () => {
+    const data = fixture();
+    data.rows = [{ ...candidate(), version: 4, state: "published" }];
+    data.dispatchSystemAction.mockImplementation(async action => action === "learning.candidates" ? data.rows
+      : { results: [{ publication: { ...data.publication, phase: "committed" } }],
+        blocked: [{ key, code: "experience_projection_blocked", recovery: "SECRET /private/experience.sqlite" }] });
+    const result = await data.service.knowledge.reconcile({ scope });
+    expect(result).toEqual({ results: [{ publication: { key, scope, candidateId, candidateVersion: 3,
+      targetRef: "wiki:approval", phase: "committed" } }], blocked: [{ code: "experience_projection_blocked" }] });
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+    expect(data.dispatchSystemAction).toHaveBeenCalledWith("learning.knowledge.reconcile", { scope });
   });
 
   it.each(["publish", "reconcile"] as const)("rejects %s metadata newer than the scoped candidate", async operation => {

@@ -5,6 +5,7 @@ import { parseNoInput } from "../../shared/experience-contract.js";
 import { LEARNING_LIMITS, parseLearningQuery, parseLearningValidate, parseKnowledgePrepare, parseKnowledgePublish,
   parseLearningProjects, parseLearningJob, parseLearningCandidate, parseLearningJobs, parseLearningCandidates,
   parseLearningValidationResult, parseLearningPublication, parseLearningPublicationResult, parseLearningReconciliation,
+  parseLearningCorrectionInput, parseLearningCorrectionResult,
   type DesktopLearningApi, type DesktopLearningCandidate, type DesktopLearningPublication, type LearningQuery } from "../../shared/learning-contract.js";
 
 export type LearningServiceOptions = {
@@ -13,7 +14,7 @@ export type LearningServiceOptions = {
 };
 
 class SelectionUnavailable extends Error {}
-type MutationAction = "learning.validate" | "learning.knowledge.prepare" | "learning.knowledge.publish" | "learning.knowledge.reconcile";
+type MutationAction = "learning.correct" | "learning.validate" | "learning.knowledge.prepare" | "learning.knowledge.publish" | "learning.knowledge.reconcile";
 type Dispatch = PluginRuntime["dispatchSystemAction"];
 
 function batch(value: unknown): unknown[] {
@@ -33,11 +34,23 @@ function candidateProjection(value: unknown, scope: string): DesktopLearningCand
   return parseLearningCandidate(projection);
 }
 
+function candidateProjections(records: unknown, scope: string): DesktopLearningCandidate[] {
+  const result: DesktopLearningCandidate[] = [];
+  for (const record of batch(records)) {
+    const candidate = candidateProjection(record, scope);
+    if (candidate) result.push(candidate);
+  }
+  return result;
+}
+
 function publicationProjection(value: unknown, scope: string, candidates: readonly DesktopLearningCandidate[]): DesktopLearningPublication {
   const input = parseObject(value, "publication");
-  if (!candidates.some(candidate => candidate.id === input.candidateId && candidate.scope === scope)) throw new Error();
-  return parseLearningPublication({ key: input.key, scope, candidateId: input.candidateId, candidateVersion: input.candidateVersion,
+  const candidate = candidates.find(entry => entry.id === input.candidateId && entry.scope === scope);
+  if (!candidate) throw new Error();
+  const publication = parseLearningPublication({ key: input.key, scope, candidateId: input.candidateId, candidateVersion: input.candidateVersion,
     targetRef: input.targetRef, phase: input.phase, ...(input.supersededBy === undefined ? {} : { supersededBy: input.supersededBy }) });
+  if (publication.candidateVersion > candidate.version) throw new Error();
+  return publication;
 }
 
 function resultProjection(value: unknown, scope: string, candidates: readonly DesktopLearningCandidate[]) {
@@ -45,7 +58,8 @@ function resultProjection(value: unknown, scope: string, candidates: readonly De
   const withdrawal = input.withdrawal === undefined ? undefined : parseObject(input.withdrawal, "withdrawal");
   return parseLearningPublicationResult({ publication: publicationProjection(input.publication, scope, candidates),
     ...(input.wikiStatus === undefined ? {} : { wikiStatus: input.wikiStatus }), ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
-    ...(withdrawal === undefined ? {} : { withdrawal: { status: withdrawal.status } }) });
+    ...(withdrawal === undefined ? {} : { withdrawal: { status: withdrawal.status } }),
+    ...(input.experienceProjection === undefined ? {} : { experienceProjection: input.experienceProjection }) });
 }
 
 export function createLearningService(options: LearningServiceOptions): DesktopLearningApi {
@@ -64,28 +78,37 @@ export function createLearningService(options: LearningServiceOptions): DesktopL
     return dispatch(action, { ...input });
   }
 
-  async function scoped<Result>(scope: string, operation: (dispatch: Dispatch) => Promise<Result>): Promise<Result> {
+  async function scoped<Result>(scope: string, operation: (dispatch: Dispatch) => Promise<Result>, recoverCompleted?: (result: Result) => Result): Promise<Result> {
     await requireProject(scope);
     let result: Result;
+    let completed: { result: Result } | undefined;
     try {
-      result = await options.withRuntime(runtime => operation((action, input) => runtime.dispatchSystemAction(action, input)));
+      result = await options.withRuntime(async runtime => {
+        const value = await operation((action, input) => runtime.dispatchSystemAction(action, input));
+        completed = { result: value };
+        return value;
+      });
     }
     catch (error) {
-      if (error instanceof SelectionUnavailable) throw new Error("当前项目中找不到该候选，或版本已变化，请刷新列表。");
-      throw new Error("学习操作失败，请检查学习配置、候选版本与授权后重试。");
+      if (completed && recoverCompleted) result = recoverCompleted(completed.result);
+      else {
+        if (error instanceof SelectionUnavailable) throw new Error("当前项目中找不到该候选，或版本已变化，请刷新列表。");
+        throw new Error("学习操作失败，请检查学习配置、候选版本与授权后重试。");
+      }
     }
     await requireProject(scope);
     return result;
   }
 
   async function scopedCandidates(dispatch: Dispatch, scope: string): Promise<DesktopLearningCandidate[]> {
-    const result: DesktopLearningCandidate[] = [];
-    const records = await dispatch("learning.candidates", { scope });
-    for (const record of batch(records)) {
-      const candidate = candidateProjection(record, scope);
-      if (candidate) result.push(candidate);
-    }
-    return result;
+    return candidateProjections(await dispatch("learning.candidates", { scope }), scope);
+  }
+
+  async function refreshCandidates(dispatch: Dispatch, scope: string): Promise<DesktopLearningCandidate[] | undefined> {
+    let records: unknown;
+    try { records = await dispatch("learning.candidates", { scope }); }
+    catch { return undefined; }
+    return candidateProjections(records, scope);
   }
 
   function requireCandidate(candidates: readonly DesktopLearningCandidate[], candidateId: LearningCandidate["id"], expectedVersion?: number) {
@@ -122,6 +145,21 @@ export function createLearningService(options: LearningServiceOptions): DesktopL
       const input = parseLearningQuery(raw);
       return scoped(input.scope, async dispatch => parseLearningCandidates((await scopedCandidates(dispatch, input.scope)).slice(0, LEARNING_LIMITS.records)));
     },
+    async correct(raw) {
+      const input = parseLearningCorrectionInput(raw);
+      return scoped(input.scope, async dispatch => {
+        requireCandidate(await scopedCandidates(dispatch, input.scope), input.candidateId, input.expectedVersion);
+        const response = await mutate(dispatch, "learning.correct", input);
+        const result = parseLearningCorrectionResult(response);
+        assertExactKeys(response as Record<string, unknown>, ["jobId", "scope", "candidateId", "candidateVersion"], "correction");
+        if (result.scope !== input.scope || result.candidateId !== input.candidateId || result.candidateVersion !== input.expectedVersion) throw new Error();
+        let refreshed = false;
+        try { refreshed = requireCandidate(await scopedCandidates(dispatch, input.scope), input.candidateId).version >= result.candidateVersion; }
+        catch { refreshed = false; }
+        await requireProject(input.scope);
+        return refreshed ? result : { ...result, candidateRefresh: "unavailable" as const };
+      }, result => ({ ...result, candidateRefresh: "unavailable" as const }));
+    },
     async validate(raw) {
       const input = parseLearningValidate(raw);
       return scoped(input.scope, async dispatch => {
@@ -155,7 +193,9 @@ export function createLearningService(options: LearningServiceOptions): DesktopL
         return scoped(input.scope, async dispatch => {
           const before = await scopedCandidates(dispatch, input.scope);
           const result = resultProjection(await mutate(dispatch, "learning.knowledge.publish", input), input.scope, before);
-          requirePublicationVersion(result.publication, await scopedCandidates(dispatch, input.scope));
+          const after = await refreshCandidates(dispatch, input.scope);
+          if (!after) return { ...result, candidateRefresh: "unavailable" as const };
+          requirePublicationVersion(result.publication, after);
           return result;
         });
       },
@@ -164,18 +204,19 @@ export function createLearningService(options: LearningServiceOptions): DesktopL
         return scoped(input.scope, async dispatch => {
           const before = await scopedCandidates(dispatch, input.scope);
           const response = parseObject(await mutate(dispatch, "learning.knowledge.reconcile", input), "reconciliation");
-          const after = await scopedCandidates(dispatch, input.scope);
+          const after = await refreshCandidates(dispatch, input.scope);
           const results = [];
           for (const value of batch(response.results)) {
             const publication = parseObject(parseObject(value, "result").publication, "publication");
-            if (!before.some(candidate => candidate.id === publication.candidateId) || !after.some(candidate => candidate.id === publication.candidateId)) continue;
-            const result = resultProjection(value, input.scope, after);
-            requirePublicationVersion(result.publication, after);
+            if (!before.some(candidate => candidate.id === publication.candidateId)
+              || (after && !after.some(candidate => candidate.id === publication.candidateId))) continue;
+            const result = resultProjection(value, input.scope, before);
+            if (after) requirePublicationVersion(result.publication, after);
             results.push(result);
             if (results.length === LEARNING_LIMITS.records) break;
           }
           const blocked = batch(response.blocked).slice(0, LEARNING_LIMITS.records).map(value => ({ code: parseObject(value, "blocked").code }));
-          return parseLearningReconciliation({ results, blocked });
+          return parseLearningReconciliation({ results, blocked, ...(!after ? { candidateRefresh: "unavailable" } : {}) });
         });
       },
     },

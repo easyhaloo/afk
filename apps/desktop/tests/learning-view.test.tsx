@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopLearningApi, DesktopLearningCandidate, DesktopLearningPublication } from "../shared/learning-contract.js";
 import { SelectMenu } from "../src/components/SelectMenu.js";
 import { LearningView } from "../src/features/learning/LearningView.js";
+import { createLearningService } from "../electron/services/learning-service.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const scope = "github:acme/api";
@@ -28,6 +29,7 @@ function fixture() {
     projects: vi.fn(async () => [scope, other]),
     jobs: vi.fn(async () => [{ jobId: key, scope, status: "blocked" as const, attemptCount: 1 }]),
     candidates: vi.fn(async () => rows),
+    correct: vi.fn(async (): Promise<Awaited<ReturnType<DesktopLearningApi["correct"]>>> => ({ jobId: key, scope, candidateId, candidateVersion: 2 })),
     validate: vi.fn(async (): Promise<Awaited<ReturnType<DesktopLearningApi["validate"]>>> => {
       rows = [{ ...candidate, state: "validated", version: 3 }];
       return { status: "validated" as const, candidateId, candidateVersion: 2, validatedVersion: 3 };
@@ -63,6 +65,178 @@ function checker(renderer: ReturnType<typeof create>, value = "verify.approval")
 }
 
 describe("learning governance view", () => {
+  it("queues a version-bound correction only on submit and clears private text", async () => {
+    const { api } = fixture();
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    expect(api.correct).not.toHaveBeenCalled();
+    const correction = "PRIVATE_CORRECTION: require two reviewers.";
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: correction } }); });
+    await click(renderer, "提交纠正");
+    expect(api.correct).toHaveBeenCalledTimes(1);
+    expect(api.correct).toHaveBeenCalledWith({ scope, candidateId, expectedVersion: 2, correction });
+    expect(text(renderer)).not.toContain("PRIVATE_CORRECTION");
+    expect(text(renderer)).toContain("纠正已入队");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).toContain("待验证");
+    expect(api.validate).not.toHaveBeenCalled();
+    expect(api.knowledge.publish).not.toHaveBeenCalled();
+  });
+
+  it("retains an accepted correction receipt when refreshing candidates fails", async () => {
+    const { api } = fixture();
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: "PRIVATE_CORRECTION" } }); });
+    api.correct.mockImplementation(async () => {
+      api.candidates.mockRejectedValue(new Error("PRIVATE_CORRECTION_REFRESH"));
+      return { jobId: key, scope, candidateId, candidateVersion: 2 };
+    });
+    await click(renderer, "提交纠正");
+    expect(api.correct).toHaveBeenCalledTimes(1);
+    expect(text(renderer)).toContain("操作结果已保留");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).not.toContain("PRIVATE_CORRECTION");
+    expect(button(renderer, "提交纠正").props.disabled).toBe(true);
+  });
+
+  it.each([
+    { scope: other }, { candidateId: "d".repeat(64) }, { candidateVersion: 3 }, { correction: "PRIVATE_REPLY" },
+  ])("rejects an unbound or unexpected correction receipt: %j", async change => {
+    const { api } = fixture();
+    api.correct.mockResolvedValue({ jobId: key, scope, candidateId, candidateVersion: 2, ...change });
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: "PRIVATE_INPUT" } }); });
+    await click(renderer, "提交纠正");
+    expect(text(renderer)).toContain("学习操作未确认");
+    expect(renderer.root.findAllByProps({ "aria-label": "本次纠正结果" })).toHaveLength(0);
+    expect(text(renderer)).not.toContain("PRIVATE_");
+  });
+
+  it.each([" ".repeat(32768) + "x", "界".repeat(10923), "PRIVATE_INPUT\0", "   "])("rejects invalid correction text before IPC: %#", async correction => {
+    const { api } = fixture();
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: correction } }); });
+    await click(renderer, "提交纠正");
+    expect(api.correct).not.toHaveBeenCalled();
+    expect(text(renderer)).toContain("32768 字节");
+    expect(renderer.root.findByProps({ "aria-label": "纠正内容" }).props.value).toBe("");
+    expect(api.validate).not.toHaveBeenCalled();
+  });
+
+  it.each(["read-error", "malformed", "missing", "regressed", "dispose"])("keeps a service receipt through %s and explicit refresh without resubmitting", async failure => {
+    let unavailable = false;
+    const dispatchSystemAction = vi.fn(async (action: string) => {
+      if (action === "learning.jobs") return [];
+      if (action === "learning.candidates") {
+        if (unavailable && failure === "read-error") throw new Error("PRIVATE_POSTFLIGHT");
+        if (unavailable && failure === "malformed") return {};
+        if (unavailable && failure === "missing") return [];
+        return [{ id: candidateId, requestKey: candidate.requestKey, version: unavailable && failure === "regressed" ? 1 : 2, state: "candidate",
+          proposal: { kind: "fact", title: candidate.title, evidenceIds: [key], applicability: { project: scope } } }];
+      }
+      if (action === "learning.correct") {
+        unavailable = true;
+        return { jobId: key, scope, candidateId, candidateVersion: 2 };
+      }
+      throw new Error("Unexpected action");
+    });
+    const api = createLearningService({ projects: async () => [scope], withRuntime: async action => {
+      const result = await action({ dispatchSystemAction });
+      if (unavailable && failure === "dispose") throw new Error("PRIVATE_DISPOSE");
+      return result;
+    } });
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: "PRIVATE_INPUT" } }); });
+    await click(renderer, "提交纠正");
+    expect(text(renderer)).toContain("操作结果已保留");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).not.toContain("PRIVATE_");
+    unavailable = false;
+    await click(renderer, "重新读取学习数据");
+    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ "aria-label": `选择候选 ${candidateId}` })).toHaveLength(1);
+    expect(dispatchSystemAction.mock.calls.filter(([action]) => action === "learning.correct")).toHaveLength(1);
+  });
+
+  it("suppresses duplicate correction submissions and ignores a receipt from an old API", async () => {
+    const { api } = fixture();
+    const pending = deferred<Awaited<ReturnType<DesktopLearningApi["correct"]>>>();
+    api.correct.mockReturnValue(pending.promise);
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: "PRIVATE_INPUT" } }); });
+    await act(async () => { button(renderer, "提交纠正").props.onClick(); button(renderer, "提交纠正").props.onClick(); });
+    expect(api.correct).toHaveBeenCalledTimes(1);
+    expect(button(renderer, "提交纠正").props.disabled).toBe(true);
+    const replacement = fixture().api;
+    await act(async () => { renderer.update(createElement(LearningView, { api: replacement })); });
+    await act(async () => { pending.resolve({ jobId: key, scope, candidateId, candidateVersion: 2 }); });
+    expect(renderer.root.findAllByProps({ "aria-label": "本次纠正结果" })).toHaveLength(0);
+    expect(text(renderer)).not.toContain("PRIVATE_");
+    expect(replacement.correct).not.toHaveBeenCalled();
+    expect(button(renderer, "重新读取学习数据").props.disabled).toBe(false);
+  });
+
+  it("clears correction drafts when switching project or disabling learning", async () => {
+    const { api } = fixture();
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: "PRIVATE_FIRST" } }); });
+    await selectScope(renderer, other);
+    expect(text(renderer)).not.toContain("PRIVATE_FIRST");
+    await selectScope(renderer); selectCandidate(renderer);
+    act(() => { renderer.root.findByProps({ "aria-label": "纠正内容" }).props.onChange({ target: { value: "PRIVATE_SECOND" } }); });
+    await act(async () => { renderer.update(createElement(LearningView, { api, enabled: false })); });
+    expect(text(renderer)).not.toContain("PRIVATE_SECOND");
+    expect(api.correct).not.toHaveBeenCalled();
+  });
+
+  it.each(["publish", "reconcile"] as const)("retains %s receipts from the real service through candidate read failure and explicit recovery", async operation => {
+    let unavailable = false;
+    let failRefresh = true;
+    let committed = false;
+    const dispatchSystemAction = vi.fn(async (action: string) => {
+      if (action === "learning.jobs") return [];
+      if (action === "learning.candidates") {
+        if (unavailable) throw new Error("SECRET_CANDIDATE_READ_ERROR");
+        return [{ id: candidateId, requestKey: candidate.requestKey, version: committed ? 4 : 3, state: committed ? "published" : "validated",
+          proposal: { kind: "fact", title: candidate.title, evidenceIds: [key], targetRef: publication.targetRef, applicability: { project: scope } } }];
+      }
+      if (action === "learning.knowledge.prepare") return publication;
+      if (action === "learning.knowledge.publish" || action === "learning.knowledge.reconcile") {
+        committed = true;
+        unavailable = failRefresh;
+        const result = { publication: { ...publication, phase: "committed" }, experienceProjection: { blocked: failRefresh ? [key] : [] } };
+        return action === "learning.knowledge.publish" ? result
+          : { results: [result], blocked: failRefresh ? [{ key, code: "experience_projection_blocked" }] : [] };
+      }
+      throw new Error("Unexpected action");
+    });
+    const api = createLearningService({ projects: async () => [scope], withRuntime: action => action({ dispatchSystemAction }) });
+    const renderer = await render(api);
+    await selectScope(renderer); selectCandidate(renderer);
+    if (operation === "publish") await click(renderer, "准备知识预览");
+    await click(renderer, operation === "publish" ? "发布知识" : "核对知识发布");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).toContain("经验入库受阻");
+    expect(text(renderer)).toContain("操作结果已保留");
+    expect(text(renderer)).not.toContain("SECRET");
+    expect(button(renderer, "发布知识").props.disabled).toBe(true);
+    expect(renderer.root.findAllByProps({ "aria-label": `选择候选 ${candidateId}` })).toHaveLength(0);
+    expect(button(renderer, "核对知识发布").props.disabled).toBe(false);
+    unavailable = false;
+    failRefresh = false;
+    await click(renderer, "核对知识发布");
+    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+    expect(text(renderer)).toContain("已提交");
+    expect(text(renderer)).not.toContain("经验入库受阻");
+    expect(dispatchSystemAction.mock.calls.filter(([action]) => action === "learning.knowledge.publish")).toHaveLength(operation === "publish" ? 1 : 0);
+  });
+
   it.each(["publish", "reconcile"] as const)("retains %s withdrawal receipts when refreshing jobs fails", async operation => {
     for (const status of ["withdrawn", "rollback_blocked"] as const) {
       const data = fixture();
@@ -98,6 +272,70 @@ describe("learning governance view", () => {
     await click(renderer, "核对知识发布");
     expect(text(renderer)).toContain(hiddenId);
     expect(text(renderer)).toContain("撤回受阻");
+  });
+
+  it.each(["publish", "reconcile"] as const)("retains %s committed receipts and projection repair guidance when refreshing jobs fails", async operation => {
+    const data = fixture();
+    data.rows = [{ ...candidate, state: "validated", version: 3 }];
+    const result = { publication: { ...publication, phase: "committed" as const }, experienceProjection: { blocked: [key] } };
+    data.api.knowledge.publish.mockImplementationOnce(async () => {
+      data.api.jobs.mockRejectedValueOnce(new Error("SECRET_REFRESH_ERROR"));
+      return result;
+    });
+    data.api.knowledge.reconcile.mockImplementationOnce(async () => {
+      data.api.jobs.mockRejectedValueOnce(new Error("SECRET_REFRESH_ERROR"));
+      return { results: [result], blocked: [{ code: "experience_projection_blocked" }] };
+    });
+    const renderer = await render(data.api);
+    await selectScope(renderer); selectCandidate(renderer);
+    if (operation === "publish") await click(renderer, "准备知识预览");
+    await click(renderer, operation === "publish" ? "发布知识" : "核对知识发布");
+    const receipt = renderer.root.findByProps({ "aria-label": operation === "publish" ? "本次发布结果" : "核对发布结果" });
+    expect(receipt.findByType("b").children.join("")).toBe("经验入库受阻");
+    expect(text(renderer)).toContain("发布阶段：");
+    expect(text(renderer)).toContain("已提交");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).toContain("修复本机经验库");
+    expect(text(renderer)).not.toContain("SECRET_REFRESH_ERROR");
+    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(1);
+    expect(button(renderer, "核对知识发布").props.disabled).toBe(false);
+  });
+
+  it("shows projection repair status without losing committed metadata and retries through explicit reconciliation", async () => {
+    const data = fixture();
+    data.rows = [{ ...candidate, state: "validated", version: 3 }];
+    const committed = { publication: { ...publication, phase: "committed" as const }, wikiStatus: "applied" as const };
+    data.api.knowledge.publish.mockImplementationOnce(async () => {
+      data.rows = [{ ...candidate, state: "published", version: 4 }];
+      return { ...committed, experienceProjection: { blocked: [key] } };
+    });
+    data.api.knowledge.reconcile.mockResolvedValueOnce({ results: [committed], blocked: [{ code: "experience_projection_blocked" }] })
+      .mockResolvedValueOnce({ results: [committed], blocked: [] });
+    const renderer = await render(data.api);
+    await selectScope(renderer); selectCandidate(renderer);
+    await click(renderer, "准备知识预览"); await click(renderer, "发布知识");
+    const receipt = renderer.root.findByProps({ "aria-label": "本次发布结果" });
+    expect(receipt.findByType("b").children.join("")).toBe("经验入库受阻");
+    expect(text(renderer)).toContain("发布阶段：");
+    expect(text(renderer)).toContain("已提交");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).toContain("wiki:approval");
+    expect(renderer.root.findByProps({ role: "status" }).children.join("")).toContain("经验入库受阻");
+    expect(text(renderer)).not.toContain("知识发布已提交。");
+    expect(data.api.knowledge.reconcile).not.toHaveBeenCalled();
+    await click(renderer, "核对知识发布");
+    expect(renderer.root.findByProps({ role: "status" }).children.join("")).toContain("经验入库受阻");
+    const blockers = renderer.root.findByProps({ "aria-label": "发布阻断项" });
+    expect(blockers.findByType("li").children.join("")).toContain("修复本机经验库");
+    expect(text(renderer)).toContain(key);
+    expect(text(renderer)).not.toContain("experience_projection_blocked");
+    await click(renderer, "核对知识发布");
+    expect(text(renderer)).not.toContain("经验入库受阻");
+    expect(text(renderer)).toContain(key);
+    expect(renderer.root.findByProps({ "aria-label": "核对发布结果" }).findByType("b").children.join("")).toBe("已提交");
+    expect(data.api.knowledge.reconcile).toHaveBeenCalledTimes(2);
+    expect(data.api.knowledge.publish).toHaveBeenCalledTimes(1);
+    expect(button(renderer, "发布知识").props.disabled).toBe(true);
   });
 
   it("shows unavailable and disabled states without manufacturing a runtime or enabling it", async () => {
@@ -347,7 +585,7 @@ describe("learning governance view", () => {
     data.rows = [{ ...candidate, state: "validated", version: 3 }];
     data.api.knowledge.publish.mockImplementationOnce(async () => {
       data.rows = [{ ...candidate, state: "conflict", version: 5 }];
-      return { publication: { ...publication, phase: "committed" }, withdrawal: { status } };
+      return { publication: { ...publication, phase: "committed" }, withdrawal: { status }, experienceProjection: { blocked: [key] } };
     });
     const renderer = await render(data.api);
     await selectScope(renderer); selectCandidate(renderer);
@@ -366,7 +604,7 @@ describe("learning governance view", () => {
   it.each(["withdrawn", "rollback_blocked"] as const)("shows reconciled committed + %s as a withdrawal, retaining its history", async status => {
     const data = fixture();
     data.rows = [{ ...candidate, state: "conflict", version: 5 }];
-    data.api.knowledge.reconcile.mockResolvedValueOnce({ results: [{ publication: { ...publication, phase: "committed" }, withdrawal: { status } }], blocked: [] });
+    data.api.knowledge.reconcile.mockResolvedValueOnce({ results: [{ publication: { ...publication, phase: "committed" }, withdrawal: { status }, experienceProjection: { blocked: [key] } }], blocked: [{ code: "experience_projection_blocked" }] });
     const renderer = await render(data.api);
     await selectScope(renderer); await click(renderer, "核对知识发布");
     const outcome = status === "withdrawn" ? "已撤回" : "撤回受阻";
@@ -382,7 +620,7 @@ describe("learning governance view", () => {
   it.each(["publish", "reconcile"] as const)("does not announce success for %s committed metadata accompanied by an error", async operation => {
     const data = fixture();
     data.rows = [{ ...candidate, state: "validated", version: 3 }];
-    const result = { publication: { ...publication, phase: "committed" as const }, errorCode: 4 };
+    const result = { publication: { ...publication, phase: "committed" as const }, errorCode: 4, experienceProjection: { blocked: [key] } };
     data.api.knowledge.publish.mockImplementationOnce(async () => { data.rows = [{ ...candidate, state: "conflict", version: 5 }]; return result; });
     data.api.knowledge.reconcile.mockResolvedValueOnce({ results: [result], blocked: [] });
     const renderer = await render(data.api);

@@ -10,13 +10,16 @@ const states = { candidate: "待验证", conflict: "冲突", validated: "已验�
 const kinds = { fact: "事实", process: "流程", lesson: "经验", skill: "技能", tool: "工具" };
 const phases = { prepared: "已准备", applied: "已应用，待提交", committed: "已提交", conflict: "冲突", superseded: "已替代" };
 const jobStates = { pending: "待处理", blocked: "受阻", failed: "失败", processed: "已处理" };
+const projectionBlockedNotice = "经验入库受阻，请修复本机经验库后点击“核对知识发布”重试。";
 
 function PublicationResult({ result }: { result: DesktopLearningPublicationResult }) {
+  const projectionBlocked = !!result.experienceProjection?.blocked.length;
   const outcome = result.withdrawal?.status === "withdrawn" ? "已撤回"
     : result.withdrawal?.status === "rollback_blocked" ? "撤回受阻"
-    : result.errorCode !== undefined ? "发布错误" : phases[result.publication.phase];
+    : result.errorCode !== undefined ? "发布错误" : projectionBlocked ? "经验入库受阻" : phases[result.publication.phase];
   return <li><b>{outcome}</b><span>{result.publication.targetRef}</span><code>{result.publication.key}</code>
     {result.withdrawal || result.errorCode !== undefined ? <small>历史发布阶段：{phases[result.publication.phase]}</small> : null}
+    {projectionBlocked ? <><small>发布阶段：{phases[result.publication.phase]}</small><small>{projectionBlockedNotice}</small></> : null}
     <small>候选 {result.publication.candidateId} · v{result.publication.candidateVersion}</small>
     {result.wikiStatus ? <small>Wiki：{result.wikiStatus}</small> : null}
     {result.errorCode !== undefined ? <small>错误码：{result.errorCode}</small> : null}
@@ -32,7 +35,8 @@ function CandidateSummary({ candidate }: { candidate: DesktopLearningCandidate }
 export function LearningView({ api, enabled = true }: LearningViewProps) {
   const data = useLearning(api, enabled);
   const [checkerId, setCheckerId] = useState("");
-  useEffect(() => { setCheckerId(""); }, [api, enabled, data.scope, data.selectedId]);
+  const [correction, setCorrection] = useState("");
+  useEffect(() => { setCheckerId(""); setCorrection(""); }, [api, enabled, data.scope, data.selectedId]);
   const busy = data.loading || data.mutating;
   const available = !!api && enabled;
   const canValidate = !!data.selected && ["candidate", "conflict"].includes(data.selected.state)
@@ -69,6 +73,14 @@ export function LearningView({ api, enabled = true }: LearningViewProps) {
             <dl><dt>目标</dt><dd>{data.preview.targetRef}</dd><dt>阶段</dt><dd>{phases[data.preview.phase]}</dd><dt>候选版本</dt><dd>v{data.preview.candidateVersion}</dd><dt>发布键</dt><dd><code>{data.preview.key}</code></dd></dl></section> : null}
           <button type="button" aria-label="发布知识" disabled={!available || busy || !data.preview} onClick={() => { void data.publish(); }}>发布知识</button>
           {data.publication ? <ul className="learning-list" aria-label="本次发布结果"><PublicationResult result={data.publication} /></ul> : null}
+          <label>纠正内容<textarea aria-label="纠正内容" value={correction} maxLength={32768} disabled={!available || !data.selected || busy}
+            onChange={event => setCorrection(event.target.value)} /></label>
+          <small>UTF-8 最多 32768 字节。提交后生成新学习请求，原候选及历史保留。</small>
+          <button type="button" aria-label="提交纠正" disabled={!available || !data.selected || busy || !correction.trim()} onClick={() => {
+            const submitted = correction; setCorrection(""); void data.correct(submitted);
+          }}>提交纠正</button>
+          {data.correction ? <section className="learning-preview" aria-label="本次纠正结果"><h2>纠正已入队</h2>
+            <dl><dt>学习任务</dt><dd><code>{data.correction.jobId}</code></dd><dt>原候选版本</dt><dd>v{data.correction.candidateVersion}</dd></dl></section> : null}
         </div>
       </section>
     </div>
@@ -76,7 +88,7 @@ export function LearningView({ api, enabled = true }: LearningViewProps) {
       <div className="learning-detail"><button type="button" aria-label="核对知识发布" disabled={!available || !data.scope || busy} onClick={() => { void data.reconcile(); }}>核对知识发布</button>
         {data.reconciliation ? <><p>返回 {data.reconciliation.results.length} 项发布结果，{data.reconciliation.blocked.length} 项阻断。</p>
           <ul className="learning-list" aria-label="核对发布结果">{data.reconciliation.results.map((result, index) => <PublicationResult key={`${result.publication.key}:${index}`} result={result} />)}</ul>
-          <ul aria-label="发布阻断项">{data.reconciliation.blocked.map((failure, index) => <li key={`${failure.code}:${index}`}>{failure.code}</li>)}</ul></> : null}
+          <ul aria-label="发布阻断项">{data.reconciliation.blocked.map((failure, index) => <li key={`${failure.code}:${index}`}>{failure.code === "experience_projection_blocked" ? projectionBlockedNotice : failure.code}</li>)}</ul></> : null}
       </div>
     </section>
     <section className="settings-section" aria-label="学习任务"><header><div><b>学习任务</b><small>最多展示 100 项；读取任务不会启动提炼或模型。</small></div></header>

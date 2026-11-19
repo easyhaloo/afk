@@ -107,6 +107,18 @@ jobs:
         run: pnpm exec vitest run tests/cli-install.test.ts tests/package-cli-validation.test.ts
       - name: Build, package and verify offline installation
         run: pnpm release:cli --version "${{ needs.prepare.outputs.version }}"
+      - name: Verify repository workflows against the installed archive
+        env:
+          ASSET: afk-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          profile=$(mktemp -d "${RUNNER_TEMP}/repository-install.XXXXXXXX")
+          AFK_HOME="$profile/store" bash install.sh --skip-completion --prefix "$profile/bin" --version "$VERSION" \
+            --archive "release/cli/$ASSET" --checksum "release/cli/$ASSET.sha256"
+          AFK_E2E_CLI_ENTRY="$profile/bin/afk" pnpm exec vitest run --no-file-parallelism \
+            tests/e2e/repository-managed-local.test.ts tests/e2e/repository-managed-remote.test.ts \
+            tests/e2e/repository-verification-hook.test.ts tests/e2e/repository-verification-batch.test.ts \
+            tests/e2e/repository-verification-replay.test.ts
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.platform }}-${{ matrix.arch }}

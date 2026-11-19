@@ -1278,6 +1278,21 @@ process-local and do not backfill downtime. Callback completion still depends
 on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `TriggerQueueOptions` and
 `TriggerDeliveryStatus` for delivery context, queue limits and receipt contracts.
 
+### First connection to Slack, Feishu, Linear and Jira Cloud
+
+1. Choose a provider and create its credential using the official entry point. Supply the secret or complete webhook URL through the environment of the AFK process. Store the environment reference in the settings file.
+
+| Plugin ID | Obtain the configuration | `settings.json` contents (replace the sample target) |
+| --- | --- | --- |
+| `notification.slack` | Create an app in the test workspace, enable Incoming Webhooks, select an authorized test channel and copy the generated URL. [Slack apps](https://api.slack.com/apps) · [Webhook setup](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
+| `notification.feishu` | Add a custom bot in the target test group's bot settings and copy its webhook. Include any required keyword in the test message. The adapter sends text only. Groups requiring signatures need signing support first. [Feishu custom bots](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"}}` |
+| `tracker.linear` | Create a personal API key with read access to the target team and store the raw key. Run `query { teams { nodes { id name } } }` in the authorized workspace and select the team's `id`. [Linear API settings](https://linear.app/settings/api) · [GraphQL guide](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
+| `tracker.jira` | Create an account API token and supply the same account's email and the project key. Use the site root for an unscoped token or `https://api.atlassian.com/ex/jira/CLOUD_ID` for a scoped token. The adapter appends the REST path and builds Basic authentication from the email and token. [Create token](https://id.atlassian.com/manage-profile/security/api-tokens) · [Token and gateway guide](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
+
+2. Save the chosen JSON as `settings.json` and run `afk plugin configure <plugin-id> --builtin --file settings.json`.
+3. For a tracker, save `{}` as `empty.json`. Run `afk plugin invoke tracker.issue <linear-or-jira> health --input empty.json --json` and check for `status` equal to `ok`. Save `{"issueId":"DEMO-123"}` as `issue.json`, substituting a known authorized test issue. Run `afk plugin invoke tracker.issue <linear-or-jira> getIssue --input issue.json --json` and verify the returned issue. Both operations are read-only.
+4. For a notifier, confirm the webhook's destination accepts a test post. Save `{"title":"Plugin connection test","body":"Check CHECK-001"}` as `message.json`, substituting a unique check ID. Run `afk plugin invoke notification.provider <full-plugin-id> notify --input message.json --json`. Check for `delivered: true` and confirm the same ID in the destination group or channel.
+
 ### Complete configured example and scheduled invocation
 
 This `~/.afk/plugins.yml` example uses actual factory fields. The Linear entry

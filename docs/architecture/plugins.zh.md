@@ -997,6 +997,21 @@ interval timer 仍在进程内，不补跑停机时段；callback 完成依赖 a
 SDK 提供 `currentTriggerDeliveryId()`、`TriggerQueueOptions`、
 `TriggerDeliveryStatus`，分别用于投递上下文、队列限制和回执契约。
 
+### 首次连接 Slack、飞书、Linear 和 Jira Cloud
+
+1. 选择一行，在官方入口创建凭据。将密钥或完整 webhook URL 存入启动 AFK 的进程环境，配置文件只保存环境变量引用。
+
+| 插件 ID | 获取配置 | `settings.json` 内容（替换示例目标） |
+| --- | --- | --- |
+| `notification.slack` | 在测试工作区创建应用，开启 Incoming Webhooks，选择获授权的测试频道并复制生成的 URL。[Slack 应用](https://api.slack.com/apps) · [配置步骤](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
+| `notification.feishu` | 在目标测试群的机器人设置中添加自定义机器人并复制 webhook。若启用关键词，测试消息须包含该词。当前适配器仅发送文本，要求签名的群需要先支持签名。[飞书自定义机器人](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"}}` |
+| `tracker.linear` | 创建有目标团队读取权限的个人 API key，原样保存。在授权工作区运行查询 `query { teams { nodes { id name } } }`，选择目标团队的 `id`。[Linear API 设置](https://linear.app/settings/api) · [GraphQL 入门](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
+| `tracker.jira` | 创建账户 API token，填写同一账户邮箱及项目键。普通 token 使用站点根地址，带 scope 的 token 使用 `https://api.atlassian.com/ex/jira/CLOUD_ID`。适配器追加 REST 路径并使用邮箱和 token 构造 Basic 认证。[创建 token](https://id.atlassian.com/manage-profile/security/api-tokens) · [令牌与网关说明](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
+
+2. 将所选行的 JSON 保存为 `settings.json`，运行 `afk plugin configure <插件 ID> --builtin --file settings.json`。
+3. 对工单插件，将 `{}` 保存为 `empty.json`。运行 `afk plugin invoke tracker.issue <linear 或 jira> health --input empty.json --json`，确认 `status` 为 `ok`。再将 `{"issueId":"DEMO-123"}` 保存为 `issue.json`（替换为获授权的已知测试工单），运行 `afk plugin invoke tracker.issue <linear 或 jira> getIssue --input issue.json --json`，核对返回的工单。这两个操作均为只读。
+4. 对通知插件，先确认 webhook 绑定的群或频道允许试发。将 `{"title":"插件接入测试","body":"测试编号 CHECK-001"}` 保存为 `message.json`，替换为本次唯一编号。运行 `afk plugin invoke notification.provider <完整插件 ID> notify --input message.json --json`。核对 `delivered: true`，并在目标群或频道核对相同编号。
+
 ### 完整配置与定时调用示例
 
 以下 `~/.afk/plugins.yml` 使用实际工厂字段。Linear 条目注册独立 issue 操作，

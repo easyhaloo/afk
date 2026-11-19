@@ -1,0 +1,150 @@
+{
+  "target": "Loopback Apache TLS CGI and Git Smart HTTP, one POSIX host, synthetic repository",
+  "entry": "afk plugin invoke repository.provider remote-workspace run",
+  "runs": [
+    {
+      "afk": "0.2.158",
+      "apache": "Server version: Apache/2.4.62 (Unix)",
+      "git": "git version 2.53.0",
+      "serviceGit": "git version 2.39.5 (Apple Git-154)",
+      "service_sha256": "4c9b81a7aaa03c565f3d2c287dcdf950d2985c498ada054f39e9d19ac7388bf4",
+      "base": "134da15a9e65997fcd306e48b452c8a2a2d04202",
+      "source": "393175d6b366dd965187fc4711cb1db4e7459db6",
+      "outage": {
+        "runId": "disconnect",
+        "claimId": "e4e83958-0bb8-466a-81ed-67d41eb33a51",
+        "session": "90463ae2849b4769207e90f2567aba796bedc9947a6a5489",
+        "cliExit": 1,
+        "diagnostic": "repository execution and cleanup failed",
+        "checkoutCommit": "393175d6b366dd965187fc4711cb1db4e7459db6",
+        "retainedAcrossRestart": true,
+        "remoteBranchAbsent": true,
+        "recovered": {
+          "removed": true
+        }
+      },
+      "unpublished": {
+        "commit": "2581f11714d832a0e1fd49fda4036850f83ace99",
+        "preserved": "2581f11714d832a0e1fd49fda4036850f83ace99"
+      },
+      "refusals": [
+        "401 missing bearer",
+        "404 unknown repository",
+        "409 prepare without claim",
+        "409 second prepare",
+        "403 merge",
+        "409 stale commit",
+        "live owner",
+        "wrong session",
+        "dirty checkout",
+        "unpublished commit"
+      ],
+      "retry": {
+        "value": {
+          "commit": "393175d6b366dd965187fc4711cb1db4e7459db6",
+          "branch": "afk/disconnect",
+          "dirty": false
+        },
+        "workspace": {
+          "id": "c6c53c64025d0817e746b5ffde89d5c7c408136e23d69c59",
+          "repository": {
+            "url": "parcel",
+            "ref": "main"
+          },
+          "runId": "disconnect",
+          "snapshot": {
+            "commit": "393175d6b366dd965187fc4711cb1db4e7459db6",
+            "branch": "afk/disconnect",
+            "dirty": false
+          },
+          "path": "$FIXTURE/mount/parcel@disconnect"
+        },
+        "publication": {
+          "commit": "393175d6b366dd965187fc4711cb1db4e7459db6",
+          "branch": "afk/disconnect"
+        },
+        "cleanup": {
+          "removed": true
+        }
+      },
+      "readback": {
+        "main": "134da15a9e65997fcd306e48b452c8a2a2d04202",
+        "afk/disconnect": "393175d6b366dd965187fc4711cb1db4e7459db6",
+        "parcel.txt": "synthetic parcel"
+      },
+      "remainingMounts": 0
+    },
+    {
+      "afk": "0.2.159",
+      "apache": "Server version: Apache/2.4.62 (Unix)",
+      "git": "git version 2.53.0",
+      "serviceGit": "git version 2.39.5 (Apple Git-154)",
+      "service_sha256": "4c9b81a7aaa03c565f3d2c287dcdf950d2985c498ada054f39e9d19ac7388bf4",
+      "base": "b9e1dd1a2754df0be4645dd4843e759953b6c064",
+      "source": "ce6b33ba97605aca197c40fec134712402992acd",
+      "outage": {
+        "runId": "disconnect",
+        "claimId": "d1d8ba8a-d2e1-4493-9724-1664ff12ca59",
+        "session": "d6da90c34ca4bf36b8792c260d33bdba490cb08b93a58c6e",
+        "cliExit": 1,
+        "diagnostic": "repository execution and cleanup failed",
+        "checkoutCommit": "ce6b33ba97605aca197c40fec134712402992acd",
+        "retainedAcrossRestart": true,
+        "remoteBranchAbsent": true,
+        "recovered": {
+          "removed": true
+        }
+      },
+      "unpublished": {
+        "commit": "87d47a35c258b88b975cace8e7df2899ef52b76c",
+        "preserved": "87d47a35c258b88b975cace8e7df2899ef52b76c"
+      },
+      "refusals": [
+        "401 missing bearer",
+        "404 unknown repository",
+        "409 prepare without claim",
+        "409 second prepare",
+        "403 merge",
+        "409 stale commit",
+        "live owner",
+        "wrong session",
+        "dirty checkout",
+        "unpublished commit"
+      ],
+      "retry": {
+        "value": {
+          "commit": "ce6b33ba97605aca197c40fec134712402992acd",
+          "branch": "afk/disconnect",
+          "dirty": false
+        },
+        "workspace": {
+          "id": "61c7d6ba1468b97a4294706f8e2b2749016c9b22453cc8b2",
+          "repository": {
+            "url": "parcel",
+            "ref": "main"
+          },
+          "runId": "disconnect",
+          "snapshot": {
+            "commit": "ce6b33ba97605aca197c40fec134712402992acd",
+            "branch": "afk/disconnect",
+            "dirty": false
+          },
+          "path": "$FIXTURE/mount/parcel@disconnect"
+        },
+        "publication": {
+          "commit": "ce6b33ba97605aca197c40fec134712402992acd",
+          "branch": "afk/disconnect"
+        },
+        "cleanup": {
+          "removed": true
+        }
+      },
+      "readback": {
+        "main": "b9e1dd1a2754df0be4645dd4843e759953b6c064",
+        "afk/disconnect": "ce6b33ba97605aca197c40fec134712402992acd",
+        "parcel.txt": "synthetic parcel"
+      },
+      "remainingMounts": 0
+    }
+  ]
+}

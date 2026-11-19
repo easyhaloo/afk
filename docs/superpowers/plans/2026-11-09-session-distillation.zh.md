@@ -2762,6 +2762,8 @@ Claude观察器故障透明、final flush及尾部收据修复已限定双审通
 
 收益对照已有 12/18 次独立运行。环境、流程、修复各有两对 `none` 和 `new`，双方均通过任务检查。六次 `none` 都出现预先定义的重复操作，六次 `new` 都避开了该操作。流程组两对分别缩短 7.334 秒和 7.451 秒。三个场景各缺两次可独立召回旧发布的 `old` 对照。任务级 `#765` 的收益仍为 `unknown`，实际账单未知。
 
+2026-11-20，使用 0.2.162 安装包和真实 Claude 对合成清单会话重新提炼。新候选 `e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584` 提供三组正常输入和一组拒绝输入，纯计算所需权限为空。正式验证通过提案准备，随后因权限拒绝实验缺少受支持的观察协议返回 `blocked/insufficient_coverage`。该候选停留在 `candidate`。这次运行单列在冻结的 30 个样本之外。
+
 D01 SDK已完成首批独立交付：commit `9ed99fb681eb2842f0886a8c5d7ba155a8d9026d`，tree `bbd22ef6eb3b17a96c1331db4267e0760bb35184`，CLI0.2.59；真实index清空，捕获的1749份工作文件字节不变。Runtime4447通过/21跳过、CLI608通过/2跳过、root338通过/1跳过；Core30、Application78、workflow-graph9通过；16项构建/类型/架构/import/docs检查退出0。Python3.9.6原失败与3.13.7对照保留，不修改断言或超时。当前精确tree未重授Desktop或覆盖率资格。
 
 5,268,903字节CLI安装包SHA256为`3c228176fd83999366310888803579bd6b4012b12c99e7ff14d187ae5f0af810`；官方源码外23入口及独立SDK8项通过，自有临时安装已移除。初次打包驱动错误与两次离线元数据缺失原样保留；使用既有pnpm、关闭自动依赖验证、ignore-scripts及prefer-offline完成正式打包，registry元数据获取不宣称全离线或共享cache未变。收据见`.codex/validation/plugin-external-tools-integration-20261114/commit-snapshot-v2/DELIVERY.md`。PR295已更新，CI43554331331的headSHA匹配9ed99fb6，八job全部成功，含Desktop E2E及PTY；首次watch API超时仅重连同一run，未重启workflow。V8 Linux Node22.23.4全配置源码覆盖率为Lines/Statements88.78%、Functions85.49%、Branches87.10%，policy violations为空，包基线保留；Desktop、PTY及独立spawn进程不在百分比范围内。完整run及490项下载产物hash保留，无合并。

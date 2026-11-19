@@ -37,3 +37,18 @@ gh run view 44592073226 -R easyhaloo/afk --job 135800539966 --log |
   sed -n 's/.*AFK_PODMAN_RECEIPT //p' | jq -s -e \
     --slurpfile saved tests/qualification/w10/podman-native.receipt.json '. == $saved'
 ```
+
+## Installed CLI 0.2.168
+
+The [arm64 package job](https://github.com/easyhaloo/afk/actions/runs/44595292353/job/135812047449) built the archive from `987eac6cdf353e49f4991cc7e450c629308b335a`. The [installed receipt](podman-installed-168.receipt.json) was emitted on 2026-11-19 at 19:53 UTC in a disposable Debian 13 arm64 guest running on Apple Virtualization. This host ran native Linux rootless Podman 5.4.2 with crun. The GitHub run supplied the package. The guest ran the qualification.
+
+To replay on disposable Linux with the prerequisites above and Node 22.16+, copy `podman-native.mjs` and `podman-installed-entry.mjs` into an empty directory and run the following there as an ordinary user. The download can also be done separately on a machine with artifact access.
+
+```sh
+gh run download 44595292353 -R easyhaloo/afk -n cli-linux-arm64 -D assets
+node ./podman-native.mjs --installed ./assets
+```
+
+The installed mode pins the archive and installer SHA-256, runs the installer in an isolated home and calls the installed `afk plugin serve-container --sandbox podman` from a synthetic repository. A loopback client calls `sandbox.create`, `agent.start`, `agent.wait` and `sandbox.close`. An explicitly registered test agent dispatches two deterministic shell workloads through the sandbox. The common harness independently inspects the live container, checks its four mounts, compares host input and returned bytes, and checks exits 0 and 23. After close, the service returns HTTP 404 `SANDBOX_MISSING` and the engine reports that the full container ID is absent. Each run uses a private Podman store and emits its receipt after cleanup.
+
+Coverage is installed CLI batch sandbox execution on Linux arm64. Agent inference, interactive sessions, suspend/resume and Linux x64 qualification remain outside this receipt. The script also pins the sibling `cli-linux-x64` artifact for a separate x64 replay.

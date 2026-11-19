@@ -23,13 +23,13 @@ def port():
         return listener.getsockname()[1]
 
 
-def request(port_number, route, data=None, headers=None):
+def request(port_number, route, data=None, headers=None, expected_status=200):
     connection = HTTPConnection('127.0.0.1', port_number, timeout=135)
     try:
         connection.request('GET' if data is None else 'POST', '/' + route,
                            None if data is None else json.dumps(data), headers or {})
         response = connection.getresponse()
-        if response.status != 200:
+        if response.status != expected_status:
             raise RuntimeError(f'{route} returned HTTP {response.status}')
         return json.load(response)
     finally:
@@ -61,7 +61,36 @@ def start(stack, command, env, workspace, port_number, health, headers=None):
     raise RuntimeError(f'{health} readiness timed out')
 
 
-def qualify(afk, root, stack):
+def cancel_execution(afk_port, headers, sandbox, execution, pid_file):
+    reference = dict(sandboxId=sandbox, executionId=execution)
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        tail = request(afk_port, 'agent.output', reference, headers)['output']
+        if re.search(r'"assistantMessageEvent":\{"type":"text_delta",', tail):
+            break
+        time.sleep(0.05)
+    else:
+        raise RuntimeError('No Pi text delta observed before cancellation deadline')
+
+    pid = int(pid_file.read_text())
+    os.kill(pid, 0)
+    interrupted = request(afk_port, 'agent.interrupt', dict(**reference, reason='manual'), headers)
+    result = request(afk_port, 'agent.wait', dict(**reference, options={'completionTimeoutMs': 10000}), headers)
+    try:
+        os.kill(pid, 0)
+        exited = False
+    except ProcessLookupError:
+        exited = True
+    closed = request(afk_port, 'sandbox.close', dict(sandboxId=sandbox), headers)
+    missing = request(afk_port, 'agent.output', reference, headers, expected_status=404)['error']['code']
+    checks = dict(textDeltaBeforeInterrupt=True, piPidAliveBeforeInterrupt=True, interruptAcknowledged=interrupted == {'ok': True},
+                  aborted=result['status'] == 'aborted', piPidGoneBeforeSandboxClose=exited,
+                  sandboxClosed=closed == {'ok': True}, closedSandboxMissing=missing == 'SANDBOX_MISSING')
+    return dict(passed=all(checks.values()), scenario='manual interrupt during Pi text generation',
+                status=result['status'], postCloseHttp=404, postCloseCode=missing, checks=checks)
+
+
+def qualify(afk, root, stack, cancel):
     cache = Path.home() / '.cache/huggingface/hub/models--Qwen--Qwen3.5-2B'
     model = cache / 'snapshots' / (cache / 'refs/main').read_text().strip()
     if not any(model.glob('*.safetensors')):
@@ -93,7 +122,9 @@ def qualify(afk, root, stack):
     flags = ['--offline', '--no-tools', '--no-mcp', '--no-extensions', '--no-skills', '--no-context-files',
              '--no-prompt-templates', '--provider', 'qualification', '--model', model_name, '--thinking', 'off']
     launcher = bin_dir / 'pi'
-    launcher.write_text('#!/bin/sh\nexec ' + shlex.join([pi, *flags]) + ' "$@"\n')
+    pid_file = root / 'pi.pid'
+    record_pid = f'echo "$$" > {shlex.quote(str(pid_file))}\n' if cancel else ''
+    launcher.write_text('#!/bin/sh\n' + record_pid + 'exec ' + shlex.join([pi, *flags]) + ' "$@"\n')
     launcher.chmod(0o700)
 
     afk_port = port()
@@ -107,9 +138,16 @@ def qualify(afk, root, stack):
     expected = first + second
     prompt = (f'What is {first} + {second}? Replace N with the numeric answer. Reply with only '
               '<goal_complete>{"type":"goal_complete","summary":"N"}</goal_complete>.')
+    if cancel:
+        prompt = 'Write all the integers from 1 through 500 in ascending order, one per line.'
     options = dict(command={'argv': ['pi']}, metadata=dict(provider='pi', transport='process'), generation=0,
                    prompt=prompt, signalType='goal_complete', executionMode='batch')
     execution = request(afk_port, 'agent.start', dict(sandboxId=sandbox, options=options), headers)['id']
+    provenance = dict(afk=afk_version, pi=pi_version, ollama=request(model_port, 'api/version')['version'],
+                      entry='plugin serve-container / local / pi', model='Qwen3.5-2B', revision=model.name)
+    if cancel:
+        receipt = cancel_execution(afk_port, headers, sandbox, execution, pid_file)
+        return dict(**receipt, **provenance, checkedAt=datetime.now(timezone.utc).isoformat(timespec='seconds'))
     result = request(afk_port, 'agent.wait', dict(sandboxId=sandbox, executionId=execution,
                      options={'completionTimeoutMs': 120000}), headers)
     request(afk_port, 'sandbox.close', dict(sandboxId=sandbox), headers)
@@ -135,9 +173,7 @@ def qualify(afk, root, stack):
                   usage=result.get('usage') == usage and min(usage.values()) > 0 and
                   usage['inputTokens'] + usage['outputTokens'] == usage['totalTokens'])
     return dict(passed=all(checks.values()), checkedAt=datetime.now(timezone.utc).isoformat(timespec='seconds'),
-                afk=afk_version, pi=pi_version, ollama=request(model_port, 'api/version')['version'],
-                entry='plugin serve-container / local / pi', model='Qwen3.5-2B',
-                revision=model.name, operands=[first, second], expected=expected,
+                **provenance, operands=[first, second], expected=expected,
                 answer=answer if isinstance(answer, str) and re.fullmatch(r'\d{1,3}', answer) else None,
                 status=result['status'], roles=[message['role'] for message in messages],
                 assistantBlocks=[part['type'] for part in assistant['content']],
@@ -147,8 +183,9 @@ def qualify(afk, root, stack):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('afk', type=Path)
+    parser.add_argument('--cancel', action='store_true', help='Interrupt a streaming Pi reply and check cleanup')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='pi-local-') as temp, ExitStack() as stack:
-        receipt = qualify(args.afk.resolve(strict=True), Path(temp).resolve(), stack)
+        receipt = qualify(args.afk.resolve(strict=True), Path(temp).resolve(), stack, args.cancel)
     print(json.dumps(receipt, indent=2))
     raise SystemExit(0 if receipt['passed'] else 1)

@@ -86,7 +86,7 @@ async function containerHost(engine: ContainerEngine, name: 'cursor' | 'pi' | 'c
     const lines = name === 'codex' ? [
       { type: 'thread.started', thread_id: 'native-codex' },
       { type: 'item.completed', item: { type: 'agent_message', text: marker } },
-      { type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 3, cache_write_input_tokens: 2, output_tokens: 4 } },
+      { type: 'turn.completed', usage: { input_tokens: 15, cached_input_tokens: 3, output_tokens: 4 } },
     ] : nativeLines(name, cwd);
     const resultMount = created.mounts.find(mount => mount.containerPath === '/afk/result')!;
     for (const suffix of ['stdout', 'stderr', 'exit']) {

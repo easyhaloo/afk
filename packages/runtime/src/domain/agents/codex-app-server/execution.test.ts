@@ -141,8 +141,14 @@ describe('CodexAppServerExecution', () => {
     transport.push({
       jsonrpc: '2.0', method: 'thread/tokenUsage/updated',
       params: {
+        tokenUsage: { total: { inputTokens: 10, outputTokens: 4, totalTokens: 14 } },
+      },
+    });
+    transport.push({
+      jsonrpc: '2.0', method: 'thread/tokenUsage/updated',
+      params: {
         tokenUsage: {
-          total: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
+          total: { inputTokens: 12, cachedInputTokens: 4, outputTokens: 5, reasoningOutputTokens: 2, totalTokens: 17 },
           last: { inputTokens: 2, outputTokens: 1, totalTokens: 3 },
         },
       },

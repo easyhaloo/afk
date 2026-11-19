@@ -198,8 +198,7 @@ describe('extractCodexRolloutTokens', () => {
             output_tokens: n * 10,
             reasoning_output_tokens: 0,
             cached_input_tokens: n * 5,
-            cache_write_input_tokens: n * 2,
-            total_tokens: n * 117,
+            total_tokens: n * 110,
           },
         },
       },
@@ -210,15 +209,14 @@ describe('extractCodexRolloutTokens', () => {
     // Claude uses MAX (non-monotonic snapshots); Codex uses LAST (cumulative).
     const lines = [tokenCount(1), tokenCount(3), tokenCount(2)];
     const usage = extractCodexRolloutTokens(lines);
-    // Last entry is tokenCount(2): input=200+10+4=214, output=20
-    expect(usage).toEqual({ inputTokens: 214, outputTokens: 20, totalTokens: 234 });
+    expect(usage).toEqual({ inputTokens: 200, outputTokens: 20, totalTokens: 220 });
   });
 
   it('returns undefined when no token_count entries exist', () => {
     expect(extractCodexRolloutTokens(['{"type":"turn.completed"}'])).toBeUndefined();
   });
 
-  it('sums cache tokens into input', () => {
+  it('uses native totals and treats cache and reasoning as breakdowns', () => {
     const lines = [JSON.stringify({
       type: 'event_msg',
       payload: {
@@ -227,22 +225,21 @@ describe('extractCodexRolloutTokens', () => {
           total_token_usage: {
             input_tokens: 1000,
             output_tokens: 200,
-            reasoning_output_tokens: 0,
+            reasoning_output_tokens: 10,
             cached_input_tokens: 50,
-            cache_write_input_tokens: 25,
-            total_tokens: 1275,
+            total_tokens: 1200,
           },
         },
       },
     })];
     const usage = extractCodexRolloutTokens(lines);
-    expect(usage).toEqual({ inputTokens: 1075, outputTokens: 200, totalTokens: 1275 });
+    expect(usage).toEqual({ inputTokens: 1000, outputTokens: 200, totalTokens: 1200 });
   });
 
   it('survives a truncated trailing line without throwing', () => {
-    const lines = [tokenCount(2), '{"type":"token_coun'];
+    const lines = [tokenCount(2), '{"type":"event_msg","payload":{"type":"token_count","info":null}}', '{"type":"token_coun'];
     expect(() => extractCodexRolloutTokens(lines)).not.toThrow();
-    expect(extractCodexRolloutTokens(lines)).toEqual({ inputTokens: 214, outputTokens: 20, totalTokens: 234 });
+    expect(extractCodexRolloutTokens(lines)).toEqual({ inputTokens: 200, outputTokens: 20, totalTokens: 220 });
   });
 
   it('returns undefined for an empty rollout', () => {
@@ -375,7 +372,7 @@ describe('findCodexRollout', () => {
     const sessionsDir = join(tmp, '.codex', 'sessions', '2025', '01', '15');
     mkdirSync(sessionsDir, { recursive: true });
     const rolloutFile = join(sessionsDir, 'rollout-103000-abc123def456.jsonl');
-    writeFileSync(rolloutFile, JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 0, cached_input_tokens: 5, cache_write_input_tokens: 2, total_tokens: 127 } } } }) + '\n');
+    writeFileSync(rolloutFile, JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 0, cached_input_tokens: 5, total_tokens: 120 } } } }) + '\n');
 
     const found = await findCodexRollout('abc123def456', tmp);
     expect(found).toBe(rolloutFile);

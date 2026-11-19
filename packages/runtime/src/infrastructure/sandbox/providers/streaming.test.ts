@@ -642,7 +642,7 @@ describe('StreamingAgentExecution', () => {
     await expect(execution.waitForResult({ completionTimeoutMs: 5_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'codex fixture complete' },
-      usage: { inputTokens: 14, outputTokens: 5, totalTokens: 19 },
+      usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
     });
     expect(execution.metadata).toEqual({ provider: 'codex', transport: 'exec' });
   });
@@ -953,7 +953,7 @@ describe('StreamingAgentExecution', () => {
     it.each([new ClaudeCodeProvider(), new CodexProvider()])('uses normalized native usage from $name', async provider => {
       const usage = JSON.stringify(provider.name === 'claude-code'
         ? { type: 'usage', usage: { input_tokens: 60, cache_creation_input_tokens: 10, cache_read_input_tokens: 10, output_tokens: 20 } }
-        : { type: 'turn.completed', usage: { input_tokens: 70, cached_input_tokens: 10, output_tokens: 20 } });
+        : { type: 'turn.completed', usage: { input_tokens: 80, cached_input_tokens: 10, output_tokens: 20 } });
       const execution = new StreamingAgentExecution({
         command: command(`console.log(${JSON.stringify(usage)}); setInterval(() => {}, 10000)`),
         prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),

@@ -5,6 +5,7 @@
  */
 
 import type { AgentToolCallSummary } from '@afk/core';
+import { codexTokenUsage } from '../../domain/agents/codex-usage.js';
 import type { AgentExecution, ExecutionResult, TokenUsage } from '../../domain/agents/types.js';
 import { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 export { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
@@ -207,14 +208,7 @@ function isCostStateEntry(v: unknown): v is CostStateEntry {
 interface TokenCountPayload {
   type: 'token_count';
   info: {
-    total_token_usage: {
-      input_tokens: number;
-      output_tokens: number;
-      reasoning_output_tokens: number;
-      cached_input_tokens: number;
-      cache_write_input_tokens: number;
-      total_tokens: number;
-    };
+    total_token_usage?: Record<string, unknown> | null;
   } | null;
 }
 
@@ -238,19 +232,12 @@ export function extractCodexRolloutTokens(lines: string[]): TokenUsage | undefin
     } catch {
       continue;
     }
-    if (!isEventMsgWithTokenCount(parsed)) continue;
+    if (!isEventMsgWithTokenCount(parsed) || !parsed.payload.info?.total_token_usage) continue;
     last = parsed.payload;
   }
 
-  if (!last) return undefined;
-
-  const tu = last.info?.total_token_usage;
-  if (!tu) return undefined;
-
-  const inputTokens = num(tu.input_tokens) + num(tu.cached_input_tokens) + num(tu.cache_write_input_tokens);
-  const outputTokens = num(tu.output_tokens); // reasoning_output_tokens already in output_tokens
-
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+  const snapshot = last?.info?.total_token_usage;
+  return snapshot ? codexTokenUsage(snapshot) : undefined;
 }
 
 function isEventMsgWithTokenCount(v: unknown): v is { type: 'event_msg'; payload: TokenCountPayload } {

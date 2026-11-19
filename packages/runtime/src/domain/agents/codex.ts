@@ -18,6 +18,7 @@ import type {
   AgentExecution,
 } from './types.js';
 import { ProcessAgentProvider } from './process-provider.js';
+import { codexTokenUsage } from './codex-usage.js';
 import { CodexAppServerExecution } from './codex-app-server/execution.js';
 
 type CodexJsonEvent = { [key: string]: unknown };
@@ -88,14 +89,7 @@ export class CodexProvider extends ProcessAgentProvider {
     }
 
     if (event.type === 'turn.completed' && isRecord(event.usage)) {
-      const num = (value: unknown) => numberValue(value);
-      // Cache tokens count as input; reasoning_output_tokens is already in output_tokens.
-      const inputTokens = num(event.usage['input_tokens']) + num(event.usage['cached_input_tokens']) + num(event.usage['cache_write_input_tokens']);
-      const outputTokens = num(event.usage['output_tokens']);
-      return [{
-        type: 'usage',
-        usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
-      }];
+      return [{ type: 'usage', usage: codexTokenUsage(event.usage) }];
     }
 
     if (event.type === 'error' || event.type === 'turn.failed') {
@@ -117,10 +111,6 @@ export class CodexProvider extends ProcessAgentProvider {
 
 function isRecord(value: unknown): value is CodexJsonEvent {
   return value !== null && typeof value === 'object';
-}
-
-function numberValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function errorMessage(event: CodexJsonEvent): string {

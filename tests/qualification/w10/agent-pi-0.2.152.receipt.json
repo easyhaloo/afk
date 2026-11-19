@@ -1,0 +1,62 @@
+{
+  "date": "2026-11-19",
+  "installationSource": "parent-worktree-installed-release",
+  "baselineReceipt": "agent-pi.receipt.json",
+  "modelEvidenceLevel": "fixture",
+  "runs": [
+    {
+      "scenario": "success",
+      "passed": true,
+      "phase": "complete",
+      "evidenceLevel": "native",
+      "modelSource": "isolated-loopback-fixture",
+      "platform": "darwin",
+      "afk": "0.2.152",
+      "pi": "1.5.2",
+      "archiveSha256": "0d72d87da6c6de209b11626a845c2fc9d625c5185032fcb07d7b7689d455d8b0",
+      "arch": "arm64",
+      "workflowSuccess": true,
+      "state": "verification",
+      "queued": true,
+      "failureCodes": [],
+      "expected": 1497,
+      "artifactMatches": true,
+      "implementationCompleted": true,
+      "sessionMatches": true,
+      "assistantTurns": 3,
+      "nativeUsage": {
+        "inputTokens": 93,
+        "outputTokens": 21,
+        "totalTokens": 114
+      },
+      "productUsage": {
+        "inputTokens": 93,
+        "outputTokens": 21,
+        "totalTokens": 114
+      },
+      "exitCode": 0
+    },
+    {
+      "scenario": "cancel",
+      "passed": true,
+      "phase": "complete",
+      "evidenceLevel": "native",
+      "modelSource": "isolated-loopback-fixture",
+      "platform": "darwin",
+      "afk": "0.2.152",
+      "pi": "1.5.2",
+      "archiveSha256": "0d72d87da6c6de209b11626a845c2fc9d625c5185032fcb07d7b7689d455d8b0",
+      "arch": "arm64",
+      "workflowSuccess": false,
+      "state": "blocked",
+      "queued": false,
+      "terminal": "cancelled",
+      "reasonCode": "user_cancelled",
+      "failureCodes": [],
+      "abortAfterStart": true,
+      "delayedWrite": false,
+      "processExited": true,
+      "exitCode": 0
+    }
+  ]
+}

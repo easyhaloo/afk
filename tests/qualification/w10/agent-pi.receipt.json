@@ -1,0 +1,81 @@
+{
+  "baseline": "ccd7b06a5fbd3611ee9886bfcdd93c8f8759aeaf",
+  "date": "2026-11-19",
+  "runs": [
+    {
+      "scenario": "success",
+      "passed": false,
+      "phase": "workflow",
+      "evidenceLevel": "native",
+      "modelSource": "configured-default",
+      "platform": "darwin",
+      "afk": "0.2.150",
+      "pi": "1.5.2",
+      "archiveSha256": "54a32102515f8622252f0cc64551188cf6ae0c5988785a29f71cfee210f2ca78",
+      "arch": "arm64",
+      "nativeSessionFiles": 1,
+      "nativeErrorMarkers": [
+        "402"
+      ],
+      "failureCodes": [
+        "upstream_model_error",
+        "workflow_crash"
+      ]
+    },
+    {
+      "scenario": "success",
+      "passed": true,
+      "phase": "complete",
+      "evidenceLevel": "native",
+      "modelSource": "isolated-loopback-fixture",
+      "platform": "darwin",
+      "afk": "0.2.150",
+      "pi": "1.5.2",
+      "archiveSha256": "54a32102515f8622252f0cc64551188cf6ae0c5988785a29f71cfee210f2ca78",
+      "arch": "arm64",
+      "workflowSuccess": true,
+      "state": "verification",
+      "queued": true,
+      "failureCodes": [],
+      "expected": 6396,
+      "artifactMatches": true,
+      "implementationCompleted": true,
+      "sessionMatches": true,
+      "assistantTurns": 3,
+      "nativeUsage": {
+        "inputTokens": 93,
+        "outputTokens": 21,
+        "totalTokens": 114
+      },
+      "productUsage": {
+        "inputTokens": 93,
+        "outputTokens": 21,
+        "totalTokens": 114
+      }
+    },
+    {
+      "scenario": "cancel",
+      "passed": false,
+      "phase": "cancellation",
+      "evidenceLevel": "native",
+      "modelSource": "isolated-loopback-fixture",
+      "platform": "darwin",
+      "afk": "0.2.150",
+      "pi": "1.5.2",
+      "archiveSha256": "54a32102515f8622252f0cc64551188cf6ae0c5988785a29f71cfee210f2ca78",
+      "arch": "arm64",
+      "workflowSuccess": false,
+      "state": "blocked",
+      "queued": false,
+      "terminal": "failed",
+      "failureCodes": [
+        "workflow_crash"
+      ],
+      "abortAfterStart": true,
+      "delayedWrite": false,
+      "processExited": true,
+      "nativeSessionFiles": 1,
+      "nativeErrorMarkers": []
+    }
+  ]
+}

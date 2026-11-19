@@ -2750,6 +2750,16 @@ Provisional total63–103 person-days. With four to five effective parallel writ
 
 #### Committed slice and current delivery evidence
 
+On November 19, 2026, the `w11-recall-v1` audit checked historical installed releases against all six second-consumer cases for each of five asset types. All 10 expected hits and 20 expected exclusions matched.
+
+| Asset | Consumer CLI | Provenance |
+| --- | --- | --- |
+| Facts, processes, repair lessons | 0.2.135, 0.2.138, 0.2.139, 0.2.143 | All 18 cases trace to actual extraction, validation and authorized publication. A further process consumption receipt uses 0.2.147. |
+| Skills | 0.2.141, 0.2.146 | Six cases loaded or excluded historical edition 2. The extracted revision still needs human merge, installation and consumption receipts matching its digest. |
+| Tools | 0.2.142, 0.2.146 | The source digest links extraction, Docker verification, installation and invocation of 2.0.3 for `tool-01`. Formal promotion and human merge receipts are outstanding. Five cases cover consumption or exclusion of 2.0.2. |
+
+The benefit comparison covers 12 of 18 independent runs. Each of the environment, process and repair scenarios has two `none`/`new` pairs. Both arms passed the task checker. The predefined detour occurred in all six `none` runs and in zero `new` runs. The two process pairs saved 7.334 and 7.451 seconds. Each scenario still lacks two `old` runs with an independently retrievable previous release. The benefit for work item `#765` is still `unknown`, as are actual billed costs.
+
 D01 SDK completed the first independent delivery: commit `9ed99fb681eb2842f0886a8c5d7ba155a8d9026d`, tree `bbd22ef6eb3b17a96c1331db4267e0760bb35184`, CLI0.2.59. Real index is empty and all1,749 captured working-file bytes are unchanged. Runtime4447/skipped21, CLI608/skipped2, root338/skipped1; core30, application78 and workflow-graph9 pass. Sixteen build/type/architecture/import/docs checks exit0. Original Python3.9.6 failures and supported3.13.7 comparison remain; no assertions/timeouts changed. No new Desktop/coverage qualification for this exact tree.
 
 The5,268,903-byte CLI archive SHA256 is`3c228176fd83999366310888803579bd6b4012b12c99e7ff14d187ae5f0af810`. Official outside-source23 entries and independent installed SDK8 pass; owned temporary installs removed. Initial driver mistake and both offline-metadata failures remain. Existing pnpm with auto-dependency verification disabled, ignore-scripts and prefer-offline completed packaging; registry metadata fetching is not called fully offline or proof shared cache stayed unchanged. Receipts: `.codex/validation/plugin-external-tools-integration-20261114/commit-snapshot-v2/DELIVERY.md`. PR295 updated; exacthead9ed99fb6 CI43554331331 all eight jobs succeed, including Desktop E2E/PTY. First watch API timeout only reconnected to the same run, never restarted workflow. V8 Linux Node22.23.4 full-configured source coverage lines/statements88.78%, functions85.49%, branches87.10%, violations=[] and package baselines retained; Desktop,PTY/separately spawned processes excluded. Authoritative run and490 downloaded artifact hashes retained; no merge.

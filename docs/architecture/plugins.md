@@ -656,7 +656,7 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `tracker.linear` | `baseUrl`, secret `token`, `teamId` |
 | `tracker.jira` | `baseUrl`, secret `token`, `projectKey`, `email?`, `issueType?` |
 | `verification.test-runner`, `verification.static-scan`, `verification.browser-check` | Nonempty argv `command`, `timeoutMs?` |
-| `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?` |
+| `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?`. Feishu also accepts an optional `signingSecret` credential reference. |
 | `notification.email` | `from`, `to` email addresses; `sendmailPath?`, `channel?` |
 | `notification.gmail` | `{}` sends to the authenticated Google account; optional email `to` overrides the recipient; `channel?` |
 | `notification.desktop` | `platform?` (`darwin`, `linux`, `win32`), `channel?` |
@@ -1292,7 +1292,7 @@ on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `Trigg
 | Plugin ID | Obtain the configuration | `settings.json` contents (replace the sample target) |
 | --- | --- | --- |
 | `notification.slack` | Create an app in the test workspace, enable Incoming Webhooks, select an authorized test channel and copy the generated URL. [Slack apps](https://api.slack.com/apps) · [Webhook setup](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
-| `notification.feishu` | Add a custom bot in the target test group's bot settings and copy its webhook. Include any required keyword in the test message. The adapter sends text only. Groups requiring signatures need signing support first. [Feishu custom bots](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"}}` |
+| `notification.feishu` | Add a custom bot in the target group's bot settings and copy its webhook into `FEISHU_WEBHOOK`. Under Security Settings, enable signature verification and copy the generated secret into `FEISHU_SIGNING_SECRET`. Omit `signingSecret` for an unsigned bot. Include any required keyword in the message. For error 19021, check the signing key and the sender's clock (the timestamp must be within one hour). [Feishu custom bots](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"},"signingSecret":{"env":"FEISHU_SIGNING_SECRET"}}` |
 | `tracker.linear` | Create a personal API key with read access to the target team and store the raw key. Run `query { teams { nodes { id name } } }` in the authorized workspace and select the team's `id`. [Linear API settings](https://linear.app/settings/api) · [GraphQL guide](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
 | `tracker.jira` | Create an account API token and supply the same account's email and the project key. Use the site root for an unscoped token or `https://api.atlassian.com/ex/jira/CLOUD_ID` for a scoped token. The adapter appends the REST path and builds Basic authentication from the email and token. [Create token](https://id.atlassian.com/manage-profile/security/api-tokens) · [Token and gateway guide](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
 

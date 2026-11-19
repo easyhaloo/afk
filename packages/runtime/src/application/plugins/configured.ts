@@ -359,7 +359,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new JiraTrackerProvider({ ...config, fetch });
       return capability(provider, { issueTrackers: [provider] });
     }),
-    'notification.feishu': defineOperation('notification.provider', secret => z.object({ webhook: secret.refine(value => typeof value !== 'string' || httpUrl.safeParse(value).success, 'invalid webhook configuration'), channel: text.optional() }).strict(), config => {
+    'notification.feishu': defineOperation('notification.provider', secret => z.object({
+      webhook: secret.refine(value => typeof value !== 'string' || httpUrl.safeParse(value).success, 'invalid webhook configuration'),
+      signingSecret: secret.optional(), channel: text.optional(),
+    }).strict(), config => {
       const provider = new FeishuNotificationProvider({ ...config, fetch });
       return capability(provider, { notifications: [provider] });
     }),

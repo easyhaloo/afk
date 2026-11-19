@@ -514,7 +514,7 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `tracker.linear` | `baseUrl`、secret `token`、`teamId` |
 | `tracker.jira` | `baseUrl`、secret `token`、`projectKey`、`email?`、`issueType?` |
 | `verification.test-runner`、`verification.static-scan`、`verification.browser-check` | 非空 argv `command`、`timeoutMs?` |
-| `notification.feishu`、`notification.slack` | 解析为 HTTP URL 的 secret `webhook`、`channel?` |
+| `notification.feishu`、`notification.slack` | 解析为 HTTP URL 的 secret `webhook`、`channel?`。飞书还接受可选的凭据引用 `signingSecret`。 |
 | `notification.email` | 邮箱 `from`、`to`；`sendmailPath?`、`channel?` |
 | `notification.gmail` | `{}` 默认发给授权 Google 账号自身；邮箱 `to?` 可覆盖收件人，另可选 `channel?` |
 | `notification.desktop` | `platform?`（`darwin`、`linux`、`win32`）、`channel?` |
@@ -1008,7 +1008,7 @@ SDK 提供 `currentTriggerDeliveryId()`、`TriggerQueueOptions`、
 | 插件 ID | 获取配置 | `settings.json` 内容（替换示例目标） |
 | --- | --- | --- |
 | `notification.slack` | 在测试工作区创建应用，开启 Incoming Webhooks，选择获授权的测试频道并复制生成的 URL。[Slack 应用](https://api.slack.com/apps) · [配置步骤](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
-| `notification.feishu` | 在目标测试群的机器人设置中添加自定义机器人并复制 webhook。若启用关键词，测试消息须包含该词。当前适配器仅发送文本，要求签名的群需要先支持签名。[飞书自定义机器人](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"}}` |
+| `notification.feishu` | 在目标群的机器人设置中添加自定义机器人，将 webhook 存入 `FEISHU_WEBHOOK`。在「安全设置」启用「签名校验」，将生成的密钥存入 `FEISHU_SIGNING_SECRET`。无签名机器人省略 `signingSecret`。若启用关键词，消息须包含该词。遇到错误码 19021 时检查签名密钥和发送端时钟（时间戳与当前时间须相差一小时以内）。[飞书自定义机器人](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"},"signingSecret":{"env":"FEISHU_SIGNING_SECRET"}}` |
 | `tracker.linear` | 创建有目标团队读取权限的个人 API key，原样保存。在授权工作区运行查询 `query { teams { nodes { id name } } }`，选择目标团队的 `id`。[Linear API 设置](https://linear.app/settings/api) · [GraphQL 入门](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
 | `tracker.jira` | 创建账户 API token，填写同一账户邮箱及项目键。普通 token 使用站点根地址，带 scope 的 token 使用 `https://api.atlassian.com/ex/jira/CLOUD_ID`。适配器追加 REST 路径并使用邮箱和 token 构造 Basic 认证。[创建 token](https://id.atlassian.com/manage-profile/security/api-tokens) · [令牌与网关说明](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
 

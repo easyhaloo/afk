@@ -23,6 +23,7 @@
  * - Failure receipts never echo the webhook URL or any secret; every error
  *   message is passed through a redactor that strips known sensitive strings.
  */
+import { createHmac } from 'node:crypto';
 import type {
   NotificationCapability,
   NotificationMessage,
@@ -31,7 +32,7 @@ import type {
   ProviderOperationOptions,
 } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, executeCommand, requestHttp } from './dependencies.js';
-import { resolveWebhook, type OperationSecret } from './operation-secret.js';
+import { resolveOperationSecret, resolveWebhook, type OperationSecret } from './operation-secret.js';
 import type { CommandExecutor, CommandRequest, FetchTransport } from './dependencies.js';
 
 /** Flattens a neutral message into the single text body webhook providers send. */
@@ -59,6 +60,7 @@ function describeError(error: unknown, secrets: readonly string[]): string {
 export interface FeishuNotificationOptions {
   /** Incoming webhook URL. Treated as a secret and never echoed in receipts. */
   readonly webhook: OperationSecret;
+  readonly signingSecret?: OperationSecret;
   /** Optional transport; defaults to global fetch at delivery time. */
   readonly fetch?: FetchTransport;
   /** Channel label reported in receipts. */
@@ -81,11 +83,13 @@ export class FeishuNotificationProvider implements NotificationProvider {
   };
 
   private readonly webhook: OperationSecret;
+  private readonly signingSecret?: OperationSecret;
   private readonly fetch?: FetchTransport;
   private readonly defaultChannel: string;
 
   constructor(options: FeishuNotificationOptions) {
     this.webhook = options.webhook;
+    this.signingSecret = options.signingSecret;
     this.fetch = options.fetch;
     this.defaultChannel = options.channel ?? 'feishu';
   }
@@ -95,17 +99,23 @@ export class FeishuNotificationProvider implements NotificationProvider {
     let webhook: string | undefined;
     try {
       webhook = await resolveWebhook(this.webhook, options);
+      let signature: { timestamp: string; sign: string } | undefined;
+      if (this.signingSecret !== undefined) {
+        const secret = await resolveOperationSecret(this.signingSecret, options);
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        signature = { timestamp, sign: createHmac('sha256', `${timestamp}\n${secret}`).digest('base64') };
+      }
       const response = await requestHttp(
         this.fetch,
         webhook,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json; charset=utf-8' },
-          body: JSON.stringify({ msg_type: 'text', content: { text: renderText(message) } }),
+          body: JSON.stringify({ ...signature, msg_type: 'text', content: { text: renderText(message) } }),
         },
         options,
       );
-      const payload = (await response.json()) as { readonly code?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as { readonly code?: unknown } | null;
       if (typeof payload?.code !== 'number' || !Number.isFinite(payload.code)) {
         return { delivered: false, channel, error: 'Feishu returned an invalid delivery response' };
       }

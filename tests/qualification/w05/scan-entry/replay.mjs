@@ -4,14 +4,15 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isolated } from '../scan-seatbelt.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const read = file => JSON.parse(readFileSync(file, 'utf8'));
 const proof = resolve(process.argv[2]);
-const profile = resolve(process.argv[3]);
+const requestedProfile = resolve(process.argv[3]);
+const profile = join(realpathSync(dirname(requestedProfile)), basename(requestedProfile));
 const frozen = read(new URL('../tool-denial/candidate.json', import.meta.url));
 const extraction = read(join(proof, 'extraction.json'));
 const candidate = extraction.candidates.find(entry => entry.id === frozen.candidateId);

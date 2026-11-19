@@ -258,6 +258,36 @@ describe('local plugin matrix: persisted lifecycle × public operation', () => {
 });
 
 describe('context selection and persisted memory', () => {
+  it('context.project-memory reads the active edition from the configured project on each invocation', async () => {
+    const primary = await configured('context.project-memory');
+    const other = await configured('context.project-memory');
+    const first = { origin: 'returns/v1', content: 'warehouse north accepts returns' };
+    const second = { origin: 'returns/v2', content: 'warehouse south accepts returns' };
+    const independent = { origin: 'orders/v1', content: 'warehouse east accepts orders' };
+    const query = { scope: '.', prompt: 'warehouse' };
+    await writeFile(join(primary.workspace, 'memory.json'), JSON.stringify([first]));
+    await writeFile(join(other.workspace, 'memory.json'), JSON.stringify([independent]));
+    expect(JSON.parse((await primary.run(query)).stdout)).toEqual([{ ...first, score: 1 }]);
+    await writeFile(join(primary.workspace, 'memory.json'), JSON.stringify([second]));
+    expect(JSON.parse((await primary.run(query)).stdout)).toEqual([{ ...second, score: 1 }]);
+    expect(JSON.parse((await other.run(query)).stdout)).toEqual([{ ...independent, score: 1 }]);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('context.code respects revocation and restoration of source file permissions', async () => {
+    const test = await configured('context.code');
+    const path = join(test.workspace, 'widget.ts');
+    const query = { scope: 'widget.ts', prompt: 'needle' };
+    const expected = [{ origin: 'widget.ts', content, score: 2 }];
+    expect(JSON.parse((await test.run(query)).stdout)).toEqual(expected);
+    await chmod(path, 0o000);
+    try {
+      await expectRejected(test.run(query), 'EACCES');
+    } finally {
+      await chmod(path, 0o600);
+    }
+    expect(JSON.parse((await test.run(query)).stdout)).toEqual(expected);
+  });
+
   it.each(['context.code', 'context.retrieval', 'context.project-memory'])('%s ranks matching fragments, filters misses, and enforces public limits', async id => {
     const test = await configured(id);
     const before = await test.effects();

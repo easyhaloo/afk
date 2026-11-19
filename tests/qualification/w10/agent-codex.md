@@ -50,3 +50,15 @@ python3 tests/qualification/w10/agent-codex.py "$release" "$evidence/resume.json
 `resume` 用例要求未声明恢复能力的 provider 在启动前拒绝显式请求。0.2.156 在最后一项以 `passed:false`、退出码 1 记录缺口。正常工作流通过能力门控，表现为跳过原生恢复。显式 `createExecution({resume})` 仅用于复现底层调用者遇到的不一致。实测覆盖的是首轮、恢复请求及预算重入，原生续跑后的用量增量仍待产品支持后验证。
 
 `0.2.157` 已在源码外安装验证。本地和远程沙箱的 exec、app-server 四种组合均在分派前拒绝显式快照。真实账户重跑时首轮触发 `agent_completion_timeout`，停在预算重入和恢复断言之前。
+
+### 0.2.163 本地原生恢复与预算验收
+
+工作树安装依赖后，用真实 `codex` 和临时 HOME 运行。收据文件应使用新名称。
+
+```sh
+pnpm --filter afk... build
+mkdir -p .afk
+python3 tests/qualification/w10/agent-codex-resume-loopback.py .afk/resume-proof.json
+```
+
+驱动从本树的构建产物进入 `WorkflowRunner`。模型响应由回环 HTTP 服务提供，工单、分支和变更 provider 使用本地 fixture。Codex app-server、原生线程持久化、恢复协议、审计和预算存储均实际运行，不需要账户凭据。首次用量达到交接阈值后，下一代重新启动 app-server 并恢复同一线程。验收核对两条审计的增量为 12、17，原生文件与预算表均累计 29，一次交接后工单进入 `verification`。以 29 为上限再次进入该工单时，必须记录 `budget_exhausted`、进入 `blocked`、预算保持 29，且新增线程数为零。

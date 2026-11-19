@@ -77,6 +77,7 @@ const POLL_INTERVAL_MS = 2_000;
  * the tmux session within an existing worktree.
  */
 export class LocalSandbox implements Sandbox {
+  get localProcessWorkspace(): boolean { return !this.analysis; }
   readonly id: string;
   readonly worktreePath: string;
   readonly workspacePath: string;

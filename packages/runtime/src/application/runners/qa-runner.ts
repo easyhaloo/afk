@@ -1087,7 +1087,7 @@ export class QARunner {
     const sandboxKind = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
     const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
     const { sessionId, usage } = telemetry;
-    if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
+    if (usage && budget.recordSession(sessionId, result.cumulativeSessionTokens ?? usage.totalTokens)) await store.save(budget.snapshot());
     await this.onSession?.({ kind: 'agent.session_recorded', ...telemetry });
   }
 

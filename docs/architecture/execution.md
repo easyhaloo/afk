@@ -410,6 +410,19 @@ transport error from the wrong endpoint. The probe costs a live model
 round-trip, so it runs once per provider per run. See
 [ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md).
 
+Codex native resume is supported for batch work in a local development
+workspace using a spawned stdio app-server. The checkpoint identifies the
+native thread, last completed turn, canonical worktree, model provider and
+token watermark. Before sending new input, AFK checks the native workspace,
+turn and effective approval and sandbox policies. Explicit resume on exec,
+interactive, analysis, container or external endpoints is rejected. When a
+dispatched turn cannot be confirmed or another writer owns the thread, the workflow stops to avoid duplicate work.
+
+Each generation audits the difference from its saved usage watermark. Only
+notifications for its own thread and turn count. The work-item budget stores
+the cumulative native thread total. A missing or inconsistent resumed usage
+report fails the turn and prevents a new checkpoint. Each new cumulative reading must advance by the reported increment in every counter. Exact duplicate readings count once. Checkpoints require explicit completed status and matching native turn identities.
+
 The verification branch binds the same way. The QA reviewer resolves its
 provider and its runtime together: a reviewer that names its own provider
 resolves the runtime that belongs to it, and a runtime the caller already

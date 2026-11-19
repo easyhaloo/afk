@@ -113,6 +113,7 @@ export type AgentRuntimeSelection = { kind: 'default' } | CodexRuntimeSelection;
 
 /** Minimal execution host implemented by local and container sandboxes. */
 export interface AgentExecutionHost {
+  readonly localProcessWorkspace?: boolean;
   readonly worktreePath: string;
   readonly workspacePath: string;
   startAgent(options: AgentStartOptions): Promise<AgentExecution>;
@@ -191,6 +192,8 @@ export interface ResumeOptions {
   prompt?: string;
 }
 
+export class NativeResumeDispatchError extends Error {}
+
 export type ExecutionEvent =
   | { type: 'text'; text: string }
   | { type: 'usage'; usage: TokenUsage }
@@ -228,6 +231,7 @@ export interface ExecutionResult {
   exitCode?: number;
   structuredOutput?: unknown;
   usage?: TokenUsage;
+  cumulativeSessionTokens?: number;
   tools?: AgentToolCallSummary[];
   commits: string[];
   branch?: string;
@@ -270,6 +274,7 @@ export interface AgentExecution {
 export interface AgentProvider {
   readonly name: AgentProviderName;
   readonly capabilities: ReadonlySet<AgentCapability>;
+  supportsResume?(options: Pick<AgentExecutionOptions, 'sandbox' | 'runtime' | 'executionMode' | 'interactive' | 'executionProfile'>): boolean;
 
   /**
    * The limits this provider puts on the text AFK hands it.

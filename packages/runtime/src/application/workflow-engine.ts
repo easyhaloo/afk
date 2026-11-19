@@ -1952,6 +1952,7 @@ export class WorkflowRunner {
             {
               iid: p.iid,
               session: p.session,
+              sourceThreadId: execution.metadata.threadId,
               wtPath: p.wtPath,
               runId,
               generation: p.budget.used + 2,
@@ -2141,7 +2142,8 @@ export class WorkflowRunner {
       ['docker', 'podman', 'remote-container'].includes(this.sandboxProvider.name) ? 'container' : 'local';
     const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
     const { sessionId, usage } = telemetry;
-    if (!this.observationContext) return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
+    const budgetUsage = usage ? { sessionId, totalTokens: result.cumulativeSessionTokens ?? usage.totalTokens } : undefined;
+    if (!this.observationContext) return budgetUsage;
     try {
       await this.observer.record(this.observationContext, {
         kind: 'agent.session_recorded',
@@ -2150,7 +2152,7 @@ export class WorkflowRunner {
     } catch (err) {
       logger.info({ runId: this.observationContext.runId, err }, 'agent.session_recorded: telemetry not persisted (non-fatal)');
     }
-    return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
+    return budgetUsage;
   }
 
   private async startRuntime(backlogId: string, session: string): Promise<void> {

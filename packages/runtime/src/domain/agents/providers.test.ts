@@ -127,9 +127,9 @@ describe('Agent providers — fixture coverage', () => {
   describe('CodexProvider', () => {
     const p = new CodexProvider();
 
-    it('exposes correct name and capabilities (NO resume)', () => {
+    it('exposes transport-scoped resume', () => {
       expect(p.name).toBe('codex');
-      expect(p.capabilities.has('resume')).toBe(false);
+      expect(p.capabilities.has('resume')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
       expect(p.capabilities.has('interactive')).toBe(true);
     });
@@ -537,7 +537,7 @@ describe('Agent registry', () => {
 
 describe('Resume capability gating', () => {
   const resumeProvider = new CursorProvider(); // HAS resume
-  const noResumeProvider = new CodexProvider();   // NO resume
+  const noResumeProvider = new OpenCodeProvider();
 
   it('guardedRestoreSession throws for non-resume provider', async () => {
     await expect(guardedRestoreSession(noResumeProvider, {

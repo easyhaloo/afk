@@ -20,11 +20,13 @@ import type {
 import { ProcessAgentProvider } from './process-provider.js';
 import { codexTokenUsage } from './codex-usage.js';
 import { CodexAppServerExecution } from './codex-app-server/execution.js';
+import { readCheckpoint, supportsLocalResume } from './codex-app-server/resume.js';
+import type { RestoreSessionOptions } from './types.js';
 
 type CodexJsonEvent = { [key: string]: unknown };
 
-/** Codex capabilities — resume deliberately excluded. */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
+  'resume',
   'streaming',
   'structured-output',
   'usage',
@@ -34,17 +36,24 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
 export class CodexProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'codex';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
+  readonly supportsResume = supportsLocalResume;
+
+  override async restoreSession(options: RestoreSessionOptions): Promise<void> {
+    await readCheckpoint(options);
+  }
 
   override async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
+    if (options.resume && !this.supportsResume(options)) throw new Error('codex does not support explicit native resume on this transport or sandbox');
     if (options.sandbox.startProviderExecution) return super.createExecution(options);
     if (options.runtime?.kind === 'codex' && options.runtime.transport === 'app-server') {
-      this.assertExecutionSupported(options);
+      this.assertExecutionSupported({ ...options, resume: undefined });
       return CodexAppServerExecution.start(options, options.runtime);
     }
     return super.createExecution(options);
   }
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
+    if (options.resume) throw new Error('codex does not support explicit native resume through exec or interactive commands');
     const argv = ['codex'];
     if (options.executionMode === 'batch') {
       argv.push('exec', '--json');

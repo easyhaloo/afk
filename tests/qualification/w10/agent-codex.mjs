@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const [release, root, output, scenario, codexVersion] = process.argv.slice(2);
-const load = name => import(join(release, 'node_modules/@afk/runtime/dist', name + '.js'));
+const loopback = scenario === 'resume-loopback';
+const load = name => import(join(release, loopback ? 'packages/runtime/dist' : 'node_modules/@afk/runtime/dist', name + '.js'));
 const { WorkflowRunner } = await load('application/workflow-engine');
 const { createDefaultPluginRuntime } = await load('plugin-sdk/index');
 const { resolveCodexRuntime, prepareAgentRuntime, DEFAULT_CODEX_CONFIG } = await load('domain/agents/codex-runtime');
@@ -28,14 +29,16 @@ const providers = {
   branches:{createBranch:async()=>{git('checkout','-b',branchName); return {branchName,worktreePath:workspace};},cleanup:async()=>{}},
   changes:{findForBacklog:async()=>null},
 };
-const transport = ['qa','app-server','resume'].includes(scenario) ? 'app-server' : 'exec';
-const receipt = { afk:JSON.parse(readFileSync(join(release,'release.json'))).version, codexVersion, scenario, transport, runId, workItemId };
+const transport = loopback || ['qa','app-server','resume'].includes(scenario) ? 'app-server' : 'exec';
+const receipt = { afk:JSON.parse(readFileSync(join(release,loopback ? 'apps/cli/package.json' : 'release.json'))).version, codexVersion, scenario, transport, runId, workItemId };
 const controller = new AbortController();
 const poll = setInterval(()=>{if(scenario==='cancel' && existsSync('started') && !controller.signal.aborted) controller.abort(new Error('synthetic operator cancellation'));},50);
 let plugins;
 try {
   receipt.phase = 'readiness';
   const runtime = await prepareAgentRuntime(resolveCodexRuntime({cli:{transport},config:DEFAULT_CODEX_CONFIG}));
+  const nativeFiles = () => readdirSync(join(process.env.CODEX_HOME,'sessions'), { recursive: true }).filter(name => name.endsWith('.jsonl'));
+  const readinessFiles = loopback ? nativeFiles() : [];
   receipt.phase = 'workflow';
   plugins = await createDefaultPluginRuntime({homeDir:process.env.HOME,workspaceRoot:workspace});
   const events = [];
@@ -48,6 +51,7 @@ try {
     receipt.authRemovedAfterReadiness = !process.env.QUAL_MODEL_AUTH;
   }
   const result = await runner.run({backlogId:'1',workItemId,session:runId,observationWorkItemId:workItemId,observationRunId:runId,
+    ...(loopback && { contextHighTokens: 10 }),
     targetBranch:branchName,baseBranch:'main',baseBranchExplicit:true,repoRoot:workspace,workspaceRoot:workspace,template,
     agentProvider:'codex',sandboxProvider:'local',executionMode:'batch',completionTimeoutMs:60000,hardTimeoutMs:90000,maxRetries:0,maxHandoffs:1,signal:controller.signal}).catch(error=>{
       const message=String(error.message);
@@ -101,6 +105,28 @@ try {
     assert.equal(receipt.terminalOutcome,'cancelled');
     assert.equal(receipt.reasonCode,'user_cancelled');
     assert.deepEqual(codes,[]);
+  } else if (loopback) {
+    const sessions = events.filter(event => event.kind === 'agent.session_recorded');
+    const { BudgetStore } = await load('application/workflows/budget-store');
+    const ledger = new BudgetStore(workspace, workItemId);
+    const budget = await ledger.load();
+    const files = nativeFiles().filter(name => !readinessFiles.includes(name));
+    receipt.turnTokens = sessions.map(session => session.usage?.totalTokens);
+    receipt.nativeThreads = files.length;
+    receipt.budget = budget?.tokens;
+    assert.equal(result.success, true);
+    assert.equal(sessions.length, 2);
+    assert.deepEqual(receipt.turnTokens, [12, 17]);
+    assert.equal(files.length, 1);
+    assert.equal(sessions[0].sessionId, sessions[1].sessionId);
+    assert.ok(files[0].endsWith(`${sessions[0].sessionId}.jsonl`));
+    const rows = readFileSync(join(process.env.CODEX_HOME,'sessions',files[0]),'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(rows.findLast(row => row.payload?.info?.total_token_usage)?.payload.info.total_token_usage.total_tokens, 29);
+    assert.deepEqual(budget.sessions, { [sessions[0].sessionId]: 29 });
+    assert.equal(budget.used, 1);
+    assert.equal(item.state, 'verification');
+    const { checkBudgetReentry } = await import('./agent-codex-resume.mjs');
+    await checkBudgetReentry({ runner, receipt, store, item, template, workspace, workItemId, branchName, ledger, transcripts: nativeFiles });
   } else {
     assert.equal(result.success,true);receipt.expected=value+40;receipt.actual=Number(readFileSync('total.txt','utf8').trim());assert.equal(receipt.actual,receipt.expected);
     assert.match(receipt.sessionId,/^[0-9a-f-]{36}$/);

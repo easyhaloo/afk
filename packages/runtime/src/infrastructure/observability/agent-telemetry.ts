@@ -102,7 +102,7 @@ export async function collectAgentTelemetry(
     : undefined;
   let usage = result.usage;
   let tools = result.tools;
-  if (transcript && telemetryProvider) {
+  if (transcript && telemetryProvider && result.cumulativeSessionTokens === undefined) {
     const options = { provider: telemetryProvider, transcriptPath: transcript.path, sandboxKind };
     if (!usage) usage = await readAgentTelemetry(options);
     if (!tools) tools = await readAgentTools(options);

@@ -311,7 +311,7 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
       }
       case 'agent.capture-session': {
         const job = execution(requests[operation].parse(body));
-        if (job.sessionInvalidated || !job.agent.capabilities.has('resume')) return null;
+        if (job.sessionInvalidated || !job.agent.capabilities.has('resume') || job.agent.supportsResume?.(job.options) === false) return null;
         const captured = await job.execution.captureSession() ?? (job.agent.captureSession && job.execution.sessionId
           ? await job.agent.captureSession({ sessionId: job.execution.sessionId, worktreePath: job.options.worktreePath }) : undefined);
         if (job.sessionInvalidated) return null;
@@ -341,7 +341,7 @@ export function createRemoteContainerServer(options: RemoteContainerServerOption
         const entry = sandbox(input.sandboxId);
         const job = execution(input);
         if (entry.busy || job.state === 'running' || [...entry.executions.values()].some(value => value !== job && (value.state === 'running' || value.state === 'interrupted'))) throw new HttpFailure(409, 'AGENT_BUSY', 'interrupt or finish the agent before resuming');
-        if (!job.agent.capabilities.has('resume')) throw new HttpFailure(409, 'RESUME_UNSUPPORTED', 'agent does not support resume');
+        if (!job.agent.capabilities.has('resume') || job.agent.supportsResume?.(job.options) === false) throw new HttpFailure(409, 'RESUME_UNSUPPORTED', 'agent does not support resume');
         if (!job.snapshot || !isDeepStrictEqual(job.snapshot, input.options.snapshot)) throw new HttpFailure(403, 'SNAPSHOT_DENIED', 'resume requires an unmodified snapshot captured by this execution');
         const snapshot = job.snapshot;
         if (entry.executions.size >= maxExecutions) throw new HttpFailure(429, 'EXECUTION_LIMIT', 'execution limit reached');

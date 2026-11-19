@@ -477,6 +477,8 @@ successfully refreshed OAuth with sending scope, verified the account identity a
 received HTTP 200 from the Gmail API discovery endpoint. No new email was sent;
 this recheck establishes authentication and connectivity, not a new delivery.
 
+The installed CLI template checks and the Desktop/CLI single-claim recovery test share a local repository fixture. See the [W07 qualification receipt and reproduction commands](../../tests/qualification/w07/README.md).
+
 ## Anti-patterns
 
 - ❌ Rendering full Ink components in unit tests without size context

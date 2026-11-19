@@ -5,11 +5,11 @@
 | 证据等级 | 行数 | 判定依据 |
 | --- | ---: | --- |
 | `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
-| `service` | 16 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
+| `service` | 17 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[Pi 本地推理](pi-local-inference.receipt.json)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
 | `native` | 14 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
 | `local` | 9 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 10 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 9 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
@@ -17,7 +17,7 @@
 
 2026-11-20，Cursor CLI `2026.07.09-a3815c0` 的 `cursor-agent status --format json` 返回 `authenticated`。安装版 0.2.162 在空白项目经本地 Sandbox 调用 Cursor 后收到 `NON_ZERO_EXIT`（退出码 1）。在同一目录直接运行原生批处理也收到 `Authentication required`。重新执行 `cursor-agent login` 后，需用实际批处理回包验证账号可用。Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
 
-本机 Pi 默认使用 `wiscode-aiproxy`。该 Provider 的 `pi auth check --provider wiscode-aiproxy --no-refresh` 返回 `ready`。安装版 CLI 经 Local Sandbox 收到原生会话，随后返回 `AGENT_ERROR`，没有命中预期回答。独立调用同一 Provider 的 `deepseek/deepseek-v4-flash` 模型，进程退出码为 0，最后一条助手消息的 `stopReason` 为 `error`，错误信息含 HTTP 402，输入和输出 token 均为 0。下一次验收需取得指定回答并核对原生 usage。[脱敏回执](agent-pi.receipt.json)
+安装版 0.2.168 经 Local Sandbox、Pi 1.5.2 和临时 Ollama 服务运行 Qwen3.5-2B。Pi 正确回答随机算术题，AFK 会话 ID 与 Pi 原生记录一致，输入 513、输出 80、合计 593 token，工具调用为零。使用本地缓存权重和隔离配置可[复跑](pi-local-inference.py)。执行中取消待验。云端 `wiscode-aiproxy` 的独立请求曾返回 HTTP 402。[本地回执](pi-local-inference.receipt.json) · [云端回执](agent-pi.receipt.json)
 
 2026-11-20，安装版 0.2.162 通过 `plugin invoke repository.provider special-git-backend run` 驱动独立 Git 命令后端。首次执行因动作查询失败而清理工作树，裸仓库只有 `main`。同一 runId 重试后，裸仓库的 `review` 指向 `9e3aabe46203670a9a56bf61b08e2ac61ce91e92`，读回 `parcel.txt` 的内容为 `ready for review`。基线 `main` 仍指向 `d7e85a8f44cb3bb06a302f3b8c970e37176adeea`，临时工作树已移除。运行 `python3 tests/qualification/w10/special-git-backend.py <安装版 CLI 可执行文件>` 可在独立临时仓库复验。
 

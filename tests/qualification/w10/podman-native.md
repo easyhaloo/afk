@@ -51,4 +51,18 @@ node ./podman-native.mjs --installed ./assets
 
 The installed mode pins the archive and installer SHA-256, runs the installer in an isolated home and calls the installed `afk plugin serve-container --sandbox podman` from a synthetic repository. A loopback client calls `sandbox.create`, `agent.start`, `agent.wait` and `sandbox.close`. An explicitly registered test agent dispatches two deterministic shell workloads through the sandbox. The common harness independently inspects the live container, checks its four mounts, compares host input and returned bytes, and checks exits 0 and 23. After close, the service returns HTTP 404 `SANDBOX_MISSING` and the engine reports that the full container ID is absent. Each run uses a private Podman store and emits its receipt after cleanup.
 
-Coverage is installed CLI batch sandbox execution on Linux arm64. Agent inference, interactive sessions, suspend/resume and Linux x64 qualification remain outside this receipt. The script also pins the sibling `cli-linux-x64` artifact for a separate x64 replay.
+The arm64 receipt covers installed CLI batch sandbox execution. The same assertions and cleanup ran on Linux x64 using the sibling release artifact.
+
+### Hosted Linux x64
+
+The [x64 package job](https://github.com/easyhaloo/afk/actions/runs/44595292353/job/135812047532) produced `cli-linux-x64` (artifact `14564928382`). The [dedicated qualification job](https://github.com/easyhaloo/afk/actions/runs/44606496713/job/135851471341) emitted the [x64 receipt](podman-installed-168-x64.receipt.json) on 2026-11-19 at 20:14:09 UTC. The runner used Ubuntu 24.04 x86_64, Node 22.16.0 and native rootless Podman 4.9.3 with crun. Both installed receipts cover deterministic batch shell execution. Model inference, interactive sessions and suspend/resume require separate checks.
+
+The [single-job workflow](https://github.com/easyhaloo/afk/blob/efd05d19060861d2fdf8327fee2cfe70dbdaca16/.github/workflows/w10-installed-podman-x64.yml) lives on `fix/podman-installed-x64-run`. It copies both harness modules to a directory outside the checkout and runs the installed mode there. To replay on a disposable Linux x64 host, follow the installed instructions above with `-n cli-linux-x64`. To compare the retained record with the original job log, run from the checkout root with Bash or Zsh.
+
+```sh
+set -o pipefail
+gh run view 44606496713 -R easyhaloo/afk --attempt 1 --job 135851471341 --log |
+  sed -n 's/.*Z AFK_PODMAN_RECEIPT \({.*}\)$/\1/p' | jq -se \
+    --slurpfile saved tests/qualification/w10/podman-installed-168-x64.receipt.json \
+    'length == 1 and . == $saved'
+```

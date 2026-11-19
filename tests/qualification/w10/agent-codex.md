@@ -29,3 +29,5 @@ done
 
 0.2.151 的安装回归从工单的持久审计读取事件，并校验审计链。`cancel` 要求恰好一个 `cancelled` 终态、`user_cancelled` 原因码和调用方原因原文。`failure` 要求恰好一个 `failed` 终态并保留 `agent_process_failed` 根因。两个场景都要求工单进入 `blocked` 且无 `qa.started`。正常 `qa` 场景继续验证独立原生线程、`qa.passed` 和 `merge_ready`。
 父工作树以 macOS arm64 安装包 `0.2.152` 重跑了 `cancel`、`failure` 和 `qa`。取消后只有一个 `cancelled/user_cancelled` 终态，原因为调用方传入的消息，随后 13 秒未出现延迟写入。撤去认证时终态为 `failed/agent_process_failed`。两个工单均停在 `blocked`。正常任务由独立 Codex 会话记录 `qa.passed`，工单进入 `merge_ready`。
+
+`0.2.156` 安装包与 codex-cli `0.169.0` 再次通过上述三个场景的持久审计校验。`cancel` 观察 13 秒无延迟写入，`failure` 保留 `agent_process_failed`，两个工单各有一条终态并进入 `blocked`。`qa` 匹配独立的原生线程并进入 `merge_ready`。会话恢复前后的身份和预算另行验收。

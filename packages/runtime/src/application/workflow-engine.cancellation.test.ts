@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -14,7 +14,7 @@ import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { ProviderAbortSignal, ProviderOperationOptions } from '../plugin-sdk/capabilities.js';
 import type { LifecycleContext, InitContext } from './workflows/lifecycle.js';
 import { LifecycleDispatcher } from './workflows/lifecycle.js';
-import type { RunResourceScope } from './workflows/resource-scope.js';
+import { RunResourceScope } from './workflows/resource-scope.js';
 import type { WorkflowRunRepository } from './workflows/run-request.js';
 import type { BranchHandle } from '../domain/branches/types.js';
 import type { ExecutionResult } from '../domain/agents/types.js';
@@ -681,8 +681,8 @@ it.each(['scope', 'dispatcher'] as const)('preserves caller cancellation when %s
   try {
     expect(await bounded(f.entered.promise)).not.toBe('still pending');
     caller.abort(new Error('operator stopped work'));
-    const result = await bounded(pending) as { error: AggregateError & { cause: { recovery: { scope: RunResourceScope } } } };
-    expect(result.error).toBeInstanceOf(AggregateError);
+    const result = await bounded(pending);
+    assert(result !== 'still pending' && 'error' in result && result.error instanceof AggregateError);
     expect(result.error.errors[0]).toBe(caller.signal.reason);
     expect(result.error.errors[1]).toBe(cleanupError);
     const events = f.observer.record.mock.calls.map(([, data]) => data);
@@ -696,7 +696,12 @@ it.each(['scope', 'dispatcher'] as const)('preserves caller cancellation when %s
     expect(terminal).toMatchObject({ status: 'blocked', errorSummary: expect.stringContaining('operator stopped work') });
     if (stage === 'scope') {
       expect(terminal?.errorSummary).toContain(cleanupError.message);
-      const scope = result.error.cause.recovery.scope;
+      const cause = result.error.cause;
+      assert(cause && typeof cause === 'object' && 'recovery' in cause);
+      const recovery = cause.recovery;
+      assert(recovery && typeof recovery === 'object' && 'scope' in recovery);
+      const scope = recovery.scope;
+      assert(scope instanceof RunResourceScope);
       const attempts = f.release.mock.calls.length;
       f.release.mockResolvedValue();
       await scope.finish({ status: 'failed' });

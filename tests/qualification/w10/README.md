@@ -15,6 +15,8 @@
 
 ## 核对行清单与历史用例
 
+2026-11-20，Cursor CLI `2026.07.09-a3815c0` 的 `cursor-agent status --format json` 返回 `authenticated`。安装版 0.2.162 在空白项目经本地 Sandbox 调用 Cursor 后收到 `NON_ZERO_EXIT`（退出码 1）。在同一目录直接运行原生批处理也收到 `Authentication required`。重新执行 `cursor-agent login` 后，需用实际批处理回包验证账号可用。Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
+
 2026-11-20，安装版 0.2.162 通过 `plugin invoke repository.provider special-git-backend run` 驱动独立 Git 命令后端。首次执行因动作查询失败而清理工作树，裸仓库只有 `main`。同一 runId 重试后，裸仓库的 `review` 指向 `9e3aabe46203670a9a56bf61b08e2ac61ce91e92`，读回 `parcel.txt` 的内容为 `ready for review`。基线 `main` 仍指向 `d7e85a8f44cb3bb06a302f3b8c970e37176adeea`，临时工作树已移除。运行 `python3 tests/qualification/w10/special-git-backend.py <安装版 CLI 可执行文件>` 可在独立临时仓库复验。WorkflowRunner/QA 的工作区租约及路径路由仍待验证。
 
 2026-11-19，安装版 0.2.158 经 `plugin configure` 启用 OTLP，受管工作项在 `not_claimed` 结束。隔离的 Jaeger 2.23.0 内存后端按服务名和 `run_id` 查回一条匹配 trace，span 包含预期的工单 ID。写入前和随机运行 ID 的查询均为空，本地审计链通过（序号 4）。运行 ID 为 `8583cc99-467e-4b73-86ab-ecbe4e994341`。复现命令为 `python3 tests/qualification/w10/jaeger-query.py <安装目录> <jaeger可执行文件>`。此次使用的官方 Darwin arm64 压缩包 SHA-256 为 `ed4f00636e5a909cf8ce3fcdaf26a1ea7977163fe29da8fb5031b37a6a9682c4`。远端部署鉴权、丢弃计数和时间序列指标查询另行验收。

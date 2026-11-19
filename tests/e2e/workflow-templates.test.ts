@@ -11,6 +11,7 @@ import { CandidateStore } from '../../packages/runtime/src/application/learning/
 import { reconcileDistillationSources } from '../../packages/runtime/src/application/learning/intake.js';
 import { validateConfiguredLearningCandidate } from '../../packages/runtime/src/application/learning/validation-runtime.js';
 import { runRepositoryTemplate } from './workflow-templates.fixture.js';
+import { checkHookReceipt, installFailingHook } from './workflow-hook-receipt.fixture.js';
 
 const execute = promisify(execFile);
 const entry = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
@@ -54,6 +55,17 @@ async function setup(kind: string) {
   return { fixture, cli, review, bin };
 }
 
+it.concurrent.each(['issue-implementation', 'merge-conflict-resolution'])('%s continues after a receipted optional hook failure', async template => {
+  const repair = template === 'merge-conflict-resolution';
+  const { first, conflicts, parents, verifiedContent, requests } = await runRepositoryTemplate(entry, repair, true);
+  expect(first).toContain(repair ? '解决 QA 工作树中未完成的合并冲突' : '实现 issue #1');
+  expect(conflicts.trim()).toBe(repair ? 'shared.txt' : '');
+  expect(parents).toHaveLength(repair ? 2 : 1);
+  expect(verifiedContent.trim()).toBe('applied');
+  expect(requests.filter(request => /^POST .*\/merge_requests$/.test(request))).toHaveLength(1);
+  expect(requests.some(request => /\/merge_requests\/\d+\/merge$/.test(request))).toBe(false);
+});
+
 it.each([
   ['success', 'success-review-preview'], ['repair', 'repair-review-preview'],
   ['skill', 'skill-optimization-validation'], ['tool', 'tool-optimization-validation'],
@@ -85,7 +97,7 @@ it.each([
 });
 
 it.each(['repair', 'success'])('prepares the exact prevalidated %s candidate via CLI without publishing it', async kind => {
-  const { fixture, review, bin } = await setup(kind);
+  const { fixture, review, cli, bin } = await setup(kind);
   const { root, events, scope, workItemId, configurationFile, vault } = fixture;
   const runId = fixture.sourceInput.runId;
   const directory = join(root, '.afk', 'learning');
@@ -124,7 +136,9 @@ it.each(['repair', 'success'])('prepares the exact prevalidated %s candidate via
   for (const [name, body] of [['template', '{{knowledge}}'], ['index', '[[backlinks]]'], ['backlinks', '[[index]]']] as const) {
     await writeFile(join(vault, `${name}.md`), page(name === 'template' ? '{{title}}' : name, body));
   }
+  if (kind === 'success') await installFailingHook(root, cli);
   const result = JSON.parse((await review()).stdout);
+  if (kind === 'success') await checkHookReceipt(root, cli, workItemId, 'success-review-preview', events.root);
   expect(result).toMatchObject({ scope, runId, requestKey, processing: { candidateIds: [candidateId] },
     prepared: [{ candidateId, validatedVersion: 2, publication: { phase: 'prepared', targetRef: 'wiki:retry' } }] });
   expect(store.listPublications()).toEqual([expect.objectContaining({ phase: 'prepared', candidateId })]);

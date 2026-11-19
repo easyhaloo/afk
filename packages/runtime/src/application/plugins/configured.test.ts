@@ -90,6 +90,19 @@ async function load(selected: readonly Configuration[], options: Partial<Configu
 function config(id: string): Configuration { return configurations.find(item => item.id === id)!; }
 
 describe('configured plugin composition', () => {
+  it('observes live tool source decisions without delegating the verdict to the observer', async () => {
+    const readToolSourcePolicy = vi.fn().mockReturnValueOnce({ rules: [{ id: 'read', effect: 'allow' }] }).mockReturnValue(undefined);
+    const onToolSourceDecision = vi.fn((_request: unknown, decision: { allowed: boolean }) => { decision.allowed = !decision.allowed; });
+    const { runtime } = await load([config('policy.compliance-policy')], { readToolSourcePolicy, onToolSourceDecision });
+    const policy = runtime.getPolicyProvider('compliance-policy')!;
+    const request = { action: 'tool.source.read', context: { project: 'github:w11/parcel', extra: 'omit' } };
+    await expect(policy.evaluate(request)).resolves.toMatchObject({ allowed: true, rule: 'read' });
+    await expect(policy.evaluate(request)).resolves.toEqual({ allowed: false, rule: 'default-deny' });
+    await policy.evaluate({ action: 'deploy' });
+    expect(onToolSourceDecision).toHaveBeenCalledTimes(2);
+    expect(onToolSourceDecision.mock.calls[0]![0]).toEqual({ action: request.action, context: { project: request.context.project } });
+    expect(readToolSourcePolicy).toHaveBeenCalledTimes(2);
+  });
   it('exposes only schema-validated named credential dependencies without scanning ordinary user data', async () => {
     const network = vi.fn();
     const execute = vi.fn();

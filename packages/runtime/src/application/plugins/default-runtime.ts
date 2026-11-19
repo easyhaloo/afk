@@ -7,7 +7,7 @@ import { capabilitySelectionSchema as selectionSchema, createDefaultBuiltinProvi
 import { loadInstalledPlugins } from './loader.js';
 import { PluginRuntime, type Plugin } from './runtime.js';
 import { invokeCapability } from './operations.js';
-import { createConfiguredPlugins } from './configured.js';
+import { createConfiguredPlugins, type ConfiguredPluginsOptions } from './configured.js';
 import { readPluginConfiguration, type PluginConfiguration } from './configuration.js';
 import { createCapabilityLifecycle } from './integrations.js';
 import { selectManagedRepository } from './repository-lifecycle.js';
@@ -32,6 +32,7 @@ export interface DefaultPluginRuntimeOptions {
   readonly activateTriggers?: boolean;
   readonly queuePath?: string;
   readonly queueOptions?: TriggerQueueOptions;
+  readonly onToolSourceDecision?: ConfiguredPluginsOptions['onToolSourceDecision'];
 }
 
 export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOptions = {}): Promise<PluginRuntime> {
@@ -156,6 +157,7 @@ async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: De
   try {
     plugins.push(...await createConfiguredPlugins({
       configurations: configured, homeDir, workspaceRoot, activateTriggers: options.activateTriggers,
+      onToolSourceDecision: options.onToolSourceDecision,
       readToolSourcePolicy: () => readPluginConfiguration(homeDir).plugins.find(entry =>
         entry.id === 'policy.compliance-policy' && entry.builtin && entry.enabled !== false)?.config,
       onTrigger: async event => {

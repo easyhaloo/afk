@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { HostConnectionPort } from '@afk/core';
 import type { PluginManifest, PluginConfigValue } from '../../plugin-sdk/profile.js';
-import type { ProviderDiagnostic, ProviderHealth, TriggerDescriptor, TriggerProvider, ArtifactSink } from '../../plugin-sdk/capabilities.js';
+import type { PolicyCheckInput, PolicyDecision, ProviderDiagnostic, ProviderHealth, TriggerDescriptor, TriggerProvider, ArtifactSink } from '../../plugin-sdk/capabilities.js';
 import type { Plugin, PluginSetupContext } from './runtime.js';
 import { createBuiltinCapabilityPlugins } from './builtin-capabilities.js';
 import { ExperienceContextProvider, experienceStorePath } from '../learning/runtime.js';
@@ -50,6 +50,7 @@ export interface ConfiguredTriggerEvent {
 
 export interface ConfiguredPluginsOptions {
   readonly readToolSourcePolicy?: () => unknown;
+  readonly onToolSourceDecision?: (request: PolicyCheckInput, decision: Pick<PolicyDecision, 'allowed' | 'rule'>) => void;
   readonly configurations: readonly {
     readonly id: string;
     readonly config?: { readonly [key: string]: PluginConfigValue };
@@ -492,11 +493,16 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     'policy.compliance-policy': define('policy.provider', complianceSettings, config => {
       const provider = compliancePolicy(config);
       const evaluate = provider.evaluate.bind(provider);
-      provider.evaluate = (input, operation) => {
+      provider.evaluate = async (input, operation) => {
         if (input.action !== 'tool.source.read' || !options.readToolSourcePolicy) return evaluate(input, operation);
+        const request = options.onToolSourceDecision && { action: input.action, context: Object.fromEntries(
+          Object.entries(input.context ?? {}).filter(([key]) => ['project', 'plugin', 'version', 'source', 'digest'].includes(key))) };
         const current = complianceSettings.safeParse(options.readToolSourcePolicy());
-        if (!current.success) return Promise.resolve({ allowed: false, rule: 'default-deny' });
-        return compliancePolicy(current.data).evaluate(input, operation);
+        const decision = current.success
+          ? await compliancePolicy(current.data).evaluate(input, operation)
+          : { allowed: false, rule: 'default-deny' };
+        if (request) options.onToolSourceDecision?.(request, { allowed: decision.allowed, rule: decision.rule });
+        return decision;
       };
       return capability(provider, { policies: [provider] });
     }),

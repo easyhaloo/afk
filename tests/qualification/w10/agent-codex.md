@@ -24,3 +24,5 @@ done
 | `cancel` | 原生任务创建 `started` 后才发 abort，核对拒绝原因、终态事件、`blocked` 和未入 QA。任务计划在 12 秒后创建 `late`，产品退出后再观察 13 秒。 |
 
 首次探测的配置目录与用量采集路径不同，后续已统一至临时 `HOME/.codex`。一次 `exec` 生成文件后工单仍被阻塞，另一次成功执行的产品和原生用量不同。`cancel` 实测运行终态为 `failed`，分类为 `workflow_crash`。收据中的 `passed` 仅覆盖上表断言。
+
+0.2.150 的 macOS arm64 安装包已在新临时项目重跑 `exec`。工单进入 `verification`，计算结果正确，同一原生线程和产品均记录 70,560 tokens。取消分类仍待修复与复验。

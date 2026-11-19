@@ -25,10 +25,13 @@ try {
     assert.deepEqual(origins, [`${expected}@2.0.2`]);
     selections.push({ project, origins });
   }
-  const second = await createDefaultPluginRuntime({ warn: () => {} });
+  const decisions = [];
+  const second = await createDefaultPluginRuntime({ warn: () => {}, onToolSourceDecision: (request, decision) => decisions.push({ request, decision }) });
   try {
     const readers = [owner, second].map(host => host.getVerificationProvider(tool));
     const input = '4006381333931';
+    await assert.rejects(readers[1].verify({ target: otherProject, input }), /authorization denied/);
+    assert.deepEqual(decisions, []);
     await assert.rejects(readers[0].verify({ input }), /authorization denied/);
     await assert.rejects(readers[0].verify({ input, target: otherProject }), /authorization denied/);
     const results = await Promise.all(readers.map((reader, index) => reader.verify({ target: query.scope,
@@ -46,6 +49,14 @@ try {
     assert.deepEqual(counts.map(result => result.output), ['1', '2']);
     await assert.rejects(counters[0].verify({ target: query.scope, input }), /authorization denied/);
     const policy = JSON.parse(await readFile(originalPolicy, 'utf8'));
+    const sourceRule = policy.rules.find(rule => rule.id === tool);
+    const request = { action: 'tool.source.read', context: sourceRule.when };
+    const checkDecision = (phase, allowed, rule) => {
+      const observed = decisions.splice(0);
+      assert.deepEqual(observed, [{ request, decision: { allowed, rule } }]);
+      console.log(JSON.stringify({ phase, action: observed[0].request.action, sourceDigest: observed[0].request.context.digest, ...observed[0].decision }));
+    };
+    checkDecision('invalid-line', true, sourceRule.id);
     const grant = policy.sharedVerification.find(item => item.plugin === counterId);
     const dependency = join(process.cwd(), '.afk/plugins', counterId, dirname(grant.entry), 'words.mjs');
     const original = await readFile(dependency);
@@ -62,11 +73,24 @@ try {
     policy.sharedVerification = policy.sharedVerification.filter(grant => grant.plugin !== counterId);
     await configure(policy);
     for (const reader of counters) await assert.rejects(reader.verify({ target: otherProject, input }), /authorization denied/);
-    assert.equal((await readers[1].verify({ target: query.scope, input })).passed, true);
-    await configure({ ...policy, rules: [{ id: 'revoke', effect: 'deny', actions: ['tool.source.read'] }] });
+    const baseline = await readers[1].verify({ target: query.scope, input });
+    assert.equal(baseline.passed, true);
+    assert.equal(baseline.output, results[0].output);
+    checkDecision('baseline', true, sourceRule.id);
+    const sourceBytes = await readFile(new URL(sourceRule.when.source));
+    await configure({ ...policy, rules: [...policy.rules, { id: 'revoke', effect: 'deny', actions: ['tool.source.read'] }] });
     for (const reader of readers) await assert.rejects(reader.verify({ target: query.scope, input }), /Tool source read denied/);
+    checkDecision('revoked', false, 'revoke');
     assert.equal(await contextFor(otherProject), undefined);
     await assert.rejects(readFile(join(workspace, '.afk/experience-context.md')), { code: 'ENOENT' });
+    await configure(policy);
+    for (const phase of ['restored', 'replay']) {
+      const result = await readers[1].verify({ target: query.scope, input });
+      checkDecision(phase, true, sourceRule.id);
+      assert.equal(result.passed, baseline.passed);
+      assert.equal(result.output, baseline.output);
+    }
+    assert.deepEqual(await readFile(new URL(sourceRule.when.source)), sourceBytes);
     console.log(JSON.stringify({ selections, concurrentResults: results.map(result => JSON.parse(result.output)), revokedReaders: readers.length,
       counterId, counts: counts.map(result => result.output), dependencyChangeDeniedReaders: counters.length, freshLoadDenied: true, revokedSharedReaders: counters.length }));
   } finally { await second.dispose(); }

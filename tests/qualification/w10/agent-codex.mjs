@@ -28,7 +28,7 @@ const providers = {
   branches:{createBranch:async()=>{git('checkout','-b',branchName); return {branchName,worktreePath:workspace};},cleanup:async()=>{}},
   changes:{findForBacklog:async()=>null},
 };
-const transport = ['qa','app-server'].includes(scenario) ? 'app-server' : 'exec';
+const transport = ['qa','app-server','resume'].includes(scenario) ? 'app-server' : 'exec';
 const receipt = { afk:JSON.parse(readFileSync(join(release,'release.json'))).version, codexVersion, scenario, transport, runId, workItemId };
 const controller = new AbortController();
 const poll = setInterval(()=>{if(scenario==='cancel' && existsSync('started') && !controller.signal.aborted) controller.abort(new Error('synthetic operator cancellation'));},50);
@@ -113,6 +113,10 @@ try {
     assert.ok(receipt.nativeTokens>0);assert.ok(receipt.totalTokens>0);assert.equal(receipt.queueStep,true);assert.equal(item.state,'verification');
     receipt.usageMatches = receipt.nativeTokens === receipt.totalTokens;
     assert.equal(receipt.usageMatches,true,'product usage differs from native cumulative usage');
+    if (scenario === 'resume') {
+      const { qualifyResume } = await import('./agent-codex-resume.mjs');
+      await qualifyResume({ load, runtime, runner, receipt, store, item, template, workspace, workItemId, branchName });
+    }
     if (scenario === 'qa') {
       receipt.phase = 'independent-qa';
       await qualifyQA(runtime);

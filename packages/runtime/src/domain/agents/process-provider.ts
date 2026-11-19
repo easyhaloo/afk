@@ -34,7 +34,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
   parseLine?(line: string): AgentEvent[];
 
   async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
-    this.assertExecutionProfile(options);
+    this.assertExecutionSupported(options);
     // A goal the provider would refuse is refused here, where the reason is
     // still known. Dispatching it would cost the whole idle timeout and
     // produce a timeout instead of a cause.
@@ -43,7 +43,6 @@ export abstract class ProcessAgentProvider implements AgentProvider {
     const executionMode = options.executionMode ?? (options.interactive ? 'interactive' : 'batch');
     const commandOptions = { ...options, executionMode, interactive: executionMode === 'interactive', goal: options.prompt };
     if (options.resume) {
-      if (!this.nativeSessions) throw new Error(`${this.name} does not support explicit native resume`);
       await this.restoreSession({ snapshot: options.resume, worktreePath: options.worktreePath });
       if (!Number.isSafeInteger(options.generation) || options.generation !== options.resume.generation + 1) {
         throw new Error('Resume generation must follow the captured generation');
@@ -179,9 +178,12 @@ export abstract class ProcessAgentProvider implements AgentProvider {
     return { provider: this.name, transport: 'process' };
   }
 
-  protected assertExecutionProfile(options: AgentCommandOptions): void {
+  protected assertExecutionSupported(options: AgentCommandOptions): void {
     if (options.executionProfile === 'analysis' && !this.capabilities.has('analysis')) {
       throw new Error(`analysis_unsupported: ${this.name}`);
+    }
+    if (options.resume && !this.nativeSessions) {
+      throw new Error(`${this.name} does not support explicit native resume`);
     }
   }
 }

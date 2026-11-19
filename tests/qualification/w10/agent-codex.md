@@ -31,3 +31,22 @@ done
 父工作树以 macOS arm64 安装包 `0.2.152` 重跑了 `cancel`、`failure` 和 `qa`。取消后只有一个 `cancelled/user_cancelled` 终态，原因为调用方传入的消息，随后 13 秒未出现延迟写入。撤去认证时终态为 `failed/agent_process_failed`。两个工单均停在 `blocked`。正常任务由独立 Codex 会话记录 `qa.passed`，工单进入 `merge_ready`。
 
 `0.2.156` 安装包与 codex-cli `0.169.0` 再次通过上述三个场景的持久审计校验。`cancel` 观察 13 秒无延迟写入，`failure` 保留 `agent_process_failed`，两个工单各有一条终态并进入 `blocked`。`qa` 匹配独立的原生线程并进入 `merge_ready`。会话恢复前后的身份和预算另行验收。
+
+### 0.2.156 的 Codex 恢复边界
+
+沿用上述隔离启动器，`release` 指向含 `release.json` 的安装目录，收据路径须为新文件。
+
+```sh
+python3 tests/qualification/w10/agent-codex.py "$release" "$evidence/resume.json" resume
+```
+
+| 检查 | macOS arm64、Codex CLI 0.169.0 的实测 |
+| --- | --- |
+| 首轮身份与预算 | 正常 `WorkflowRunner` 通过 app-server 完成算术任务。持久审计的会话 ID 匹配原生线程文件，同一 ID 在工单预算表中记录 70,534 tokens，与原生累计用量相等。 |
+| 工作流恢复门控 | 对实际 provider 调用运行器的 `attemptNativeResume`，直接返回 `undefined`。快照存储和启动回调都未调用。显式恢复守卫提示 Codex 不支持恢复，建议使用 Markdown 交接。`--session` 是运行器会话名。 |
+| 同工单重入 | 复用运行器会话名，将上限设为首轮实际用量。第二次运行产生独立审计，终态 `failed/budget_exhausted`，工单 `blocked`，新增原生线程数为零，预算仍为 70,534。 |
+| 显式恢复请求 | 使用首轮真实线程 ID 构造合成快照。exec 拒绝 `createExecution({resume})`。相同工作目录下的 app-server 接受相同快照并完成一轮，原生元数据确认线程 ID 已变。该线程的产品和原生用量均为 17,103。直接调用 provider 位于工作流预算记账之外。执行对象的 `resume()` 也明确拒绝。 |
+
+`resume` 用例要求未声明恢复能力的 provider 在启动前拒绝显式请求。0.2.156 在最后一项以 `passed:false`、退出码 1 记录缺口。正常工作流通过能力门控，表现为跳过原生恢复。显式 `createExecution({resume})` 仅用于复现底层调用者遇到的不一致。实测覆盖的是首轮、恢复请求及预算重入，原生续跑后的用量增量仍待产品支持后验证。
+
+`0.2.157` 已在源码外安装验证。本地和远程沙箱的 exec、app-server 四种组合均在分派前拒绝显式快照。真实账户重跑时首轮触发 `agent_completion_timeout`，停在预算重入和恢复断言之前。

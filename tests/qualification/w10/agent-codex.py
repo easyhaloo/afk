@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('release', type=Path)
     parser.add_argument('receipt', type=Path)
-    parser.add_argument('case', choices=['exec', 'app-server', 'qa', 'failure', 'cancel'])
+    parser.add_argument('case', choices=['exec', 'app-server', 'qa', 'failure', 'cancel', 'resume'])
     args = parser.parse_args()
     release = args.release.resolve(strict=True)
     receipt = args.receipt.resolve()

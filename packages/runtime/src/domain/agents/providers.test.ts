@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code.js';
 import { CodexProvider } from './codex.js';
+import { CodexAppServerExecution } from './codex-app-server/execution.js';
 import { CursorProvider } from './cursor.js';
 import { PiProvider } from './pi.js';
 import { OpenCodeProvider, resolveOpenCodeModel } from './opencode.js';
@@ -234,6 +235,26 @@ describe('Agent providers — fixture coverage', () => {
           modelProvider: 'openai',
         },
       }));
+    });
+
+    it.each([
+      ['exec', false], ['app-server', false], ['exec', true], ['app-server', true],
+    ] as const)('rejects explicit resume before starting %s (remote=%s)', async (transport, remote) => {
+      const startAgent = vi.fn();
+      const startProviderExecution = vi.fn();
+      const appServer = vi.spyOn(CodexAppServerExecution, 'start').mockRejectedValue(new Error('unexpected start'));
+      try {
+        await expect(p.createExecution({
+          sandbox: { startAgent, ...(remote && { startProviderExecution }) } as unknown as Sandbox,
+          worktreePath: '/tmp/worktree', sessionId: 'sess-1', generation: 2,
+          prompt: 'continue', signalType: 'goal_complete', executionMode: 'batch',
+          runtime: { kind: 'codex', transport, auth: 'chatgpt', provider: 'openai', startupTimeoutMs: 5_000 },
+          resume: { sessionId: 'thread-1', generation: 1, checkpoint: null, summary: '', capturedAt: new Date().toISOString() },
+        })).rejects.toThrow('codex does not support explicit native resume');
+        expect(appServer).not.toHaveBeenCalled();
+        expect(startAgent).not.toHaveBeenCalled();
+        expect(startProviderExecution).not.toHaveBeenCalled();
+      } finally { appServer.mockRestore(); }
     });
 
     it('selects app-server execution before delegating to a process sandbox', async () => {

@@ -5,11 +5,11 @@
 | 证据等级 | 行数 | 判定依据 |
 | --- | ---: | --- |
 | `account` | 4 | 有真实账户侧操作或用户收件记录，范围见该行 |
-| `service` | 6 | 有独立工具进程、引擎、接收服务或远端主机的回执 |
-| `native` | 10 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
+| `service` | 8 | 有独立工具进程、引擎、接收服务或远端主机的回执 |
+| `native` | 11 | 产品实际驱动本机进程、Git、时钟或事件文件，可核对效果 |
 | `local` | 10 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 2 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 23 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 20 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
@@ -29,6 +29,8 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 
 | 引用 | 相对定位 | 核对内容 |
 | --- | --- | --- |
+| [SMTP] | `email-loopback.py`、`email-receipt.json` | 0.2.148 经 BusyBox sendmail 将测试邮件交给回环 SMTP；收端逐字节核对换行、点转义和信封地址 |
+| [ISSUE] | `issue-event.md`、`issue-event.receipt.json` | 本地 Gitea 直送三个签名事件；仅打开事件执行一次，重复投递复用原收据 |
 | [G] | `docs/architecture/plugins.zh.md` 的 Gmail OAuth 手工记录 | 2026-11-07 浏览器授权后 CLI 发信、Gmail API 接受、用户确认收到 |
 | [T] | `docs/guides/testing.zh.md` 的“插件矩阵与源码覆盖率” | 11-09 安装版 0.2.44 复验刷新、scope、身份与 discovery HTTP 200，发信次数为零。另有真实 Claude、Docker、认证 HTTP/Docker/Claude 和 SSH 的范围 |
 | [W] | `docs/superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md` 的“已安装 CLI”、`plugin-matrix-wiki-claude-20261108-2` 和“真实经验” | GitLab MR !198、人工门、SSH 和已安装 `context.experience` gather |

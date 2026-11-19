@@ -239,7 +239,7 @@ export class EmailNotificationProvider implements NotificationProvider {
     }
   }
 
-  /** Builds the RFC-822 message; header values are CRLF-injection screened. */
+  /** sendmail reads Unix lines on stdin and adds CRLF for SMTP. */
   private compose(message: NotificationMessage): string {
     const header = (name: string, value: string): string => {
       if (/[\r\n]/.test(value)) throw new Error(`Invalid ${name} header: CR/LF is not allowed`);
@@ -251,8 +251,8 @@ export class EmailNotificationProvider implements NotificationProvider {
       header('Subject', message.title || '(no subject)'),
       header('X-Urgency', message.urgency ?? 'normal'),
       '',
-      message.body,
-    ].join('\r\n');
+      message.body.replace(/\r\n?/g, '\n'),
+    ].join('\n');
   }
 }
 

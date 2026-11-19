@@ -183,7 +183,7 @@ describe('EmailNotificationProvider', () => {
     const { executor, calls } = fakeExecutor();
     const provider = new EmailNotificationProvider({ from: 'ci@example.test', to: 'oncall@example.test', executor });
 
-    const receipt = await provider.notify(message);
+    const receipt = await provider.notify({ ...message, body: 'one\r\ntwo\rthree\nfour' });
 
     expect(receipt.delivered).toBe(true);
     expect(receipt.channel).toBe('email');
@@ -191,11 +191,7 @@ describe('EmailNotificationProvider', () => {
     const request = calls[0];
     expect(request.command).toBe('/usr/sbin/sendmail');
     expect(request.args).toEqual(['-t', '-oi', '-f', 'ci@example.test']);
-    // The body travels through stdin, never as an argument.
-    expect(request.input).toContain('Subject: Build failed');
-    expect(request.input).toContain('Unit tests are red on main');
-    expect(request.input).toContain('X-Urgency: high');
-    expect(request.args.every(argument => !argument.includes('Unit tests are red on main'))).toBe(true);
+    expect(request.input).toBe('From: ci@example.test\nTo: oncall@example.test\nSubject: Build failed\nX-Urgency: high\n\none\ntwo\nthree\nfour');
   });
 
   it('rejects header injection via the subject', async () => {

@@ -216,7 +216,7 @@ async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
     const channel = provider.id === 'notification.email' ? 'email' : 'desktop';
     expect(result).toEqual({ delivered: true, channel });
     if (channel === 'email') {
-      expect(await readFile(join(test.output, 'message.eml'), 'utf8')).toBe(`From: sender@example.test\r\nTo: receiver@example.test\r\nSubject: ${message.title}\r\nX-Urgency: high\r\n\r\n${message.body}`);
+      expect(await readFile(join(test.output, 'message.eml'), 'utf8')).toBe(`From: sender@example.test\nTo: receiver@example.test\nSubject: ${message.title}\nX-Urgency: high\n\n${message.body}`);
       expect((await test.calls()).at(-1)).toEqual({ role: 'matrix-sendmail', args: ['-t', '-oi', '-f', 'sender@example.test'], input: expect.stringContaining(message.body) });
     } else expect(JSON.parse(await readFile(join(test.output, 'desktop.json'), 'utf8'))).toEqual({ role: 'notify-send', args: ['-u', 'critical', message.title, message.body], input: '' });
     expect(await test.optionalFile(join(test.workspace, 'injected'))).toBeNull();

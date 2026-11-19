@@ -5,15 +5,17 @@
 | 证据等级 | 行数 | 判定依据 |
 | --- | ---: | --- |
 | `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
-| `service` | 18 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[Pi 本地推理](pi-local-inference.receipt.json)、[Podman](podman-native.md)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
+| `service` | 19 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[JumpServer](jumpserver.receipt.json)、[Pi 本地推理](pi-local-inference.receipt.json)、[Podman](podman-native.md)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
 | `native` | 14 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
 | `local` | 9 | 本地实现的文件、规则、映射或检索断言通过 |
-| `partial` | 1 | JumpServer 的资产发现已通过，远程执行待验 |
+| `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
 | `fixture` | 7 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
 ## 核对行清单与历史用例
+
+仓库外安装的 0.2.169 复验了两种 `jms` 的发现结果。SSH 型客户端列出 16 个资产，安装版 `afk host exec --provider jumpserver` 在唯一匹配的 Wiki 资产上运行 `echo`，返回本次随机标记及退出码 0。OpenAPI 型客户端的资产发现返回退出码 1。[安装版回执](jumpserver.receipt.json)
 
 2026-11-20，安装版 0.2.168 通过 `afk host ls --provider jumpserver --json` 列出 16 个资产，各记录均含别名且 provider 为 `jumpserver`。本次仅对该进程调整 `PATH`，选择支持 `config list` 和 `ls` 的 SSH 型 `jms` 0.2.0。默认 `PATH` 中优先选中的 OpenAPI 型 `jms` 0.1.8 拒绝 `config` 命令。遇到该情况，0.2.168 曾返回成功的空列表，0.2.169 返回退出码 1 并提示所需的 CLI 命令。
 

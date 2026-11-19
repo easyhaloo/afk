@@ -135,7 +135,7 @@ jobs:
 
   publish:
     needs: [prepare, package]
-    if: needs.prepare.outputs.publish == 'true'
+    if: ${{ !inputs.verify_only && needs.prepare.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

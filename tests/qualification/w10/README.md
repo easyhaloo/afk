@@ -5,15 +5,25 @@
 | 证据等级 | 行数 | 判定依据 |
 | --- | ---: | --- |
 | `account` | 4 | 有真实账户侧操作或用户收件记录，范围见该行 |
-| `service` | 10 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[知识库检索和撤权](knowledge-base-meili.md) |
+| `service` | 11 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[知识库检索和撤权](knowledge-base-meili.md) |
 | `native` | 12 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
 | `local` | 10 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 1 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
-| `fixture` | 18 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
+| `fixture` | 17 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。
 
 ## 核对行清单与历史用例
+
+Linux 桌面通知的安装验收通过 Docker 将 `notify-send` 的参数原样送入隔离的 X11 桌面。运行器确认 Dunst 显示一条通知、窗口处于可见状态、历史记录中的标题、正文和紧急程度正确。停止该桌面后，CLI 返回失败回执。macOS 和 Windows 的原生展示仍待验收。
+
+```sh
+docker build -t w10-notifier-qual:local - <<'DOCKER'
+FROM node@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+RUN apk add --no-cache dunst xvfb dbus libnotify font-dejavu xwininfo
+DOCKER
+python3 tests/qualification/w10/desktop-notify.py release/cli/afk-darwin-arm64.tar.gz w10-notifier-qual:local
+```
 
 从仓库根运行。相邻工作树保存原审计，单独应用补丁时也可省略 `W10_AUDIT_DIR`，仅核对本树的源码、契约路径和配置清单。
 

@@ -52,38 +52,9 @@ it('loads CLI-configured OTLP into managed execution, isolates collector failure
   expect(inventory.stdout).toContain('observability.otlp');
   expect(inventory.stdout).not.toContain(env.OBSERVABILITY_E2E_AUTH);
   const runtime = resolve(process.env.AFK_E2E_RUNTIME_ROOT ?? 'packages/runtime/dist');
-  const moduleUrl = (path: string) => JSON.stringify(pathToFileURL(join(runtime, `${path}.js`)).href);
-  const script = join(root, 'managed-run.mjs');
-  await writeFile(script, `
-    import { createDefaultPluginRuntime } from ${moduleUrl('plugin-sdk/index')};
-    import { executeWorkItem } from ${moduleUrl('application/workflows/execute-work-item')};
-    import { JsonlEventStore } from ${moduleUrl('infrastructure/observability/jsonl-event-store')};
-    const workspaceRoot = process.env.WORKSPACE_E2E;
-    const workItemId = 'github:acme/api#42';
-    const executionId = process.argv[2];
-    const plugins = await createDefaultPluginRuntime({ homeDir: process.env.HOME, workspaceRoot });
-    const item = {
-      id: workItemId, workItemId, issueNumber: 42,
-      project: { platform: 'github', projectKey: 'acme/api', name: 'api' },
-      managed: true, executionEligible: true, title: 'Observe', dependsOn: [],
-      state: 'ready', executionMode: 'afk', tags: [], branchName: 'feature/42', providerRef: workItemId,
-    };
-    try {
-      const result = await executeWorkItem({ workItemId, executionId, manifestPath: workspaceRoot + '/manifest.json' }, {
-        plugins,
-        lookupWorkItem: async () => item,
-        readManifest: async () => ({ workItemId, providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'acme/api' }, workspaceRoot, manifestPath: workspaceRoot + '/manifest.json' }),
-        createContext: async () => ({
-          providers: { backlog: { get: async () => item, isRunnable: async () => true, claim: async () => null, setExecutionMode: async () => undefined }, branches: {}, changes: { findForBacklog: async () => null } },
-          request: { backlogId: '42', workspaceRoot, repoRoot: workspaceRoot, agentRuntime: { kind: 'default' }, targetBranch: 'main' },
-        }),
-      });
-      const integrity = await new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }).verify(executionId);
-      console.log('OBSERVABILITY_RESULT=' + JSON.stringify({ result, integrity }));
-    } finally { await plugins.dispose(); }
-  `);
+  const script = resolve('tests/e2e/observability-managed-run.mjs');
   const run = async (id: string) => {
-    const result = await execute(process.execPath, [script, id], { cwd: workspace, env, timeout: 15_000 });
+    const result = await execute(process.execPath, [script, id], { cwd: workspace, env: { ...env, AFK_E2E_RUNTIME_ROOT: runtime }, timeout: 15_000 });
     const report = result.stdout.split('\n').find(line => line.startsWith('OBSERVABILITY_RESULT='));
     if (!report) throw new Error('Managed execution did not report its result');
     const parsed = JSON.parse(report.slice('OBSERVABILITY_RESULT='.length));

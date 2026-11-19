@@ -484,6 +484,10 @@ export class QARunner {
           logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
         }
         await this.onExperienceTarget?.(context);
+        if (standaloneContext && standaloneObserver) {
+          await standaloneObserver.record(standaloneContext, { kind: 'decision.made', command: 'experience.qa-target',
+            accepted: true, reason: JSON.stringify(context) });
+        }
       }
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
@@ -547,6 +551,13 @@ export class QARunner {
         await withCancellation(() => dispatcher.run('after-agent', context), options);
       }
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName, verifiedCommit, assertVerified,
+        async () => {
+          await this.onCommit?.(verifiedCommit, handle.branchName);
+          if (standaloneContext && standaloneObserver) {
+            await standaloneObserver.record(standaloneContext, { kind: 'commit.recorded', phase: 'qa',
+              commitSha: verifiedCommit, branch: handle.branchName });
+          }
+        },
         () => withCancellation(() => dispatcher.run('before-publish', context), options), options,
         change => { publication = change; }, workspace?.publish && (async () => {
           await leaseScope.stopExecutions();
@@ -838,6 +849,7 @@ export class QARunner {
     verificationBranch: string,
     commitSha: string,
     assertVerified: () => Promise<void>,
+    recordVerifiedCommit: () => Promise<void>,
     beforePublish: () => Promise<void>,
     options?: ProviderOperationOptions,
     onPublished?: (change: ChangeRequest) => void,
@@ -851,7 +863,7 @@ export class QARunner {
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
       const targetBranch = (await this.resolvePlan(backlog)).targetRef;
       await assertVerified();
-      await this.onCommit?.(commitSha, verificationBranch);
+      await recordVerifiedCommit();
       await beforePublish();
       await assertVerified();
       await this.beforeChange?.('publish', backlog);

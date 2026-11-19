@@ -16,16 +16,24 @@ const markers = { original: 'ORIGINAL_SKILL_CONTENT_e791a1', proposed: 'PROPOSED
 const hash = value => createHash('sha256').update(value).digest('hex');
 const grantDigest = process.argv[2];
 if (grantDigest !== undefined) assert.match(grantDigest, /^[a-f0-9]{64}$/);
+const frozen = process.argv[3] === '--host-controls';
+if (frozen) {
+  assert.ok(grantDigest);
+  Object.assign(resources, { denied: 'Fixture denied 8bf3', fallback: 'Fixture primary fb27' });
+}
+const observerDigest = hash(await readFile(new URL(import.meta.url)));
+const source = 'claude-seatbelt-loopback-read-v1';
 const receipt = { version: execFileSync(binary, ['--version'], { encoding: 'utf8', env: { HOME: '/var/empty', PATH: '/usr/bin:/bin' } }).trim(), binarySha256: hash(await readFile(binary)), cases: [] };
 const modes = Object.keys(markers).flatMap(variant => ['alpha', 'beta', 'automatic', 'denied-read', 'recovery'].map(mode => [variant, mode]));
 for (const [variant, mode] of modes) {
-  if (grantDigest && !['alpha', 'beta'].includes(mode)) continue;
+  if (grantDigest && !(frozen ? mode !== 'automatic' : ['alpha', 'beta'].includes(mode))) continue;
   const explicit = mode !== 'automatic';
   const root = await mkdtemp(join(await realpath(tmpdir()), 'native-skill-'));
   const plugin = join(root, 'plugin');
   const work = join(root, 'work');
   const skill = join(plugin, 'skills', 'proof');
-  const input = mode === 'beta' ? 'beta' : 'alpha';
+  const input = frozen && mode === 'recovery' ? 'fallback' : frozen && mode === 'denied-read' ? 'denied' : mode === 'beta' ? 'beta' : 'alpha';
+  const checkId = `behavior-${['alpha', 'beta', 'denied', 'fallback'].indexOf(input) + 1}`;
   const reference = join(skill, 'references', `${input}.md`);
   const fallback = join(skill, 'references', 'beta.md');
   const resource = resources[mode === 'recovery' ? 'beta' : input];
@@ -49,25 +57,42 @@ for (const [variant, mode] of modes) {
       const request = JSON.parse(Buffer.concat(chunks).toString());
       const messages = JSON.stringify(request.messages);
       const round = caseResult.requests.length;
-      if (grantDigest && round === 1) {
+      if (grantDigest && round > 0) {
         const blocks = request.messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
         const prefix = `Base directory for this skill: ${skill}\n\n`;
         const bodies = blocks.filter(block => block.type === 'text' && block.text.startsWith(prefix));
         const calls = blocks.filter(block => block.type === 'tool_use');
         const results = blocks.filter(block => block.type === 'tool_result');
         assert.equal(bodies.length, 1);
-        assert.equal(calls.length, 1);
-        assert.equal(results.length, 1);
-        assert.equal(calls[0].name, 'Read');
-        assert.equal(calls[0].id, 'toolu_fixture_read_1');
-        assert.deepEqual(calls[0].input, { file_path: reference });
-        assert.equal(results[0].tool_use_id, calls[0].id);
-        assert.notEqual(results[0].is_error, true);
-        assert.equal(results[0].content, `1\t${resource}`);
-        caseResult.load = { checkId: input === 'alpha' ? 'behavior-1' : 'behavior-2', edition: variant,
-          artifactDigest: caseResult.skillDigest, inputDigest: hash(input), expandedBodyDigest: hash(bodies[0].text.slice(prefix.length)),
-          resource: relative(skill, calls[0].input.file_path), resourceDigest: hash(results[0].content.slice(2)) };
+        assert.equal(calls.length, round);
+        assert.equal(results.length, round);
+        const call = calls[round - 1];
+        const result = results[round - 1];
+        assert.equal(call.name, 'Read');
+        assert.equal(call.id, `toolu_fixture_read_${round}`);
+        assert.deepEqual(call.input, { file_path: round === 1 ? reference : fallback });
+        assert.equal(result.tool_use_id, call.id);
+        const path = relative(skill, call.input.file_path);
+        const expandedBodyDigest = hash(bodies[0].text.slice(prefix.length));
+        let event;
+        if (round === 1 && ['denied-read', 'recovery'].includes(mode)) {
+          assert.equal(result.is_error, true);
+          assert.match(JSON.stringify(result.content), /permission|denied|not allowed|not permitted|EPERM/i);
+          event = { outcome: 'denied', path };
+        } else {
+          assert.notEqual(result.is_error, true);
+          assert.equal(result.content, `1\t${resource}`);
+          event = { outcome: 'read', path, digest: hash(result.content.slice(2)) };
+          if (round === 1) caseResult.load = { checkId, edition: variant, artifactDigest: caseResult.skillDigest,
+            inputDigest: hash(input), expandedBodyDigest, resource: path, resourceDigest: event.digest };
+        }
+        if (frozen) {
+          caseResult.run ??= { checkId, edition: variant, snapshotDigest: caseResult.snapshotDigest, expandedBodyDigest, events: [] };
+          assert.equal(caseResult.run.expandedBodyDigest, expandedBodyDigest);
+          caseResult.run.events.push(event);
+        }
       }
+      if (frozen && ['denied-read', 'recovery'].includes(mode)) assert.ok(!messages.includes(resources[input]));
       const toolResult = request.messages.flatMap(message => Array.isArray(message.content) ? message.content : [])
         .find(block => block.type === 'tool_result' && block.tool_use_id === `toolu_fixture_read_${round}`);
       const evidence = { selectedBody: messages.includes(markers[variant]), otherBody: messages.includes(markers[otherVariant]),
@@ -113,18 +138,27 @@ for (const [variant, mode] of modes) {
     await writeFile(join(alternate, 'SKILL.md'), fixture('alternate', otherVariant));
     for (const [name, bytes] of Object.entries(resources)) await writeFile(join(skill, 'references', `${name}.md`), bytes);
     caseResult.skillDigest = hash(await readFile(join(skill, 'SKILL.md')));
+    const snapshot = async () => hash(JSON.stringify([source, observerDigest, grantDigest, receipt.binarySha256, checkId, variant, hash(input),
+      hash(await readFile(join(skill, 'SKILL.md'))), await Promise.all(Object.keys(resources).sort().map(async name => {
+        const path = `references/${name}.md`;
+        return [path, hash(await readFile(join(skill, path)))];
+      }))]));
+    if (frozen) caseResult.snapshotDigest = await snapshot();
     caseResult.resourceDigest = hash(resource);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const { port } = server.address();
     const seatbelt = `(version 1) (allow default) (deny network*) (allow network-outbound (remote ip "localhost:${port}"))
       (deny file-read* (require-all (subpath ${JSON.stringify(home)}) (require-not (literal ${JSON.stringify(binary)}))))
       (deny file-write* (require-all (require-not (subpath ${JSON.stringify(root)})) (require-not (literal "/dev/null"))))
-      ${grantDigest ? `(deny file-read-data (literal ${JSON.stringify(join(skill, 'references', input === 'alpha' ? 'beta.md' : 'alpha.md'))}))` : ''}
+      ${frozen ? `(deny file-write* (subpath ${JSON.stringify(plugin)}) (literal ${JSON.stringify(root)}))` : ''}
+      ${grantDigest && mode !== 'recovery' ? `(deny file-read-data (literal ${JSON.stringify(join(skill, 'references', input === 'alpha' ? 'beta.md' : 'alpha.md'))}))` : ''}
       ${['denied-read', 'recovery'].includes(mode) ? `(deny file-read-data (literal ${JSON.stringify(reference)}))` : ''}`;
     const environment = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'),
       CLAUDE_CONFIG_DIR: join(root, 'home', '.claude'), ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`, ANTHROPIC_API_KEY: dummy,
       DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_MAX_RETRIES: '0', API_TIMEOUT_MS: '5000' };
-    const allowedReads = grantDigest ? [reference] : [reference, fallback];
+    if (frozen) await run('/usr/bin/sandbox-exec', ['-p', seatbelt, '/bin/sh', '-c',
+      'for file do if ( : >> "$file" ) 2>/dev/null; then exit 1; fi; done; : > probe', 'freeze', join(skill, 'SKILL.md'), reference, fallback], { cwd: work, env: environment });
+    const allowedReads = grantDigest && mode !== 'recovery' ? [reference] : [reference, fallback];
     const settings = { disableAllHooks: true, enabledPlugins: {}, permissions: { allow: allowedReads.map(path => `Read(${path})`), deny: ['Bash', 'Write', 'Edit'] } };
     const result = await run('/usr/bin/sandbox-exec', ['-p', seatbelt, binary, '--bare', '--restricted', '--print', '--verbose', '--output-format', 'stream-json',
       '--no-session-persistence', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--plugin-dir', plugin,
@@ -136,6 +170,7 @@ for (const [variant, mode] of modes) {
     caseResult.loaded = entries.some(entry => entry.type === 'system' && entry.subtype === 'init'
       && ['fixture:proof', 'fixture:alternate'].every(name => entry.slash_commands?.includes(name)));
     caseResult.completed = caseResult.final.length === 1 && caseResult.final[0].isError === false;
+    if (frozen) assert.equal(await snapshot(), caseResult.snapshotDigest);
   } catch (error) {
     caseResult.error = { code: error.code ?? error.name, killed: error.killed ?? false,
       stderrKind: /sandbox-exec/.test(error.stderr ?? '') ? 'seatbelt' : /auth/i.test(error.stderr ?? '') ? 'auth' : 'other' };
@@ -149,7 +184,7 @@ const expected = { alpha: ['initial', 'read'], beta: ['initial', 'read'], automa
   'denied-read': ['initial', 'denied'], recovery: ['initial', 'denied', 'read'] };
 for (const entry of receipt.cases) {
   const steps = expected[entry.mode];
-  entry.passed = Boolean(entry.completed && entry.loaded && !entry.serverError && entry.requests.length === steps.length
+  entry.passed = Boolean(entry.completed && entry.loaded && !entry.error && !entry.serverError && entry.requests.length === steps.length
     && entry.requests.every((request, index) => (grantDigest && entry.variant === 'proposed' || !request.otherBody) && !request.otherResource
       && request.selectedBody === (entry.mode !== 'automatic') && request.expandedInput === request.selectedBody
       && JSON.stringify(request.tools) === '["Read"]'
@@ -159,8 +194,13 @@ for (const entry of receipt.cases) {
 receipt.passed = receipt.cases.every(entry => entry.passed);
 if (grantDigest && receipt.passed) {
   assert.equal(receipt.binarySha256, hash(await readFile(binary)));
-  assert.ok(receipt.cases.every(entry => entry.load));
-  receipt.skillObservation = { grantDigest, hostBinaryDigest: receipt.binarySha256, loads: receipt.cases.map(entry => entry.load) };
+  const normal = receipt.cases.filter(entry => ['alpha', 'beta'].includes(entry.mode));
+  assert.ok(normal.every(entry => entry.load));
+  receipt.skillObservation = { grantDigest, hostBinaryDigest: receipt.binarySha256, loads: normal.map(entry => entry.load) };
+  if (frozen) {
+    assert.ok(receipt.cases.every(entry => entry.run));
+    receipt.skillObservation.hostTrace = { source, observerDigest, runs: receipt.cases.map(entry => entry.run) };
+  }
 }
 console.log(JSON.stringify(receipt, null, 2));
 process.exitCode = receipt.passed ? 0 : 1;

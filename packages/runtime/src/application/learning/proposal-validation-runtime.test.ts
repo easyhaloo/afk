@@ -132,14 +132,16 @@ function bindScratchHelper(test: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('saved repository-asset production validation routing', () => {
-  it('binds explicit skill loads to the operator grant without promoting the candidate', async () => {
+  it.each([false, true])('binds explicit skill loads to the operator grant (frozen host controls: %s)', async frozen => {
     const test = await fixture();
     const { root, expectedCommit } = test.entry.repository;
     const directory = join(root, 'skills/proof');
     mkdirSync(join(directory, 'references'), { recursive: true });
     const original = '---\nname: proof\ndescription: Local fixture\ndisable-model-invocation: true\nuser-invocable: true\n---\nORIGINAL_SKILL_CONTENT_e791a1\nRead references/$ARGUMENTS.md. If alpha is unavailable, beta is the fallback.\n';
-    const resources = ['Inventory fixture ALPHA_5f0129', 'Inventory fixture BETA_7de381'].map((text, index) => {
-      const path = `references/${index ? 'beta' : 'alpha'}.md`;
+    const contents = { alpha: 'Inventory fixture ALPHA_5f0129', beta: 'Inventory fixture BETA_7de381',
+      ...(frozen ? { denied: 'Fixture denied 8bf3', fallback: 'Fixture primary fb27' } : {}) };
+    const resources = Object.entries(contents).map(([name, text]) => {
+      const path = `references/${name}.md`;
       writeFileSync(join(directory, path), text);
       return { path, digest: bytesDigest(text) };
     });
@@ -160,9 +162,13 @@ describe('saved repository-asset production validation routing', () => {
     const normal = prepared.checks.filter(check => check.kind === 'normal');
     const native = process.env.AFK_QUALIFY_NATIVE_SKILL === '1';
     const hostBinaryDigest = native ? bytesDigest(readFileSync(execFileSync('which', ['claude'], { encoding: 'utf8' }).trim())) : 'c'.repeat(64);
+    const script = fileURLToPath(new URL('../../../../../tests/qualification/w05/native-skill.mjs', import.meta.url));
+    const observerDigest = bytesDigest(readFileSync(script));
+    const hostControls = { observerDigest, cases: prepared.checks.slice(2).map(check => ({ checkId: check.id, checkDigest: digest(check),
+      denied: `references/${check.input}.md`, ...(check.kind === 'recovery' ? { fallback: resources[1].path } : {}) })) };
     const entry = { ...test.entry, kind: 'skill', inventory: { file: test.inventoryFile, digest: bytesDigest(catalog) },
       asset: { ref: 'skill:proof', path: 'skills/proof/SKILL.md' }, semantic: { protocol: 'claude-explicit-load-v1', adapter: 'skill-trace-v1', revision: 'v1',
-        hostBinaryDigest, cases: normal.map((check, index) => ({ checkId: check.id, checkDigest: digest(check), resource: resources[index].path })) } };
+        hostBinaryDigest, ...(frozen ? { hostControls } : {}), cases: normal.map((check, index) => ({ checkId: check.id, checkDigest: digest(check), resource: resources[index].path })) } };
     const grant = { ...test.grant, kind: 'skill', candidateId: candidate.id, candidateVersion: candidate.version, candidateDigest: candidate.digest,
       checkerDigest: digest(entry), asset: entry.asset, inventoryDigest: entry.inventory.digest, adapter: { ...test.grant.adapter, id: 'skill-trace-v1' },
       limits: { ...test.grant.limits, timeoutMs: prepared.execution.timeoutMs } };
@@ -171,12 +177,22 @@ describe('saved repository-asset production validation routing', () => {
     const loads = [original, prepared.artifact.content].flatMap((text, edition) => normal.map((check, index) => ({
       edition: edition ? 'proposed' : 'original', checkId: check.id, artifactDigest: bytesDigest(text), inputDigest: bytesDigest(check.input),
       expandedBodyDigest: bytesDigest(text.split('---\n').at(-1)!.replace('$ARGUMENTS', check.input)), resource: resources[index].path, resourceDigest: resources[index].digest })));
-    let observation = { grantDigest: digest(grant), hostBinaryDigest, loads };
+    const source = 'claude-seatbelt-loopback-read-v1';
+    const runs = [original, prepared.artifact.content].flatMap((text, index) => prepared.checks.map(check => {
+      const edition = index === 0 ? 'original' : 'proposed';
+      const path = `references/${check.input}.md`;
+      const events = check.kind === 'normal' ? [{ outcome: 'read', ...resources.find(resource => resource.path === path)! }]
+        : [{ outcome: 'denied', path }, ...(check.kind === 'recovery' ? [{ outcome: 'read', ...resources[1] }] : [])];
+      const snapshotDigest = digest([source, observerDigest, digest(grant), hostBinaryDigest, check.id, edition, bytesDigest(check.input),
+        bytesDigest(text), resources.map(resource => [resource.path, resource.digest])]);
+      return { edition, checkId: check.id, snapshotDigest, expandedBodyDigest: bytesDigest(text.split('---\n').at(-1)!.replace('$ARGUMENTS', check.input)), events };
+    }));
+    const hostTrace = { source, observerDigest, runs };
+    let observation = { grantDigest: digest(grant), hostBinaryDigest, loads, ...(frozen ? { hostTrace } : {}) };
     let hostVersion: string | undefined;
     if (native) {
-      const script = fileURLToPath(new URL('../../../../../tests/qualification/w05/native-skill.mjs', import.meta.url));
       const issued = JSON.parse(readFileSync(test.grantFile, 'utf8'));
-      const receipt = JSON.parse(execFileSync(process.execPath, [script, digest(issued)], { encoding: 'utf8', timeout: 90000 }));
+      const receipt = JSON.parse(execFileSync(process.execPath, [script, digest(issued), ...(frozen ? ['--host-controls'] : [])], { encoding: 'utf8', timeout: 110000 }));
       expect(receipt.passed).toBe(true);
       expect(receipt.skillObservation).toEqual(observation);
       observation = receipt.skillObservation;
@@ -187,7 +203,8 @@ describe('saved repository-asset production validation routing', () => {
       return validateConfiguredLearningCandidate({ ...test.input, candidateId: candidate.id, expectedVersion: candidate.version }, test.options);
     };
     const result = await validate({ ...grant, skillObservation: observation });
-    expect(result).toEqual({ status: 'blocked', code: 'insufficient_coverage', skillLoadEvidenceDigest: digest(observation) });
+    expect(result).toEqual({ status: 'blocked', code: 'insufficient_coverage', skillLoadEvidenceDigest: digest(observation),
+      ...(frozen ? { skillHostTraceEvidenceDigest: digest(hostTrace) } : {}) });
     const runtime = new PluginRuntime();
     runtimes.push(runtime);
     await runtime.activate(createLearningPlugin({ homeDir: test.root, config: { enabled: true, validation: { configurationFile: test.configurationFile } } }));
@@ -204,6 +221,19 @@ describe('saved repository-asset production validation routing', () => {
       expect(await validate({ ...grant, skillObservation: { ...observation, ...mismatch } })).toEqual({ status: 'blocked', code: 'binding_mismatch' });
     }
     expect(await validate({ ...grant, skillObservation: { passed: true } })).toEqual({ status: 'blocked', code: 'unauthorized' });
+    if (frozen) {
+      const recovery = runs[3];
+      const reject = async (hostTrace: unknown) => expect(await validate({ ...grant, skillObservation: { ...observation, hostTrace } }))
+        .toEqual({ status: 'blocked', code: 'binding_mismatch' });
+      await reject(undefined);
+      await reject({ ...hostTrace, observerDigest: '0'.repeat(64) });
+      await reject({ ...hostTrace, runs: runs.slice(1) });
+      for (const change of [{ snapshotDigest: runs[7].snapshotDigest }, { expandedBodyDigest: runs[2].expandedBodyDigest },
+        { events: recovery.events.slice(1) }, { events: [...recovery.events].reverse() }, { events: [recovery.events[0], { outcome: 'read', ...resources[0] }] }]) {
+        await reject({ ...hostTrace, runs: runs.map(run => run === recovery ? { ...run, ...change } : run) });
+      }
+      await reject({ ...hostTrace, runs: runs.map(run => run.checkId === 'behavior-3' ? { ...run, events: [{ outcome: 'read', ...resources[2] }] } : run) });
+    }
     writeFileSync(join(directory, resources[0].path), 'catalog refresh');
     expect(await validate({ ...grant, skillObservation: observation })).toEqual({ status: 'blocked', code: 'source_unavailable' });
     expect(test.store.getValidation(candidate.id)).toBeUndefined();

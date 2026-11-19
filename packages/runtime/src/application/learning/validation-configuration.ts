@@ -142,11 +142,20 @@ function matchesAssetKind(kind: 'tool' | 'skill', ref: string | null, adapter: z
 
 const skillLoadSchema = z.object({ protocol: z.literal('claude-explicit-load-v1'), adapter: z.literal('skill-trace-v1'),
   revision: learningIdentitySchema, hostBinaryDigest: learningDigestSchema,
+  hostControls: z.object({ observerDigest: learningDigestSchema, cases: z.array(z.object({ checkId: learningIdentitySchema,
+    checkDigest: learningDigestSchema, denied: assetPath, fallback: assetPath.optional() }).strict()).min(2).max(16)
+    .refine(cases => new Set(cases.map(entry => entry.checkId)).size === cases.length) }).strict().optional(),
   cases: z.array(z.object({ checkId: learningIdentitySchema, checkDigest: learningDigestSchema, resource: assetPath }).strict())
     .min(1).max(16).refine(cases => new Set(cases.map(entry => entry.checkId)).size === cases.length),
 }).strict();
 
 const skillObservationSchema = z.object({ grantDigest: learningDigestSchema, hostBinaryDigest: learningDigestSchema,
+  hostTrace: z.object({ source: z.literal('claude-seatbelt-loopback-read-v1'), observerDigest: learningDigestSchema,
+    runs: z.array(z.object({ edition: z.enum(['original', 'proposed']), checkId: learningIdentitySchema, snapshotDigest: learningDigestSchema,
+      expandedBodyDigest: learningDigestSchema, events: z.array(z.discriminatedUnion('outcome', [
+        z.object({ outcome: z.literal('denied'), path: assetPath }).strict(),
+        z.object({ outcome: z.literal('read'), path: assetPath, digest: learningDigestSchema }).strict(),
+      ])).min(1).max(2) }).strict()).min(2).max(32) }).strict().optional(),
   loads: z.array(z.object({ edition: z.enum(['original', 'proposed']), checkId: learningIdentitySchema,
     artifactDigest: learningDigestSchema, inputDigest: learningDigestSchema, expandedBodyDigest: learningDigestSchema,
     resource: assetPath, resourceDigest: learningDigestSchema }).strict()).min(2).max(32),

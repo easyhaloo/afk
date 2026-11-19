@@ -77,7 +77,7 @@ type ValidationCode = LessonQaBlockedCode | 'invalid_input' | 'candidate_unavail
   | 'verification_failed' | 'invalid_execution' | 'cleanup_failed' | 'invalid_receipt' | 'output_limit' | 'binding_mismatch' | 'insufficient_coverage'
   | 'assertion_failed' | 'cancelled' | 'timed_out' | 'storage_failed' | 'commit_guard_unavailable';
 
-export type LearningValidationResult = { status: 'blocked'; code: ValidationCode; skillLoadEvidenceDigest?: string } | {
+export type LearningValidationResult = { status: 'blocked'; code: ValidationCode; skillLoadEvidenceDigest?: string; skillHostTraceEvidenceDigest?: string } | {
   status: 'validated'; candidateId: string; candidateVersion: number; validatedVersion: number;
   executionId: string; receiptDigest: string;
 };

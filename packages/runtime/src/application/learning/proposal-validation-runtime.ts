@@ -157,8 +157,43 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
             || load.resourceDigest !== resource.digest) return { status: 'blocked', code: failureCode };
         }
       }
+      const controls = semantic.hostControls;
+      const trace = skillObservation.hostTrace;
+      if (controls || trace) {
+        if (!controls || !trace || trace.observerDigest !== controls.observerDigest || normal.length < 2
+          || !prepared.checks.some(check => check.kind === 'refusal') || !prepared.checks.some(check => check.kind === 'recovery')
+          || controls.cases.length + normal.length !== prepared.checks.length || trace.runs.length !== prepared.checks.length * 2) {
+          return { status: 'blocked', code: failureCode };
+        }
+        const resources = target.resources ?? [];
+        for (const check of prepared.checks) {
+          const control = controls.cases.find(entry => entry.checkId === check.id);
+          const allowed = semantic.cases.find(entry => entry.checkId === check.id)?.resource;
+          if (!/^[A-Za-z0-9_-]{1,128}$/.test(check.input) || (check.kind !== 'normal' && (!control || control.checkDigest !== digest(check)
+            || !resources.some(resource => resource.path === control.denied) || (check.kind === 'recovery') !== !!control.fallback
+            || control.fallback === control.denied))) return { status: 'blocked', code: failureCode };
+          const events: { outcome: string; path: string; digest?: string }[] = [];
+          if (control) events.push({ outcome: 'denied', path: control.denied });
+          const readPath = allowed ?? control?.fallback;
+          if (readPath) {
+            const resource = resources.find(entry => entry.path === readPath);
+            if (!resource) return { status: 'blocked', code: failureCode };
+            events.push({ outcome: 'read', ...resource });
+          }
+          for (const edition of ['original', 'proposed'] as const) {
+            const run = trace.runs.find(entry => entry.edition === edition && entry.checkId === check.id);
+            const text = edition === 'original' ? original.toString('utf8') : prepared.artifact.content;
+            const body = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(text)?.[1];
+            const snapshot = [trace.source, trace.observerDigest, skillObservation.grantDigest, semantic.hostBinaryDigest,
+              check.id, edition, sha256(check.input), sha256(text), resources.map(resource => [resource.path, resource.digest])];
+            if (!body || !run || run.snapshotDigest !== digest(snapshot) || !same(run.events, events)
+              || run.expandedBodyDigest !== sha256(body.replaceAll('$ARGUMENTS', check.input))) return { status: 'blocked', code: failureCode };
+          }
+        }
+      }
       authorization(options);
-      return { status: 'blocked', code: 'insufficient_coverage', skillLoadEvidenceDigest: digest(skillObservation) };
+      return { status: 'blocked', code: 'insufficient_coverage', skillLoadEvidenceDigest: digest(skillObservation),
+        ...(trace ? { skillHostTraceEvidenceDigest: digest(trace) } : {}) };
     }
     if (semantic.cases.length !== prepared.checks.length) return { status: 'blocked', code: failureCode };
     const cases: ProposalRuntimeHarness['cases'] = [];

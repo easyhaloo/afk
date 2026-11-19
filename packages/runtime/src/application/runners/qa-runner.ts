@@ -4,7 +4,7 @@ import { join } from 'path';
 import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
-import { configureStatusline, logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
+import { logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
 import { getWorkflowConfig, repositoryExecutionDefaults } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { blockBacklog } from '../../domain/backlog/commands.js';
@@ -366,10 +366,6 @@ export class QARunner {
       const merge = await this.mergeIntoBaseline(worktreePath, baselineBranch, featureBranch);
       controller.signal.throwIfAborted();
       await this.logWorktreeDiagnostics(id, 'branches-merged', worktreePath);
-      if (this.executionMode === 'interactive') {
-        await configureStatusline(worktreePath);
-        await this.logWorktreeDiagnostics(id, 'statusline-configured', worktreePath);
-      }
 
       const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load('pre-merge-qa-verification');
       controller.signal.throwIfAborted();

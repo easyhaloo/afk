@@ -5,11 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { executionWorkspacePath } from '@afk/runtime/infrastructure/workspace';
-import { checkHookReceipt, installFailingHook } from './workflow-hook-receipt.fixture.js';
 
 const execute = promisify(execFile);
 
-export async function runRepositoryTemplate(entry: string, repair: boolean, withOptionalHook = false) {
+interface RepositoryFixture {
+  root: string;
+  checkout: string;
+  host: string;
+  workItemId: string;
+  env: Record<string, string>;
+  requests: string[];
+  labels: string[];
+}
+
+export async function withRepositoryFixture<Result>(repair: boolean, passingVerification: boolean, run: (fixture: RepositoryFixture) => Promise<Result>) {
   const root = await mkdtemp(join(tmpdir(), 'afk-template-repo-'));
   const labels = [repair ? 'stage::qa' : 'stage::ready-for-issues', 'mode::afk'];
   const requests: string[] = [];
@@ -67,7 +76,7 @@ if test -f "$HOME/first-prompt"; then
   cat > "$HOME/verify-prompt"
   git show HEAD:shared.txt > "$HOME/verified-content"
   git show -s --format=%P HEAD > "$HOME/verified-parents"
-  ${withOptionalHook ? `test "$(cat "$HOME/verified-content")" = applied
+  ${passingVerification ? `test "$(cat "$HOME/verified-content")" = applied
   echo '${pass(repair ? 'qa' : 'ac_verification')}'
   exit 0` : 'exit 1'}
 fi
@@ -103,6 +112,16 @@ echo '${completion}'
       await commit('baseline');
     }
     await local('push', 'origin', 'main');
+    return await run({ root, checkout, host, workItemId, env, requests, labels });
+  } finally {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+export async function runRepositoryTemplate(entry: string, repair: boolean, withOptionalHook = false) {
+  const { checkHookReceipt, installFailingHook } = await import('./workflow-hook-receipt.fixture.js');
+  return withRepositoryFixture(repair, withOptionalHook, async ({ root, host, workItemId, env, requests }) => {
     const args = repair ? ['qa', '--mode', 'batch'] : ['run', '--template', 'issue-implementation', '--execution-mode', 'batch', '--hard-timeout', '10000'];
     if (repair) {
       const manifest = join(root, 'execution-manifest.json');
@@ -123,8 +142,5 @@ echo '${completion}'
     }
     return { result, requests, first: await read('first-prompt'), verify: await read('verify-prompt'),
       conflicts: await read('conflicts'), verifiedContent: await read('verified-content'), parents: (await read('verified-parents')).trim().split(' ') };
-  } finally {
-    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(root, { recursive: true, force: true });
-  }
+  });
 }

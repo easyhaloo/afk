@@ -19,7 +19,7 @@ import { promises as fs, realpathSync } from 'fs';
 import { isAbsolute, join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
-import { clearSignal, getTokenUsage, readSignal, preacceptClaudeProjectTrust, isClaudeCodeArgv, logger } from '../../io/index.js';
+import { clearSignal, configureStatusline, getTokenUsage, readSignal, preacceptClaudeProjectTrust, isClaudeCodeArgv, logger } from '../../io/index.js';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
 import {
@@ -138,6 +138,8 @@ export class LocalSandbox implements Sandbox {
     if (!this.tmux) throw new Error('interactive local execution requires tmux');
     await clearSignal(this.worktreePath);
     if (!this.sessionCreated) {
+      const isClaude = isClaudeCodeArgv(options.command.argv);
+      if (isClaude) await configureStatusline(this.worktreePath);
       // The marker belongs to a Claude process, not the worktree. A prior
       // phase's file must not make a freshly-created tmux session look ready.
       await fs.unlink(join(workspaceDataDirectory(this.worktreePath), 'claude-status.json')).catch(error => {
@@ -147,7 +149,7 @@ export class LocalSandbox implements Sandbox {
       // has never seen — which is every fresh worktree. The dialog stops the
       // statusline from rendering and turns the run into a false
       // `blocked/hitl`. Persist the trust answer before the process starts.
-      if (isClaudeCodeArgv(options.command.argv)) {
+      if (isClaude) {
         const trust = await preacceptClaudeProjectTrust(this.worktreePath);
         if (!trust.trusted) {
           logger.warn(

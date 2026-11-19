@@ -17,7 +17,7 @@ import type {
   ExecutionResult,
 } from '../infrastructure/sandbox/types.js';
 import type { AgentCommandOptions, AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
-import { getTokenUsage, configureStatusline, logger, resolveLogDir, resolveTimeoutSnapshotDir, withLogContext } from '../infrastructure/io/index.js';
+import { getTokenUsage, logger, resolveLogDir, resolveTimeoutSnapshotDir, withLogContext } from '../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './runners/registry.js';
 import type { ModuleParams } from './runners/registry.js';
@@ -1455,10 +1455,6 @@ export class WorkflowRunner {
     }
     await this.recordObservation({ kind: 'workspace.prepared', branch: wt.branch, workspace: wt.path, baseBranch });
     logger.info({ iid, status: 'active' }, 'worktree status updated');
-    if (this.executionMode === 'interactive') {
-      await configureStatusline(wt.path);
-      logger.info({ iid, worktree: wt.path }, 'statusline configured');
-    }
 
     // ── Step 1b: Lifecycle before_agent hooks ──────────────────────────────
     this.lifecycleCtx = {

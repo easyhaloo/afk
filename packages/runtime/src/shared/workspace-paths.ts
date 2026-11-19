@@ -14,3 +14,7 @@ export function workspaceDataDirectory(workspace: string): string {
   const key = createHash('sha256').update(resolve(workspace)).digest('hex');
   return join(workspaceStateDirectory(), 'workspaces', key);
 }
+
+export function claudeStatuslineSettingsPath(workspace: string): string {
+  return join(workspaceDataDirectory(workspace), 'claude-statusline-settings.json');
+}

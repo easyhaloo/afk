@@ -5,6 +5,8 @@ import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { SignalSchema } from '../../../domain/schemas.js';
 import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
+import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
+import { claudeStatuslineSettingsPath } from '../../../shared/workspace-paths.js';
 
 describe('LocalSandboxProvider', () => {
   const metadata = { provider: 'claude-code', transport: 'process' } as const;
@@ -54,6 +56,32 @@ describe('LocalSandboxProvider', () => {
     expect(tmux.sendPrompt).toHaveBeenCalledWith(
       process.cwd(), 'interactive-test', 'main', 'goal', 'goal_complete', 'claude-code',
     );
+  });
+
+  it('prepares settings for the actual checkout before an interactive Claude step starts', async () => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-interactive-step-'));
+    const settingsPath = claudeStatuslineSettingsPath(worktreePath);
+    const markerPath = join(workspaceDataDirectory(worktreePath), 'claude-status.json');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', await mkdtemp(join(tmpdir(), 'afk-step-config-')));
+    try {
+      const tmux = {
+        createSession: vi.fn(async (_session: string, cwd: string, command: string) => {
+          expect(cwd).toBe(worktreePath);
+          expect(command).toContain(`'--settings' '${settingsPath}'`);
+          expect(JSON.parse(await readFile(settingsPath, 'utf8')).statusLine.command).toContain(markerPath);
+          await expect(access(markerPath)).rejects.toMatchObject({ code: 'ENOENT' });
+          return {};
+        }),
+        sendPrompt: vi.fn(),
+      };
+      const sandbox = await new LocalSandboxProvider().create({ worktreePath, session: 'interactive-step', tmux: tmux as never });
+      await new ClaudeCodeProvider().createExecution({ sandbox, worktreePath, executionMode: 'interactive',
+        generation: 1, prompt: 'fixture', signalType: 'goal_complete' });
+      expect(tmux.createSession).toHaveBeenCalledOnce();
+      await expect(access(join(worktreePath, '.claude'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('does not submit the launch prompt twice for OpenCode', async () => {

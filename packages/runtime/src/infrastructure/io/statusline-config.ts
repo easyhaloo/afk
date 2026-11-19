@@ -2,6 +2,7 @@ import { workspaceDataDirectory } from '../workspace.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { STATUS_FILENAME } from './status.js';
+import { claudeStatuslineSettingsPath } from '../../shared/workspace-paths.js';
 
 type JsonObject = Record<string, string | number | boolean | null | object>;
 
@@ -14,7 +15,6 @@ export async function configureStatusline(worktreeDir: string): Promise<void> {
   const statusJsonPath = join(workspaceDataDirectory(worktreeDir), STATUS_FILENAME);
 
   await fs.mkdir(workspaceDataDirectory(worktreeDir), { recursive: true });
-  await fs.mkdir(claudeDir, { recursive: true });
 
   let existing: JsonObject = {};
   try {
@@ -35,7 +35,6 @@ export async function configureStatusline(worktreeDir: string): Promise<void> {
     : existingCommand ? `(${teeCommand}) && ${existingCommand}` : teeCommand;
 
   const next: JsonObject = {
-    ...existing,
     statusLine: {
       ...(existingStatusLine && typeof existingStatusLine === 'object' ? existingStatusLine : {}),
       type: 'command',
@@ -43,7 +42,7 @@ export async function configureStatusline(worktreeDir: string): Promise<void> {
     },
   };
 
-  await fs.writeFile(settingsPath, JSON.stringify(next, null, 2) + '\n', 'utf-8');
+  await fs.writeFile(claudeStatuslineSettingsPath(worktreeDir), JSON.stringify(next, null, 2) + '\n', 'utf-8');
 
   try {
     await fs.access(statusJsonPath);

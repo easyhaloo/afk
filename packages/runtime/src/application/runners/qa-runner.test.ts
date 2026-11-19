@@ -29,12 +29,6 @@ import { simpleGit } from 'simple-git';
 import { GitBranchProvider } from '../../infrastructure/git/branches/git-provider.js';
 import { loadRun, queryExecutionHistory } from '@afk/application';
 
-const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
-vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../infrastructure/io/index.js')>(),
-  configureStatusline: ioMocks.configureStatusline,
-}));
-
 /**
  * The QA worktree.
  *
@@ -1365,10 +1359,9 @@ describe('QARunner execution boundary', () => {
     expect(f.sandboxProvider.create.mock.calls[0][0]).toMatchObject({ executionMode: 'interactive', tmux });
   });
 
-  it('configures the interactive statusline after merging the QA worktree', async () => {
+  it('creates the interactive sandbox after merging the QA worktree', async () => {
     const f = fixture();
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
-    ioMocks.configureStatusline.mockClear();
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'interactive',
       tmux: {} as any, mergeFeatureIntoBaseline,
@@ -1377,8 +1370,8 @@ describe('QARunner execution boundary', () => {
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
     expect(mergeFeatureIntoBaseline).toHaveBeenCalled();
-    expect(ioMocks.configureStatusline).toHaveBeenCalledWith(worktreePath);
-    expect(mergeFeatureIntoBaseline.mock.invocationCallOrder[0]).toBeLessThan(ioMocks.configureStatusline.mock.invocationCallOrder[0]);
+    expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ worktreePath }));
+    expect(mergeFeatureIntoBaseline.mock.invocationCallOrder[0]).toBeLessThan(f.sandboxProvider.create.mock.invocationCallOrder[0]);
   });
 
   it('publishes an independent QA runtime record through completion', async () => {

@@ -6,7 +6,7 @@
  * command is built for execution inside a Sandbox.
  */
 
-import { join } from 'node:path';
+import { claudeStatuslineSettingsPath } from '../../shared/workspace-paths.js';
 import type {
   AgentProviderName,
   AgentCapability,
@@ -93,7 +93,7 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
     if (options.executionMode === 'batch') {
       argv.push('--print', '--output-format', 'stream-json', '--verbose');
     } else if (options.executionMode === 'interactive') {
-      argv.push('--settings', join(options.worktreePath, '.claude', 'settings.local.json'));
+      argv.push('--settings', claudeStatuslineSettingsPath(options.worktreePath));
     }
     return {
       argv,

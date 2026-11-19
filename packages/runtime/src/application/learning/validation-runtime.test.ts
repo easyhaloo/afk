@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -188,8 +188,10 @@ const actual = { 'fact.subject': policy.subject,
   'fact.rule': policy.approvalRequired ? 'approval required' : 'no approval required', 'fact.authority': policy.authority };
 process.stdout.write(JSON.stringify({ protocol: request.protocol, binding: request.binding,
   assertions: request.assertions.map(assertion => ({ ...assertion, actual: actual[assertion.node], status: 'observed' })) }));
-`);
-  const node = realpathSync(process.execPath);
+`, { mode: 0o600 });
+  const node = join(setup.root, 'node');
+  copyFileSync(process.execPath, node, constants.COPYFILE_FICLONE);
+  chmodSync(node, 0o700);
   const entry: FactCommandCheckerConfiguration = { ...setup.config.checkers[0], mode: 'fact-command', kind: 'fact',
     qa: undefined, allowLessonValidation: undefined,
     executionAuthorizationFile: join(setup.root, 'owned-fixture-execution-grant.json'),
@@ -344,6 +346,14 @@ describe('fact command bridge with owned fixtures, not domain qualification', ()
     const setup = await ownedFactCommandFixture();
     delete setup.options.fact;
     expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('checker_unavailable'));
+    expect(setup.options.resolveProvider).not.toHaveBeenCalled();
+    expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
+  });
+
+  it('rejects a group-writable executable even when its digest matches the grant', async () => {
+    const setup = await ownedFactCommandFixture();
+    chmodSync(setup.entry.execution.command[0], 0o770);
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toEqual(blocked('unauthorized'));
     expect(setup.options.resolveProvider).not.toHaveBeenCalled();
     expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
   });

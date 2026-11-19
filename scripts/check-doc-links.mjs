@@ -15,9 +15,10 @@ const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url))).replace
 const EXCLUDES = [
   '*/node_modules/*', '*/.git/*', '*/dist/*', '*/dist-electron/*', '*/release/*',
   '*/.playwright-mcp/*', '*/.playwright-cli/*', '*/.afk/*', '*/.codegraph/*',
-  '*/.worktrees/*', '*/.claude/*', '*/test-results/*', '*/.omo/*',
+  '*/.worktrees/*', '*/.claude/*', '*/.codex/*', '*/test-results/*', '*/.omo/*',
 ];
-const findArgs = ['.', '-type', 'f', '-name', '*.md', ...EXCLUDES.flatMap(p => ['-not', '-path', p])];
+const pruneArgs = EXCLUDES.flatMap((pattern, index) => [...(index ? ['-o'] : []), '-path', pattern.replace(/\/\*$/, '')]);
+const findArgs = ['.', '(', ...pruneArgs, ')', '-prune', '-o', '-type', 'f', '-name', '*.md', '-print'];
 let mdFiles;
 try {
   const output = execFileSync('find', findArgs, { cwd: repoRoot, encoding: 'utf8' });

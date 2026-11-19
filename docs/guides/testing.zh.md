@@ -244,7 +244,7 @@ pnpm --dir apps/desktop test
 # 完整运行 CLI 子进程、PTY 和 Electron E2E
 pnpm test:e2e
 
-# 只跑 CLI 流程（先构建可执行文件）
+# CLI 子进程测试，含学习路由和经验撤回（不调用真实模型）
 pnpm test:e2e:cli
 
 # 本地插件安装/启停/卸载，以及真实本地 Provider 调用
@@ -381,7 +381,9 @@ pnpm test:coverage
 pnpm test:coverage:report
 ```
 
-插件矩阵使用构建后的 CLI 子进程、隔离 HOME、真实临时文件和 Git 仓库、loopback HTTP / TLS 服务及明确标记的命令替身。本地 97 个用例、HTTP 27 个用例、执行 67 个用例；这些数字是测试数，不是源码覆盖率。执行矩阵覆盖六种 Agent × 四种 Sandbox、四种 Trigger × 四种 Host，并检查组合完成情况。模拟 Agent、SSH、云端和容器命令不能证明真实厂商行为或容器隔离；验证器的命令替身也不能证明浏览器完成页面渲染。
+插件矩阵使用构建后的 CLI 子进程、隔离 HOME、真实临时文件和 Git 仓库、loopback HTTP / TLS 服务及明确标记的命令替身。本地矩阵 101 个用例、HTTP 27 个用例、执行 71 个用例；这些数字是测试数，不是源码覆盖率。执行矩阵覆盖六种 Agent × 四种 Sandbox、四种 Trigger × 四种 Host，并检查组合完成情况。模拟 Agent、SSH、云端和容器命令不能证明真实厂商行为或容器隔离；验证器的命令替身也不能证明浏览器完成页面渲染。
+
+CLI 工作流、本地插件、本地矩阵、HTTP、执行、学习、学习验证和可观测性套件支持通过 `AFK_E2E_CLI_ENTRY` 选择已安装的 CLI 入口。根目录 E2E 配置自动使用同一安装包的 Runtime。显式指定 `AFK_E2E_RUNTIME_ROOT` 时，两者必须指向同一 Runtime 目录。使用原有断言验证安装代码，服务和 Agent 仍为模拟。共享构建及其产物消费者串行执行，安装测试记录安装包校验和。
 
 经验 E2E 穿过构建后的 CLI、真实工作流引擎、Agent 子进程替身、持久经验账本和上下文组装，覆盖“失败 → 候选 → 模拟 QA 审计 → 证据门禁验证 → 后续提示词引用 → 禁用及重新启用 → 撤销”。其中 QA 审计明确为模拟。真实 Claude 验收另行运行已有无工具和完整工具 Sandbox 用例；外部 backlog 的实际状态及独立 QA 结果必须单独报告。
 

@@ -245,7 +245,7 @@ pnpm --dir apps/desktop test
 # Full CLI subprocess, PTY and Electron E2E suites
 pnpm test:e2e
 
-# CLI workflows only (builds the executable first)
+# CLI subprocess suites, including learning routing and lesson withdrawal (no live model)
 pnpm test:e2e:cli
 
 # Local plugin install/enable/disable/remove and real local provider operations
@@ -395,12 +395,20 @@ pnpm test:coverage:report
 
 The plugin matrix exercises built CLI subprocesses with isolated HOME directories,
 real temporary files/Git repositories, loopback HTTP/TLS services and explicit command
-fixtures. Local: 97 cases; HTTP: 27 cases; execution: 67 cases. These are test cases,
+fixtures. Local matrix: 101 cases; HTTP: 27 cases; execution: 71 cases. These are test cases,
 not source coverage percentages. The execution matrix covers all six Agents against
 four Sandbox adapters and four Triggers against four Host adapters, with explicit
 pair-completion assertions. Simulated Agent/SSH/cloud/container commands do not prove
 live vendor behavior or container isolation. Verification command fixtures do not
 prove that a browser rendered a page.
+
+The CLI-workflow, local-plugin, local-matrix, HTTP, execution, learning,
+learning-validation and observability suites accept `AFK_E2E_CLI_ENTRY` pointing
+to an installed CLI entry. The root E2E configuration resolves its bundled runtime automatically.
+An explicit `AFK_E2E_RUNTIME_ROOT` must resolve to the same directory. This runs
+the same assertions against installed code; the service and agent fixtures
+remain simulations. Keep shared builds and tests consuming those outputs
+serial, and record the archive checksum with installed test results.
 
 The learning E2E crosses the built CLI, actual workflow runner, subprocess Agent
 fixture, durable experience store and context assembly: failure → candidate →

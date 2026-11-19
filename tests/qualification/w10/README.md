@@ -4,11 +4,11 @@
 
 | 证据等级 | 行数 | 判定依据 |
 | --- | ---: | --- |
-| `account` | 5 | 有真实账户侧操作或用户收件记录，含 [Codex 开发与独立 QA](agent-codex.md) |
+| `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
 | `service` | 13 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)及 [Grafana 报告读回](report-platform.md) |
 | `native` | 12 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
 | `local` | 10 | 本地实现的文件、规则、映射或检索断言通过 |
-| `partial` | 1 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
+| `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
 | `fixture` | 14 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
 隔离工作树基线为 `29a25e0b5f1a5c1e5a6536d073f3c2544c116f39`。`packages/runtime/src/application/plugins/configured.ts` 中 `configuredPluginManifests()` 返回 52 个配置 ID。扣除另一专题的 `learning.distiller` 后，W10 有 50 行各用一个 ID，两行 OTLP 共用 `observability.otlp`，三行是内建日志、事件及 Evidence 路由。共享的清单发现、依赖安装、doctor、启停、取消、卸载和升级恢复按各自收据判定。原审计 `commonLifecycle` 记录了安装失败与版本回滚的适用范围。

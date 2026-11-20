@@ -130,6 +130,9 @@ describe.each(['standalone', 'managed'] as const)('QARunner bounded evidence can
     const records = new Map<string, EvidenceRecord>();
     const identity = { traceId: 'qa-evidence-trace', runId: 'qa-evidence-managed', workItemId: 'github:org/repo#60',
       profileId: 'qa-evidence-profile', attempt: 3, actor: { kind: 'system' as const, id: 'qa-evidence-owner' } };
+    const qaTimeout = 600;
+    let markPutStarted!: () => void;
+    const putStarted = new Promise<void>(resolve => { markPutStarted = resolve; });
     let releasePut!: () => void;
     const heldPut = new Promise<void>(resolve => { releasePut = resolve; });
     let sdkSignal: ProviderAbortSignal | undefined;
@@ -144,6 +147,7 @@ describe.each(['standalone', 'managed'] as const)('QARunner bounded evidence can
         if (summary.kind === 'failure.classified') {
           heldId = record.id;
           sdkSignal = options?.signal;
+          markPutStarted();
           if (cancellation === 'caller') caller.abort(new Error('controlled QA caller cancellation'));
           await heldPut;
         }
@@ -198,15 +202,19 @@ describe.each(['standalone', 'managed'] as const)('QARunner bounded evidence can
       const current = fixture();
       const item = await current.providers.backlog.get('60');
       current.providers.backlog.get.mockResolvedValue({ ...item, workItemId: identity.workItemId });
-      const runner = new QARunner(current.providers, { ...config, qaTimeout: 600 }, { plugins, projectRoot: root,
+      const runner = new QARunner(current.providers, { ...config, qaTimeout }, { plugins, projectRoot: root,
         sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider, executionMode: 'batch',
         ...(ownership === 'managed' ? { observation: { context: identity, record: managedRecord } } : {}) });
-      const started = performance.now();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const run = () => runner.process('60', { signal: caller.signal });
       pending = ownership === 'managed'
         ? withLogContext({ runId: identity.runId, workItemId: identity.workItemId }, run) : run();
+      if (cancellation === 'timeout') {
+        await Promise.race([putStarted, pending.then(() => { throw new Error('QA finished before evidence mirroring started'); })]);
+        expect(sdkSignal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(qaTimeout);
+      }
       const result = await pending;
-      const elapsed = performance.now() - started;
       const events = new JsonlEventStore({ root: eventRoot });
       const runId = ownership === 'managed' ? identity.runId : (await events.listRuns())[0];
       const beforeLatePut = await loadRun(runId, events);
@@ -239,7 +247,6 @@ describe.each(['standalone', 'managed'] as const)('QARunner bounded evidence can
         .toMatchObject({ sourceEventId: probe.id, sourceSequence: probe.sequence, reason: 'cancelled' });
       expect(sdkAbortedAtQaCancellation).toBe(true);
       expect(sdkSignal?.aborted).toBe(true);
-      expect(elapsed).toBeLessThan(2000);
       expect(saved.signal.aborted).toBe(false);
       expect(selection.signal).toBe(saved.signal);
       const independent = { ...identity, runId: 'qa-independent-after-cancellation' };
@@ -251,6 +258,7 @@ describe.each(['standalone', 'managed'] as const)('QARunner bounded evidence can
       expect(current.branches.push).not.toHaveBeenCalled();
     } finally {
       releasePut();
+      vi.useRealTimers();
       await pending?.catch(() => undefined);
       await plugins.dispose();
       vi.unstubAllEnvs();

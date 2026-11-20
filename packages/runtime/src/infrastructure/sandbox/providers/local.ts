@@ -88,7 +88,9 @@ export class LocalSandbox implements Sandbox {
   private readonly runtimeRunId?: string;
   private readonly analysis?: { executable: string; sessionId: string; verifyExecutable(): void };
   private _closed = false;
-  private sessionCreated = false;
+  private sessionCreation?: Promise<void>;
+  private sessionCreationAttempted = false;
+  private closing?: Promise<void>;
 
   constructor(opts: {
     id: string;
@@ -138,55 +140,10 @@ export class LocalSandbox implements Sandbox {
     if (options.executionMode !== 'interactive') throw new Error('execution mode is required');
     if (!this.tmux) throw new Error('interactive local execution requires tmux');
     await clearSignal(this.worktreePath);
-    if (!this.sessionCreated) {
-      const isClaude = isClaudeCodeArgv(options.command.argv);
-      if (isClaude) await configureStatusline(this.worktreePath);
-      // The marker belongs to a Claude process, not the worktree. A prior
-      // phase's file must not make a freshly-created tmux session look ready.
-      await fs.unlink(join(workspaceDataDirectory(this.worktreePath), 'claude-status.json')).catch(error => {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      });
-      // Claude Code blocks on a "Quick safety check" dialog in any directory it
-      // has never seen — which is every fresh worktree. The dialog stops the
-      // statusline from rendering and turns the run into a false
-      // `blocked/hitl`. Persist the trust answer before the process starts.
-      if (isClaude) {
-        const trust = await preacceptClaudeProjectTrust(this.worktreePath);
-        if (!trust.trusted) {
-          logger.warn(
-            { worktree: this.worktreePath, configFilePath: trust.configFilePath },
-            'claude workspace trust could not be pre-accepted',
-          );
-        }
-      }
-      const repositoryClaims = repositoryClaimIds();
-      if (repositoryClaims.length) getAfkResourceRegistry().register({
-        workspacePath: this.workspaceRoot, runId: this.runtimeRunId, worktreePath: this.worktreePath,
-        kind: 'tmux', origin: 'local-sandbox', name: this.sessionName, metadata: { repositoryClaims },
-      });
-      const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
-      if (repositoryClaims.length) await this.tmux.setSessionOwnership(this.sessionName, repositoryClaims.join(','));
-      this.sessionCreated = true;
-      const paneId = created.paneId
-        ?? await this.tmux.firstPaneId?.(created.name, created.window).catch(() => undefined);
-      getAfkResourceRegistry().register({
-        workspacePath: this.workspaceRoot,
-        runId: this.runtimeRunId,
-        worktreePath: this.worktreePath,
-        kind: 'tmux',
-        origin: 'local-sandbox',
-        name: this.sessionName,
-        detail: 'interactive tmux session',
-        metadata: {
-          repositoryClaims,
-          branch: this.branch,
-          generation: options.generation,
-          ...(paneId
-            ? { tmuxSession: created.name, tmuxWindowName: created.window, tmuxPaneId: paneId }
-            : {}),
-        },
-      });
-    }
+    if (this._closed) throw new Error('sandbox already closed');
+    this.sessionCreation ??= this.createInteractiveSession(options);
+    await this.sessionCreation;
+    if (this._closed) throw new Error('sandbox already closed');
 
     // Interactive mode (default): use tmux session to drive the agent.
     const execution = new LocalAgentExecution({
@@ -202,12 +159,70 @@ export class LocalSandbox implements Sandbox {
     await execution.sendPrompt();
     return execution;
   }
-  async close(): Promise<void> {
-    if (this._closed) return;
+
+  private async createInteractiveSession(options: AgentStartOptions): Promise<void> {
+    const isClaude = isClaudeCodeArgv(options.command.argv);
+    if (isClaude) await configureStatusline(this.worktreePath);
+    // The marker belongs to a Claude process, not the worktree. A prior
+    // phase's file must not make a freshly-created tmux session look ready.
+    await fs.unlink(join(workspaceDataDirectory(this.worktreePath), 'claude-status.json')).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    });
+    // Claude Code blocks on a "Quick safety check" dialog in any directory it
+    // has never seen — which is every fresh worktree. The dialog stops the
+    // statusline from rendering and turns the run into a false
+    // `blocked/hitl`. Persist the trust answer before the process starts.
+    if (isClaude) {
+      const trust = await preacceptClaudeProjectTrust(this.worktreePath);
+      if (!trust.trusted) {
+        logger.warn(
+          { worktree: this.worktreePath, configFilePath: trust.configFilePath },
+          'claude workspace trust could not be pre-accepted',
+        );
+      }
+    }
+    if (this._closed) throw new Error('sandbox already closed');
+    const repositoryClaims = repositoryClaimIds();
+    if (repositoryClaims.length) getAfkResourceRegistry().register({
+      workspacePath: this.workspaceRoot, runId: this.runtimeRunId, worktreePath: this.worktreePath,
+      kind: 'tmux', origin: 'local-sandbox', name: this.sessionName, metadata: { repositoryClaims },
+    });
+    this.sessionCreationAttempted = true;
+    const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
+    if (repositoryClaims.length) await this.tmux.setSessionOwnership(this.sessionName, repositoryClaims.join(','));
+    const paneId = created.paneId
+      ?? await this.tmux.firstPaneId?.(created.name, created.window).catch(() => undefined);
+    getAfkResourceRegistry().register({
+      workspacePath: this.workspaceRoot,
+      runId: this.runtimeRunId,
+      worktreePath: this.worktreePath,
+      kind: 'tmux',
+      origin: 'local-sandbox',
+      name: this.sessionName,
+      detail: 'interactive tmux session',
+      metadata: {
+        repositoryClaims,
+        branch: this.branch,
+        generation: options.generation,
+        ...(paneId
+          ? { tmuxSession: created.name, tmuxWindowName: created.window, tmuxPaneId: paneId }
+          : {}),
+      },
+    });
+  }
+
+  close(): Promise<void> {
     this._closed = true;
-    try {
-      await this.tmux.killSession(this.sessionName);
-    } catch { /* ignore if session already gone */ }
+    return this.closing ??= this.closeInteractiveSession().catch(error => {
+      this.closing = undefined;
+      throw error;
+    });
+  }
+
+  private async closeInteractiveSession(): Promise<void> {
+    await this.sessionCreation?.catch(() => undefined);
+    if (!this.sessionCreationAttempted) return;
+    await this.tmux.killSession(this.sessionName);
     getAfkResourceRegistry().markClosed({
       workspacePath: this.workspaceRoot,
       worktreePath: this.worktreePath,
@@ -215,9 +230,7 @@ export class LocalSandbox implements Sandbox {
       origin: 'local-sandbox',
       name: this.sessionName,
     });
-    try {
-      await this.tmux.closeSession();
-    } catch { /* ignore */ }
+    this.tmux.closeSession();
   }
 }
 
@@ -250,6 +263,7 @@ export class LocalAgentExecution implements AgentExecution {
    */
   private readonly turnWatcher: CodexTurnWatcher | undefined;
   private done = false;
+  private stopping?: Promise<void>;
   private interruptAcked = false;
 
   constructor(opts: {
@@ -498,11 +512,14 @@ export class LocalAgentExecution implements AgentExecution {
   }
 
   async kill(): Promise<void> {
+    if (this.stopping) return this.stopping;
     if (this.done) return;
-    this.done = true;
-    try {
-      await this.tmux.killSession(this.sessionName);
-    } catch { /* ignore */ }
+    this.stopping = this.tmux.killSession(this.sessionName).then(() => {
+      this.done = true;
+    }).finally(() => {
+      this.stopping = undefined;
+    });
+    return this.stopping;
   }
 
   async captureOutput(options?: CaptureOptions): Promise<string> {

@@ -194,10 +194,8 @@ export class RunResourceScope {
     };
     await attempt(() => this.stopExecutions());
     for (const sandbox of [...this.sandboxes].reverse()) await attempt(async () => { await sandbox.close(); this.sandboxes.delete(sandbox); });
-    if (this.hasUnclosedExecutions) {
-      if (firstError !== undefined) throw firstError;
-      return;
-    }
+    if (firstError !== undefined) throw firstError;
+    if (this.hasUnclosedExecutions) return;
     if (this.options.managePrimary !== false && outcome.status === 'success' && this.primary && !this.finalized && this.options.branchStrategy && this.options.branchConfig) {
       await attempt(async () => {
         await this.options.branchStrategy!.finalize(this.gitForOperations(), this.options.branchConfig!, this.primary!, { push: true });

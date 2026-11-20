@@ -96,3 +96,9 @@ python3 -B tests/qualification/w10/agent-codex.py "$RELEASE" "$out/interactive-c
 ```
 
 [交互取消验收回执](agent-codex-interactive-cancel.receipt.json)
+
+### 0.2.178 清理失败与重试
+
+2026-11-20，在 QA 入口注入主沙箱和冲突处理沙箱的关闭失败。两种情况下运行均报告失败，保留工作树和租约。关闭恢复后重试，分支清理执行一次，租约释放。主沙箱场景还检查工作区在重试前保持占用，随后完成清理。取消、会话接入、QA 与仓库生命周期的四个套件共 209 项通过。
+
+macOS arm64 安装包在源码目录外启动并通过 23 个命令入口检查。安装包 SHA-256 为 `76c2cd5b483e25332d1a21b3adc9ed1dc9aa7baf9ebe2960d709f01cb5ecea6a`。打包时 CLI 与 Runtime 源码及测试补丁的 SHA-256 为 `9442c9f199190bfc98b3f04474c500d4692954bd6f18e13e52dcdb5a8b08d0c4`。真实账户交互取消沿用上节的 0.2.177 回执。已重新归属的进程仍待验收。

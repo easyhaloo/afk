@@ -85,7 +85,7 @@ describe('RunResourceScope', () => {
       expect(heartbeat).toHaveBeenCalledTimes(2);
       if (stage === 'sandbox' || stage === 'step' || stage === 'primary') expect(external).not.toHaveBeenCalled();
       if (stage !== 'claim') expect(claim).not.toHaveBeenCalled();
-      expect(step).toHaveBeenCalledTimes(1);
+      expect(step).toHaveBeenCalledTimes(stage === 'sandbox' ? 0 : 1);
       await scope.finish({ status: 'failed' });
       await next.acquireOwnership();
       await scope.finish({ status: 'failed' });
@@ -345,9 +345,9 @@ describe('RunResourceScope', () => {
     expect(branch.cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it('continues cleanup after sandbox failure and preserves the first error', async () => {
+  it('closes the other sandboxes and retains the worktree until sandbox cleanup succeeds', async () => {
     const branch = strategy();
-    const failedSandbox = { close: vi.fn(async () => { throw new Error('sandbox close failed'); }) };
+    const failedSandbox = { close: vi.fn(async () => {}).mockRejectedValueOnce(new Error('sandbox close failed')) };
     const remainingSandbox = { close: vi.fn(async () => {}) };
     const scope = new RunResourceScope({ repoRoot: '/repo', git: simpleGit(), baseBranch: 'main' });
     scope.registerSandbox(remainingSandbox);
@@ -359,6 +359,11 @@ describe('RunResourceScope', () => {
 
     await expect(scope.finish({ status: 'failed' })).rejects.toThrow('sandbox close failed');
     expect(failedSandbox.close).toHaveBeenCalledTimes(1);
+    expect(remainingSandbox.close).toHaveBeenCalledTimes(1);
+    expect(branch.cleanup).not.toHaveBeenCalled();
+
+    await scope.finish({ status: 'failed' });
+    expect(failedSandbox.close).toHaveBeenCalledTimes(2);
     expect(remainingSandbox.close).toHaveBeenCalledTimes(1);
     expect(branch.cleanup).toHaveBeenCalledTimes(1);
   });

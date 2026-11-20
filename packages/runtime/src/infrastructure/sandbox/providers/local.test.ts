@@ -1,5 +1,5 @@
 import { workspaceDataDirectory } from '../../workspace.js';
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,22 +7,65 @@ import { SignalSchema } from '../../../domain/schemas.js';
 import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
 import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
 import { claudeStatuslineSettingsPath } from '../../../shared/workspace-paths.js';
+import { getAfkResourceRegistry } from '../../runtime/resource-registry.js';
 
 describe('LocalSandboxProvider', () => {
   const metadata = { provider: 'claude-code', transport: 'process' } as const;
   it('provisions a batch sandbox without creating a tmux session', async () => {
-    const tmux = { createSession: vi.fn(), waitForPrompt: vi.fn() };
+    const tmux = { createSession: vi.fn(), waitForPrompt: vi.fn(), killSession: vi.fn() };
     const provider = new LocalSandboxProvider();
 
-    await provider.create({
+    const sandbox = await provider.create({
       worktreePath: process.cwd(),
       session: 'batch-test',
       executionMode: 'batch',
       tmux: tmux as never,
     });
 
+    await sandbox.close();
     expect(tmux.createSession).not.toHaveBeenCalled();
     expect(tmux.waitForPrompt).not.toHaveBeenCalled();
+    expect(tmux.killSession).not.toHaveBeenCalled();
+  });
+
+  it('waits for a session in flight and retains its registry entry until close succeeds', async () => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-close-'));
+    const registry = getAfkResourceRegistry();
+    const failure = new Error('tmux termination failed');
+    const creation = Promise.withResolvers<{ name: string; window: string }>();
+    const tmux = {
+      createSession: vi.fn(() => creation.promise),
+      sendPrompt: vi.fn(),
+      killSession: vi.fn(async () => {}).mockRejectedValueOnce(failure),
+      closeSession: vi.fn(),
+    };
+    const sandbox = await new LocalSandboxProvider().create({
+      worktreePath, session: 'interactive-close-test', executionMode: 'interactive', tmux: tmux as never,
+    });
+    try {
+      const start = expect(sandbox.startAgent({
+        command: { argv: ['agent'], cwd: worktreePath }, prompt: 'fixture', generation: 1,
+        signalType: 'goal_complete', executionMode: 'interactive', metadata,
+      })).rejects.toThrow('sandbox already closed');
+      await vi.waitFor(() => expect(tmux.createSession).toHaveBeenCalledOnce());
+      const closing = sandbox.close();
+      expect(sandbox.close()).toBe(closing);
+      expect(tmux.killSession).not.toHaveBeenCalled();
+      creation.resolve({ name: 'interactive-close-test', window: 'main' });
+      await expect(closing).rejects.toBe(failure);
+      await start;
+      expect(tmux.sendPrompt).not.toHaveBeenCalled();
+      expect(registry.listActive(worktreePath)).toHaveLength(1);
+
+      await sandbox.close();
+      await sandbox.close();
+      expect(tmux.killSession).toHaveBeenCalledTimes(2);
+      expect(registry.listActive(worktreePath)).toHaveLength(0);
+    } finally {
+      creation.resolve({ name: 'interactive-close-test', window: 'main' });
+      await sandbox.close();
+      await rm(worktreePath, { recursive: true, force: true });
+    }
   });
 
   it('starts interactive work with the provider-built command and tmux prompt', async () => {
@@ -331,6 +374,20 @@ describe('LocalSandboxProvider', () => {
       tmux: tmux as never,
       paneIntervalMs: 1,
       pollIntervalMs: 1,
+    });
+
+    it('shares a concurrent kill and retries if tmux termination fails', async () => {
+      const failure = new Error('tmux termination failed');
+      const tmux = { killSession: vi.fn(async () => {}).mockRejectedValueOnce(failure) };
+      const execution = localExecution(process.cwd(), tmux);
+
+      await expect(Promise.allSettled([execution.kill(), execution.kill()])).resolves.toEqual([
+        { status: 'rejected', reason: failure }, { status: 'rejected', reason: failure },
+      ]);
+      expect(tmux.killSession).toHaveBeenCalledOnce();
+      await execution.kill();
+      await execution.kill();
+      expect(tmux.killSession).toHaveBeenCalledTimes(2);
     });
 
     it('fails as soon as the agent session is gone instead of waiting for the hard timeout', async () => {

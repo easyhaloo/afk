@@ -902,7 +902,7 @@ it.each(['sandbox', 'lifecycle', 'worktree', 'workspace'])('QA continues indepen
   expect(result).toMatchObject({ success: false, error: expect.objectContaining({ message: expect.stringContaining(failure.message) }) });
   expect(f.sandbox.close).toHaveBeenCalled();
   expect(cleanup).toHaveBeenCalled();
-  expect(f.providers.branches.cleanup).toHaveBeenCalled();
+  expect(f.providers.branches.cleanup).toHaveBeenCalledTimes(resource === 'sandbox' ? 0 : 1);
   const deferredWorkspace = resource === 'sandbox' || resource === 'worktree';
   expect(f.releaseWorkspace.mock.calls.length + f.finishWorkspace.mock.calls.length).toBe(deferredWorkspace ? 0 : 1);
   expect(f.runtimeManager.finish).toHaveBeenCalled();
@@ -910,6 +910,7 @@ it.each(['sandbox', 'lifecycle', 'worktree', 'workspace'])('QA continues indepen
     const retained = (result as { error: { cause: { recovery: { scope: RunResourceScope } } } }).error.cause.recovery.scope;
     expect(retained.ownershipClaims.length).toBeGreaterThan(0);
     await retained.finish({ status: 'failed' });
+    expect(f.providers.branches.cleanup).toHaveBeenCalledTimes(resource === 'sandbox' ? 1 : 2);
     expect(f.finishWorkspace).toHaveBeenCalledTimes(1);
     expect(retained.ownershipClaims).toHaveLength(0);
   }
@@ -948,8 +949,14 @@ it('QA retains conflict sandbox ownership when its local close fails', async () 
   expect(conflictSandbox.close.mock.calls.length).toBeGreaterThanOrEqual(2);
   expect(f.sandbox.close).toHaveBeenCalled();
   expect(f.cleanupSignals).toHaveLength(1);
-  expect(f.providers.branches.cleanup).toHaveBeenCalled();
+  expect(f.providers.branches.cleanup).not.toHaveBeenCalled();
   expect(f.runtimeManager.finish.mock.calls.at(-1)?.[1]).toMatchObject({ status: 'blocked', errorSummary: expect.stringContaining(failure.message) });
+  const retained = (result as { error: { cause: { recovery: { scope: RunResourceScope } } } }).error.cause.recovery.scope;
+  expect(retained.ownershipClaims.length).toBeGreaterThan(0);
+  conflictSandbox.close.mockResolvedValue(undefined);
+  await retained.finish({ status: 'failed' });
+  expect(f.providers.branches.cleanup).toHaveBeenCalledTimes(1);
+  expect(retained.ownershipClaims).toHaveLength(0);
 });
 
 it('Workflow cleanup retry retains its original workspace after another invocation resets the runner', async () => {

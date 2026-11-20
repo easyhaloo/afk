@@ -47,7 +47,9 @@ macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 Ope
 
 macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[复跑脚本](opencode-local-inference.py) · [安装包与结果回执](opencode-local-inference.receipt.json)
 
-macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环 Ollama 的 `qwen3.5:4b`，严格批处理通过 2/2。`--template` 显式禁用模型工具，`--read` 观察到恰好一次成功读取。两项均返回 `41`，原生会话、退出状态及累计用量与 AFK 记录一致。受管真实工单组合待验。[批处理回执](opencode-batch-176.receipt.json)
+macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环 Ollama 的 `qwen3.5:4b`，严格批处理通过 2/2。`--template` 显式禁用模型工具，`--read` 观察到恰好一次成功读取。两项均返回 `41`，原生会话、退出状态及累计用量与 AFK 记录一致。[批处理回执](opencode-batch-176.receipt.json)
+
+同宿主安装版 `0.2.180` 经真实 OpenCode、本地模型、真实双仓 Git 和回环 GitLab Tracker 运行 `issue-implementation`。实施与只读验证使用独立会话配置。首次独立 QA 的原生回复多出一个 JSON 右花括号，严格解析返回 `MISSING_RESULT` 并保留含未发布提交的 QA 工作树。批处理提示加入显式的 JSON 闭合检查后，使用同一驱动和模型复跑，实施、需求核验、独立 QA 均通过，三条会话 ID 与含缓存的用量匹配原生记录。CLI 退出 0，两个工作分支读回预期字节，两个 `main` 保持原提交，审计链有效，运行停在 `awaiting_human` 的 `merge:2`，工作树及 claim 均归零。目标 GitLab 账户和其他宿主待验。[双仓回执](opencode-managed-180.receipt.json)
 
 安装版 0.2.170 在 macOS arm64 上驱动原生 Copilot CLI 和本地 Ollama。首次在 90 秒内未观察到取消前的文本增量。第二次回答 `16 + 22 = 38`，原生会话、输入 13,326 和输出 49 token 均与 AFK 匹配。下一段生成出现文本增量后，AFK 中断执行，进程在 Sandbox 关闭前退出。账号托管推理及完整工单待验。[两版安装包回执](copilot-local-inference.receipt.json)
 

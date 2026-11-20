@@ -19,6 +19,8 @@ describe('batch execution prompt protocol', () => {
     expect(prompt).toContain('<goal_complete>');
     expect(prompt).toContain('"type":"goal_complete"');
     expect(prompt).toContain('</goal_complete>');
+    expect(prompt).toContain('End your final reply with exactly one completion line as plain text');
+    expect(prompt).toContain('Do not call a tool or write a file to emit it');
     expect(prompt).toContain('Do not switch branches');
     expect(prompt).toContain('pnpm vitest run');
   });
@@ -47,20 +49,18 @@ describe('batch execution prompt protocol', () => {
     )).toEqual({ type: 'goal_complete', kind: 'task', summary: 'done' });
   });
 
-  it('requires QA to report its PASS or FAIL outcome in the unified completion payload', () => {
-    const prompt = buildBatchPrompt('/goal verify issue #60', 'qa');
+  it.each([['qa', 'qa'], ['ac', 'ac_verification']] as const)('gives %s two valid verdict examples', (kind, expectedKind) => {
+    const prompt = buildBatchPrompt('/goal verify issue #60', kind);
+    const payloads = prompt.split('\n').filter(line => line.startsWith('<goal_complete>')).map(extractGoalComplete);
 
-    expect(prompt).toContain('<goal_complete>');
-    expect(prompt).toContain('"kind":"qa"');
-    expect(prompt).toContain('"result":"PASS|FAIL"');
-  });
-
-  it('requires original-branch AC verification to return structured pass or fail feedback', () => {
-    const prompt = buildBatchPrompt('/goal verify issue #60', 'ac');
-
-    expect(prompt).toContain('"kind":"ac_verification"');
-    expect(prompt).toContain('"result":"PASS|FAIL"');
-    expect(prompt).toContain('"failedCriteria"');
+    expect(payloads).toEqual([
+      expect.objectContaining({ type: 'goal_complete', kind: expectedKind, result: 'PASS' }),
+      expect.objectContaining({
+        type: 'goal_complete', kind: expectedKind, result: 'FAIL',
+        failedCriteria: [{ id: '...', expected: '...', actual: '...' }],
+      }),
+    ]);
+    expect(prompt).not.toContain('"result":"PASS|FAIL"');
   });
 
   it('accepts only diagnosable AC failures for implementation retry', () => {

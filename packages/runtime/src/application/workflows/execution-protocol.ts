@@ -122,17 +122,19 @@ export function assemblePrompt(segments: readonly PromptSegment[], separator = '
  */
 export function buildBatchPromptSegments(goalSegments: readonly PromptSegment[], kind: CompletionKind = 'task'): PromptSegment[] {
   const batchGoal = assemblePrompt(goalSegments).trim().replace(/^\/goal\s*/i, '').trim();
-  const payload = kind === 'qa'
-    ? '{"type":"goal_complete","kind":"qa","result":"PASS|FAIL","summary":"...","observations":[{"claim":"...","evidence":"..."}],"notes":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}],"requiredChecks":[{"command":"...","expected":"...","actual":"..."}]}'
-    : kind === 'ac'
-      ? '{"type":"goal_complete","kind":"ac_verification","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]}'
-      : '{"type":"goal_complete","kind":"task","summary":"..."}';
+  const verificationKind = kind === 'ac' ? 'ac_verification' : kind;
+  const qaFields = kind === 'qa'
+    ? ',"observations":[{"claim":"...","evidence":"..."}],"notes":"...","requiredChecks":[{"command":"...","expected":"...","actual":"..."}]'
+    : '';
+  const completion = kind === 'task'
+    ? '<goal_complete>{"type":"goal_complete","kind":"task","summary":"..."}</goal_complete>'
+    : `Choose the example matching your actual verdict and replace the placeholders with your findings.\nIf all criteria pass:\n<goal_complete>{"type":"goal_complete","kind":"${verificationKind}","result":"PASS","summary":"..."${qaFields}}</goal_complete>\nIf any criterion fails:\n<goal_complete>{"type":"goal_complete","kind":"${verificationKind}","result":"FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]${qaFields}}</goal_complete>`;
   const evidence = kind === 'qa' ? `\n${QA_ARTIFACT_INSTRUCTION}\n${QA_EVIDENCE_INSTRUCTION}\n${QA_E2E_INSTRUCTION}\n` : '';
   return [
     { label: 'goal', text: `AFK batch goal:\n${batchGoal}` },
     {
       label: 'completion protocol',
-      text: `AFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. ${PUSH_BOUNDARY_INSTRUCTION} When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`,
+      text: `AFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. ${PUSH_BOUNDARY_INSTRUCTION} When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish.${evidence}\nEnd your final reply with exactly one completion line as plain text. The completion marker is reply text. Do not call a tool or write a file to emit it. Before replying, check that the marker contains one valid JSON object and that its closing brace is followed immediately by </goal_complete>.\n${completion}`,
     },
   ];
 }

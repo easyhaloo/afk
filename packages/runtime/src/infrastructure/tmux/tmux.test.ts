@@ -228,6 +228,24 @@ describe('ControlModeConnection pipe failures', () => {
     try { execFileSync('tmux', ['-V'], { stdio: 'pipe' }); return true; } catch { return false; }
   })();
 
+  it.skipIf(!hasTmux)('delivers Ctrl-C to the foreground process through piped control mode', async () => {
+    const session = `afk-test-interrupt-${Date.now()}`;
+    const client = new TmuxClient();
+    try {
+      await client.createSession(session, tmpdir(), "printf 'ready-for-interrupt\\n'; exec sleep 30");
+      await vi.waitFor(async () => {
+        await expect(client.capturePane(session, 'main')).resolves.toContain('ready-for-interrupt');
+      });
+      await client.sendKeys(session, 'main', 'C-c');
+      await vi.waitFor(async () => {
+        await expect(client.hasSession(session)).resolves.toBe(false);
+      }, { timeout: 2000 });
+    } finally {
+      client.closeSession();
+      await client.killSession(session).catch(() => undefined);
+    }
+  });
+
   it.skipIf(!hasTmux)('does not write to a control pipe that closed with the session', async () => {
     const session = `afk-test-epipe-${Date.now()}`;
     const client = new TmuxClient();

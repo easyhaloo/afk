@@ -47,7 +47,7 @@ type SignalReaders = { readSignal: typeof readSignal; readSignalSync: typeof rea
 /**
  * Tmux client wrapper for session management.
  *
- * Uses Control Mode (`tmux -CC`) for interactive operations (sendKeys, waitForSignal)
+ * Uses Control Mode (`tmux -C`) for interactive operations (sendKeys, waitForSignal)
  * to receive real-time events, and plain `exec()` for one-shot commands.
  */
 export class TmuxClient {

@@ -66,3 +66,9 @@ python3 tests/qualification/w10/agent-codex-resume-loopback.py .afk/resume-proof
 2026-11-20 在集成提交 `e7c9115a`（CLI 0.2.166）复跑。Codex CLI 0.169.0 使用一个原生线程完成两轮，增量分别为 12、17，预算表累计 29。再次进入同一工单时返回 `budget_exhausted`，新增线程数为零。三个相关文件的测试共 104 项通过。
 
 同一提交的 macOS arm64 归档 SHA-256 为 `02bb3dd673d3aca95699b4bbfc4984180b76a355ed4ca62ff2a67a5babafe678`。仓库外安装验证了 23 个命令入口。安装版工作流模板 12 项通过，源码 Desktop 与安装版 CLI 竞争和恢复 1 项通过。`tests/qualification/cli-upgrade.sh` 验证了 0.2.165 升级到 0.2.166、错误校验和拒绝、回滚至原版本和插件配置字节一致。
+
+### 0.2.174 安装版真实账户恢复
+
+2026-11-20，使用校验通过的 macOS arm64 安装包（SHA-256 `6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475`）与 Codex CLI 0.169.0 复跑 `agent-codex.py` 的 `resume` 用例，通过 1/1。安装版运行器完成合成算术工单，预算表与原生线程均为 70,795 tokens。以该用量为上限重新进入同一工单时，工作流返回 `budget_exhausted`，新增线程为零，账本数值一致。
+
+同一次验收独立调用本地 app-server 执行对象恢复其快照，两轮保持同一原生线程。产品记录的两轮增量为 17,157 和 17,212 tokens，与原生记录的累计 34,369 tokens 一致。真实账户的同工单自动交接与续跑仍待验，已执行的工作流自动交接用例使用上一节的回环模型响应。

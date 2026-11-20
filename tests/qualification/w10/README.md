@@ -15,6 +15,8 @@
 
 ## 核对行清单与历史用例
 
+2026-11-20 在真实 tmux 3.6a 上复现安装版 CLI 0.2.174 返回 `aborted` 后前台子进程仍在运行。tmux `-CC` 无法在 Node 管道中启动，报 `tcgetattr failed`。切换至 `-C` 后，仓库外安装的 macOS arm64 CLI 0.2.175 通过同一 PTY 断言。前台 Python 进程捕获 Ctrl-C，产物登记的 pane ID 与 tmux 一致，关闭后自有会话消失，活动资源归零，同一隔离服务器中的未登记会话仍存在。测试载荷为有界 Python 进程。归档 SHA-256 为 `e8df48c0a75817522627fe425984985c41125897b4a0384769d38e1e85058868`。
+
 macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三种重启场景均通过。分别在交付为 `pending` 时以 `SIGTERM` 或 `SIGKILL` 停止监听器，以及在阻塞动作处于 `processing` 时以 `SIGKILL` 停止监听器。第二个监听器在首个监听器持有队列时被拒绝。停机 8 秒后，新监听器用原交付 ID 重试成功，再等待一个周期接收新事件。停机期间的两个周期跳过，每次队列共两条交付，成功动作各产生一次写入。执行中断发生在写入前，动作随 stdin 关闭而退出。使用 `python3 -B tests/qualification/w10/schedule-restart.py <安装版CLI绝对路径>` 复跑，另加 `--force` 或 `--in-flight` 测试两种强制终止场景。[安装版回执](schedule-restart.receipt.json)
 
 同一安装包以 `--after-effect` 复跑，在观察到外部文件已写入且交付仍为 `processing` 时强杀监听器。重启后原交付 ID 在第二次尝试变为 `delivered`，同一动作已写入两次。下一次正常触发再写入一次，最终两个交付 ID 对应三次写入。该结果核实队列的至少一次派发语义。外部动作若要求只生效一次，需要由接收方用稳定键实现幂等。[安装版回执](schedule-restart.receipt.json) · [队列协议](../../../docs/architecture/plugins.md)

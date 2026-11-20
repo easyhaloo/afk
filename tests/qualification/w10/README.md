@@ -21,6 +21,10 @@
 
 同一 0.2.175 安装版通过 33 项 E2E。`AFK_E2E_CLI_ENTRY` 指向安装后的 `afk`，以 `--no-file-parallelism` 运行 `tests/e2e/repository-managed-{local,remote,command}.test.ts`、`tests/e2e/repository-verification-{hook,batch,replay}.test.ts` 和 `tests/e2e/workflow-templates.test.ts`。测试使用实际 Git 工作树、回环 Tracker 和脚本 Agent。`node tests/qualification/w10/local-artifact-audit.mjs <安装版CLI绝对路径>` 另通过两项，核对本地测试报告和证据包的导出字节、摘要及审计事件。
 
+`0.2.175` 同一归档复跑 `schedule-restart.py` 的默认、`--force`、`--in-flight`、`--after-effect`、`--idempotent` 五个场景，全部退出 0。原交付均在第二次尝试成功，每次启动第二个监听器均被拒绝。`--after-effect` 的两个交付产生三次写入。`--idempotent` 使用原交付 ID 去重，两个交付各生效一次。接收端为隔离的本地文件系统。
+
+同一归档的 W11 本地召回检查通过 30/30。设置 `AFK_E2E_CLI_ENTRY` 指向安装版，`AFK_E2E_OPENCODE_ENTRY` 指向本机 OpenCode 2.2.7，并运行 `pnpm exec vitest run --no-file-parallelism tests/e2e/w11/installed-{fact,lesson,skill,tool}.test.ts`。事实、流程、修复经验和工具经安装版 CLI 或 Runtime 验证，技能经离线 OpenCode 提示词适配器验证。五类各覆盖六条冻结用例。四个测试文件合计 31 项通过，包含一项工具授权检查。其余 9 项跳过。真实模型和正式业务收益测试仍使用独立的验收记录。
+
 macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三种重启场景均通过。分别在交付为 `pending` 时以 `SIGTERM` 或 `SIGKILL` 停止监听器，以及在阻塞动作处于 `processing` 时以 `SIGKILL` 停止监听器。第二个监听器在首个监听器持有队列时被拒绝。停机 8 秒后，新监听器用原交付 ID 重试成功，再等待一个周期接收新事件。停机期间的两个周期跳过，每次队列共两条交付，成功动作各产生一次写入。执行中断发生在写入前，动作随 stdin 关闭而退出。使用 `python3 -B tests/qualification/w10/schedule-restart.py <安装版CLI绝对路径>` 复跑，另加 `--force` 或 `--in-flight` 测试两种强制终止场景。[安装版回执](schedule-restart.receipt.json)
 
 同一安装包以 `--after-effect` 复跑，在观察到外部文件已写入且交付仍为 `processing` 时强杀监听器。重启后原交付 ID 在第二次尝试变为 `delivered`，同一动作已写入两次。下一次正常触发再写入一次，最终两个交付 ID 对应三次写入。该结果核实队列的至少一次派发语义。外部动作若要求只生效一次，需要由接收方用稳定键实现幂等。[安装版回执](schedule-restart.receipt.json) · [队列协议](../../../docs/architecture/plugins.md)

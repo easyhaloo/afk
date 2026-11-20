@@ -64,6 +64,7 @@ export class RunResourceScope {
   private finalized = false;
   private primaryCleanupPending = false;
   private claimReleased = false;
+  private claimRelease?: Promise<void>;
   private readonly ownershipLeases: ClaimLease[] = [];
 
   constructor(options: RunResourceScopeOptions) {
@@ -155,11 +156,14 @@ export class RunResourceScope {
       onError,
     };
     const tick = async () => {
-      if (resource.stopped || resource.inFlight) return;
+      if (this.claimRelease || resource.stopped || resource.inFlight) return;
       resource.inFlight = true;
       try {
         await resource.heartbeat();
       } catch (error) {
+        if (this.claimRelease) {
+          try { await this.claimRelease; return; } catch {}
+        }
         if (resource.stopped) return;
         resource.stopped = true;
         clearInterval(resource.timer);
@@ -218,14 +222,19 @@ export class RunResourceScope {
     });
     if (firstError !== undefined) throw firstError;
     if (!this.claimReleased) {
-      await this.options.onCleanup?.();
-      this.claimReleased = true;
+      this.claimRelease = Promise.resolve().then(() => this.options.onCleanup?.());
+      try {
+        await this.claimRelease;
+        this.claimReleased = true;
+        this.stopHeartbeats();
+      } finally {
+        this.claimRelease = undefined;
+      }
     }
     for (const lease of [...this.ownershipLeases].reverse()) {
       await lease.release();
       this.ownershipLeases.splice(this.ownershipLeases.indexOf(lease), 1);
     }
-    this.stopHeartbeats();
   }
 
   private stopHeartbeats(): void {

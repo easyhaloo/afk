@@ -254,6 +254,50 @@ describe('RunResourceScope', () => {
     }
   });
 
+  it.each([true, false])('defers an overlapping heartbeat failure until claim release settles (released=%s)', async releaseSucceeds => {
+    vi.useFakeTimers();
+    let finishHeartbeat!: () => void;
+    const pendingHeartbeat = new Promise<void>(resolve => { finishHeartbeat = resolve; });
+    let finishRelease!: () => void;
+    const pendingRelease = new Promise<void>(resolve => { finishRelease = resolve; });
+    let released = false;
+    const heartbeatFailure = new Error('claim lease has been released');
+    const releaseFailure = new Error('claim release unconfirmed');
+    const heartbeat = vi.fn(async () => {
+      await pendingHeartbeat;
+      if (released) throw heartbeatFailure;
+    });
+    const release = vi.fn(async () => {}).mockImplementationOnce(async () => {
+      released = true;
+      await pendingRelease;
+      if (!releaseSucceeds) throw releaseFailure;
+    });
+    const onError = vi.fn();
+    const scope = new RunResourceScope({ repoRoot: '/repo', baseBranch: 'main', onCleanup: release });
+    scope.registerHeartbeat(heartbeat, 10, onError);
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      expect(heartbeat).toHaveBeenCalledOnce();
+      const finishing = scope.finish({ status: 'success' }).catch(error => error);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(release).toHaveBeenCalledOnce();
+      finishHeartbeat();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(heartbeat).toHaveBeenCalledOnce();
+      expect(onError).not.toHaveBeenCalled();
+
+      finishRelease();
+      expect(await finishing).toBe(releaseSucceeds ? undefined : releaseFailure);
+      if (releaseSucceeds) expect(onError).not.toHaveBeenCalled();
+      else expect(onError.mock.calls).toEqual([[heartbeatFailure]]);
+    } finally {
+      finishHeartbeat();
+      finishRelease();
+      await scope.finish({ status: 'failed' });
+      vi.useRealTimers();
+    }
+  });
+
   it('routes heartbeat failures to the error hook once and still finishes cleanup', async () => {
     vi.useFakeTimers();
     try {

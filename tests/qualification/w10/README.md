@@ -111,6 +111,8 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 
 ## [TS] 安装版静态扫描补验
 
+2026 年 11 月 20 日，macOS arm64 安装版 0.2.173 通过仓库发布门禁的全部 10 个用例。新增的两个 `static-scan` 用例在同一双仓工作流中调用真实 TypeScript 5.9.3。TS2322 用例确认编译器退出码为 2、审计回执完整、推送和 MR 请求均为零。修正用例确认两个远端收到正确的提交内容，工作项进入人工合并门。
+
 在独立配置中，用 0.2.142 发行版的 `plugin configure` 保存 TypeScript 5.9.3 的 `tsc --project tsconfig.json --pretty false` 命令。两次 `plugin invoke verification.provider static-scan verify` 使用相同输入，唯一字段为合成项目目录 `target`。每次调用前后 Git 工作树均干净。修正前后只改动 `parcel.ts` 的赋值。
 
 | 测试提交 | 产品回执 | CLI 退出码 |

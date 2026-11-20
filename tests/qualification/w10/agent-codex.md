@@ -101,4 +101,10 @@ python3 -B tests/qualification/w10/agent-codex.py "$RELEASE" "$out/interactive-c
 
 2026-11-20，在 QA 入口注入主沙箱和冲突处理沙箱的关闭失败。两种情况下运行均报告失败，保留工作树和租约。关闭恢复后重试，分支清理执行一次，租约释放。主沙箱场景还检查工作区在重试前保持占用，随后完成清理。取消、会话接入、QA 与仓库生命周期的四个套件共 209 项通过。
 
-macOS arm64 安装包在源码目录外启动并通过 23 个命令入口检查。安装包 SHA-256 为 `76c2cd5b483e25332d1a21b3adc9ed1dc9aa7baf9ebe2960d709f01cb5ecea6a`。打包时 CLI 与 Runtime 源码及测试补丁的 SHA-256 为 `9442c9f199190bfc98b3f04474c500d4692954bd6f18e13e52dcdb5a8b08d0c4`。真实账户交互取消沿用上节的 0.2.177 回执。已重新归属的进程仍待验收。
+macOS arm64 安装包在源码目录外启动并通过 23 个命令入口检查。安装包 SHA-256 为 `76c2cd5b483e25332d1a21b3adc9ed1dc9aa7baf9ebe2960d709f01cb5ecea6a`。打包时 CLI 与 Runtime 源码及测试补丁的 SHA-256 为 `9442c9f199190bfc98b3f04474c500d4692954bd6f18e13e52dcdb5a8b08d0c4`。该安装包通过真实 Codex 账户交互取消复验。工单进入 `blocked`，13 秒内未出现迟到写入，活跃资源归零，无关 tmux 会话仍在。[0.2.178 回执](agent-codex-interactive-cancel-178.receipt.json)
+
+### 0.2.179 已脱离 pane 的进程清理
+
+2026-11-20，原生 tmux 测试在 0.2.178 复现父进程已退出、pane 已退出时的迟到写入。0.2.179 为 LocalSandbox 分配独立进程标记，正常清理与过期租约恢复均使用该标记。七个套件共 166 项通过，覆盖重新归属进程、共享窗口、同名替代会话，以及进程检查失败时保留资源记录以便重试。
+
+macOS arm64 安装包在源码目录外通过 23 个命令入口检查和真实 Codex 账户交互取消复验。合成工单仅记录一个 `cancelled/user_cancelled` 终态，进入 `blocked`，13 秒内未出现迟到写入，活跃资源归零，无关 tmux 会话仍在。复验使用上文同一命令，`RELEASE` 指向校验后解包的 `afk` 目录。进程重新归属与替代会话由上述原生 tmux 测试覆盖。[0.2.179 回执](agent-codex-interactive-cancel-179.receipt.json)

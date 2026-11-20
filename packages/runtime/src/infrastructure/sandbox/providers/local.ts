@@ -83,6 +83,7 @@ export class LocalSandbox implements Sandbox {
   readonly workspacePath: string;
   private readonly tmux: TmuxClient;
   private readonly sessionName: string;
+  private readonly processOwner = randomUUID();
   private readonly branch?: string;
   private readonly workspaceRoot: string;
   private readonly runtimeRunId?: string;
@@ -149,6 +150,7 @@ export class LocalSandbox implements Sandbox {
     const execution = new LocalAgentExecution({
       worktreePath: this.worktreePath,
       sessionName: this.sessionName,
+      processOwner: this.processOwner,
       command: options.command,
       generation: options.generation,
       prompt: options.prompt,
@@ -185,10 +187,10 @@ export class LocalSandbox implements Sandbox {
     const repositoryClaims = repositoryClaimIds();
     if (repositoryClaims.length) getAfkResourceRegistry().register({
       workspacePath: this.workspaceRoot, runId: this.runtimeRunId, worktreePath: this.worktreePath,
-      kind: 'tmux', origin: 'local-sandbox', name: this.sessionName, metadata: { repositoryClaims },
+      kind: 'tmux', origin: 'local-sandbox', name: this.sessionName, metadata: { repositoryClaims, processOwner: this.processOwner },
     });
     this.sessionCreationAttempted = true;
-    const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
+    const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '), this.processOwner);
     if (repositoryClaims.length) await this.tmux.setSessionOwnership(this.sessionName, repositoryClaims.join(','));
     const paneId = created.paneId
       ?? await this.tmux.firstPaneId?.(created.name, created.window).catch(() => undefined);
@@ -202,6 +204,7 @@ export class LocalSandbox implements Sandbox {
       detail: 'interactive tmux session',
       metadata: {
         repositoryClaims,
+        processOwner: this.processOwner,
         branch: this.branch,
         generation: options.generation,
         ...(paneId
@@ -222,7 +225,7 @@ export class LocalSandbox implements Sandbox {
   private async closeInteractiveSession(): Promise<void> {
     await this.sessionCreation?.catch(() => undefined);
     if (!this.sessionCreationAttempted) return;
-    await this.tmux.killSession(this.sessionName);
+    await this.tmux.killSession(this.sessionName, this.processOwner);
     getAfkResourceRegistry().markClosed({
       workspacePath: this.workspaceRoot,
       worktreePath: this.worktreePath,
@@ -251,6 +254,7 @@ export class LocalAgentExecution implements AgentExecution {
   readonly metadata: AgentExecutionMetadata;
   private readonly worktreePath: string;
   private readonly sessionName: string;
+  private readonly processOwner?: string;
   private readonly tmux: TmuxClient;
   private readonly generation: number;
   private readonly prompt: string;
@@ -269,6 +273,7 @@ export class LocalAgentExecution implements AgentExecution {
   constructor(opts: {
     worktreePath: string;
     sessionName: string;
+    processOwner?: string;
     command: AgentCommand;
     generation: number;
     prompt: string;
@@ -285,6 +290,7 @@ export class LocalAgentExecution implements AgentExecution {
     this.id = randomUUID();
     this.worktreePath = opts.worktreePath;
     this.sessionName = opts.sessionName;
+    this.processOwner = opts.processOwner;
     this.tmux = opts.tmux;
     this.generation = opts.generation;
     this.prompt = opts.prompt;
@@ -514,7 +520,7 @@ export class LocalAgentExecution implements AgentExecution {
   async kill(): Promise<void> {
     if (this.stopping) return this.stopping;
     if (this.done) return;
-    this.stopping = this.tmux.killSession(this.sessionName).then(() => {
+    this.stopping = this.tmux.killSession(this.sessionName, this.processOwner).then(() => {
       this.done = true;
     }).finally(() => {
       this.stopping = undefined;

@@ -94,7 +94,7 @@ describe('LocalSandboxProvider', () => {
     });
 
     expect(tmux.createSession).toHaveBeenCalledWith(
-      'interactive-test', process.cwd(), "'agent' '--interactive'",
+      'interactive-test', process.cwd(), "'agent' '--interactive'", expect.any(String),
     );
     expect(tmux.sendPrompt).toHaveBeenCalledWith(
       process.cwd(), 'interactive-test', 'main', 'goal', 'goal_complete', 'claude-code',

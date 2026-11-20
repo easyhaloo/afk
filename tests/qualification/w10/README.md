@@ -33,9 +33,13 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 以 `--idempotent` 复跑时，通过 CLI 安装本地动作插件。插件通过 SDK 的 `currentTriggerDeliveryId()` 取交付 ID，并以原子目录创建作为本地副作用。目录可读、交付仍为 `processing` 时强杀监听器。重启后原交付在第二次尝试变为 `delivered`，目录仍只有一个。新触发正常创建第二个目录，两目录名分别匹配两个交付 ID。该场景验证本地接收端去重跨进程重启生效。[安装版回执](schedule-restart.receipt.json)
 
+`0.2.176` 的 macOS arm64 安装包再次通过五个定时恢复场景。新增 `--http-receiver` 场景让动作通过 `Idempotency-Key` 请求头把交付 ID 发送到独立运行的回环 HTTP 接收端。接收端提交第一个副作用后强制停止监听器，当时队列状态为 `processing`。监听器重启后，接收端共收到原 ID 两次、新 ID 一次，两个 ID 各产生一次副作用。目标部署和跨主机链路待验。[HTTP 接收回执](schedule-http-receiver.receipt.json)
+
 同一安装包的本地审计重放通过 3 项。两项双仓门禁用例通过 `observe verify` 校验事件链，用 `observe replay --json` 重放，并和原运行视图核对工单、序列及状态。拒绝用例停在 `failed`，两个远端保持原引用。放行用例读回两个远端公布的提交，重放停在 `awaiting_human` 的 `merge:2`，与末事件一致。第三项独立检查核对失败事件绑定的验证证据。场景使用真实 Git 仓库、回环 Tracker 和脚本 Agent。将 `AFK_E2E_CLI_ENTRY` 指向仓库外安装的 `dist/index.js` 后，可运行 `pnpm exec vitest run tests/e2e/repository-verification-{batch,replay}.test.ts` 复验。同一安装包也复验了开发等待人工合并、冲突修复成功及成功复盘预览三个状态。参见 [W07 三套模板](../w07/README.md)。
 
 macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[复跑脚本](opencode-local-inference.py) · [安装包与结果回执](opencode-local-inference.receipt.json)
+
+macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环 Ollama 的 `qwen3.5:4b`，严格批处理通过 2/2。`--template` 显式禁用模型工具，`--read` 观察到恰好一次成功读取。两项均返回 `41`，原生会话、退出状态及累计用量与 AFK 记录一致。受管真实工单组合待验。[批处理回执](opencode-batch-176.receipt.json)
 
 安装版 0.2.170 在 macOS arm64 上驱动原生 Copilot CLI 和本地 Ollama。首次在 90 秒内未观察到取消前的文本增量。第二次回答 `16 + 22 = 38`，原生会话、输入 13,326 和输出 49 token 均与 AFK 匹配。下一段生成出现文本增量后，AFK 中断执行，进程在 Sandbox 关闭前退出。账号托管推理及完整工单待验。[两版安装包回执](copilot-local-inference.receipt.json)
 

@@ -92,9 +92,12 @@ def probe(root, args, stack):
     if args.cancel:
         endpoint, delta, finished = observe_stream(stack, args.port, prompt, args.model)
     model_id = 'qualification/' + args.model
+    provider_options = {'baseURL': f'http://127.0.0.1:{endpoint}/v1'}
+    if not args.read and not args.cancel:
+        provider_options['body'] = {'tools': [], 'tool_choice': 'none'}
     (config / 'opencode.json').write_text(json.dumps(dict(enabled_providers=['qualification'],
         provider={'qualification': dict(npm='@ai-sdk/openai-compatible', name='Qualification',
-            options={'baseURL': f'http://127.0.0.1:{endpoint}/v1'}, models={args.model: dict(name='Local model',
+            options=provider_options, models={args.model: dict(name='Local model',
             limit={'context': 8192, 'output': 1024})})}, model=model_id, small_model=model_id,
         default_agent='qualification', agent={'qualification': dict(mode='primary', prompt=instruction,
         permission=permission, **({'steps': 4} if args.read else {})), 'title': {'disable': True}}, permission=permission, share='disabled', autoupdate=False)))

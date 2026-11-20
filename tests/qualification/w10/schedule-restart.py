@@ -8,8 +8,11 @@ import signal
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from threading import Thread
 
 
 def wait_for(probe, timeout=15):
@@ -22,7 +25,35 @@ def wait_for(probe, timeout=15):
     raise AssertionError('Timed out waiting for scheduled delivery or listener')
 
 
-def qualify(afk, root, force, in_flight, after_effect, idempotent):
+@contextmanager
+def http_receiver(effects):
+    attempts = Counter()
+
+    class Receiver(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            delivery_id = self.headers.get('Idempotency-Key', '')
+            if self.path != '/deliveries' or not re.fullmatch(r'[a-f0-9]{64}', delivery_id):
+                self.send_error(400)
+                return
+            attempts[delivery_id] += 1
+            (effects / delivery_id).mkdir(exist_ok=True)
+            self.send_response(204)
+            self.end_headers()
+
+    with HTTPServer(('127.0.0.1', 0), Receiver) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_port}/deliveries', attempts
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=None):
     target = root / 'target'
     effects = root / 'effects.txt'
     allow = root / 'allow-effect'
@@ -66,6 +97,15 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent):
                     'trusted': True, 'provides': ['workflow.action'], 'entry': 'index.js'}
         (extension / 'package.json').write_text(json.dumps({'name': 'schedule-receiver', 'version': '1.0.0', 'type': 'module'}))
         (extension / 'plugin.json').write_text(json.dumps(manifest))
+        record_effect = f'''
+                    const response = await fetch({json.dumps(receiver_url)}, {{
+                        method: 'POST', headers: {{ 'Idempotency-Key': id }}, signal: AbortSignal.timeout(5000)
+                    }});
+                    if (response.status !== 204) throw new Error(`Receiver returned ${{response.status}}`);
+        ''' if receiver_url else f'''
+                    try {{ mkdirSync(join({json.dumps(str(effects))}, id)); }}
+                    catch (error) {{ if (error.code !== 'EEXIST') throw error; }}
+        '''
         (extension / 'index.js').write_text(f'''
             import {{ existsSync, mkdirSync }} from 'node:fs';
             import {{ join }} from 'node:path';
@@ -74,8 +114,7 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent):
                 context.registerSystemAction({json.dumps(action)}, async () => {{
                     const id = currentTriggerDeliveryId();
                     if (!/^[a-f0-9]{{64}}$/.test(id ?? '')) throw new Error('Missing durable delivery ID');
-                    try {{ mkdirSync(join({json.dumps(str(effects))}, id)); }}
-                    catch (error) {{ if (error.code !== 'EEXIST') throw error; }}
+                    {record_effect}
                     if (!existsSync({json.dumps(str(allow))})) await new Promise(() => {{}});
                 }});
             }} }};
@@ -181,8 +220,17 @@ if __name__ == '__main__':
     mode.add_argument('--in-flight', action='store_true')
     mode.add_argument('--after-effect', action='store_true')
     mode.add_argument('--idempotent', action='store_true')
+    mode.add_argument('--http-receiver', action='store_true')
     args = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='afk-schedule-restart.') as directory:
-        print(json.dumps(qualify(args.afk.resolve(strict=True), Path(directory).resolve(), args.force, args.in_flight,
-                                 args.after_effect, args.idempotent), indent=2))
+        afk = args.afk.resolve(strict=True)
+        root = Path(directory).resolve()
+        if args.http_receiver:
+            with http_receiver(root / 'effects.txt') as (url, attempts):
+                receipt = qualify(afk, root, False, False, False, True, url)
+            assert attempts == {receipt['recovered']['deliveryId']: 2, receipt['firstNewTick']['deliveryId']: 1}, attempts
+            receipt.update(receiverTransport='http-loopback', receiverRequests=dict(attempts))
+        else:
+            receipt = qualify(afk, root, args.force, args.in_flight, args.after_effect, args.idempotent)
+        print(json.dumps(receipt, indent=2))

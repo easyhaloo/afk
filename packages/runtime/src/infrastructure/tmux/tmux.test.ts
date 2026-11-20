@@ -1,8 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { readSignalSync } from '../io/signal.js';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 import { ControlModeConnection } from './control-mode.js';
@@ -240,6 +241,42 @@ describe('ControlModeConnection pipe failures', () => {
   const hasTmux = (() => {
     try { execFileSync('tmux', ['-V'], { stdio: 'pipe' }); return true; } catch { return false; }
   })();
+
+  it.skipIf(!hasTmux || process.platform === 'win32')('stops a detached pane child and preserves a linked window', async () => {
+    const root = await mkdtemp('/tmp/afk-tmux-tree-');
+    const client = new TmuxClient();
+    const runTmux = (...args: string[]) => execFileSync('tmux', ['-f', '/dev/null', ...args], { encoding: 'utf8' }).trim();
+    vi.stubEnv('TMUX_TMPDIR', root);
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('AFK_TEST_NODE', process.execPath);
+    try {
+      runTmux('new-session', '-d', '-s', 'unmanaged', 'sleep 30');
+      const unmanagedPid = Number(runTmux('display-message', '-p', '-t', 'unmanaged', '#{pane_pid}'));
+      await writeFile(join(root, 'detached.cjs'), `
+        const { spawn } = require('node:child_process');
+        spawn(process.execPath, ['-e', ${JSON.stringify(`
+          const { writeFileSync } = require('node:fs');
+          writeFileSync('started', String(process.pid));
+          setTimeout(() => writeFileSync('late', ''), 1800);
+        `)}], { detached: true, stdio: 'ignore' });
+      `);
+      await client.createSession('owned', root, 'exec "$AFK_TEST_NODE" detached.cjs');
+      runTmux('rename-session', '-t', 'unmanaged', 'owned-unmanaged');
+      runTmux('link-window', '-s', 'owned-unmanaged:0', '-t', 'owned:1');
+      const childPid = await vi.waitFor(async () => Number(await readFile(join(root, 'started'), 'utf8')));
+      expect(() => process.kill(childPid, 0)).not.toThrow();
+      await client.killSession('owned');
+      await delay(1900);
+      await expect(access(join(root, 'late'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await client.killSession('owned');
+      expect(runTmux('list-sessions', '-F', '#{session_name}')).toBe('owned-unmanaged');
+      expect(() => process.kill(unmanagedPid, 0)).not.toThrow();
+    } finally {
+      try { runTmux('kill-server'); } catch {}
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
   it.skipIf(!hasTmux)('delivers Ctrl-C to the foreground process through piped control mode', async () => {
     const session = `afk-test-interrupt-${Date.now()}`;

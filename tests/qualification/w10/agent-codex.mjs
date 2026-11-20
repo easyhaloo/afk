@@ -9,6 +9,8 @@ const [release, root, output, scenario, codexVersion] = process.argv.slice(2);
 const loopback = scenario === 'resume-loopback';
 const liveHandoff = scenario === 'workflow-handoff';
 const automaticHandoff = loopback || liveHandoff;
+const interactiveCancel = scenario === 'interactive-cancel';
+const cancel = interactiveCancel || scenario === 'cancel';
 const load = name => import(join(release, loopback ? 'packages/runtime/dist' : 'node_modules/@afk/runtime/dist', name + '.js'));
 const { WorkflowRunner } = await load('application/workflow-engine');
 const { createDefaultPluginRuntime } = await load('plugin-sdk/index');
@@ -21,7 +23,7 @@ const branchName = 'feat/qual', workItemId = 'github:fixture/parcel#1', runId = 
 const value = Math.floor(Math.random() * 9000) + 1000;
 writeFileSync('input.json', JSON.stringify({ quantities: [value, 13, 27] }));
 const completion = '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>';
-const goal = scenario === 'cancel' ? 'Run exactly one shell command: touch started && sleep 12 && touch late. Wait for it to finish.' : 'Read input.json. Write only the sum of its quantities as a decimal integer to total.txt.';
+const goal = cancel ? 'Run exactly one shell command: touch started && sleep 12 && touch late. Wait for it to finish.' : 'Read input.json. Write only the sum of its quantities as a decimal integer to total.txt.';
 const prompt = liveHandoff
   ? `In the current directory, check whether handoff.txt exists. If it is absent, write ${value} to handoff.txt, reply only with ready for resume, and end this turn without reporting completion. If it already exists and contains ${value}, leave it unchanged and reply only with ${completion}. Use only local shell or file tools.`
   : `/goal ${goal} Finish with ${completion}.`;
@@ -37,15 +39,31 @@ const providers = {
 };
 const transport = automaticHandoff || ['qa','app-server','resume'].includes(scenario) ? 'app-server' : 'exec';
 const receipt = { afk:JSON.parse(readFileSync(join(release,loopback ? 'apps/cli/package.json' : 'release.json'))).version, codexVersion, scenario, transport, runId, workItemId };
+const progress = phase => {
+  receipt.phase = phase;
+  if (interactiveCancel) writeFileSync(join(root, 'progress'), phase, { mode: 0o600 });
+};
 const controller = new AbortController();
-const poll = setInterval(()=>{if(scenario==='cancel' && existsSync('started') && !controller.signal.aborted) controller.abort(new Error('synthetic operator cancellation'));},50);
+let poll;
 let plugins;
 try {
-  receipt.phase = 'readiness';
+  progress('setup');
+  const resources = interactiveCancel ? (await load('infrastructure/runtime/resource-registry')).getAfkResourceRegistry() : undefined;
+  if (interactiveCancel) {
+    assert.equal(process.env.TMUX_TMPDIR, join(root, 'tmp'));
+    receipt.tmuxVersion = execFileSync('tmux', ['-V'], { encoding: 'utf8' }).trim();
+  }
+  if (cancel) poll = setInterval(() => {
+    if (!existsSync('started') || controller.signal.aborted) return;
+    receipt.ownedTmuxAtCancel = resources?.listActive(workspace).filter(resource => resource.kind === 'tmux').length;
+    progress('cancel-requested');
+    controller.abort(new Error('synthetic operator cancellation'));
+  }, 50);
+  progress('readiness');
   const runtime = await prepareAgentRuntime(resolveCodexRuntime({cli:{transport},config:DEFAULT_CODEX_CONFIG}));
   const nativeFiles = () => readdirSync(join(process.env.CODEX_HOME,'sessions'), { recursive: true }).filter(name => name.endsWith('.jsonl'));
   const readinessFiles = automaticHandoff && existsSync(join(process.env.CODEX_HOME, 'sessions')) ? nativeFiles() : [];
-  receipt.phase = 'workflow';
+  progress('workflow');
   plugins = await createDefaultPluginRuntime({homeDir:process.env.HOME,workspaceRoot:workspace});
   const events = [];
   const { createPluginRunObserver } = await load('application/plugins/observability');
@@ -62,10 +80,10 @@ try {
     ...(loopback && { contextHighTokens: 10 }),
     ...(liveHandoff && { contextHighTokens: 1, maxTotalTokens: 250_000 }),
     targetBranch:branchName,baseBranch:'main',baseBranchExplicit:true,repoRoot:workspace,workspaceRoot:workspace,template,
-    agentProvider:'codex',sandboxProvider:'local',executionMode:'batch',completionTimeoutMs:60000,hardTimeoutMs:90000,maxRetries:0,maxHandoffs:1,signal:controller.signal}).catch(error=>{
+    agentProvider:'codex',sandboxProvider:'local',executionMode:interactiveCancel ? 'interactive' : 'batch',completionTimeoutMs:60000,hardTimeoutMs:90000,maxRetries:0,maxHandoffs:1,signal:controller.signal}).catch(error=>{
       const message=String(error.message);
       receipt.rejection={name:error.name, frames:String(error.stack).split('\n').filter(line=>/^\s+at /.test(line)).slice(0,4).map(line=>line.match(/\/([\w.-]+\.js):(\d+):\d+\)?$/)?.slice(1)??[]), markers:['synthetic operator cancellation','QUAL_MODEL_AUTH','environment variable','cancel','abort','blocked','failed','is not a function','interrupted','lease','Missing','credential'].filter(term=>message.toLowerCase().includes(term.toLowerCase()))};
-      if(scenario!=='failure' && scenario!=='cancel') throw error;
+      if(scenario!=='failure' && !cancel) throw error;
       return {success:false};
     });
   const { JsonlEventStore } = await load('infrastructure/observability/jsonl-event-store');
@@ -85,12 +103,12 @@ try {
   receipt.outputExists=existsSync('total.txt');
   receipt.eventKinds=[...new Set(events.map(event=>event.kind))];
   receipt.classifications=events.filter(event=>event.kind==='failure.classified').map(event=>({category:event.failureClass,code:event.code,causeCode:event.cause?.code}));
-  receipt.phase='assertions';
+  progress('assertions');
   const codes = receipt.classifications.map(failure => failure.code);
   const terminal = events.find(event => event.kind === 'run.finished');
   receipt.terminalOutcome = terminal?.outcome;
   receipt.reasonCode = terminal?.reasonCode;
-  if (scenario==='cancel' || scenario==='failure') {
+  if (cancel || scenario==='failure') {
     receipt.terminalCount = events.filter(event=>event.kind==='run.finished').length;
     receipt.qaStarted = events.some(event=>event.kind==='qa.started');
     assert.equal(receipt.terminalCount,1);
@@ -103,17 +121,26 @@ try {
     assert.ok(terminal);assert.equal(item.state,'blocked');
     assert.match(receipt.sessionId,/^[0-9a-f-]{36}$/);
     assert.equal(result.success,false);assert.equal(receipt.outputExists,false);assert.equal(receipt.queueStep,false);
-  } else if(scenario==='cancel'){
+  } else if(cancel){
     assert.ok(receipt.rejection?.markers.includes('synthetic operator cancellation'));
     assert.ok(terminal);assert.equal(item.state,'blocked');
     receipt.cancelAfterStart=controller.signal.aborted && existsSync('started');assert.equal(receipt.cancelAfterStart,true);assert.equal(result.success,false);assert.equal(receipt.queueStep,false);
-    await delay(13000);receipt.delayedWrite=existsSync('late');assert.equal(receipt.delayedWrite,false);
+    await delay(13000);receipt.delayedWrite=existsSync('late');
     receipt.observationMs = 13000;
     receipt.reasonMatchesCaller = terminal.reason===controller.signal.reason.message;
     assert.ok(receipt.reasonMatchesCaller);
     assert.equal(receipt.terminalOutcome,'cancelled');
     assert.equal(receipt.reasonCode,'user_cancelled');
     assert.deepEqual(codes,[]);
+    if (resources) {
+      const remaining = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf8' }).trim().split('\n');
+      receipt.onlyUnmanagedTmuxRemains = remaining.length === 1 && remaining[0] === 'w10-unmanaged';
+      receipt.activeAfter = resources.listAllActive().length;
+      assert.equal(receipt.ownedTmuxAtCancel, 1);
+      assert.equal(receipt.onlyUnmanagedTmuxRemains, true);
+      assert.equal(receipt.activeAfter, 0);
+    }
+    assert.equal(receipt.delayedWrite,false);
   } else if (automaticHandoff) {
     const sessions = events.filter(event => event.kind === 'agent.session_recorded');
     const { BudgetStore } = await load('application/workflows/budget-store');
@@ -176,7 +203,10 @@ try {
   receipt.diagnostic=['AUTH_INVALID','CLI_NOT_FOUND','PROVIDER_INVALID','ENDPOINT_UNREACHABLE','auth','doctor','model','timeout','profile'].filter(term=>message.toLowerCase().includes(term.toLowerCase()));
   process.exitCode=1;
 } finally {
-  clearInterval(poll);await plugins?.dispose();writeFileSync(output,JSON.stringify(receipt,null,2),{flag:'wx',mode:0o600});
+  clearInterval(poll);
+  if (interactiveCancel) writeFileSync(join(root, 'progress'), 'plugin-disposal', { mode: 0o600 });
+  await plugins?.dispose();
+  writeFileSync(output, JSON.stringify(receipt, null, 2), { flag: 'wx', mode: 0o600 });
 }
 
 async function qualifyQA(runtime) {

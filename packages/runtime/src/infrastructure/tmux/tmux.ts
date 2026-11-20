@@ -1,5 +1,5 @@
 import { workspaceDataDirectory } from '../workspace.js';
-import { spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { Signal } from '../../domain/schemas.js';
 import { readSignal, readSignalSync } from '../io/signal.js';
 import { TIMEOUTS } from '../../shared/constants.js';
@@ -43,6 +43,39 @@ export interface TmuxCaptureOptions {
 }
 
 type SignalReaders = { readSignal: typeof readSignal; readSignalSync: typeof readSignalSync };
+
+function isMissingTmuxSession(error: unknown): boolean {
+  const message = String(error).trimEnd();
+  return message === 'Error: tmux command failed: no current target'
+    || /can't find session|no server running|error connecting to .*No such file or directory/i.test(message);
+}
+
+function stopPaneProcesses(panes: ReadonlyMap<number, number>): void {
+  if (!panes.size || process.getuid === undefined) return;
+  const output = execFileSync('ps', ['-U', String(process.getuid()), '-o', 'pid=,ppid=,stat='],
+    { encoding: 'utf8', timeout: 1000, maxBuffer: 4 * 1024 * 1024 });
+  const children = new Map<number, number[]>();
+  const roots: number[] = [];
+  for (const line of output.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)/);
+    if (!match || match[3]!.startsWith('Z')) continue;
+    const pid = Number(match[1]);
+    const parentPid = Number(match[2]);
+    const siblings = children.get(parentPid) ?? [];
+    siblings.push(pid);
+    children.set(parentPid, siblings);
+    if (panes.get(pid) === parentPid) roots.push(pid);
+  }
+  const owned = new Set(roots);
+  for (const pid of owned) {
+    for (const child of children.get(pid) ?? []) owned.add(child);
+  }
+  for (const pid of owned) {
+    try { process.kill(pid, 'SIGKILL'); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }
+}
 
 /**
  * Tmux client wrapper for session management.
@@ -129,7 +162,7 @@ export class TmuxClient {
    */
   async hasSession(name: string): Promise<boolean> {
     try {
-      await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
+      await this.exec(['has-session', '-t', `=${normalizeTmuxSessionName(name)}`]);
       return true;
     } catch {
       return false;
@@ -138,12 +171,10 @@ export class TmuxClient {
 
   async sessionStatus(name: string): Promise<'present' | 'missing' | 'unknown'> {
     try {
-      await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
+      await this.exec(['has-session', '-t', `=${normalizeTmuxSessionName(name)}`]);
       return 'present';
     } catch (error) {
-      const message = String(error).trimEnd();
-      if (message === 'Error: tmux command failed: no current target') return 'missing';
-      return /can't find session|no server running|error connecting to .*No such file or directory/i.test(message) ? 'missing' : 'unknown';
+      return isMissingTmuxSession(error) ? 'missing' : 'unknown';
     }
   }
 
@@ -173,10 +204,26 @@ export class TmuxClient {
   }
 
   /**
-   * Kill tmux session
+   * Stop the processes in unshared windows before removing the session.
    */
   async killSession(name: string): Promise<void> {
-    await this.exec(['kill-session', '-t', normalizeTmuxSessionName(name)]);
+    const session = normalizeTmuxSessionName(name);
+    try {
+      const panes = await this.exec(['list-panes', '-a', '-F', '#{session_id} #{pid} #{pane_pid} #{window_linked} #{pane_dead} #{session_name}']);
+      const processes = new Map<number, number>();
+      let sessionId: string | undefined;
+      for (const row of panes.split('\n')) {
+        const match = row.match(/^(\$\d+) (\d+) (\d+) ([01]) ([01]) (.*)$/);
+        if (!match || match[6] !== session) continue;
+        sessionId = match[1];
+        if (match[4] === '0' && match[5] === '0') processes.set(Number(match[3]), Number(match[2]));
+      }
+      if (!sessionId) return;
+      stopPaneProcesses(processes);
+      await this.exec(['kill-session', '-t', sessionId]);
+    } catch (error) {
+      if (!isMissingTmuxSession(error)) throw error;
+    }
   }
 
   /**

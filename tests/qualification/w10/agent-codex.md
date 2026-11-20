@@ -84,3 +84,15 @@ python3 -B tests/qualification/w10/agent-codex.py "$RELEASE" "$out/workflow-hand
 ```
 
 [安装版验收回执](agent-codex-workflow-handoff.receipt.json)
+
+### 0.2.177 安装版真实账户交互取消
+
+2026-11-20，macOS arm64 安装版通过真实 Codex CLI 0.169.0 执行合成工单。用例确认任务已经写入启动标记后才取消。持久审计链有效，恰好有一个 `cancelled/user_cancelled` 终态，原因与调用方一致。工单停在 `blocked`，未进入 QA。取消后的 13 秒内没有迟到写入。运行创建的 tmux 会话已消失，旁路会话仍在，活跃资源记录归零。
+
+0.2.176 对照在取消后仍写出迟到标记。0.2.177 首轮在 240 秒的启动器时限内未完成，带阶段标记的复跑退出 0。回归另检查了脱离 pane 进程组但仍在其进程树中的子进程，以及共享窗口和同名前缀会话的保留。已重新归属的进程与清理异常的可见性需单独验收。
+
+```sh
+python3 -B tests/qualification/w10/agent-codex.py "$RELEASE" "$out/interactive-cancel.json" interactive-cancel
+```
+
+[交互取消验收回执](agent-codex-interactive-cancel.receipt.json)

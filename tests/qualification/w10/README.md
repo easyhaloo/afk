@@ -15,7 +15,7 @@
 
 ## 核对行清单与历史用例
 
-macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。目标目录缺失使首次交付停在 `pending`，同时启动的第二个监听器因队列已有所有者退出。分别以 `SIGTERM` 和 `SIGKILL` 停止首个监听器，停机 8 秒后启动新监听器。两次都用原交付 ID 重试成功，再等待一个周期接收新的定时事件。停机期间的两个周期跳过，每次队列共两条交付，命令成功执行两次。使用 `python3 -B tests/qualification/w10/schedule-restart.py <安装版CLI绝对路径>` 复跑，追加 `--force` 测试 `SIGKILL`。[安装版回执](schedule-restart.receipt.json)
+macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三种重启场景均通过。分别在交付为 `pending` 时以 `SIGTERM` 或 `SIGKILL` 停止监听器，以及在阻塞动作处于 `processing` 时以 `SIGKILL` 停止监听器。第二个监听器在首个监听器持有队列时被拒绝。停机 8 秒后，新监听器用原交付 ID 重试成功，再等待一个周期接收新事件。停机期间的两个周期跳过，每次队列共两条交付，成功动作各产生一次写入。执行中断发生在写入前，动作随 stdin 关闭而退出。使用 `python3 -B tests/qualification/w10/schedule-restart.py <安装版CLI绝对路径>` 复跑，另加 `--force` 或 `--in-flight` 测试两种强制终止场景。[安装版回执](schedule-restart.receipt.json)
 
 macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[复跑脚本](opencode-local-inference.py) · [安装包与结果回执](opencode-local-inference.receipt.json)
 

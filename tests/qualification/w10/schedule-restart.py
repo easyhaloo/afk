@@ -22,9 +22,11 @@ def wait_for(probe, timeout=15):
     raise AssertionError('Timed out waiting for scheduled delivery or listener')
 
 
-def qualify(afk, root, force):
+def qualify(afk, root, force, in_flight):
     target = root / 'target'
     effects = root / 'effects.txt'
+    allow = root / 'allow-effect'
+    closed = root / 'interrupted-action-closed'
     profile = root / 'profile'
     profile.mkdir()
     env = {'PATH': str(Path(shutil.which('node')).parent) + os.pathsep + os.defpath,
@@ -40,7 +42,12 @@ def qualify(afk, root, force):
         settings.write_text(json.dumps(config))
         cli('plugin', 'configure', name, '--builtin', '--file', settings, *args)
 
-    configure('verification.test-runner', {'command': ['/bin/sh', '-c', 'pwd -P >> "$1"', 'sh', str(effects)]})
+    command = ['/bin/sh', '-c', 'pwd -P >> "$1"', 'sh', str(effects)]
+    if in_flight:
+        target.mkdir()
+        command = ['/bin/sh', '-c', 'if [ ! -f "$2" ]; then read -r ignored; touch "$3"; exit 1; fi; pwd -P >> "$1"',
+                   'sh', str(effects), str(allow), str(closed)]
+    configure('verification.test-runner', {'command': command})
     configure('trigger.schedule', {'triggers': [{'id': 'restart', 'kind': 'schedule',
         'schedule': str(interval_ms), 'input': {'capability': 'verification.provider', 'provider': 'test-runner',
         'operation': 'verify', 'input': {'target': str(target)}}}]}, '--action', 'capability.invoke')
@@ -76,22 +83,27 @@ def qualify(afk, root, force):
         assert all(row['providerId'] == 'trigger.schedule' for row in rows), rows
         return {row['deliveryId']: row for row in rows}
 
-    def failed_attempt(url):
+    def interrupted_attempt(url):
         rows = list(deliveries(url).values())
         assert len(rows) <= 1, rows
-        return rows[0] if rows and rows[0]['status'] == 'pending' and rows[0]['attempts'] >= 1 else None
+        expected_status = 'processing' if in_flight else 'pending'
+        return rows[0] if rows and rows[0]['status'] == expected_status and rows[0]['attempts'] >= 1 else None
 
     version = cli('--version').strip()
-    stop = signal.SIGKILL if force else signal.SIGTERM
+    stop = signal.SIGKILL if force or in_flight else signal.SIGTERM
     with listener('initial', stop) as url:
         competitor = subprocess.run(listen, cwd=root, env=env, capture_output=True, text=True, timeout=8)
         assert competitor.returncode != 0 and 'Trigger queue is already owned' in competitor.stderr
-        pending = wait_for(lambda: failed_attempt(url))
+        interrupted = wait_for(lambda: interrupted_attempt(url))
     assert not effects.exists()
 
     downtime = 2 * interval_ms / 1000
     time.sleep(downtime)
-    target.mkdir()
+    if in_flight:
+        wait_for(closed.exists)
+        allow.touch()
+    else:
+        target.mkdir()
     assert not effects.exists()
 
     def completed(url, count):
@@ -100,22 +112,24 @@ def qualify(afk, root, force):
         return rows if len(rows) == count and all(row['status'] == 'delivered' for row in rows.values()) else None
 
     with listener('restarted') as url:
-        recovered = wait_for(lambda: completed(url, 1))[pending['deliveryId']]
-        assert recovered['receivedAt'] == pending['receivedAt'] and recovered['attempts'] > pending['attempts']
+        recovered = wait_for(lambda: completed(url, 1))[interrupted['deliveryId']]
+        assert recovered['receivedAt'] == interrupted['receivedAt'] and recovered['attempts'] > interrupted['attempts']
         assert effects.read_text().splitlines() == [str(target)]
-        fresh, = [row for key, row in wait_for(lambda: completed(url, 2)).items() if key != pending['deliveryId']]
+        fresh, = [row for key, row in wait_for(lambda: completed(url, 2)).items() if key != interrupted['deliveryId']]
         assert fresh['attempts'] == 1 and fresh['receivedAt'] - recovered['receivedAt'] >= downtime * 1000
     assert effects.read_text().splitlines() == [str(target)] * 2
     return {'afk': version, 'stopSignal': stop.name, 'intervalMs': interval_ms, 'downtimeMs': int(downtime * 1000),
-            'competingListenerRejected': True, 'beforeRestart': pending, 'recovered': recovered,
+            'competingListenerRejected': True, 'beforeRestart': interrupted, 'recovered': recovered,
             'firstNewTick': fresh, 'observedSuccessfulActions': 2}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('afk', type=Path)
-    parser.add_argument('--force', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--force', action='store_true')
+    mode.add_argument('--in-flight', action='store_true')
     args = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='afk-schedule-restart.') as directory:
-        print(json.dumps(qualify(args.afk.resolve(strict=True), Path(directory).resolve(), args.force), indent=2))
+        print(json.dumps(qualify(args.afk.resolve(strict=True), Path(directory).resolve(), args.force, args.in_flight), indent=2))

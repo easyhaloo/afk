@@ -63,6 +63,35 @@
         "nextAttemptAt": 1795149200418
       },
       "observedSuccessfulActions": 2
+    },
+    {
+      "stopSignal": "SIGKILL",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "f51526fd49b518d273eba914118d320b8cde197a3354de733f6c524119273b0e",
+        "providerId": "trigger.schedule",
+        "status": "processing",
+        "attempts": 1,
+        "receivedAt": 1795149360131,
+        "nextAttemptAt": 1795149360131
+      },
+      "recovered": {
+        "deliveryId": "f51526fd49b518d273eba914118d320b8cde197a3354de733f6c524119273b0e",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795149360131,
+        "nextAttemptAt": 1795149370681
+      },
+      "firstNewTick": {
+        "deliveryId": "286a84876869b421c9882052dc25c2bbc648a4ad5ab3380280cf86f7c7197ee0",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795149372673,
+        "nextAttemptAt": 1795149373679
+      },
+      "observedSuccessfulActions": 2
     }
   ]
 }

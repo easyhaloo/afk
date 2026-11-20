@@ -455,8 +455,10 @@ collector 不具备完整语义资格。保存配置及新增实验遵守以下�
   配置及独立执行授权摘要须包含 `callInput`，变更实际调用输入即改变绑定。
   撤销或任何绑定变化均阻断。Wiki 发布许可不能替代执行许可。当前许可仅接受空 dependencies、
   空 permissions、`sideEffects: none`，并限制 timeoutMs/maxOutputBytes，不隐式授权安装或外部副作用。
-  当前宿主 revision 为 `proposal-validation-runtime-v4`；旧宿主执行许可须独立重新授权，
+  当前宿主 revision 为 `proposal-validation-runtime-v5`。旧宿主执行许可须独立重新授权，
   不自动改写或沿用。adapter 与语义协议仍为 v1，不能用协议版本相同推导宿主兼容。
+- 超时与取消实验从宿主独立观察到容器运行时开始计时。`afterMs` 可等于实际执行上限。
+  触发后用独立的 5 秒窗口核验终止，整个验证仍受总预算和外部取消约束。
 - catalog 的 skills/cli/script/plugin 四类搜索须来自授权根下的真实有界扫描与已登记来源，
   不接受自报搜索结果。首次读源文件前核对已打开 FD 的预期 inode/设备、归属、权限和链接数；
   读取后及使用前复核目录、文件、内容和 manifest 绑定。

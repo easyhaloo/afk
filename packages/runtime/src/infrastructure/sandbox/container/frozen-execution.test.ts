@@ -976,7 +976,7 @@ describe('frozen host control experiments', () => {
     expect(engine.buildFrozenImage).not.toHaveBeenCalled();
   });
 
-  it.each([{ kind: 'timeout', afterMs: 0 }, { kind: 'timeout', afterMs: 500 },
+  it.each([{ kind: 'timeout', afterMs: 0 }, { kind: 'timeout', afterMs: 501 },
     { kind: 'timeout', afterMs: 1.5 }, { kind: 'other', afterMs: 10 }, { kind: 'timeout', afterMs: 10, passed: true }])('rejects invalid control %j', async control => {
     const { provider, engine, options } = controlFixture();
     await expect(executeFrozenContainer(provider, { ...options, control: control as FrozenExecutionOptions['control'] })).rejects.toThrow(/control/i);
@@ -1006,15 +1006,19 @@ describe('frozen host control experiments', () => {
     expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
   });
 
-  it('keeps the hard deadline independent from the experiment timer', async () => {
+  it('triggers at the full execution limit and separately confirms termination and cleanup', async () => {
     const { provider, engine, options, state, inspect } = controlFixture();
     let runningInspections = 0;
     vi.mocked(engine.inspectFrozenContainer).mockImplementation(async () => {
-      if (state.status === 'running' && runningInspections++ === 0) await new Promise(resolve => setTimeout(resolve, 40));
+      if (state.status === 'running' && runningInspections++ === 0) await new Promise(resolve => setTimeout(resolve, 15));
       return { ...inspect(), ...state };
     });
-    await expect(executeFrozenContainer(provider, { ...options, timeoutMs: 60, control: { kind: 'timeout', afterMs: 40 } })).rejects.toThrow(/deadline/i);
-    expect(engine.killFrozenContainer).not.toHaveBeenCalled();
+    const result = await executeFrozenContainer(provider, { ...options, timeoutMs: 40, control: { kind: 'timeout', afterMs: 40 } });
+    const control = result.evidence.control;
+    if (control?.outcome !== 'triggered') throw new Error('Expected triggered control evidence');
+    expect(control.triggeredMs - control.runningObservedMs).toBeGreaterThanOrEqual(40);
+    expect(control.exitCode).toBe(137);
+    expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
   });
 
   it.each([null, undefined])('preserves exact external reason %j when an inspection rejects on abort', async reason => {
@@ -1273,15 +1277,16 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen e
   }, 60_000);
 
   it.each(['cancellation', 'timeout'] as const)('performs host %s on a running container and descendants with no remaining resources', async kind => {
+    const afterMs = kind === 'timeout' ? 5000 : 200;
     const result = await execute({ input: captureFrozenInput(directory()), baseImageId, timeoutMs: 5000,
-      control: { kind, afterMs: 200 }, argv: ['node', '-e',
+      control: { kind, afterMs }, argv: ['node', '-e',
         'require("child_process").spawn("node",["-e","setInterval(()=>{},1000)"],{stdio:"ignore"});console.log("not a control receipt");setInterval(()=>{},1000)'] });
     expect(result.exitCode).toBe(137);
     expect(result.evidence.control).toMatchObject({ outcome: 'triggered', kind, signal: 'SIGKILL', containerId: result.evidence.containerId,
       operationId: result.evidence.operationId, exitCode: 137 });
     const control = result.evidence.control;
     if (control?.outcome !== 'triggered') throw new Error('Expected triggered control evidence');
-    expect(control.triggeredMs - control.runningObservedMs).toBeGreaterThanOrEqual(200);
+    expect(control.triggeredMs - control.runningObservedMs).toBeGreaterThanOrEqual(afterMs);
     expect(() => execFileSync('docker', ['container', 'inspect', result.evidence.containerId], { stdio: 'pipe' })).toThrow();
     expect(() => execFileSync('docker', ['image', 'inspect', result.evidence.imageId], { stdio: 'pipe' })).toThrow();
   }, 60_000);

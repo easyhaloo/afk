@@ -876,7 +876,7 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real temporary Git a
     const callInput = '{"key":"alpha"}';
     configured.argv = ['node', '/workspace/asset.js', callInput];
     configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input, callInput,
-      control: { kind, afterMs: 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
+      control: { kind, afterMs: kind === 'timeout' ? 5000 : 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
         { id: 'trigger', source: 'control', path: ['kind'], expected: kind }] };
     options.harness!.cases = [configured, ...options.harness!.cases.filter(entry => entry !== configured)];
     options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Remaining experiments are not configured' }));

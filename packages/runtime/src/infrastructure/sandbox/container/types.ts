@@ -141,6 +141,9 @@ export interface ContainerProvider {
   inspect(containerId: string): Promise<ContainerInspectInfo>;
 }
 
+export const FROZEN_EXECUTION_MAX_MS = 120_000;
+export const FROZEN_CONTROL_OBSERVATION_MS = 5_000;
+
 export interface FrozenCommandOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs: number;

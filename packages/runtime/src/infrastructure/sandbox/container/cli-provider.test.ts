@@ -28,6 +28,14 @@ class HostProbe extends DockerContainerProvider {
 }
 
 describe('frozen Docker CLI adapter', () => {
+  it('allows observation time on attach only and retains a hard command ceiling', async () => {
+    const provider = new ScriptedDocker();
+    await provider.startFrozenContainer(containerId, { ...bounds, timeoutMs: 130_000 });
+    await expect(provider.startFrozenContainer(containerId, { ...bounds, timeoutMs: 130_001 })).rejects.toThrow(/bounds/i);
+    await expect(provider.inspectFrozenContainer(containerId, { ...bounds, timeoutMs: 120_001 })).rejects.toThrow(/bounds/i);
+    expect(provider.calls.map(call => call.argv)).toEqual([['docker', 'start', '--attach', containerId]]);
+  });
+
   it('sends SIGKILL only to the exact independently inspected running owned container', async () => {
     const provider = new ScriptedDocker();
     vi.spyOn(provider, 'inspectFrozenContainer').mockResolvedValue({ id: containerId, operationId,

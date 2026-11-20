@@ -19,7 +19,7 @@ import { proposalExecutionGrantSchema, validationConfigurationSchema, type Valid
 import { readValidationPrivateFile, readValidationSnapshotFile } from './validation-files.js';
 import type { LearningValidationResult } from './validation.js';
 
-export const PROPOSAL_VALIDATION_RUNTIME_REVISION = 'proposal-validation-runtime-v4';
+export const PROPOSAL_VALIDATION_RUNTIME_REVISION = 'proposal-validation-runtime-v5';
 export const PROPOSAL_VALIDATION_ADAPTER_REVISION = 'v1';
 type AssetChecker = Extract<Extract<ValidationConfiguration, { version: 2 }>['checkers'][number], { mode: 'repository-asset' }>;
 type Blocked = Extract<LearningValidationResult, { status: 'blocked' }>;

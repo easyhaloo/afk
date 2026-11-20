@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import { assertFrozenScratchHelper, buildFrozenContext, type CapturedFrozenInput, type CapturedFrozenScratchHelper } from './frozen-input.js';
 import type { ContainerProvider, FrozenCommandOptions, FrozenContainerInspection, FrozenContainerOperations, FrozenScratchAssertion, FrozenScratchBaselineFailure, FrozenScratchEvidence, FrozenScratchRecoveryEvidence, FrozenScratchRecoveryRequest, FrozenScratchResource, FrozenScratchSnapshot } from './types.js';
+import { FROZEN_CONTROL_OBSERVATION_MS, FROZEN_EXECUTION_MAX_MS } from './types.js';
 
 export interface FrozenScratchObservation {
   readonly helper: CapturedFrozenScratchHelper;
@@ -370,15 +371,15 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
     result: { stdout: string; stderr: string; code: number }; completed: FrozenContainerInspection; control: FrozenControlEvidence;
   }> {
   const control = options.control!;
-  const began = performance.now();
-  const deadline = began + options.timeoutMs;
+  let deadline = performance.now() + Math.min(FROZEN_CONTROL_OBSERVATION_MS, options.timeoutMs);
+  const attachDeadline = deadline + control.afterMs + FROZEN_CONTROL_OBSERVATION_MS;
   const controller = new AbortController();
   const abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });
   let outcome: { result: { stdout: string; stderr: string; code: number } } | { error: unknown } | undefined;
-  const bounded = (): FrozenCommandOptions => {
+  const bounded = (until = deadline): FrozenCommandOptions => {
     if (options.signal?.aborted) throw options.signal.reason;
-    const timeoutMs = Math.floor(deadline - performance.now());
+    const timeoutMs = Math.floor(until - performance.now());
     if (timeoutMs < 1) throw new Error('Frozen control execution deadline exceeded');
     return { signal: controller.signal, timeoutMs, maxOutputBytes: 256 * 1024 };
   };
@@ -393,7 +394,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
     return outcome !== undefined;
   };
   const earlyExit = async () => {
-    await pending;
+    if (!outcome) await wait(bounded().timeoutMs);
     bounded();
     if (!outcome || 'error' in outcome) throw outcome && 'error' in outcome ? outcome.error : new Error('Frozen attach exit was not confirmed');
     const completed = await engine.inspectFrozenContainer(containerId, bounded());
@@ -406,7 +407,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
       runningObservedMs, triggeredMs: null, terminatedMs: performance.now() - started } };
   };
   try {
-    pending = engine.startFrozenContainer(containerId, { ...bounded(), maxOutputBytes: options.maxOutputBytes ?? 64 * 1024 })
+    pending = engine.startFrozenContainer(containerId, { ...bounded(attachDeadline), maxOutputBytes: options.maxOutputBytes ?? 64 * 1024 })
       .then(result => { outcome = { result }; }, error => { outcome = { error }; });
     let inspected: FrozenContainerInspection;
     while (true) {
@@ -420,6 +421,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
       await wait(Math.min(20, bounded().timeoutMs));
     }
     const triggerAt = started + runningObservedMs + control.afterMs;
+    deadline = triggerAt + FROZEN_CONTROL_OBSERVATION_MS;
     while (performance.now() < triggerAt) {
       if (exited()) return await earlyExit();
       await wait(Math.min(20, Math.max(1, Math.ceil(triggerAt - performance.now())), bounded().timeoutMs));
@@ -431,7 +433,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
     if (inspected.status !== 'running') throw new Error('Frozen container stopped before control trigger');
     const triggeredMs = performance.now() - started;
     await engine.killFrozenContainer!(operationId, containerId, bounded());
-    await pending;
+    if (!outcome) await wait(bounded().timeoutMs);
     bounded();
     const completed = await engine.inspectFrozenContainer(containerId, bounded());
     verify(completed);
@@ -500,14 +502,14 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
   const checkAbort = () => { if (options.signal?.aborted) throw options.signal.reason; };
   checkAbort();
   if (provider.engine !== 'docker' || !provider.frozen) throw new Error('Provider has no supported frozen execution capability');
-  if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 120_000
+  if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > FROZEN_EXECUTION_MAX_MS
     || !options.argv.length || !options.argv[0]?.trim() || options.argv.length > 128 || options.argv.some(argument => typeof argument !== 'string' || argument.includes('\0'))
     || Buffer.byteLength(JSON.stringify(options.argv)) > 32 * 1024) throw new Error('Invalid frozen execution limits or command');
   const maxOutputBytes = options.maxOutputBytes ?? 64 * 1024;
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 1024 * 1024) throw new Error('Invalid frozen output limit');
   if (options.control !== undefined && (Object.keys(options.control).length !== 2
     || !['cancellation', 'timeout'].includes(options.control.kind) || !Number.isSafeInteger(options.control.afterMs)
-    || options.control.afterMs < 1 || options.control.afterMs >= options.timeoutMs)) throw new Error('Invalid frozen control experiment');
+    || options.control.afterMs < 1 || options.control.afterMs > options.timeoutMs)) throw new Error('Invalid frozen control experiment');
   if (options.control && typeof provider.frozen.killFrozenContainer !== 'function') throw new Error('Frozen control is not supported by provider');
   if (options.scratch) {
     validateScratch(options);

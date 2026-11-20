@@ -272,10 +272,10 @@ describe('saved repository-asset production validation routing', () => {
     expect(test.store.getValidation(test.candidate.id)).toBeUndefined();
   });
 
-  it('requires a new execution grant for host runtime v4', async () => {
+  it('requires a new execution grant for host runtime v5', async () => {
     const test = await fixture();
-    expect(PROPOSAL_VALIDATION_RUNTIME_REVISION).toBe('proposal-validation-runtime-v4');
-    test.grant.adapter.hostRuntimeRevision = 'proposal-validation-runtime-v3';
+    expect(PROPOSAL_VALIDATION_RUNTIME_REVISION).toBe('proposal-validation-runtime-v5');
+    test.grant.adapter.hostRuntimeRevision = 'proposal-validation-runtime-v4';
     test.save();
     expect(await validateConfiguredLearningCandidate(test.input, test.options)).toEqual({ status: 'blocked', code: 'unauthorized' });
     expect(test.resolveRepository).not.toHaveBeenCalled();

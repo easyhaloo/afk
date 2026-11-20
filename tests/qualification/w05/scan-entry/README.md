@@ -8,6 +8,8 @@ In Seatbelt the actual revised Node entry point accepts one JSON-encoded string 
 
 The revised program exits in 31 ms with the diagnostic 500 ms cancellation timer and in 38 ms with its declared 5000 ms deadline. Both controls still require observed termination during work. Permission denial still lacks a protected operation and exact target. Recovery still lacks a bound recovery case, helper, interrupted partial state and checkpoint observations. The retained grant covers the original candidate and checker digests. A generated candidate and accepted checker require their own matching grant before formal execution.
 
+The 0.2.183 runtime accepts a control timer equal to the 5000 ms execution limit. Two opt-in native Docker checks passed from source using a local Node 22 base image. The direct control triggered 5021 ms after observing the container running. The paired proposal control recorded a baseline early exit with code 0 and triggered on the proposed process after 5027 ms. Both triggered runs confirmed SIGKILL and exit 137. Ownership checks found no remaining containers or images from the three operations. These checks use a synthetic long-running proposal. Formal `scan-entry` coverage remains 0/8, and grants for earlier host revisions must be reissued for `proposal-validation-runtime-v5`.
+
 ## Replay
 
 Run from the checkout on Darwin arm64 with Node 24.18.0. Supply a fresh profile path whose parent exists. The profile and queued request survive the command. The original synthetic evidence home and archive are required.

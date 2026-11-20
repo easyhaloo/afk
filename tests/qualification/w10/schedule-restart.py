@@ -25,7 +25,7 @@ def wait_for(probe, timeout=15):
     raise AssertionError('Timed out waiting for scheduled delivery or listener')
 
 
-def serve_http_receiver(effects, requests, port, ready):
+def serve_http_receiver(effects, requests, port, ready=None):
     class Receiver(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -41,9 +41,13 @@ def serve_http_receiver(effects, requests, port, ready):
             self.send_response(204)
             self.end_headers()
 
-    with HTTPServer(('127.0.0.1', port), Receiver) as server:
-        with ready:
-            ready.send(server.server_port)
+    host = '127.0.0.1' if ready is not None else '0.0.0.0'
+    with HTTPServer((host, port), Receiver) as server:
+        if ready is not None:
+            with ready:
+                ready.send(server.server_port)
+        else:
+            print('ready', flush=True)
         server.serve_forever()
 
 
@@ -66,9 +70,42 @@ def http_receiver(effects, requests, port=0):
             receiver.close()
 
 
-def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=None, restart_receiver=None):
+def docker(*arguments):
+    return subprocess.run(['docker', *arguments], text=True, capture_output=True,
+                          timeout=15, check=True).stdout.strip()
+
+
+@contextmanager
+def docker_http_receiver(state, image, port=0):
+    script = Path(__file__).resolve()
+    receiver = (
+        "from pathlib import Path\n"
+        "from receiver import serve_http_receiver\n"
+        "serve_http_receiver(Path('/state/effects.txt'), Path('/state/receiver-requests.txt'), 8080)"
+    )
+    container_id = docker('run', '--detach', '--pull', 'never', '--read-only', '--cap-drop', 'ALL',
+                          '--security-opt', 'no-new-privileges', '--user', f'{os.getuid()}:{os.getgid()}',
+                          '--publish', f'127.0.0.1:{port or ""}:8080', '--mount',
+                          f'type=bind,source={script},target=/receiver.py,readonly',
+                          '--mount', f'type=bind,source={state},target=/state', '--workdir', '/',
+                          '--entrypoint', '/usr/bin/python3', image, '-B', '-c', receiver)
+    try:
+        wait_for(lambda: docker('logs', container_id) == 'ready', timeout=8)
+        match = re.fullmatch(r'127\.0\.0\.1:(\d+)', docker('port', container_id, '8080/tcp'))
+        assert match, 'Expected a host loopback port mapped to the Linux receiver'
+        yield int(match[1]), container_id
+    finally:
+        try:
+            docker('kill', '--signal', 'KILL', container_id)
+            assert docker('wait', container_id) == '137'
+        finally:
+            docker('rm', container_id)
+
+
+def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=None, restart_receiver=None,
+            receiver_state=None):
     target = root / 'target'
-    effects = root / 'effects.txt'
+    effects = (receiver_state or root) / 'effects.txt'
     allow = root / 'allow-effect'
     closed = root / 'interrupted-action-closed'
     profile = root / 'profile'
@@ -244,34 +281,51 @@ if __name__ == '__main__':
     mode.add_argument('--idempotent', action='store_true')
     mode.add_argument('--http-receiver', action='store_true')
     mode.add_argument('--http-receiver-restart', action='store_true')
+    mode.add_argument('--docker-http-receiver-restart', metavar='IMAGE')
     args = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='afk-schedule-restart.') as directory:
         afk = args.afk.resolve(strict=True)
         root = Path(directory).resolve()
-        if args.http_receiver or args.http_receiver_restart:
-            effects = root / 'effects.txt'
-            requests = root / 'receiver-requests.txt'
-            receiver_pids = []
+        image = args.docker_http_receiver_restart
+        if args.http_receiver or args.http_receiver_restart or image:
+            state = root
+            if image:
+                state = root / 'receiver-state'
+                state.mkdir()
+                receiver_image = docker('image', 'inspect', '--format', '{{.Os}}/{{.Architecture}} {{.Id}}', image)
+                platform, image = receiver_image.split()
+                assert platform.startswith('linux/'), platform
+
+            effects = state / 'effects.txt'
+            requests = state / 'receiver-requests.txt'
+            receiver_ids = []
+
+            def receiver_context(port=0):
+                return docker_http_receiver(state, image, port) if image else http_receiver(effects, requests, port)
+
             with ExitStack() as processes:
-                port, original_pid = processes.enter_context(http_receiver(effects, requests))
-                receiver_pids.append(original_pid)
+                port, original_id = processes.enter_context(receiver_context())
+                receiver_ids.append(original_id)
 
                 def restart_receiver(delivery_id):
                     wait_for(lambda: requests.exists() and requests.read_text().splitlines() == [delivery_id])
                     processes.close()
-                    resumed_port, resumed_pid = processes.enter_context(http_receiver(effects, requests, port))
-                    assert resumed_port == port and resumed_pid != original_pid
-                    receiver_pids.append(resumed_pid)
+                    resumed_port, resumed_id = processes.enter_context(receiver_context(port))
+                    assert resumed_port == port and resumed_id != original_id
+                    receiver_ids.append(resumed_id)
 
                 url = f'http://127.0.0.1:{port}/deliveries'
                 receipt = qualify(afk, root, False, False, False, True, url,
-                                  restart_receiver if args.http_receiver_restart else None)
+                                  restart_receiver if args.http_receiver_restart or image else None, state)
             attempts = Counter(requests.read_text().splitlines())
             assert attempts == {receipt['recovered']['deliveryId']: 2, receipt['firstNewTick']['deliveryId']: 1}, attempts
             receipt.update(receiverTransport='http-loopback', receiverRequests=dict(attempts))
-            if args.http_receiver_restart:
-                receipt.update(receiverPids=receiver_pids, receiverStopSignal='SIGKILL')
+            if image:
+                receipt.update(receiverTransport='http-docker-published-port', receiverImage=receiver_image,
+                               receiverContainerIds=receiver_ids, receiverStopSignal='SIGKILL')
+            elif args.http_receiver_restart:
+                receipt.update(receiverPids=receiver_ids, receiverStopSignal='SIGKILL')
         else:
             receipt = qualify(afk, root, args.force, args.in_flight, args.after_effect, args.idempotent)
         print(json.dumps(receipt, indent=2))

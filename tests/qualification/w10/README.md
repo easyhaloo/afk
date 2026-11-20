@@ -37,6 +37,8 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 同一安装包通过 `--http-receiver-restart`。监听器强制终止后，独立接收进程也以 `SIGKILL` 退出，新进程在原端口使用同一持久目录接收重投。原交付 ID 共到达两次，副作用目录的 inode 和修改时间保持一致。新交付 ID 到达一次并创建新目录。`--http-receiver` 和 `--idempotent` 对照均通过。这次验证覆盖同主机进程故障恢复。[接收端重启回执](schedule-http-receiver-restart.receipt.json)
 
+同一安装包经 Docker 发布端口向 Linux VM 内的接收进程投递。`python3 -B schedule-restart.py <安装版CLI绝对路径> --docker-http-receiver-restart afk-sandbox-base:node22` 复用同一接收逻辑和持久目录，在旧交付已提交副作用且队列仍为 `processing` 时强杀监听器及第一个容器，再在原端口启动不同容器。旧 ID 收到两次且原目录 inode、修改时间保持一致，新 ID 到达一次并创建新目录。两个容器均以退出码 137 停止并移除，同机 `--http-receiver-restart` 对照通过。验证覆盖 macOS 宿主到 Linux VM，独立物理主机和目标部署长时运行待验。[Linux VM 接收端回执](schedule-linux-vm-receiver-restart.receipt.json)
+
 macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 OpenTelemetry Collector 发送 OTLP/HTTP。授权场景收到两次 trace 和四次 metric 的 HTTP 200，Collector 解码了对应工单的 span、事件计数和耗时直方图。错误凭据使同样数量的请求返回 401，Collector 中没有该会话的数据。AFK 审计链保持有效，失败数与入口记录一致，两个场景的超时与丢弃数均为零。
 
 暂停隔离的 Collector 后，`run.requested` 和 `run.finished` 各有一次在途指标操作耗尽共享 5 秒时限。每条事件另有一次指标操作与两次追踪操作在启动前被丢弃。Nginx 只看到两次指标 POST，均记为客户端关闭连接（499）。解除暂停后，新工单的两次 trace 和四次 metric POST 均返回 200，审计计数恢复至正常值。四个场景的本地审计链均有效，两次独立复跑结果一致。目标远端的授权检索和实际负载仍待验。[复跑脚本](otlp-ingress.py) · [入口、超时与恢复回执](otlp-ingress.receipt.json)

@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test';
+import { test, expect, _electron as electron, type TestInfo } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -10,9 +10,14 @@ import { RENDERER_URL } from './_helpers/launch.js';
 
 const desktop = fileURLToPath(new URL('../../', import.meta.url));
 const entry = resolve(process.env.AFK_E2E_CLI_ENTRY ?? join(desktop, '../cli/dist/index.js'));
+const packagedExecutable = process.env.AFK_E2E_DESKTOP_EXECUTABLE;
 const execute = promisify(execFile);
 
-test('CLI and Desktop contend for one work item and recover after an agent failure', async ({}, info) => {
+for (const owner of ['Desktop', 'CLI'] as const) {
+  test(`${owner} holds the repository lease against the other client`, ({}, info) => claimScenario(owner, info));
+}
+
+async function claimScenario(owner: 'Desktop' | 'CLI', info: TestInfo) {
   await withRepositoryFixture(false, true, async ({ root, checkout, host, workItemId, env, requests, labels }) => {
     const cli = (...args: string[]) => execute(process.execPath, [entry, ...args], { cwd: root, env, timeout: 25_000 });
     const run = (id: string) => cli('execute', '--work-item-id', workItemId, '--execution-id', id, '--execution-mode', 'batch');
@@ -36,16 +41,42 @@ exec "$HOME/bin/claude-success" "$@"
       steps: [{ id: 'implement', role: 'implementer', executionMode: 'batch', prompt: 'Perform the local fixture task.' }] }));
     const display = Object.fromEntries(['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS']
       .flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
-    const app = await electron.launch({ args: [desktop, '--use-mock-keychain', `--user-data-dir=${join(root, 'chromium')}`], cwd: root,
-      env: { ...env, ...display, AFK_WORKSPACE: root, AFK_E2E_NO_WINDOW: '1', ELECTRON_RENDERER_URL: RENDERER_URL } });
+    const app = await electron.launch({
+      executablePath: packagedExecutable ? resolve(packagedExecutable) : undefined,
+      args: [...(packagedExecutable ? [] : [desktop]), '--use-mock-keychain', `--user-data-dir=${join(root, 'chromium')}`], cwd: root,
+      env: { ...env, ...display, AFK_WORKSPACE: root, AFK_E2E_NO_WINDOW: '1', ...(packagedExecutable ? {} : { ELECTRON_RENDERER_URL: RENDERER_URL }) },
+    });
+    let cliOwner: Promise<{ code: number }> | undefined;
     try {
       const page = await app.firstWindow();
+      if (packagedExecutable) {
+        expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true);
+        expect(new URL(page.url()).pathname).toContain('/app.asar/dist/');
+      }
+      const launches = async () => (await text('launches')).trim().split('\n').map(Number);
+      if (owner === 'CLI') {
+        cliOwner = run('cli-owner').then(() => ({ code: 0 }), error => ({ code: error.code }));
+        await expect.poll(async () => (await launches().catch(() => [])).length).toBe(1);
+      }
       const start = await page.evaluate(input => window.afkDesktop.workItems.start(input), { workItemId, workflow: 'held-task',
         repositories: [{ platform: 'gitlab' as const, projectKey: `${host}/acme/api`, name: 'api', checkoutPath: 'repositories/api', baseBranch: 'main' }] });
       const system = join(root, '.afk/workspaces', createHash('sha256').update(start.workspace.root).digest('hex'));
       const runs = async () => JSON.parse(await readFile(join(system, 'work-item-runs.json'), 'utf8'));
       const journal = async (id: string) => (await readFile(join(system, 'executions', `${id}.jsonl`), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-      const launches = async () => (await text('launches')).trim().split('\n').map(Number);
+      if (cliOwner) {
+        await expect.poll(runs).toMatchObject([{ id: start.runId, status: 'failed', error: 'afk run exited with code 1' }]);
+        const ownerJournal = await journal('cli-owner');
+        expect(ownerJournal.some((event: { phase: string }) => event.phase === 'failed')).toBe(false);
+        await expect(journal(start.runId)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(await launches()).toHaveLength(1);
+        expect(requests.some(request => /^POST .*\/merge_requests$/.test(request))).toBe(false);
+        await writeFile(join(root, 'release'), 'fail CLI owner');
+        expect(await cliOwner).toEqual({ code: 1 });
+        expect((await journal('cli-owner')).at(-1)).toMatchObject({ workItemId, phase: 'failed', reason: expect.stringContaining('agent process failed with exit code 1') });
+        await info.attach('reverse-claim-receipt', { contentType: 'application/json', body: JSON.stringify({ workItemId,
+          desktop: await runs(), ownerJournal: await journal('cli-owner'), pids: await launches() }, null, 2) });
+        return;
+      }
       await expect.poll(async () => (await launches().catch(() => [])).length).toBe(1);
       const collision = await run('cli-contender').then(() => ({ code: 0, stderr: '' }), error => ({ code: error.code, stderr: error.stderr }));
       expect(collision).toMatchObject({ code: 1, stderr: expect.stringContaining('repository is leased by another execution') });
@@ -87,7 +118,8 @@ exec "$HOME/bin/claude-success" "$@"
         collision, dirtyStatus, recoveryStatus, failed, recovered: recovered.stdout, completed, pids, labels }, null, 2) });
     } finally {
       await writeFile(join(root, 'release'), 'release on cleanup');
+      await cliOwner;
       await app.close();
     }
   });
-});
+}

@@ -46,14 +46,47 @@ change production behavior and requires a scoped plan/report, route to
 
 ## Steps
 
-### Step 1 — Workspace mode
+### Step 1 — Branch and workspace strategy
 
-Ask user which workspace mode to use:
-- **Current branch** (default): work directly in the current directory.
-- **New worktree**: create isolated `git worktree` under `.worktrees/do-<name>/`.
+**Question 1: Branch strategy**
 
-If current branch: check `git status --short` first. Uncommitted changes
-must be committed or stashed before proceeding.
+Ask user which branch to use:
+- **Current branch** (default): work on the existing branch
+- **New branch from main**: create fresh branch from latest main/master (recommended for new features/fixes)
+- **New branch from current**: create branch based on current branch (for sub-tasks)
+
+If current branch selected: check `git status --short` first. Uncommitted changes must be committed or stashed before proceeding.
+
+**Question 2: Workspace (if creating new branch)**
+
+Ask user where to work:
+- **Current directory**: create branch in current working directory
+- **Isolated worktree** (recommended): create `git worktree` under `.worktrees/<branch-name>/`
+
+Worktree benefits: keeps main workspace clean, supports parallel work, easy cleanup.
+
+**Question 3: Branch name (if creating new branch)**
+
+Suggest branch name based on task type detected in Step 2:
+- Feature → `feat/<description>` (e.g., `feat/user-login`)
+- Refactor → `refactor/<description>` (e.g., `refactor/extract-validation`)
+- Hotfix → `hotfix/<description>` (e.g., `hotfix/null-pointer-fix`)
+- Spike → `spike/<description>` (e.g., `spike/graphql-feasibility`)
+
+User can accept suggestion or provide custom name.
+
+**Execution:**
+```bash
+# For "new branch from main" + "isolated worktree"
+git fetch origin
+git worktree add -b <branch-name> .worktrees/<branch-name> origin/main
+
+# For "new branch from current" + "isolated worktree"
+git worktree add -b <branch-name> .worktrees/<branch-name> HEAD
+
+# For new branch in current directory
+git checkout -b <branch-name> [origin/main|HEAD]
+```
 
 ### Step 2 — Load methodology
 

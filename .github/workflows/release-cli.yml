@@ -9,6 +9,9 @@ on:
         description: Build and test the four archives without publishing a release
         type: boolean
         default: false
+      rollback_from_run:
+        description: Optional successful Release CLI run ID supplying the previous archives
+        type: string
 
 permissions:
   contents: read
@@ -20,6 +23,9 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
@@ -36,9 +42,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERIFY_ONLY: ${{ inputs.verify_only }}
+          ROLLBACK_FROM_RUN: ${{ inputs.rollback_from_run }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -n "$ROLLBACK_FROM_RUN" ]]; then
+            [[ "$VERIFY_ONLY" == true && "$ROLLBACK_FROM_RUN" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'rollback_from_run requires verify_only and a numeric run ID' >&2
+              exit 1
+            }
+            baseline=$(gh run view "$ROLLBACK_FROM_RUN" --json workflowName,conclusion --jq '.workflowName + ":" + .conclusion')
+            [[ "$baseline" == 'Release CLI:success' ]] || {
+              echo 'rollback_from_run must refer to a successful Release CLI run' >&2
+              exit 1
+            }
+          fi
           version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('apps/cli/package.json', 'utf8')).version)")"
           tag="cli-v${version}"
 
@@ -71,6 +89,9 @@ jobs:
   package:
     needs: prepare
     if: inputs.verify_only || needs.prepare.outputs.publish == 'true'
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +134,25 @@ jobs:
         run: pnpm exec vitest run tests/cli-install.test.ts tests/package-cli-validation.test.ts
       - name: Build, package and verify offline installation
         run: pnpm release:cli --version "${{ needs.prepare.outputs.version }}"
+      - name: Download the previous archive
+        if: inputs.verify_only && inputs.rollback_from_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.rollback_from_run }}
+          name: cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/rollback-baseline
+      - name: Verify upgrade and rollback against the previous archive
+        if: inputs.verify_only && inputs.rollback_from_run != ''
+        env:
+          ASSET: afk-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BASELINE: ${{ runner.temp }}/rollback-baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          old_version=$(tar -xOzf "$BASELINE/$ASSET" afk/release.json | node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).version')
+          bash tests/qualification/cli-upgrade.sh "$BASELINE" "$old_version" release/cli "$VERSION"
       - name: Verify repository workflows and audit artifacts against the installed archive
         env:
           ASSET: afk-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz

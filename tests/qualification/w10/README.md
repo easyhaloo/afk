@@ -19,6 +19,8 @@
 
 同日使用 `bash tests/qualification/cli-upgrade.sh <0.2.174 归档目录> 0.2.174 <0.2.175 归档目录> 0.2.175` 完成 macOS arm64、Node 24.18.0 离线验收，退出码为 0。错误校验和被拒绝，原可执行链接保持有效。正常升级后，重装 0.2.174 恢复原链接和版本。各阶段的 `plugins.yml` 字节及 `plugin list --json` 结果一致，其中 OTLP 插件处于启用状态。0.2.174 归档 SHA-256 为 `6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475`。
 
+四平台复跑时，在 `Release CLI` 工作流指定 `verify_only=true` 和 `rollback_from_run=<上一版归档的运行 ID>`。每种平台使用对应的上一版归档与本次构建的归档，执行同一个升级、错误校验和拒绝、回滚脚本。可用基线需保留四份归档产物。`0.2.174` 的基线为 [44672582771](https://github.com/easyhaloo/afk/actions/runs/44672582771)。
+
 同一 0.2.175 安装版通过 33 项 E2E。`AFK_E2E_CLI_ENTRY` 指向安装后的 `afk`，以 `--no-file-parallelism` 运行 `tests/e2e/repository-managed-{local,remote,command}.test.ts`、`tests/e2e/repository-verification-{hook,batch,replay}.test.ts` 和 `tests/e2e/workflow-templates.test.ts`。测试使用实际 Git 工作树、回环 Tracker 和脚本 Agent。`node tests/qualification/w10/local-artifact-audit.mjs <安装版CLI绝对路径>` 另通过两项，核对本地测试报告和证据包的导出字节、摘要及审计事件。
 
 `0.2.175` 同一归档复跑 `schedule-restart.py` 的默认、`--force`、`--in-flight`、`--after-effect`、`--idempotent` 五个场景，全部退出 0。原交付均在第二次尝试成功，每次启动第二个监听器均被拒绝。`--after-effect` 的两个交付产生三次写入。`--idempotent` 使用原交付 ID 去重，两个交付各生效一次。接收端为隔离的本地文件系统。

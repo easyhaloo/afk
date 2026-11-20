@@ -14,7 +14,11 @@ const finish = result => {
   process.exit(result.status ?? 91);
 };
 
-if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(binary)) {
+if (binary === 'opencode' && argv[0] === 'db') {
+  if (argv.length !== 5 || !argv[1].includes("session") || !argv[1].includes("'matrix-opencode-native'")
+    || argv[2] !== '--pure' || argv[3] !== '--format' || argv[4] !== 'json') process.exit(64);
+  json([]);
+} else if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(binary)) {
   let prompt = '';
   for await (const chunk of process.stdin) prompt += chunk;
   const effect = { binary, argv, prompt, cwd: process.cwd(), pid: process.pid, simulated: true };
@@ -63,7 +67,18 @@ if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(bi
     }
     json({ type: 'result', sessionId, exitCode: 0 });
   } else if (binary === 'codex') json({ type: 'item.completed', item: { type: 'agent_message', text: result } });
-  else if (binary === 'opencode') json({ type: 'text', part: { text: result } });
+  else if (binary === 'opencode') {
+    const sessionID = 'matrix-opencode-native';
+    const messageID = 'matrix-opencode-message';
+    for (const [type, part] of [
+      ['step_start', { type: 'step-start' }],
+      ['text', { type: 'text', text: result }],
+      ['step_finish', { type: 'step-finish', reason: 'stop', tokens: { input: 10, output: 4, cache: { read: 3, write: 2 } } }],
+    ]) {
+      json({ type, sessionID, part: { ...part, sessionID, messageID } });
+      process.stdout.write('\n');
+    }
+  }
   else json({ type: 'result', result });
   process.stdout.write('\n');
 } else if (['docker', 'podman'].includes(binary)) {

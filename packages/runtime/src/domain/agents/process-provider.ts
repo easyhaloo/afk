@@ -28,7 +28,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
    * not is measured against the strictest limit AFK knows of.
    */
   readonly promptLimits?: AgentPromptLimits;
-  protected readonly nativeSessions: boolean = false;
+  protected readonly nativeSessions: boolean | 'batch' = false;
 
   abstract buildCommand(options: AgentCommandOptions): AgentCommand;
   parseLine?(line: string): AgentEvent[];
@@ -71,7 +71,8 @@ export abstract class ProcessAgentProvider implements AgentProvider {
     let sessionError: string | undefined;
     let execution: AgentExecution | undefined;
     const expectedSessionId = this.resumeSessionId(commandOptions);
-    const parseLine = this.nativeSessions && parser ? (line: string): AgentEvent[] => {
+    const nativeSessions = this.nativeSessions === true || (this.nativeSessions === 'batch' && executionMode === 'batch');
+    const parseLine = nativeSessions && parser ? (line: string): AgentEvent[] => {
       const events = parser(line);
       for (const event of events) {
         if (event.type === 'usage') usage = event.usage;
@@ -101,7 +102,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
       metadata: this.executionMetadata(options),
       parseLine,
     });
-    if (!this.nativeSessions) return execution;
+    if (!nativeSessions) return execution;
     const source = execution;
     if (sessionError) await source.kill();
     return {

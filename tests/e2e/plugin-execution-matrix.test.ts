@@ -293,7 +293,7 @@ describe('built WorkflowRunner Agent × Sandbox (simulated agent outputs)', () =
     expect(report.effect.argv).toEqual(copilotUsageReport
       ? [...commands[agent], '--usage-output-file', expect.stringMatching(/\/afk-copilot-[^/]+\/usage\.json$/)]
       : commands[agent]);
-    if (agent === 'cursor' || agent === 'pi') {
+    if (agent === 'cursor' || agent === 'pi' || agent === 'opencode') {
       expect(report.events.filter((event: { kind: string }) => event.kind === 'agent.session_recorded')).toEqual([
         expect.objectContaining({ kind: 'agent.session_recorded', sessionId: `matrix-${agent}-native`,
           usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } }),

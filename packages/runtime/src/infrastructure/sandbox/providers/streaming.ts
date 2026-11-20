@@ -229,7 +229,7 @@ export class StreamingAgentExecution implements AgentExecution {
             const extracted = this.extractSignal(raw);
             if (extracted) {
               this.structuredOutput = extracted;
-              if (this.analysisSessionId === undefined && !this.copilotReport && this.hasExpectedSignal()) this.done = true;
+              if (this.analysisSessionId === undefined && !this.copilotReport && this.metadata.provider !== 'opencode' && this.hasExpectedSignal()) this.done = true;
             }
             break;
           }
@@ -610,7 +610,7 @@ export class StreamingAgentExecution implements AgentExecution {
     } catch {
       // The buffer may instead contain a provider's raw completion marker.
     }
-    if (this.metadata.provider === 'copilot' || /^\s*[{["]/.test(this.stdoutBuffer)) return;
+    if (this.metadata.provider === 'copilot' || this.metadata.provider === 'opencode' || /^\s*[{["]/.test(this.stdoutBuffer)) return;
     const extracted = extractGoalComplete(this.stdoutBuffer);
     if (!extracted) return;
     this.structuredOutput = extracted;

@@ -15,6 +15,8 @@
 
 ## 核对行清单与历史用例
 
+macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[复跑脚本](opencode-local-inference.py) · [安装包与结果回执](opencode-local-inference.receipt.json)
+
 安装版 0.2.170 在 macOS arm64 上驱动原生 Copilot CLI 和本地 Ollama。首次在 90 秒内未观察到取消前的文本增量。第二次回答 `16 + 22 = 38`，原生会话、输入 13,326 和输出 49 token 均与 AFK 匹配。下一段生成出现文本增量后，AFK 中断执行，进程在 Sandbox 关闭前退出。账号托管推理及完整工单待验。[两版安装包回执](copilot-local-inference.receipt.json)
 
 仓库外安装的 0.2.169 复验了两种 `jms` 的发现结果。SSH 型客户端列出 16 个资产，安装版 `afk host exec --provider jumpserver` 在唯一匹配的 Wiki 资产上运行 `echo`，返回本次随机标记及退出码 0。OpenAPI 型客户端的资产发现返回退出码 1。[安装版回执](jumpserver.receipt.json)

@@ -15,6 +15,19 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it('waits for the OpenCode exit status after the stopped answer', async () => {
+    const execution = new StreamingAgentExecution({
+      command: command('console.log("stopped"); setTimeout(() => process.exit(7), 800)'),
+      prompt: 'compute', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: { provider: 'opencode', transport: 'process' },
+      parseLine: () => [{ type: 'result', result: '{"type":"goal_complete","summary":"41"}' }],
+    });
+    execution.start();
+    try {
+      await expect(execution.waitForResult({ completionTimeoutMs: 5000 })).resolves.toMatchObject({ status: 'failed', exitCode: 7 });
+    } finally { await execution.kill(); }
+  });
+
   it.each(['newline', 'crlf', 'eof'] as const)('parses a complete buffered nonterminal record once before %s', async ending => {
     const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } });
     const parseLine = vi.fn(new ClaudeCodeProvider().parseLine.bind(new ClaudeCodeProvider()));

@@ -393,7 +393,7 @@ describe('Agent providers — fixture coverage', () => {
     it('passes the runner prompt intact when creating an interactive execution', async () => {
       const startAgent = vi.fn(async () => ({ id: 'interactive-opencode' } as AgentExecution));
       const prompt = '/goal Implement the assigned task.\nBacklog description: exact acceptance criteria.\nAFK interactive completion protocol: write .afk-signal.json.';
-      await p.createExecution({
+      const execution = await p.createExecution({
         worktreePath: '/tmp/worktree',
         sessionId: 'sess-1',
         sandbox: { startAgent } as unknown as Sandbox,
@@ -402,6 +402,7 @@ describe('Agent providers — fixture coverage', () => {
         signalType: 'goal_complete',
         executionMode: 'interactive',
       });
+      expect(execution).toBe(await startAgent.mock.results[0].value);
       expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
         command: expect.objectContaining({ argv: expect.arrayContaining(['--prompt', prompt.replace(/^\/goal\s*/, '')]) }),
         prompt,
@@ -452,33 +453,69 @@ describe('Agent providers — fixture coverage', () => {
       expect(resolveOpenCodeModel({ AFK_OPENCODE_MODEL: '   ' })).toBeUndefined();
     });
 
-    it('routes step_finish tokens into usage and result events', () => {
-      const line = JSON.stringify({
-        type: 'step_finish',
-        timestamp: 1791992467521,
-        sessionID: 'ses_x',
-        part: { type: 'step-finish', reason: 'stop', tokens: { total: 703, input: 700, output: 3 } },
-      });
-      const events = p.parseLine(line);
-      const usage = events.find(e => e.type === 'usage');
-      expect(usage).toMatchObject({ usage: { inputTokens: 700, outputTokens: 3, totalTokens: 703 } });
-      expect(events.some(e => e.type === 'result')).toBe(true);
+    const row = (type: string, fields = {}, messageID = 'msg_one') => JSON.stringify({ type, sessionID: 'ses_one',
+      part: { type: type.replace('_', '-'), sessionID: 'ses_one', messageID, ...fields } });
+
+    async function batch() {
+      const startAgent = vi.fn(async (_options: AgentStartOptions) => ({ id: 'logical' }) as AgentExecution);
+      const execution = await p.createExecution({ ...opts(), sandbox: { startAgent } as unknown as Sandbox,
+        executionMode: 'batch', generation: 0, prompt: 'compute', signalType: 'goal_complete' });
+      return { execution, parse: startAgent.mock.calls[0][0].parseLine! };
+    }
+
+    it('binds the native session and publishes its stopped answer after usage', async () => {
+      const { execution, parse } = await batch();
+      expect(execution.sessionId).toBeUndefined();
+      expect(parse(row('step_start'))).toEqual([{ type: 'session', sessionId: 'ses_one' }]);
+      expect(execution.sessionId).toBe('ses_one');
+      expect(parse(row('text', { text: '41' }))).toEqual([{ type: 'text', text: '41' }]);
+      expect(parse(row('step_finish', { reason: 'stop', tokens: { input: 636, output: 119 } }))).toEqual([
+        { type: 'usage', usage: { inputTokens: 636, outputTokens: 119, totalTokens: 755 } }, { type: 'result', result: '41' }]);
+      await expect(p.restoreSession()).rejects.toThrow(/resume/);
     });
 
-    it('captures the session id from step_start', () => {
-      const line = JSON.stringify({ type: 'step_start', sessionID: 'ses_ec4e', part: { type: 'step-start' } });
-      const events = p.parseLine(line);
-      expect(events[0]).toEqual({ type: 'session', sessionId: 'ses_ec4e' });
+    it('isolates executions and excludes unrelated, intermediate and failed steps', async () => {
+      const { parse } = await batch();
+      const other = await batch();
+      parse(row('step_start'));
+      parse(row('text', { text: 'intermediate' }));
+      expect(other.parse(row('step_finish', { reason: 'stop' }))).toEqual([]);
+      expect(parse(row('step_finish', { reason: 'stop' }, 'wrong'))).toEqual([]);
+      expect(parse(row('step_finish', { reason: 'tool-calls', tokens: { input: 1 } }))).toEqual([]);
+      parse(row('step_start'));
+      expect(parse(row('text', { text: 'mixed', sessionID: 'ses_other' }))).toEqual([]);
+      expect(parse(row('step_finish', { reason: 'length' }))).toEqual([]);
+      parse(row('step_start'));
+      parse(row('text', { text: 'discard' }));
+      expect(parse(JSON.stringify({ type: 'error' }))[0].type).toBe('error');
+      expect(parse(row('step_finish', { reason: 'stop' }))).toEqual([]);
+      expect(parse('plain output')).toEqual([{ type: 'text', text: 'plain output' }]);
     });
 
-    it('exposes completion text to the batch signal reader', () => {
-      const text = '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>';
-      expect(p.parseLine(JSON.stringify({ type: 'text', part: { text } })))
-        .toContainEqual({ type: 'result', result: text });
+    it('counts completed tool and answer messages once, including cached and reasoning tokens', async () => {
+      const { parse } = await batch();
+      const text = '{"type":"goal_complete","summary":"intermediate"}';
+      parse(row('step_start'));
+      parse(row('text', { text }));
+      expect(parse(row('tool_use', { type: 'tool', state: { output: text } }))).toEqual([]);
+      const finish = row('step_finish', { reason: 'tool-calls', tokens: { input: 811, output: 92 } });
+      expect(parse(finish)).toEqual([{ type: 'usage', usage: { inputTokens: 811, outputTokens: 92, totalTokens: 903 } }]);
+      expect(parse(finish)).toEqual([]);
+      parse(row('step_start', {}, 'final'));
+      parse(row('text', { text: '{"type":"goal_complete",' }, 'final'));
+      parse(row('text', { text: '"summary":"41"}' }, 'final'));
+      expect(parse(row('step_finish', { reason: 'stop', tokens: { input: 36, output: 77, reasoning: 3, cache: { read: 900, write: 3 } } }, 'final')))
+        .toEqual([{ type: 'usage', usage: { inputTokens: 1750, outputTokens: 172, totalTokens: 1922 } },
+          { type: 'result', result: '{"type":"goal_complete","summary":"41"}' }]);
+      expect(parse(row('step_start', {}, 'extra'))[0]?.type).toBe('error');
     });
 
-    it('falls back to text for non-JSON lines', () => {
-      expect(p.parseLine('plain output')[0].type).toBe('text');
+    it('does not publish text from a tool-bearing stop', async () => {
+      const { parse } = await batch();
+      parse(row('step_start'));
+      parse(row('text', { text: 'intermediate' }));
+      parse(row('tool_use', { type: 'tool' }));
+      expect(parse(row('step_finish', { reason: 'stop' }))).toEqual([]);
     });
   });
 

@@ -37,6 +37,8 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 同一安装包通过 `--http-receiver-restart`。监听器强制终止后，独立接收进程也以 `SIGKILL` 退出，新进程在原端口使用同一持久目录接收重投。原交付 ID 共到达两次，副作用目录的 inode 和修改时间保持一致。新交付 ID 到达一次并创建新目录。`--http-receiver` 和 `--idempotent` 对照均通过。这次验证覆盖同主机进程故障恢复。[接收端重启回执](schedule-http-receiver-restart.receipt.json)
 
+macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 OpenTelemetry Collector 发送 OTLP/HTTP。授权场景收到两次 trace 和四次 metric 的 HTTP 200，Collector 解码了对应工单的 span、事件计数和耗时直方图。错误凭据使同样数量的请求返回 401，Collector 中没有该会话的数据。AFK 审计链保持有效，失败数与入口记录一致，两个场景的超时与丢弃数均为零。目标远端部署查询和压力下的丢弃仍待验。[复跑脚本](otlp-ingress.py) · [入口验收回执](otlp-ingress.receipt.json)
+
 同一安装包的本地审计重放通过 3 项。两项双仓门禁用例通过 `observe verify` 校验事件链，用 `observe replay --json` 重放，并和原运行视图核对工单、序列及状态。拒绝用例停在 `failed`，两个远端保持原引用。放行用例读回两个远端公布的提交，重放停在 `awaiting_human` 的 `merge:2`，与末事件一致。第三项独立检查核对失败事件绑定的验证证据。场景使用真实 Git 仓库、回环 Tracker 和脚本 Agent。将 `AFK_E2E_CLI_ENTRY` 指向仓库外安装的 `dist/index.js` 后，可运行 `pnpm exec vitest run tests/e2e/repository-verification-{batch,replay}.test.ts` 复验。同一安装包也复验了开发等待人工合并、冲突修复成功及成功复盘预览三个状态。参见 [W07 三套模板](../w07/README.md)。
 
 macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[复跑脚本](opencode-local-inference.py) · [安装包与结果回执](opencode-local-inference.receipt.json)

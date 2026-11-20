@@ -47,6 +47,21 @@ if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(bi
         usage: { input: 10, output: 4, cacheRead: 3, cacheWrite: 2 } } });
       emit({ type: 'agent_settled', aborted: false });
     }
+  } else if (binary === 'copilot') {
+    const sessionId = 'matrix-copilot-native';
+    const usageIndex = argv.indexOf('--usage-output-file');
+    if (usageIndex !== -1) {
+      writeFileSync(argv[usageIndex + 1], JSON.stringify({ modelMetrics: { local: { usage: { inputTokens: 15, outputTokens: 4 } } } }));
+    }
+    for (const event of [
+      { type: 'session.start', data: { sessionId, context: { cwd: process.env.MATRIX_NATIVE_CWD ?? process.cwd() } } },
+      { type: 'assistant.turn_start', data: {} },
+      { type: 'assistant.message', data: { content: result, toolRequests: [] } },
+    ]) {
+      json(event);
+      process.stdout.write('\n');
+    }
+    json({ type: 'result', sessionId, exitCode: 0 });
   } else if (binary === 'codex') json({ type: 'item.completed', item: { type: 'agent_message', text: result } });
   else if (binary === 'opencode') json({ type: 'text', part: { text: result } });
   else json({ type: 'result', result });

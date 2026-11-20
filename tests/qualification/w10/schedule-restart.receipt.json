@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "afk": "0.2.174",
+  "archiveSha256": "6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475",
+  "intervalMs": 4000,
+  "downtimeMs": 8000,
+  "scenarios": [
+    {
+      "stopSignal": "SIGTERM",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "e3ec208b71ab88b279ee47cc7970a7e42115a737cec2e2e5acd7cb8a09cedcc1",
+        "providerId": "trigger.schedule",
+        "status": "pending",
+        "attempts": 1,
+        "receivedAt": 1795149087140,
+        "nextAttemptAt": 1795149088144
+      },
+      "recovered": {
+        "deliveryId": "e3ec208b71ab88b279ee47cc7970a7e42115a737cec2e2e5acd7cb8a09cedcc1",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795149087140,
+        "nextAttemptAt": 1795149097599
+      },
+      "firstNewTick": {
+        "deliveryId": "bca85a86fa987e4e72922d235bc19693100d794ea767f523fd78461064c4d830",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795149099590,
+        "nextAttemptAt": 1795149100596
+      },
+      "observedSuccessfulActions": 2
+    },
+    {
+      "stopSignal": "SIGKILL",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "0aea4f9757790f0d6a626056b2e1681853263df14c5bc41e3bac609e03a24271",
+        "providerId": "trigger.schedule",
+        "status": "pending",
+        "attempts": 1,
+        "receivedAt": 1795149186934,
+        "nextAttemptAt": 1795149187937
+      },
+      "recovered": {
+        "deliveryId": "0aea4f9757790f0d6a626056b2e1681853263df14c5bc41e3bac609e03a24271",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795149186934,
+        "nextAttemptAt": 1795149197420
+      },
+      "firstNewTick": {
+        "deliveryId": "9fce70a614b479c7096e23b20d62fe2a270fc681d52420294c07b5043c5d2dc8",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795149199412,
+        "nextAttemptAt": 1795149200418
+      },
+      "observedSuccessfulActions": 2
+    }
+  ]
+}

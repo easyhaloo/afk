@@ -1,5 +1,6 @@
 import argparse
 import json
+import multiprocessing
 import os
 import re
 import secrets
@@ -9,10 +10,9 @@ import subprocess
 import tempfile
 import time
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from threading import Thread
 
 
 def wait_for(probe, timeout=15):
@@ -25,10 +25,7 @@ def wait_for(probe, timeout=15):
     raise AssertionError('Timed out waiting for scheduled delivery or listener')
 
 
-@contextmanager
-def http_receiver(effects):
-    attempts = Counter()
-
+def serve_http_receiver(effects, requests, port, ready):
     class Receiver(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -38,22 +35,38 @@ def http_receiver(effects):
             if self.path != '/deliveries' or not re.fullmatch(r'[a-f0-9]{64}', delivery_id):
                 self.send_error(400)
                 return
-            attempts[delivery_id] += 1
             (effects / delivery_id).mkdir(exist_ok=True)
+            with requests.open('a') as journal:
+                journal.write(delivery_id + '\n')
             self.send_response(204)
             self.end_headers()
 
-    with HTTPServer(('127.0.0.1', 0), Receiver) as server:
-        thread = Thread(target=server.serve_forever)
-        thread.start()
+    with HTTPServer(('127.0.0.1', port), Receiver) as server:
+        with ready:
+            ready.send(server.server_port)
+        server.serve_forever()
+
+
+@contextmanager
+def http_receiver(effects, requests, port=0):
+    spawn = multiprocessing.get_context('spawn')
+    parent, child = spawn.Pipe(duplex=False)
+    receiver = spawn.Process(target=serve_http_receiver, args=(effects, requests, port, child))
+    with parent, child:
+        receiver.start()
+        child.close()
         try:
-            yield f'http://127.0.0.1:{server.server_port}/deliveries', attempts
+            assert parent.poll(8), 'HTTP receiver did not announce readiness'
+            yield parent.recv(), receiver.pid
         finally:
-            server.shutdown()
-            thread.join()
+            if receiver.is_alive():
+                receiver.kill()
+            receiver.join(timeout=8)
+            assert receiver.exitcode == -signal.SIGKILL, receiver.exitcode
+            receiver.close()
 
 
-def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=None):
+def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=None, restart_receiver=None):
     target = root / 'target'
     effects = root / 'effects.txt'
     allow = root / 'allow-effect'
@@ -180,6 +193,10 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=
             wait_for(lambda: observed_effects() == pre_restart_effects)
             assert deliveries(url)[interrupted['deliveryId']]['status'] == 'processing'
     assert observed_effects() == pre_restart_effects
+    committed_effect = None
+    if restart_receiver:
+        committed_effect = (effects / interrupted['deliveryId']).stat()
+        restart_receiver(interrupted['deliveryId'])
 
     downtime = 2 * interval_ms / 1000
     time.sleep(downtime)
@@ -205,10 +222,15 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=
     final_effects = observed_effects()
     expected = sorted([recovered['deliveryId'], fresh['deliveryId']]) if idempotent else pre_restart_effects + [str(target)] * 2
     assert final_effects == expected
+    if committed_effect is not None:
+        replayed_effect = (effects / recovered['deliveryId']).stat()
+        assert (committed_effect.st_ino, committed_effect.st_mtime_ns) == (
+            replayed_effect.st_ino, replayed_effect.st_mtime_ns)
     return {'afk': version, 'stopSignal': stop.name, 'intervalMs': interval_ms, 'downtimeMs': int(downtime * 1000),
             'competingListenerRejected': True, 'beforeRestart': interrupted, 'recovered': recovered,
             'firstNewTick': fresh, 'observedSuccessfulActions': 2,
             'observedEffectsBeforeRestart': len(pre_restart_effects), 'observedEffectsTotal': len(final_effects),
+            **({'receiverPreservedOriginalEffect': True} if committed_effect is not None else {}),
             **({'receiverEffectIds': final_effects} if idempotent else {})}
 
 
@@ -221,16 +243,35 @@ if __name__ == '__main__':
     mode.add_argument('--after-effect', action='store_true')
     mode.add_argument('--idempotent', action='store_true')
     mode.add_argument('--http-receiver', action='store_true')
+    mode.add_argument('--http-receiver-restart', action='store_true')
     args = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='afk-schedule-restart.') as directory:
         afk = args.afk.resolve(strict=True)
         root = Path(directory).resolve()
-        if args.http_receiver:
-            with http_receiver(root / 'effects.txt') as (url, attempts):
-                receipt = qualify(afk, root, False, False, False, True, url)
+        if args.http_receiver or args.http_receiver_restart:
+            effects = root / 'effects.txt'
+            requests = root / 'receiver-requests.txt'
+            receiver_pids = []
+            with ExitStack() as processes:
+                port, original_pid = processes.enter_context(http_receiver(effects, requests))
+                receiver_pids.append(original_pid)
+
+                def restart_receiver(delivery_id):
+                    wait_for(lambda: requests.exists() and requests.read_text().splitlines() == [delivery_id])
+                    processes.close()
+                    resumed_port, resumed_pid = processes.enter_context(http_receiver(effects, requests, port))
+                    assert resumed_port == port and resumed_pid != original_pid
+                    receiver_pids.append(resumed_pid)
+
+                url = f'http://127.0.0.1:{port}/deliveries'
+                receipt = qualify(afk, root, False, False, False, True, url,
+                                  restart_receiver if args.http_receiver_restart else None)
+            attempts = Counter(requests.read_text().splitlines())
             assert attempts == {receipt['recovered']['deliveryId']: 2, receipt['firstNewTick']['deliveryId']: 1}, attempts
             receipt.update(receiverTransport='http-loopback', receiverRequests=dict(attempts))
+            if args.http_receiver_restart:
+                receipt.update(receiverPids=receiver_pids, receiverStopSignal='SIGKILL')
         else:
             receipt = qualify(afk, root, args.force, args.in_flight, args.after_effect, args.idempotent)
         print(json.dumps(receipt, indent=2))

@@ -15,6 +15,8 @@
 
 ## 核对行清单与历史用例
 
+2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
+
 2026-11-20 在真实 tmux 3.6a 上复现安装版 CLI 0.2.174 返回 `aborted` 后前台子进程仍在运行。tmux `-CC` 无法在 Node 管道中启动，报 `tcgetattr failed`。切换至 `-C` 后，仓库外安装的 macOS arm64 CLI 0.2.175 通过同一 PTY 断言。前台 Python 进程捕获 Ctrl-C，产物登记的 pane ID 与 tmux 一致，关闭后自有会话消失，活动资源归零，同一隔离服务器中的未登记会话仍存在。测试载荷为有界 Python 进程。归档 SHA-256 为 `e8df48c0a75817522627fe425984985c41125897b4a0384769d38e1e85058868`。
 
 同日使用 `bash tests/qualification/cli-upgrade.sh <0.2.174 归档目录> 0.2.174 <0.2.175 归档目录> 0.2.175` 完成 macOS arm64、Node 24.18.0 离线验收，退出码为 0。错误校验和被拒绝，原可执行链接保持有效。正常升级后，重装 0.2.174 恢复原链接和版本。各阶段的 `plugins.yml` 字节及 `plugin list --json` 结果一致，其中 OTLP 插件处于启用状态。0.2.174 归档 SHA-256 为 `6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475`。

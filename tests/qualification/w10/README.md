@@ -99,10 +99,12 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 
 `audit_cases` 的 I/N/S 加数字均为 `installedPassedCases` 键，`resultPath` 相对原验证工作树。`—` 表示原审计未列该行的安装用例。脚本逐行核对 case ID、索引状态及 `provider-matrix.json` 的 SHA-256。11 月 13 日的 Repository 接线结论由后续 [R] 更新。
 
+用 `uv run --no-project --with boto3==1.44.7 -- python tests/qualification/w10/object-storage-presigned.py <MinIO 可执行文件> <安装包内 artifacts.js 路径> --cli <安装后的 afk>` 复跑预签名上传。脚本使用 CLI 配置环境引用并发起 PUT，独立读回对象。省略 `--cli` 可单独验证 Runtime URL resolver。
+
 | 引用 | 相对定位 | 核对内容 |
 | --- | --- | --- |
 | [OIDC] | [脚本说明](oidc-keycloak.md) · [脱敏回执](oidc-keycloak.receipt.json) | 0.2.159 经 Keycloak 交换凭据后上传报告。显式撤销后，报告服务在令牌到期前 15 秒返回 401，随后新交换成功。另有禁用目标客户端以及自然到期的独立用例。 |
-| [PUT] | `python3 tests/qualification/w10/object-storage.py release/cli` | macOS Apache WebDAV 返回 201，重启后 GET 和磁盘 SHA-256 一致，覆盖返回 403 后原内容完整 |
+| [PUT] | `python3 tests/qualification/w10/object-storage.py release/cli` · [MinIO 脚本](object-storage-presigned.py) · [Runtime 回执](object-storage-presigned.receipt.json) · [CLI 回执](object-storage-presigned-cli.receipt.json) | Apache WebDAV 正常上传在重启后可读，拒绝覆盖后原内容完整。MinIO 上 0.2.180 Runtime 及 0.2.181 本地安装 CLI 均验证有效签名可上传，8 秒后返回 403。CLI 路径还核对输出和本地记录均无签名，独立读回 4,099 字节且摘要一致。 |
 | [SMTP] | `email-loopback.py`、`email-receipt.json` | 0.2.148 经 BusyBox sendmail 将测试邮件交给回环 SMTP；收端逐字节核对换行、点转义和信封地址 |
 | [ISSUE] | `issue-event.md`、`issue-event.receipt.json` | 本地 Gitea 直送三个签名事件；仅打开事件执行一次，重复投递复用原收据 |
 | [G] | `docs/architecture/plugins.zh.md` 的 Gmail OAuth 手工记录 | 2026-11-07 浏览器授权后 CLI 发信、Gmail API 接受、用户确认收到 |

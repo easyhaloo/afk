@@ -672,7 +672,8 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `credential.oidc` | HTTPS `issuer`, `clientId`, secret `assertion`, `tokenEndpoint?`, `timeoutMs?`; optional `exchange:{subjectToken,subjectTokenType,audience?,resource?}` with secret `subjectToken` |
 | `credential.enterprise` | Nonempty `values` map of secret references |
 | `artifact.test-report-local`, `artifact.evidence-bundle` | `root`; evidence-bundle factory wraps the builder as an `ArtifactSink`, mapping `put` to a one-record bundle's `create` |
-| `artifact.object-storage`, `artifact.report-platform` | `endpoint`; report platform also accepts secret `token?` |
+| `artifact.object-storage` | Either `endpoint` or a secret reference in `presignedUrl` |
+| `artifact.report-platform` | `endpoint` and optional secret `token` |
 | `repository.multi-repository` | Nonempty `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`, unique names; optional `managed: {workspaceRoot}` requires each repository's remote URL, base branch and canonical lease key |
 | `repository.remote-workspace`, `repository.special-git-backend` | Respectively `baseUrl` plus secret `token?`, or `backend`; optional `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` selects supported operations |
 | `repository.remote-workspace`, `repository.special-git-backend` for managed execution | Add `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`. The backend creates a linked Git worktree at `<workspaceRoot>/<name>@<runId>` on the canonical absolute shared mount. Supply its absolute Git common directory. Each name must match a lifecycle repository with an explicit source ref. Use the same repository claim store and canonical tracker lease key across workers. See [install and recover the mounted Git service](../../services/mounted-workspace/README.md). |
@@ -1165,6 +1166,8 @@ is truncated within that budget. The file is execution context, not an audit rec
 replacement for evidence classification and redaction.
 
 ### Secret references and trigger lifetime
+
+For an object storage PUT URL issued by your storage service, configure `artifact.object-storage` with `{"presignedUrl":{"env":"OBJECT_UPLOAD_URL"}}`. A credential-provider reference also works. Set the variable in the invoking process or let the credential provider supply the URL per upload. The URL targets one object key, and the artifact name does not change that key. Use HTTPS for remote storage. Plain HTTP is accepted on `127.0.0.1` and `::1` for local storage. The returned artifact reference contains the object URL without its signature query.
 
 Configured secret values use either an environment reference, for example
 `{"env":"PROVIDER_TOKEN"}`, or a credential reference such as

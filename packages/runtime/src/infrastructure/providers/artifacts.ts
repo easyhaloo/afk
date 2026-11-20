@@ -301,6 +301,7 @@ export interface ObjectStorageProviderOptions {
   readonly endpoint?: string;
   /** Returns a presigned/upload URL for the artifact. Takes precedence. */
   readonly resolveUrl?: (artifact: ArtifactDescriptor) => string | Promise<string>;
+  readonly presignedUrl?: OperationSecret;
 }
 
 /**
@@ -325,7 +326,9 @@ export class ObjectStorageProvider implements ArtifactSink {
     if (typeof artifact.mediaType !== 'string' || artifact.mediaType.length === 0) {
       throw new Error('artifact mediaType is required');
     }
-    const target = await this.resolveTarget(artifact);
+    const target = this.options.presignedUrl === undefined
+      ? await this.resolveTarget(artifact)
+      : await this.resolvePresignedTarget(this.options.presignedUrl, options);
     const response = await requestHttp(
       this.options.transport,
       target,
@@ -336,15 +339,17 @@ export class ObjectStorageProvider implements ArtifactSink {
       },
       options,
     );
-    const uri = await this.extractUri(response, target);
+    const uri = this.options.presignedUrl === undefined
+      ? await this.extractUri(response, target)
+      : artifactHttpUri(target);
     return { uri, name: artifact.name };
   }
 
   async health(): Promise<ProviderHealth> {
-    if (!this.options.endpoint && !this.options.resolveUrl) {
+    if (!this.options.endpoint && !this.options.resolveUrl && this.options.presignedUrl === undefined) {
       return { status: 'unavailable', message: 'object storage requires an endpoint or a presigned URL resolver' };
     }
-    if (!this.options.resolveUrl) {
+    if (!this.options.resolveUrl && this.options.presignedUrl === undefined) {
       try { artifactHttpUri(this.options.endpoint); } catch {
         return { status: 'unavailable', message: 'invalid object storage endpoint' };
       }
@@ -361,6 +366,19 @@ export class ObjectStorageProvider implements ArtifactSink {
       return `${base}/${encodeURIComponent(artifact.name)}`;
     }
     throw new Error('object storage requires an endpoint or a presigned URL resolver');
+  }
+
+  private async resolvePresignedTarget(source: OperationSecret, options?: ProviderOperationOptions): Promise<string> {
+    const value = await resolveOperationSecret(source, options);
+    try {
+      const target = new URL(value);
+      const localHttp = target.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(target.hostname);
+      if ((target.protocol === 'https:' || localHttp) && !target.username && !target.password
+        && !value.includes('#') && target.search && !/[\s\u0000-\u001f\u007f]/u.test(value)) return target.href;
+    } catch {
+      throw new Error('Invalid presigned upload URL');
+    }
+    throw new Error('Invalid presigned upload URL');
   }
 
   /**

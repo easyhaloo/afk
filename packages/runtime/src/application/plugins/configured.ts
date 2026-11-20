@@ -461,7 +461,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       };
       return capability(provider, { artifacts: [provider] });
     }),
-    'artifact.object-storage': define('artifact.provider', z.object({ endpoint: httpUrl }).strict(), config => {
+    'artifact.object-storage': defineOperation('artifact.provider', secret => z.union([
+      z.object({ endpoint: httpUrl }).strict(),
+      z.object({ presignedUrl: secret }).strict(),
+    ]), config => {
       const provider = new ObjectStorageProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),

@@ -530,7 +530,8 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `credential.oidc` | HTTPS `issuer`、`clientId`、secret `assertion`、`tokenEndpoint?`、`timeoutMs?`；可选 `exchange:{subjectToken,subjectTokenType,audience?,resource?}`，其中 `subjectToken` 是 secret |
 | `credential.enterprise` | 非空 `values` 映射，每个值为 secret 引用 |
 | `artifact.test-report-local`、`artifact.evidence-bundle` | `root`；evidence-bundle 工厂把 builder 包装成 `ArtifactSink`，`put` 调用单记录 bundle 的 `create` |
-| `artifact.object-storage`、`artifact.report-platform` | `endpoint`；报告平台另接受 secret `token?` |
+| `artifact.object-storage` | 二选一，`endpoint` 或 secret 引用 `presignedUrl` |
+| `artifact.report-platform` | `endpoint` 和可选 secret `token` |
 | `repository.multi-repository` | 非空 `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`，名称唯一；可选 `managed: {workspaceRoot}` 要求各仓库提供 remote URL、base branch 和规范 lease key |
 | `repository.remote-workspace`、`repository.special-git-backend` | 分别为 `baseUrl` 加 secret `token?`，或 `backend`；可选 `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` 选择支持的操作 |
 | `repository.remote-workspace`、`repository.special-git-backend` 受管执行 | 增加 `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`。`workspaceRoot` 使用共享挂载的规范绝对路径。后端在 `<workspaceRoot>/<name>@<runId>` 创建 Git 关联工作树，`gitDirectory` 指向 Git 公共目录的绝对路径。每个名称须对应声明了来源 ref 的生命周期仓库。多个执行器共用同一份租约存储和仓库对应的 Tracker 租约键。见[服务安装与恢复说明](../../services/mounted-workspace/README.md)。 |
@@ -913,6 +914,8 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 也不替代证据分类与脱敏。
 
 ### Secret 引用和 Trigger 生命周期
+
+对象存储服务签发 PUT URL 后，可为 `artifact.object-storage` 配置 `{"presignedUrl":{"env":"OBJECT_UPLOAD_URL"}}`，也可使用 Credential Provider 引用。在调用进程中注入环境变量，或由 Credential Provider 在每次上传时提供 URL。该 URL 指向固定对象键，产物名称不改变对象键。远程存储使用 HTTPS，本地存储可在 `127.0.0.1` 或 `::1` 使用 HTTP。返回的产物引用会移除 URL 中的签名查询参数。
 
 配置中的 secret 使用环境引用对象，例如 `{"env":"PROVIDER_TOKEN"}`，或 credential
 引用 `{"provider":"credential.enterprise","name":"deployment"}`，后者可带 `scope`。

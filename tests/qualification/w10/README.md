@@ -29,6 +29,12 @@
 
 同一归档的 W11 本地召回检查通过 30/30。设置 `AFK_E2E_CLI_ENTRY` 指向安装版，`AFK_E2E_OPENCODE_ENTRY` 指向本机 OpenCode 2.2.7，并运行 `pnpm exec vitest run --no-file-parallelism tests/e2e/w11/installed-{fact,lesson,skill,tool}.test.ts`。事实、流程、修复经验和工具经安装版 CLI 或 Runtime 验证，技能经离线 OpenCode 提示词适配器验证。五类各覆盖六条冻结用例。四个测试文件合计 31 项通过，包含一项工具授权检查。其余 9 项跳过。真实模型和正式业务收益测试仍使用独立的验收记录。
 
+2026-11-21，使用 [W07 同一 macOS arm64 0.2.183 本地归档](../w07/README.md)、Node 24.18.0 和 OpenCode 2.2.7 复跑该套件。30 条冻结召回断言及 1 条工具授权检查均通过，9 条需单独启用的用例跳过。技能仍使用离线提示适配器，技能或工具的新候选晋级需单独验收。
+
+提交 `732786ed` 的 [W07 macOS arm64 CI 归档](../w07/README.md) 复跑同一召回套件，4 个文件共通过 31 项，跳过 9 项，耗时 92.85 秒。30 条冻结断言和 1 条工具授权检查的适用范围与上次一致。
+
+同提交的 [CI 44804807080](https://github.com/easyhaloo/afk/actions/runs/44804807080) 通过，`source-coverage` 中 `report.json` 的 SHA-256 为 `1e8775c463c28847af3869a54728b5df5902332c6ef2c6ed6937bb62368b0512`。源码覆盖率为行及语句 90.19%、函数 86.99%、分支 88.83%，已通过各包基线。五个包的行覆盖率分别为 Core 97.75%、Application 97.68%、Workflow Graph 99.00%、Runtime 92.89%、CLI 71.49%。覆盖率采集范围为 Vitest worker。Desktop 单独通过类型检查、构建、测试及 107 项 Electron E2E。
+
 macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三种重启场景均通过。分别在交付为 `pending` 时以 `SIGTERM` 或 `SIGKILL` 停止监听器，以及在阻塞动作处于 `processing` 时以 `SIGKILL` 停止监听器。第二个监听器在首个监听器持有队列时被拒绝。停机 8 秒后，新监听器用原交付 ID 重试成功，再等待一个周期接收新事件。停机期间的两个周期跳过，每次队列共两条交付，成功动作各产生一次写入。执行中断发生在写入前，动作随 stdin 关闭而退出。使用 `python3 -B tests/qualification/w10/schedule-restart.py <安装版CLI绝对路径>` 复跑，另加 `--force` 或 `--in-flight` 测试两种强制终止场景。[安装版回执](schedule-restart.receipt.json)
 
 同一安装包以 `--after-effect` 复跑，在观察到外部文件已写入且交付仍为 `processing` 时强杀监听器。重启后原交付 ID 在第二次尝试变为 `delivered`，同一动作已写入两次。下一次正常触发再写入一次，最终两个交付 ID 对应三次写入。该结果核实队列的至少一次派发语义。外部动作若要求只生效一次，需要由接收方用稳定键实现幂等。[安装版回执](schedule-restart.receipt.json) · [队列协议](../../../docs/architecture/plugins.md)

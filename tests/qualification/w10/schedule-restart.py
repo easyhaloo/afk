@@ -103,7 +103,7 @@ def docker_http_receiver(state, image, port=0):
 
 
 def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=None, restart_receiver=None,
-            receiver_state=None):
+            receiver_state=None, ticks_after_restart=1):
     target = root / 'target'
     effects = (receiver_state or root) / 'effects.txt'
     allow = root / 'allow-effect'
@@ -254,10 +254,19 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=
         recovered = wait_for(lambda: completed(url, 1))[interrupted['deliveryId']]
         assert recovered['receivedAt'] == interrupted['receivedAt'] and recovered['attempts'] > interrupted['attempts']
         assert observed_effects() == (pre_restart_effects if idempotent else pre_restart_effects + [str(target)])
-        fresh, = [row for key, row in wait_for(lambda: completed(url, 2)).items() if key != interrupted['deliveryId']]
-        assert fresh['attempts'] == 1 and fresh['receivedAt'] - recovered['receivedAt'] >= downtime * 1000
+        fresh_ticks = []
+        previous_rows = {recovered['deliveryId']: recovered}
+        for receipt_count in range(2, ticks_after_restart + 2):
+            rows = wait_for(lambda: completed(url, receipt_count))
+            assert all(rows.get(key) == row for key, row in previous_rows.items()), rows
+            fresh, = [row for key, row in rows.items() if key not in previous_rows]
+            assert fresh['attempts'] == 1, fresh
+            fresh_ticks.append(fresh)
+            previous_rows = rows
+        assert fresh_ticks[0]['receivedAt'] - recovered['receivedAt'] >= downtime * 1000
     final_effects = observed_effects()
-    expected = sorted([recovered['deliveryId'], fresh['deliveryId']]) if idempotent else pre_restart_effects + [str(target)] * 2
+    successful_count = 1 + ticks_after_restart
+    expected = sorted(previous_rows) if idempotent else pre_restart_effects + [str(target)] * successful_count
     assert final_effects == expected
     if committed_effect is not None:
         replayed_effect = (effects / recovered['deliveryId']).stat()
@@ -265,8 +274,11 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=
             replayed_effect.st_ino, replayed_effect.st_mtime_ns)
     return {'afk': version, 'stopSignal': stop.name, 'intervalMs': interval_ms, 'downtimeMs': int(downtime * 1000),
             'competingListenerRejected': True, 'beforeRestart': interrupted, 'recovered': recovered,
-            'firstNewTick': fresh, 'observedSuccessfulActions': 2,
+            'firstNewTick': fresh_ticks[0], 'observedSuccessfulActions': successful_count,
             'observedEffectsBeforeRestart': len(pre_restart_effects), 'observedEffectsTotal': len(final_effects),
+            **({'observedNewTicks': fresh_ticks,
+                'newTickSpanMs': fresh_ticks[-1]['receivedAt'] - fresh_ticks[0]['receivedAt']}
+               if ticks_after_restart > 1 else {}),
             **({'receiverPreservedOriginalEffect': True} if committed_effect is not None else {}),
             **({'receiverEffectIds': final_effects} if idempotent else {})}
 
@@ -274,6 +286,8 @@ def qualify(afk, root, force, in_flight, after_effect, idempotent, receiver_url=
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('afk', type=Path)
+    parser.add_argument('--ticks-after-restart', type=int, default=1, metavar='1-99',
+                        help='Number of new scheduled deliveries to verify after recovering the original')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--force', action='store_true')
     mode.add_argument('--in-flight', action='store_true')
@@ -283,6 +297,8 @@ if __name__ == '__main__':
     mode.add_argument('--http-receiver-restart', action='store_true')
     mode.add_argument('--docker-http-receiver-restart', metavar='IMAGE')
     args = parser.parse_args()
+    if not 1 <= args.ticks_after_restart <= 99:
+        parser.error('--ticks-after-restart must be between 1 and 99')
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='afk-schedule-restart.') as directory:
         afk = args.afk.resolve(strict=True)
@@ -317,9 +333,12 @@ if __name__ == '__main__':
 
                 url = f'http://127.0.0.1:{port}/deliveries'
                 receipt = qualify(afk, root, False, False, False, True, url,
-                                  restart_receiver if args.http_receiver_restart or image else None, state)
+                                  restart_receiver if args.http_receiver_restart or image else None, state,
+                                  args.ticks_after_restart)
             attempts = Counter(requests.read_text().splitlines())
-            assert attempts == {receipt['recovered']['deliveryId']: 2, receipt['firstNewTick']['deliveryId']: 1}, attempts
+            expected_attempts = dict.fromkeys(receipt['receiverEffectIds'], 1)
+            expected_attempts[receipt['recovered']['deliveryId']] = 2
+            assert attempts == expected_attempts, attempts
             receipt.update(receiverTransport='http-loopback', receiverRequests=dict(attempts))
             if image:
                 receipt.update(receiverTransport='http-docker-published-port', receiverImage=receiver_image,
@@ -327,5 +346,6 @@ if __name__ == '__main__':
             elif args.http_receiver_restart:
                 receipt.update(receiverPids=receiver_ids, receiverStopSignal='SIGKILL')
         else:
-            receipt = qualify(afk, root, args.force, args.in_flight, args.after_effect, args.idempotent)
+            receipt = qualify(afk, root, args.force, args.in_flight, args.after_effect, args.idempotent,
+                              ticks_after_restart=args.ticks_after_restart)
         print(json.dumps(receipt, indent=2))

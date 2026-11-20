@@ -39,6 +39,8 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 同一安装包经 Docker 发布端口向 Linux VM 内的接收进程投递。`python3 -B schedule-restart.py <安装版CLI绝对路径> --docker-http-receiver-restart afk-sandbox-base:node22` 复用同一接收逻辑和持久目录，在旧交付已提交副作用且队列仍为 `processing` 时强杀监听器及第一个容器，再在原端口启动不同容器。旧 ID 收到两次且原目录 inode、修改时间保持一致，新 ID 到达一次并创建新目录。两个容器均以退出码 137 停止并移除，同机 `--http-receiver-restart` 对照通过。验证覆盖 macOS 宿主到 Linux VM，独立物理主机和目标部署长时运行待验。[Linux VM 接收端回执](schedule-linux-vm-receiver-restart.receipt.json)
 
+2026-11-21，从 Release CLI 运行 `44769511915` 下载 `da2a8fba` 的 macOS arm64 `0.2.180` 安装包。用 `--http-receiver-restart --ticks-after-restart 48` 强制重启同机监听器和独立 HTTP 接收进程。原交付在第二次尝试成功且副作用只生效一次。48 条新交付各生效一次，首末相隔 188.045 秒。[定时恢复回执](schedule-http-receiver-soak.receipt.json)的 SHA-256 为 `f31f46ea1100c1e9b00eebd586301e007d401e37f627e2f6709177d2ef8d3184`。同包通过 6 个仓库 E2E 文件的 18 项及本地报告和证据包审计，测试源码包含本次静态扫描负载调整。目标部署的跨主机长跑及 macOS x64 安装包复验仍待完成。
+
 macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 OpenTelemetry Collector 发送 OTLP/HTTP。授权场景收到两次 trace 和四次 metric 的 HTTP 200，Collector 解码了对应工单的 span、事件计数和耗时直方图。错误凭据使同样数量的请求返回 401，Collector 中没有该会话的数据。AFK 审计链保持有效，失败数与入口记录一致，两个场景的超时与丢弃数均为零。
 
 暂停隔离的 Collector 后，`run.requested` 和 `run.finished` 各有一次在途指标操作耗尽共享 5 秒时限。每条事件另有一次指标操作与两次追踪操作在启动前被丢弃。Nginx 只看到两次指标 POST，均记为客户端关闭连接（499）。解除暂停后，新工单的两次 trace 和四次 metric POST 均返回 200，审计计数恢复至正常值。四个场景的本地审计链均有效，两次独立复跑结果一致。目标远端的授权检索和实际负载仍待验。[复跑脚本](otlp-ingress.py) · [入口、超时与恢复回执](otlp-ingress.receipt.json)

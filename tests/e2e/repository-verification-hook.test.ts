@@ -66,7 +66,8 @@ it.skipIf(!entry).each(verificationCases)('audits $provider before repository pu
   try {
     const staticScan = provider === 'static-scan';
     const command = staticScan
-      ? [process.execPath, createRequire(import.meta.url).resolve('typescript/lib/tsc.js'), '--noEmit', '--strict', '--pretty', 'false', 'parcel.ts']
+      ? [process.execPath, createRequire(import.meta.url).resolve('typescript/lib/tsc.js'), '--noEmit', '--strict', '--pretty', 'false',
+        '--lib', 'ES5', '--skipLibCheck', 'parcel.ts']
       : ['/usr/bin/grep', '-Exq', passes ? 'applied (api|web)' : 'missing change', 'shared.txt'];
     const { cli, git, repositories, workItemId, manifest } = await prepareRepositoryRun(root, server.host, installation.binary, false, command, undefined, provider);
     const source = `export const parcelCount: number = ${passes ? '3' : '"three"'};`;

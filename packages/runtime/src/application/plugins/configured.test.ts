@@ -10,7 +10,7 @@ import { readPluginConfiguration } from './configuration.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import type { CredentialRef } from '../../plugin-sdk/capabilities.js';
 import { WebhookTriggerProvider, ScheduleTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider, TestReportProvider, ObjectStorageProvider, GoogleOAuthCredentialProvider } from '../../infrastructure/providers/index.js';
-import type { CommandRequest } from '../../infrastructure/providers/dependencies.js';
+import type { CommandRequest, FetchTransport } from '../../infrastructure/providers/dependencies.js';
 import { GitHubClient } from '../../infrastructure/github/client.js';
 import { GitLabClient } from '../../infrastructure/gitlab/index.js';
 import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.js';

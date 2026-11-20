@@ -80,7 +80,7 @@ def qualify(afk, root):
         def run(label, authorization):
             run_id = f'{label}-{marker}'
             service = f'installed-otlp-{run_id}'
-            settings.write_text(json.dumps({'endpoint': endpoint, 'serviceName': service,
+            settings.write_text(json.dumps({'endpoint': endpoint, 'serviceName': service, 'timeoutMs': 15_000,
                                             'headers': {'authorization': {'env': 'W10_INGRESS_AUTH'}}}))
             run_env = dict(env, W10_INGRESS_AUTH=f'Bearer {authorization}')
             execute(afk, 'plugin', 'configure', 'observability.otlp', '--builtin', '--file', settings,
@@ -102,12 +102,14 @@ def qualify(afk, root):
             assert sorted(deliveries) == ['run.finished', 'run.requested']
             return {'runId': run_id, 'serviceName': service, 'audit': result['integrity'], 'deliveries': deliveries}
 
+        def ingress_requests():
+            return Counter(line.removeprefix('POST ') for line in execute('docker', 'logs', ingress).splitlines()
+                           if line.startswith('POST /v1/'))
+
         allowed = run('allowed', token)
         denied = run('denied', secrets.token_hex(32))
-        ingress_logs = execute('docker', 'logs', ingress)
+        requests = ingress_requests()
         collector_logs = execute('docker', 'logs', collector)
-        requests = Counter(line.removeprefix('POST ') for line in ingress_logs.splitlines()
-                           if line.startswith('POST /v1/'))
         assert set(requests) == {f'/v1/{signal} {status}' for signal in ('traces', 'metrics') for status in (200, 401)}, requests
         def total(report, signal, count):
             return sum(event[signal][count] for event in report['deliveries'].values())
@@ -123,8 +125,28 @@ def qualify(afk, root):
                    'afk.run_events_total', 'run.event_persistence_ms']
         assert all(signal in collector_logs for signal in signals)
         assert denied['runId'] not in collector_logs and denied['serviceName'] not in collector_logs
+
+        execute('docker', 'pause', collector)
+        try:
+            stalled = run('stalled', token)
+            stalled_requests = ingress_requests() - requests
+            assert stalled_requests == Counter({'/v1/metrics 499': 2}), stalled_requests
+        finally:
+            execute('docker', 'unpause', collector)
+        for counts in stalled['deliveries'].values():
+            assert counts['metrics'] == {'succeeded': 0, 'failed': 0, 'timed_out': 1, 'dropped': 1, 'skipped': 0}, counts
+            assert counts['tracing'] == {'succeeded': 1, 'failed': 0, 'timed_out': 0, 'dropped': 2, 'skipped': 0}, counts
+
+        recovered = run('recovered', token)
+        recovered_requests = ingress_requests() - requests - stalled_requests
+        assert recovered_requests == Counter({'/v1/metrics 200': 4, '/v1/traces 200': 2}), recovered_requests
+        for event, counts in recovered['deliveries'].items():
+            assert counts == allowed['deliveries'][event], counts
+        assert recovered['runId'] in execute('docker', 'logs', collector)
         return {'afk': execute(afk, '--version', cwd=root, env=env), 'ingressRequests': dict(requests),
                 'allowed': allowed, 'denied': denied, 'collectorObservations': signals,
+                'stalled': stalled, 'stalledIngressRequests': dict(stalled_requests),
+                'recovered': recovered, 'recoveredIngressRequests': dict(recovered_requests),
                 'images': {image: execute('docker', 'image', 'inspect', '--format', '{{.Os}}/{{.Architecture}} {{.Id}}', image)
                            for image in (collector_image, ingress_image)}}
 

@@ -71,4 +71,16 @@ python3 tests/qualification/w10/agent-codex-resume-loopback.py .afk/resume-proof
 
 2026-11-20，使用校验通过的 macOS arm64 安装包（SHA-256 `6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475`）与 Codex CLI 0.169.0 复跑 `agent-codex.py` 的 `resume` 用例，通过 1/1。安装版运行器完成合成算术工单，预算表与原生线程均为 70,795 tokens。以该用量为上限重新进入同一工单时，工作流返回 `budget_exhausted`，新增线程为零，账本数值一致。
 
-同一次验收独立调用本地 app-server 执行对象恢复其快照，两轮保持同一原生线程。产品记录的两轮增量为 17,157 和 17,212 tokens，与原生记录的累计 34,369 tokens 一致。真实账户的同工单自动交接与续跑仍待验，已执行的工作流自动交接用例使用上一节的回环模型响应。
+同一次验收独立调用本地 app-server 执行对象恢复其快照，两轮保持同一原生线程。产品记录的两轮增量为 17,157 和 17,212 tokens，与原生记录的累计 34,369 tokens 一致。
+
+### 0.2.176 安装版真实账户自动交接
+
+2026-11-20 通过仓库外安装的 macOS arm64 CLI 与 Codex CLI 0.169.0 执行 `workflow-handoff`。合成工单的第一轮创建随机标记并跨过上下文门槛，续跑后验证标记并进入 `verification`。安装版审计记录两段用量 53,070 和 73,986，唯一新增的原生线程与工单账本均累计 127,056 tokens，账本记录一次交接。同工单以该用量为上限重入，审计返回 `budget_exhausted`，原生记录的文件列表和内容均保持一致。Tracker、Git 和任务输入均为隔离测试数据。
+
+首次只依赖对话历史的探测在同一原生线程记录两段用量，但工单停在 `blocked`。改用可独立核对的文件标记后通过。源码构建的回环对照也通过。真实交互模式的取消与清理仍单独验收。
+
+```sh
+python3 -B tests/qualification/w10/agent-codex.py "$RELEASE" "$out/workflow-handoff.json" workflow-handoff
+```
+
+[安装版验收回执](agent-codex-workflow-handoff.receipt.json)

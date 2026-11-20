@@ -7,6 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const [release, root, output, scenario, codexVersion] = process.argv.slice(2);
 const loopback = scenario === 'resume-loopback';
+const liveHandoff = scenario === 'workflow-handoff';
+const automaticHandoff = loopback || liveHandoff;
 const load = name => import(join(release, loopback ? 'packages/runtime/dist' : 'node_modules/@afk/runtime/dist', name + '.js'));
 const { WorkflowRunner } = await load('application/workflow-engine');
 const { createDefaultPluginRuntime } = await load('plugin-sdk/index');
@@ -18,9 +20,13 @@ git('-c', 'user.name=Fixture', '-c', 'user.email=qa@example.invalid', 'commit', 
 const branchName = 'feat/qual', workItemId = 'github:fixture/parcel#1', runId = randomUUID();
 const value = Math.floor(Math.random() * 9000) + 1000;
 writeFileSync('input.json', JSON.stringify({ quantities: [value, 13, 27] }));
+const completion = '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>';
 const goal = scenario === 'cancel' ? 'Run exactly one shell command: touch started && sleep 12 && touch late. Wait for it to finish.' : 'Read input.json. Write only the sum of its quantities as a decimal integer to total.txt.';
+const prompt = liveHandoff
+  ? `In the current directory, check whether handoff.txt exists. If it is absent, write ${value} to handoff.txt, reply only with ready for resume, and end this turn without reporting completion. If it already exists and contains ${value}, leave it unchanged and reply only with ${completion}. Use only local shell or file tools.`
+  : `/goal ${goal} Finish with ${completion}.`;
 const template = join(root, 'flow.yml');
-writeFileSync(template, `name: qualification\nversion: 1\nsteps:\n  - id: implement\n    kind: agent\n    role: implementer\n    prompt: |-\n      /goal ${goal} Finish with <goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>.\n  - id: queue\n    kind: system\n    action: queue-qa\n    dependsOn: [implement]\n`);
+writeFileSync(template, `name: qualification\nversion: 1\nsteps:\n  - id: implement\n    kind: agent\n    role: implementer\n    prompt: |-\n      ${prompt}\n  - id: queue\n    kind: system\n    action: queue-qa\n    dependsOn: [implement]\n`);
 const item = {id:'1', issueNumber:1, workItemId, providerRef:workItemId, title:goal, description:goal, kind:'task', state:'ready', executionMode:'afk', branchName, dependsOn:[], tags:[]};
 let queued = false;
 const providers = {
@@ -29,7 +35,7 @@ const providers = {
   branches:{createBranch:async()=>{git('checkout','-b',branchName); return {branchName,worktreePath:workspace};},cleanup:async()=>{}},
   changes:{findForBacklog:async()=>null},
 };
-const transport = loopback || ['qa','app-server','resume'].includes(scenario) ? 'app-server' : 'exec';
+const transport = automaticHandoff || ['qa','app-server','resume'].includes(scenario) ? 'app-server' : 'exec';
 const receipt = { afk:JSON.parse(readFileSync(join(release,loopback ? 'apps/cli/package.json' : 'release.json'))).version, codexVersion, scenario, transport, runId, workItemId };
 const controller = new AbortController();
 const poll = setInterval(()=>{if(scenario==='cancel' && existsSync('started') && !controller.signal.aborted) controller.abort(new Error('synthetic operator cancellation'));},50);
@@ -38,13 +44,15 @@ try {
   receipt.phase = 'readiness';
   const runtime = await prepareAgentRuntime(resolveCodexRuntime({cli:{transport},config:DEFAULT_CODEX_CONFIG}));
   const nativeFiles = () => readdirSync(join(process.env.CODEX_HOME,'sessions'), { recursive: true }).filter(name => name.endsWith('.jsonl'));
-  const readinessFiles = loopback ? nativeFiles() : [];
+  const readinessFiles = automaticHandoff && existsSync(join(process.env.CODEX_HOME, 'sessions')) ? nativeFiles() : [];
   receipt.phase = 'workflow';
   plugins = await createDefaultPluginRuntime({homeDir:process.env.HOME,workspaceRoot:workspace});
   const events = [];
   const { createPluginRunObserver } = await load('application/plugins/observability');
   const observer = createPluginRunObserver(plugins, process.env.AFK_EVENT_STORE_DIR);
-  const runner = new WorkflowRunner(providers,{plugins,agentRuntime:runtime,observer});
+  const { getWorkflowConfig } = await load('infrastructure/config/manager');
+  const runner = new WorkflowRunner(providers,{plugins,agentRuntime:runtime,observer,
+    ...(liveHandoff && { config: { ...getWorkflowConfig(), maxRetries: 0 } })});
   if(scenario==='failure') {
     assert.ok(process.env.QUAL_MODEL_AUTH);
     delete process.env.QUAL_MODEL_AUTH;
@@ -52,6 +60,7 @@ try {
   }
   const result = await runner.run({backlogId:'1',workItemId,session:runId,observationWorkItemId:workItemId,observationRunId:runId,
     ...(loopback && { contextHighTokens: 10 }),
+    ...(liveHandoff && { contextHighTokens: 1, maxTotalTokens: 250_000 }),
     targetBranch:branchName,baseBranch:'main',baseBranchExplicit:true,repoRoot:workspace,workspaceRoot:workspace,template,
     agentProvider:'codex',sandboxProvider:'local',executionMode:'batch',completionTimeoutMs:60000,hardTimeoutMs:90000,maxRetries:0,maxHandoffs:1,signal:controller.signal}).catch(error=>{
       const message=String(error.message);
@@ -80,9 +89,9 @@ try {
   const codes = receipt.classifications.map(failure => failure.code);
   const terminal = events.find(event => event.kind === 'run.finished');
   receipt.terminalOutcome = terminal?.outcome;
+  receipt.reasonCode = terminal?.reasonCode;
   if (scenario==='cancel' || scenario==='failure') {
     receipt.terminalCount = events.filter(event=>event.kind==='run.finished').length;
-    receipt.reasonCode = terminal?.reasonCode;
     receipt.qaStarted = events.some(event=>event.kind==='qa.started');
     assert.equal(receipt.terminalCount,1);
     assert.equal(receipt.qaStarted,false);
@@ -105,7 +114,7 @@ try {
     assert.equal(receipt.terminalOutcome,'cancelled');
     assert.equal(receipt.reasonCode,'user_cancelled');
     assert.deepEqual(codes,[]);
-  } else if (loopback) {
+  } else if (automaticHandoff) {
     const sessions = events.filter(event => event.kind === 'agent.session_recorded');
     const { BudgetStore } = await load('application/workflows/budget-store');
     const ledger = new BudgetStore(workspace, workItemId);
@@ -114,19 +123,31 @@ try {
     receipt.turnTokens = sessions.map(session => session.usage?.totalTokens);
     receipt.nativeThreads = files.length;
     receipt.budget = budget?.tokens;
-    assert.equal(result.success, true);
+    if (liveHandoff) {
+      receipt.markerMatches = existsSync('handoff.txt') && readFileSync('handoff.txt', 'utf8').trim() === String(value);
+    }
     assert.equal(sessions.length, 2);
-    assert.deepEqual(receipt.turnTokens, [12, 17]);
+    assert.ok(receipt.turnTokens.every(tokens => Number.isSafeInteger(tokens) && tokens > 0));
+    if (loopback) assert.deepEqual(receipt.turnTokens, [12, 17]);
     assert.equal(files.length, 1);
     assert.equal(sessions[0].sessionId, sessions[1].sessionId);
     assert.ok(files[0].endsWith(`${sessions[0].sessionId}.jsonl`));
     const rows = readFileSync(join(process.env.CODEX_HOME,'sessions',files[0]),'utf8').trim().split('\n').map(line => JSON.parse(line));
-    assert.equal(rows.findLast(row => row.payload?.info?.total_token_usage)?.payload.info.total_token_usage.total_tokens, 29);
-    assert.deepEqual(budget.sessions, { [sessions[0].sessionId]: 29 });
+    receipt.nativeTokens = rows.findLast(row => row.payload?.info?.total_token_usage)?.payload.info.total_token_usage.total_tokens;
+    const combined = receipt.turnTokens[0] + receipt.turnTokens[1];
+    assert.equal(receipt.nativeTokens, combined);
+    assert.deepEqual(budget.sessions, { [sessions[0].sessionId]: combined });
     assert.equal(budget.used, 1);
+    assert.equal(budget.tokens, combined);
+    receipt.handoffs = budget.used;
+    assert.equal(result.success, true);
+    if (liveHandoff) assert.equal(receipt.markerMatches, true);
+    assert.deepEqual(events.filter(event => event.kind === 'run.finished').map(event => event.outcome), ['succeeded']);
+    assert.equal(receipt.queueStep, true);
     assert.equal(item.state, 'verification');
     const { checkBudgetReentry } = await import('./agent-codex-resume.mjs');
-    await checkBudgetReentry({ runner, receipt, store, item, template, workspace, workItemId, branchName, ledger, transcripts: nativeFiles });
+    const transcripts = () => nativeFiles().sort().map(name => [name, readFileSync(join(process.env.CODEX_HOME, 'sessions', name), 'utf8')]);
+    await checkBudgetReentry({ runner, receipt, store, item, template, workspace, workItemId, branchName, ledger, transcripts });
   } else {
     assert.equal(result.success,true);receipt.expected=value+40;receipt.actual=Number(readFileSync('total.txt','utf8').trim());assert.equal(receipt.actual,receipt.expected);
     assert.match(receipt.sessionId,/^[0-9a-f-]{36}$/);

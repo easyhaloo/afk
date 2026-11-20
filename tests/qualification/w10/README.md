@@ -41,6 +41,8 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 2026-11-21，从 Release CLI 运行 `44769511915` 下载 `da2a8fba` 的 macOS arm64 `0.2.180` 安装包。用 `--http-receiver-restart --ticks-after-restart 48` 强制重启同机监听器和独立 HTTP 接收进程。原交付在第二次尝试成功且副作用只生效一次。48 条新交付各生效一次，首末相隔 188.045 秒。[定时恢复回执](schedule-http-receiver-soak.receipt.json)的 SHA-256 为 `f31f46ea1100c1e9b00eebd586301e007d401e37f627e2f6709177d2ef8d3184`。同包通过 6 个仓库 E2E 文件的 18 项及本地报告和证据包审计，测试源码包含本次静态扫描负载调整。目标部署的跨主机长跑及 macOS x64 安装包复验仍待完成。
 
+同一 `0.2.180` 安装包使用 `--docker-http-receiver-restart afk-sandbox-base:node22 --ticks-after-restart 64` 复跑。强制重启监听器及 Linux VM 接收容器后，原交付累计收到两次且副作用生效一次。随后 64 条新交付各生效一次，首末相隔 252.044 秒。总计 66 次 HTTP 请求、65 次副作用，两次接收用的容器均已移除。[Linux VM 连续投递回执](schedule-linux-vm-receiver-soak.receipt.json)的 SHA-256 为 `3c31b547a6d2f78c9decb250c77d50fcfefab23c3753d0469d48abe3aa347dc8`。独立物理主机和目标部署长时运行待验。
+
 macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 OpenTelemetry Collector 发送 OTLP/HTTP。授权场景收到两次 trace 和四次 metric 的 HTTP 200，Collector 解码了对应工单的 span、事件计数和耗时直方图。错误凭据使同样数量的请求返回 401，Collector 中没有该会话的数据。AFK 审计链保持有效，失败数与入口记录一致，两个场景的超时与丢弃数均为零。
 
 暂停隔离的 Collector 后，`run.requested` 和 `run.finished` 各有一次在途指标操作耗尽共享 5 秒时限。每条事件另有一次指标操作与两次追踪操作在启动前被丢弃。Nginx 只看到两次指标 POST，均记为客户端关闭连接（499）。解除暂停后，新工单的两次 trace 和四次 metric POST 均返回 200，审计计数恢复至正常值。四个场景的本地审计链均有效，两次独立复跑结果一致。目标远端的授权检索和实际负载仍待验。[复跑脚本](otlp-ingress.py) · [入口、超时与恢复回执](otlp-ingress.receipt.json)
@@ -61,7 +63,9 @@ macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环
 
 安装版 0.2.168 通过 `afk run` 在两个共享挂载仓库完成实施、验收检查和 QA，停在人工合并门。另一工单在实施发布后遇到一次 HTTP 409，随后 `afk qa` 使用新租约完成独立 QA。两组均从裸仓读回输出，并核对租约与工作树清理。该场景使用回环 HTTPS、合成 Tracker 和脚本 Agent。跨主机挂载和真实模型 QA 待验。[双仓工单回执](mounted-work-item.receipt.json)
 
-2026-11-20，Cursor CLI `2026.07.09-a3815c0` 的 `cursor-agent status --format json` 返回 `authenticated`。安装版 0.2.162 在空白项目经本地 Sandbox 调用 Cursor 后收到 `NON_ZERO_EXIT`（退出码 1）。在同一目录直接运行原生批处理也收到 `Authentication required`。重新执行 `cursor-agent login` 后，需用实际批处理回包验证账号可用。Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
+2026-11-20，Cursor CLI `2026.07.09-a3815c0` 的 `cursor-agent status --format json` 返回 `authenticated`。在空白 Git 仓库，安装版 0.2.162 和 0.2.180 均经本地 Sandbox 收到 `NON_ZERO_EXIT`（退出码 1）。0.2.180 复验成功关闭 Sandbox。直接运行原生只读批处理同样以退出码 1 返回 `Authentication required`。`cursor-agent login` 完成后，仍需核对安装版的实际回包和原生会话。[Cursor 复验回执](agent-cursor-180-auth.receipt.json)
+
+Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
 
 安装版 0.2.168 经 Local Sandbox、Pi 1.5.2 和临时 Ollama 服务运行 Qwen3.5-2B。Pi 正确回答随机算术题，AFK 会话 ID 与 Pi 原生记录一致，输入 513、输出 80、合计 593 token，工具调用为零。加 `--cancel` 可复验流式输出中的取消。同版本 macOS arm64 CI 发行包复验时，Pi 在关闭 Sandbox 前退出，关闭后原句柄返回 `404 SANDBOX_MISSING`。云端 `wiscode-aiproxy` 的独立请求曾返回 HTTP 402。[复跑脚本](pi-local-inference.py) · [推理回执](pi-local-inference.receipt.json) · [取消回执](pi-local-cancel.receipt.json) · [云端回执](agent-pi.receipt.json)
 

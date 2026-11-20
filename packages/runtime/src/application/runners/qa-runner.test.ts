@@ -405,12 +405,12 @@ describe('QARunner plugin publication policies', () => {
         if (state === 'wrong-branch') await git.checkoutLocalBranch('unreviewed');
         return pass;
       });
-      const runner = new QARunner(current.providers, config, {
+      const runner = new QARunner(current.providers, { ...config, qaTimeout: 30_000 }, {
         sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
       });
       const result = await runner.process('60');
       const shouldPublish = state === 'unchanged' || state === 'before-review';
-      expect(result.success).toBe(shouldPublish);
+      expect(result.success, result.summary).toBe(shouldPublish);
       expect(preparePush).toHaveBeenCalledOnce();
       expect(preparePush.mock.invocationCallOrder[0]).toBeLessThan(current.agentProvider.createExecution.mock.invocationCallOrder[0]);
       expect(current.changes.create).toHaveBeenCalledTimes(shouldPublish ? 1 : 0);
@@ -958,11 +958,14 @@ describe('QARunner execution boundary', () => {
             result: verdict === 'rework' ? 'FAIL' : 'PASS', summary: 'controlled QA result' } };
       });
       if (verdict === 'cleanup-failed') current.sandbox.close.mockRejectedValue(new Error('injected cleanup failure'));
-      const runner = new QARunner(current.providers, config, { plugins, projectRoot: root, sandboxProvider: current.sandboxProvider,
+      const runner = new QARunner(current.providers, { ...config, qaTimeout: 30_000 }, { plugins, projectRoot: root, sandboxProvider: current.sandboxProvider,
         agentProvider: current.agentProvider, executionMode: 'batch' });
       const runtimeRunId = `qa-60-${Date.now()}-runtime`;
       if (verdict === 'cleanup-failed') await expect(runner.process('60')).rejects.toThrow(/cleanup/);
-      else expect(await runner.process('60', { signal: cancellation.signal })).toMatchObject({ success: verdict === 'pass' });
+      else expect(await runner.process('60', { signal: cancellation.signal })).toMatchObject({
+        success: verdict === 'pass',
+        ...(verdict === 'cancelled' ? { summary: expect.stringContaining('controlled QA cancellation') } : {}),
+      });
       const receipts = store.contextReceipts({ scope, source: { runId: runtimeRunId, workItemId } });
       expect(receipts.filter(receipt => receipt.stage === 'selected')).toHaveLength(1);
       const source = receipts[0].source;

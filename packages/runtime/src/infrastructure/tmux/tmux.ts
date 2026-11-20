@@ -141,7 +141,9 @@ export class TmuxClient {
       await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
       return 'present';
     } catch (error) {
-      return /can't find session|no server running|error connecting to .*No such file or directory/i.test(String(error)) ? 'missing' : 'unknown';
+      const message = String(error).trimEnd();
+      if (message === 'Error: tmux command failed: no current target') return 'missing';
+      return /can't find session|no server running|error connecting to .*No such file or directory/i.test(message) ? 'missing' : 'unknown';
     }
   }
 

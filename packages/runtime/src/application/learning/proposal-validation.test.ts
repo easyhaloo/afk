@@ -669,23 +669,36 @@ describe('shared proposal candidate validation foundation', () => {
     const test = await fixture();
     const coordination = new SharedArrayBuffer(8);
     const state = new Int32Array(coordination);
+    const timeoutMs = mode === 'deadline' ? 20_000 : 5000;
+    if (mode === 'deadline') {
+      const now = performance.now.bind(performance);
+      vi.spyOn(performance, 'now').mockImplementation(() => now() + (Atomics.load(state, 1) === 2 ? timeoutMs : 0));
+    }
     const worker = new Worker(`const { parentPort, workerData } = require('node:worker_threads');
       const { DatabaseSync } = require('node:sqlite'); const fs = require('node:fs');
       const database = new DatabaseSync(workerData.file); const state = new Int32Array(workerData.coordination);
       parentPort.postMessage('ready'); Atomics.wait(state, 0, 0); database.exec('BEGIN IMMEDIATE');
-      Atomics.store(state, 1, 1); Atomics.notify(state, 1); Atomics.wait(state, 0, 1, workerData.delay);
+      Atomics.store(state, 1, 1); Atomics.notify(state, 1);
+      Atomics.wait(state, 0, 1); Atomics.wait(state, 0, 2, 150);
       if (workerData.revoke) { const value = JSON.parse(fs.readFileSync(workerData.stateFile)); value.authorization.allowed = false; fs.writeFileSync(workerData.stateFile, JSON.stringify(value)); }
-      database.exec('COMMIT'); database.close();`, { eval: true, workerData: { file: test.file, coordination, stateFile: test.stateFile, revoke: mode === 'revocation', delay: mode === 'deadline' ? 2700 : 150 } });
+      Atomics.store(state, 1, 2); database.exec('COMMIT'); database.close();`, { eval: true, workerData: { file: test.file, coordination, stateFile: test.stateFile, revoke: mode === 'revocation' } });
     cleanups.push(() => { void worker.terminate(); });
     await new Promise<void>((resolve, reject) => { worker.once('message', () => resolve()); worker.once('error', reject); });
     const record = test.store.recordValidation.bind(test.store);
-    vi.spyOn(test.store, 'recordValidation').mockImplementation((...args) => {
+    const commitGuardWriterStates: number[] = [];
+    vi.spyOn(test.store, 'recordValidation').mockImplementation((candidateId, version, receipt, guard) => {
       Atomics.store(state, 0, 1); Atomics.notify(state, 0);
-      expect(Atomics.wait(state, 1, 0, 1000)).not.toBe('timed-out');
-      return record(...args);
+      expect(Atomics.wait(state, 1, 0, 5000)).not.toBe('timed-out');
+      Atomics.store(state, 0, 2); Atomics.notify(state, 0);
+      return record(candidateId, version, receipt, () => {
+        commitGuardWriterStates.push(Atomics.load(state, 1));
+        guard?.();
+      });
     });
-    expect(await validate(test.input, test.dependencies, { timeoutMs: mode === 'deadline' ? 2500 : 5000 })).toEqual(blocked(mode === 'deadline' ? 'timed_out' : 'unauthorized'));
-    expect(test.store.recordValidation).toHaveBeenCalledOnce(); test.unchanged();
+    expect(await validate(test.input, test.dependencies, { timeoutMs })).toEqual(blocked(mode === 'deadline' ? 'timed_out' : 'unauthorized'));
+    expect(test.store.recordValidation).toHaveBeenCalledOnce();
+    expect(commitGuardWriterStates).toEqual([2]);
+    test.unchanged();
   });
 });
 

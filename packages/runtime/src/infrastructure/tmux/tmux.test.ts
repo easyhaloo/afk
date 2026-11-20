@@ -19,6 +19,19 @@ describe('normalizeTmuxSessionName', () => {
   });
 });
 
+describe('TmuxClient session status', () => {
+  it.each([
+    ['no current target\n', 'missing'],
+    ['error connecting to /tmp/tmux/default (Permission denied)\n', 'unknown'],
+  ])('classifies %j as %s', async (stderr, status) => {
+    const client = new TmuxClient();
+    vi.spyOn(client as unknown as { exec(args: string[]): Promise<string> }, 'exec')
+      .mockRejectedValue(new Error(`tmux command failed: ${stderr}`));
+
+    await expect(client.sessionStatus('afk-session')).resolves.toBe(status);
+  });
+});
+
 describe('TmuxClient with special-character session names', () => {
   const hasTmux = (() => {
     try { execFileSync('tmux', ['-V'], { stdio: 'pipe' }); return true; } catch { return false; }

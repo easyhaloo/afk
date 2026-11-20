@@ -17,6 +17,8 @@
 
 2026-11-20 使用 `9951888e` 构建的 macOS arm64 CLI 0.2.174，仓库外安装后通过模板套件 15/15（18.16 秒）。新增三个 `required` Hook 失败用例。开发与合并冲突修复在启动 Agent 和创建 MR 前退出。成功复盘在处理证据前退出，未创建提炼请求，原始事件文件逐字节保持一致。三次失败均返回退出码 1，事件链校验通过，终态为 `failed`。场景用本地脚本 Agent、回环 Tracker 和临时 Git 仓库。
 
+同一安装版复跑模板套件 15/15（19.55 秒）。可选 Hook 失败之后，三个受管运行仍推进到各自预期状态。`observe verify` 与 `observe replay --json` 分别核对序列和重放状态。开发到序号 22 的人工合并门 `merge:1`，冲突修复与成功复盘预览分别到序号 8、7 的 `succeeded`，均与原运行视图一致。
+
 2026-11-20 同一 CLI 安装包通过双向租约竞争。源码构建的 Desktop 通过 2/2。本地 macOS arm64 打包版 Desktop 0.1.0（产品源码 `e3af46bd`）解压至仓库外后同样通过 2/2。CLI 持有租约时，Desktop 工作器退出 1，Desktop 持久化 `failed`，竞争方没有执行日志或 Agent 启动记录，也没有发起 MR。Desktop 持有租约时，CLI 报告冲突。Desktop 失败后，CLI 显式重试，保全用户设置并推进到 `merge_ready`。测试核对 Electron `app.isPackaged` 和 ASAR 内的渲染页面。ZIP 为本地未签名产物，SHA-256 为 `14df162e2e356815dd7cd4b16592ec10e139dab9146e352e0e6da5051d3d2249`。另设 `AFK_E2E_DESKTOP_EXECUTABLE` 指向解压后的可执行文件即可复跑。
 
 同一 Desktop ZIP 通过 `playwright test learning-settings --grep packaged` 的 2/2 项。验证设置界面驱动本地 Wiki 发布、来源失效后的撤回，以及回环项目标识脱敏。该套件使用固定候选与本地 Tracker。

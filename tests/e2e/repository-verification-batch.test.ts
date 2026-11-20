@@ -63,9 +63,14 @@ it.skipIf(!entry).each(['reject-web', 'allow-both'] as const)('verifies both rep
     else await run;
     const runs = JSON.parse(await cli('observe', 'runs', '--json'));
     expect(runs).toHaveLength(1);
-    const integrity = JSON.parse(await cli('observe', 'verify', runs[0], '--json'));
+    const [runId] = runs;
+    const integrity = JSON.parse(await cli('observe', 'verify', runId, '--json'));
     expect(integrity.valid).toBe(true);
-    const receipts = await publicationReceipts(installation.runtime, root, runs[0], workItemId, command);
+    const observation = JSON.parse(await cli('observe', runId, '--json'));
+    const replayed = JSON.parse(await cli('observe', 'replay', runId, '--json'));
+    expect(replayed.state).toEqual(observation.state);
+    expect(replayed.state).toMatchObject({ sequence: integrity.lastSequence, run: { id: runId, workItemId } });
+    const receipts = await publicationReceipts(installation.runtime, root, runId, workItemId, command);
     const refs = [];
     for (const { name, bare, seed } of repositories) {
       const cwd = (await readFile(join(root, `${name}.path`), 'utf8')).trimEnd();
@@ -88,15 +93,19 @@ it.skipIf(!entry).each(['reject-web', 'allow-both'] as const)('verifies both rep
     }
     const publicationRequests = server.requests.filter(request => request.startsWith('POST') && /git-receive-pack|merge_requests$/.test(request));
     if (rejectWeb) {
+      expect(replayed.state).toMatchObject({ terminal: true, run: { status: 'failed' } });
+      expect(observation.events.at(-1)?.data).toMatchObject({ kind: 'run.finished', outcome: 'failed' });
       expect(firstPush).toBeUndefined();
       expect(publicationRequests).toEqual([]);
     } else {
-      expect(JSON.parse(await cli('observe', runs[0], '--json')).state.run.status).toBe('awaiting_human');
+      expect(replayed.state).toMatchObject({ terminal: false, run: { status: 'awaiting_human' }, humanGateId: 'merge:2' });
+      expect(observation.events.at(-1)?.data).toMatchObject({ kind: 'human_gate.opened', gateId: 'merge:2' });
       expect(publicationRequests.filter(request => request.endsWith('/merge_requests'))).toHaveLength(1);
     }
     if (process.env.AFK_E2E_KEEP_REPOSITORY === '1') {
-      await writeFile(join(root, 'receipt.json'), JSON.stringify({ installation, policy, workItemId, runId: runs[0],
-        integrity, receipts, checks: checks(), firstPush: firstPush ?? null, publicationRequests, refs }, null, 2));
+      await writeFile(join(root, 'receipt.json'), JSON.stringify({ installation, policy, workItemId, runId,
+        integrity, replayedState: replayed.state, lastEvent: observation.events.at(-1)?.data, receipts,
+        checks: checks(), firstPush: firstPush ?? null, publicationRequests, refs }, null, 2));
       console.info(`Batch verification receipt (${policy}): ${join(root, 'receipt.json')}`);
     }
   } finally {

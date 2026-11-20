@@ -52,6 +52,12 @@ export async function checkHookReceipt(root: string, cli: Cli, workItemId: strin
   expect(timeline).not.toContain(canary);
   const events: RunEvent[] = timeline.trim().split('\n').map(line => JSON.parse(line));
   expect(verification).toMatchObject({ valid: true, lastSequence: events.length, lastHash: events.at(-1)!.integrity.hash });
+  const observation = JSON.parse((await cli('observe', runId, '--root', eventRoot, '--json')).stdout);
+  const replayed = JSON.parse((await cli('observe', 'replay', runId, '--root', eventRoot, '--json')).stdout);
+  const awaitingHuman = template === 'issue-implementation';
+  expect(replayed.state).toEqual(observation.state);
+  expect(replayed.state).toMatchObject({ sequence: verification.lastSequence, terminal: !awaitingHuman,
+    run: { id: runId, workItemId, status: awaitingHuman ? 'awaiting_human' : 'succeeded' } });
   if (template !== 'merge-conflict-resolution') expect(events.map(event => event.data)).toContainEqual(
     expect.objectContaining({ kind: 'workflow.recorded', name: template }));
   expect(events.at(-1)?.data).toMatchObject(template === 'issue-implementation' ? { kind: 'human_gate.opened' }
@@ -64,5 +70,6 @@ export async function checkHookReceipt(root: string, cli: Cli, workItemId: strin
     expect(receipt.context.purpose ?? 'execution').toBe(purpose);
     expect(events.slice(receipt.sequence, receipts[index + 1]?.sequence).some(event => event.data.kind === milestones[index])).toBe(true);
   }
-  console.info(JSON.stringify({ template, workItemId, runId, purpose, milestones, receipts, verification, last: events.at(-1)?.data }));
+  console.info(JSON.stringify({ template, workItemId, runId, purpose, milestones, receipts, verification,
+    replayedState: replayed.state, last: events.at(-1)?.data }));
 }

@@ -7,21 +7,35 @@ type Cli = (...args: string[]) => Promise<{ stdout: string }>;
 const name = 'w07-optional';
 const canary = 'private-fixture-error-text';
 
-export async function installFailingHook(root: string, cli: Cli) {
-  const directory = join(root, name);
+export async function installFailingHook(root: string, cli: Cli, failureMode: 'best-effort' | 'required' = 'best-effort') {
+  const hookName = failureMode === 'required' ? 'w07-required' : name;
+  const directory = join(root, hookName);
   await mkdir(directory);
-  const manifest = { id: 'test.optional-hook', version: '1.0.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true, entry: 'index.js' };
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name, version: '1.0.0', type: 'module' }));
+  const manifest = { id: `test.${hookName}`, version: '1.0.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true, entry: 'index.js' };
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: hookName, version: '1.0.0', type: 'module' }));
   await writeFile(join(directory, 'plugin.json'), JSON.stringify(manifest));
   await writeFile(join(directory, 'index.js'), `import { appendFile } from 'node:fs/promises';
     export default { manifest: ${JSON.stringify(manifest)}, activate(context) {
-      context.registerLifecycle({ name: '${name}', purposes: ['execution', 'learning'], failureMode: 'best-effort',
+      context.registerLifecycle({ name: '${hookName}', purposes: ['execution', 'learning'], failureMode: '${failureMode}',
         async onBeforeAgent(ctx) {
           await appendFile(${JSON.stringify(join(root, 'hook.calls'))}, JSON.stringify(ctx.observation.context.runId) + '\\n');
           throw new Error('${canary}');
         } });
     } };`);
   await cli('plugin', 'install', directory);
+}
+
+export async function checkRequiredHookFailure(root: string, cli: Cli, workItemId: string, eventRoot = join(root, '.afk', 'events')) {
+  const calls = (await readFile(join(root, 'hook.calls'), 'utf8')).trim().split('\n');
+  expect(calls).toHaveLength(1);
+  const runId: string = JSON.parse(calls[0]!);
+  const verification = JSON.parse((await cli('observe', 'verify', runId, '--root', eventRoot, '--json')).stdout);
+  const timeline = await readFile(join(eventRoot, `${Buffer.from(runId).toString('base64url')}.jsonl`), 'utf8');
+  const events: RunEvent[] = timeline.trim().split('\n').map(line => JSON.parse(line));
+  expect(verification).toMatchObject({ valid: true, lastSequence: events.length, lastHash: events.at(-1)!.integrity.hash });
+  expect(events.every(event => event.context.runId === runId && event.context.workItemId === workItemId)).toBe(true);
+  expect(events.at(-1)?.data).toMatchObject({ kind: 'run.finished', outcome: 'failed' });
+  expect(events.some(event => ['agent.session_recorded', 'human_gate.opened', 'implementation.completed', 'qa.passed'].includes(event.data.kind))).toBe(false);
 }
 
 export async function checkHookReceipt(root: string, cli: Cli, workItemId: string,

@@ -119,9 +119,11 @@ echo '${completion}'
   }
 }
 
-export async function runRepositoryTemplate(entry: string, repair: boolean, withOptionalHook = false) {
-  const { checkHookReceipt, installFailingHook } = await import('./workflow-hook-receipt.fixture.js');
-  return withRepositoryFixture(repair, withOptionalHook, async ({ root, host, workItemId, env, requests }) => {
+export async function withRepositoryTemplate<Result>(entry: string, repair: boolean, failureMode: 'best-effort' | 'required' | undefined,
+  inspect: (output: { result: { code: number; stdout: string; stderr: string }; requests: string[]; root: string; workItemId: string;
+    cli: (...commands: string[]) => Promise<{ stdout: string }> }) => Promise<Result>) {
+  const { installFailingHook } = await import('./workflow-hook-receipt.fixture.js');
+  return withRepositoryFixture(repair, failureMode !== undefined, async ({ root, host, workItemId, env, requests }) => {
     const args = repair ? ['qa', '--mode', 'batch'] : ['run', '--template', 'issue-implementation', '--execution-mode', 'batch', '--hard-timeout', '10000'];
     if (repair) {
       const manifest = join(root, 'execution-manifest.json');
@@ -132,9 +134,16 @@ export async function runRepositoryTemplate(entry: string, repair: boolean, with
       args.push('--execution-manifest', manifest);
     }
     const cli = (...commands: string[]) => execute(process.execPath, [entry, ...commands], { cwd: root, env, timeout: 15_000 });
-    if (withOptionalHook) await installFailingHook(root, cli);
+    if (failureMode) await installFailingHook(root, cli, failureMode);
     const result = await execute(process.execPath, [entry, ...args, '--agent', 'claude-code', '--backlog-id', workItemId],
       { cwd: root, env, timeout: 20_000 }).then(output => ({ ...output, code: 0 }), error => ({ code: error.code, stdout: error.stdout, stderr: error.stderr }));
+    return inspect({ result, requests, root, workItemId, cli });
+  });
+}
+
+export async function runRepositoryTemplate(entry: string, repair: boolean, withOptionalHook = false) {
+  const { checkHookReceipt } = await import('./workflow-hook-receipt.fixture.js');
+  return withRepositoryTemplate(entry, repair, withOptionalHook ? 'best-effort' : undefined, async ({ root, result, requests, cli, workItemId }) => {
     const read = (name: string) => readFile(join(root, name), 'utf8');
     if (withOptionalHook) {
       if (result.code !== 0) throw new Error(`Template exited ${result.code}: ${result.stdout} ${result.stderr}`);

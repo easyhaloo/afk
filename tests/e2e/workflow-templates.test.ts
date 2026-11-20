@@ -10,8 +10,8 @@ import { page, wikiScript } from '../../packages/runtime/src/application/learnin
 import { CandidateStore } from '../../packages/runtime/src/application/learning/candidate-store.js';
 import { reconcileDistillationSources } from '../../packages/runtime/src/application/learning/intake.js';
 import { validateConfiguredLearningCandidate } from '../../packages/runtime/src/application/learning/validation-runtime.js';
-import { runRepositoryTemplate } from './workflow-templates.fixture.js';
-import { checkHookReceipt, installFailingHook } from './workflow-hook-receipt.fixture.js';
+import { runRepositoryTemplate, withRepositoryTemplate } from './workflow-templates.fixture.js';
+import { checkHookReceipt, checkRequiredHookFailure, installFailingHook } from './workflow-hook-receipt.fixture.js';
 
 const execute = promisify(execFile);
 const entry = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
@@ -64,6 +64,26 @@ it.concurrent.each(['issue-implementation', 'merge-conflict-resolution'])('%s co
   expect(verifiedContent.trim()).toBe('applied');
   expect(requests.filter(request => /^POST .*\/merge_requests$/.test(request))).toHaveLength(1);
   expect(requests.some(request => /\/merge_requests\/\d+\/merge$/.test(request))).toBe(false);
+});
+
+it.concurrent.each(['issue-implementation', 'merge-conflict-resolution'])('%s stops before launching an agent when a required hook fails', async template => {
+  await withRepositoryTemplate(entry, template === 'merge-conflict-resolution', 'required', async ({ root, cli, workItemId, result, requests }) => {
+    expect(result.code).toBe(1);
+    await expect(access(join(root, 'first-prompt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(requests.some(request => /^POST .*\/merge_requests$/.test(request))).toBe(false);
+    await checkRequiredHookFailure(root, cli, workItemId);
+  });
+});
+
+it('blocks a learning review before processing evidence when a required hook fails', async () => {
+  const { fixture: { root, events, workItemId, scope }, cli, review } = await setup('success');
+  const sourceRuns = await events.listRuns();
+  const sourceAudits = await Promise.all(sourceRuns.map(run => readFile(events.pathFor(run))));
+  await installFailingHook(root, cli, 'required');
+  await expect(review()).rejects.toMatchObject({ code: 1 });
+  await checkRequiredHookFailure(root, cli, workItemId, events.root);
+  expect(JSON.parse((await cli('experience', 'jobs', '--scope', scope, '--json')).stdout)).toEqual([]);
+  expect(await Promise.all(sourceRuns.map(run => readFile(events.pathFor(run))))).toEqual(sourceAudits);
 });
 
 it.each([

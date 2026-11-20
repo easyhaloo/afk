@@ -153,7 +153,7 @@ jobs:
           set -euo pipefail
           old_version=$(tar -xOzf "$BASELINE/$ASSET" afk/release.json | node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).version')
           bash tests/qualification/cli-upgrade.sh "$BASELINE" "$old_version" release/cli "$VERSION"
-      - name: Verify repository workflows and audit artifacts against the installed archive
+      - name: Verify repository workflows, workspace recovery and audit artifacts against the installed archive
         env:
           ASSET: afk-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -165,7 +165,7 @@ jobs:
             tests/e2e/repository-managed-local.test.ts tests/e2e/repository-managed-remote.test.ts \
             tests/e2e/repository-managed-command.test.ts \
             tests/e2e/repository-verification-hook.test.ts tests/e2e/repository-verification-batch.test.ts \
-            tests/e2e/repository-verification-replay.test.ts
+            tests/e2e/repository-verification-replay.test.ts tests/e2e/workspace-doctor-installed.test.ts
           node tests/qualification/w10/local-artifact-audit.mjs "$profile/bin/afk"
       - uses: actions/upload-artifact@v4
         with:

@@ -23,6 +23,8 @@
 
 同一 Desktop ZIP 通过 `playwright test learning-settings --grep packaged` 的 2/2 项。验证设置界面驱动本地 Wiki 发布、来源失效后的撤回，以及回环项目标识脱敏。该套件使用固定候选与本地 Tracker。
 
+2026-11-21，使用 Release CLI 运行 `44782222425` 构建的 macOS arm64 CLI `0.2.181` 复跑同一模板套件。归档 SHA-256 为 `8f94971f3cc0730aa5c7b62267b0feab7e1be688e8014830ecf962f952342df2`。首次安装在仓库内，测试配置拒绝该路径。将同一归档安装到仓库外后，套件 **15/15** 通过（20.83 秒），覆盖三个模板的必需 Hook 阻断、可选 Hook 留痕及审计回放。场景使用本地脚本 Agent、回环 Tracker 和临时 Git 仓库。
+
 以下命令复现最初的 0.2.162 验收，在 `c220e380` 的独立工作树根目录运行。原环境为 Node 24.18.0、pnpm 12.5.1，需 Git、Python 3、`rg`、可启动 Electron 的桌面会话及已缓存的依赖和 Electron 二进制。两个套件均使用同一个仓库外安装入口。临时目录中的日志和 Playwright JSON 附件含本机标识，仅在本地查阅。
 
 ```sh

@@ -39,9 +39,15 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 同一安装包经 Docker 发布端口向 Linux VM 内的接收进程投递。`python3 -B schedule-restart.py <安装版CLI绝对路径> --docker-http-receiver-restart afk-sandbox-base:node22` 复用同一接收逻辑和持久目录，在旧交付已提交副作用且队列仍为 `processing` 时强杀监听器及第一个容器，再在原端口启动不同容器。旧 ID 收到两次且原目录 inode、修改时间保持一致，新 ID 到达一次并创建新目录。两个容器均以退出码 137 停止并移除，同机 `--http-receiver-restart` 对照通过。验证覆盖 macOS 宿主到 Linux VM，独立物理主机和目标部署长时运行待验。[Linux VM 接收端回执](schedule-linux-vm-receiver-restart.receipt.json)
 
-2026-11-21，从 Release CLI 运行 `44769511915` 下载 `da2a8fba` 的 macOS arm64 `0.2.180` 安装包。用 `--http-receiver-restart --ticks-after-restart 48` 强制重启同机监听器和独立 HTTP 接收进程。原交付在第二次尝试成功且副作用只生效一次。48 条新交付各生效一次，首末相隔 188.045 秒。[定时恢复回执](schedule-http-receiver-soak.receipt.json)的 SHA-256 为 `f31f46ea1100c1e9b00eebd586301e007d401e37f627e2f6709177d2ef8d3184`。同包通过 6 个仓库 E2E 文件的 18 项及本地报告和证据包审计，测试源码包含本次静态扫描负载调整。目标部署的跨主机长跑及 macOS x64 安装包复验仍待完成。
+2026-11-21，从 Release CLI 运行 `44769511915` 下载 `da2a8fba` 的 macOS arm64 `0.2.180` 安装包。用 `--http-receiver-restart --ticks-after-restart 48` 强制重启同机监听器和独立 HTTP 接收进程。原交付在第二次尝试成功且副作用只生效一次。48 条新交付各生效一次，首末相隔 188.045 秒。[定时恢复回执](schedule-http-receiver-soak.receipt.json)的 SHA-256 为 `f31f46ea1100c1e9b00eebd586301e007d401e37f627e2f6709177d2ef8d3184`。同包通过 6 个仓库 E2E 文件的 18 项及本地报告和证据包审计，测试源码包含本次静态扫描负载调整。目标部署的跨主机长跑仍待完成。
 
 同一 `0.2.180` 安装包使用 `--docker-http-receiver-restart afk-sandbox-base:node22 --ticks-after-restart 64` 复跑。强制重启监听器及 Linux VM 接收容器后，原交付累计收到两次且副作用生效一次。随后 64 条新交付各生效一次，首末相隔 252.044 秒。总计 66 次 HTTP 请求、65 次副作用，两次接收用的容器均已移除。[Linux VM 连续投递回执](schedule-linux-vm-receiver-soak.receipt.json)的 SHA-256 为 `3c31b547a6d2f78c9decb250c77d50fcfefab23c3753d0469d48abe3aa347dc8`。独立物理主机和目标部署长时运行待验。
+
+2026-11-21，从 Release CLI 运行 `44773404254` 安装提交 `2231a1cb` 的 macOS x64 `0.2.180` 包，SHA-256 为 `fa55a78a5a15d66f397fc4c525366e9fc3a6847be874cd0ca692bd7ca2aa3f09`。在 Apple Silicon 上用 Rosetta 和经校验的 Node `v24.18.0`（`process.arch` 为 `x64`）运行 `--http-receiver-restart --ticks-after-restart 48`。强制重启监听器和独立回环 HTTP 接收进程后，旧交付第二次尝试成功，原副作用保持不变。随后 48 次新交付各生效一次，首末相隔 188.036 秒。总计 50 次 HTTP 请求、49 次副作用。[x64 回执](schedule-darwin-x64-receiver-soak.receipt.json)的 SHA-256 为 `45cb59089c14fae239ebd7702d600719e283cf37427c13273053c40da2de64c0`。独立 Intel 主机及目标部署的长时间运行待验收。
+
+2026-11-21，从 Release CLI 运行 `44773404254` 安装提交 `2231a1cb` 的 Linux arm64 `0.2.180` 包，SHA-256 为 `87a52ec171f350182525c51413c4c1732aca0a924c7d85a514ce36705e579746`。CLI 与独立 HTTP 接收进程均运行在禁用外网的 Docker Desktop Linux VM 容器中，镜像为 `sha256:eb5d9c60d047664130b3c88bb9d3ff77cf809b4a524ee05aa3ac898940332d39`，Node 为 `v22.23.4`。用 `--http-receiver-restart --ticks-after-restart 48` 强制重启监听器和接收进程。原交付在第二次尝试成功，原副作用保持不变。随后 48 次新交付各生效一次，首末相隔 188.114 秒。共 50 次 HTTP 请求、49 次副作用。[Linux arm64 回执](schedule-linux-arm64-receiver-soak.receipt.json)的 SHA-256 为 `64848f6391d5e7a0c897140dd808063945cd28c016f87b764cc18ddb8ccd33f6`。独立主机和目标部署仍待验收。
+
+2026-11-21，使用运行 `44782222425` 的 `f751e430` macOS arm64 `0.2.181` 归档，在 Node `v24.18.0` 下对独立回环接收进程复验同一场景。监听器与接收端均以 SIGKILL 停止后重启，原交付第二次尝试成功，48 条新交付各生效一次，首末相隔 188.019 秒。独立接收端共记录 50 次请求和 49 次副作用。[macOS arm64 回执](schedule-darwin-arm64-181.receipt.json)
 
 macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 OpenTelemetry Collector 发送 OTLP/HTTP。授权场景收到两次 trace 和四次 metric 的 HTTP 200，Collector 解码了对应工单的 span、事件计数和耗时直方图。错误凭据使同样数量的请求返回 401，Collector 中没有该会话的数据。AFK 审计链保持有效，失败数与入口记录一致，两个场景的超时与丢弃数均为零。
 
@@ -81,7 +87,9 @@ Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready
 
 另一次对照将 AFK 的 OTLP 地址直接指向 Prometheus 3.5.0。Prometheus 存入指标并返回 HTTP 200 空响应，AFK 要求接收端返回 OTLP JSON 确认。运行 `bf8fd597-8d9c-480b-bbca-5744c8d8fe8d` 的审计因此记录四次指标投递失败。部署时可使用本节验证过的 Collector 转发配置。
 
-Linux 桌面通知的安装验收通过 Docker 将 `notify-send` 的参数原样送入隔离的 X11 桌面。运行器确认 Dunst 显示一条通知、窗口处于可见状态、历史记录中的标题、正文和紧急程度正确。停止该桌面后，CLI 返回失败回执。macOS 和 Windows 的原生展示仍待验收。
+Linux 桌面通知的安装验收通过 Docker 将 `notify-send` 的参数原样送入隔离的 X11 桌面。运行器确认 Dunst 显示一条通知、窗口处于可见状态、历史记录中的标题、正文和紧急程度正确。停止该桌面后，CLI 返回失败回执。
+
+2026-11-21，在 macOS 15.2 arm64 上使用本地打包的 CLI `0.2.181` 和隔离配置运行 `plugin invoke notification.provider notification.desktop notify --input message.json --json`。真实 `/usr/bin/osascript` 仅执行一次，退出码为 0，标准错误为空。CLI 退出 0 并返回 `delivered: true`。macOS 横幅或通知中心条目以及 Windows 的原生展示仍待验收。[macOS 调用回执](desktop-notify-darwin.receipt.json)
 
 ```sh
 docker build -t w10-notifier-qual:local - <<'DOCKER'

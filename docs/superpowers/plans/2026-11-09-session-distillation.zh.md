@@ -2768,6 +2768,16 @@ Claude观察器故障透明、final flush及尾部收据修复已限定双审通
 
 更新后的 `0.2.182` 回收补丁通过 80 项运行时测试和 7 项 CLI 单测。macOS arm64 安装包的 SHA-256 为 `77fd35551b828f8da174c439d245f69637cf430501a0672ef8539f620c12a824`，在仓库外安装后通过两个 `doctor` 端到端用例。两种入口均保留过期但未关闭的执行占用。释放后，`--fix` 回收测试工作区并注销 Git worktree，将陈旧的活动记录以 `failed` 归档。回收后的盘点与回收报告均无诊断，命令返回退出码 0。旧 QA 工作区仍待恢复。
 
+提交 `bb78d3a1` 的 macOS arm64 CI 归档经 SHA-256 校验，在仓库外安装后通过 17 项端到端测试，包括 15 项工作流模板用例和 2 项工作区回收用例。同一提交的 CI `44790676100` 成功，Desktop 在独立作业中通过 107 项 Playwright E2E。安装归档及复跑范围见 [W07 验收记录](../../../tests/qualification/w07/README.md)。
+
+`44790676100` 的 `source-coverage` 产物记录行及语句覆盖率 90.17%、函数 86.95%、分支 88.82%。总覆盖率及 Core、Application、Workflow Graph、Runtime、CLI 五个包的门槛均通过，违规项为零。Desktop 覆盖率在该产物范围外。`report.json` 的 SHA-256 为 `bd1aca41b2d558d8db4fd3ebd33e53cee27b859ee174015c30893cdb7ab2b557`。
+
+Release CLI `44790689971` 在同一提交通过 macOS 和 Linux 的 x64、arm64 四平台验证。各平台均通过离线安装、从 `0.2.181` 升级到 `0.2.182`、拒绝错误校验和、保全配置、回滚和安装版仓库工作流、工作区回收及产物审计。回滚基线为 `44782222425`，发布步骤在仅验证模式中跳过。
+
+从同一 macOS arm64 归档在仓库外复跑 Release CLI 安装验证步骤，7 个测试文件共 20 项通过。`test-report-local` 和 `evidence-bundle` 的落盘摘要均与各自回执一致。
+
+同次 Linux x64 归档在独立的 `linux/amd64` 容器内通过安装版触发恢复。原交付收到两次并生效一次。两个进程经 SIGKILL 停止并重启后，48 条新交付各生效一次，首末相隔 188.138 秒。独立主机间的投递待验收。见 [Linux x64 回执](../../../tests/qualification/w10/schedule-linux-x64-182.receipt.json)。
+
 2026-11-19 对照 `w11-recall-v1` 冻结题集复核了历史安装包的第二消费者。五类资产各有六条，10 条应命中均命中，20 条应排除均排除。
 
 | 资产 | 消费者 CLI | 可追溯边界 |

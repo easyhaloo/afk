@@ -68,7 +68,7 @@ def qualify(afk, root):
                 with client.open(endpoint + '/ready', timeout=2) as response:
                     assert response.status == 200
                 break
-            except URLError:
+            except (URLError, ConnectionError, TimeoutError):
                 if attempt == 39:
                     raise
                 time.sleep(0.1)

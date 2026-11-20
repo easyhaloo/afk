@@ -2766,6 +2766,16 @@ On November 21, 2026 (Asia/Shanghai), GitHub Actions run `44779309112` succeeded
 
 The updated `0.2.182` reclamation patch passed 80 runtime tests and seven CLI command tests. The macOS arm64 archive, with SHA-256 `77fd35551b828f8da174c439d245f69637cf430501a0672ef8539f620c12a824`, passed both doctor E2E cases from an installation outside the repository. Both modes retained an expired, unclosed claim. After release, `--fix` reclaimed the test workspace, removed its Git worktree registration and archived the stale active record as `failed`. The post-reclamation inventory and reclamation report had no diagnostics, and the command exited 0. The prior QA workspace remains pending recovery.
 
+The macOS arm64 CI archive for `bb78d3a1` passed SHA-256 verification and 17 E2E tests from an installation outside the repository, covering 15 workflow template cases and two workspace reclamation cases. CI run `44790676100` succeeded for the same commit. Desktop passed 107 Playwright E2E tests in a separate job. The archive receipt and test scope are in the [W07 qualification record](../../../tests/qualification/w07/README.md).
+
+The `source-coverage` artifact for `44790676100` reports 90.17% line and statement coverage, 86.95% function coverage and 88.82% branch coverage. The overall threshold and thresholds for core, application, workflow-graph, runtime and CLI passed with zero violations. Desktop coverage is outside this artifact's scope. The SHA-256 of `report.json` is `bd1aca41b2d558d8db4fd3ebd33e53cee27b859ee174015c30893cdb7ab2b557`.
+
+Release CLI run `44790689971` verified the same commit on macOS and Linux, each on x64 and arm64. All four targets passed offline installation, upgrade from `0.2.181` to `0.2.182`, checksum rejection, configuration preservation, rollback, and installed repository workflows, workspace reclamation and artifact audits. Run `44782222425` supplied the rollback baseline. The workflow skipped publication in verify-only mode.
+
+An independent rerun of the Release CLI installation checks used that macOS arm64 archive outside the repository. All 20 tests across seven files passed. The files written by `test-report-local` and `evidence-bundle` matched their respective receipt digests.
+
+The same release's Linux x64 archive passed installed trigger recovery inside an isolated `linux/amd64` container. The original delivery was received twice and applied once. After SIGKILL and restart of both processes, 48 new deliveries each applied once over 188.138 seconds. Independent-host delivery remains open. See the [Linux x64 receipt](../../../tests/qualification/w10/schedule-linux-x64-182.receipt.json).
+
 On November 19, 2026, the `w11-recall-v1` audit checked historical installed releases against all six second-consumer cases for each of five asset types. All 10 expected hits and 20 expected exclusions matched.
 
 | Asset | Consumer CLI | Provenance |

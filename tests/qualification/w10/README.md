@@ -49,9 +49,13 @@ macOS arm64 仓库外安装版 `0.2.174` 每 4 秒触发一次验证命令。三
 
 2026-11-21，使用运行 `44782222425` 的 `f751e430` macOS arm64 `0.2.181` 归档，在 Node `v24.18.0` 下对独立回环接收进程复验同一场景。监听器与接收端均以 SIGKILL 停止后重启，原交付第二次尝试成功，48 条新交付各生效一次，首末相隔 188.019 秒。独立接收端共记录 50 次请求和 49 次副作用。[macOS arm64 回执](schedule-darwin-arm64-181.receipt.json)
 
+2026-11-21，使用 Release CLI `44790689971` 的 `bb78d3a1` Linux x64 `0.2.182` 归档，在隔离的 Docker Desktop Linux VM `linux/amd64` 容器中使用 Node `v22.23.5` 和 Python `3.11.2` 复验。监听器和独立 HTTP 接收进程均以 SIGKILL 停止后重启。接收端收到原交付 ID 两次，原副作用保持不变。48 条新交付各生效一次，首末相隔 188.138 秒。共 50 次 HTTP 请求、49 次副作用。独立主机间的持续投递待验收。[Linux x64 回执](schedule-linux-x64-182.receipt.json)
+
 macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 OpenTelemetry Collector 发送 OTLP/HTTP。授权场景收到两次 trace 和四次 metric 的 HTTP 200，Collector 解码了对应工单的 span、事件计数和耗时直方图。错误凭据使同样数量的请求返回 401，Collector 中没有该会话的数据。AFK 审计链保持有效，失败数与入口记录一致，两个场景的超时与丢弃数均为零。
 
 暂停隔离的 Collector 后，`run.requested` 和 `run.finished` 各有一次在途指标操作耗尽共享 5 秒时限。每条事件另有一次指标操作与两次追踪操作在启动前被丢弃。Nginx 只看到两次指标 POST，均记为客户端关闭连接（499）。解除暂停后，新工单的两次 trace 和四次 metric POST 均返回 200，审计计数恢复至正常值。四个场景的本地审计链均有效，两次独立复跑结果一致。目标远端的授权检索和实际负载仍待验。[复跑脚本](otlp-ingress.py) · [入口、超时与恢复回执](otlp-ingress.receipt.json)
+
+2026-11-21，使用 Release CLI `44790689971` 的 macOS arm64 `0.2.182` 安装包（提交 `bb78d3a1`、归档 SHA-256 `a28ec58e8a96babc5e8977d2c12f9e253ef9bad5c365f6172fe23ac50e8854de`）复验四个场景。首次探针在 Nginx 就绪前收到 `RemoteDisconnected`。就绪探针纳入有界重试后，授权和恢复各记录 2 次 trace、4 次 metric 成功，拒绝场景有 6 次 401 且 Collector 未收到该运行的数据，暂停场景有 2 次客户端断开。另一次复跑在首次就绪查询注入同样的断连，第二次查询成功，四个场景通过。两份回执保存在本地验收目录，SHA-256 分别为 `e017f3ceaad6db31a071a668c2b9a272dc43730eab0b66a8fd640fdc051eb5f2` 和 `4814ce9997a904ef2cf553741f5ba63fa941d0b2c7dbf177b81b7f3906533015`。目标远端读回仍待验收。
 
 同一安装包的本地审计重放通过 3 项。两项双仓门禁用例通过 `observe verify` 校验事件链，用 `observe replay --json` 重放，并和原运行视图核对工单、序列及状态。拒绝用例停在 `failed`，两个远端保持原引用。放行用例读回两个远端公布的提交，重放停在 `awaiting_human` 的 `merge:2`，与末事件一致。第三项独立检查核对失败事件绑定的验证证据。场景使用真实 Git 仓库、回环 Tracker 和脚本 Agent。将 `AFK_E2E_CLI_ENTRY` 指向仓库外安装的 `dist/index.js` 后，可运行 `pnpm exec vitest run tests/e2e/repository-verification-{batch,replay}.test.ts` 复验。同一安装包也复验了开发等待人工合并、冲突修复成功及成功复盘预览三个状态。参见 [W07 三套模板](../w07/README.md)。
 
@@ -90,6 +94,8 @@ Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready
 Linux 桌面通知的安装验收通过 Docker 将 `notify-send` 的参数原样送入隔离的 X11 桌面。运行器确认 Dunst 显示一条通知、窗口处于可见状态、历史记录中的标题、正文和紧急程度正确。停止该桌面后，CLI 返回失败回执。
 
 2026-11-21，在 macOS 15.2 arm64 上使用本地打包的 CLI `0.2.181` 和隔离配置运行 `plugin invoke notification.provider notification.desktop notify --input message.json --json`。真实 `/usr/bin/osascript` 仅执行一次，退出码为 0，标准错误为空。CLI 退出 0 并返回 `delivered: true`。macOS 横幅或通知中心条目以及 Windows 的原生展示仍待验收。[macOS 调用回执](desktop-notify-darwin.receipt.json)
+
+同日使用 Release CLI `44790689971` 的 macOS arm64 `0.2.182` 安装包复验。CLI 返回 `delivered: true`。主显示器右上角的 14 帧均未匹配本次随机标题与正文，采样结束后检查到桌面锁定。解锁后的展示验收仍开放。[macOS 展示采样回执](desktop-notify-darwin-182.receipt.json)
 
 ```sh
 docker build -t w10-notifier-qual:local - <<'DOCKER'

@@ -6,6 +6,8 @@ Installed AFK 0.2.158 queried both dedicated producer profiles for `github:w11/p
 
 The v2 freeze pins the scenario prompts, station, scoring and arm schedule from `6ed3e4e4b8ae59f24d24796c09b7f453925d6b27`. Both parameters remain scheduled for each of environment, repair and process. All three groups lack a release binding. Offline replay reported 18 `missing-publications` seats and six unmatched groups. The frozen formal envelope was 0 cents with a 75-cent seat ceiling. One matched sample needs 225 cents of reservations. This check used zero paid calls and reserved zero cents. All 48 historical release manifest entries passed checksum verification. Historical coverage is 12/18.
 
+The November 21 follow-up checked the archived environment and repair repeat plans. Each pair of plans set `old` to null and reused one verified experience ID for `new`. The surviving `wiki:seal-cutoff` publications describe address changes and cannot answer the staging-log task. The repair survey retained one committed `wiki:label-offset` edition and no independently verified predecessor. The subsequent process queue still replays to its archived report byte for byte and admits the process pair with zero reserved cents. Environment and repair each retain six seats awaiting a committed edition pair and its checker and predecessor receipts.
+
 ## Offline replay
 
 Pass the private evidence directory as `study`. These checks work on a relocated copy with Python 3 and `shasum`. The scoring black-box log is a separate synthetic regression.

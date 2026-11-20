@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-21",
+  "releaseRunId": 44790689971,
+  "gitCommit": "bb78d3a1fde25a096adbab215ab66048954592c0",
+  "archiveSha256": "a28ec58e8a96babc5e8977d2c12f9e253ef9bad5c365f6172fe23ac50e8854de",
+  "platform": "darwin-arm64",
+  "macOS": "15.2",
+  "version": "0.2.182",
+  "input": {
+    "title": "AFK Notification 917151",
+    "body": "Local display test for AFK"
+  },
+  "cli": { "delivered": true, "channel": "desktop" },
+  "observation": {
+    "method": "upper-right screen OCR",
+    "frameCount": 14,
+    "baselineMatched": false,
+    "matchedFrames": [],
+    "displayObserved": false,
+    "screenLockedAtFollowUp": true
+  }
+}

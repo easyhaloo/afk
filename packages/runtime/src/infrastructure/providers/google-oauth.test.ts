@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GMAIL_SEND_SCOPE, GoogleOAuthCredentialProvider } from './google-oauth.js';
 import { OAuthKeychainStore, type OAuthSecretStore } from './oauth-keychain.js';
-import type { CommandRequest } from './dependencies.js';
+import type { CommandRequest, FetchTransport } from './dependencies.js';
 
 const client = { installed: {
   client_id: 'synthetic.apps.googleusercontent.com', client_secret: 'SYNTHETIC_CLIENT_SECRET',
@@ -28,6 +28,82 @@ function memoryStore(initial?: string) {
 }
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+
+describe('Google passive diagnostics', () => {
+  it.each([
+    ['fresh', JSON.stringify(session), 'ok', undefined],
+    ['fresh beyond refresh window', JSON.stringify({ ...session, expiresAt: now + 60_001 }), 'ok', undefined],
+    ['missing', undefined, 'unavailable', /plugin auth login google/],
+    ['expired', JSON.stringify({ ...session, expiresAt: now }), 'degraded', /expired.*refreshable/i],
+    ['refresh due', JSON.stringify({ ...session, expiresAt: now + 60_000 }), 'degraded', /refresh/i],
+    ['missing scope', JSON.stringify({ ...session, scopes: ['openid', 'email'] }), 'degraded', /permission.*sign in/i],
+    ['malformed JSON', 'SYNTHETIC_RAW_RECORD', 'degraded', /record.*sign in/i],
+    ['malformed session', JSON.stringify({ ...session, refreshToken: '' }), 'degraded', /record.*sign in/i],
+  ] as const)('classifies %s without authorizing or mutating', async (_name, saved, status, action) => {
+    const store = memoryStore(saved);
+    const transport = vi.fn();
+    const openBrowser = vi.fn();
+    const directory = await mkdtemp(join(tmpdir(), 'google-passive-'));
+    try {
+      const provider = new GoogleOAuthCredentialProvider({ store, fetch: transport, openBrowser, now: () => now, homeDir: directory });
+      const health = await provider.health();
+      const diagnostics = await provider.doctor();
+      expect(health.status).toBe(status);
+      expect(diagnostics.every(finding => finding.ok)).toBe(status === 'ok');
+      if (action) expect(JSON.stringify({ health, diagnostics })).toMatch(action);
+      else expect(health.message).toMatch(/local credentials.*live.*not.*validated/i);
+      for (const secret of [session.email, session.subject, session.clientId, session.clientSecret, session.accessToken, session.refreshToken, 'SYNTHETIC_RAW_RECORD']) {
+        expect(JSON.stringify({ health, diagnostics })).not.toContain(secret);
+      }
+      expect(store.read).toHaveBeenCalledTimes(2);
+      expect(store.write).not.toHaveBeenCalled();
+      expect(store.remove).not.toHaveBeenCalled();
+      expect(transport).not.toHaveBeenCalled();
+      expect(openBrowser).not.toHaveBeenCalled();
+      expect(await readdir(directory)).toEqual([]);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('sanitizes unreadable storage and preserves cancellation', async () => {
+    const store = memoryStore();
+    store.read.mockRejectedValue(new Error(`SYNTHETIC_PRIVATE_ERROR ${JSON.stringify(session)}`));
+    const provider = new GoogleOAuthCredentialProvider({ store, now: () => now, fetch: vi.fn() });
+    expect(await provider.health()).toMatchObject({ status: 'degraded', message: expect.stringMatching(/storage.*unlock/i) });
+    const diagnostics = await provider.doctor();
+    expect(diagnostics).toEqual([{ check: 'storage', ok: false, detail: expect.stringMatching(/storage.*unlock/i) }]);
+    expect(JSON.stringify(diagnostics)).not.toContain('SYNTHETIC');
+    store.read.mockClear();
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled'));
+    await expect(provider.health({ signal: controller.signal })).rejects.toThrow('cancelled');
+    await expect(provider.doctor({ signal: controller.signal })).rejects.toThrow('cancelled');
+    expect(store.read).not.toHaveBeenCalled();
+  });
+
+  it('remains passive while the auth lock exists and accepts normalized scopes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'google-passive-lock-'));
+    try {
+      const store = memoryStore(JSON.stringify({ ...session, scopes: ['openid', 'email', GMAIL_SEND_SCOPE] }));
+      const auth = join(directory, '.afk', 'auth');
+      await mkdir(auth, { recursive: true });
+      const lock = join(auth, 'google-oauth.lock');
+      await writeFile(lock, 'SYNTHETIC_LOCK');
+      const provider = new GoogleOAuthCredentialProvider({ store, now: () => now, homeDir: directory, fetch: vi.fn() });
+      expect((await provider.health()).status).toBe('ok');
+      expect((await provider.doctor()).every(finding => finding.ok)).toBe(true);
+      expect(await readFile(lock, 'utf8')).toBe('SYNTHETIC_LOCK');
+      expect(await readdir(auth)).toEqual(['google-oauth.lock']);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('treats connected status as saved metadata even when the access token has expired', async () => {
+    const store = memoryStore(JSON.stringify({ ...session, expiresAt: now - 1 }));
+    const provider = new GoogleOAuthCredentialProvider({ store, now: () => now, fetch: vi.fn() });
+    expect(await provider.status()).toEqual({ connected: true, email: session.email, expiresAt: new Date(now - 1).toISOString() });
+    expect((await provider.health()).status).toBe('degraded');
+    expect(store.write).not.toHaveBeenCalled();
+  });
+});
 
 describe('Google browser OAuth', () => {
   let directory: string;
@@ -161,7 +237,7 @@ describe('Google browser OAuth', () => {
 
   it('reuses fresh tokens and refreshes once across concurrent provider instances', async () => {
     const store = memoryStore(JSON.stringify(session));
-    const transport = vi.fn(async () => json({ access_token: 'SYNTHETIC_ROTATED_ACCESS', refresh_token: 'SYNTHETIC_ROTATED_REFRESH', token_type: 'Bearer', expires_in: 3600 }));
+    const transport = vi.fn<Parameters<FetchTransport>, ReturnType<FetchTransport>>(async () => json({ access_token: 'SYNTHETIC_ROTATED_ACCESS', refresh_token: 'SYNTHETIC_ROTATED_REFRESH', token_type: 'Bearer', expires_in: 3600 }));
     const provider = new GoogleOAuthCredentialProvider({ store, fetch: transport, now: () => now });
     expect((await provider.resolve({ name: 'default' })).secret).toBe('SYNTHETIC_ACCESS');
     expect(transport).not.toHaveBeenCalled();
@@ -189,7 +265,7 @@ describe('Google browser OAuth', () => {
 
   it('revokes remotely before removing the local token and supports repeated logout', async () => {
     const store = memoryStore(JSON.stringify(session));
-    const transport = vi.fn(async () => new Response('', { status: 200 }));
+    const transport = vi.fn<Parameters<FetchTransport>, ReturnType<FetchTransport>>(async () => new Response('', { status: 200 }));
     const provider = new GoogleOAuthCredentialProvider({ store, fetch: transport });
     await provider.logout();
     await provider.logout();
@@ -253,7 +329,7 @@ describe('Google browser OAuth', () => {
 });
 
 describe('OAuth system keychain', () => {
-  it.each(['darwin', 'linux'])('passes secrets through stdin and verifies the saved value on %s', async os => {
+  it.each(['darwin', 'linux'] as const)('passes secrets through stdin and verifies the saved value on %s', async os => {
     const calls: CommandRequest[] = [];
     const stored = JSON.stringify(session);
     let encoded = '';

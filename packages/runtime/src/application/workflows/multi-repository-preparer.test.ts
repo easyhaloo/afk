@@ -8,12 +8,14 @@ import {
   acquireWorkspaceLock,
   assertRepositoryOrigin,
   cloneUrl,
+  defaultDependencies,
   MultiRepositoryPreparer,
   type MultiRepositoryPreparerDependencies,
   type RepositoryGitSnapshot,
   type WorkspaceLockDependencies,
 } from './multi-repository-preparer.js';
 import type { WorkflowRunRepository } from './run-request.js';
+import { RunResourceScope } from './resource-scope.js';
 
 function repository(overrides: Partial<WorkflowRunRepository> = {}): WorkflowRunRepository {
   return {
@@ -97,6 +99,74 @@ function lockStat(iso: string) {
 }
 
 describe('MultiRepositoryPreparer', () => {
+  it.each([['release', false], ['finish', false], ['release', true], ['finish', true]] as const)('retains owned native leases and retries only unconfirmed repository cleanup via %s (failed outcome retry=%s)', async (terminal, failedRetry) => {
+    const deps = dependencies();
+    const nativeRelease = vi.fn(async () => {});
+    deps.repositoryLeases = { acquire: vi.fn(async () => ({ heartbeat: vi.fn(async () => {}), release: nativeRelease })) };
+    const lock = await deps.lock.acquire('/workspace');
+    vi.mocked(deps.lock.acquire).mockClear();
+    const failure = new Error('owned restore unconfirmed');
+    vi.mocked(deps.git.restore).mockImplementation(async root => {
+      if (root.endsWith('/api')) throw failure;
+    });
+    const prepared = await new MultiRepositoryPreparer(deps).prepare([
+      repository(), repository({ projectKey: 'acme/web', repoRoot: '/workspace/repositories/web', primary: false }),
+    ], '/workspace', { claims: [], assertClosed: () => {} });
+    const stop = () => terminal === 'release' ? prepared.release() : prepared.finish({ status: 'success' });
+    await expect(stop()).rejects.toBe(failure);
+    expect(nativeRelease).not.toHaveBeenCalled();
+    expect(lock.release).not.toHaveBeenCalled();
+    expect(deps.git.restore).toHaveBeenCalledTimes(2);
+    vi.mocked(deps.git.restore).mockResolvedValue(undefined);
+    if (failedRetry) await prepared.finish({ status: 'failed' });
+    else await stop();
+    expect(deps.git.restore).toHaveBeenCalledTimes(3);
+    if (terminal === 'finish') expect(deps.git.finalize).toHaveBeenCalledTimes(2);
+    expect(nativeRelease).toHaveBeenCalledTimes(1);
+    expect(lock.release).toHaveBeenCalledTimes(1);
+    await prepared.release();
+    await prepared.finish({ status: 'failed' });
+    expect(deps.git.restore).toHaveBeenCalledTimes(3);
+    expect(nativeRelease).toHaveBeenCalledTimes(1);
+    expect(lock.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks direct prepare during retained execution ownership and releases only after the same scope closes it', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'preparer-retained-'));
+    vi.stubEnv('AFK_STATE_DIR', join(root, 'state'));
+    const repo = repository({ repoRoot: join(root, 'api') });
+    const deps = dependencies();
+    const release = vi.fn(async () => {});
+    deps.repositoryLeases = { acquire: vi.fn(async () => ({ heartbeat: vi.fn(async () => {}), release })) };
+    const preparer = new MultiRepositoryPreparer(deps);
+    const scope = new RunResourceScope({ repoRoot: root, baseBranch: 'main', ownership: { workspaceRoot: root, repositories: [repo], owner: 'owner-42' } });
+    const kill = vi.fn(async () => {});
+    kill.mockRejectedValueOnce(new Error('owned process still alive'));
+    try {
+      await scope.acquireOwnership();
+      const workspace = await preparer.prepare([repo], root, scope.cleanupOwnership);
+      scope.registerExecution({ kill });
+      scope.registerExternalResource(workspace);
+      await expect(scope.finish({ status: 'failed' })).rejects.toThrow('still alive');
+      await expect(workspace.finish({ status: 'failed' })).rejects.toThrow(/unclosed/);
+      await expect(workspace.release()).rejects.toThrow(/unclosed/);
+      expect(release).not.toHaveBeenCalled();
+      expect(deps.git.restore).not.toHaveBeenCalled();
+      await expect(preparer.prepare([repo], root)).rejects.toThrow(/quarantin/);
+      expect(deps.lock.acquire).toHaveBeenCalledTimes(1);
+      expect(deps.git.prepareWorkingBranch).toHaveBeenCalledTimes(1);
+      await scope.finish({ status: 'failed' });
+      expect(release).toHaveBeenCalledTimes(1);
+      const next = await preparer.prepare([repo], root);
+      await next.release();
+      expect(deps.lock.acquire).toHaveBeenCalledTimes(2);
+    } finally {
+      await scope.finish({ status: 'failed' });
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('builds GitLab clone URLs only from an explicit provider host', () => {
     expect(cloneUrl(repository({ platform: 'gitlab', projectKey: 'team.platform/subgroup/repo' })))
       .toBe('https://gitlab.com/team.platform/subgroup/repo.git');
@@ -896,6 +966,151 @@ describe('MultiRepositoryPreparer', () => {
     }
   });
 });
+
+describe('MultiRepositoryPreparer local Git publication', () => {
+  it.each([false, true])('pushes the reviewed HEAD unchanged on first and repeated publication (published=%s)', async published => {
+    const current = await publicationRepository(published);
+    try {
+      const deps = defaultDependencies();
+      await deps.git.prepareWorkingBranch(current.repoRoot, 'main', current.workingBranch);
+      await fs.writeFile(join(current.repoRoot, 'local-work.txt'), 'reviewed work\n');
+      await current.git.add('local-work.txt');
+      await current.git.commit('reviewed work');
+      const reviewedHead = (await current.git.revparse(['HEAD'])).trim();
+
+      for (const attempt of [1, 2]) {
+        await deps.git.finalize(current.repoRoot, current.workingBranch);
+        expect((await current.git.revparse(['HEAD'])).trim(), `publication ${attempt}`).toBe(reviewedHead);
+        expect((await current.remote.revparse([current.workingBranch])).trim()).toBe(reviewedHead);
+      }
+      await expect(current.remote.raw(['show', `${current.workingBranch}:local-work.txt`])).resolves.toBe('reviewed work\n');
+    } finally {
+      await fs.rm(current.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['ahead', 'diverged'] as const)('integrates remote %s during preparation and preserves local work before review', async state => {
+    const current = await publicationRepository();
+    try {
+      let localHead = (await current.git.revparse([current.workingBranch])).trim();
+      if (state === 'diverged') {
+        await current.git.checkout(current.workingBranch);
+        await fs.writeFile(join(current.repoRoot, 'local-work.txt'), 'unpublished local work\n');
+        await current.git.add('local-work.txt');
+        await current.git.commit('unpublished local work');
+        localHead = (await current.git.revparse(['HEAD'])).trim();
+        await current.git.checkout('main');
+      }
+      const remoteHead = await current.advanceRemote();
+      const deps = defaultDependencies();
+
+      await deps.git.prepareWorkingBranch(current.repoRoot, 'main', current.workingBranch);
+
+      const reviewedHead = (await current.git.revparse(['HEAD'])).trim();
+      expect(reviewedHead).not.toBe(localHead);
+      await expect(current.git.raw(['merge-base', '--is-ancestor', localHead, reviewedHead])).resolves.toBe('');
+      await expect(current.git.raw(['merge-base', '--is-ancestor', remoteHead, reviewedHead])).resolves.toBe('');
+      await expect(fs.readFile(join(current.repoRoot, 'remote-work.txt'), 'utf8')).resolves.toBe('remote work\n');
+      if (state === 'diverged') {
+        await expect(fs.readFile(join(current.repoRoot, 'local-work.txt'), 'utf8')).resolves.toBe('unpublished local work\n');
+      } else expect(reviewedHead).toBe(remoteHead);
+
+      await deps.git.finalize(current.repoRoot, current.workingBranch);
+      await deps.git.finalize(current.repoRoot, current.workingBranch);
+      expect((await current.git.revparse(['HEAD'])).trim()).toBe(reviewedHead);
+      expect((await current.remote.revparse([current.workingBranch])).trim()).toBe(reviewedHead);
+    } finally {
+      await fs.rm(current.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['ahead', 'diverged'] as const)('rejects remote %s after review without cleanup losing the reviewed HEAD or pending edits', async state => {
+    const current = await publicationRepository();
+    try {
+      if (state === 'diverged') {
+        await current.git.checkout(current.workingBranch);
+        await fs.writeFile(join(current.repoRoot, 'local-work.txt'), 'unpublished local work\n');
+        await current.git.add('local-work.txt');
+        await current.git.commit('unpublished local work');
+        await current.git.checkout('main');
+      }
+      const deps = defaultDependencies();
+      const removeTarget = vi.spyOn(deps.filesystem, 'removeTarget');
+      const restore = vi.spyOn(deps.git, 'restore');
+      const prepared = await new MultiRepositoryPreparer(deps).prepare([
+        repository({ repoRoot: current.repoRoot, workingBranch: current.workingBranch }),
+      ], current.root);
+      const reviewedHead = (await current.git.revparse(['HEAD'])).trim();
+      const remoteHead = await current.advanceRemote();
+      await fs.writeFile(join(current.repoRoot, 'base.txt'), 'pending tracked edit\n');
+      await current.git.add('base.txt');
+      await fs.writeFile(join(current.repoRoot, 'base.txt'), 'pending unstaged edit\n');
+      await fs.writeFile(join(current.repoRoot, 'scratch.txt'), 'pending untracked edit\n');
+      const pendingStatus = await current.git.raw(['status', '--porcelain=v1']);
+
+      await expect(prepared.finish({ status: 'success' })).rejects.toThrow(/rejected|failed to push/i);
+      await expect(prepared.finish({ status: 'success' })).rejects.toThrow(/rejected|failed to push/i);
+
+      expect(removeTarget).not.toHaveBeenCalled();
+      expect(restore).not.toHaveBeenCalled();
+      expect((await current.git.revparse(['HEAD'])).trim()).toBe(reviewedHead);
+      expect((await current.git.revparse([current.workingBranch])).trim()).toBe(reviewedHead);
+      expect((await current.remote.revparse([current.workingBranch])).trim()).toBe(remoteHead);
+      expect(await current.git.raw(['status', '--porcelain=v1'])).toBe(pendingStatus);
+      await expect(current.git.raw(['show', ':base.txt'])).resolves.toBe('pending tracked edit\n');
+      await expect(fs.readFile(join(current.repoRoot, 'base.txt'), 'utf8')).resolves.toBe('pending unstaged edit\n');
+      await expect(fs.readFile(join(current.repoRoot, 'scratch.txt'), 'utf8')).resolves.toBe('pending untracked edit\n');
+      await expect(fs.access(join(current.repoRoot, 'remote-work.txt'))).rejects.toThrow();
+      if (state === 'diverged') {
+        await expect(fs.readFile(join(current.repoRoot, 'local-work.txt'), 'utf8')).resolves.toBe('unpublished local work\n');
+        await expect(current.remote.raw(['show', `${current.workingBranch}:local-work.txt`])).rejects.toThrow();
+      }
+    } finally {
+      await fs.rm(current.root, { recursive: true, force: true });
+    }
+  });
+});
+
+async function publicationRepository(published = true) {
+  const root = await fs.mkdtemp(join(tmpdir(), 'afk-multi-publication-'));
+  const repoRoot = join(root, 'repositories', 'api');
+  const remoteRoot = join(root, 'remote.git');
+  const publisherRoot = join(root, 'publisher');
+  const workingBranch = 'afk/work-item-18';
+  await fs.mkdir(repoRoot, { recursive: true });
+  await fs.mkdir(remoteRoot);
+  const remote = simpleGit(remoteRoot);
+  await remote.init(true);
+  const git = simpleGit(repoRoot);
+  await git.init(['--initial-branch=main']);
+  await git.addConfig('user.name', 'AFK Test');
+  await git.addConfig('user.email', 'afk@example.test');
+  await fs.writeFile(join(repoRoot, 'base.txt'), 'baseline\n');
+  await git.add('base.txt');
+  await git.commit('baseline');
+  await git.addRemote('origin', remoteRoot);
+  await git.push('origin', 'main');
+  if (published) {
+    await git.checkoutLocalBranch(workingBranch);
+    await git.push('origin', workingBranch);
+    await git.checkout('main');
+  }
+  await configureLocalOrigin(repoRoot, remoteRoot, 'https://github.com/acme/api.git');
+  await simpleGit().clone(remoteRoot, publisherRoot, ['--branch', published ? workingBranch : 'main']);
+  const publisher = simpleGit(publisherRoot);
+  await publisher.addConfig('user.name', 'AFK Test');
+  await publisher.addConfig('user.email', 'afk@example.test');
+  return {
+    root, repoRoot, workingBranch, git, remote,
+    advanceRemote: async () => {
+      await fs.writeFile(join(publisherRoot, 'remote-work.txt'), 'remote work\n');
+      await publisher.add('remote-work.txt');
+      await publisher.commit('remote work');
+      await publisher.push('origin', workingBranch);
+      return (await publisher.revparse(['HEAD'])).trim();
+    },
+  };
+}
 
 async function configureLocalOrigin(repoRoot: string, remote: string, url: string): Promise<void> {
   const git = simpleGit(repoRoot);

@@ -4,6 +4,9 @@ import { WorkflowRunner } from '../workflow-engine.js';
 import type { RunObserver } from '../../observability/run-observer.js';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ObservationContext, RunEventData } from '@afk/core';
+
+type TelemetryArgs = [ObservationContext, Extract<RunEventData, { kind: 'agent.session_recorded' }>];
 
 /**
  * Tests for agent.session_recorded wiring in WorkflowRunner.
@@ -42,7 +45,7 @@ describe('agent.session_recorded wiring', () => {
   it('prefers result.usage over file read when result.usage is present', async () => {
     // result.usage is already normalized from stream (AC1).
     // recordAgentTelemetry must use it directly without triggering file I/O.
-    const record = vi.fn(async () => ({ lastSequence: 1 }));
+    const record = vi.fn<TelemetryArgs, Promise<{ lastSequence: number }>>(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
     const claim = vi.fn(async () => null);
 
@@ -99,7 +102,7 @@ describe('agent.session_recorded wiring', () => {
       },
     })].join('\n') + '\n');
 
-    const record = vi.fn(async () => ({ lastSequence: 1 }));
+    const record = vi.fn<TelemetryArgs, Promise<{ lastSequence: number }>>(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
     const claim = vi.fn(async () => null);
 
@@ -152,7 +155,7 @@ describe('agent.session_recorded wiring', () => {
       { type: 'item.completed', item: { id: 'call-1', type: 'command_execution', exit_code: 0 } },
     ].map(event => JSON.stringify(event)).join('\n'));
 
-    const record = vi.fn(async () => ({ lastSequence: 1 }));
+    const record = vi.fn<TelemetryArgs, Promise<{ lastSequence: number }>>(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
     const claim = vi.fn(async () => null);
 
@@ -195,8 +198,8 @@ describe('agent.session_recorded wiring', () => {
     expect(data.tools).toEqual([{ id: 'call-1', name: 'command_execution', result: 'succeeded', exitCode: 0 }]);
   });
 
-  it.each(['docker', 'podman'])('preserves native telemetry in %s without reading host transcripts', async sandboxProvider => {
-    const record = vi.fn(async () => ({ lastSequence: 1 }));
+  it.each(['docker', 'podman', 'remote-container'])('preserves native telemetry in %s without reading host transcripts', async sandboxProvider => {
+    const record = vi.fn<TelemetryArgs, Promise<{ lastSequence: number }>>(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
     const claim = vi.fn(async () => null);
 
@@ -244,7 +247,7 @@ describe('agent.session_recorded wiring', () => {
       { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'private command' } }] } },
       { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', is_error: true, content: 'private output' }] } },
     ].map(event => JSON.stringify(event)).join('\n'));
-    const record = vi.fn(async () => ({ lastSequence: 1 }));
+    const record = vi.fn<TelemetryArgs, Promise<{ lastSequence: number }>>(async () => ({ lastSequence: 1 }));
     const runner = new WorkflowRunner({} as ProviderBundle, {
       observer: { record } as unknown as RunObserver,
       agentProvider: { name: 'claude-code', capabilities: new Set() } as never,

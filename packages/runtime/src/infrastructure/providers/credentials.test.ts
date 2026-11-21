@@ -152,7 +152,7 @@ describe('credential providers', () => {
       controller.abort(new Error('cancel assertion'));
       return 'signed.jwt.assertion';
     } });
-    await expect(provider.resolve({ name: 'service' }, { signal: controller.signal })).rejects.toThrow('cancel assertion');
+    await expect(provider.resolve({ name: 'service' }, { signal: controller.signal })).rejects.toThrow('OIDC operation unavailable');
     expect(fetch).toHaveBeenCalledOnce();
   });
 
@@ -163,7 +163,7 @@ describe('credential providers', () => {
     const fetch = vi.fn(async () => json({ issuer, token_endpoint: endpoint }));
     const controller = new AbortController();
     controller.abort(new Error('stop'));
-    await expect(new OidcCredentialProvider({ issuer, clientId: 'id', assertion: 'jwt', fetch }).resolve({ name: 'service' }, { signal: controller.signal })).rejects.toThrow('stop');
+    await expect(new OidcCredentialProvider({ issuer, clientId: 'id', assertion: 'jwt', fetch }).resolve({ name: 'service' }, { signal: controller.signal })).rejects.toThrow('OIDC operation unavailable');
     expect(fetch).not.toHaveBeenCalled();
   });
 

@@ -1,0 +1,25 @@
+{
+  "id": "verification.playwright-managed",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "provides": [
+    "verification.provider"
+  ],
+  "trusted": true,
+  "entry": "index.mjs",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "execution": {
+        "type": "string",
+        "enum": [
+          "host-local"
+        ]
+      }
+    },
+    "required": [
+      "execution"
+    ],
+    "additionalProperties": false
+  }
+}

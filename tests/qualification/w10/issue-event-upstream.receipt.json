@@ -1,0 +1,123 @@
+{
+  "afk": "0.2.163",
+  "gitea": "gitea version 28.4.0 built with go1.27.4 : bindata, sqlite, sqlite_unlock_notify",
+  "repository": "qualifier/parcel",
+  "repositoryId": 1,
+  "issue": 1,
+  "label": "ready",
+  "hookId": 1,
+  "events": [
+    {
+      "action": "opened",
+      "sourceId": "348e2c9b-4fbd-4aa1-b28e-2d27fd42dbe3",
+      "bodySha256": "376c1cbb2c7d6e32106b418fbe08c0100fd663b76e4de0e910e9a6177869762b",
+      "accepted": {
+        "deliveryId": "a0e9433e8682194647d14096f34a594a45dc88f3e7aa3035b5e6eb0acf01facb",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795108039479,
+        "nextAttemptAt": 1795108039479,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "a0e9433e8682194647d14096f34a594a45dc88f3e7aa3035b5e6eb0acf01facb",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795108039479,
+        "nextAttemptAt": 1795108040527,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "label_updated",
+      "sourceId": "9c975000-ba2b-411d-847e-d766774991e2",
+      "bodySha256": "0a5e004d189837e03eae636472b4c00efadfd2501fda0cd1f67b9ec63a51886c",
+      "accepted": {
+        "deliveryId": "c2be288b5635da3899c27c9e3354834368aa1b60ef86e7b8067cb3486dc0247d",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795108039490,
+        "nextAttemptAt": 1795108039490,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "c2be288b5635da3899c27c9e3354834368aa1b60ef86e7b8067cb3486dc0247d",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795108039490,
+        "nextAttemptAt": 1795108040528,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "closed",
+      "sourceId": "b008887b-1977-453f-b087-3cdf0199f9a9",
+      "bodySha256": "4ee72661c0b60c034addcb152904040cfdb98e67bf10bc27695ff7c88eda8f42",
+      "accepted": {
+        "deliveryId": "010f8b749eadc6b9892f9f864414ed5426ff062a29a5aed5fdc70b027fbc4a84",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795108039652,
+        "nextAttemptAt": 1795108039652,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "010f8b749eadc6b9892f9f864414ed5426ff062a29a5aed5fdc70b027fbc4a84",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795108039652,
+        "nextAttemptAt": 1795108040653,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    }
+  ],
+  "deliveries": [
+    {
+      "deliveryId": "010f8b749eadc6b9892f9f864414ed5426ff062a29a5aed5fdc70b027fbc4a84",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108039652,
+      "nextAttemptAt": 1795108040653
+    },
+    {
+      "deliveryId": "c2be288b5635da3899c27c9e3354834368aa1b60ef86e7b8067cb3486dc0247d",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108039490,
+      "nextAttemptAt": 1795108040528
+    },
+    {
+      "deliveryId": "a0e9433e8682194647d14096f34a594a45dc88f3e7aa3035b5e6eb0acf01facb",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108039479,
+      "nextAttemptAt": 1795108040527
+    }
+  ],
+  "replayAfterListenerRestart": true,
+  "upstreamReplay": {
+    "sourceId": "7e6b1091-2253-4eba-b740-89d31b4c2325",
+    "receipt": {
+      "deliveryId": "a0e9433e8682194647d14096f34a594a45dc88f3e7aa3035b5e6eb0acf01facb",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108039479,
+      "nextAttemptAt": 1795108040527,
+      "duplicate": true
+    }
+  },
+  "actionCount": 1
+}

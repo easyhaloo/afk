@@ -1,0 +1,110 @@
+{
+  "afk": "0.2.147",
+  "gitea": "gitea version 28.4.0 built with go1.27.4 : bindata, sqlite, sqlite_unlock_notify",
+  "repository": "qualifier/parcel",
+  "repositoryId": 1,
+  "issue": 1,
+  "label": "ready",
+  "hookId": 1,
+  "events": [
+    {
+      "action": "opened",
+      "sourceId": "fd47ca10-06f4-4854-8547-a3fe2ec3b9ff",
+      "bodySha256": "a4746f0009763935bbea73fc1764fb21e45bfa61ba6174d145b1c128badaeb41",
+      "accepted": {
+        "deliveryId": "53bc942c3f00b315e4558cb1a6064c6d920a49970a591700f11b83c3aa9ab746",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795076564595,
+        "nextAttemptAt": 1795076564595,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "53bc942c3f00b315e4558cb1a6064c6d920a49970a591700f11b83c3aa9ab746",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795076564595,
+        "nextAttemptAt": 1795076565628,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "label_updated",
+      "sourceId": "8df18360-4748-48cc-9f68-95a19d508ddf",
+      "bodySha256": "e2d57a271de0b3bf1d380bfeb4b319ec5c42da5aec4f4b4210d90111a021614e",
+      "accepted": {
+        "deliveryId": "d8cfe4e322e07e88c21faa794da057187ee7f673feaeb4f1fa195aa533a40db3",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795076564609,
+        "nextAttemptAt": 1795076564609,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "d8cfe4e322e07e88c21faa794da057187ee7f673feaeb4f1fa195aa533a40db3",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795076564609,
+        "nextAttemptAt": 1795076565629,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "closed",
+      "sourceId": "60650dc2-b04c-4e28-8d2f-fd7210500b2e",
+      "bodySha256": "8acd513ac8a3a02f9829cefa5f1a26a0565de70221ea5e16b25612b796b5594c",
+      "accepted": {
+        "deliveryId": "b30a2430b6ab9dd8a78eb287ebf9ddb4d93a0284be716a3eaa4e4278d7f74090",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795076564763,
+        "nextAttemptAt": 1795076564763,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "b30a2430b6ab9dd8a78eb287ebf9ddb4d93a0284be716a3eaa4e4278d7f74090",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795076564763,
+        "nextAttemptAt": 1795076565763,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    }
+  ],
+  "deliveries": [
+    {
+      "deliveryId": "b30a2430b6ab9dd8a78eb287ebf9ddb4d93a0284be716a3eaa4e4278d7f74090",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795076564763,
+      "nextAttemptAt": 1795076565763
+    },
+    {
+      "deliveryId": "d8cfe4e322e07e88c21faa794da057187ee7f673feaeb4f1fa195aa533a40db3",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795076564609,
+      "nextAttemptAt": 1795076565629
+    },
+    {
+      "deliveryId": "53bc942c3f00b315e4558cb1a6064c6d920a49970a591700f11b83c3aa9ab746",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795076564595,
+      "nextAttemptAt": 1795076565628
+    }
+  ],
+  "actionCount": 1
+}

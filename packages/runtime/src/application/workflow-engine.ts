@@ -1,5 +1,6 @@
+import { prepareManagedRepositories } from './plugins/repository-lifecycle.js';
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { randomUUID } from 'node:crypto';
 import { simpleGit } from 'simple-git';
 import { WorktreeManager } from '../infrastructure/git/index.js';
@@ -15,22 +16,26 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from '../infrastructure/sandbox/types.js';
-import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
-import { getTokenUsage, configureStatusline, logger, resolveLogDir, resolveTimeoutSnapshotDir, withLogContext } from '../infrastructure/io/index.js';
+import type { AgentCommandOptions, AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
+import { getTokenUsage, logger, resolveLogDir, resolveTimeoutSnapshotDir, withLogContext } from '../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './runners/registry.js';
 import type { ModuleParams } from './runners/registry.js';
 import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle.js';
 import { Watchdog, createWatchdog } from './workflows/watchdog.js';
 import type { WorkflowConfig } from '../infrastructure/config/manager.js';
-import { HandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
+import { createHandoffCoordinator, type HandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
 import { attemptNativeResume } from './workflows/resume.js';
 import { BudgetManager } from './workflows/budget.js';
 import { BudgetStore } from './workflows/budget-store.js';
 import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
-import { experienceScope, prepareExperienceContext, recordExecutionExperience } from './learning/runtime.js';
+import { ExperienceFeedbackError, experienceScope, prepareExperienceContext, recordExecutionExperience } from './learning/runtime.js';
+import { experienceQueryContextSchema, type ExperienceQueryContext } from './learning/experience-store.js';
+import { LearningReviewIncompleteError, normalizeLearningActionInput } from './learning/contracts.js';
+import { learningIdentitySchema } from './learning/requests.js';
 import { TemplateLoader } from '../domain/templates/loader.js';
+import { compileTemplate } from '../domain/templates/compiler.js';
 import { PlanExecutor } from './workflows/plan-executor.js';
 import { SystemActionExecutor } from './workflows/system-actions.js';
 import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope.js';
@@ -43,12 +48,14 @@ import {
   type CompletionKind,
   type PromptSegment,
 } from './workflows/execution-protocol.js';
-import { BACKLOG_CONTEXT_PATH, buildGoalSegments, writeBacklogContext } from './workflows/backlog-context.js';
+import { BACKLOG_CONTEXT_PATH, buildGoalSegments, prepareManagedBacklogContext, writeBacklogContext } from './workflows/backlog-context.js';
 import { describePublishBoundary } from '../domain/branches/publish-boundary.js';
 import { measurePromptBudget } from '../domain/agents/prompt-budget.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
-import type { Step, StepResult } from '../domain/templates/types.js';
+import { withCancellation } from './plugins/cancellation.js';
+import type { ProviderAbortSignal, ProviderOperationOptions } from '../plugin-sdk/capabilities.js';
+import { WorkflowTemplateSchema, type Step, type StepResult, type WorkflowTemplate } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/types.js';
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
@@ -64,7 +71,7 @@ import {
 } from './workflows/multi-repository-preparer.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
-import type { RunObserver } from '../observability/run-observer.js';
+import { withObservationSignal, type RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
 import {
   appendFailure,
@@ -124,6 +131,15 @@ function formatReworkContext(rework: import('../domain/backlog/index.js').Rework
   return `\n\nAn open QA rework record (${rework.id}, ${round}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
+class WorkflowScopeCleanupError extends AggregateError {
+  declare readonly cause: { runError: unknown; recovery: unknown };
+}
+
+function callerCancellationReason(error: unknown): string {
+  const reason = error instanceof Error ? error.message : error;
+  return typeof reason === 'string' && reason.trim() ? reason : 'Cancelled by caller';
+}
+
 /**
  * The issue number of a backlog reference.
  *
@@ -140,6 +156,8 @@ function issueNumberOf(reference: string): number {
 }
 
 export interface RunnerOptions {
+  signal?: ProviderAbortSignal;
+  purpose?: ObservationContext['purpose'];
   /** Canonical backlog ID. */
   backlogId: string;
   /**
@@ -152,6 +170,7 @@ export interface RunnerOptions {
   workItemId?: string;
   observationRunId?: string;
   observationWorkItemId?: string;
+  observationRunOwner?: 'workflow' | 'caller';
   auditRequired?: boolean;
   /** Local-only numeric worktree key for older git helpers. */
   iid?: number;
@@ -197,8 +216,8 @@ export interface RunnerOptions {
 }
 
 export type WorkflowRunResult =
-  | { success: true; url?: string }
-  | { success: false; url?: string; skipped?: 'not_claimed' };
+  | { success: true; url?: string; steps?: Record<string, StepResult> }
+  | { success: false; url?: string; skipped?: 'not_claimed'; steps?: Record<string, StepResult> };
 
 /**
  * Optional collaborator overrides for WorkflowRunner. Tests inject a fake
@@ -207,6 +226,7 @@ export type WorkflowRunResult =
  * WorkflowRunner itself.
  */
 export interface RunnerDependencies {
+  template?: WorkflowTemplate;
   coordinatorFactory?: (deps: {
     backlog: import('../domain/backlog/index.js').BacklogProvider;
     tmux: TmuxClient;
@@ -238,6 +258,7 @@ export interface RunnerDependencies {
   config?: WorkflowConfig;
   /** Typed plugin capabilities available to this run. */
   plugins?: PluginRuntime;
+  experienceContext?: ExperienceQueryContext;
   /** Canonical backlog/branch/change providers. */
   providers?: ProviderBundle;
   /** Local runtime projection for the read-only Tasks monitor. */
@@ -302,10 +323,10 @@ export class WorkflowRunner {
   private readonly worktree = new WorktreeManager();
   private tmux: TmuxClient;
   private watchdog: Watchdog;
-  private coordinator: HandoffCoordinator;
-  private sandboxProvider: SandboxProvider;
+  private readonly handoffCoordinator?: HandoffCoordinator;
+  private selectedSandboxProvider?: SandboxProvider;
   private readonly sandboxProviderRegistry: SandboxProviderRegistry;
-  private agentProvider: AgentProvider;
+  private selectedAgentProvider?: AgentProvider;
   private readonly agentRuntime?: AgentRuntimeSelection;
   /**
    * Runtimes already probed for this run, keyed by the provider that runs them.
@@ -342,12 +363,18 @@ export class WorkflowRunner {
   private readonly agentProviderRegistry: AgentProviderRegistry;
   private readonly sandboxProviderInjected: boolean;
   private primaryHandle?: BranchHandle;
+  private primaryCleanupRegistered = false;
   private resourceScope?: RunResourceScope;
   private readonly plugins?: PluginRuntime;
-  private readonly providers: ProviderBundle;
+  private readonly experienceContext?: ExperienceQueryContext;
+  private readonly executionProviders?: ProviderBundle;
+  private readonly template?: WorkflowTemplate;
   private activeBacklog?: BacklogItem;
   private activeClaim?: BacklogClaim;
+  private implementationHandedOff = false;
   private leaseLost = false;
+  private operationOptions?: ProviderOperationOptions;
+  private lifecycleCleaned = false;
   private readonly runtimeManager: TaskRuntimeManager;
   private runtimeRunId?: string;
   /**
@@ -394,25 +421,27 @@ export class WorkflowRunner {
     return this.sessionStoreChainFactory(worktreePath);
   }
 
-  constructor(providers: ProviderBundle, deps: RunnerDependencies) {
+  constructor(providers: ProviderBundle | undefined, deps: RunnerDependencies) {
     if (!deps?.observer) throw new Error('WorkflowRunner requires an observer');
     this.tmux = deps?.tmux ?? createTmuxClient();
     this.timeoutSnapshotDir = resolveTimeoutSnapshotDir();
     this.watchdog = deps?.watchdog ?? createWatchdog(resolveLogDir());
     this.config = deps?.config ?? getWorkflowConfig();
     this.plugins = deps?.plugins;
-    this.providers = providers;
-    this.coordinator = deps?.coordinatorFactory
-      ? deps.coordinatorFactory({ backlog: providers?.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config } as never)
-      : ({ handoff: async () => 'terminal' } as unknown as HandoffCoordinator);
+    this.experienceContext = deps?.experienceContext ? experienceQueryContextSchema.parse(deps.experienceContext) : undefined;
+    this.executionProviders = providers;
+    this.template = deps.template && structuredClone(deps.template);
+    this.handoffCoordinator = providers && (deps?.coordinatorFactory ?? createHandoffCoordinator)({
+      backlog: providers.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config,
+    });
     this.sandboxProviderRegistry = deps?.sandboxProviderRegistry ?? deps?.plugins?.getSandboxProviderRegistry() ?? defaultSandboxProviderRegistry;
-    this.sandboxProvider = deps?.sandboxProvider ?? this.sandboxProviderRegistry.create(this.sandboxProviderRegistry.has('local') ? 'local' : this.sandboxProviderRegistry.ids()[0] ?? 'local', { worktreeManager: this.worktree });
+    this.selectedSandboxProvider = deps?.sandboxProvider;
     this.sandboxProviderInjected = deps?.sandboxProvider !== undefined;
     this.agentProviderRegistry = deps?.agentProviderRegistry ?? deps?.plugins?.getAgentProviderRegistry() ?? defaultAgentProviderRegistry;
     if (this.agentProviderRegistry === defaultAgentProviderRegistry) ensureBuiltinAgentProviders(this.agentProviderRegistry);
     this.agentProviderInjected = deps?.agentProvider !== undefined;
-    this.agentProvider = deps?.agentProvider ?? this.agentProviderRegistry.get(this.agentProviderName) ?? this.agentProviderRegistry.list()[0] ?? this.agentProviderRegistry.require(this.agentProviderName);
-    this.agentProviderName = this.agentProvider.name;
+    this.selectedAgentProvider = deps?.agentProvider;
+    if (this.selectedAgentProvider) this.agentProviderName = this.selectedAgentProvider.name;
     this.agentRuntime = deps?.agentRuntime;
     this.prepareRuntime = deps?.prepareRuntime ?? prepareAgentRuntime;
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
@@ -421,6 +450,31 @@ export class WorkflowRunner {
     this.observer = deps.observer;
     this.multiRepositoryPreparer = deps?.multiRepositoryPreparer ?? new MultiRepositoryPreparer();
   }
+
+  private get providers(): ProviderBundle {
+    if (!this.executionProviders) throw new Error('execution workflows require managed providers');
+    return this.executionProviders;
+  }
+
+  private get coordinator(): HandoffCoordinator {
+    if (!this.handoffCoordinator) throw new Error('execution workflows require a handoff coordinator');
+    return this.handoffCoordinator;
+  }
+
+  private get sandboxProvider(): SandboxProvider {
+    return this.selectedSandboxProvider ??= this.sandboxProviderRegistry.create(
+      this.sandboxProviderRegistry.has('local') ? 'local' : this.sandboxProviderRegistry.ids()[0] ?? 'local',
+      { worktreeManager: this.worktree });
+  }
+
+  private set sandboxProvider(provider: SandboxProvider) { this.selectedSandboxProvider = provider; }
+
+  private get agentProvider(): AgentProvider {
+    return this.selectedAgentProvider ??= this.agentProviderRegistry.get(this.agentProviderName)
+      ?? this.agentProviderRegistry.list()[0] ?? this.agentProviderRegistry.require(this.agentProviderName);
+  }
+
+  private set agentProvider(provider: AgentProvider) { this.selectedAgentProvider = provider; }
 
   /**
    * The runtime a provider runs with, probed at most once per run.
@@ -449,17 +503,201 @@ export class WorkflowRunner {
 
   /**
    * Full workflow: worktree -> tmux session -> /goal -> wait -> cleanup.
-   * Every explicit terminal path does its own cleanup; the catch below only
-   * covers unexpected exceptions (crash path), and the finally only ever
-   * disarms the watchdog.
    */
   async run(options: RunnerOptions): Promise<WorkflowRunResult> {
     validateObservationIdentity(options);
-    const context = this.createObservationContext(options.backlogId, options.session, options);
-    return withLogContext(context, () => this.runObserved(options, context));
+    const timeout = options.hardTimeoutMs ?? this.config.workflowHardTimeout;
+    if (!Number.isInteger(timeout) || timeout <= 0 || timeout > 2_147_483_647) {
+      throw new Error('workflow hardTimeoutMs must be a positive integer at most 2147483647');
+    }
+    const controller = new AbortController();
+    return withObservationSignal(controller.signal, async () => {
+      const operationOptions = { signal: controller.signal };
+      this.operationOptions = operationOptions;
+      this.failureChain = [];
+      this.resourceScope = undefined;
+      this.lifecycleDispatcher = undefined;
+      this.modules = [];
+      this.lifecycleCleaned = false;
+      this.lifecycleCtx = { iid: options.iid ?? issueNumberOf(options.backlogId), worktreePath: '', baseBranch: options.baseBranch ?? 'main',
+        sessionName: options.session, params: {}, signal: controller.signal };
+      let callerStoppedRun = false;
+      const abort = () => {
+        if (controller.signal.aborted) return;
+        callerStoppedRun = this.failureChain.length === 0;
+        controller.abort(options.signal?.reason);
+      };
+      const isCallerCancellation = (error: unknown) => callerStoppedRun && error === controller.signal.reason;
+      const stop = () => { void this.resourceScope?.stopExecutions().catch(error => logger.warn({ error }, 'failed to stop cancelled workflow')); };
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.signal?.aborted) abort();
+      controller.signal.addEventListener('abort', stop, { once: true });
+      const timer = setTimeout(() => controller.abort(new Error(`workflow deadline exceeded (${timeout}ms)`)), timeout);
+      let incompleteFailure: LearningReviewIncompleteError | undefined;
+      let cancelledExecution: unknown;
+      try {
+        await withCancellation(() => undefined, operationOptions);
+        const template = await withCancellation(() => this.template
+          ? WorkflowTemplateSchema.parse(this.template)
+          : new TemplateLoader({ projectRoot: options.repoRoot ?? process.cwd(),
+            getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(options.template ?? 'issue-implementation'), operationOptions);
+        compileTemplate(template, { systemActions: this.plugins?.listSystemActions() });
+        if (template.purpose === 'learning') {
+          if (options.purpose === 'execution') throw new Error('learning template conflicts with execution purpose');
+          if (options.repositories?.length) throw new Error('learning template cannot prepare managed repositories');
+          const context = this.createObservationContext(options.backlogId, options.session, { ...options, purpose: 'learning' });
+          if (template.steps.some(step => {
+            const input = normalizeLearningActionInput(step.action!, step.input);
+            if (typeof input !== 'object' || input === null || !('runId' in input)) return false;
+            const sourceRun = learningIdentitySchema.safeParse(input.runId);
+            return sourceRun.success && sourceRun.data === context.runId;
+          })) {
+            throw new Error('learning workflow run must be distinct from the source run');
+          }
+          return await withLogContext(context, () => this.runLearning(options, context, structuredClone(template), controller));
+        }
+        if (!this.executionProviders) throw new Error('execution workflows require managed providers');
+        this.agentProviderName = this.agentProvider.name;
+        const context = this.createObservationContext(options.backlogId, options.session, options);
+        return await withLogContext(context, async () => {
+          try {
+            const result = await this.runObserved(options, context, controller, template, isCallerCancellation);
+            if (options.observationRunOwner !== 'caller' && result.success && this.implementationHandedOff) {
+              await this.recordObservation({ kind: 'run.finished', outcome: 'succeeded', reason: 'implementation handed to QA' });
+            }
+            return result;
+          } catch (error) {
+            if (isCallerCancellation(error) || (error instanceof WorkflowScopeCleanupError && isCallerCancellation(error.cause.runError))) {
+              await this.recordObservation({ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: callerCancellationReason(controller.signal.reason) });
+              cancelledExecution = error;
+            }
+            throw error;
+          }
+        });
+      } catch (error) {
+        if (error instanceof LearningReviewIncompleteError) incompleteFailure = error;
+        throw error;
+      } finally {
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
+        controller.signal.removeEventListener('abort', stop);
+        try {
+          try { await this.teardownSession(options.iid ?? issueNumberOf(options.backlogId), options.session); }
+          finally {
+            try { await this.runLifecycleHooks(['cleanup'], this.lifecycleCtx, true); }
+            finally { this.watchdog.disarm(); this.operationOptions = undefined; }
+          }
+        } catch (error) {
+          if (incompleteFailure) throw new LearningReviewIncompleteError(incompleteFailure.output, {
+            cause: new AggregateError([incompleteFailure, error], 'Learning workflow and finalization failed'),
+          });
+          if (cancelledExecution !== undefined) throw new AggregateError([cancelledExecution, error],
+            `${callerCancellationReason(controller.signal.reason)}; workflow finalization failed: ${String(error)}`,
+            { cause: cancelledExecution instanceof WorkflowScopeCleanupError ? cancelledExecution.cause : { runError: cancelledExecution } });
+          throw error;
+        }
+      }
+    });
   }
 
-  private async runObserved(options: RunnerOptions, context: ObservationContext): Promise<WorkflowRunResult> {
+  private async runLearning(options: RunnerOptions, context: ObservationContext, template: WorkflowTemplate, controller: AbortController): Promise<WorkflowRunResult> {
+    this.observationContext = context;
+    this.activeBacklog = undefined;
+    this.activeClaim = undefined;
+    this.runtimeRunId = undefined;
+    this.preparedRepositories = undefined;
+    this.repoRoot = options.repoRoot ?? process.cwd();
+    this.workspaceRoot = options.workspaceRoot ?? this.repoRoot;
+    this.extParams = parseModuleParams(options.extParams);
+    this.lifecycleCtx = { ...this.lifecycleCtx, worktreePath: this.repoRoot, repoRoot: this.repoRoot, params: this.extParams,
+      projectName: options.projectName, originalCwd: process.cwd() };
+    let failure: { error: unknown } | undefined;
+    let auditFailure: AuditPersistenceError | undefined;
+    let incompleteFailure: LearningReviewIncompleteError | undefined;
+    let success = false;
+    let results: Record<string, StepResult> = {};
+    try {
+      await this.recordObservation({ kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId,
+        profileId: context.profileId, attempt: context.attempt, status: 'pending' } });
+      this.modules = [...await loadModules(options.ext), ...(this.plugins?.getLifecycleModules() ?? [])]
+        .filter(module => module.purposes?.includes('learning'));
+      this.lifecycleDispatcher = new LifecycleDispatcher(this.modules, { strictCleanup: true,
+        isFatalError: error => error instanceof AuditPersistenceError });
+      await withCancellation(() => undefined, this.operationOptions);
+      await this.recordObservation({ kind: 'run.started' });
+      await this.recordObservation({ kind: 'workflow.recorded', name: template.name, version: template.version,
+        steps: template.steps.map(step => ({ id: step.id, kind: 'system', dependsOn: step.dependsOn ?? [] })) });
+      await this.runInitHooks({ iid: this.lifecycleCtx.iid, projectName: options.projectName,
+        baseBranch: this.lifecycleCtx.baseBranch, params: this.extParams, originalCwd: process.cwd(), repoRoot: this.repoRoot });
+      await this.runLifecycleHooks(['before'], this.lifecycleCtx);
+      const forbidden = () => { throw new Error('execution action is unavailable in a learning workflow'); };
+      const actions = new SystemActionExecutor({ plugins: this.plugins, publishChange: forbidden, queueQA: forbidden });
+      const executor = new PlanExecutor({ systemActions: this.plugins?.listSystemActions(), executeAgent: forbidden,
+        executeSystem: async step => {
+          if (auditFailure) throw auditFailure;
+          if (incompleteFailure) throw incompleteFailure;
+          const startedAt = new Date().toISOString();
+          const effect = { effectKind: step.action, idempotencyKey: `${context.runId}:${step.id}` };
+          let stepSignal = controller.signal;
+          try {
+            if (step.timeoutMs !== undefined) stepSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(step.timeoutMs)]);
+            const actionOptions = { ...this.operationOptions, signal: stepSignal, authorizedWorkspace: this.repoRoot };
+            await withCancellation(() => undefined, actionOptions);
+            await this.recordObservation({ kind: 'effect.started', ...effect });
+            if (auditFailure) throw auditFailure;
+            const output = await withCancellation(() => actions.execute(step.action, step.input, actionOptions), actionOptions);
+            await this.recordObservation({ kind: 'effect.completed', ...effect, outcome: 'succeeded' });
+            return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
+          } catch (error) {
+            if (error instanceof LearningReviewIncompleteError) incompleteFailure ??= error;
+            const summary = error instanceof LearningReviewIncompleteError ? 'learning_review_incomplete' : String(error);
+            if (error instanceof AuditPersistenceError) { auditFailure ??= error; controller.abort(auditFailure); }
+            if (!auditFailure) {
+              try { await this.recordObservation({ kind: 'effect.completed', ...effect, outcome: 'failed', summary }); }
+              catch (recordError) {
+                if (recordError instanceof AuditPersistenceError) { auditFailure ??= recordError; controller.abort(auditFailure); }
+                else throw recordError;
+              }
+            }
+            return { stepId: step.id, status: stepSignal.aborted && !controller.signal.aborted ? 'timed_out' : 'failed',
+              ...(error instanceof LearningReviewIncompleteError ? { output: error.output } : {}),
+              summary, startedAt, completedAt: new Date().toISOString() };
+          }
+        } });
+      results = await executor.execute(template);
+      if (auditFailure) throw auditFailure;
+      if (incompleteFailure) throw incompleteFailure;
+      await withCancellation(() => undefined, this.operationOptions);
+      const steps = Object.values(results);
+      success = steps.some(step => step.status === 'completed') && steps.every(step => step.status === 'completed');
+      if (success) await this.runLifecycleHooks(['after'], this.lifecycleCtx);
+    } catch (error) {
+      failure = { error: incompleteFailure && error !== incompleteFailure
+        ? new AggregateError([incompleteFailure, error], 'Learning workflow and execution failed') : error };
+    }
+    try { await this.runLifecycleHooks(['cleanup'], this.lifecycleCtx, true); }
+    catch (error) { failure = { error: failure ? new AggregateError([failure.error, error], 'Learning workflow and cleanup failed') : error }; }
+    if (controller.signal.aborted && !failure) failure = { error: controller.signal.reason };
+    const hasAuditFailure = (error: unknown): boolean => error instanceof AuditPersistenceError
+      || error instanceof AggregateError && error.errors.some(hasAuditFailure);
+    if (!hasAuditFailure(failure?.error) && !auditFailure) {
+      try {
+        await this.recordObservation({ kind: 'run.finished', outcome: controller.signal.aborted ? 'cancelled' : failure || !success ? 'failed' : 'succeeded' });
+      } catch (error) {
+        failure = { error: failure ? new AggregateError([failure.error, error], 'Learning workflow and terminal audit failed') : error };
+      }
+    }
+    if (failure) {
+      if (incompleteFailure && failure.error !== incompleteFailure) {
+        throw new LearningReviewIncompleteError(incompleteFailure.output, { cause: failure.error });
+      }
+      throw failure.error;
+    }
+    return { success, steps: results };
+  }
+
+  private async runObserved(options: RunnerOptions, context: ObservationContext, controller: AbortController, loadedTemplate: WorkflowTemplate,
+    isCallerCancellation: (error: unknown) => boolean): Promise<WorkflowRunResult> {
     const {
       iid: requestedIid,
       session,
@@ -476,12 +714,13 @@ export class WorkflowRunner {
     const backlogId = options.backlogId;
     const iid = requestedIid ?? issueNumberOf(backlogId);
     let terminalOutcome: RunOutcomeStatus = 'failed';
+    let runError: unknown;
     this.resourceScope = undefined;
     this.activeBacklog = undefined;
     this.activeClaim = undefined;
+    this.implementationHandedOff = false;
     this.leaseLost = false;
     this.runtimeRunId = undefined;
-    this.failureChain = [];
     this.preparedRepositories = undefined;
     this.stopRepositoryHeartbeat = undefined;
     this.preparedRepositoryFinish = undefined;
@@ -500,6 +739,7 @@ export class WorkflowRunner {
     });
     if (this.providers) {
       const backlog = await this.providers.backlog.get(backlogId);
+      controller.signal.throwIfAborted();
       if (backlog.kind === 'prd') throw new Error(`backlog ${backlogId} is a PRD anchor and is not runnable`);
       if (!options.baseBranchExplicit) {
         baseBranch = await resolveItemExecutionBase(this.providers.backlog, backlog, baseBranch);
@@ -507,49 +747,64 @@ export class WorkflowRunner {
           branchStrategy: options.branchStrategy?.type === 'named' ? { ...options.branchStrategy, baseBranch } : options.branchStrategy,
           repositories: options.repositories?.map(repository => repository.primary ? { ...repository, baseBranch } : repository) };
       }
+      controller.signal.throwIfAborted();
       const claimed = await this.providers.backlog.claim(backlogId, session);
       if (!claimed) {
+        controller.signal.throwIfAborted();
         logger.info({ backlogId }, 'backlog is not runnable or was claimed by another worker');
         await this.recordObservation({ kind: 'run.finished', outcome: 'cancelled', reason: 'not_claimed' });
         return { success: false, skipped: 'not_claimed' };
       }
       this.activeBacklog = claimed.item;
       this.activeClaim = claimed;
-      try {
-        this.activeRework = await this.providers.backlog.getActiveRework(backlogId);
-        await this.recordObservation({ kind: 'run.started' });
-        await this.recordObservation({ kind: 'lease.granted', leaseId: session });
-      } catch (error) {
-        await claimed.release();
-        throw error;
-      }
-      // Establish the terminalizer immediately after claim acquisition, before
-      // template validation or any branch/sandbox resource can be created.
-      // Every terminal path shares this scope, so a native no-op lease and a
-      // filesystem lease have identical release semantics.
       this.resourceScope = new RunResourceScope({
         repoRoot: options.repoRoot ?? process.cwd(),
         baseBranch,
         onCleanup: () => claimed.release(),
+        ownership: { workspaceRoot: options.workspaceRoot ?? options.repoRoot ?? process.cwd(), repositories: options.repositories, owner: context.runId },
       });
+      const resourceScope = this.resourceScope;
       try {
-        this.resourceScope.registerHeartbeat(
-          claimed.heartbeat,
-          options.claimHeartbeatIntervalMs ?? 10_000,
-          async error => {
-            this.leaseLost = true;
-            await this.resourceScope?.stopExecutions().catch(stopError => logger.warn({ stopError }, 'failed to stop execution after lease loss'));
-            try {
-              await this.providers.backlog.transition(claimed.item.id, 'blocked', { reason: `claim heartbeat failed: ${(error as Error).message}` });
-              await this.providers.backlog.setExecutionMode(claimed.item.id, 'hitl');
-            } catch (routeError) {
-              logger.warn({ backlogId: claimed.item.id, error: routeError }, 'failed to route heartbeat failure to hitl');
-            }
-          },
-        );
+        controller.signal.throwIfAborted();
+        this.activeRework = await this.providers.backlog.getActiveRework(backlogId);
+        controller.signal.throwIfAborted();
+        await this.recordObservation({ kind: 'run.started' });
+        await this.recordObservation({ kind: 'lease.granted', leaseId: session });
+        try {
+          resourceScope.registerHeartbeat(
+            claimed.heartbeat,
+            options.claimHeartbeatIntervalMs ?? 10_000,
+            async error => {
+              if (this.operationOptions?.signal !== controller.signal) return;
+              this.leaseLost = true;
+              controller.abort(error);
+              await resourceScope.stopExecutions().catch(stopError => logger.warn({ stopError }, 'failed to stop execution after lease loss'));
+              if (this.operationOptions?.signal !== controller.signal) return;
+              try {
+                await this.providers.backlog.transition(claimed.item.id, 'blocked', { reason: `claim heartbeat failed: ${(error as Error).message}` });
+                if (this.operationOptions?.signal !== controller.signal) return;
+                await this.providers.backlog.setExecutionMode(claimed.item.id, 'hitl');
+              } catch (routeError) {
+                logger.warn({ backlogId: claimed.item.id, error: routeError }, 'failed to route heartbeat failure to hitl');
+              }
+            },
+          );
+        } catch (error) {
+          await this.markBacklogBlocked(`claim heartbeat setup failed: ${(error as Error).message}`);
+          throw error;
+        }
+        controller.signal.throwIfAborted();
       } catch (error) {
-        await this.markBacklogBlocked(`claim heartbeat setup failed: ${(error as Error).message}`);
-        await this.resourceScope.finish({ status: 'failed' });
+        if (isCallerCancellation(error)) await this.markBacklogBlocked(callerCancellationReason(error));
+        if (this.resourceScope === resourceScope) this.resourceScope = undefined;
+        try { await resourceScope.finish({ status: 'failed' }); }
+        catch (cleanupError) {
+          throw new WorkflowScopeCleanupError([error, cleanupError], `workflow claim setup failed: ${String(error)}; cleanup unconfirmed: ${String(cleanupError)}`, { cause: {
+            runError: error,
+            implementationHandedOff: false,
+            recovery: { runtimeRunId: context.runId, worktreePath: options.repoRoot ?? process.cwd(), scope: resourceScope },
+          } });
+        }
         throw error;
       }
       const branchStrategy = options.branchStrategy ?? { type: 'named' as const, branch: claimed.item.branchName, baseBranch };
@@ -564,12 +819,14 @@ export class WorkflowRunner {
     this.agentProviderName = options.agentProvider ?? this.agentProvider.name;
     this.executionMode = options.executionMode ?? 'batch';
     this.repoRoot = options.repoRoot ?? process.cwd();
-    await this.startRuntime(options.backlogId, session);
     try {
+    controller.signal.throwIfAborted();
+    await this.startRuntime(options.backlogId, session);
     // Bind all git/worktree operations to the explicit project root. This
     // deliberately avoids process.chdir(), which is process-global state.
     this.systemActionsRan = false;
     this.primaryHandle = undefined;
+    this.primaryCleanupRegistered = false;
     this.acFeedback = undefined;
     // Preserve injected WorktreeManager fakes and legacy cwd behavior when
     // no explicit project context was requested.
@@ -587,40 +844,58 @@ export class WorkflowRunner {
     }
 
     // Load lifecycle modules
-    this.modules = [...await loadModules(options.ext), ...(this.plugins?.getLifecycleModules() ?? [])];
+    this.modules = [...await loadModules(options.ext), ...(this.plugins?.getLifecycleModules() ?? [])]
+      .filter(module => (module.purposes ?? ['execution']).includes('execution'));
     this.lifecycleDispatcher = new LifecycleDispatcher(this.modules);
     this.extParams = parseModuleParams(options.extParams);
     this.originalCwd = process.cwd();
     logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
 
     this.workspaceRoot = options.workspaceRoot ?? this.repoRoot;
-    if (options.repositories?.length) {
-      this.preparedRepositories = await this.multiRepositoryPreparer.prepare(options.repositories, this.workspaceRoot);
+    controller.signal.throwIfAborted();
+    await this.resourceScope?.acquireOwnership();
+    this.preparedRepositories = await prepareManagedRepositories({ runtime: this.plugins, fallback: this.multiRepositoryPreparer,
+      repositories: options.repositories ?? [], workspaceRoot: this.workspaceRoot, scope: this.resourceScope, runId: context.runId, options: this.operationOptions });
+    if (this.preparedRepositories) {
+      const repositoryScope = this.resourceScope;
+      const activeBacklogId = this.activeBacklog?.id;
       if (this.preparedRepositories.heartbeat) this.stopRepositoryHeartbeat = this.resourceScope?.registerHeartbeat(this.preparedRepositories.heartbeat, 10_000, async error => {
+        if (this.operationOptions?.signal !== controller.signal) return;
         this.leaseLost = true;
-        await this.resourceScope?.stopExecutions();
-        await this.markBacklogBlocked(`repository lease lost: ${String(error)}`);
+        controller.abort(error);
+        await repositoryScope?.stopExecutions();
+        if (this.operationOptions?.signal !== controller.signal) return;
+        if (activeBacklogId) await blockBacklog(this.providers.backlog, activeBacklogId, `repository lease lost: ${String(error)}`);
       });
       this.repoRoot = this.preparedRepositories.primary.repoRoot;
-      this.resourceScope?.registerExternalResource({ finish: outcome => this.finishPreparedRepositories(outcome) });
+      const prepared = this.preparedRepositories;
+      const stopHeartbeat = this.stopRepositoryHeartbeat ?? (() => {});
+      this.resourceScope?.registerExternalResource({ finish: outcome => this.finishPreparedRepositories(outcome, prepared, repositoryScope, stopHeartbeat) });
     }
+    controller.signal.throwIfAborted();
 
     // Validate template early so failures throw before worktree creation. A
     // claimed backlog must never be left in-progress when validation fails.
-    await new TemplateLoader({ projectRoot: this.repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(effectiveTemplate);
     } catch (error) {
       if (error instanceof AuditPersistenceError) {
         await this.resourceScope?.finish({ status: 'failed' });
         throw error;
       }
-      const setup = await this.classifyFailure(createFailureDiagnostic({
+      const setup = isCallerCancellation(error) ? undefined : await this.classifyFailure(createFailureDiagnostic({
         code: 'workflow_setup',
         message: `workflow setup failed: ${(error as Error).message}`,
       }));
-      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: setup.message, reasonCode: setup.code });
-      await this.markBacklogBlocked(setup.message);
-      await this.resourceScope?.finish({ status: 'failed' });
-      await this.finishRuntime('blocked', setup.message);
+      const reason = setup?.message ?? callerCancellationReason(error);
+      if (setup) await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason, reasonCode: setup.code });
+      await this.markBacklogBlocked(reason);
+      try { await this.resourceScope?.finish({ status: 'failed' }); }
+      catch (cleanupError) {
+        const summary = `${reason}; cleanup ownership unconfirmed for run ${context.runId} at ${this.repoRoot}`;
+        await this.finishRuntime('blocked', summary);
+        throw new WorkflowScopeCleanupError([error, cleanupError], summary, { cause: { runError: error,
+          implementationHandedOff: false, recovery: { runtimeRunId: context.runId, worktreePath: this.repoRoot, scope: this.resourceScope } } });
+      }
+      await this.finishRuntime('blocked', reason, reason);
       throw error;
     }
 
@@ -630,7 +905,9 @@ export class WorkflowRunner {
         contextHighTokens, maxTotalTokens, projectName: options.projectName, repoRoot: this.repoRoot,
         workspaceRoot: this.workspaceRoot,
         branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode,
+        loadedTemplate,
       });
+      controller.signal.throwIfAborted();
       if (result.success && this.leaseLost) {
         await this.markBacklogBlocked('claim heartbeat failed');
         terminalOutcome = 'failed';
@@ -638,15 +915,18 @@ export class WorkflowRunner {
       }
       if (result.success && this.preparedRepositories) {
         await this.resourceScope?.stopExecutions();
+        this.resourceScope?.cleanupOwnership.assertClosed();
         await this.preparedRepositories.heartbeat?.();
         await this.activeClaim?.heartbeat();
         for (const repository of this.preparedRepositories.repositories) {
           await this.runPublicationHooks(repository.handle.path);
           await this.commitImplementationWork(iid, repository.handle.path);
           await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
+          controller.signal.throwIfAborted();
         }
         try {
-          await this.finishPreparedRepositories({ status: 'success' });
+          controller.signal.throwIfAborted();
+          await this.resourceScope!.finish({ status: 'success' });
         } catch (error) {
           await this.classifyFailure(createFailureDiagnostic({
             code: 'repository_publication',
@@ -656,8 +936,10 @@ export class WorkflowRunner {
         }
       }
       if (this.providers && this.activeBacklog) {
+        controller.signal.throwIfAborted();
         if (result.success) {
           await this.providers.backlog.transition(this.activeBacklog.id, 'verification', undefined);
+          this.implementationHandedOff = true;
         } else {
           await blockBacklog(this.providers.backlog, this.activeBacklog.id, this.runtimeErrorSummary ?? 'workflow execution failed');
         }
@@ -672,8 +954,13 @@ export class WorkflowRunner {
       });
       return result;
     } catch (error) {
+      runError = error;
       if (error instanceof AuditPersistenceError) {
         await this.teardownSession(iid, session);
+        throw error;
+      }
+      if (isCallerCancellation(error)) {
+        await this.markBacklogBlocked(callerCancellationReason(error));
         throw error;
       }
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
@@ -684,33 +971,40 @@ export class WorkflowRunner {
         message: `workflow crashed: ${(error as Error).message}`,
       }));
       const reason = this.runtimeErrorSummary ?? crash.message;
-      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason, reasonCode: this.failureChain[0]?.code });
       await this.cleanupOnFailure(iid, session, reason);
+      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason, reasonCode: this.failureChain[0]?.code });
       await this.markBacklogBlocked(reason);
       throw error;
     } finally {
       let scopeError: unknown;
       try {
         await this.resourceScope?.finish({ status: terminalOutcome });
+        this.resourceScope?.cleanupOwnership.assertClosed();
       } catch (err) {
         scopeError = err;
-        if (terminalOutcome !== 'success') {
-          scopeError = undefined;
-          logger.warn({ iid, err }, 'resource scope cleanup failed on terminal failure');
-        }
       }
       // Never leave an armed watchdog behind: it would fire later and write a
       // stale timeout signal into the retained worktree.
       this.watchdog.disarm();
       this.activeClaim = undefined;
       this.activeRework = undefined;
+      const recovery = { runtimeRunId: this.runtimeRunId, worktreePath: (this.primaryHandle as BranchHandle | undefined)?.path ?? this.repoRoot, scope: this.resourceScope };
+      const runSummary = isCallerCancellation(runError) ? callerCancellationReason(runError) : this.runtimeErrorSummary;
+      const cleanupSummary = scopeError === undefined ? undefined : [runSummary,
+        `workflow terminal cleanup failed: ${scopeError instanceof Error ? scopeError.message : String(scopeError)}; cleanup ownership unconfirmed for run ${this.runtimeRunId ?? session} at ${recovery.worktreePath}; implementation handoff ${this.implementationHandedOff ? 'already performed' : 'not completed'}`,
+      ].filter(Boolean).join('; ');
       await this.finishRuntime(
-        terminalOutcome === 'success' ? 'completed' : 'blocked',
+        scopeError === undefined && terminalOutcome === 'success' ? 'completed' : 'blocked',
         terminalOutcome === 'success' ? 'implementation handed to QA' : 'implementation stopped',
+        cleanupSummary ?? runSummary,
       );
       if (scopeError !== undefined) {
-        await this.markBacklogBlocked('resource cleanup failed');
-        throw scopeError;
+        await this.markBacklogBlocked(cleanupSummary!);
+        throw new WorkflowScopeCleanupError(runError === undefined ? [scopeError] : [runError, scopeError], cleanupSummary, { cause: {
+          runError,
+          implementationHandedOff: this.implementationHandedOff,
+          recovery,
+        } });
       }
     }
   }
@@ -769,9 +1063,11 @@ export class WorkflowRunner {
       ...(recorded.cause ? { cause: snapshotFailure(recorded.cause) } : {}),
       evidence: recorded.evidence,
     });
+    if (this.observationContext.purpose === 'learning') return;
     try { experienceScope(this.observationContext.workItemId); } catch { return; }
     try {
-      recordExecutionExperience({ failure: recorded, runId: this.observationContext.runId, workItemId: this.observationContext.workItemId });
+      recordExecutionExperience({ failure: recorded, runId: this.observationContext.runId,
+        workItemId: this.observationContext.workItemId, plugins: this.plugins });
     } catch {
       logger.warn({ runId: this.observationContext.runId }, 'experience candidate could not be persisted; original failure evidence remains in the audit stream');
     }
@@ -791,14 +1087,8 @@ export class WorkflowRunner {
     }
 
     await this.teardownSession(iid, session);
-    // Lifecycle cleanup hooks (zeroed context - may run before runBody
-    // populates lifecycleCtx; modules must be idempotent).
     try {
-      await this.runLifecycleHooks(
-        ['after', 'cleanup'],
-        { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
-        true,
-      );
+      await this.runLifecycleHooks(['cleanup'], this.lifecycleCtx, true);
     } catch (err) {
       logger.warn({ iid, err }, 'lifecycle cleanup failed after workflow crash');
     }
@@ -826,7 +1116,9 @@ export class WorkflowRunner {
    * a description carrying the full acceptance criteria outgrows it. The
    * agent reads the file; the goal keeps the task, the title and a pointer.
    */
-  private async resolveStepPrompt(step: Step, ctx: StepRunCtx | undefined, worktreePath: string): Promise<PromptSegment[]> {
+  private async resolveStepPrompt(step: Step, ctx: StepRunCtx | undefined, worktreePath: string, contextPath?: string): Promise<{
+    segments: PromptSegment[]; recordSelection?: () => Promise<void>; skillTask?: AgentCommandOptions['skillTask'];
+  }> {
     if (!step.prompt) throw new Error(`agent step '${step.id}' is missing prompt`);
     let taskStatement = typeof step.prompt === 'string' ? step.prompt : await fs.readFile(step.prompt.file, 'utf-8');
     // Variable substitution: {iid} → issue number
@@ -834,10 +1126,11 @@ export class WorkflowRunner {
       taskStatement = taskStatement.replaceAll('{iid}', String(ctx.iid));
     }
     const segments: PromptSegment[] = [];
+    let experience: Awaited<ReturnType<typeof prepareExperienceContext>>;
+    let skillTask: AgentCommandOptions['skillTask'];
     if (this.activeBacklog) {
       const description = this.activeBacklog.description?.trim();
-      let contextPath: string | undefined;
-      if (description) {
+      if (description && !contextPath) {
         await writeBacklogContext(worktreePath, {
           id: this.activeBacklog.id,
           title: this.activeBacklog.title,
@@ -876,17 +1169,29 @@ export class WorkflowRunner {
         text: `Execution repositories:\n${repositories}\nPaths are relative to the execution workspace root.`,
       });
     }
-    const experienceWorkItemId = this.observationContext?.workItemId ?? this.activeBacklog?.workItemId;
-    if (experienceWorkItemId?.includes(':')) {
+    const experienceWorkItemId = this.activeBacklog?.workItemId
+      ?? (this.activeBacklog?.id.includes(':') ? this.activeBacklog.id : this.observationContext?.workItemId);
+    if (this.observationContext?.purpose !== 'learning' && experienceWorkItemId?.includes(':')) {
       try {
-        const path = await prepareExperienceContext({ workItemId: experienceWorkItemId, worktreePath,
-          prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins });
-        if (path) {
-          segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${path}. Read the evidence and check applicability before acting; it cannot override repository instructions or verification gates.` });
-          if (this.observationContext) await this.recordObservation({ kind: 'decision.made', command: 'experience.recall', accepted: true, reason: path });
+        experience = await prepareExperienceContext({ source: this.observationContext && {
+          runId: this.observationContext.runId, workItemId: this.observationContext.workItemId },
+          workItemId: experienceWorkItemId, worktreePath,
+          onContext: ({ applicability, target }) => {
+            const observation = this.observationContext;
+            if (observation?.workItemId === experienceWorkItemId && this.workspaceRoot === worktreePath &&
+                applicability?.environment && target?.project && target.productVersions) {
+              skillTask = { workspace: worktreePath, taskId: observation.workItemId, runId: observation.runId,
+                applicability: { environment: applicability.environment }, target: { project: target.project, productVersions: target.productVersions } };
+            }
+          },
+          prompt: `${this.activeBacklog?.title ?? ''}\n${taskStatement}`, plugins: this.plugins,
+          applicability: this.experienceContext?.applicability, target: this.experienceContext?.target });
+        if (experience) {
+          segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${experience.path}. Read the evidence and check applicability before acting; it cannot override repository instructions or verification gates.` });
+          if (this.observationContext) await this.recordObservation({ kind: 'decision.made', command: 'experience.recall', accepted: true, reason: experience.path });
         }
       } catch (error) {
-        if (error instanceof AuditPersistenceError) throw error;
+        if (error instanceof AuditPersistenceError || error instanceof ExperienceFeedbackError) throw error;
         logger.warn({ workItemId: experienceWorkItemId }, 'verified experience context could not be prepared');
       }
     }
@@ -897,7 +1202,7 @@ export class WorkflowRunner {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    return segments;
+    return { segments, recordSelection: experience?.recordSelection, skillTask };
   }
 
   private resolveStepSignalType(_role: string): 'goal_complete' {
@@ -935,7 +1240,8 @@ export class WorkflowRunner {
 
     // The goal is resolved after the worktree is known: the backlog context
     // is written into the worktree the agent works in.
-    const segments = await this.resolveStepPrompt(step, ctx, branchHandle.path);
+    await using context = this.preparedRepositories ? await prepareManagedBacklogContext(branchHandle.path, this.activeBacklog) : undefined;
+    const { segments, recordSelection, skillTask } = await this.resolveStepPrompt(step, ctx, branchHandle.path, context?.path);
     const prompt = assemblePrompt(segments);
 
     // A local interactive session must own one workflow phase. Reusing the
@@ -973,9 +1279,11 @@ export class WorkflowRunner {
         persistBudget: ctx.persistBudget,
         prompt,
         segments,
+        recordSelection,
         signalType,
         executionMode: ctx.executionMode ?? 'batch',
         agentProvider: stepProvider,
+        skillTask: stepProvider.name === 'opencode' && this.sandboxProviderName === 'local' ? skillTask : undefined,
         runtime,
         sandbox,
         completionKind,
@@ -1028,10 +1336,19 @@ export class WorkflowRunner {
     ctx: LifecycleContext,
     reverse = false,
   ): Promise<void> {
+    ctx = { ...ctx, signal: this.operationOptions?.signal,
+      observation: this.observationContext ? {
+        context: this.observationContext,
+        record: (data, options) => this.recordObservation(data, options),
+      } : undefined };
     if (this.lifecycleDispatcher) {
       for (const hook of hooks) {
         const phase = hook === 'before' ? 'before-agent' : hook === 'after' ? 'after-agent' : hook === 'publish' ? 'before-publish' : 'cleanup';
-        await this.lifecycleDispatcher.run(phase, ctx);
+        if (phase === 'cleanup') {
+          if (this.lifecycleCleaned) continue;
+          this.lifecycleCleaned = true;
+          await this.lifecycleDispatcher.run(phase, ctx);
+        } else await withCancellation(() => this.lifecycleDispatcher!.run(phase, ctx), this.operationOptions);
       }
       return;
     }
@@ -1059,8 +1376,9 @@ export class WorkflowRunner {
    * downstream operation pointed at the wrong directory.
    */
   private async runInitHooks(ctx: InitContext): Promise<void> {
+    ctx = { ...ctx, signal: this.operationOptions?.signal };
     if (this.lifecycleDispatcher) {
-      await this.lifecycleDispatcher.run('init', ctx);
+      await withCancellation(() => this.lifecycleDispatcher!.run('init', ctx), this.operationOptions);
       return;
     }
     for (const mod of this.modules) {
@@ -1080,6 +1398,7 @@ export class WorkflowRunner {
     workspaceRoot: string;
     branchStrategy?: BranchStrategyConfig;
     template: string;
+    loadedTemplate?: WorkflowTemplate;
     executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
     const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
@@ -1126,21 +1445,22 @@ export class WorkflowRunner {
       this.primaryHandle = { branch: handle.branchName, path: handle.worktreePath, isNewBranch: true };
       wt = { iid, path: handle.worktreePath, branch: handle.branchName, createdAt: new Date(), status: 'active' };
     }
+    await withCancellation(() => undefined, this.operationOptions);
+    if (!this.preparedRepositories) {
+      await withCancellation(() => this.providers.branches.preparePush?.(wt.branch, wt.path), this.operationOptions);
+    }
     logger.info({ iid, worktree: wt.path, branch: wt.branch }, 'worktree created');
     for (const path of this.preparedRepositories?.repositories.map(repository => repository.handle.path) ?? [wt.path]) {
       this.implementationBaseShas.set(path, (await simpleGit(path).revparse(['HEAD'])).trim());
     }
     await this.recordObservation({ kind: 'workspace.prepared', branch: wt.branch, workspace: wt.path, baseBranch });
     logger.info({ iid, status: 'active' }, 'worktree status updated');
-    if (this.executionMode === 'interactive') {
-      await configureStatusline(wt.path);
-      logger.info({ iid, worktree: wt.path }, 'statusline configured');
-    }
 
     // ── Step 1b: Lifecycle before_agent hooks ──────────────────────────────
     this.lifecycleCtx = {
       iid, worktreePath: wt.path, baseBranch, sessionName: session, params: this.extParams, repoRoot,
       projectName, originalCwd: this.originalCwd, repositories: this.preparedRepositories?.repositories,
+      signal: this.operationOptions?.signal,
     };
     await this.runLifecycleHooks(['before'], this.lifecycleCtx);
     logger.info({ iid, hook: 'before_agent', moduleCount: this.modules.length }, 'lifecycle before_agent hooks complete');
@@ -1156,6 +1476,7 @@ export class WorkflowRunner {
       runtimeRunId: this.runtimeRunId,
     });
     this.resourceScope?.registerSandbox(this.sandbox);
+    await withCancellation(() => undefined, this.operationOptions);
     logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
@@ -1171,7 +1492,7 @@ export class WorkflowRunner {
 
     // ── Template execution: compilation + typed dispatch ─────────────────────
     logger.info({ iid, template }, 'using compiled execution plan');
-    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(template);
+    const loadedTemplate = ctx.loadedTemplate ?? await new TemplateLoader({ projectRoot: repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(template);
     await this.recordObservation({
       kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
       steps: loadedTemplate.steps.map(step => ({
@@ -1189,6 +1510,7 @@ export class WorkflowRunner {
           return { url: undefined };
         }
         await this.recordImplementationCommit(wt.path, wt.branch);
+        await withCancellation(() => undefined, this.operationOptions);
         await this.providers.branches.push(wt.branch, wt.path);
         this.systemActionsRan = true;
         return { url: undefined };
@@ -1211,7 +1533,7 @@ export class WorkflowRunner {
       executeSystem: async step => {
         const startedAt = new Date().toISOString();
         try {
-          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input });
+          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input }, { ...this.operationOptions, authorizedWorkspace: wt.path });
           return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
         } catch (error) {
           return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };
@@ -1220,6 +1542,7 @@ export class WorkflowRunner {
       systemActions: this.plugins?.listSystemActions(),
     });
     const executedResults = await executor.execute(loadedTemplate);
+    await withCancellation(() => undefined, this.operationOptions);
     Object.assign(stepResults, executedResults);
     const verification = stepResults['verify-ac'];
     if (verification?.status === 'failed') {
@@ -1259,24 +1582,46 @@ export class WorkflowRunner {
   }
 
   private async cleanupPrimary(iid: number, force: boolean): Promise<void> {
+    if (this.preparedRepositories || !this.primaryHandle) return;
+    if (this.resourceScope) {
+      if (!this.primaryCleanupRegistered) {
+        const primary = this.primaryHandle;
+        const branches = this.providers.branches;
+        this.resourceScope.registerStepHandle(primary, () => branches.cleanup(primary.path, { preserve: !force }));
+        this.primaryCleanupRegistered = true;
+      }
+      return;
+    }
     try {
       if (this.preparedRepositories) return;
       if (!this.primaryHandle) return;
       await this.providers.branches.cleanup(this.primaryHandle.path, { preserve: !force });
     } catch (error) {
       logger.warn({ iid, error }, 'failed to remove primary worktree');
+      throw error;
     }
   }
 
-  private finishPreparedRepositories(outcome: { status: RunOutcomeStatus }): Promise<void> {
-    if (!this.preparedRepositories) return Promise.resolve();
-    this.preparedRepositoryFinish ??= this.preparedRepositories.finish(outcome).catch(error => {
+  private async finishPreparedRepositories(outcome: { status: RunOutcomeStatus }, prepared = this.preparedRepositories,
+    scope = this.resourceScope, stopHeartbeat = this.stopRepositoryHeartbeat): Promise<void> {
+    if (!prepared) return;
+    await scope?.stopExecutions();
+    if (scope?.hasUnclosedExecutions) throw new Error('repository cleanup is blocked by an unclosed owned execution');
+    if (prepared !== this.preparedRepositories) {
+      await prepared.finish(outcome);
+      stopHeartbeat?.();
+      return;
+    }
+    if (this.preparedRepositoryFinish) return this.preparedRepositoryFinish;
+    const finishing = prepared.finish(outcome).then(() => { stopHeartbeat?.(); }).catch(error => {
+      if (this.preparedRepositoryFinish === finishing) this.preparedRepositoryFinish = undefined;
       // The failure is classified by the caller that owns the audit event;
       // recording it here as well would put the same failure into the chain
       // twice.
       logger.warn({ error }, 'prepared repository publication failed');
       throw error;
-    }).finally(() => this.stopRepositoryHeartbeat?.());
+    });
+    this.preparedRepositoryFinish = finishing;
     return this.preparedRepositoryFinish;
   }
 
@@ -1307,7 +1652,7 @@ export class WorkflowRunner {
     if (!this.preparedRepositories) await this.transitionBacklog(iid, 'verification');
 
     await this.cleanupPrimary(iid, true);
-    logger.info({ iid, worktreePath }, 'worktree cleaned up');
+    logger.info({ iid, worktreePath }, 'worktree cleanup registered');
 
     return { success: true };
   }
@@ -1320,6 +1665,7 @@ export class WorkflowRunner {
    * and the work would be lost when the workspace is restored.
    */
   private async commitImplementationWork(iid: number, worktreePath: string): Promise<string> {
+    await withCancellation(() => undefined, this.operationOptions);
     const title = this.activeBacklog?.title?.trim();
     const message = `feat: ${title ? `${title} ` : ''}(backlog ${iid})`;
     const commit = await this.providers.branches.commit(worktreePath, message);
@@ -1368,11 +1714,10 @@ export class WorkflowRunner {
     }
 
     await this.teardownSession(iid, session);
-    // Lifecycle cleanup hooks (zeroed context, same as cleanupOnFailure).
     try {
       await this.runLifecycleHooks(
-        ['after', 'cleanup'],
-        { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
+        this.operationOptions?.signal?.aborted ? ['cleanup'] : ['after', 'cleanup'],
+        this.lifecycleCtx,
         true,
       );
     } catch (err) {
@@ -1402,17 +1747,28 @@ export class WorkflowRunner {
     prompt: string;
     /** The goal's pieces, so an over-long prompt can name the guilty one. */
     segments?: PromptSegment[];
+    recordSelection?: () => Promise<void>;
     signalType: 'goal_complete';
     executionMode?: ExecutionMode;
     agentProvider?: AgentProvider;
     runtime?: AgentRuntimeSelection;
+    skillTask?: AgentCommandOptions['skillTask'];
     sandbox?: Sandbox;
     completionKind: CompletionKind;
   }): Promise<PhaseResult> {
     const basePrompt = p.prompt ?? (p as unknown as { goalBase?: string }).goalBase ?? '';
     let resumedExecution: AgentExecution | undefined;
+    let continuationGen: number | undefined;
+    let cancelled = false;
+    const assertCanStart = (): void => {
+      const signal = this.operationOptions?.signal;
+      if (signal?.aborted) throw signal.reason;
+      if (this.leaseLost) throw new Error('claim lease lost before agent start');
+      if (cancelled) throw new Error('workflow execution cancelled before agent start');
+    };
     let agentFailures = 0;
     for (let round = 1; ; round++) {
+      assertCanStart();
       if (!resumedExecution && p.budget.isExhausted() && round === 1) {
         const failure = await this.classifyFailure(createFailureDiagnostic({
           code: 'budget_exhausted',
@@ -1421,9 +1777,9 @@ export class WorkflowRunner {
         await this.markBacklogBlocked(failure.message);
         return { completed: false };
       }
-      const rawPrompt = round === 1
+      const rawPrompt = continuationGen === undefined
         ? basePrompt
-        : this.continuePrompt(basePrompt, p.iid, p.wtPath, round - 1);
+        : this.continuePrompt(basePrompt, p.iid, p.wtPath, continuationGen);
       const goalSegments = round === 1 && p.segments ? p.segments : [{ label: 'goal', text: rawPrompt }];
       const segments = buildExecutionPromptSegments(goalSegments, p.executionMode, p.completionKind);
       const prompt = assemblePrompt(segments);
@@ -1432,7 +1788,7 @@ export class WorkflowRunner {
 
       const agentProvider = p.agentProvider ?? this.agentProvider;
       const sandbox = p.sandbox ?? this.sandbox!;
-      if (this.leaseLost) throw new Error('claim lease lost before agent start');
+      assertCanStart();
       // A goal the provider would refuse is refused here, where the length
       // and the limit are still known. Dispatching it would cost the whole
       // idle timeout and produce a timeout instead of a cause.
@@ -1459,14 +1815,20 @@ export class WorkflowRunner {
             {
               kind: 'context',
               label: 'suggested action',
-              actual: `the backlog context is already written to ${BACKLOG_CONTEXT_PATH}; shorten the task statement or the completion protocol, or raise the goal limit the ${agentProvider.name} provider declares`,
+              actual: `shorten the task statement or the completion protocol, or raise the goal limit the ${agentProvider.name} provider declares`,
             },
           ],
         }));
         await this.markBacklogBlocked(failure.message);
         return { completed: false };
       }
-      const execution = resumedExecution ?? await agentProvider.createExecution({
+      let execution: AgentExecution | undefined;
+      let creating = true;
+      this.resourceScope?.registerExecution({ kill: async () => {
+        cancelled = true;
+        await execution?.kill();
+      }, pending: () => creating });
+      try { execution = resumedExecution ?? await agentProvider.createExecution({
         sandbox,
         worktreePath: p.wtPath,
         sessionId: p.session,
@@ -1475,22 +1837,30 @@ export class WorkflowRunner {
         generation: p.budget.used + 1,
         executionMode: p.executionMode,
         runtime: p.runtime,
-      });
+        skillTask: p.skillTask,
+      }); } finally { creating = false; }
       resumedExecution = undefined;
-      this.resourceScope?.registerExecution(execution);
-      if (this.leaseLost) {
+      await p.recordSelection?.();
+      if (this.leaseLost || cancelled) {
         await execution.kill();
-        throw new Error('claim lease lost during agent start');
+        assertCanStart();
       }
       await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
       await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
-      const result = await execution.waitForResult({
+      assertCanStart();
+      const result = await withCancellation(() => execution!.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
         idleTimeoutMs: p.idleTimeoutMs,
-      });
+      }), this.operationOptions);
+      assertCanStart();
+      const diagnosis = result.status === 'completed' || result.status === 'context_high'
+        ? undefined
+        : diagnoseExecutionFailure(result);
+      const retry = diagnosis?.retryable && agentFailures < this.config.maxRetries;
+      const failure = diagnosis && !retry ? await this.classifyFailure(diagnosis) : undefined;
       await this.writeRuntimeDiagnostics(result, execution);
 
       const telemetry = await this.recordAgentTelemetry(execution, result);
@@ -1506,10 +1876,7 @@ export class WorkflowRunner {
       //
       // The decision is read from the structured diagnosis, so the meaning of
       // a provider code is decided in one place.
-      const diagnosis = result.status === 'completed' || result.status === 'context_high'
-        ? undefined
-        : diagnoseExecutionFailure(result);
-      if (diagnosis?.retryable && agentFailures < this.config.maxRetries) {
+      if (retry && diagnosis) {
         agentFailures++;
         await this.persistFailureEvidence(diagnosis);
         logger.warn(
@@ -1520,6 +1887,7 @@ export class WorkflowRunner {
         continue;
       }
 
+      assertCanStart();
       switch (result.status) {
         case 'completed':
           return { completed: true, output: result.structuredOutput };
@@ -1528,8 +1896,7 @@ export class WorkflowRunner {
           // A timeout is a first-class failure: it carries the budget that
           // ran out, the last time the agent did something, and why it was
           // read as a timeout rather than as a crash.
-          const timeout = await this.classifyFailure(diagnosis!);
-          await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs, timeout.message);
+          await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs, failure!.message);
           return { completed: false };
         }
 
@@ -1541,12 +1908,9 @@ export class WorkflowRunner {
             hardTimeoutMs: p.hardTimeoutMs,
             gen: p.budget.used + 1,
             tokens: result.usage?.totalTokens ?? 0,
+            executionMode: p.executionMode,
+            execution,
           };
-
-          if (p.budget.isExhausted()) {
-            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason()!);
-            return { completed: false };
-          }
 
           // Phase 4 — save session snapshot to the store chain before handing off.
           // This allows future native-resume rounds to restore from the snapshot.
@@ -1557,23 +1921,38 @@ export class WorkflowRunner {
             try {
               const snapshot = await execution.captureSession();
               if (snapshot) {
-                await chain.saveFirst({ runId, provider: this.agentProvider.name, snapshot });
-                logger.info({ iid: p.iid, runId, provider: this.agentProvider.name }, 'session snapshot saved to store chain');
+                await chain.saveFirst({ runId, provider: agentProvider.name, snapshot });
+                logger.info({ iid: p.iid, runId, provider: agentProvider.name }, 'session snapshot saved to store chain');
               }
             } catch (err) {
               logger.info({ iid: p.iid, runId, err }, 'session snapshot save failed; proceeding with handoff');
             }
           }
 
+          if (p.budget.isExhausted()) {
+            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason()!);
+            return { completed: false };
+          }
+
+          const batch = p.executionMode === 'batch';
+          if (batch) {
+            if ((await this.coordinator.handoff(hctx, 'auto')) !== 'continued') return { completed: false };
+          }
+          let handoffReserved = false;
           const reserveHandoff = async (): Promise<void> => {
+            assertCanStart();
+            if (batch && handoffReserved) return;
             if (!p.budget.canHandoff()) throw new Error('work item handoff budget exhausted');
             p.budget.recordHandoff();
+            handoffReserved = true;
             await p.persistBudget();
+            assertCanStart();
           };
           resumedExecution = await attemptNativeResume(
             {
               iid: p.iid,
               session: p.session,
+              sourceThreadId: execution.metadata.threadId,
               wtPath: p.wtPath,
               runId,
               generation: p.budget.used + 2,
@@ -1587,8 +1966,12 @@ export class WorkflowRunner {
             () => chain,
             reserveHandoff,
           );
+          if (this.leaseLost || cancelled) {
+            await resumedExecution?.kill();
+            assertCanStart();
+          }
           if (resumedExecution) continue;
-          if (!p.budget.canHandoff()) {
+          if (!handoffReserved && !p.budget.canHandoff()) {
             const failure = await this.classifyFailure(createFailureDiagnostic({
               code: 'handoff_budget_exhausted',
               message: 'work item handoff budget exhausted',
@@ -1601,7 +1984,12 @@ export class WorkflowRunner {
           // After it returns, the loop continues and sends the continued goal in the next iteration.
           // This mirrors the original behavior exactly.
           await reserveHandoff();
+          if (batch) {
+            continuationGen = hctx.gen;
+            continue;
+          }
           if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
+            continuationGen = hctx.gen;
             logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }
@@ -1610,14 +1998,14 @@ export class WorkflowRunner {
 
         default:
           // 'failed', 'blocked', 'aborted' — treat as failure
-          const failure = await this.classifyFailure(diagnosis!);
+          const terminalFailure = failure!;
           logger.warn(
-            { iid: p.iid, status: result.status, code: failure.code, providerCode: failure.providerCode },
+            { iid: p.iid, status: result.status, code: terminalFailure.code, providerCode: terminalFailure.providerCode },
             'execution returned non-success status',
           );
           if (round === 1) {
             // Initial round failure: unchanged crash path
-            throw new Error(`execution failed: ${failure.message}`);
+            throw new Error(`execution failed: ${terminalFailure.message}`);
           }
           await this.manualFlip(p.iid, p.session);
           return { completed: false };
@@ -1668,8 +2056,9 @@ export class WorkflowRunner {
   /** Prompt for a resumed round: read the handoff doc(s) before continuing. */
   private continuePrompt(prompt: string, iid: number, wtPath: string, gen: number): string {
     const docPath = handoffDocPath(wtPath, this.activeBacklog?.id ?? String(iid), gen);
+    const historyPattern = basename(docPath).replace(/-\d+\.md$/, '-*.md');
     const continuation = prompt.replace(/^\/goal\s*/i, '');
-    return `继续${continuation}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 handoff-${iid}-*.md），请一并阅读以获取完整上下文，再继续）`;
+    return `继续${continuation}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 ${historyPattern}），请一并阅读以获取完整上下文，再继续）`;
   }
 
   /**
@@ -1689,7 +2078,8 @@ export class WorkflowRunner {
   private async pushBranch(worktreePath: string): Promise<void> {
     await this.runPublicationHooks(worktreePath);
     const git = simpleGit(worktreePath);
-    const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
+    const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
+    await withCancellation(() => undefined, this.operationOptions);
     await this.providers.branches.push(branch, worktreePath);
   }
 
@@ -1698,6 +2088,7 @@ export class WorkflowRunner {
   }
 
   private async transitionBacklog(iid: number, state: BacklogState, reason?: string): Promise<void> {
+    if (state !== 'blocked') await withCancellation(() => undefined, this.operationOptions);
     const id = this.activeBacklog?.id ?? String(iid);
     if (state === 'verification' && this.activeClaim) {
       try {
@@ -1709,6 +2100,7 @@ export class WorkflowRunner {
       }
     }
     await this.providers.backlog.transition(id, state, reason ? { reason } : undefined);
+    if (state === 'verification') this.implementationHandedOff = true;
     if (state === 'blocked') await this.providers.backlog.setExecutionMode(id, 'hitl');
   }
 
@@ -1722,21 +2114,23 @@ export class WorkflowRunner {
   }
 
   private createObservationContext(backlogId: string, session: string, options: RunnerOptions): ObservationContext {
-    const runId = options.observationRunId ?? `afk-${backlogId}-${randomUUID()}`;
+    const runId = options.observationRunId ?? randomUUID();
     return {
       traceId: runId,
       runId,
       workItemId: options.observationWorkItemId ?? options.workItemId ?? backlogId,
+      purpose: options.purpose,
       profileId: process.env.AFK_PROFILE ?? 'local',
       attempt: 1,
       actor: { kind: 'system', id: session },
     };
   }
 
-  private async recordObservation(data: RunEventData): Promise<void> {
+  private async recordObservation(data: RunEventData, options?: Parameters<NonNullable<LifecycleContext['observation']>['record']>[1]): Promise<void> {
     if (!this.observationContext) throw new AuditPersistenceError(data.kind, 'observation context unavailable');
     try {
-      await this.observer.record(this.observationContext, data);
+      if (options === undefined) await this.observer.record(this.observationContext, data);
+      else await this.observer.record(this.observationContext, data, options);
     } catch (error) {
       logger.error({ runId: this.observationContext.runId, eventType: data.kind, err: error }, 'failed to persist run audit event');
       throw new AuditPersistenceError(data.kind, error);
@@ -1745,10 +2139,11 @@ export class WorkflowRunner {
 
   private async recordAgentTelemetry(execution: AgentExecution, result: ExecutionResult): Promise<{ sessionId: string; totalTokens: number } | undefined> {
     const sandboxKind: 'local' | 'container' =
-      this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
+      ['docker', 'podman', 'remote-container'].includes(this.sandboxProvider.name) ? 'container' : 'local';
     const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
     const { sessionId, usage } = telemetry;
-    if (!this.observationContext) return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
+    const budgetUsage = usage ? { sessionId, totalTokens: result.cumulativeSessionTokens ?? usage.totalTokens } : undefined;
+    if (!this.observationContext) return budgetUsage;
     try {
       await this.observer.record(this.observationContext, {
         kind: 'agent.session_recorded',
@@ -1757,7 +2152,7 @@ export class WorkflowRunner {
     } catch (err) {
       logger.info({ runId: this.observationContext.runId, err }, 'agent.session_recorded: telemetry not persisted (non-fatal)');
     }
-    return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
+    return budgetUsage;
   }
 
   private async startRuntime(backlogId: string, session: string): Promise<void> {
@@ -1799,13 +2194,13 @@ export class WorkflowRunner {
     }
   }
 
-  private async finishRuntime(status: 'completed' | 'blocked', progress: string): Promise<void> {
+  private async finishRuntime(status: 'completed' | 'blocked', progress: string, errorSummary = this.runtimeErrorSummary): Promise<void> {
     if (!this.runtimeRunId) return;
     try {
       await this.runtimeManager.finish(this.runtimeRunId, {
         status,
         progress,
-        errorSummary: status === 'blocked' ? this.runtimeErrorSummary ?? 'workflow execution failed' : undefined,
+        errorSummary: status === 'blocked' ? errorSummary ?? 'workflow execution failed' : undefined,
       });
     } catch (error) {
       logger.warn({ runId: this.runtimeRunId, error }, 'failed to archive workflow runtime');

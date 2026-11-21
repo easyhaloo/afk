@@ -3,6 +3,14 @@ import { compileTemplate } from './compiler.js';
 import type { WorkflowTemplate } from './types.js';
 
 describe('compileTemplate', () => {
+  it.each(['execution', 'learning'] as const)('rejects duplicate step identities in in-memory %s templates', purpose => {
+    const template: WorkflowTemplate = { name: 'duplicate', version: 1, purpose, steps: [
+      { id: 'same', kind: 'system', action: 'learning.settings' },
+      { id: 'same', kind: 'system', action: 'learning.settings' },
+    ] };
+    expect(() => compileTemplate(template, { systemActions: ['learning.settings'] })).toThrow(/duplicate.*same/i);
+  });
+
   it('compiles every agent step to the unified completion signal', () => {
     const template: WorkflowTemplate = { name: 'legacy', version: 1, steps: [{ id: 'verify', role: 'verifier', prompt: 'verify' }] };
     const compiled = compileTemplate(template);

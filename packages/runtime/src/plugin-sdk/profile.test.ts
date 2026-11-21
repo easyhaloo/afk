@@ -1,8 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import { resolveProfile, type PluginManifest } from './profile.js';
+import { resolveProfile, validateManifest, type PluginManifest } from './profile.js';
 
 const eventStore: PluginManifest = { id: 'observe.event-store-jsonl', version: '1.0.0', apiVersion: 1, provides: ['event-store'], trusted: true };
 const observer: PluginManifest = { id: 'observe.otel-console', version: '1.0.0', apiVersion: 1, provides: ['tracer', 'metrics'], requires: ['event-store'], trusted: true };
+
+const tool = {
+  id: 'node', command: 'node', location: 'backend',
+  version: { args: ['--version'], minimum: '22.16.0' },
+  platforms: ['linux', 'darwin', 'win32'], architectures: ['x64', 'arm64'],
+  source: { url: 'https://nodejs.org/en/download' },
+};
+
+describe('external tool declarations', () => {
+  it('preserves declarations without resolving them as capabilities or executing them', () => {
+    const manifest = { ...eventStore, externalTools: [tool] } as PluginManifest;
+    const resolved = resolveProfile({ id: 'static', plugins: [manifest.id], requiredCapabilities: [] }, [manifest]);
+    expect(resolved.manifests[0]).toEqual(manifest);
+    expect([...resolved.capabilities.keys()]).toEqual(['event-store']);
+    expect(() => validateManifest(eventStore)).not.toThrow();
+  });
+
+  it.each([
+    null, {}, [null], [{ ...tool, id: '../node' }], [{ ...tool, command: 'node --eval' }],
+    [{ ...tool, command: '/tmp/node' }], [{ ...tool, command: '-node' }],
+    [{ ...tool, location: 'container' }], [{ ...tool, platforms: [] }],
+    [{ ...tool, architectures: ['mystery'] }], [{ ...tool, platforms: ['linux', 'linux'] }],
+    [{ ...tool, version: { args: [] } }], [{ ...tool, version: { args: ['--version\0'] } }],
+    [{ ...tool, version: { args: ['--version'], minimum: '^22' } }],
+    [{ ...tool, version: { args: ['--version'], minimum: '22.0.0-beta' } }],
+    [{ ...tool, source: { url: 'http://nodejs.org' } }],
+    [{ ...tool, source: { url: 'not-a-url' } }],
+    [{ ...tool, source: { url: 'https://nodejs.org/\nprivate' } }],
+    [{ ...tool, source: { url: 'https://user:secret@nodejs.org' } }],
+    [{ ...tool, source: { url: 'https://nodejs.org?token=secret' } }],
+    [{ ...tool, source: { url: 'https://nodejs.org/#secret' } }],
+    [{ ...tool, install: ['curl', 'untrusted'] }], [tool, tool],
+  ].map(value => [value]))('rejects malformed externalTools %# at the manifest boundary', externalTools => {
+    expect(() => validateManifest({ ...eventStore, externalTools } as PluginManifest)).toThrow(/externalTools/);
+  });
+
+  it('allows declarations with unknown version support and no platform restriction', () => {
+    expect(() => validateManifest({ ...eventStore, externalTools: [{
+      id: 'jms', command: 'jms', location: 'host', source: { url: 'https://github.com/jumpserver/jms' },
+    }] } as PluginManifest)).not.toThrow();
+  });
+});
 
 describe('resolveProfile', () => {
   it('resolves an explicit trusted capability composition', () => {

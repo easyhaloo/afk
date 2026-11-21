@@ -10,6 +10,7 @@ export interface ObservationContext {
   profileId: string;
   attempt: number;
   leaseEpoch?: number;
+  purpose?: 'execution' | 'learning';
   actor: { kind: ObservationActorKind; id: string };
 }
 
@@ -170,7 +171,8 @@ export type RunEventData =
   | { kind: 'step.completed'; stepId: string; outcome: 'succeeded' | 'failed' }
   | { kind: 'human_gate.opened'; gateId: string; reason: string }
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }
-  | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string; reasonCode?: RunFailureReasonCode }
+  | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed'>; reason?: string; reasonCode?: RunFailureReasonCode }
+  | { kind: 'run.finished'; outcome: 'cancelled'; reason?: string; reasonCode?: 'user_cancelled' }
   | { kind: 'failure.classified'; failureClass: string; summary: string; code?: RunFailureReasonCode; cause?: FailureCauseSnapshot; evidence?: FailureEvidenceEntry[] }
   | { kind: 'agent.session_recorded'; sessionId: string; transcriptPath?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number }; tools?: AgentToolCallSummary[] };
 

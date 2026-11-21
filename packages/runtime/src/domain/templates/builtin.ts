@@ -35,20 +35,17 @@ function issueImplementation(): WorkflowTemplate {
     name: 'issue-implementation',
     version: 1,
     description: 'Implement a backlog item: code, verify AC, push the branch, and queue QA.',
-    defaultBranch: { type: 'issue', iid: 0 }, // runner overrides per-run
     defaultProvider: 'claude-code',
     steps: [
       {
         id: 'implement',
         role: 'implementer',
         prompt: '/goal 实现 issue #{iid} 的功能需求。每完成一个代码或测试 AC 就提交一次。不要创建或合并 MR：基线集成、提交 QA 结果、推送和创建 MR 都由后续 QARunner 负责。',
-        branch: { type: 'issue', iid: 0 },
       },
       {
         id: 'verify-ac',
         role: 'verifier',
         prompt: '/goal 验证 issue #{iid} 的 AC 全部通过。',
-        branch: { type: 'issue', iid: 0 },
         dependsOn: ['implement'],
       },
       {

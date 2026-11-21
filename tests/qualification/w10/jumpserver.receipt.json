@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-20",
+  "afk": "0.2.169",
+  "platform": "darwin-arm64",
+  "archiveSha256": "db33b88af45e800fe09b15ffc32634a5a971f705a199e8e7c4661af812cf4176",
+  "provider": "jumpserver",
+  "sshJmsVersion": "0.2.0",
+  "inventoryExit": 0,
+  "assetCount": 16,
+  "wikiAliasMatches": 1,
+  "command": "echo <random marker>",
+  "remoteExit": 0,
+  "uniqueEchoMatched": true,
+  "openapiJmsVersion": "0.1.8",
+  "incompatibleInventoryExit": 1
+}

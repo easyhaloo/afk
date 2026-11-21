@@ -23,6 +23,7 @@
  * - Failure receipts never echo the webhook URL or any secret; every error
  *   message is passed through a redactor that strips known sensitive strings.
  */
+import { createHmac } from 'node:crypto';
 import type {
   NotificationCapability,
   NotificationMessage,
@@ -31,6 +32,7 @@ import type {
   ProviderOperationOptions,
 } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, executeCommand, requestHttp } from './dependencies.js';
+import { resolveOperationSecret, resolveWebhook, type OperationSecret } from './operation-secret.js';
 import type { CommandExecutor, CommandRequest, FetchTransport } from './dependencies.js';
 
 /** Flattens a neutral message into the single text body webhook providers send. */
@@ -57,7 +59,8 @@ function describeError(error: unknown, secrets: readonly string[]): string {
 
 export interface FeishuNotificationOptions {
   /** Incoming webhook URL. Treated as a secret and never echoed in receipts. */
-  readonly webhook: string;
+  readonly webhook: OperationSecret;
+  readonly signingSecret?: OperationSecret;
   /** Optional transport; defaults to global fetch at delivery time. */
   readonly fetch?: FetchTransport;
   /** Channel label reported in receipts. */
@@ -79,30 +82,40 @@ export class FeishuNotificationProvider implements NotificationProvider {
     mention: false,
   };
 
-  private readonly webhook: string;
+  private readonly webhook: OperationSecret;
+  private readonly signingSecret?: OperationSecret;
   private readonly fetch?: FetchTransport;
   private readonly defaultChannel: string;
 
   constructor(options: FeishuNotificationOptions) {
     this.webhook = options.webhook;
+    this.signingSecret = options.signingSecret;
     this.fetch = options.fetch;
     this.defaultChannel = options.channel ?? 'feishu';
   }
 
   async notify(message: NotificationMessage, options?: ProviderOperationOptions): Promise<NotificationReceipt> {
     const channel = message.channel ?? this.defaultChannel;
+    let webhook: string | undefined;
     try {
+      webhook = await resolveWebhook(this.webhook, options);
+      let signature: { timestamp: string; sign: string } | undefined;
+      if (this.signingSecret !== undefined) {
+        const secret = await resolveOperationSecret(this.signingSecret, options);
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        signature = { timestamp, sign: createHmac('sha256', `${timestamp}\n${secret}`).digest('base64') };
+      }
       const response = await requestHttp(
         this.fetch,
-        this.webhook,
+        webhook,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json; charset=utf-8' },
-          body: JSON.stringify({ msg_type: 'text', content: { text: renderText(message) } }),
+          body: JSON.stringify({ ...signature, msg_type: 'text', content: { text: renderText(message) } }),
         },
         options,
       );
-      const payload = (await response.json()) as { readonly code?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as { readonly code?: unknown } | null;
       if (typeof payload?.code !== 'number' || !Number.isFinite(payload.code)) {
         return { delivered: false, channel, error: 'Feishu returned an invalid delivery response' };
       }
@@ -111,7 +124,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
       }
       return { delivered: true, channel };
     } catch (error) {
-      return { delivered: false, channel, error: describeError(error, [this.webhook]) };
+      return { delivered: false, channel, error: webhook && options?.signal?.aborted ? 'Notification cancelled' : describeError(error, webhook ? [webhook] : []) };
     }
   }
 }
@@ -120,7 +133,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
 
 export interface SlackNotificationOptions {
   /** Slack incoming-webhook URL. Treated as a secret. */
-  readonly webhook: string;
+  readonly webhook: OperationSecret;
   readonly fetch?: FetchTransport;
   readonly channel?: string;
 }
@@ -140,7 +153,7 @@ export class SlackNotificationProvider implements NotificationProvider {
     mention: true,
   };
 
-  private readonly webhook: string;
+  private readonly webhook: OperationSecret;
   private readonly fetch?: FetchTransport;
   private readonly defaultChannel: string;
 
@@ -152,10 +165,12 @@ export class SlackNotificationProvider implements NotificationProvider {
 
   async notify(message: NotificationMessage, options?: ProviderOperationOptions): Promise<NotificationReceipt> {
     const channel = message.channel ?? this.defaultChannel;
+    let webhook: string | undefined;
     try {
+      webhook = await resolveWebhook(this.webhook, options);
       const response = await requestHttp(
         this.fetch,
-        this.webhook,
+        webhook,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -169,7 +184,7 @@ export class SlackNotificationProvider implements NotificationProvider {
       }
       return { delivered: true, channel };
     } catch (error) {
-      return { delivered: false, channel, error: describeError(error, [this.webhook]) };
+      return { delivered: false, channel, error: webhook && options?.signal?.aborted ? 'Notification cancelled' : describeError(error, webhook ? [webhook] : []) };
     }
   }
 }
@@ -234,7 +249,7 @@ export class EmailNotificationProvider implements NotificationProvider {
     }
   }
 
-  /** Builds the RFC-822 message; header values are CRLF-injection screened. */
+  /** sendmail reads Unix lines on stdin and adds CRLF for SMTP. */
   private compose(message: NotificationMessage): string {
     const header = (name: string, value: string): string => {
       if (/[\r\n]/.test(value)) throw new Error(`Invalid ${name} header: CR/LF is not allowed`);
@@ -246,8 +261,8 @@ export class EmailNotificationProvider implements NotificationProvider {
       header('Subject', message.title || '(no subject)'),
       header('X-Urgency', message.urgency ?? 'normal'),
       '',
-      message.body,
-    ].join('\r\n');
+      message.body.replace(/\r\n?/g, '\n'),
+    ].join('\n');
   }
 }
 
@@ -267,9 +282,8 @@ function appleQuote(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/** Single-quotes a value for safe interpolation into a PowerShell string. */
-function powerShellQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+function powerShellString(value: string): string {
+  return `[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(value, 'utf8').toString('base64')}'))`;
 }
 
 function desktopUrgency(urgency: NotificationMessage['urgency']): string {
@@ -295,10 +309,27 @@ export function desktopNotificationCommand(platform: DesktopPlatform, message: N
       return { command: 'notify-send', args: ['-u', desktopUrgency(message.urgency), title, body] };
     case 'win32': {
       const script = [
+        "$ErrorActionPreference = 'Stop'",
         'Add-Type -AssemblyName System.Windows.Forms',
-        `[System.Windows.Forms.MessageBox]::Show(${powerShellQuote(body)}, ${powerShellQuote(title)})`,
+        'Add-Type -AssemblyName System.Drawing',
+        '$notification = $null',
+        'try {',
+        '  $notification = New-Object System.Windows.Forms.NotifyIcon',
+        '  $notification.Icon = [System.Drawing.SystemIcons]::Information',
+        `  $notification.BalloonTipTitle = ${powerShellString(title)}`,
+        `  $notification.BalloonTipText = ${powerShellString(body)}`,
+        '  $notification.Visible = $true',
+        '  $notification.ShowBalloonTip(3000)',
+        '  Start-Sleep -Milliseconds 3000',
+        '} finally {',
+        '  if ($null -ne $notification) {',
+        '    $notification.Dispose()',
+        '  }',
+        '}',
+        '',
+        '',
       ].join('\n');
-      return { command: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command', '-'], input: script };
+      return { command: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', '-'], input: script };
     }
   }
 }

@@ -13,11 +13,12 @@
  * the work item, and the agent still sees the whole requirement.
  *
  * The file lives under `.afk/`, the directory AFK already uses for its own
- * runtime artifacts. It is therefore never committed into a change request
- * and never makes a worktree look dirty.
+ * runtime artifacts. A managed repository must release the agent's copy
+ * before publication checks the entire checkout for unexpected files.
  */
 
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { PromptSegment } from './execution-protocol.js';
 
@@ -68,6 +69,41 @@ export async function writeBacklogContext(
   await fs.mkdir(dirname(target), { recursive: true });
   await fs.writeFile(target, buildBacklogContextDocument(input), 'utf-8');
   return target;
+}
+
+export async function prepareManagedBacklogContext(worktreePath: string, item?: { id: string; title: string; description?: string }) {
+  const description = item?.description?.trim();
+  if (!item || !description) return undefined;
+  const root = await fs.realpath(worktreePath);
+  const directory = join(root, '.afk');
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  if (await fs.realpath(directory) !== directory) throw new Error('Backlog context directory must not be a symbolic link');
+  const path = `.afk/backlog-context-${randomUUID()}.md`;
+  const target = join(root, path);
+  const content = buildBacklogContextDocument({ ...item, description });
+  const file = await fs.open(target, 'wx', 0o600);
+  const original = await file.stat();
+  try {
+    await file.writeFile(content);
+  } catch (error) {
+    await fs.unlink(target);
+    throw error;
+  } finally {
+    await file.close();
+  }
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    if (await fs.realpath(directory) !== directory) throw new Error('Backlog context directory changed');
+    const current = await fs.lstat(target);
+    if (!current.isFile() || current.dev !== original.dev || current.ino !== original.ino ||
+      current.size !== Buffer.byteLength(content) || await fs.readFile(target, 'utf8') !== content) {
+      throw new Error(`Refusing to remove changed backlog context: ${path}`);
+    }
+    await fs.unlink(target);
+    released = true;
+  };
+  return { path, release, [Symbol.asyncDispose]: release };
 }
 
 /**

@@ -10,8 +10,19 @@ const IPC_CHANNELS = {
   googleLogout: "afk:google-logout",
   experiencesProjects: "afk:experiences-projects",
   experiencesList: "afk:experiences-list",
+  experiencesOutcomes: "afk:experiences-outcomes",
   experiencesVerify: "afk:experiences-verify",
   experiencesRevoke: "afk:experiences-revoke",
+  learningProjects: "learning:projects",
+  learningJobs: "learning:jobs",
+  learningWorkerOnce: "learning:worker-once",
+  learningWorkerCancel: "learning:worker-cancel",
+  learningCandidates: "learning:candidates",
+  learningCorrect: "learning:correct",
+  learningValidate: "learning:validate",
+  learningKnowledgePrepare: "learning:knowledge-prepare",
+  learningKnowledgePublish: "learning:knowledge-publish",
+  learningKnowledgeReconcile: "learning:knowledge-reconcile",
   pluginsList: "afk:plugins-list",
   pluginsInstall: "afk:plugins-install",
   pluginsSetEnabled: "afk:plugins-set-enabled",
@@ -84,9 +95,26 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: DesktopApi = {
+  learning: {
+    projects: () => ipcRenderer.invoke(IPC_CHANNELS.learningProjects),
+    jobs: input => ipcRenderer.invoke(IPC_CHANNELS.learningJobs, input),
+    worker: {
+      once: input => ipcRenderer.invoke(IPC_CHANNELS.learningWorkerOnce, input),
+      cancel: input => ipcRenderer.invoke(IPC_CHANNELS.learningWorkerCancel, input),
+    },
+    candidates: input => ipcRenderer.invoke(IPC_CHANNELS.learningCandidates, input),
+    correct: input => ipcRenderer.invoke(IPC_CHANNELS.learningCorrect, input),
+    validate: input => ipcRenderer.invoke(IPC_CHANNELS.learningValidate, input),
+    knowledge: {
+      prepare: input => ipcRenderer.invoke(IPC_CHANNELS.learningKnowledgePrepare, input),
+      publish: input => ipcRenderer.invoke(IPC_CHANNELS.learningKnowledgePublish, input),
+      reconcile: input => ipcRenderer.invoke(IPC_CHANNELS.learningKnowledgeReconcile, input),
+    },
+  },
   experiences: {
     projects: () => ipcRenderer.invoke(IPC_CHANNELS.experiencesProjects),
     list: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesList, input),
+    outcomes: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesOutcomes, input),
     verify: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesVerify, input),
     revoke: input => ipcRenderer.invoke(IPC_CHANNELS.experiencesRevoke, input),
   },

@@ -38,7 +38,9 @@ export interface BranchProvider {
   createBranch(item: BacklogItem, baseBranch: string): Promise<BranchHandle>;
   /** Create an isolated, disposable verification worktree from the base branch. */
   createVerificationWorktree(item: BacklogItem, baseBranch: string): Promise<BranchHandle>;
-  push(branchName: string, worktreePath: string): Promise<void>;
+  preparePush?(branchName: string, worktreePath: string): Promise<string>;
+  verificationRevision(worktreePath: string, branchName: string, ownedContextPath?: string): Promise<string>;
+  push(branchName: string, worktreePath: string, commitSha?: string): Promise<void>;
   commit(worktreePath: string, message: string): Promise<BranchCommitResult>;
   cleanup(worktreePath: string, options?: { preserve?: boolean }): Promise<void>;
   /**

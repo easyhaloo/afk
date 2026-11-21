@@ -15,7 +15,7 @@ import {
   _resetTemplateRegistry,
 } from './registry.js';
 import { builtinTemplates } from './builtin.js';
-import type { WorkflowTemplate, StepResult } from './types.js';
+import type { WorkflowTemplate, StepResult, WhenClause } from './types.js';
 
 describe('Template schema — validation', () => {
   const loader = new TemplateLoader();
@@ -84,7 +84,7 @@ steps:
 });
 
 describe('Dependency resolver', () => {
-  function mkTemplate(steps: Array<{ id: string; dependsOn?: string[] }>): WorkflowTemplate {
+  function mkTemplate(steps: Array<{ id: string; dependsOn?: string[]; when?: WhenClause }>): WorkflowTemplate {
     return {
       name: 'test',
       version: 1,
@@ -93,6 +93,7 @@ describe('Dependency resolver', () => {
         role: 'r',
         prompt: 'p',
         dependsOn: s.dependsOn,
+        when: s.when,
       })),
     };
   }
@@ -120,6 +121,62 @@ describe('Dependency resolver', () => {
     const plan = resolveExecutionPlan(t);
     expect(plan.groups[0].steps.map(s => s.id)).toEqual(['a', 'b', 'c']);
     expect(plan.groups[1].steps.map(s => s.id)).toEqual(['d']);
+  });
+
+  it.each<WhenClause>([
+    { step: 'review', equals: 'failed' },
+    { step: 'review', notEquals: 'completed' },
+  ])('orders a forward condition reference before its consumer: %j', when => {
+    const template = mkTemplate([{ id: 'fix', when }, { id: 'review' }]);
+    expect(resolveExecutionPlan(template).groups.map(group => group.steps.map(step => step.id)))
+      .toEqual([['review'], ['fix']]);
+  });
+
+  it('waits for both explicit and conditional dependencies at their latest level', () => {
+    const template = mkTemplate([
+      { id: 'publish', dependsOn: ['implement'], when: { step: 'review', equals: 'completed' } },
+      { id: 'review', dependsOn: ['implement'] },
+      { id: 'implement' },
+    ]);
+    expect(resolveExecutionPlan(template).groups.map(group => group.steps.map(step => step.id)))
+      .toEqual([['implement'], ['review'], ['publish']]);
+  });
+
+  it('counts a repeated dependency and condition reference only once', () => {
+    const template = mkTemplate([
+      { id: 'fix', dependsOn: ['review', 'review'], when: { step: 'review', equals: 'failed' } },
+      { id: 'review' },
+    ]);
+    expect(resolveExecutionPlan(template).groups.map(group => group.steps.map(step => step.id)))
+      .toEqual([['review'], ['fix']]);
+  });
+
+  it('rejects a condition referencing its own step', () => {
+    const template = mkTemplate([{ id: 'review', when: { step: 'review', equals: 'failed' } }]);
+    expect(() => resolveExecutionPlan(template)).toThrow(/itself/);
+  });
+
+  it('rejects a cycle containing a condition and an explicit dependency', () => {
+    const template = mkTemplate([
+      { id: 'fix', when: { step: 'review', equals: 'failed' } },
+      { id: 'review', dependsOn: ['fix'] },
+    ]);
+    expect(() => resolveExecutionPlan(template)).toThrow(/cycle/);
+    expect(hasCycle(template)).toBe(true);
+  });
+
+  it('rejects a cycle consisting only of conditions', () => {
+    const template = mkTemplate([
+      { id: 'fix', when: { step: 'review', equals: 'failed' } },
+      { id: 'review', when: { step: 'fix', equals: 'completed' } },
+    ]);
+    expect(() => resolveExecutionPlan(template)).toThrow(/cycle/);
+    expect(hasCycle(template)).toBe(true);
+  });
+
+  it('rejects an unknown condition reference', () => {
+    const template = mkTemplate([{ id: 'fix', when: { step: 'ghost', equals: 'failed' } }]);
+    expect(() => resolveExecutionPlan(template)).toThrow(/unknown step/);
   });
 
   it('detects cycles', () => {
@@ -165,8 +222,15 @@ describe('When-clause evaluator', () => {
     expect(evaluateWhen(undefined, results)).toBe(true);
   });
 
-  it('returns true when referenced step has not run yet (forward reference)', () => {
-    expect(evaluateWhen({ step: 'future', equals: 'completed' }, results)).toBe(true);
+  it.each<WhenClause>([
+    { step: 'future', equals: 'completed' },
+    { step: 'future', notEquals: 'failed' },
+  ])('returns false when the referenced result is missing: %j', clause => {
+    expect(evaluateWhen(clause, results)).toBe(false);
+  });
+
+  it('does not treat an inherited constructor as an executed step', () => {
+    expect(evaluateWhen({ step: 'constructor', notEquals: 'failed' }, results)).toBe(false);
   });
 
   it('matches equals clause', () => {
@@ -178,11 +242,21 @@ describe('When-clause evaluator', () => {
     expect(evaluateWhen({ step: 'review', notEquals: 'failed' }, results)).toBe(true);
     expect(evaluateWhen({ step: 'broken', notEquals: 'failed' }, results)).toBe(false);
   });
+
+  it.each(['failed', 'aborted', 'timed_out'] as const)('allows explicit recovery from %s', status => {
+    const recoveryResults = { broken: { ...results.broken, status } };
+    expect(evaluateWhen({ step: 'broken', equals: status }, recoveryResults)).toBe(true);
+    expect(evaluateWhen({ step: 'broken', notEquals: 'completed' }, recoveryResults)).toBe(true);
+  });
 });
 
 describe('Builtin templates', () => {
   beforeEach(() => _resetTemplateRegistry());
   afterEach(() => _resetTemplateRegistry());
+
+  it.each(builtinTemplates())('validates $name through the public template schema', template => {
+    expect(() => new TemplateLoader().parseAndValidate(JSON.stringify(template), template.name)).not.toThrow();
+  });
 
   it('all builtin templates are registered', () => {
     expect(listTemplates().sort()).toEqual([

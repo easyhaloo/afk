@@ -46,6 +46,7 @@ export type AgentCapability =
   | 'usage'           // Provider can report token usage
   | 'resume'           // Provider supports native session resume
   | 'fork'             // Provider supports session forking
+  | 'analysis'
   | 'interactive';     // Provider supports HITL attach */
 
 /** Token usage snapshot for a single generation. */
@@ -70,16 +71,20 @@ export type ExecutionMode = 'interactive' | 'batch';
 
 /** Options for building an agent command. */
 export interface AgentCommandOptions {
+  skillTask?: { workspace: string; taskId: string; runId: string; applicability: { environment: string };
+    target: { project: string; productVersions: Readonly<Record<string, string>> } };
   /** Path the agent should operate in. */
   worktreePath: string;
   /** Session identifier (used for resume/restore). */
   sessionId: string;
+  resume?: SessionSnapshot;
   /** Initial prompt or goal text. */
   goal?: string;
   /** Whether to attach interactively (HITL). */
   interactive?: boolean;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
+  executionProfile?: 'development' | 'analysis';
   /** Immutable provider runtime resolved before backlog claim. */
   runtime?: AgentRuntimeSelection;
 }
@@ -108,9 +113,11 @@ export type AgentRuntimeSelection = { kind: 'default' } | CodexRuntimeSelection;
 
 /** Minimal execution host implemented by local and container sandboxes. */
 export interface AgentExecutionHost {
+  readonly localProcessWorkspace?: boolean;
   readonly worktreePath: string;
   readonly workspacePath: string;
   startAgent(options: AgentStartOptions): Promise<AgentExecution>;
+  startProviderExecution?(provider: AgentProviderName, options: Omit<AgentExecutionOptions, 'sandbox'>): Promise<AgentExecution>;
 }
 
 export interface AgentExecutionOptions extends AgentCommandOptions {
@@ -124,9 +131,9 @@ export interface AgentExecutionOptions extends AgentCommandOptions {
 /** An event emitted by the agent during execution. */
 export type AgentEvent =
   | { type: 'text'; text: string }
-  | { type: 'session'; sessionId: string }
+  | { type: 'session'; sessionId: string; worktreePath?: string }
   | { type: 'usage'; usage: TokenUsage }
-  | { type: 'result'; result: unknown }
+  | { type: 'result'; result: unknown; completedTurnUsage?: TokenUsage }
   | { type: 'error'; error: Error };
 
 /** Provider-neutral options used by an execution host to start an agent. */
@@ -153,6 +160,14 @@ export interface SessionSnapshot {
   capturedAt: string;
 }
 
+export interface NativeSessionCheckpoint {
+  version: 1;
+  provider: AgentProviderName;
+  sessionId: string;
+  worktreePath: string;
+  workspacePath?: string;
+}
+
 /** Options for capturing a session snapshot. */
 export interface CaptureSessionOptions {
   sessionId: string;
@@ -174,7 +189,10 @@ export interface CaptureOptions {
 
 export interface ResumeOptions {
   snapshot: SessionSnapshot;
+  prompt?: string;
 }
+
+export class NativeResumeDispatchError extends Error {}
 
 export type ExecutionEvent =
   | { type: 'text'; text: string }
@@ -213,6 +231,7 @@ export interface ExecutionResult {
   exitCode?: number;
   structuredOutput?: unknown;
   usage?: TokenUsage;
+  cumulativeSessionTokens?: number;
   tools?: AgentToolCallSummary[];
   commits: string[];
   branch?: string;
@@ -255,6 +274,7 @@ export interface AgentExecution {
 export interface AgentProvider {
   readonly name: AgentProviderName;
   readonly capabilities: ReadonlySet<AgentCapability>;
+  supportsResume?(options: Pick<AgentExecutionOptions, 'sandbox' | 'runtime' | 'executionMode' | 'interactive' | 'executionProfile'>): boolean;
 
   /**
    * The limits this provider puts on the text AFK hands it.

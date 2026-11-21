@@ -5,6 +5,7 @@ import { glob } from 'glob';
 import { directoryBytes, DependencyPool } from '../../infrastructure/git/dependency-pool.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
+import { withWorkspaceOwnershipAvailable } from '../../infrastructure/runtime/workspace-ownership.js';
 import { executionWorkspacePath, resolveWorkspaceRoot, workspaceStateDirectory } from '../../infrastructure/workspace.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { readExecutionManifest } from './execution-manifest.js';
@@ -65,9 +66,6 @@ export async function reclaimWorkspaces(options: ReclaimWorkspacesOptions = {}):
   const store = options.store ?? new RepositoryStore(join(root, 'repos'));
   const report: WorkspaceReclamationReport = { reclaimed: [], skipped: [], diagnostics: [] };
 
-  const [activeRecords, archiveRecords] = await Promise.all([manager.store.listActive(), manager.store.listArchive()]);
-  const records = [...activeRecords, ...archiveRecords];
-
   const manifestPaths = (options.manifests ?? (await glob(join(workspaceStateDirectory(), 'workspaces/*/execution-manifest.json'), { follow: false }).catch(() => [])))
     .map(path => resolve(path))
     .sort();
@@ -87,22 +85,26 @@ export async function reclaimWorkspaces(options: ReclaimWorkspacesOptions = {}):
         continue;
       }
       const keys = manifest.repositories.map(repository => `${repository.platform}:${repository.projectKey}`);
-      const attributed = records.filter(record => {
-        if (!record.workspace) return false;
-        const recordLocation = relative(workspace, resolve(record.workspace));
-        return recordLocation === '' || (!recordLocation.startsWith(`..${sep}`) && recordLocation !== '..' && !isAbsolute(recordLocation));
-      });
-      const alive = attributed.find(record => Date.parse(record.heartbeatAt) > cutoff);
-      if (alive) {
-        report.skipped.push({ workItemId: manifest.workItemId, path: workspace, reason: `runtime record ${alive.runId} heartbeated within the grace period` });
-        continue;
-      }
-      const bytes = await directoryBytes(workspace);
+      let bytes = 0;
       const capturedDependencies: string[] = [];
       try {
-        // Acquiring the lease proves no live competitor and, through the
-        // dead-owner recovery policy, clears expired claims of crashed runs.
-        await leases.run(keys, async () => {
+        await leases.run(keys, () => withWorkspaceOwnershipAvailable(workspace, manifest.repositories, async () => {
+          const active = await manager.store.listActive();
+          const archive = await manager.store.listArchive();
+          const attributed = [...active, ...archive].filter(record => {
+            if (!record.workspace) return false;
+            const recordLocation = relative(workspace, resolve(record.workspace));
+            return recordLocation === '' || (!recordLocation.startsWith(`..${sep}`) && recordLocation !== '..' && !isAbsolute(recordLocation));
+          });
+          if (!attributed.length) throw new Error('no attributable runtime record');
+          for (const record of attributed) {
+            if (record.status === 'blocked') throw new Error(`blocked runtime record ${record.runId}`);
+            if (!['running', 'completed', 'failed'].includes(record.status)) {
+              throw new Error(`unusable runtime record ${record.runId}`);
+            }
+            if (Date.parse(record.heartbeatAt) > cutoff) throw new Error(`runtime record ${record.runId} heartbeated within the grace period`);
+          }
+          bytes = await directoryBytes(workspace);
           for (const repository of manifest.repositories) {
             try {
               if (await pool.capture(repository.repoRoot)) capturedDependencies.push(repository.repoRoot);
@@ -113,13 +115,13 @@ export async function reclaimWorkspaces(options: ReclaimWorkspacesOptions = {}):
             try { await store.removeCheckout(repository.repoRoot); } catch { /* independent clones are removed with the workspace */ }
           }
           await fs.rm(workspace, { recursive: true, force: true });
-          for (const record of attributed.filter(entry => activeRecords.some(active => active.runId === entry.runId))) {
+          for (const record of attributed.filter(entry => active.includes(entry))) {
             await manager.store.finish(record.runId, { status: 'failed', errorSummary: 'workspace reclaimed after the run stopped heartbeating (ADR-0038)' })
               .catch(error => report.diagnostics.push(`${record.runId}: runtime record termination failed: ${String(error)}`));
           }
-        });
+        }));
       } catch (error) {
-        report.skipped.push({ workItemId: manifest.workItemId, path: workspace, reason: `repository lease could not be acquired: ${String(error)}` });
+        report.skipped.push({ workItemId: manifest.workItemId, path: workspace, reason: `workspace reclamation blocked: ${String(error)}` });
         continue;
       }
       await pool.prune(nowFor(options));

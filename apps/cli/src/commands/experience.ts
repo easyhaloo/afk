@@ -1,14 +1,28 @@
 import { Command, InvalidArgumentError, Option } from 'commander';
 import { constants, promises as fs } from 'node:fs';
-import { ExperienceStore, experienceScope, experienceStorePath, verifyAdoptionRun, verifyExperienceRun } from '@afk/runtime/execution';
+import { homedir } from 'node:os';
+import { z } from 'zod';
+import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState,
+  candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningScopeSchema, verifyAdoptionRun, verifyExperienceRun,
+  LearningReviewIncompleteError, learningReviewIncompleteSchema,
+  type LearningCandidate, type LearningJob, type LearningState, type LearningValidationResult,
+  type ExperienceQueryContext, type publishConfiguredKnowledge, type reconcileConfiguredKnowledge } from '@afk/runtime/execution';
+import type { PluginRuntime } from '@afk/runtime/plugin-sdk';
+import { runOptimizationReviewWorkflow, runRepairReviewWorkflow, runSuccessReviewWorkflow } from '@afk/runtime/application/workflows/run-cmd';
+import { parseWorkItemId } from '@afk/runtime/domain/work-item/identity';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
-type Store = Pick<ExperienceStore, 'recordFailure' | 'list' | 'get' | 'recall' | 'verify' | 'revoke' | 'export' | 'import' | 'copy' | 'metrics' | 'adopt' | 'close'>;
+type Store = Pick<ExperienceStore, 'recordFailure' | 'list' | 'get' | 'recall' | 'verify' | 'revoke' | 'export' | 'import' | 'copy' | 'metrics' | 'adopt' | 'outcomeReceipts' | 'close'>;
 
 export interface ExperienceCommandComposition extends CommandRegistrationContext {
+  createRuntime?: () => Promise<PluginRuntime>;
   createStore?: () => Store;
   verifyRun?: typeof verifyExperienceRun;
   verifyAdoptionRun?: typeof verifyAdoptionRun;
+  queryLearningState?: typeof queryLearningState;
+  runSuccessReviewWorkflow?: typeof runSuccessReviewWorkflow;
+  runRepairReviewWorkflow?: typeof runRepairReviewWorkflow;
+  runOptimizationReviewWorkflow?: typeof runOptimizationReviewWorkflow;
 }
 
 function parseScope(value: string): string {
@@ -29,16 +43,39 @@ function parseLimit(value: string): number {
   return count;
 }
 
+function parseOffset(value: string): number {
+  const offset = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(offset) || offset < 0) throw new InvalidArgumentError('offset must be a non-negative safe integer');
+  return offset;
+}
+
+function parseCandidateId(value: string): string {
+  if (!/^[a-f0-9]{64}$/.test(value) || value.length !== 64) throw new InvalidArgumentError('candidate ID must be 64 lowercase hexadecimal characters');
+  return value;
+}
+
+function parseVersion(value: string): number {
+  const version = parseOffset(value);
+  if (version < 1) throw new InvalidArgumentError('version must be a positive safe integer');
+  return version;
+}
+
+function learningCode(value?: string): string | undefined {
+  return value && ['analysis_cancelled', 'analysis_executable_changed', 'analysis_failed', 'analysis_invalid_output', 'analysis_outcome_unknown',
+    'analysis_output_limit', 'analysis_timed_out', 'analysis_unsupported', 'attempts_exhausted', 'budget_exhausted',
+    'evidence_unavailable', 'learning_disabled', 'source_invalidated', 'source_limit', 'source_not_allowed', 'source_unstable', 'storage_blocked'].includes(value)
+    ? value : undefined;
+}
+
 function collectEvidence(value: string, previous: string[] = []): string[] {
   return [...previous, parseText(value)];
 }
 
-async function readExchange(file: string): Promise<string> {
-  const maximum = 1024 * 1024;
+async function readExchange(file: string, maximum = 1024 * 1024): Promise<string> {
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > maximum) throw new Error('Exchange must be a regular JSON file of at most 1048576 bytes');
+    if (!stat.isFile() || stat.size > maximum) throw new Error(`Exchange must be a regular JSON file of at most ${maximum} bytes`);
     const buffer = Buffer.alloc(maximum + 1);
     let length = 0;
     while (length < buffer.length) {
@@ -46,7 +83,7 @@ async function readExchange(file: string): Promise<string> {
       if (!bytesRead) break;
       length += bytesRead;
     }
-    if (length > maximum) throw new Error('Experience exchange exceeds byte limit (1048576)');
+    if (length > maximum) throw new Error(`Experience exchange exceeds byte limit (${maximum})`);
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length));
   } finally { await handle.close(); }
 }
@@ -54,9 +91,27 @@ async function readExchange(file: string): Promise<string> {
 export function registerExperienceCommands(program: Command, composition: ExperienceCommandComposition = {}): void {
   const experience = program.command('experience').description('Inspect and govern scoped execution experiences');
   const withStore = async (operation: (store: Store) => void | Promise<void>): Promise<void> => {
-    const store = composition.createStore ? composition.createStore() : new ExperienceStore({ file: experienceStorePath() });
+    const homeDir = homedir();
+    const store = composition.createStore ? composition.createStore() : new ExperienceStore({ file: experienceStorePath(homeDir), homeDir });
     try { await operation(store); }
     finally { store.close(); }
+  };
+  const withRuntime = async <Result>(failure: string, operation: (plugins: PluginRuntime) => Promise<Result>,
+    errorCode?: (error: unknown) => string | undefined): Promise<Result> => {
+    const owned = !composition.pluginRuntime && !composition.createRuntime;
+    let plugins: PluginRuntime | undefined;
+    try {
+      plugins = composition.pluginRuntime ?? await (composition.createRuntime
+        ? composition.createRuntime() : import('../composition-root.js').then(module => module.createCliPluginRuntime()));
+      if (!plugins) throw new Error(failure);
+      return await operation(plugins);
+    } catch (error) { throw new Error(errorCode?.(error) ?? failure); }
+    finally {
+      if (owned) {
+        try { await plugins?.dispose(); }
+        catch { throw new Error(failure); }
+      }
+    }
   };
   const requireScopedRecord = (store: Store, id: string, scope: string): void => {
     const record = store.get(id, scope);
@@ -66,6 +121,255 @@ export function registerExperienceCommands(program: Command, composition: Experi
     const output = json ? JSON.stringify(records, null, 2) : records.map(record => `${record.id} [${record.status}] ${record.trigger}\n  ${record.action}`).join('\n');
     process.stdout.write(`${output}\n`);
   };
+
+  const queryLearning = async <Kind extends keyof LearningState>(kind: Kind, scope: string): Promise<LearningState[Kind]> => {
+    try {
+      const records = composition.pluginRuntime
+        ? await composition.pluginRuntime.dispatchSystemAction(`learning.${kind}`, { scope }) as LearningState[Kind]
+        : (composition.queryLearningState ?? queryLearningState)({ directory: learningDirectory(), scope })[kind];
+      if (kind === 'jobs') {
+        return (records as LearningJob[]).filter(record => record.scope === scope).map(record => {
+          const { jobId, sourceId, sourceRunId, workItemId, status, reasonCode, attempts } = record;
+          if (!['pending', 'blocked', 'failed', 'processed'].includes(status)) throw new Error('Invalid learning status');
+          return { jobId: parseCandidateId(jobId), scope, sourceId, sourceRunId, workItemId, status, reasonCode: learningCode(reasonCode),
+            attempts: attempts.map(({ requestKey, callId, day, startedAt, ownerPid, host, status, analysisRunId, sessionId, finishedAt, errorCode, usage }) => ({
+              requestKey, callId, day, startedAt, ownerPid, host, status, analysisRunId, sessionId, finishedAt, errorCode: learningCode(errorCode),
+              ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
+            })) };
+        }) as LearningState[Kind];
+      }
+      return (records as LearningCandidate[]).filter(record => record.proposal.applicability.project === scope)
+        .map(({ id, requestKey, version, state, digest, evidenceDigest, proposal }) => ({ id: parseCandidateId(id), requestKey,
+          version, state: candidateStateSchema.parse(state), digest, evidenceDigest, proposal: candidateProposalSchema.parse(proposal) })) as LearningState[Kind];
+    } catch { throw new Error('Learning query failed'); }
+  };
+  const learningId = (record: LearningJob | LearningCandidate): string => 'jobId' in record ? record.jobId : record.id;
+  const emitLearning = (records: (LearningJob | LearningCandidate)[], json?: boolean, single = false): void => {
+    const output = json ? JSON.stringify(single ? records[0] : records, null, 2) : records.map(record => {
+      const reason = 'reasonCode' in record && record.reasonCode ? ` ${record.reasonCode}` : '';
+      return `${learningId(record)} [${'status' in record ? record.status : record.state}]${reason}`;
+    }).join('\n');
+    process.stdout.write(`${output}\n`);
+  };
+
+  experience.command('review')
+    .description('Review an execution for process or repair-lesson previews, or skill/tool optimization validation')
+    .requiredOption('--backlog-id <canonical>', 'Canonical platform:projectKey#issueNumber')
+    .requiredOption('--run-id <source>', 'Source execution run identity')
+    .requiredOption('--checker <id>', 'Saved checker identity')
+    .addOption(new Option('--kind <kind>', 'Success review, three-run repair review, or skill/tool validation').choices(['success', 'repair', 'skill', 'tool']).default('success'))
+    .option('--session <name>', 'Learning workflow session name')
+    .option('--hard-timeout <ms>', 'Maximum workflow duration in milliseconds')
+    .option('--json', 'Emit compact JSON')
+    .action(async options => {
+      try {
+        const identity = parseWorkItemId(options.backlogId);
+        const scope = learningScopeSchema.parse(`${identity.platform}:${identity.projectKey}`);
+        const backlogId = identity.id;
+        const sourceRunId = learningIdentitySchema.parse(options.runId);
+        const checkerId = learningIdentitySchema.parse(options.checker);
+        const session = options.session === undefined ? undefined : parseText(options.session);
+        const hardTimeoutMs = options.hardTimeout === undefined ? undefined : parseVersion(options.hardTimeout);
+        if (hardTimeoutMs !== undefined && hardTimeoutMs > 2147483647) throw new Error('Learning review failed');
+        let incompleteOutput: string | undefined;
+        const result = await withRuntime('Learning review failed', async plugins => {
+          try {
+            const reviewOptions = { plugins,
+              backlogId, sourceRunId, checkerId, ...(session === undefined ? {} : { session }),
+              ...(hardTimeoutMs === undefined ? {} : { hardTimeoutMs }) };
+            const result = options.kind === 'skill' || options.kind === 'tool'
+              ? await (composition.runOptimizationReviewWorkflow ?? runOptimizationReviewWorkflow)({ ...reviewOptions, kind: options.kind })
+              : await (options.kind === 'repair' ? composition.runRepairReviewWorkflow ?? runRepairReviewWorkflow
+                : composition.runSuccessReviewWorkflow ?? runSuccessReviewWorkflow)(reviewOptions);
+            if (!result.success) throw new Error('Learning review failed');
+            const output = result.steps?.review?.output;
+            if (!output || typeof output !== 'object' || Array.isArray(output)) throw new Error('Learning review failed');
+            return { status: 'success' as const, output: JSON.stringify(output, null, options.json ? undefined : 2) };
+          } catch (error) {
+            if (!(error instanceof LearningReviewIncompleteError)) throw error;
+            const output = learningReviewIncompleteSchema.parse(error.output);
+            if (output.scope !== scope || output.runId !== sourceRunId) throw new Error('Learning review failed');
+            incompleteOutput = JSON.stringify(output, null, options.json ? undefined : 2);
+            return { status: 'incomplete' as const, output: incompleteOutput };
+          }
+        }).catch(error => {
+          if (incompleteOutput !== undefined) process.stdout.write(`${incompleteOutput}\n`);
+          throw error;
+        });
+        process.stdout.write(`${result.output}\n`);
+        if (result.status === 'incomplete') throw new Error('Learning review failed');
+      } catch { throw new Error('Learning review failed'); }
+    });
+
+  for (const kind of ['jobs', 'candidates'] as const) {
+    experience.command(kind)
+      .description(`Read scoped learning ${kind}, ordered by full ${kind === 'jobs' ? 'jobId' : 'id'} ascending`)
+      .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+      .option('--limit <count>', 'Maximum records to return (0..100)', parseLimit, 100)
+      .option('--offset <count>', 'Records to skip in ID order', parseOffset, 0)
+      .option('--json', 'Emit existing learning DTOs as JSON')
+      .action(async options => {
+        const records = await queryLearning(kind, options.scope);
+        records.sort((first, second) => learningId(first) < learningId(second) ? -1 : learningId(first) > learningId(second) ? 1 : 0);
+        emitLearning(records.slice(options.offset).slice(0, options.limit), options.json);
+      });
+  }
+
+  experience.command('inspect')
+    .description('Read one learning candidate in its exact project scope')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit the existing candidate DTO as JSON')
+    .action(async (candidateId, options) => {
+      const records = await queryLearning('candidates', options.scope);
+      const record = records.find(candidate => candidate.id === candidateId);
+      if (!record) throw new Error('Candidate not found in scope');
+      emitLearning([record], options.json, true);
+    });
+
+  experience.command('correct')
+    .description('Queue a candidate correction without running analysis or changing the original candidate')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters')
+    .requiredOption('--scope <scope>', 'Canonical platform:projectKey')
+    .requiredOption('--expected-version <version>', 'Current candidate version')
+    .requiredOption('--file <path>', 'UTF-8 correction file (maximum 32768 bytes)')
+    .option('--json', 'Emit compact JSON')
+    .action(async (candidateId, options) => {
+      try {
+        const scope = parseScope(options.scope);
+        parseCandidateId(candidateId);
+        const expectedVersion = parseVersion(options.expectedVersion);
+        const correction = await readExchange(options.file, 32768);
+        parseText(correction);
+        const result = await withRuntime('Learning correction failed', async plugins => {
+          const receipt = await plugins.dispatchSystemAction('learning.correct', { scope, candidateId, expectedVersion, correction }) as {
+            jobId: string; scope: string; candidateId: string; candidateVersion: number;
+          };
+          if (typeof receipt.jobId !== 'string' || receipt.scope !== scope || receipt.candidateId !== candidateId
+            || receipt.candidateVersion !== expectedVersion) throw new Error('Learning correction failed');
+          return { jobId: parseCandidateId(receipt.jobId), scope, candidateId, candidateVersion: receipt.candidateVersion };
+        });
+        process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      } catch { throw new Error('Learning correction failed'); }
+    });
+
+  experience.command('validate')
+    .description('Independently validate a learning candidate using a saved checker binding')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--expected-version <version>', 'Current candidate version', parseVersion)
+    .requiredOption('--checker <id>', 'Saved checker identity', parseText)
+    .option('--json', 'Emit the validation result as JSON')
+    .action(async (candidateId, options) => withRuntime('Learning validation failed', async active => {
+        const result = await active.dispatchSystemAction('learning.validate', { scope: options.scope, candidateId,
+          expectedVersion: options.expectedVersion, checkerId: options.checker }) as LearningValidationResult;
+        process.stdout.write(`${options.json ? JSON.stringify(result) : result.status === 'validated'
+          ? `${result.candidateId} [validated] version ${result.validatedVersion}` : `[blocked] ${result.code}`}\n`);
+        if (result.status === 'blocked') process.exitCode = 1;
+    }));
+
+  const worker = experience.command('worker').description('Run the configured learning worker');
+  const withWorkerSignals = async <Result>(operation: (plugins: PluginRuntime, signal: AbortSignal) => Promise<Result>,
+    gracefulStop = false): Promise<Result> => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    const abort = () => controller.abort();
+    process.on('SIGINT', abort);
+    process.on('SIGTERM', abort);
+    try {
+      const result = await withRuntime('learning_worker_failed', plugins => {
+        signal.throwIfAborted();
+        return operation(plugins, signal);
+      }, error => {
+        if (signal.aborted && error === signal.reason) return 'learning_worker_cancelled';
+        if (!(error instanceof Error)) return undefined;
+        switch (error.message) {
+          case 'Trigger queue is already owned by a live or unverifiable listener': return 'learning_worker_busy';
+          case "unknown system action 'learning.worker.once'":
+          case "unknown system action 'learning.worker.watch'": return 'learning_worker_unavailable';
+          case 'learning_disabled': return 'learning_disabled';
+          case 'learning_request_not_found': return 'learning_request_not_found';
+          case 'analysis_unsupported': return 'analysis_unsupported';
+          default: return undefined;
+        }
+      });
+      if (signal.aborted && !gracefulStop) throw new Error('learning_worker_cancelled');
+      return result;
+    } finally {
+      process.off('SIGINT', abort);
+      process.off('SIGTERM', abort);
+    }
+  };
+  worker.command('once')
+    .description('Process one exact learning request')
+    .requiredOption('--scope <scope>', 'Canonical platform:projectKey', value => {
+      const scope = learningScopeSchema.safeParse(value);
+      if (!scope.success || scope.data !== value) throw new InvalidArgumentError('scope must be a canonical project (platform:projectKey)');
+      return value;
+    })
+    .requiredOption('--request <requestKey>', '64 lowercase hexadecimal learning request key', parseCandidateId)
+    .option('--json', 'Emit compact JSON')
+    .action(async (options: { scope: string; request: string; json?: boolean }) => {
+      const target = { scope: options.scope, requestKey: options.request };
+      const job = await withWorkerSignals(async (plugins, signal) => {
+        const result = await plugins.dispatchSystemAction('learning.worker.once', target, { signal });
+        signal.throwIfAborted();
+        const { job } = z.object({ job: z.object({
+          jobId: z.literal(target.requestKey), scope: z.literal(target.scope),
+          status: z.enum(['pending', 'blocked', 'failed', 'processed']), canRun: z.boolean(),
+          reasonCode: z.string().optional(), attempts: z.custom<unknown[]>(Array.isArray),
+        }) }).parse(result);
+        const { attempts, reasonCode, ...summary } = job;
+        return { ...summary, attemptCount: attempts.length, reasonCode: learningCode(reasonCode) };
+      });
+      process.stdout.write(`${JSON.stringify({ job }, null, options.json ? undefined : 2)}\n`);
+      if (job.status !== 'processed') process.exitCode = 1;
+    });
+  worker.command('watch')
+    .description('Watch the saved learning queue until stopped')
+    .option('--json', 'Emit compact JSON on shutdown')
+    .action(async (options: { json?: boolean }) => {
+      const result = await withWorkerSignals(async (plugins, signal) => {
+        const result = await plugins.dispatchSystemAction('learning.worker.watch', {}, { signal });
+        if (!signal.aborted) throw new Error('learning_worker_stopped_unexpectedly');
+        return z.object({ status: z.literal('stopped') }).parse(result);
+      }, true);
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+    });
+
+  const knowledge = experience.command('knowledge').description('Preview, publish and recover authorized knowledge');
+  knowledge.command('prepare')
+    .description('Prepare an immutable publication preview for a validated candidate')
+    .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--expected-version <version>', 'Current candidate version', parseVersion)
+    .option('--target <ref>', 'Authorized logical target reference', parseText)
+    .option('--json', 'Emit compact JSON')
+    .action(async (candidateId, options) => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.prepare', { scope: options.scope, candidateId,
+        expectedVersion: options.expectedVersion, ...(options.target ? { targetRef: options.target } : {}) });
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+    }));
+  knowledge.command('publish')
+    .description('Apply the exact prepared publication through its current authorization guards')
+    .argument('<key>', '64 lowercase hexadecimal publication key', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit compact JSON')
+    .action(async (key, options) => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.publish', { scope: options.scope, key }) as Awaited<ReturnType<typeof publishConfiguredKnowledge>>;
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      if (result.publication.phase !== 'committed') process.exitCode = 1;
+    }));
+  knowledge.command('reconcile')
+    .description('Recover publications and withdraw invalid assets in one project')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .option('--json', 'Emit compact JSON')
+    .action(async options => withRuntime('Learning knowledge operation failed', async plugins => {
+      const result = await plugins.dispatchSystemAction('learning.knowledge.reconcile', { scope: options.scope }) as Awaited<ReturnType<typeof reconcileConfiguredKnowledge>>;
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
+      if (result.blocked.length || result.results.some(entry => entry.withdrawal?.status === 'rollback_blocked'
+        || (entry.publication.phase !== 'committed' && entry.withdrawal?.status !== 'withdrawn'))) process.exitCode = 1;
+    }));
 
   experience.command('list')
     .description('List experiences in one canonical project scope')
@@ -83,11 +387,21 @@ export function registerExperienceCommands(program: Command, composition: Experi
     .description('Recall verified experience for a scoped query')
     .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
     .requiredOption('--query <text>', 'Current task or failure to match', parseText)
+    .option('--context <file>', 'Strict JSON applicability and target context (at most 32 KiB)')
     .option('--json', 'Emit JSON')
-    .action(options => withStore(store => {
-      const records = store.recall({ scope: options.scope, prompt: options.query }).filter(record => record.scope === options.scope);
-      emit(records, options.json);
-    }));
+    .action(async options => {
+      let context: ExperienceQueryContext = {};
+      if (options.context !== undefined) {
+        try {
+          context = experienceQueryContextSchema.parse(JSON.parse(await readExchange(options.context, 32 * 1024)));
+          if (context.target && context.target.project !== options.scope) throw new Error('Context scope mismatch');
+        } catch { throw new Error('Experience recall context is invalid'); }
+      }
+      await withStore(store => {
+        const records = store.recall({ scope: options.scope, prompt: options.query, ...context }).filter(record => record.scope === options.scope);
+        emit(records, options.json);
+      });
+    });
 
   experience.command('record')
     .description('Record a candidate failure experience for a canonical work item')
@@ -161,6 +475,26 @@ export function registerExperienceCommands(program: Command, composition: Experi
     .requiredOption('--target-scope <project>', 'Target canonical platform:projectKey', parseScope)
     .action((id, options) => withStore(store => emit([store.copy({ id, scope: options.scope, targetScope: options.targetScope })], true)));
 
+  experience.command('outcomes')
+    .description('Read historical outcomes for selected experience references; selection is not adoption and benefit remains unknown')
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--run-id <id>', 'Consuming run ID', parseText)
+    .requiredOption('--work-item-id <id>', 'Canonical consuming work item ID', parseText)
+    .option('--limit <count>', 'Maximum receipts, newest audit sequence first (0..100, default 20)', parseLimit, 20)
+    .option('--json', 'Emit compact JSON')
+    .action(async options => {
+      if (experienceScope(options.workItemId) !== options.scope) throw new Error('Work item does not belong to scope');
+      let output: string;
+      try {
+        await withStore(store => {
+          const receipts = store.outcomeReceipts({ scope: options.scope,
+            source: { runId: options.runId, workItemId: options.workItemId }, limit: options.limit });
+          output = JSON.stringify(receipts, null, options.json ? undefined : 2);
+        });
+      } catch { throw new Error('Experience outcome query failed'); }
+      process.stdout.write(`${output!}\n`);
+    });
+
   experience.command('metrics')
     .description('Read bounded persisted counts for retained scoped lessons; retrieval is separate from explicit adoption')
     .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
@@ -171,7 +505,7 @@ export function registerExperienceCommands(program: Command, composition: Experi
     }));
 
   experience.command('adopt <id>')
-    .description('Explicitly acknowledge use of a verified lesson in an intact target run/task; this does not measure observed use (maximum 64 per lesson)')
+    .description('Explicitly acknowledge use of a verified lesson in an intact target run/task; emit metrics and a version-bound receipt (legacy receipts remain unbound); constrained lessons require a trusted successful QA target; this does not measure observed use (maximum 64 per lesson)')
     .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
     .requiredOption('--run-id <id>', 'Run where the lesson was used', parseText)
     .requiredOption('--work-item-id <id>', 'Canonical target work item ID', parseText)
@@ -180,10 +514,10 @@ export function registerExperienceCommands(program: Command, composition: Experi
       if (experienceScope(options.workItemId) !== options.scope) throw new Error('Work item does not belong to scope');
       return withStore(async store => {
         requireScopedRecord(store, id, options.scope);
-        await (composition.verifyAdoptionRun ?? verifyAdoptionRun)({ scope: options.scope, runId: options.runId, workItemId: options.workItemId,
+        const context = await (composition.verifyAdoptionRun ?? verifyAdoptionRun)({ scope: options.scope, runId: options.runId, workItemId: options.workItemId,
           ...(options.root === undefined ? {} : { root: options.root }) });
-        const counts = store.adopt({ id, scope: options.scope, source: { runId: options.runId, workItemId: options.workItemId } });
-        process.stdout.write(`${JSON.stringify(counts)}\n`);
+        const result = store.adopt({ id, scope: options.scope, source: { runId: options.runId, workItemId: options.workItemId } }, context);
+        process.stdout.write(`${JSON.stringify(result)}\n`);
       });
     });
 }

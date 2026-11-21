@@ -53,11 +53,53 @@ test("lists, recalls, independently verifies and revokes real project-scoped exp
   await experiences.getByRole("textbox", { name: "召回内容", exact: true }).fill("network");
   await experiences.getByRole("button", { name: "查询经验", exact: true }).click();
   await expect(row).toBeVisible();
+  const consumer = { runId: "experience-desktop-consumer", workItemId: "github:acme/api#3" };
+  const selectedStore = new ExperienceStore({ file, now: () => new Date(Date.now() - 1000) });
+  try {
+    expect(selectedStore.get(record.id, record.scope)).toMatchObject({ status: "verified", verifiedEvidence: { runId } });
+    const retrieved = selectedStore.recordContextRetrieval({ id: record.id, scope: record.scope, source: consumer,
+      selectionId: "12345678-1234-4234-8234-123456789012", fragmentDigest: "a".repeat(64) });
+    selectedStore.recordContextSelection({ retrieved, fragmentDigest: "b".repeat(64) });
+    const occurredAt = new Date().toISOString();
+    selectedStore.recordRunOutcome({ scope: record.scope, source: consumer, event: { runId: consumer.runId,
+      sequence: 3, hash: "c".repeat(64), type: "run.finished", outcome: "succeeded", occurredAt, observedAt: occurredAt } });
+    selectedStore.recordRunOutcome({ scope: record.scope, source: consumer, event: { runId: consumer.runId,
+      sequence: 4, hash: "d".repeat(64), type: "qa.failed", outcome: "failed", occurredAt, observedAt: occurredAt },
+      failure: { scope: record.scope, trigger: record.trigger, rootCause: record.rootCause, action: "Configure network proxy",
+        source: consumer, evidence: ["run:experience-desktop-consumer#qa.failed"] } });
+    expect(selectedStore.outcomeReceipts({ scope: record.scope, source: consumer })).toHaveLength(2);
+    expect(selectedStore.get(record.id, record.scope)?.status).toBe("candidate");
+    expect(selectedStore.get(record.id, record.scope)?.verifiedEvidence).toBeUndefined();
+    expect(selectedStore.metrics({ scope: record.scope }).adoptions).toBe(0);
+  } finally { selectedStore.close(); }
+  const outcomes = experiences.getByRole("region", { name: "经验结果收据", exact: true });
+  await outcomes.getByRole("textbox", { name: "结果运行 ID", exact: true }).fill(consumer.runId);
+  await outcomes.getByRole("textbox", { name: "结果工作项 ID", exact: true }).fill(consumer.workItemId);
+  await outcomes.getByRole("button", { name: "提交结果查询", exact: true }).click();
+  await expect(outcomes.getByRole("status")).toContainText("结果收据 2 条");
+  const outcomeRows = outcomes.locator(".plugin-list > li");
+  await expect(outcomeRows).toHaveCount(2);
+  await expect(outcomeRows.first()).toContainText("失败 · 已记录复发 · 收益未知");
+  await expect(outcomeRows.last()).toContainText("成功 · 本收据未记录复发 · 收益未知");
+  await outcomes.getByRole("textbox", { name: "结果工作项 ID", exact: true }).fill("github:acme/api#4");
+  await outcomes.getByRole("button", { name: "提交结果查询", exact: true }).click();
+  await expect(outcomes.getByRole("status")).toHaveText("没有结果收据");
+  await expect(outcomeRows).toHaveCount(0);
+  await outcomes.getByRole("textbox", { name: "结果工作项 ID", exact: true }).fill(consumer.workItemId);
+  await outcomes.getByRole("button", { name: "提交结果查询", exact: true }).click();
+  await expect(outcomeRows).toHaveCount(2);
   await row.getByRole("button", { name: `撤销 ${record.id}`, exact: true }).click();
   await page.getByRole("button", { name: "确认撤销经验", exact: true }).click();
   await expect(row).toHaveCount(0);
   await expect(experiences).toContainText("没有匹配记录");
+  await outcomes.getByRole("button", { name: "提交结果查询", exact: true }).click();
+  await expect(outcomeRows).toHaveCount(2);
   const persisted = new ExperienceStore({ file });
-  try { expect(persisted.get(record.id, record.scope)).toMatchObject({ status: "revoked", verifiedEvidence: { runId } }); }
+  try {
+    expect(persisted.get(record.id, record.scope)?.status).toBe("revoked");
+    expect(persisted.get(record.id, record.scope)?.verifiedEvidence).toBeUndefined();
+    expect(persisted.metrics({ scope: record.scope }).adoptions).toBe(0);
+    expect(persisted.outcomeReceipts({ scope: record.scope, source: consumer })).toHaveLength(2);
+  }
   finally { persisted.close(); }
 });

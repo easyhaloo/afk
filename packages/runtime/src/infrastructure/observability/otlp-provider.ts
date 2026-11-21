@@ -9,7 +9,8 @@ import type {
   TraceSpanOptions,
   TracerProvider,
 } from '../../plugin-sdk/capabilities.js';
-import { requestHttp, type FetchTransport } from '../providers/dependencies.js';
+import { checkAbort, requestHttp, type FetchTransport } from '../providers/dependencies.js';
+import { resolveOperationCredential, validateOperationCredential, type OperationSecret } from '../providers/operation-secret.js';
 
 type Attributes = Readonly<Record<string, string | number | boolean>>;
 type Attribute = { key: string; value: { stringValue: string } | { doubleValue: number } | { boolValue: boolean } };
@@ -18,7 +19,7 @@ type SpanEvent = { name: string; timeUnixNano: string; attributes: Attribute[] }
 export interface OtlpObservabilityProviderOptions {
   readonly endpoint: string;
   readonly serviceName?: string;
-  readonly headers?: Readonly<Record<string, string>>;
+  readonly headers?: Readonly<Record<string, OperationSecret>>;
   readonly timeoutMs?: number;
   readonly resourceAttributes?: Attributes;
   readonly fetch?: FetchTransport;
@@ -113,6 +114,7 @@ export class OtlpObservabilityProvider implements TracerProvider, MetricsProvide
   readonly capabilities = { span: true, event: true, baggage: false, counter: true, gauge: true, histogram: true } as const;
   private readonly endpoint: string;
   private readonly headers: Headers;
+  private readonly headerSources: readonly [string, OperationSecret][];
   private readonly resource: { attributes: Attribute[] };
   private readonly timeoutMs: number;
   private readonly transport?: FetchTransport;
@@ -146,8 +148,9 @@ export class OtlpObservabilityProvider implements TracerProvider, MetricsProvide
         throw new Error();
       }
       const entries = Object.entries(options.headers ?? {});
-      if (entries.length > 64 || entries.some(([key, value]) => typeof value !== 'string' || key.length + value.length > 8_192)) throw new Error();
-      this.headers = new Headers(entries);
+      if (entries.length > 64 || entries.some(([key, value]) => !['string', 'function'].includes(typeof value) || key.length + (typeof value === 'string' ? value.length : 0) > 8_192)) throw new Error();
+      this.headerSources = entries;
+      this.headers = new Headers(entries.map(([key, value]): [string, string] => [key, typeof value === 'string' ? value : '']));
       this.headers.set('content-type', 'application/json');
       this.headers.set('accept', 'application/json');
     } catch { throw new Error('Invalid OTLP headers'); }
@@ -287,14 +290,39 @@ export class OtlpObservabilityProvider implements TracerProvider, MetricsProvide
   private async export(signal: 'traces' | 'metrics', body: unknown, options?: ProviderOperationOptions): Promise<void> {
     const controller = new AbortController();
     this.exports.add(controller);
+    const abort = () => controller.abort();
     try {
+      options?.signal?.addEventListener('abort', abort, { once: true });
+      if (options?.signal?.aborted) abort();
+      checkAbort(options);
+      const operation = {
+        ...options,
+        signal: controller.signal,
+        deadlineAt: Math.min(Date.now() + this.timeoutMs, options?.deadlineAt ?? Infinity),
+      };
+      let headers = this.headers;
+      if (this.headerSources.some(([, source]) => typeof source !== 'string')) {
+        const resolved = await Promise.all(this.headerSources.map(async ([key, source]) => ({
+          key, value: typeof source === 'string' ? source : await resolveOperationCredential(source, operation),
+        })));
+        headers = new Headers(resolved.map(({ key, value }): [string, string] => {
+          const secret = typeof value === 'string' ? value : validateOperationCredential(value).secret;
+          if (key.length + secret.length > 8_192) throw new Error('Invalid OTLP headers');
+          return [key, secret];
+        }));
+        headers.set('content-type', 'application/json');
+        headers.set('accept', 'application/json');
+      }
+      this.ready(operation);
+      checkAbort(operation);
       const response = await requestHttp(this.transport, `${this.endpoint}/v1/${signal}`, {
-        method: 'POST', headers: this.headers, body: JSON.stringify(body), signal: controller.signal,
-      }, { ...options, timeoutMs: this.timeoutMs, maxResponseBytes: 65_536 });
+        method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
+      }, { ...operation, timeoutMs: this.timeoutMs, maxResponseBytes: 65_536 });
       if (response.status !== 200) throw new Error('Invalid OTLP response status');
       if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) throw new Error('Invalid OTLP response content type');
       const responseBody = await response.text();
-      this.ready(options);
+      this.ready(operation);
+      checkAbort(operation);
       validateResponse(responseBody, signal === 'traces' ? 'rejectedSpans' : 'rejectedDataPoints');
       this.lastExport = { ok: true, message: 'Last OTLP export succeeded' };
       this.signalExports.set(signal, this.lastExport);
@@ -306,6 +334,8 @@ export class OtlpObservabilityProvider implements TracerProvider, MetricsProvide
       this.signalExports.set(signal, this.lastExport);
       throw new Error(message);
     } finally {
+      options?.signal?.removeEventListener('abort', abort);
+      controller.abort();
       this.exports.delete(controller);
     }
   }

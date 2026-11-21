@@ -36,6 +36,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -105,7 +106,7 @@ function snapshot(dir) {
   return out;
 }
 
-/** True when the destination tree is byte-for-byte the same shape as source. */
+/** Compare the tree shape, file lengths, and contents of regular files. */
 function treesMatch(srcDir, destDir) {
   if (!existsSync(destDir)) return false;
   const a = snapshot(srcDir);
@@ -113,6 +114,9 @@ function treesMatch(srcDir, destDir) {
   if (a.size !== b.size) return false;
   for (const [rel, info] of a) {
     if (b.get(rel) !== info) return false;
+    if (typeof info === "number" && !readFileSync(join(srcDir, rel)).equals(readFileSync(join(destDir, rel)))) {
+      return false;
+    }
   }
   return true;
 }

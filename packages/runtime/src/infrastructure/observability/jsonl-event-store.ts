@@ -90,19 +90,10 @@ export class JsonlEventStore implements EventStorePort {
   }
 
   async verify(runId: string): Promise<{ valid: boolean; lastSequence: number; lastHash?: string; reason?: string }> {
-    let previous: RunEvent | undefined;
-    let count = 0;
     try {
-      for (const event of await this.load(runId)) {
-        count += 1;
-        if (event.context.runId !== runId) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'run_id_mismatch' };
-        if (event.sequence !== count) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'sequence_gap' };
-        if (!verify(event, previous)) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'integrity_mismatch' };
-        previous = event;
-      }
-      return { valid: true, lastSequence: count, lastHash: previous?.integrity.hash };
+      return verifyRunEventHistory(runId, await this.load(runId));
     } catch (error) {
-      return { valid: false, lastSequence: count, lastHash: previous?.integrity.hash, reason: error instanceof Error ? error.message : 'unknown_error' };
+      return { valid: false, lastSequence: 0, reason: error instanceof Error ? error.message : 'unknown_error' };
     }
   }
 
@@ -161,7 +152,7 @@ export class JsonlEventStore implements EventStorePort {
     });
   }
 
-  private pathFor(runId: string): string {
+  pathFor(runId: string): string {
     return join(this.root, `${Buffer.from(runId, 'utf8').toString('base64url')}.jsonl`);
   }
 
@@ -175,6 +166,23 @@ export class JsonlEventStore implements EventStorePort {
     } finally {
       if (this.mutations.get(runId) === tail) this.mutations.delete(runId);
     }
+  }
+}
+
+export function verifyRunEventHistory(runId: string, history: readonly RunEvent[]): { valid: boolean; lastSequence: number; lastHash?: string; reason?: string } {
+  let previous: RunEvent | undefined;
+  let count = 0;
+  try {
+    for (const event of history) {
+      count += 1;
+      if (event.context.runId !== runId) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'run_id_mismatch' };
+      if (event.sequence !== count) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'sequence_gap' };
+      if (!verify(event, previous)) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'integrity_mismatch' };
+      previous = event;
+    }
+    return { valid: true, lastSequence: count, lastHash: previous?.integrity.hash };
+  } catch {
+    return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'invalid_event' };
   }
 }
 

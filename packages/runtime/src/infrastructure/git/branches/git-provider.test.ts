@@ -35,6 +35,23 @@ async function repository(): Promise<{ repoPath: string; remotePath: string }> {
   return { repoPath, remotePath };
 }
 
+it('allows only the owned untracked QA context while preparing the agent', async () => {
+  const { repoPath } = await repository();
+  const provider = new GitBranchProvider(repoPath);
+  const owned = '.afk/backlog-context-owned.md';
+  const git = simpleGit(repoPath);
+  const verified = (await git.revparse(['HEAD'])).trim();
+  await mkdir(join(repoPath, '.afk'));
+  await writeFile(join(repoPath, owned), 'acceptance criteria');
+  await expect(provider.verificationRevision(repoPath, 'main', owned)).resolves.toBe(verified);
+  await expect(provider.verificationRevision(repoPath, 'main')).rejects.toThrow(/clean/);
+  await writeFile(join(repoPath, 'unrelated'), 'other work');
+  await expect(provider.verificationRevision(repoPath, 'main', owned)).rejects.toThrow(/clean/);
+  await rm(join(repoPath, 'unrelated'));
+  await git.add(owned);
+  await expect(provider.verificationRevision(repoPath, 'main', owned)).rejects.toThrow(/clean/);
+});
+
 function item(): BacklogItem {
   return {
     id: '42',
@@ -116,11 +133,92 @@ describe('GitBranchProvider', () => {
     await publisher.commit('second child');
     await publisher.push('origin', 'afk/backlog-42');
 
+    const preparedHead = await provider.preparePush(handle.branchName, handle.worktreePath);
+    expect(preparedHead).toBe((await worktreeGit.revparse(['HEAD'])).trim());
+    expect(preparedHead).not.toBe((await publisher.revparse(['HEAD'])).trim());
     await provider.push(handle.branchName, handle.worktreePath);
     const remote = simpleGit(remotePath);
 
+    expect((await remote.revparse(['afk/backlog-42'])).trim()).toBe(preparedHead);
     await expect(remote.raw(['show', 'afk/backlog-42:parent-work.txt'])).resolves.toContain('parent work');
     await expect(remote.raw(['show', 'afk/backlog-42:second-child.txt'])).resolves.toContain('second child');
+  });
+
+  it('publishes new branches and later local commits without changing the prepared revision', async () => {
+    const { repoPath, remotePath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createBranch(item(), 'main');
+    const remote = simpleGit(remotePath);
+    const worktreeGit = simpleGit(handle.worktreePath);
+
+    const initialHead = await provider.preparePush(handle.branchName, handle.worktreePath);
+    await expect(remote.revparse([handle.branchName])).rejects.toThrow();
+    await provider.push(handle.branchName, handle.worktreePath);
+    expect((await remote.revparse([handle.branchName])).trim()).toBe(initialHead);
+
+    await writeFile(join(handle.worktreePath, 'parent-work.txt'), 'parent work\n');
+    const { sha } = await provider.commit(handle.worktreePath, 'parent work');
+    expect(await provider.preparePush(handle.branchName, handle.worktreePath)).toBe(sha);
+    await provider.push(handle.branchName, handle.worktreePath);
+    await provider.push(handle.branchName, handle.worktreePath);
+    expect((await worktreeGit.revparse(['HEAD'])).trim()).toBe(sha);
+    expect((await remote.revparse([handle.branchName])).trim()).toBe(sha);
+  });
+
+  it('fast-forwards remote changes explicitly before verification', async () => {
+    const { repoPath, remotePath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createBranch(item(), 'main');
+    await provider.push(handle.branchName, handle.worktreePath);
+    const publisherPath = await mkdtemp(join(tmpdir(), 'afk-git-provider-publisher-'));
+    cleanupPaths.push(publisherPath);
+    const publisher = simpleGit(publisherPath);
+    await publisher.clone(remotePath, publisherPath);
+    await publisher.checkout(handle.branchName);
+    await publisher.addConfig('user.email', 'test@example.com');
+    await publisher.addConfig('user.name', 'Test');
+    await writeFile(join(publisherPath, 'child-work.txt'), 'child work\n');
+    await publisher.add('child-work.txt');
+    await publisher.commit('child work');
+    await publisher.push('origin', handle.branchName);
+    const remoteHead = (await publisher.revparse(['HEAD'])).trim();
+
+    expect(await provider.preparePush(handle.branchName, handle.worktreePath)).toBe(remoteHead);
+    await expect(readFile(join(handle.worktreePath, 'child-work.txt'), 'utf8')).resolves.toBe('child work\n');
+    await provider.push(handle.branchName, handle.worktreePath);
+    expect((await simpleGit(remotePath).revparse([handle.branchName])).trim()).toBe(remoteHead);
+  });
+
+  it.each(['ahead', 'diverged'] as const)('rejects a remote that is %s after verification without changing the verified revision', async state => {
+    const { repoPath, remotePath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createBranch(item(), 'main');
+    await provider.push(handle.branchName, handle.worktreePath);
+    const publisherPath = await mkdtemp(join(tmpdir(), 'afk-git-provider-publisher-'));
+    cleanupPaths.push(publisherPath);
+    const publisher = simpleGit(publisherPath);
+    await publisher.clone(remotePath, publisherPath);
+    await publisher.checkout(handle.branchName);
+    await publisher.addConfig('user.email', 'test@example.com');
+    await publisher.addConfig('user.name', 'Test');
+    if (state === 'diverged') {
+      await writeFile(join(handle.worktreePath, 'parent-work.txt'), 'parent work\n');
+      await provider.commit(handle.worktreePath, 'parent work');
+    }
+    const verifiedHead = await provider.preparePush(handle.branchName, handle.worktreePath);
+
+    await writeFile(join(publisherPath, 'unverified-work.txt'), 'unverified work\n');
+    await publisher.add('unverified-work.txt');
+    await publisher.commit('remote advances after verification');
+    await publisher.push('origin', handle.branchName);
+    const remoteHead = (await publisher.revparse(['HEAD'])).trim();
+
+    await expect(provider.push(handle.branchName, handle.worktreePath)).rejects.toThrow();
+    expect((await simpleGit(handle.worktreePath).revparse(['HEAD'])).trim()).toBe(verifiedHead);
+    const remote = simpleGit(remotePath);
+    expect((await remote.revparse([handle.branchName])).trim()).toBe(remoteHead);
+    await expect(remote.raw(['show', `${handle.branchName}:parent-work.txt`])).rejects.toThrow();
+    await expect(readFile(join(handle.worktreePath, 'unverified-work.txt'), 'utf8')).rejects.toThrow();
   });
 
   it('creates QA worktrees from a remote-only parent branch', async () => {
@@ -372,6 +470,8 @@ describe('GitBranchProvider', () => {
     const merge = await provider.mergeFeatureIntoBaseline(repoPath, 'main', 'afk/backlog-42');
 
     expect(merge).toEqual({ merged: true, conflicts: [] });
+    expect((await git.status()).isClean()).toBe(true);
+    expect((await git.revparse(['HEAD^2'])).trim()).toBe((await git.revparse(['origin/afk/backlog-42'])).trim());
     expect(await provider.listUnresolvedConflicts(repoPath)).toEqual([]);
   });
 });

@@ -1,7 +1,33 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { compareVersions, parseLatestRelease } from './update.js';
+import { compareVersions, findManagedInstallPrefix, parseLatestRelease } from './update.js';
 
 describe('AFK update version handling', () => {
+  it('updates the invoked prefix inside its selected profile', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'update-profile-'));
+    try {
+      const profile = join(root, 'profile');
+      const binaries = [];
+      for (const version of ['old', 'active']) {
+        const dist = join(profile, 'cli/versions', version, 'dist');
+        const prefix = join(root, version);
+        await mkdir(dist, { recursive: true });
+        await mkdir(prefix);
+        await writeFile(join(dist, 'index.js'), '');
+        await symlink(join(dist, 'index.js'), join(prefix, 'afk'));
+        binaries.push(prefix);
+      }
+      const entry = join(binaries[1]!, 'afk');
+      expect(await findManagedInstallPrefix(entry, binaries.join(delimiter), profile)).toBe(binaries[1]);
+      expect(await findManagedInstallPrefix(join(profile, 'cli/versions/active/dist/index.js'), binaries.join(delimiter), profile)).toBe(binaries[1]);
+      await expect(findManagedInstallPrefix(entry, binaries.join(delimiter), root)).rejects.toThrow('installation profile');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ['0.1.10', '0.1.2', 1],
     ['1.0.0', '0.99.99', 1],

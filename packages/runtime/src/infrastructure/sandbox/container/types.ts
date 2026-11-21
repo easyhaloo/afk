@@ -117,6 +117,8 @@ export interface ContainerProvider {
   readonly engine: ContainerEngine;
   readonly binary: string;
 
+  readonly frozen?: FrozenContainerOperations;
+
   /** True if the binary is on PATH and the daemon/rootless state is usable. */
   isAvailable(): Promise<boolean>;
 
@@ -137,4 +139,156 @@ export interface ContainerProvider {
 
   /** Read container state + mount table. */
   inspect(containerId: string): Promise<ContainerInspectInfo>;
+}
+
+export const FROZEN_EXECUTION_MAX_MS = 120_000;
+export const FROZEN_CONTROL_OBSERVATION_MS = 5_000;
+
+export interface FrozenCommandOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs: number;
+  readonly maxOutputBytes: number;
+}
+
+export interface FrozenContainerInspection {
+  readonly id: string;
+  readonly imageId: string;
+  readonly operationId: string;
+  readonly name: string;
+  readonly status: string;
+  readonly exitCode: number;
+  readonly user: string;
+  readonly readOnlyRoot: boolean;
+  readonly network: string;
+  readonly capDrop: readonly string[];
+  readonly securityOptions: readonly string[];
+  readonly privileged: boolean;
+  readonly pidMode: string;
+  readonly ipcMode: string;
+  readonly binds: readonly string[];
+  readonly mounts: readonly { readonly type: string; readonly destination: string }[];
+  readonly tmpfs: Readonly<{ [path: string]: string }>;
+  readonly memory: number;
+  readonly memorySwap: number;
+  readonly nanoCpus: number;
+  readonly pidsLimit: number;
+  readonly entrypoint: readonly string[];
+  readonly command: readonly string[];
+  readonly workdir: string;
+}
+
+export interface FrozenContainerOperations {
+  buildFrozenImage(operationId: string, baseImageId: string, context: Buffer, options: FrozenCommandOptions): Promise<string>;
+  createFrozenContainer(operationId: string, imageId: string, argv: readonly string[], options: FrozenCommandOptions): Promise<string>;
+  inspectFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<FrozenContainerInspection>;
+  startFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<{ stdout: string; stderr: string; code: number }>;
+  killFrozenContainer?(operationId: string, containerId: string, options: FrozenCommandOptions): Promise<void>;
+  cleanupFrozenOperation(operationId: string, options: FrozenCommandOptions): Promise<void>;
+}
+
+export interface FrozenScratchResource {
+  readonly id: string;
+  readonly path: string;
+}
+
+export interface FrozenScratchSnapshot {
+  readonly sampledMs: number;
+  readonly processState: 'not-started' | 'exited';
+  readonly quiescenceConfirmed: true;
+  readonly stateDigest: string;
+  readonly resources: readonly (FrozenScratchResource & {
+    readonly present: boolean;
+    readonly size: number;
+    readonly digest: string | null;
+    readonly bytes: string | null;
+  })[];
+}
+
+export interface FrozenScratchAssertion extends FrozenScratchResource {
+  readonly bytes: string | null;
+}
+
+export interface FrozenScratchReturnAssertion {
+  readonly exitCode: number;
+  readonly signal: null;
+  readonly stdoutHex: string;
+  readonly stderrHex: string;
+}
+
+export interface FrozenScratchRecoveryRequest {
+  readonly callInput: string;
+  readonly requireEffectHistory: boolean;
+  readonly assertions: {
+    readonly fault: readonly FrozenScratchAssertion[];
+    readonly recovered: readonly FrozenScratchAssertion[];
+    readonly replayed: readonly FrozenScratchAssertion[];
+  };
+  readonly returnAssertions?: {
+    readonly fault: FrozenScratchReturnAssertion;
+    readonly recovery: FrozenScratchReturnAssertion;
+    readonly replay: FrozenScratchReturnAssertion;
+  };
+}
+
+export interface FrozenScratchRecoveryEvidence {
+  readonly revision: 'linux-native-scratch-recovery-v2';
+  readonly helperRevision: 'linux-native-scratch-recovery-v1';
+  readonly contractRevision: 'bounded-recovery-return-state-v1';
+  readonly contractDigest: string;
+  readonly phases: readonly (Omit<FrozenScratchEvidence, 'recovery' | 'baselineFailure'> & {
+    readonly phase: 'fault' | 'recovery' | 'replay';
+    readonly ordinal: number;
+    readonly invocationId: string;
+    readonly stdoutHex: string;
+    readonly stderrHex: string;
+  })[];
+  readonly boundaries: {
+    readonly initial: FrozenScratchSnapshot;
+    readonly fault: FrozenScratchSnapshot;
+    readonly recovered: FrozenScratchSnapshot;
+    readonly replayed: FrozenScratchSnapshot;
+  };
+  readonly assertionsDigest: string;
+  readonly assertionsMatched: true;
+  readonly returnAssertionsMatched: boolean;
+  readonly terminalStateIdempotent: true;
+  readonly trajectoryCoverage: 'observed-phase-boundaries';
+  readonly replayBehaviorCoverage: 'not-observed' | 'observed-phase-returns';
+  readonly historyCoverage: 'not-observed';
+  readonly qualification: 'unsupported-replay-behavior' | 'unsupported-effect-history' | 'qualified-bounded-returns-and-state';
+}
+
+export interface FrozenScratchEvidence {
+  readonly revision: 'linux-native-scratch-v1';
+  readonly operationId: string;
+  readonly containerId: string;
+  readonly inputDigest: string;
+  readonly helperDigest: string;
+  readonly artifactDigest: string;
+  readonly callInputDigest: string;
+  readonly argvDigest: string;
+  readonly candidateVersion: 'original' | 'proposed';
+  readonly invocation: {
+    readonly pid: number;
+    readonly startedIdentity: string;
+    readonly execConfirmed: true;
+    readonly startedMs: number;
+    readonly finishedMs: number;
+    readonly exitCode: number | null;
+    readonly signal: number | null;
+  };
+  readonly initial: FrozenScratchSnapshot;
+  readonly final: FrozenScratchSnapshot;
+  readonly historyCoverage: 'not-observed';
+  readonly recovery?: FrozenScratchRecoveryEvidence;
+  readonly baselineFailure?: FrozenScratchBaselineFailure;
+}
+
+export interface FrozenScratchBaselineFailure {
+  readonly revision: 'bounded-original-mismatch-v1';
+  readonly helperRevision: 'linux-native-original-exit-v1' | 'linux-native-scratch-recovery-v1';
+  readonly contractDigest: string;
+  readonly phases: FrozenScratchRecoveryEvidence['phases'];
+  readonly failedPhase: 'fault' | 'recovery' | 'replay';
+  readonly reason: 'exit-code' | 'phase-output' | 'checkpoint';
 }

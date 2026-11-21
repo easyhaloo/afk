@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "sourceBase": "8114bef6b95a69eecce81189eaa2b3b3ec10c4e2",
+  "sourceDiffSha256": "213ddee9e707fae54721a65bc5ec023f6990a34dc1ccf788448de7e7fbc29542",
+  "archiveSha256": "2b4c2f4a8029c0b48fae39625a2c4532ee21e6c105d80f7f8c5118dfff6d2e6d",
+  "harnessSha256": "b0a9581ab92576d5cdf9d0bf0ffa72fddd9cd8984820957f4952a9b3a8021059",
+  "afk": "0.2.180",
+  "opencode": "2.2.7",
+  "model": "qwen3.5:4b",
+  "modelDigest": "7f3251fa6878a78a606bcb3c074283306e5ad2ea411a7774a9dd98a4bc7f2d13",
+  "tracker": "loopback GitLab fixture",
+  "template": "issue-implementation",
+  "exitCode": 0,
+  "status": "awaiting_human",
+  "gate": "merge:2",
+  "qaPassed": true,
+  "auditValid": true,
+  "remainingManagedWorktrees": 0,
+  "remainingClaims": 0,
+  "remote": [
+    { "name": "api", "mainUnchanged": true, "content": "applied api" },
+    { "name": "web", "mainUnchanged": true, "content": "applied web" }
+  ],
+  "sessions": [
+    { "phase": "implementation", "inputTokens": 41130, "outputTokens": 1863, "totalTokens": 42993 },
+    { "phase": "acceptance-verification", "inputTokens": 22516, "outputTokens": 1838, "totalTokens": 24354 },
+    { "phase": "independent-qa", "inputTokens": 12501, "outputTokens": 1336, "totalTokens": 13837 }
+  ],
+  "sessionIdsAndUsageMatchedNative": true,
+  "nativeInputIncludesCacheRead": true,
+  "installedCommandEntrypoints": 23,
+  "targetedRuntimeTestsPassed": 113,
+  "installedWorkflowTestsPassed": 18,
+  "previousAttempt": {
+    "exitCode": 1,
+    "qaError": "MISSING_RESULT",
+    "nativeResultHadExtraClosingBrace": true,
+    "retainedManagedWorktrees": 1
+  }
+}

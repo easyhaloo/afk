@@ -1,0 +1,28 @@
+{
+  "observedOn": "2026-11-21",
+  "scope": "offline Claude Code text-turn smoke test",
+  "platform": "linux/arm64",
+  "claudeCodeVersion": "2.1.319",
+  "engine": {
+    "release": "b12590",
+    "archiveSha256": "7de2298f1705ecd358eadbba595971d1f987731b81a774b2739532805638b550"
+  },
+  "model": {
+    "repository": "bartowski/SmolLM2-135M-Instruct-GGUF",
+    "revision": "09816acd5d99df7be770d85ea30822623dab342c",
+    "file": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+    "sha256": "2e8040ceae7815abe0dcb3540b9995eaa1fa0d2ca9e797d0a635ae4433c68c2d"
+  },
+  "imageId": "sha256:5d026c5af1c0bd082bfaf087e32848b2de5586f8c8738cd7a0b69990fb17f112",
+  "probeSha256": "25112e5240801739cf3f0fcbc718110979a080739b8abdea33e7a31aefd59c89",
+  "network": "none",
+  "cpuMax": "100000 100000",
+  "memoryLimitBytes": 268435456,
+  "swapLimitBytes": 0,
+  "memoryPeakBytes": [268435456, 268435456, 268435456],
+  "messagesRequestsPerRun": [1, 1, 1],
+  "matchingTerminalResults": 3,
+  "answer": "The planet that humans live on is called Earth.",
+  "answerSha256": "c0723c5b34ac25fee3209f9075aadbeaade51f1a1c048a7a14b813abdb37c78e",
+  "formalSkillCasesPassed": 0
+}

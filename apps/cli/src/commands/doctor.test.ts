@@ -1,9 +1,13 @@
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { inspectWorkspaceDisk } from '@afk/runtime/execution';
+import { inspectWorkspaceDisk, reclaimWorkspaces } from '@afk/runtime/execution';
 import { registerDoctorCommands } from './doctor.js';
 
-vi.mock('@afk/runtime/execution', () => ({ inspectWorkspaceDisk: vi.fn() }));
+vi.mock('@afk/runtime/execution', () => ({
+  inspectWorkspaceDisk: vi.fn(),
+  reclaimWorkspaces: vi.fn(),
+  loadReclamationConfig: () => ({ workspaceReclaimGrace: 24 * 60 * 60 * 1000 }),
+}));
 vi.mock('../output.js', () => ({ detail: vi.fn(), warning: vi.fn(), handleCommandError: vi.fn() }));
 
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); process.exitCode = 0; });
@@ -44,6 +48,24 @@ describe('doctor commands', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     await program().parseAsync(['node', 'afk', 'doctor', '--cleanup', '/cache/workspace', '--json']);
     expect(process.exitCode).toBe(1);
+  });
+
+  it.each([
+    { inventory: [], reclamation: [], exitCode: 0 },
+    { inventory: ['active claim'], reclamation: [], exitCode: 1 },
+    { inventory: [], reclamation: ['runtime archive failed'], exitCode: 1 },
+  ])('reports post-reclamation diagnostics with exit code $exitCode', async diagnostics => {
+    const reclaimed = { reclaimed: [], skipped: [], diagnostics: diagnostics.reclamation };
+    const inventory = { ...report(), diagnostics: diagnostics.inventory };
+    vi.mocked(reclaimWorkspaces).mockResolvedValue(reclaimed);
+    vi.mocked(inspectWorkspaceDisk).mockResolvedValue(inventory);
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program().parseAsync(['node', 'afk', 'doctor', '--fix', '--json']);
+
+    expect(vi.mocked(reclaimWorkspaces).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(inspectWorkspaceDisk).mock.invocationCallOrder[0]);
+    expect(output.mock.calls.map(([document]) => JSON.parse(document))).toEqual([inventory, reclaimed]);
+    expect(process.exitCode ?? 0).toBe(diagnostics.exitCode);
   });
 
   it('requires a cleanup target instead of allowing blanket deletion', async () => {

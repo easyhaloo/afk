@@ -14,7 +14,11 @@ const finish = result => {
   process.exit(result.status ?? 91);
 };
 
-if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(binary)) {
+if (binary === 'opencode' && argv[0] === 'db') {
+  if (argv.length !== 5 || !argv[1].includes("session") || !argv[1].includes("'matrix-opencode-native'")
+    || argv[2] !== '--pure' || argv[3] !== '--format' || argv[4] !== 'json') process.exit(64);
+  json([]);
+} else if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(binary)) {
   let prompt = '';
   for await (const chunk of process.stdin) prompt += chunk;
   const effect = { binary, argv, prompt, cwd: process.cwd(), pid: process.pid, simulated: true };
@@ -26,8 +30,55 @@ if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(bi
   }
   if (mode === 'hang') await new Promise(() => { setInterval(() => {}, 1000); });
   const result = '<goal_complete>{"type":"goal_complete","kind":"task","summary":"simulated agent output"}</goal_complete>';
-  if (binary === 'codex') json({ type: 'item.completed', item: { type: 'agent_message', text: result } });
-  else if (binary === 'opencode') json({ type: 'text', part: { text: result } });
+  if (binary === 'cursor-agent' || binary === 'pi') {
+    const emit = value => { json(value); process.stdout.write('\n'); };
+    const cwd = process.env.MATRIX_NATIVE_CWD ?? process.cwd();
+    const sessionId = binary === 'cursor-agent' ? 'matrix-cursor-native' : 'matrix-pi-native';
+    const terminalSessionId = mode === 'identity-mismatch' ? `${sessionId}-other` : sessionId;
+    const nativeError = mode === 'native-error';
+    if (binary === 'cursor-agent') {
+      emit({ type: 'system', subtype: 'init', session_id: sessionId, cwd });
+      emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: result }] } });
+      emit({ type: 'result', subtype: nativeError ? 'error' : 'success', is_error: nativeError,
+        session_id: terminalSessionId, result: nativeError ? `simulated native cursor failure: ${result}` : result,
+        usage: { inputTokens: 10, outputTokens: 4, cacheReadTokens: 3, cacheWriteTokens: 2 } });
+    } else {
+      emit({ type: 'session', version: 3, id: sessionId, cwd });
+      emit({ type: 'agent_start' });
+      if (terminalSessionId !== sessionId) emit({ type: 'session', version: 3, id: terminalSessionId, cwd });
+      emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: result }],
+        stopReason: nativeError ? 'error' : 'stop', ...(nativeError ? { errorMessage: 'simulated native pi failure' } : {}),
+        usage: { input: 10, output: 4, cacheRead: 3, cacheWrite: 2 } } });
+      emit({ type: 'agent_settled', aborted: false });
+    }
+  } else if (binary === 'copilot') {
+    const sessionId = 'matrix-copilot-native';
+    const usageIndex = argv.indexOf('--usage-output-file');
+    if (usageIndex !== -1) {
+      writeFileSync(argv[usageIndex + 1], JSON.stringify({ modelMetrics: { local: { usage: { inputTokens: 15, outputTokens: 4 } } } }));
+    }
+    for (const event of [
+      { type: 'session.start', data: { sessionId, context: { cwd: process.env.MATRIX_NATIVE_CWD ?? process.cwd() } } },
+      { type: 'assistant.turn_start', data: {} },
+      { type: 'assistant.message', data: { content: result, toolRequests: [] } },
+    ]) {
+      json(event);
+      process.stdout.write('\n');
+    }
+    json({ type: 'result', sessionId, exitCode: 0 });
+  } else if (binary === 'codex') json({ type: 'item.completed', item: { type: 'agent_message', text: result } });
+  else if (binary === 'opencode') {
+    const sessionID = 'matrix-opencode-native';
+    const messageID = 'matrix-opencode-message';
+    for (const [type, part] of [
+      ['step_start', { type: 'step-start' }],
+      ['text', { type: 'text', text: result }],
+      ['step_finish', { type: 'step-finish', reason: 'stop', tokens: { input: 10, output: 4, cache: { read: 3, write: 2 } } }],
+    ]) {
+      json({ type, sessionID, part: { ...part, sessionID, messageID } });
+      process.stdout.write('\n');
+    }
+  }
   else json({ type: 'result', result });
   process.stdout.write('\n');
 } else if (['docker', 'podman'].includes(binary)) {
@@ -56,6 +107,7 @@ if (['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].includes(bi
     const workdirIndex = argv.indexOf('-w');
     const result = spawnSync(command[0], command.slice(1), {
       cwd: translate(workdirIndex < 0 ? '/workspace' : argv[workdirIndex + 1]),
+      env: { ...process.env, MATRIX_NATIVE_CWD: workdirIndex < 0 ? '/workspace' : argv[workdirIndex + 1] },
       encoding: 'utf8', timeout: 5000,
     });
     finish(result);

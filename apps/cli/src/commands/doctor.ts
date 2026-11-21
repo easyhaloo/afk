@@ -11,7 +11,12 @@ export function registerDoctorCommands(program: Command): void {
     .option('--json', 'Emit JSON')
     .action(async options => {
       try {
-        const report = await inspectWorkspaceDisk({ root: options.workspaceRoot, cleanup: options.cleanup });
+        const inspectionOptions = { root: options.workspaceRoot, cleanup: options.cleanup };
+        const cleanupReport = options.cleanup ? await inspectWorkspaceDisk(inspectionOptions) : undefined;
+        const reclamation = options.fix
+          ? await reclaimWorkspaces({ root: options.workspaceRoot, graceMs: loadReclamationConfig().workspaceReclaimGrace })
+          : undefined;
+        const report = cleanupReport ?? await inspectWorkspaceDisk(inspectionOptions);
         if (options.json) console.log(JSON.stringify(report, null, 2));
         else {
           const size = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
@@ -23,8 +28,7 @@ export function registerDoctorCommands(program: Command): void {
           if (report.cleanup) detail(`Cleanup ${report.cleanup.status}: ${report.cleanup.target}; reclaimed ${size(report.cleanup.bytes)}${report.cleanup.reason ? `; ${report.cleanup.reason}` : ''}`);
           for (const diagnostic of report.diagnostics) warning(diagnostic);
         }
-        if (options.fix) {
-          const reclamation = await reclaimWorkspaces({ root: options.workspaceRoot, graceMs: loadReclamationConfig().workspaceReclaimGrace });
+        if (reclamation) {
           if (options.json) console.log(JSON.stringify(reclamation, null, 2));
           else {
             for (const workspace of reclamation.reclaimed) detail(`reclaimed ${workspace.workItemId}: ${(workspace.bytes / 1024 ** 2).toFixed(1)} MiB${workspace.capturedDependencies.length ? `, ${workspace.capturedDependencies.length} dependency set(s) pooled` : ''}`);
@@ -32,7 +36,7 @@ export function registerDoctorCommands(program: Command): void {
             for (const diagnostic of reclamation.diagnostics) warning(diagnostic);
           }
         }
-        if (report.diagnostics.length) process.exitCode = 1;
+        if (report.diagnostics.length || reclamation?.diagnostics.length) process.exitCode = 1;
       } catch (error) { handleCommandError(error); }
     });
 }

@@ -14,7 +14,7 @@ function deadOwner(claim: ExpiredClaim): boolean {
   } catch { return false; }
 }
 
-type LeaseSet = { heartbeat(): Promise<void>; release(): Promise<void>; claimIds?: string[] };
+type LeaseSet = { heartbeat(): Promise<void>; release(): Promise<void>; claimIds?: string[]; retain?(): LeaseSet };
 const scope = new AsyncLocalStorage<{ keys: readonly string[]; leases: LeaseSet }>();
 
 export function repositoryClaimIds(): string[] {
@@ -44,6 +44,7 @@ export async function recoverRepositoryLease(claim: ExpiredClaim, dependencies: 
     const ids = resource.metadata.repositoryClaims;
     if (!Array.isArray(ids) || !ids.includes(claim.claimId)) continue;
     if (resource.kind !== 'tmux') return false;
+    const processOwner = resource.metadata.processOwner;
     const status = await tmux.sessionStatus(resource.name);
     if (status === 'unknown') return false;
     if (status === 'present') {
@@ -52,8 +53,11 @@ export async function recoverRepositoryLease(claim: ExpiredClaim, dependencies: 
       const window = resource.metadata.tmuxWindowName;
       if (typeof pane === 'string' && (typeof window !== 'string'
         || await tmux.firstPaneId(resource.name, window) !== pane)) return false;
-      await tmux.killSession(resource.name);
+      if (typeof processOwner === 'string') await tmux.killSession(resource.name, processOwner);
+      else await tmux.killSession(resource.name);
       if (await tmux.sessionStatus(resource.name) !== 'missing') return false;
+    } else if (typeof processOwner === 'string') {
+      await tmux.killSession(resource.name, processOwner);
     }
     registry.markClosed({ ...resource, status: status === 'missing' ? 'missing' : 'closed', detail: 'expired repository lease owner recovered' });
   }
@@ -103,7 +107,7 @@ export class RepositoryLeases {
     const inherited = scope.getStore();
     if (inherited && keys.every(key => inherited.keys.includes(key))) {
       await inherited.leases.heartbeat();
-      return { heartbeat: inherited.leases.heartbeat, claimIds: inherited.leases.claimIds, release: async () => {} };
+      return { ...inherited.leases.retain!(), heartbeat: inherited.leases.heartbeat };
     }
     const leases: ClaimLease[] = [];
     try {
@@ -117,10 +121,36 @@ export class RepositoryLeases {
       await Promise.all(leases.map(lease => lease.release()));
       throw error;
     }
-    return {
-      claimIds: leases.map(lease => lease.claimId),
-      heartbeat: async () => { for (const lease of leases) await lease.heartbeat(); },
-      release: async () => { for (const lease of [...leases].reverse()) await lease.release(); },
+    const claimIds = leases.map(lease => lease.claimId);
+    let references = 0;
+    let closing = false;
+    const retain = (): LeaseSet => {
+      if (closing) throw new Error('repository lease is closing or released');
+      references++;
+      let released = false;
+      let releasing: Promise<void> | undefined;
+      return {
+        claimIds,
+        retain: () => {
+          if (released || releasing) throw new Error('repository lease handle is closing or released');
+          return retain();
+        },
+        heartbeat: async () => {
+          if (!references) throw new Error('repository lease has been released');
+          for (const lease of leases) await lease.heartbeat();
+        },
+        release: async () => {
+          if (released) return;
+          if (references > 1) { references--; released = true; return; }
+          return releasing ??= (async () => {
+            closing = true;
+            while (leases.length) { await leases[leases.length - 1].release(); leases.pop(); }
+            references--;
+            released = true;
+          })().catch(error => { releasing = undefined; throw error; });
+        },
+      };
     };
+    return retain();
   }
 }

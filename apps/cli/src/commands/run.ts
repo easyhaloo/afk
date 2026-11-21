@@ -2,10 +2,10 @@ import { Command, InvalidArgumentError } from 'commander';
 import { handleCommandError, success, warning, detail } from '../output.js';
 import { runWorkflowCli } from '@afk/runtime/application/workflows/run-cmd';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
-import { resolveAgentProviderName } from '@afk/runtime/domain/agents/index';
+import type { CodexRuntimeOverrides } from '@afk/runtime/domain/agents/codex-runtime';
 import { createDefaultPluginRuntime, type PluginRuntime } from '@afk/runtime/plugin-sdk';
 import type { CommandRegistrationContext } from '../command-registry.js';
-import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
+import { addAgentRuntimeOptions } from './agent-runtime-options.js';
 
 function positiveInt(value: string): number {
   const parsed = Number(value);
@@ -17,9 +17,9 @@ function positiveInt(value: string): number {
 export function registerRunCommands(program: Command, composition: CommandRegistrationContext = {}): void {
   const command = program
     .command('run')
-    .description('Claim and execute one backlog item')
+    .description('Execute a workflow')
     .requiredOption('--backlog-id <id>', 'Backlog ID')
-    .option('--session <name>', 'Execution session name (default: afk-<backlog-id>)')
+    .option('--session <name>', 'Session name (default: afk-<work-item-id>; learning: generated unique name)')
     .option('--project <project>', 'Provider project/repository')
     .option('--target-branch <branch>', 'Working branch (MR target comes from the work item execution refs)')
     .option('--base-branch <branch>', 'Base branch for the worktree')
@@ -40,9 +40,15 @@ export function registerRunCommands(program: Command, composition: CommandRegist
       let ownedRuntime: PluginRuntime | undefined;
       try {
         const plugins = composition.pluginRuntime ?? (ownedRuntime = await createDefaultPluginRuntime());
-        const agentProviderRegistry = plugins.getAgentProviderRegistry();
         const cfg = getWorkflowConfig();
-        const agentProvider = resolveAgentProviderName(options.agent ?? cfg.agentDefault, agentProviderRegistry);
+        const agentRuntimeOverrides: CodexRuntimeOverrides = {
+          transport: options.agentTransport,
+          auth: options.agentAuth,
+          provider: options.agentProvider,
+          profile: options.agentProfile,
+          endpoint: options.agentAppServer,
+          authTokenEnv: options.agentAppServerAuthEnv,
+        };
         const goalBudget = cfg.goalBudget || 500_000;
         const result = await runWorkflowCli({
           backlogId: options.backlogId,
@@ -59,19 +65,19 @@ export function registerRunCommands(program: Command, composition: CommandRegist
           ext: options.ext,
           extParams: options.extParam,
           sandboxProvider: options.sandbox,
-          agentProvider,
-          agentRuntime: resolveAgentRuntimeOptions(agentProvider, cfg, options),
-          agentProviderRegistry,
+          agentProvider: options.agent,
+          ...(Object.values(agentRuntimeOverrides).some(value => value !== undefined)
+            ? { agentRuntimeOverrides } : {}),
           plugins,
           executionMode: options.executionMode,
           template: options.template,
         });
         if (!result.success) {
-          warning('Backlog execution did not complete successfully');
+          warning('Workflow did not complete successfully');
           process.exitCode = 1;
           return;
         }
-        success('Backlog execution completed');
+        success('Workflow completed');
         if (result.url) detail(`Change: ${result.url}`);
       } catch (error) {
         handleCommandError(error);

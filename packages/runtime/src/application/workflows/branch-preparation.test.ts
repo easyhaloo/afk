@@ -129,14 +129,14 @@ describe('working branch preparation', () => {
       await defaultDependencies().git.prepareWorkingBranch(repoRoot, 'main', 'afk/backlog-2');
 
       const head = (await simpleGit(repoRoot).revparse(['HEAD'])).trim();
-      expect(head).toBe(localCommit);
-
-      // Publishing brings the published work back in, so the push is not
-      // rejected and neither side of the divergence is lost.
+      const git = simpleGit(repoRoot);
+      expect(await isAncestorCommit(git, localCommit, head)).toBe(true);
+      expect(await isAncestorCommit(git, publishedCommit, head)).toBe(true);
       await defaultDependencies().git.finalize(repoRoot, 'afk/backlog-2');
 
       const publishedHead = (await simpleGit(repoRoot).revparse(['refs/remotes/origin/afk/backlog-2'])).trim();
-      const git = simpleGit(repoRoot);
+      expect((await git.revparse(['HEAD'])).trim()).toBe(head);
+      expect(publishedHead).toBe(head);
       expect(await isAncestorCommit(git, localCommit, publishedHead)).toBe(true);
       expect(await isAncestorCommit(git, publishedCommit, publishedHead)).toBe(true);
       expect(await readFile(join(repoRoot, 'work.txt'), 'utf8')).toBe('the implementation\n');

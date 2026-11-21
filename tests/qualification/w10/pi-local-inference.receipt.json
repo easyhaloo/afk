@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "checkedAt": "2026-11-19T19:09:30+00:00",
+  "afk": "0.2.168",
+  "pi": "1.5.2",
+  "ollama": "0.40.16",
+  "entry": "plugin serve-container / local / pi",
+  "model": "Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "operands": [
+    13,
+    24
+  ],
+  "expected": 37,
+  "answer": "37",
+  "status": "completed",
+  "roles": [
+    "system",
+    "user",
+    "assistant"
+  ],
+  "assistantBlocks": [
+    "thinking",
+    "text"
+  ],
+  "nativeUsage": {
+    "inputTokens": 513,
+    "outputTokens": 80,
+    "totalTokens": 593
+  },
+  "afkUsage": {
+    "inputTokens": 513,
+    "outputTokens": 80,
+    "totalTokens": 593
+  },
+  "checks": {
+    "completed": true,
+    "answer": true,
+    "model": true,
+    "session": true,
+    "stopped": true,
+    "noTools": true,
+    "usage": true
+  }
+}

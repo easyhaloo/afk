@@ -244,7 +244,7 @@ pnpm --dir apps/desktop test
 # 完整运行 CLI 子进程、PTY 和 Electron E2E
 pnpm test:e2e
 
-# 只跑 CLI 流程（先构建可执行文件）
+# CLI 子进程测试，含学习路由和经验撤回（不调用真实模型）
 pnpm test:e2e:cli
 
 # 本地插件安装/启停/卸载，以及真实本地 Provider 调用
@@ -381,7 +381,9 @@ pnpm test:coverage
 pnpm test:coverage:report
 ```
 
-插件矩阵使用构建后的 CLI 子进程、隔离 HOME、真实临时文件和 Git 仓库、loopback HTTP / TLS 服务及明确标记的命令替身。本地 97 个用例、HTTP 27 个用例、执行 67 个用例；这些数字是测试数，不是源码覆盖率。执行矩阵覆盖六种 Agent × 四种 Sandbox、四种 Trigger × 四种 Host，并检查组合完成情况。模拟 Agent、SSH、云端和容器命令不能证明真实厂商行为或容器隔离；验证器的命令替身也不能证明浏览器完成页面渲染。
+插件矩阵使用构建后的 CLI 子进程、隔离 HOME、真实临时文件和 Git 仓库、loopback HTTP / TLS 服务及明确标记的命令替身。本地矩阵 101 个用例、HTTP 27 个用例、执行 71 个用例；这些数字是测试数，不是源码覆盖率。执行矩阵覆盖六种 Agent × 四种 Sandbox、四种 Trigger × 四种 Host，并检查组合完成情况。模拟 Agent、SSH、云端和容器命令不能证明真实厂商行为或容器隔离；验证器的命令替身也不能证明浏览器完成页面渲染。
+
+CLI 工作流、本地插件、本地矩阵、HTTP、执行、学习、学习验证和可观测性套件支持通过 `AFK_E2E_CLI_ENTRY` 选择已安装的 CLI 入口。根目录 E2E 配置自动使用同一安装包的 Runtime。显式指定 `AFK_E2E_RUNTIME_ROOT` 时，两者必须指向同一 Runtime 目录。使用原有断言验证安装代码，服务和 Agent 仍为模拟。共享构建及其产物消费者串行执行，安装测试记录安装包校验和。
 
 经验 E2E 穿过构建后的 CLI、真实工作流引擎、Agent 子进程替身、持久经验账本和上下文组装，覆盖“失败 → 候选 → 模拟 QA 审计 → 证据门禁验证 → 后续提示词引用 → 禁用及重新启用 → 撤销”。其中 QA 审计明确为模拟。真实 Claude 验收另行运行已有无工具和完整工具 Sandbox 用例；外部 backlog 的实际状态及独立 QA 结果必须单独报告。
 
@@ -405,6 +407,8 @@ pnpm test:coverage:report
 11 月 9 日另行验证：Desktop 948 项单测、全部 99 项 Electron E2E、2 项真实 Claude Code 测试（宿主独立检查生成代码并运行 Node 测试）全部通过。前次验收还包括 Desktop 类型检查与生产构建、16 项真实 PTY 测试和 Node 22.17.0 注册表警告回归。Docker Desktop 恢复后另行通过 2 项真实容器测试及 1 项认证 HTTP/Docker/Claude 用例；真实证据与模拟矩阵分别报告，外部厂商服务不属于模拟矩阵的证明范围。
 
 CLI 0.2.44 已打包为 macOS arm64 独立发行包，在仓库外完成校验和验证、离线安装及全部 23 个命令入口检查；同一发行包已通过标准安装器安装到本机，包括当前 PATH 优先的受管命令。0.2.43 安装后实测认证投递持久化、制品字节、重启去重、分页、保留窗口和拒绝重放成功投递，真实 SSH 空操作也通过。Gmail 邮件送达已于 11 月 7 日确认；11 月 9 日使用安装版 0.2.44 认证模块复测，OAuth 自动刷新及发送权限检查、账号身份验证通过，Gmail API discovery 返回 HTTP 200。本次未发送新邮件，仅证明当前认证和连通性，不代表新增送达验收。
+
+安装版 CLI 工作流模板、Desktop 与 CLI 竞争同一工作项及失败恢复的复跑命令和脱敏结果见[工作流验收记录](../../tests/qualification/w07/README.md)。
 
 ## 反模式
 

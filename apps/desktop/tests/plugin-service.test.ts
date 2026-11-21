@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginManager, PluginRuntime, readPluginConfiguration } from "@afk/runtime/plugin-sdk";
 import { createPluginService } from "../electron/services/plugin-service.js";
+import { createLearningService } from "../electron/services/learning-service.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -34,6 +35,123 @@ async function fixture() {
 }
 
 describe("Desktop plugin management", () => {
+  it("keeps one saved configuration throughout learning preflight, mutation and postflight", async () => {
+    const homeDir = await mkdtemp(path.join(tmpdir(), "learning-config-"));
+    roots.push(homeDir);
+    const manager = new PluginManager({ homeDir });
+    const firstFile = path.join(homeDir, "first.json");
+    const secondFile = path.join(homeDir, "second.json");
+    const configurationFile = path.join(homeDir, "import.json");
+    await manager.configure("learning.distiller", { enabled: true, validation: { configurationFile: firstFile } }, true);
+    await writeFile(configurationFile, JSON.stringify({ enabled: true, validation: { configurationFile: secondFile } }));
+    const scope = "github:acme/api";
+    const candidateId = "a".repeat(64);
+    let version = 1;
+    const generations: string[] = [];
+    const disposals: ReturnType<typeof vi.spyOn>[] = [];
+    const service = createPluginService({ homeDir, manager, chooseDirectory: async () => undefined,
+      chooseJsonFile: async () => configurationFile, confirm: async () => true, createRuntime: async () => {
+        const configuration = readPluginConfiguration(homeDir).plugins.find(plugin => plugin.id === "learning.distiller")!.config!;
+        const generation = (configuration.validation as { configurationFile: string }).configurationFile;
+        const runtime = new PluginRuntime();
+        await runtime.activate({ manifest: { id: "learning.distiller", version: "1.0.0", apiVersion: 1,
+          trusted: true, provides: ["workflow.action"] }, activate(context) {
+          context.registerSystemAction("learning.candidates", () => [{ id: candidateId, requestKey: "b".repeat(64), version,
+            state: version === 1 ? "candidate" : "validated", proposal: { kind: "fact", title: "Approval", evidenceIds: ["observed"], applicability: { project: scope } } }]);
+          context.registerSystemAction("learning.validate", () => {
+            generations.push(generation); version = 2;
+            return { status: "validated", candidateId, candidateVersion: 1, validatedVersion: 2,
+              executionId: "11111111-1111-4111-8111-111111111111", receiptDigest: "d".repeat(64) };
+          });
+        } });
+        disposals.push(vi.spyOn(runtime, "dispose"));
+        return runtime;
+      } });
+    await service.list();
+    let inventoryCalls = 0;
+    const learning = createLearningService({ projects: async () => {
+      if (++inventoryCalls === 2) await expect(service.configure("learning.distiller")).rejects.toThrow("仍有插件操作或 Worker");
+      return [scope];
+    }, withRuntime: operation => service.withRuntime(operation) });
+    await expect(learning.validate({ scope, candidateId, expectedVersion: 1, checkerId: "verify.domain" }))
+      .resolves.toEqual({ status: "validated", candidateId, candidateVersion: 1, validatedVersion: 2 });
+    expect(generations).toEqual([firstFile]);
+    expect(disposals).toHaveLength(2);
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce();
+    await expect(service.configure("learning.distiller")).resolves.toBe(true);
+    const configured = readPluginConfiguration(homeDir).plugins.find(plugin => plugin.id === "learning.distiller")!.config!;
+    expect(configured.validation).toEqual({ configurationFile: secondFile });
+  });
+
+  it.each(["create", "action", "dispose"] as const)("blocks file changes during runtime %s", async stage => {
+    const { service, runtime, createRuntime } = await fixture();
+    await service.list();
+    createRuntime.mockClear();
+    let finish!: () => void;
+    let entered!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    createRuntime.mockImplementation(async () => {
+      if (stage === "create") { entered(); await pending; }
+      return runtime;
+    });
+    const dispose = vi.spyOn(runtime, "dispose").mockImplementation(async () => {
+      if (stage === "dispose") { entered(); await pending; }
+    });
+    const action = service.withRuntime(async active => {
+      expect(active).toBe(runtime);
+      if (stage === "action") { entered(); await pending; }
+      return "complete";
+    });
+    await started;
+    await expect(service.install({ kind: "local" })).rejects.toThrow("运行");
+    await expect(service.setEnabled("context.builtin", false)).rejects.toThrow("运行");
+    finish();
+    await expect(action).resolves.toBe("complete");
+    expect(createRuntime).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not create an action runtime while installation owns plugin files", async () => {
+    const { service, manager, createRuntime } = await fixture();
+    await service.list();
+    createRuntime.mockClear();
+    let finish!: () => void;
+    let entered!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    vi.spyOn(manager, "install").mockImplementation(async () => { entered(); await pending; return {} as never; });
+    const installation = service.install({ kind: "local" });
+    await started;
+    await expect(service.withRuntime(async () => "blocked")).rejects.toThrow("文件操作");
+    expect(createRuntime).not.toHaveBeenCalled();
+    finish();
+    await expect(installation).resolves.toBe(true);
+    await expect(service.withRuntime(async () => "ready")).resolves.toBe("ready");
+  });
+
+  it.each(["create", "action", "dispose"] as const)("redacts %s failures and releases action ownership", async stage => {
+    const { root, runtime } = await fixture();
+    const dispose = vi.spyOn(runtime, "dispose").mockImplementation(async () => {
+      if (stage === "dispose") throw "PRIVATE_RUNTIME_SECRET";
+    });
+    const createRuntime = vi.fn(async () => {
+      if (stage === "create") throw new Error("PRIVATE_RUNTIME_SECRET");
+      return runtime;
+    });
+    const service = createPluginService({ homeDir: root, createRuntime, chooseDirectory: async () => undefined,
+      chooseJsonFile: async () => undefined, confirm: async () => true });
+    const result = service.withRuntime(async () => {
+      if (stage === "action") throw new Error("PRIVATE_RUNTIME_SECRET");
+      return "complete";
+    });
+    await expect(result).rejects.toThrow("插件运行操作失败，请检查插件配置与运行状态后重试。");
+    expect(dispose).toHaveBeenCalledTimes(stage === "create" ? 0 : 1);
+    createRuntime.mockResolvedValue(runtime);
+    dispose.mockResolvedValue(undefined);
+    await expect(service.withRuntime(async () => "next")).resolves.toBe("next");
+  });
+
   it("does not offer configuration for workflow runtime modules", async () => {
     const { service, runtime, chooseJsonFile } = await fixture();
     await runtime.load({ manifest: { id: "workflow.capabilities", version: "0.1.0", apiVersion: 1, provides: ["workflow.action"], trusted: true }, activate() {} });

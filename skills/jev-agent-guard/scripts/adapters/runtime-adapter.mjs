@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { decideChoice } from '../jev-client.mjs';
 import { extractContract, findSkill, listSkillMetadata, recommendSkill, skillRoots } from '../skill-catalog.mjs';
 import { loadLedger, markStopBlocked, recordAction, recordSkill } from '../skill-ledger.mjs';
+import { currentSkillTask } from '../skill-scope.mjs';
 
 const destructive = /\b(?:git\s+(?:reset\s+--hard|clean\s+-[a-z]*f|push\s+--force)|rm\s+-[a-z]*r[a-z]*f|rm\s+-[a-z]*f[a-z]*r|sudo\b)\b|(?:curl|wget)\b[^|]*\|\s*(?:bash|sh)\b/i;
 const secretAccess = /(?:^|[\s/])(?:\.env(?:\.[^\s/]*)?|\.ssh|\.aws|id_rsa|id_ed25519)(?:[\s/]|$)/i;
@@ -81,7 +82,7 @@ export async function runAdapter({ host, event = 'before-action', payload = {}, 
         clientOptions: { timeout: 2500, retry: { maxRetries: 0 } },
       });
       return answer.choice;
-    });
+    }, currentSkillTask(projectRoot, env));
     return selected ? result('advise', 'Skill routing recommendation.', host, event, `Suggested Skill: ${selected}`)
       : result('allow', 'No relevant Skill was found.', host, event);
   }

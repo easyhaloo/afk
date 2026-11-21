@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepositoryProvider, RepositoryCapability, RepositoryWorkspace, RepositoryLifecycleOperation } from '../../plugin-sdk/capabilities.js';
 import {
   MultiRepositoryProvider,
+  RepositoryPreparationCleanupError,
   RemoteWorkspaceProvider,
   SpecialGitBackendProvider,
 } from './repositories.js';
 import { executeCommand, type CommandExecutor, type CommandResult, type FetchTransport } from './dependencies.js';
-import { RepositoryLeases } from '../git/repository-lease.js';
+import { RepositoryLeases, repositoryClaimIds } from '../git/repository-lease.js';
+import { RepositoryStore } from '../git/repository-store.js';
+import { RepositoryRecoveryJournal } from './repository-recovery.js';
 import { RepositoryLifecycleService } from '../../application/plugins/repository-lifecycle.js';
 
 const dirs: string[] = [];
@@ -24,6 +27,7 @@ beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('U
 
 afterEach(async () => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   await Promise.all(dirs.splice(0).map(path => fs.rm(path, { recursive: true, force: true })));
 });
 
@@ -378,7 +382,7 @@ describe('configured repository lifecycle', () => {
     const { provider, transport, setSnapshot } = remoteLifecycle();
     expect(provider.capabilities).toEqual({ read: true, clone: false, push: false, prepare: true, checkout: true, publish: true, cleanup: true });
     expect(await provider.prepare(prepareInput)).toEqual(workspace());
-    const unsafeInput = { ...workspaceRequest, path: '/outside', repository: { url: 'https://outside.example' }, ref: 'main', force: true, merge: true };
+    const unsafeInput = { ...workspaceRequest, path: '/outside', repository: { url: 'https://outside.example' }, force: true, merge: true };
     expect(await provider.checkout(unsafeInput)).toEqual(workspace('afk/run-1'));
     setSnapshot({ commit: publishedCommit, branch: 'afk/run-1', dirty: false });
     expect(await provider.publish(unsafeInput)).toEqual({ commit: publishedCommit, branch: 'afk/run-1', url: 'https://git.example/changes/1' });
@@ -558,7 +562,413 @@ describe('special git backend lifecycle', () => {
 });
 
 describe('managed local repository lifecycle', () => {
-  async function managedProvider(realLeases = false) {
+  it('captures immutable recovery ownership without retaining allocation aliases', () => {
+    const allocation = { id: 'owned-id', repository: { url: 'repo', ref: 'main' }, runId: 'failed-run', path: '/owned/checkout' };
+    const original = structuredClone(allocation);
+    const failure = new Error('preparation failed');
+    const cleanupFailure = new Error('cleanup failed');
+    const error = new RepositoryPreparationCleanupError(allocation, failure, cleanupFailure);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error.name).toBe('RepositoryPreparationCleanupError');
+    expect(error.cause).toBe(failure);
+    expect(error.errors).toEqual([failure, cleanupFailure]);
+    expect(error.allocation).toEqual(original);
+    expect(Object.isFrozen(error.allocation)).toBe(true);
+    expect(Object.isFrozen(error.allocation.repository)).toBe(true);
+    allocation.id = 'foreign-id';
+    allocation.repository.url = 'foreign-repo';
+    allocation.repository.ref = 'other';
+    allocation.runId = 'other-run';
+    allocation.path = '/foreign/checkout';
+    expect(error.allocation).toEqual(original);
+    expect(Reflect.set(error, 'allocation', allocation)).toBe(false);
+    expect(Reflect.deleteProperty(error, 'allocation')).toBe(false);
+    expect(Reflect.set(error.allocation, 'path', '/foreign/checkout')).toBe(false);
+    expect(Reflect.set(error.allocation.repository, 'url', 'foreign-repo')).toBe(false);
+    expect(error.allocation).toEqual(original);
+  });
+
+  async function allocationFixture(executor: CommandExecutor = executeCommand, withoutRemoval = false) {
+    const repo = await initRepo();
+    const root = await tempDir('afk-managed-allocation-');
+    const storeRoot = join(root, 'store');
+    const bare = join(storeRoot, 'fixture.git');
+    const workspaceRoot = join(root, 'workspaces');
+    await fs.mkdir(storeRoot);
+    await git(repo.path, ['clone', '--bare', '--no-hardlinks', repo.path, bare]);
+    const store = new RepositoryStore(storeRoot);
+    const paths: string[] = [];
+    vi.spyOn(store, 'ensureCheckout').mockImplementation(async (_url, path) => {
+      await git(bare, ['worktree', 'add', '--detach', path, repo.head]);
+      paths.push(path);
+      expect(await store.ownsCheckout(path)).toBe(true);
+    });
+    const leases = new RepositoryLeases(join(root, 'leases'));
+    const provider = new MultiRepositoryProvider({ repositories: [{ name: 'repo', path: repo.path,
+      remoteUrl: 'https://fixture.invalid/repo.git', baseBranch: repo.branch, leaseKey: 'gitlab:fixture.invalid/repo' }],
+    git: executor, managed: { workspaceRoot, store: withoutRemoval ? { ensureCheckout: store.ensureCheckout.bind(store),
+      ownsCheckout: store.ownsCheckout.bind(store), withCheckoutLock: store.withCheckoutLock.bind(store) } : store, leases, leaseStateRoot: join(root, 'leases') } });
+    return { provider, repo, root, bare, workspaceRoot, store, leases, paths };
+  }
+
+  it.each(['HEAD', '--abbrev-ref', '--porcelain'])('reclaims a real owned allocation after snapshot %s fails', async argument => {
+    const failure = new Error('snapshot I/O failed after allocation');
+    let failed = false;
+    const executor: CommandExecutor = async request => {
+      if (!failed && request.args.includes(argument)) {
+        failed = true;
+        throw failure;
+      }
+      return executeCommand(request);
+    };
+    const { provider, bare, workspaceRoot, paths, store } = await allocationFixture(executor);
+    const sibling = join(await tempDir('afk-managed-sibling-'), 'checkout');
+    await git(bare, ['worktree', 'add', '--detach', sibling, 'HEAD']);
+    await expect(provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' })).rejects.toBe(failure);
+    expect(paths).toHaveLength(1);
+    await expect(fs.stat(paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readdir(workspaceRoot)).toEqual(['.afk-repository-recovery']);
+    expect(await provider.listRecoveryAllocations()).toEqual([]);
+    expect((await git(bare, ['worktree', 'list', '--porcelain'])).stdout).not.toContain(paths[0]);
+    expect(await store.ownsCheckout(sibling)).toBe(true);
+    expect(await fs.readFile(join(sibling, 'README.md'), 'utf8')).toBe('# fixture\n');
+  });
+
+  it('reclaims through the store even when every provider snapshot command fails', async () => {
+    const failure = new Error('snapshot executor unavailable');
+    const { provider, paths, bare } = await allocationFixture(async () => { throw failure; });
+    await expect(provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' })).rejects.toBe(failure);
+    await expect(fs.stat(paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await git(bare, ['worktree', 'list', '--porcelain'])).stdout).not.toContain(paths[0]);
+  });
+
+  it('reclaims with an existing store adapter that only exposes ownership and checkout locks', async () => {
+    const failure = new Error('transient snapshot failure');
+    let failed = false;
+    const test = await allocationFixture(async request => {
+      if (!failed) { failed = true; throw failure; }
+      return executeCommand(request);
+    }, true);
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' })).rejects.toBe(failure);
+    await expect(fs.stat(test.paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await git(test.bare, ['worktree', 'list', '--porcelain'])).stdout).not.toContain(test.paths[0]);
+  });
+
+  it('reports allocation recovery when an adapter cannot inspect cleanliness during rollback', async () => {
+    const failure = new Error('persistent snapshot failure');
+    const test = await allocationFixture(async () => { throw failure; }, true);
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(RepositoryPreparationCleanupError);
+    if (!(error instanceof RepositoryPreparationCleanupError)) throw new Error('Missing recoverable preparation error');
+    expect(error.allocation).toEqual({ id: expect.any(String), repository: { url: 'repo', ref: test.repo.branch },
+      runId: 'failed-run', path: test.paths[0] });
+    expect(error.allocation.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(error.cause).toBe(failure);
+    expect(error.errors).toEqual([failure, failure]);
+    expect(Object.isFrozen(error.allocation)).toBe(true);
+    expect(Object.isFrozen(error.allocation.repository)).toBe(true);
+    expect(await test.store.ownsCheckout(test.paths[0])).toBe(true);
+    expect((await git(test.paths[0], ['status', '--porcelain'])).stdout).toBe('');
+  });
+
+  it('persists a failed allocation across provider restart and explicitly recovers only that checkout', async () => {
+    const failure = new Error('persistent snapshot failure');
+    const test = await allocationFixture(async () => { throw failure; }, true);
+    const error = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'durable-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(RepositoryPreparationCleanupError);
+    const records = await test.provider.listRecoveryAllocations();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ allocation: error.allocation, phase: 'removing', retryable: true });
+    expect(records[0].removal).toBeDefined();
+    const restarted = new MultiRepositoryProvider({ repositories: [{ name: 'repo', path: test.repo.path,
+      remoteUrl: 'https://fixture.invalid/repo.git', baseBranch: test.repo.branch, leaseKey: 'gitlab:fixture.invalid/repo' }],
+    managed: { workspaceRoot: test.workspaceRoot, store: test.store, leases: test.leases, leaseStateRoot: join(test.root, 'leases') } });
+    await fs.writeFile(join(test.paths[0], 'keep.txt'), 'preserve dirty resource');
+    await expect(restarted.recoverAllocation(error.allocation.id)).rejects.toThrow(/uncommitted|untracked|ignored/i);
+    await fs.unlink(join(test.paths[0], 'keep.txt'));
+    await expect(restarted.recoverAllocation(error.allocation.id)).resolves.toEqual({ removed: true });
+    expect(await restarted.listRecoveryAllocations()).toEqual([]);
+    await expect(fs.stat(test.paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(restarted.recoverAllocation(error.allocation.id)).resolves.toEqual({ removed: true });
+  });
+
+  it('durably binds intent before ensureCheckout and rejects recovery of an active owner', async () => {
+    const test = await allocationFixture();
+    expect(test.provider.capabilities).toHaveProperty('recovery', true);
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    vi.mocked(test.store.ensureCheckout).mockImplementation(async (...args) => {
+      const records = await test.provider.listRecoveryAllocations();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({ phase: 'reserved', allocation: { path: args[1], runId: 'active-run' }, owner: { pid: process.pid } });
+      await allocate(...args);
+    });
+    const workspace = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'active-run' });
+    await expect(test.provider.recoverAllocation(workspace.id)).rejects.toThrow(/active/i);
+    expect(await test.store.ownsCheckout(workspace.path!)).toBe(true);
+    await test.provider.checkout({ workspaceId: workspace.id });
+    await test.provider.cleanup({ workspaceId: workspace.id });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('lists no allocations before first managed prepare without creating storage', async () => {
+    const test = await allocationFixture();
+    await expect(test.provider.listRecoveryAllocations()).resolves.toEqual([]);
+    await expect(fs.lstat(test.workspaceRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([false, true])('binds the compensation lease before closing a reserved/owned allocation (owned=%s)', async owned => {
+    const failure = new Error('preparation failed');
+    const test = await allocationFixture(async () => { throw failure; });
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    let preparationClaims: string[] = [];
+    vi.mocked(test.store.ensureCheckout).mockImplementation(async (...args) => {
+      preparationClaims = [...repositoryClaimIds()];
+      if (owned) await allocate(...args);
+      else throw failure;
+    });
+    const close = RepositoryRecoveryJournal.prototype.close;
+    let checked = false;
+    vi.spyOn(RepositoryRecoveryJournal.prototype, 'close').mockImplementation(async function (this: RepositoryRecoveryJournal, id) {
+      const record = await this.get(id);
+      expect(record.owner.claims).toEqual(repositoryClaimIds());
+      expect(record.owner.claims).toHaveLength(1);
+      expect(record.owner.claims).not.toEqual(preparationClaims);
+      checked = true;
+      await close.call(this, id);
+    });
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'compensation-owner' })).rejects.toBe(failure);
+    expect(checked).toBe(true);
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('preserves a private reservation witness after failed compensation close and retries explicitly', async () => {
+    const test = await allocationFixture();
+    const rmdir = vi.spyOn(fs, 'rmdir');
+    vi.mocked(test.store.ensureCheckout).mockRejectedValueOnce(new Error('checkout unavailable'));
+    vi.spyOn(RepositoryRecoveryJournal.prototype, 'close').mockRejectedValueOnce(new Error('close unavailable'));
+    const failure = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'reservation-close' }).catch(error => error);
+    expect(failure).toBeInstanceOf(RepositoryPreparationCleanupError);
+    const [record] = await test.provider.listRecoveryAllocations();
+    expect(record).toMatchObject({ phase: 'removing', retryable: true });
+    expect(record.reservationRemoval).toBeDefined();
+    await expect(fs.lstat(record.allocation.path)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await fs.lstat(record.reservationRemoval!.witness)).ino).toBe(record.directory!.ino);
+    await expect(test.provider.recoverAllocation(record.allocation.id)).resolves.toEqual({ removed: true });
+    await expect(test.provider.recoverAllocation(record.allocation.id)).resolves.toEqual({ removed: true });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+    expect(rmdir).not.toHaveBeenCalled();
+  });
+
+  it('retains the normal cleanup deletion phase after close fails and explicitly settles on retry', async () => {
+    const test = await allocationFixture();
+    const workspace = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'close-failed' });
+    const failure = new Error('journal close unavailable');
+    vi.spyOn(RepositoryRecoveryJournal.prototype, 'close').mockRejectedValueOnce(failure);
+    await expect(test.provider.cleanup({ workspaceId: workspace.id })).rejects.toBe(failure);
+    const [record] = await test.provider.listRecoveryAllocations();
+    expect(record).toMatchObject({ phase: 'removing', retryable: true });
+    expect(record.removal).toBeDefined();
+    await expect(fs.lstat(workspace.path!)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(test.provider.recoverAllocation(workspace.id)).resolves.toEqual({ removed: true });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('persists cancelled preparation when cleanup fails and recovers without the cancelled signal', async () => {
+    const test = await allocationFixture();
+    const controller = new AbortController();
+    const reason = new Error('global validation cancelled');
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    vi.mocked(test.store.ensureCheckout).mockImplementation(async (...args) => { await allocate(...args); controller.abort(reason); });
+    vi.spyOn(test.store, 'removeCheckout').mockRejectedValueOnce(new Error('temporary cleanup storage failure'));
+    const error = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'cancelled-run' }, { signal: controller.signal }).catch(error => error);
+    expect(error).toBeInstanceOf(RepositoryPreparationCleanupError);
+    expect(error.cause).toBe(reason);
+    expect(await test.provider.listRecoveryAllocations()).toMatchObject([{ phase: 'retained', allocation: { id: error.allocation.id } }]);
+    await expect(test.provider.recoverAllocation(error.allocation.id)).resolves.toEqual({ removed: true });
+    expect(await test.provider.listRecoveryAllocations()).toEqual([]);
+  });
+
+  it('refuses a nonprivate recovery directory before allocation', async () => {
+    const test = await allocationFixture();
+    await fs.mkdir(test.workspaceRoot);
+    const recoveryRoot = join(test.workspaceRoot, '.afk-repository-recovery');
+    await fs.mkdir(recoveryRoot, { mode: 0o755 });
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'unsafe-storage' })).rejects.toThrow(/private/i);
+    expect(test.store.ensureCheckout).not.toHaveBeenCalled();
+    expect(test.paths).toEqual([]);
+  });
+
+  it('reclaims after snapshot validation fails and permits retrying the same run', async () => {
+    let invalid = true;
+    const { provider, paths } = await allocationFixture(async request => {
+      if (invalid && request.args.join(' ') === 'rev-parse HEAD') return { stdout: 'invalid-commit', stderr: '' };
+      return executeCommand(request);
+    });
+    const request = { repository: { url: 'repo' }, runId: 'failed-run' };
+    await expect(provider.prepare(request)).rejects.toThrow('invalid repository lifecycle commit');
+    await expect(fs.stat(paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    invalid = false;
+    const workspace = await provider.prepare(request);
+    await expect(provider.cleanup({ workspaceId: workspace.id })).resolves.toEqual({ removed: true });
+  });
+
+  it.each(['allocation', 'snapshot', 'lease'])('reclaims after cancellation during %s without reusing the aborted signal', async stage => {
+    const controller = new AbortController();
+    const failure = new Error('cancelled after allocation');
+    const test = await allocationFixture(async request => {
+      const result = await executeCommand(request);
+      if (stage === 'snapshot' && request.args[0] === 'status') controller.abort(failure);
+      return result;
+    });
+    if (stage === 'allocation') {
+      const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+      vi.spyOn(test.store, 'ensureCheckout').mockImplementation(async (...args) => {
+        await allocate(...args);
+        controller.abort(failure);
+      });
+    }
+    if (stage === 'lease') {
+      const run = test.leases.run.bind(test.leases);
+      vi.spyOn(test.leases, 'run').mockImplementation(async (keys, operation) => {
+        const result = await run(keys, operation);
+        controller.abort(failure);
+        return result;
+      });
+    }
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }, { signal: controller.signal })).rejects.toBe(failure);
+    await expect(fs.stat(test.paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reclaims an allocation when the lease fails after the callback returns', async () => {
+    const test = await allocationFixture();
+    const failure = new Error('lease heartbeat failed');
+    const run = test.leases.run.bind(test.leases);
+    vi.spyOn(test.leases, 'run').mockImplementationOnce(async (keys, operation) => {
+      await run(keys, operation);
+      throw failure;
+    });
+    await expect(test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' })).rejects.toBe(failure);
+    await expect(fs.stat(test.paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports recovery if the allocation disappears before rollback', async () => {
+    const failure = new Error('snapshot failed after allocation moved');
+    const test = await allocationFixture(async request => {
+      await fs.rename(request.cwd!, `${request.cwd}-moved`);
+      throw failure;
+    });
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ allocation: { path: test.paths[0] }, errors: [failure, expect.any(Error)] });
+    expect(await fs.readFile(join(`${test.paths[0]}-moved`, 'README.md'), 'utf8')).toBe('# fixture\n');
+  });
+
+  it('preserves snapshot and lease release errors together', async () => {
+    const failure = new Error('snapshot failed');
+    const releaseFailure = new Error('lease release failed');
+    const test = await allocationFixture(async () => { throw failure; });
+    const acquire = test.leases.acquire.bind(test.leases);
+    vi.spyOn(test.leases, 'acquire').mockImplementationOnce(async (...args) => {
+      const lease = await acquire(...args);
+      return { ...lease, release: async () => { await lease.release(); throw releaseFailure; } };
+    });
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ errors: [failure, releaseFailure] });
+    await expect(fs.stat(test.paths[0])).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a replacement introduced before the post-allocation identity read', async () => {
+    const test = await allocationFixture(async () => { throw new Error('snapshot failed'); });
+    const allocate = vi.mocked(test.store.ensureCheckout).getMockImplementation()!;
+    vi.spyOn(test.store, 'ensureCheckout').mockImplementation(async (...args) => {
+      await allocate(...args);
+      await git(test.bare, ['worktree', 'move', args[1], `${args[1]}-original`]);
+      await git(test.bare, ['worktree', 'add', '--detach', args[1], test.repo.head]);
+    });
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ allocation: { path: test.paths[0] } });
+    expect(await fs.readFile(join(test.paths[0], 'README.md'), 'utf8')).toBe('# fixture\n');
+    expect(await fs.readFile(join(`${test.paths[0]}-original`, 'README.md'), 'utf8')).toBe('# fixture\n');
+  });
+
+  it.each(['tracked', 'untracked', 'ignored'])('retains %s content after failed preparation and exposes recoverable allocation', async content => {
+    const failure = new Error('snapshot failed after a concurrent write');
+    let changed = false;
+    const test = await allocationFixture(async request => {
+      if (!changed) {
+        changed = true;
+        if (content === 'ignored') {
+          await git(request.cwd!, ['config', 'core.excludesFile', join(request.cwd!, '.gitignore')]);
+          await fs.writeFile(join(request.cwd!, '.gitignore'), '*\n');
+        }
+        await fs.writeFile(join(request.cwd!, content === 'tracked' ? 'README.md' : 'keep.txt'), 'keep work\n');
+        throw failure;
+      }
+      return executeCommand(request);
+    });
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ allocation: { id: expect.any(String), path: test.paths[0], repository: { url: 'repo' }, runId: 'failed-run' },
+      errors: [failure, expect.any(Error)], cause: failure });
+    expect((error as Error).message).toContain(test.paths[0]);
+    expect(await fs.readFile(join(test.paths[0], content === 'tracked' ? 'README.md' : 'keep.txt'), 'utf8')).toBe('keep work\n');
+    expect((await git(test.bare, ['worktree', 'list', '--porcelain'])).stdout).toContain(test.paths[0]);
+  });
+
+  it.each(['ownership', 'lock', 'remove'])('retains the allocation and both errors when %s prevents rollback', async stage => {
+    const failure = new Error('snapshot failed');
+    const cleanupFailure = new Error(`${stage} failed`);
+    const test = await allocationFixture(async () => { throw failure; });
+    if (stage === 'ownership') vi.spyOn(test.store, 'ownsCheckout').mockResolvedValueOnce(true).mockResolvedValue(false);
+    if (stage === 'lock') {
+      vi.spyOn(test.leases, 'run').mockImplementationOnce(async (_keys, operation) => operation())
+        .mockRejectedValueOnce(cleanupFailure);
+    }
+    if (stage === 'remove') vi.spyOn(test.store, 'removeCheckout').mockRejectedValue(cleanupFailure);
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ allocation: { path: test.paths[0] }, errors: [failure, expect.any(Error)] });
+    if (stage !== 'ownership') expect((error as AggregateError).errors[1]).toBe(cleanupFailure);
+    expect(await fs.readFile(join(test.paths[0], 'README.md'), 'utf8')).toBe('# fixture\n');
+  });
+
+  it('retains a replacement from another store even when the path is reused', async () => {
+    const failure = new Error('snapshot failed after path replacement');
+    const foreign = await initRepo();
+    let replaced = false;
+    const test = await allocationFixture(async request => {
+      if (!replaced) {
+        replaced = true;
+        await fs.rename(request.cwd!, `${request.cwd}-original`);
+        await git(foreign.path, ['worktree', 'add', '--detach', request.cwd!, foreign.head]);
+        throw failure;
+      }
+      return executeCommand(request);
+    });
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ allocation: { path: test.paths[0] }, errors: [failure, expect.any(Error)] });
+    expect(await test.store.ownsCheckout(test.paths[0])).toBe(false);
+    expect(await fs.readFile(join(test.paths[0], 'README.md'), 'utf8')).toBe('# fixture\n');
+    expect(await fs.readFile(join(`${test.paths[0]}-original`, 'README.md'), 'utf8')).toBe('# fixture\n');
+  });
+
+  it('retains a nested worktree after preparation fails', async () => {
+    const failure = new Error('snapshot failed with a nested worktree');
+    const test = await allocationFixture(async request => {
+      await git(request.cwd!, ['worktree', 'add', '--detach', join(request.cwd!, 'nested'), 'HEAD']);
+      throw failure;
+    });
+    const error: unknown = await test.provider.prepare({ repository: { url: 'repo' }, runId: 'failed-run' }).catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({ allocation: { path: test.paths[0] }, errors: [failure, expect.any(Error)] });
+    expect((error as AggregateError).errors[1].message).toContain('nested worktree');
+    expect(await fs.readFile(join(test.paths[0], 'nested', 'README.md'), 'utf8')).toBe('# fixture\n');
+  });
+
+  async function managedProvider(realLeases = false, push?: CommandExecutor) {
     const repo = await initRepo();
     const root = await tempDir('afk-managed-');
     const owned = new Set<string>();
@@ -576,7 +986,7 @@ describe('managed local repository lifecycle', () => {
     const calls: Array<{ args: readonly string[]; cwd?: string }> = [];
     const executor: CommandExecutor = async request => {
       calls.push(request);
-      if (request.args.includes('push')) return { stdout: '', stderr: '' };
+      if (request.args.includes('push')) return push ? push(request) : { stdout: '', stderr: '' };
       return executeCommand(request);
     };
     await git(repo.path, ['remote', 'add', 'origin', 'https://git.example/repo.git']);
@@ -607,6 +1017,24 @@ describe('managed local repository lifecycle', () => {
       'https://git.example/repo.git', `${repo.head}:refs/heads/afk/run-1`,
     ]);
     expect(calls.find(call => call.args[0] === 'worktree' && call.args[1] === 'remove')?.args).toEqual(['worktree', 'remove', prepared.path]);
+  });
+
+  it('refuses a stale QA revision and pushes only the verified commit if HEAD moves during push', async () => {
+    const remote = await tempDir('verified-publish-');
+    await git(remote, ['init', '--bare', '--quiet']);
+    const { provider, repo, calls } = await managedProvider(false, async request => {
+      await git(request.cwd!, ['commit', '--allow-empty', '-m', 'later change']);
+      return git(request.cwd!, request.args.map(arg => arg === 'https://git.example/repo.git' ? remote : arg));
+    });
+    const prepared = await provider.prepare({ repository: { url: 'repo' }, runId: 'run-1' });
+    const workspace = await provider.checkout({ workspaceId: prepared.id });
+    await git(prepared.path!, ['commit', '--allow-empty', '-m', 'verified change']);
+    const verified = (await git(prepared.path!, ['rev-parse', 'HEAD'])).stdout.trim();
+    await expect(provider.publish({ workspaceId: prepared.id, expectedCommit: repo.head })).rejects.toThrow(/verified commit/);
+    expect(calls.filter(call => call.args.includes('push'))).toHaveLength(0);
+    await expect(provider.publish({ workspaceId: prepared.id, expectedCommit: verified })).resolves.toMatchObject({ commit: verified });
+    expect((await git(remote, ['rev-parse', `refs/heads/${workspace.snapshot.branch}`])).stdout.trim()).toBe(verified);
+    expect((await git(prepared.path!, ['rev-parse', 'HEAD'])).stdout.trim()).not.toBe(verified);
   });
 
   it('retains dirty, ignored, unowned, and unpublished local work', async () => {

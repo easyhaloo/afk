@@ -16,6 +16,7 @@ import type {
   MetricsProvider,
   NotificationProvider,
   PolicyCheckProvider,
+  ProviderOperationOptions,
   RepositoryProvider,
   TriggerProvider,
   TracerProvider,
@@ -24,8 +25,14 @@ import type {
 import { AgentProviderRegistry } from '../../domain/agents/registry.js';
 import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.js';
 import { validateManifest } from '../../plugin-sdk/profile.js';
+import { withCancellation } from './cancellation.js';
+import { scopedVerifier } from './shared-verification.js';
 
-export type PluginSystemAction = (input: unknown) => unknown | Promise<unknown>;
+export interface PluginSystemActionOptions extends ProviderOperationOptions {
+  readonly authorizedWorkspace?: string;
+}
+
+export type PluginSystemAction = (input: unknown, options?: PluginSystemActionOptions) => unknown | Promise<unknown>;
 export type PluginProvider = object;
 export type PluginSurface = object;
 export type PluginHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
@@ -133,11 +140,13 @@ type StagedRegistration = Registration & { readonly capability: Capability; read
 
 type ActivationBatch = {
   plugin: Plugin;
+  readonly dependencies: Set<string>;
   readonly registrations: StagedRegistration[];
   readonly actions: Array<{ readonly name: string; readonly action: PluginSystemAction }>;
   readonly lifecycles: LifecycleModule[];
   readonly templates: WorkflowTemplate[];
   readonly disposers: Array<() => void | Promise<void>>;
+  readonly onCleanupConfirmed?: () => void | Promise<void>;
 };
 
 type PluginRecord = {
@@ -169,6 +178,10 @@ const CAPABILITY_BY_KIND: Readonly<Record<RegistrationKind, Capability>> = {
 
 export class PluginRuntime {
   private readonly plugins = new Map<string, PluginRecord>();
+  // Reservations outlive publication: activating and unconfirmed cleanup still own dependencies.
+  private readonly lifetimes = new Map<string, ActivationBatch>();
+  private readonly pendingCleanup = new Map<string, ActivationBatch>();
+  private readonly cleaning = new Map<ActivationBatch, Promise<unknown[]>>();
   private readonly capabilityOwners = new Map<Capability, string>();
   private readonly registrations = new Map<Capability, Map<string, Registration>>();
   private readonly actions = new Map<string, { readonly pluginId: string; readonly action: PluginSystemAction }>();
@@ -176,25 +189,31 @@ export class PluginRuntime {
   private readonly templates = new Map<string, { readonly pluginId: string; readonly template: WorkflowTemplate }>();
   private readonly activationDiagnostics: PluginDiagnostic[] = [];
 
-  async activate(plugin: Plugin | WorkflowPlugin): Promise<void> {
+  async activate(plugin: Plugin | WorkflowPlugin, onCleanupConfirmed?: () => void | Promise<void>, permits?: (...targets: string[]) => Promise<boolean>): Promise<void> {
     const normalized = normalizePlugin(plugin);
     validateManifest(normalized.manifest);
     this.validateDependencies(normalized.manifest);
 
     const batch: ActivationBatch = {
       plugin: normalized,
+      // Bind provider identities now; another provider with the same capability cannot replace a held object.
+      dependencies: new Set([...this.plugins.values()].filter(record =>
+        normalized.manifest.requires?.some(capability => record.plugin.manifest.provides.includes(capability)))
+        .map(record => record.plugin.manifest.id)),
       registrations: [],
       actions: [],
       lifecycles: [],
       templates: [],
       disposers: [],
+      onCleanupConfirmed,
     };
+    this.lifetimes.set(normalized.manifest.id, batch);
     try {
-      await normalized.activate(this.createContext(normalized.manifest.id, batch));
+      await normalized.activate(this.createContext(normalized.manifest.id, batch, permits));
       if (!isPlugin(plugin)) {
         batch.plugin = { ...normalized, manifest: { ...normalized.manifest, provides: this.batchCapabilities(batch) } };
       }
-      this.validateDependencies(batch.plugin.manifest);
+      this.validateDependencies(batch.plugin.manifest, batch);
       this.validateBatch(batch.plugin.manifest, batch);
       this.commit(batch.plugin.manifest, batch);
     } catch (error) {
@@ -203,9 +222,11 @@ export class PluginRuntime {
   }
 
   /** Compatibility alias for the exploratory API. */
-  async load(plugin: Plugin | WorkflowPlugin): Promise<void> {
-    return this.activate(plugin);
+  async load(plugin: Plugin | WorkflowPlugin, onCleanupConfirmed?: () => void | Promise<void>, permits?: (...targets: string[]) => Promise<boolean>): Promise<void> {
+    return this.activate(plugin, onCleanupConfirmed, permits);
   }
+
+  hasPendingCleanup(id: string): boolean { return this.pendingCleanup.has(id); }
 
   listPlugins(): string[] { return [...this.plugins.keys()]; }
 
@@ -281,10 +302,11 @@ export class PluginRuntime {
   listIssueTrackerProviders(): string[] { return this.listProviders('tracker.issue'); }
   listHostProviders(): string[] { return this.listProviders('host.connection'); }
 
-  async dispatchSystemAction(name: string, input: unknown): Promise<unknown> {
+  async dispatchSystemAction(name: string, input: unknown, options?: PluginSystemActionOptions): Promise<unknown> {
     const action = this.actions.get(name);
     if (!action) throw new Error(`unknown system action '${name}'`);
-    return action.action(input);
+    await withCancellation(() => undefined, options);
+    return options ? action.action(input, options) : action.action(input);
   }
 
   async health(pluginId?: string): Promise<readonly PluginHealth[]> {
@@ -321,35 +343,42 @@ export class PluginRuntime {
   }
 
   async dispose(pluginId?: string): Promise<void> {
-    if (pluginId) {
-      const target = this.plugins.get(pluginId);
-      if (target) {
-        const required = [...this.plugins.values()].find(record => record.plugin.manifest.id !== pluginId &&
-          record.plugin.manifest.requires?.some(capability => target.plugin.manifest.provides.includes(capability) &&
-            ![...this.plugins.values()].some(other => other !== target && other.plugin.manifest.provides.includes(capability))));
-        if (required) throw new Error(`Plugin '${pluginId}' is required by '${required.plugin.manifest.id}'`);
-      }
-    }
-    const ids = pluginId ? [pluginId] : [...this.plugins.keys()].reverse();
+    let ids = pluginId ? [pluginId] : [...this.lifetimes.keys()].reverse();
     const errors: unknown[] = [];
-    for (const id of ids) {
-      const record = this.plugins.get(id);
-      if (!record) continue;
-      for (const disposer of [...record.batch.disposers].reverse()) {
-        try {
-          await disposer();
-        } catch (error) {
-          errors.push(error);
+    while (ids.length) {
+      const blocked: string[] = [];
+      const dependencyErrors: Error[] = [];
+      let progressed = false;
+      for (const id of ids) {
+        const required = [...this.lifetimes.values()].find(batch => batch.dependencies.has(id));
+        if (required) {
+          const error = new Error(`Plugin '${id}' is required by '${required.plugin.manifest.id}'`);
+          if (pluginId) throw error;
+          blocked.push(id); dependencyErrors.push(error); continue;
         }
+        const record = this.plugins.get(id);
+        const batch = record?.batch ?? this.pendingCleanup.get(id);
+        if (!batch) {
+          if (this.lifetimes.has(id)) {
+            const error = new Error(`Plugin '${id}' is still activating`);
+            if (pluginId) throw error;
+            errors.push(error);
+          }
+          continue;
+        }
+        if (record) this.removeRecord(id, record);
+        errors.push(...await this.cleanup(id, batch));
+        progressed = true;
       }
-      this.removeRecord(id, record);
+      if (!progressed) { errors.push(...dependencyErrors); break; }
+      ids = blocked;
     }
     if (errors.length) throw new AggregateError(errors, 'one or more plugins failed to dispose');
   }
 
   async close(): Promise<void> { return this.dispose(); }
 
-  private createContext(pluginId: string, batch: ActivationBatch): PluginSetupContext {
+  private createContext(pluginId: string, batch: ActivationBatch, permits?: (...targets: string[]) => Promise<boolean>): PluginSetupContext {
     const register = (capability: Capability, name: string, value: PluginProvider, kind: RegistrationKind | 'custom'): void => {
       this.assertName(name, `${capability} provider`);
       if (!isObject(value)) throw new Error(`plugin '${pluginId}' registered an invalid ${capability} provider`);
@@ -357,7 +386,8 @@ export class PluginRuntime {
         throw new Error(`duplicate ${capability} provider '${name}'`);
       }
       if (this.registrations.get(capability)?.has(name)) throw new Error(`duplicate ${capability} provider '${name}'`);
-      batch.registrations.push({ pluginId, capability, name, kind, value });
+      const registered = permits && capability === 'verification.provider' ? scopedVerifier(value as VerificationProvider, permits) : value;
+      batch.registrations.push({ pluginId, capability, name, kind, value: registered });
     };
     const registerKind = (kind: RegistrationKind, name: string, value: PluginProvider): void => {
       register(CAPABILITY_BY_KIND[kind], name, value, kind);
@@ -388,10 +418,15 @@ export class PluginRuntime {
       if (typeof disposer !== 'function') throw new Error(`plugin '${pluginId}' registered an invalid disposer`);
       batch.disposers.push(disposer);
     };
+    const getProvider = <T extends PluginProvider>(capability: Capability, name: string): T | undefined => {
+      const registration = this.registrations.get(capability)?.get(name);
+      if (registration && registration.pluginId !== pluginId && this.lifetimes.get(pluginId) === batch) batch.dependencies.add(registration.pluginId);
+      return registration?.value as T | undefined;
+    };
 
     return {
-      getProvider: <T extends PluginProvider>(capability: Capability, name: string) => this.getProvider<T>(capability, name),
-      getCredentialProvider: name => this.getCredentialProvider(name),
+      getProvider,
+      getCredentialProvider: name => getProvider<CredentialProvider>('credential.provider', name),
       registerCapability: (capability, name, provider) => register(capability, name, provider, 'custom'),
       registerLifecycle,
       registerSystemAction: registerAction,
@@ -428,14 +463,15 @@ export class PluginRuntime {
     };
   }
 
-  private validateDependencies(manifest: PluginManifest): void {
-    if (this.plugins.has(manifest.id)) throw new Error(`plugin '${manifest.id}' already loaded`);
-    for (const conflict of manifest.conflicts ?? []) {
-      if (this.plugins.has(conflict) || this.capabilityOwners.has(conflict)) throw new Error(`plugin '${manifest.id}' conflicts with '${conflict}'`);
-    }
-    for (const record of this.plugins.values()) {
-      if (record.plugin.manifest.conflicts?.some(conflict => conflict === manifest.id || manifest.provides.includes(conflict))) {
-        throw new Error(`plugin '${manifest.id}' conflicts with '${record.plugin.manifest.id}'`);
+  private validateDependencies(manifest: PluginManifest, reservation?: ActivationBatch): void {
+    if (this.pendingCleanup.has(manifest.id)) throw new Error(`plugin '${manifest.id}' cleanup is pending`);
+    if (this.lifetimes.has(manifest.id) && this.lifetimes.get(manifest.id) !== reservation) throw new Error(`plugin '${manifest.id}' already loaded or activating`);
+    for (const batch of this.lifetimes.values()) {
+      if (batch === reservation) continue;
+      const other = batch.plugin.manifest;
+      if (manifest.conflicts?.some(conflict => conflict === other.id || other.provides.includes(conflict)) ||
+        other.conflicts?.some(conflict => conflict === manifest.id || manifest.provides.includes(conflict))) {
+        throw new Error(`plugin '${manifest.id}' conflicts with '${other.id}'`);
       }
     }
     for (const required of manifest.requires ?? []) {
@@ -482,14 +518,7 @@ export class PluginRuntime {
   }
 
   private async rollback(pluginId: string, batch: ActivationBatch, error: unknown): Promise<never> {
-    const rollbackErrors: unknown[] = [];
-    for (const disposer of [...batch.disposers].reverse()) {
-      try {
-        await disposer();
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
-      }
-    }
+    const rollbackErrors = await this.cleanup(pluginId, batch);
     const diagnostic: PluginDiagnostic = {
       pluginId,
       severity: 'error',
@@ -500,6 +529,32 @@ export class PluginRuntime {
     this.activationDiagnostics.push(diagnostic);
     if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], diagnostic.message);
     throw error;
+  }
+
+  private cleanup(pluginId: string, batch: ActivationBatch): Promise<unknown[]> {
+    const existing = this.cleaning.get(batch);
+    if (existing) return existing;
+    this.pendingCleanup.set(pluginId, batch);
+    const attempt = Promise.resolve().then(async () => {
+      const errors: unknown[] = [];
+      for (let index = batch.disposers.length - 1; index >= 0; index--) {
+        try {
+          await batch.disposers[index]();
+          batch.disposers.splice(index, 1);
+        } catch (error) { errors.push(error); }
+      }
+      if (!batch.disposers.length) {
+        try {
+          await batch.onCleanupConfirmed?.();
+          if (this.pendingCleanup.get(pluginId) === batch) this.pendingCleanup.delete(pluginId);
+          if (this.lifetimes.get(pluginId) === batch) this.lifetimes.delete(pluginId);
+        } catch (error) { errors.push(error); }
+      }
+      if (errors.length) this.recordDiagnostic({ pluginId, severity: 'error', code: 'cleanup.failed', message: 'Plugin cleanup is unconfirmed', details: { errors: errors.map(errorMessage) } });
+      return errors;
+    }).finally(() => this.cleaning.delete(batch));
+    this.cleaning.set(batch, attempt);
+    return attempt;
   }
 
   private removeRecord(id: string, record: PluginRecord): void {

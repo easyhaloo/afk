@@ -1,0 +1,41 @@
+{
+  "baseline": "e7c9115a9ef33c7ab5dfc719bf880187f5151f77",
+  "archive": "afk-darwin-arm64.tar.gz",
+  "sha256": "c129020c25604a039e2daaad1dbaf3705c7af6598de5c15a2968b96b5f7ac527",
+  "version": "0.2.167",
+  "failed": [
+    "prepare",
+    "checkout",
+    "snapshot",
+    "cleanup"
+  ],
+  "releasedClaims": 2,
+  "managedPaths": 4,
+  "publications": [
+    {
+      "name": "api",
+      "ref": "afk/backlog-1",
+      "commit": "43efb03edbb07593c13775289043dffb89d09214",
+      "base": "5ccef31c71f34264800a65cf1e67538642e15cc7"
+    },
+    {
+      "name": "api",
+      "ref": "afk/backlog-1-qa",
+      "commit": "78f879c22d21785435fa779df4f425e6169eaf24",
+      "base": "5ccef31c71f34264800a65cf1e67538642e15cc7"
+    },
+    {
+      "name": "web",
+      "ref": "afk/backlog-1",
+      "commit": "cec093d2eb2326c9815221af25597eb1d1232780",
+      "base": "400deae6155594d458a2451edb8315c1cc229337"
+    },
+    {
+      "name": "web",
+      "ref": "afk/backlog-1-qa",
+      "commit": "cec093d2eb2326c9815221af25597eb1d1232780",
+      "base": "400deae6155594d458a2451edb8315c1cc229337"
+    }
+  ],
+  "humanGate": "merge:2"
+}

@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { simpleGit } from 'simple-git';
+import { FilesystemClaimLock } from '../../domain/backlog/claim.js';
 import { executionWorkspacePath, resolveWorkspaceRoot } from '../../infrastructure/workspace.js';
 import { DependencyPool } from '../../infrastructure/git/dependency-pool.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
+import { executionOwnershipKeys } from '../../infrastructure/runtime/workspace-ownership.js';
 import { TaskRuntimeManager, TaskRuntimeStore } from '../runtime/task-runtime.js';
 import { reclaimWorkspaces } from './workspace-gc.js';
 
@@ -59,14 +61,30 @@ describe('reclaimWorkspaces', () => {
       const staleHeartbeat = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
       await manager.start(record(workspace, staleHeartbeat));
 
-      const report = await reclaimWorkspaces({
+      const options = {
         manifests: [manifestPath],
         manager,
         leases: { run: async (_keys: readonly string[], operation: () => Promise<void>) => operation() } as never,
         pool: new DependencyPool(poolRoot),
         store: new RepositoryStore(join(root, 'repos')),
         now: NOW,
-      });
+      };
+      const [ownershipKey] = await executionOwnershipKeys(workspace);
+      const lock = new FilesystemClaimLock();
+      const claim = await lock.acquire({ key: ownershipKey, owner: 'retained-gc-test', ttlMs: 1 });
+      expect(claim).not.toBeNull();
+      try {
+        const retained = await reclaimWorkspaces(options);
+        expect(retained.reclaimed).toEqual([]);
+        expect(retained.skipped[0]?.reason).toContain('quarantined');
+        expect(await readFile(join(checkout, 'node_modules/left-pad/index.js'), 'utf8')).toBe('module.exports = 1;\n');
+        expect(await manager.store.getActive('gc-test-run')).toBeDefined();
+        expect(await lock.inspect(ownershipKey)).toMatchObject({ claimId: claim!.claimId });
+      } finally {
+        await claim!.release();
+      }
+
+      const report = await reclaimWorkspaces(options);
 
       expect(report.diagnostics).toEqual([]);
       expect(report.skipped).toEqual([]);
@@ -126,7 +144,7 @@ describe('reclaimWorkspaces', () => {
         store: new RepositoryStore(join(root, 'repos')), now: NOW,
       });
       expect(leased.reclaimed).toEqual([]);
-      expect(leased.skipped[0]?.reason).toContain('repository lease could not be acquired');
+      expect(leased.skipped[0]?.reason).toContain('repository is leased by another execution');
 
       await rm(manifestPath);
       const unusable = await reclaimWorkspaces({
@@ -139,6 +157,48 @@ describe('reclaimWorkspaces', () => {
       expect(unusable.skipped[0]?.reason).toContain('manifest evaluation failed');
       // The workspace was never touched.
       expect(await readFile(join(workspace, 'repositories/api/evidence.txt'), 'utf8')).toBe('retained evidence');
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['missing', 'no attributable runtime record'],
+    ['blocked', 'blocked runtime record'],
+    ['fresh after lease', 'heartbeated within the grace period'],
+  ] as const)('retains workspace contents when runtime evidence is %s', async (evidence, reason) => {
+    const root = resolveWorkspaceRoot();
+    const temporary = await mkdtemp(join(tmpdir(), 'afk-gc-evidence-'));
+    const workspace = executionWorkspacePath(WORK_ITEM_ID);
+    const checkout = join(workspace, 'repositories/api');
+    const manifestPath = join(temporary, 'execution-manifest.json');
+    const manager = new TaskRuntimeManager(new TaskRuntimeStore(join(temporary, 'runtime')));
+    try {
+      await mkdir(checkout, { recursive: true });
+      await writeFile(join(checkout, 'evidence.txt'), 'preserve');
+      await writeFile(manifestPath, JSON.stringify({ schemaVersion: 1, workItemId: WORK_ITEM_ID, providerBacklogId: '941',
+        tracker: { platform: 'github', projectKey: 'gc-test/api' }, workingBranch: 'afk/941', repositories: [{
+          platform: 'github', projectKey: 'gc-test/api', name: 'api', checkoutPath: 'repositories/api',
+          baseBranch: 'main', workingBranch: 'afk/941', primary: true,
+        }] }));
+      if (evidence === 'blocked') {
+        await manager.start(record(workspace, NOW.toISOString()));
+        await manager.finish('gc-test-run', { status: 'blocked' });
+      }
+
+      const now = new Date();
+      const report = await reclaimWorkspaces({ manifests: [manifestPath], manager,
+        leases: { run: async (_keys, operation) => {
+          if (evidence === 'fresh after lease') await manager.start(record(workspace, now.toISOString()));
+          return operation();
+        } }, pool: new DependencyPool(join(temporary, 'deps')),
+        store: new RepositoryStore(join(root, 'repos')), now: evidence === 'blocked' ? new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000) : now,
+      });
+
+      expect(report.reclaimed).toEqual([]);
+      expect(report.skipped[0]?.reason).toContain(reason);
+      expect(await readFile(join(checkout, 'evidence.txt'), 'utf8')).toBe('preserve');
     } finally {
       await rm(temporary, { recursive: true, force: true });
       await rm(workspace, { recursive: true, force: true });

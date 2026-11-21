@@ -49,3 +49,33 @@ permissions unchanged. Host-native approvals can still apply independently.
 OpenCode's tool-before hook can block a deterministic denial, while its
 completion feedback cannot block a completed agent turn in this integration.
 None of the adapters return an explicit `allow` that grants host permission.
+
+## Task-scoped skill recommendations
+
+A maintainer can restrict a skill's automatic recommendation by including a
+single top-level `recall-scope` line in the installed `SKILL.md` frontmatter.
+Its value is a single-line JSON object. For example,
+
+```yaml
+recall-scope: {"project":"github:example/inventory","environment":"staging","productVersions":{"scanner":"2.0"}}
+```
+
+Existing editions using `afk-recall` keep their scope. Providing both keys
+suppresses recommendation. The declaration travels with the reviewed skill bytes. Unmarked skills keep
+their existing routing. Invalid declarations and ambiguous same-name overrides
+of a scoped installation suppress recommendation.
+
+For an AFK-managed task the launcher can pass `AFK_SKILL_TASK_CONTEXT` as
+JSON in the agent process environment. Use the allocated workspace's absolute
+root, canonical `taskId`, active `runId`, and the `applicability` and `target`
+returned by `resolveExperienceQueryContext` for that execution. For example,
+
+```json
+{"workspace":"/work/inventory/42","taskId":"github:example/inventory#42","runId":"run-abc","applicability":{"environment":"staging"},"target":{"project":"github:example/inventory","productVersions":{"scanner":"2.0"}}}
+```
+
+Launch a separate agent process for each execution context. The hook checks
+the exact workspace root and active run against the user-level AFK allocation
+on each prompt. It requires an exact project, environment and named version
+match for every declared product before ranking. The prompt supplies only
+search terms. Host permissions continue to govern manual invocation and tools.

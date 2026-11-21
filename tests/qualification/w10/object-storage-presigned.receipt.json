@@ -1,0 +1,23 @@
+{
+  "cli": "0.2.180",
+  "archiveHead": "da2a8fba",
+  "releaseRun": 44769511915,
+  "archiveSha256": "cf74baa8af6c18e4e4b3ec669065f9ce286a65cd20d233229f2db904a168b1e4",
+  "server": "minio.darwin-arm64.RELEASE.2025-04-22T22-12-26Z version RELEASE.2025-04-22T22-12-26Z (commit-id=0d7408fc9969caf07de6a8c3a84f9fbb10a6739e)",
+  "runtimeModuleSha256": "c701dcbf088f538105d1d345bf30083bccec0b3b963b7c9a190c5ecab76173ce",
+  "ttlSeconds": 8,
+  "accepted": {
+    "status": 200,
+    "referenceQueryRemoved": true
+  },
+  "expired": {
+    "status": 403,
+    "code": "AccessDenied",
+    "expired": true
+  },
+  "bytes": 4099,
+  "inputSha256": "67be96e4157a8f9cdb8dc94f9468ce3474f7a1699b7a059713e4c3430e2daa78",
+  "readbackSha256": "67be96e4157a8f9cdb8dc94f9468ce3474f7a1699b7a059713e4c3430e2daa78",
+  "serverStopped": true,
+  "temporaryDataRemoved": true
+}

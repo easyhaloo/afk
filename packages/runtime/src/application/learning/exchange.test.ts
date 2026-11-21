@@ -205,7 +205,7 @@ describe('bounded learning metrics', () => {
     store.recall({ scope: target, prompt: 'sqlite' });
     store.recall({ scope, prompt: 'sqlite' });
     expect(store.metrics({ scope })).toEqual({ retrievals: 1, adoptions: 0, recurrences: 0 });
-    expect(store.adopt(adoption)).toEqual({ retrievals: 1, adoptions: 1, recurrences: 0 });
+    expect(store.adopt(adoption)).toMatchObject({ retrievals: 1, adoptions: 1, recurrences: 0, receipt: { binding: 'verified-version' } });
     store.adopt(adoption);
     expect(() => store.adopt({ ...adoption, scope: target })).toThrow();
     const recurring = failure({ source: { runId: 'recurring-run', workItemId: `${scope}#3` }, evidence: ['run:recurring-run#qa.failed'] });

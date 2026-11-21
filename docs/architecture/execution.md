@@ -22,10 +22,19 @@ Applications consume shared packages through declared exports. Shared packages m
 ## Execution entry points
 
 - `afk`: open the interactive TUI.
-- `afk run`: resolve a work item and delegate to the complete managed implementation → independent QA → publication lifecycle. Existing runtime, timeout, budget, extension, and explicit execution-mode options apply to the managed attempt; `--target-branch` names its working branch, not the MR destination.
+- `afk run`: select the template from `--template`, configuration, then the builtin default before resolving managed execution. Learning templates use the learning lifecycle below; execution templates resolve a work item and delegate to managed implementation → independent QA → publication. Runtime, timeout, budget, extension, and explicit execution-mode options apply to the managed attempt; `--target-branch` names its working branch, not the MR destination.
 - `afk execute --work-item-id <id>`: execute the managed lifecycle, including eligibility and manifest checks, implementation, independent QA, change-request handling, and the human-controlled merge gate. `--agent <name>`, `--sandbox <name>`, and `--execution-mode <batch|interactive>` select the attempt's providers and mode; a template may still select a provider for an individual step.
-- `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`: inspect scoped experience. `recall --scope <scope> --query <text> [--json]` returns relevant verified, unexpired records.
-- `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`, `import --scope <target> --file <file>`, and `copy <id> --scope <source> --target-scope <target>`: exchange bounded portable JSON (1 MiB / 100 lessons). Imported/copied advice is candidate-only and requires local independent verification. Export never grants verification authority. `metrics --scope <scope> [--json]` separates retrieval, explicit adoption and recurrence; `adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` acknowledges use without claiming observed behavior.
+- `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`: inspect scoped experience. `recall --scope <scope> --query <text> [--context <file>] [--json]` returns relevant verified, unexpired records. The optional UTF-8 JSON context file is limited to 32 KiB, accepts only the strict applicability/target query schema, and must match the requested project scope. Invalid context is rejected before storage opens without echoing its contents. Query context does not grant execution provenance, QA, adoption or publication authority.
+- `afk experience jobs --scope <scope> [--limit <0..100>] [--offset <nonnegative-safe-integer>] [--json]` and `candidates` with the same flags: read persisted learning jobs or candidates in full-ID ascending order, filtering exact scope before offset/limit (defaults 0/100). `inspect <64-lowercase-hex-candidate-id> --scope <scope> [--json]` reads one candidate. These read-only commands use configured learning actions when a plugin runtime is supplied, otherwise the shared ledger query; they never start analysis or create an absent ledger. Pages are offsets into the current result, not a cross-call snapshot.
+  A failed attempt with `analysis_executable_changed` means the selected analysis executable could not be verified again before launch. Inspect the installation; restarting the worker does not retry that request or refund its reservation.
+- `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`, `import --scope <target> --file <file>`, and `copy <id> --scope <source> --target-scope <target>`: exchange bounded portable JSON (1 MiB / 100 lessons). Imported/copied advice is candidate-only and requires local independent verification. Export never grants verification authority and excludes publication-bound records; copy cannot transfer their publication binding. `metrics --scope <scope> [--json]` separates retrieval, explicit adoption and recurrence; `adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` still emits JSON metrics (`retrievals`, `adoptions`, `recurrences`), now with a `receipt` binding the verified content/verification/applicability and recorded actual target context (`binding: 'verified-version'`, format `version: 2`, additive `contextStatus: 'recorded' | 'unavailable'`). A trusted QA target snapshot records actual context even during an active run without completed QA; absent context binds canonical `{}` with `contextStatus: 'unavailable'`, without inventing a target. Identical source/version/context replays return the saved receipt/timestamp without another count; changed verification or context conflicts, corrupt bindings reject, and historical receipts remain `legacy-unbound` without upgrade. Adoption is explicit acknowledgement, not observed use/outcome; publication-bound experiences additionally retain CandidateStore publication/version identity; at most 64 adoption receipts per lesson. Compatibility is always checked against actual context, consistently before and after QA for unchanged context; even lessons without stored applicability cannot bypass known `productVersions` compatibility checks. Lessons with stored applicability or a publication binding additionally require successful QA and verified applicability matching actual context, including a clean target and exact QA revision; an active snapshot alone cannot qualify them. Actual and verified contexts must match when both are supplied. Ordinary lessons without stored applicability or a publication binding may be acknowledged against an intact active run even when context is unavailable, subject to the actual-context compatibility check. See [experience reuse](plugins.md#runtime-governance-and-experience-reuse) for receipt fields and provenance rules.
+  When the consuming run and work item have already selected this lesson, their first adoption requires a selection of the currently verified version. After reverification, select the updated context before acknowledging it.
+- `afk experience outcomes --scope <scope> --run-id <run> --work-item-id <canonical-id> [--limit <0..100>] [--json]`: read persisted historical outcome receipts for the exact consuming run/work-item pair. The work item must belong to scope; default limit is 20, ordered by descending audit sequence with stable experience/selection tie-breaks. Output is a JSON array (pretty by default, compact with `--json`); no receipts returns `[]`. Receipts retain selected-reference and optional publication/version identity, audit outcome, recurrence association, and `benefit: "unknown"`. Selection is not explicit adoption, success does not prove benefit, and `recurrence: false` does not prove absence of recurrence. Querying does not activate plugins, run a model, refresh credentials, recall assets, or change usage metrics; storage closes before output, and query/close failures suppress private errors. Historical receipts do not grant current retrieval or publication authority.
+- `afk experience correct <candidateId> --scope <scope> --expected-version <version> --file <path> [--json]`: submit exactly `{ scope, candidateId, expectedVersion, correction }` to configured `learning.correct`, persisting a correction job in the inbox without running a model or changing the original candidate. Scope must be a canonical project, candidate ID 64 lowercase hex characters, and expected version a positive safe integer; a stale version or foreign-project candidate is rejected. Correction text comes only from a regular UTF-8 file, must contain non-whitespace text without NUL, and is bounded to 32768 bytes (including during reads). Input and file checks precede lazy runtime creation. Output contains only `{ jobId, scope, candidateId, candidateVersion }` (64 lowercase hex job ID and positive candidate version), formatted JSON by default or compact JSON with `--json`, matching knowledge commands. Only self-created runtimes are disposed; failures report `Learning correction failed` without file contents or Provider errors.
+- `afk experience validate <64-lowercase-hex-candidate-id> --scope <scope> --expected-version <positive-safe-integer> --checker <id> [--json]`: invoke configured `learning.validate`. Trusted configuration supplies verifier, target and grant; clients supply no command or result. Blocked results exit nonzero; the command neither opens legacy experience storage nor creates an absent candidate ledger. Registered protocol-aware verifiers support fact/process; lesson additionally requires explicit saved permission and matching independent QA. Skill/tool remain blocked without dedicated validators. A configured read-only skill validator can use `proposal-semantic-v1` / `skill-trace-v1` to compare observed outputs and Read calls across both frozen editions.
+- `afk experience knowledge prepare <candidateId> --scope <scope> --expected-version <positive-safe-integer> [--target <logical-ref>] [--json]`: prepare an immutable authorized publication preview. `publish <64-lowercase-hex-publication-key> --scope <scope> [--json]` applies that exact plan through the shared guards; anything short of committed exits nonzero. `reconcile --scope <scope> [--json]` recovers publications and withdraws invalid assets; blocked recovery or human-edit-protected withdrawal exits nonzero, while completed withdrawal succeeds. Output is formatted JSON, or compact JSON with `--json`. All three commands share the learning runtime and dispose only runtimes they own.
+- `afk experience worker once --scope <scope> --request <64-lowercase-hex-request-key> [--json]` invokes the shared `learning.worker.once` action for exactly that project and request. Stdout contains a bounded JSON `job` summary with `jobId`, `scope`, `status`, `canRun`, `attemptCount`, and an optional allowlisted `reasonCode`. Use `--json` for compact output. Only `processed` exits zero. Queue contention exits `1` with `learning_worker_busy` on stderr and empty stdout. SIGINT or SIGTERM requests cancellation, which exits `1` with `learning_worker_cancelled` on stderr and empty stdout.
+- `afk experience worker watch [--json]` runs the saved learning queue in the foreground. It processes eligible requests across configured projects under the saved model budget and holds the same exclusive queue ownership as the single-request worker. SIGINT or SIGTERM stops active analysis, releases ownership and exits `0` with a `{"status":"stopped"}` receipt. Startup and runtime errors exit `1` with an error code on stderr.
 - `afk experience record --scope <scope> --trigger <text> --root-cause <text> --action <text> --run-id <id> --work-item-id <id> --evidence <refs...>`: record a candidate. `verify <id> --scope <scope> --run-id <id> --action <text> --evidence <refs...> [--root <event-store>] [--root-cause <text>]` requires an intact same-project independent QA pass followed by successful completion or confirmed publication at the matching human merge gate. `revoke <id> --scope <scope>` withdraws advice from later retrieval.
 - `afk loop start`: repeatedly attempt one manifest-bound work item by delegating to the same managed execution path. It is not a global multi-item scheduler. `--run-tag <tag>` files the run under `~/.afk/loop-runs/<tag>/`; without it the tag is derived from `--work-item-id`, or is `default`.
 - `afk loop status [--run-tag <tag>] [--all]`: report one run from its pid file and status snapshot, or every run in the runs directory. `afk loop stop` signals the same run.
@@ -33,6 +42,7 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk host ls [--provider <name>] [--json]`: list hosts from the selected installed host provider. The default provider is `jumpserver`.
 - `afk host exec <host> <command> [args...] [--provider <name>] [--timeout <duration>] [--json]`: execute a structured remote argv vector and preserve the remote exit code. Provider failures return exit code `1` with a stable diagnostic.
 - `afk plugin install <source>`: install a trusted local directory or npm package specification in a staging directory, validate its `plugin.json` manifest/entry, record entry integrity, and enable it. An ordinary failed upgrade preserves the previous installation; npm lifecycle scripts are disabled. The package must include its built entry.
+- `afk plugin install-tool <recipe> --target <target> [--offline]`: install only the approved `browser-check-1.62.1` recipe on explicit `host-local` darwin/arm64 with Node >=22.16. Validate shipped assets, lock, dependency closure and the contained CLI; bind the installation receipt to Node and the complete tree. SIGINT/SIGTERM cancel and retain staging ownership until child close; ordinary failures preserve the previous installation. `--offline` forbids fetching. Browser payloads, OS/backend prerequisites and real vendor readiness require separate qualification. Managed removal remains blocked while references are unknown.
 - `afk plugin configure <id> --file <path> [--builtin] [--action <name>]`: save a JSON settings object. Installed-plugin settings are checked against the manifest schema; `--builtin` validates and constructs a known configured provider. `--action` writes the plugin entry's top-level trigger action; omitting it preserves the existing action.
 - `afk plugin auth login google --client <path>`: delegate browser OAuth and a loopback callback to `GoogleOAuthCredentialProvider` using a Google Desktop app client JSON file; no email input is required. SIGINT/SIGTERM abort authentication and close its callback server. After successful login, configure builtin `credential.google-oauth` with `{}` and add builtin `notification.gmail` with `{}` only if absent, preserving existing Gmail settings. The default recipient is the authenticated account; login sends no mail. See [Gmail OAuth setup](plugins.md#gmail-oauth).
 - `afk plugin auth status google`: print only local Keychain record state (`connected`, optional `email` and `expiresAt`); no client file or token output. This does not verify the Google session or token validity.
@@ -41,18 +51,21 @@ Applications consume shared packages through declared exports. Shared packages m
 - `afk plugin remove <id>`: disable and remove an installed package while retaining its settings.
 - `afk plugin import-issue <provider> <issue> --project <platform:projectKey> [--mode <hitl|afk>] [--json]`: import a Linear/Jira issue into the target repository's real managed backlog with stable source provenance and idempotency. Defaults to `hitl`; the returned canonical work item uses existing execution, QA and publication. `sync-issue <provider> <issue> <canonical-work-item> --states <json-file> [--json]` checks the binding and updates only the explicitly mapped external lifecycle state. Workflow actions `work-item.import` and `work-item.sync` expose the same behavior.
 - `afk plugin invoke <capability> <provider> <operation> --input <path> [--json]`: dispatch explicitly allowed operations with validated JSON input and output. Output is JSON with or without `--json`; negative verification/policy/delivery results or a nonzero remote code set exit status `1`. Credential reads and merge operations are excluded. CLI verification input requires an explicit `target`. Repository lifecycle handles belong to one Runtime instance; `repository.provider/run` keeps prepare, checkout, the registered callback action, publication and cleanup in one invocation.
+  Providers declaring `recovery` also support `repository.provider/listRecoveryAllocations` with `{}` and `repository.provider/recoverAllocation` with `{allocationId:<uuid>}`. Inspection projects only allocation identity, repository, run identity and recovery phase. Recovery resolves the saved allocation; callers cannot supply a path or force deletion. Provider ownership/lease checks remain authoritative, and public failures omit private journal details. A removal result `{removed:false}` sets exit status `1`.
+- Repository `checkout` JSON accepts `{workspaceId,branch?,ref?}`; composite `run` accepts optional `checkout:{branch?,ref?}`. Prepare retains the configured base; checkout selects a target branch and optional source branch. Publish/cleanup remain handle-only operations. Defaults preserve `afk/<runId>` at the prepared revision.
 - `afk plugin listen --token-env <name> [--host <address>] [--port <number>] [--queue <path>]`: activate configured triggers and keep an authenticated HTTP host and Runtime alive until SIGINT/SIGTERM, then close/dispose them. Defaults to `127.0.0.1:8374` with a durable SQLite queue at `~/.afk/triggers/deliveries.sqlite`; the environment token requires at least 16 characters without CR/LF. Authenticated webhook receipts are persisted before HTTP 202, deduplicated and retried with bounded backoff; failed deliveries remain inspectable and replayable. Startup rejects error diagnostics; an unregistered action disposes its trigger. Ordinary runtime construction does not arm timers. See [Capability plugins](plugins.md).
+- Scheduled ticks under `plugin listen` use that same selected queue, owned before timer activation. Persisted tick identity, action and input survive retry/restart without being rewritten by current configuration. Listener close and Runtime disposal each wait at most five seconds; an unsettled action retains consumer ownership. No missed-interval backfill or exactly-once external side effect is promised.
 - `afk plugin deliveries --token-env <name> [--url <listener>]` and `afk plugin replay <delivery-id> --token-env <name> [--url <listener>]`: inspect the running queue and replay one failed delivery through authenticated HTTP. HTTPS or loopback HTTP is required; redirects are refused. Delivery status does not expose payloads. Managed execution derives a stable ID from the delivery and canonical work item; interrupted executions retain their audit/journal for reconciliation instead of starting duplicate jobs.
 - Delivery inspection accepts `--offset <number> --limit <1-100>` for older receipts. `afk plugin prune-deliveries --token-env <name> [--url <listener>]` explicitly removes successful receipts older than the deduplication window (seven days by default); pending/failed records remain. The queue refuses new receipts with HTTP 503 at its count/byte limit rather than evicting retained work.
 - `afk plugin serve-container --repository <path> --workspace-root <path> --sandbox <provider> --agent <providers...> --token-env <name> [--host <address>] [--port <number>] [--allow-remote]`: explicitly host remote-container sandbox/agent operations through shared registries. All five unbracketed flags are required; workspace root must already exist and bounds execution worktrees, agents form an explicit allowlist, and the environment token must be at least 32 bytes. Defaults to `127.0.0.1:8375`; non-loopback binding/clients require `--allow-remote`. SIGINT/SIGTERM close the service and dispose the runtime. Backend assembly and trust boundaries are documented in [Capability plugins](plugins.md).
-- `afk plugin list [--json]`: list loaded capability plugins, declared capabilities and registered provider names, rather than all packages present on disk.
-- `afk plugin doctor [--plugin <id>] [--json]`: run plugin health and diagnostics checks, including load/configuration failures. An unhealthy provider or error diagnostic returns failure while optional plugin load errors leave core command handling available. See [Capability plugins](plugins.md) for API v1, the provider matrix and current composition/invocation adoption status.
+- `afk plugin list [--loaded] [--json]`: default to static inventory of builtin and configured installed plugins, including disabled entries, declared capabilities, configuration shape, credential dependency names and external tools. Do not import entries, construct providers, resolve secret references or run commands. Configuration validity does not establish activation or health. `--loaded` retains activation-based rows (`id`, `capabilities`, `providers`).
+- `afk plugin doctor [--plugin <id>] [--probe] [--loaded] [--json]`: default to static configuration/dependency diagnostics and unprobed tools; JSON is `{ inventory, diagnostics, externalTools }`. `--probe` permits only approved builtin command/location/exact version arguments or explicit host lookup without version arguments; no authentication, network, installation or downloads. Missing/outdated required tools and enabled configuration/dependency errors fail; incompatible host platforms report `unsupported`. Unknown/unprobed tools do not establish health. Backend tools remain `backend-required`; no host fallback. Custom executables report their configured binding as `unsupported`/`custom-binding` without probing the default. `--loaded` retains activation-based health/diagnostics and JSON `{ health, diagnostics }`; it may resolve credentials and cannot combine with `--probe`. SIGINT/SIGTERM cancels probes; bounded timeout/output and `cleanup: unconfirmed` semantics apply. See [Capability plugins](plugins.md).
 - `afk backlog baseline --id <prd>`: report the branch a PRD accumulates its slices on and the slices that inherit it; `--branch <name>` records the branch in the PRD's body.
 - `afk backlog associate --project <platform:projectKey> [--directory <path>]`: bind a repository directory to one provider project in the local tracker index, so commands run in that directory resolve the project without flags. A geelib project key is its numeric project id (`geelib:1843`). An inventory run binds every project the credentials reach; this command writes the one precise binding.
 - `afk backlog rework revise --id <backlog> --record <r2> --summary "<fact>"`: correct an open rework record to the current fact; the record keeps its id and its evidence, only the statement is replaced, and the correction keeps its own trail in the record.
 - `afk backlog revise --id <backlog> --project <platform:projectKey> (--description-file <path> | --description-stdin) [--reason "<why>"] [--dry-run]`: replace the body of a backlog item — the contract and the acceptance criteria it carries — and nothing else about it. The title, the state, the tags, the relationships and the role of the item stay exactly where they are: a revision of a contract is not a change of the work's position in the backlog. The body is written as it was given, so an AFK-managed section the revision would remove is reported rather than rebuilt silently. `--dry-run` reports the body that would be written and the sections that change, and writes nothing at all.
 - `afk schedule --parent <canonical-id>`: dispatch executable descendants across projects, serialize overlapping repository sets, and respect dependencies and human merge gates. `--max-concurrent`, `--load-limit`, and `--poll-interval` control dispatch; the poll interval is the re-evaluation cadence, so the schedule is looked at again while executions are in flight and idle capacity is filled as soon as something becomes dispatchable. `--watch` keeps the schedule running until it is stopped, waiting for external state changes; `--dry-run` previews waves without claiming or launching work, and `--json` returns the final report. Every waiting item in the report names the constraint that keeps it waiting — an unready dependency, a full capacity, a held repository lease, an overloaded host, a human gate, or a spent attempt budget. Each preview wave assumes prior waves have been merged and reconciled. A failed inventory read does not end the schedule: it backs off and retries, and says that the scheduler is running but cannot see the work items. SIGINT/SIGTERM stop dispatch and drain active attempts.
-- `afk doctor [--workspace-root <path>] [--cleanup <target>] [--fix] [--json]`: inspect caches, dependency pools, managed workspaces and leases. Default inspection is read-only, including legacy manifests. `--cleanup` removes one exact reported work-item ID or absolute workspace/dependency path; it retains unknown, legacy, active, dirty, unpublished or verification work. `--fix` reclaims every workspace whose runs stopped heartbeating beyond the configured grace (ADR-0038) and reports what was reclaimed or skipped. Byte estimates and inventory totals describe the state before cleanup; `afk observe doctor` describes the event store.
+- `afk doctor [--workspace-root <path>] [--cleanup <target>] [--fix] [--json]`: inspect caches, dependency pools, managed workspaces and leases. Default inspection is read-only, including legacy manifests. `--cleanup` removes one exact reported work-item ID or absolute workspace/dependency path and retains unknown, legacy, active, dirty, unpublished or verification work. Its inventory describes the state before cleanup. `--fix` reclaims eligible workspaces whose runs stopped heartbeating beyond the configured grace (ADR-0038). When used alone, `--fix` inventories the remaining resources after reclamation. Inventory or reclamation diagnostics produce exit code 1. Both cleanup modes retain workspaces or repositories with an unclosed execution claim, including expired claims. `afk observe doctor` describes the event store.
 - `afk observe`: inspect executions and their audit/evidence projections.
 
 The command registry in `apps/cli/src/command-registry.ts` is the source of truth for the complete CLI surface. Do not infer supported commands from old examples or plans.
@@ -69,7 +82,7 @@ The command registry in `apps/cli/src/command-registry.ts` is the source of trut
 - Successful implementation and borrowed QA workspaces release store-owned worktrees, including worktrees reused after a failed attempt. Failed attempts retain source and diagnostic evidence. A dirty store-owned retry saves tracked and untracked edits in a named `afk-recovery-*` Git stash, prepares the working branch, then reapplies the saved changes; the stash remains available if recovery conflicts. Independent clones still reject dirty preparation. Bare repositories, local branches, and recovery stashes survive worktree removal.
 - Node dependencies are cached under `~/.loop-workspace/deps/<hash>/layout/`. Keys cover lockfiles, all workspace package manifests, package-manager configuration and patches, platform, architecture, and Node ABI. Installed dependencies are captured after a managed phase; matching phases attach them without installing. Real `node_modules` directories contain per-entry links, workspace package links point into the current checkout, and pnpm mutable state remains local. External or unsupported nested source links keep the original install rather than creating a broken cache. Maven and Go continue using their native global caches.
 - Pools retain pins while checkouts reference them. Releasing a managed checkout drops its references; unpinned entries are evicted by least recent use above the configured budget (`dependencyPoolBudget`, default 8 GiB). Bare caches are retained. Existing independent clones remain supported without automatic migration; global package-manager store pruning is an explicit operator action after pool acceptance.
-- Workspaces whose runs stopped heartbeating beyond the configured grace (`workspaceReclaimGrace`, default 24 hours) are reclaimed by `afk doctor --fix` (ADR-0038): dependencies are captured into the pool, the checkout and workspace are removed, and the attributed runtime records are terminated as failed. Workspaces with unacquirable leases, fresh heartbeats, blocked evidence, or unusable manifests are never reclaimed.
+- `afk doctor --fix` (ADR-0038) reclaims eligible workspaces whose runs stopped heartbeating beyond `workspaceReclaimGrace` (24 hours by default). It rereads runtime records under the repository lease and execution ownership gate before capturing dependencies, removing the checkout and workspace, and archiving any active records as failed. It retains workspaces with unacquirable leases, unclosed execution claims, fresh heartbeats, missing or blocked runtime evidence, unknown runtime states, or unusable manifests.
 - Agent completion signals and QA artifact manifests are execution-local protocol files, not general configuration or lifecycle-state stores.
 - Finished-run state is retained for a fixed window rather than forever. A run that reaches a terminal state prunes `~/.afk/runtime/tasks/archive` records and `~/.afk/runtime/tasks/diagnostics` snapshots older than seven days, at most once an hour and never as part of the run's own success criteria. The corresponding window for terminal event streams under `~/.afk/events/` is implemented by the event store but not yet scheduled by a caller; a deployment that wants it must invoke `prune({ retentionMs, exclusiveAccess: true })`.
 
@@ -90,7 +103,108 @@ Only the first half is recoverable — a manifest records its `workItemId`, so t
 
 ## Managed lifecycle
 
+For `afk run`, both execution and learning use the exact template snapshot loaded
+for routing, including across managed request resolution. A learning template
+requires a canonical `--backlog-id` without looking up a Tracker, and uses the
+current directory as its workspace without cloning a project. Configured Agent
+defaults do not require an installed Agent or Sandbox for learning-only actions.
+Explicit execution manifests, branch, Sandbox, Agent, Agent runtime and execution
+mode options are rejected before learning effects. `--session` defaults to a unique
+learning session name; audit run IDs remain independent. `--hard-timeout`, `--ext`
+and `--ext-param` apply. Agent runtime overrides are resolved only on the execution
+route, preserving the configured runtime defaults.
+
+`afk experience review --backlog-id <canonical-id> --run-id <source-run>
+--checker <saved-checker> [--kind <success|repair|skill|tool>] [--session <name>]
+[--hard-timeout <ms>] [--json]`
+defaults to `--kind success`, running `success-review-preview` for process
+candidates. `--kind repair` runs `repair-review-preview` for lesson candidates.
+`--kind skill` and `--kind tool` run `skill-optimization-validation` and
+`tool-optimization-validation` respectively. All four are built-in learning
+workflows. Project scope is
+derived from the canonical work item and checked against the 512-byte UTF-8 scope limit before Runtime creation. The selected source audit must belong
+to that exact work item before capture or analysis. `--hard-timeout` accepts
+integers from 1 through 2147483647 and is checked before Runtime creation.
+The `review` step captures the selected source, processes its exact request,
+validates the selected candidate kind with the saved checker. Success and repair
+reviews additionally prepare publication previews. Their output contains the exact request
+key, candidate IDs, validated versions and prepared publications; `--json` emits
+compact JSON. It does not apply the previews. Publishing remains an explicit
+knowledge publication command with its own authorization. Failed reviews return
+a generic error. A skill/tool review interrupted after committing validation receipts
+also emits a strict `status: "incomplete"` JSON result with those current-invocation
+receipts, the interrupted candidate and a safe reason, while retaining a failure exit.
+Source and learning audit run IDs remain
+distinct; replay reuses persisted requests and candidates.
+An incomplete result grants no retry or publication authority: previously validated
+skill/tool candidates still require the separate revalidation guard. Cancellation
+after a commit does not undo that validation; inspect persisted candidate state.
+Retrying a preview propagates read or validation failures without initiating
+publication conflict or withdrawal. Existing prepared or applied records remain
+available for a later explicit publication or reconciliation, which rechecks
+current authorization and source validity before recovery or withdrawal.
+
+Repair review dispatches `learning.retrospective` with `kind: "lesson"`,
+`repair: true`, canonical `scope/workItemId`, the selected failure `runId` and
+saved `checkerId`. The checker must save `qa.repair.failure` and `qa.repair.fix`,
+each `{ runId, root, auditDigest }`, alongside independent QA's own
+`qa.runId/root/auditDigest/targetRevision`. Failure, implementation fix and QA
+require three distinct run IDs for the same project/work item; `--run-id` must
+match the saved failure. This repair route explicitly admits new failed sources,
+persisting `reason: "failed"` on the request. Validation checks the pinned audits, the fix
+at QA's exact target revision and independent semantic assertions. Review only
+prepares previews; publication still requires the existing checker guards and an
+explicit lesson target grant. Current model output and semantic checks for this
+route are synthetic; live-model/service and full product E2E acceptance remain
+unverified.
+
+Skill/tool reviews dispatch the same `review` system step and
+`learning.retrospective` action with `kind: "skill"` or `kind: "tool"`, canonical
+`scope/workItemId`, source `runId` and saved `checkerId`, without `repair: true`.
+They require saved validation configuration and dedicated validation support;
+knowledge publication configuration is not required. Output is exactly
+`{ scope, runId, requestKey, processing, validated }`, where each `validated`
+entry is an existing `LearningValidationResult` receipt with `status: "validated"`,
+`candidateId`, `candidateVersion`, `validatedVersion`, `executionId` and
+`receiptDigest`. Already-validated proposals are rejected with
+`learning_proposal_revalidation_required`; this entry adds no revalidation
+authority guard. These routes validate proposals only: they do not prepare or
+apply publications, install assets, or complete the optimization lifecycle.
+Mock routing checks do not qualify live models/services, native tools or full
+product E2E behavior.
+
+An explicit template `purpose: learning` selects the learning lifecycle through
+the same public runner. Loading, schema validation and graph compilation precede
+work-item claims, hooks and repository effects. Only registered `learning.*`
+system steps are accepted; agent steps and branch/provider defaults are rejected.
+Each step receives its declared `input` DTO, the authorized existing workspace
+and a cooperative cancellation signal, including its optional `timeoutMs`.
+The learning run ID must differ from source run IDs declared in step inputs,
+including the supported single workflow envelope. Before any audit append,
+preflight uses the action boundary's envelope rules and identity schema, including
+identity trimming. Graph compilation rejects duplicate step IDs.
+The runner does not claim or transition source work, start an implementation
+runtime, prepare repositories, create branches/sandboxes, commit, push or queue QA.
+Validation and publication still require the learning plugin's own authorities.
+The shared learning runner returns `steps`, keyed by step ID, with each step's
+status and successful action output. Failed steps retain their status without
+successful output; callers must check overall success before presenting previews.
+
+Only lifecycle modules explicitly declaring `purposes: ['learning']` participate
+in learning; a shared module can declare both purposes. Init, before and after
+hooks keep their existing meanings. Cleanup drains once in reverse order with
+an independent signal; failures are retained and prevent success. Required audit
+failures remain fatal and stop pending sibling dispatch; started actions still
+settle before cleanup. A terminal audit failure preserves earlier hook and cleanup
+errors. Events carry learning purpose from the first request,
+use effect events for system steps and record the terminal outcome after cleanup;
+they do not report implementation completion or feed learning intake again.
+Absent or explicit `purpose: execution` retains the execution lifecycle;
+`RunnerOptions.purpose` alone remains observation metadata.
+
 The managed execution path validates the work item and its execution manifest, runs implementation, records branch and run evidence, performs independent QA, and prepares or verifies the provider-backed change request. A successful run does not merge code. The final merge is human-controlled; the work item reaches its terminal completed state only after merge and reconciliation.
+
+In workflow templates, `when.step` establishes an ordering dependency even without an explicit `dependsOn`. A missing result never satisfies a condition, including `notEquals`. A matching condition may allow recovery from the referenced step's failure; every other explicit prerequisite must have completed successfully. Failed, aborted, timed-out or skipped prerequisites therefore still block dependent agent and system steps.
 
 ### Execution readiness versus publication readiness
 
@@ -116,6 +230,27 @@ Because the geelib project key does not name a clone URL, a fully automated mani
 
 ## Failure and recovery
 
+### Context handoff
+
+The default runner constructs the shared handoff coordinator. In batch mode,
+`context_high` captures the active execution's output and repository revision,
+writes a recovery document, and awaits execution cleanup before starting a
+successor. Cleanup failure prevents the next start. The runner persists a
+handoff reservation before native resume or fresh startup; a failed native
+startup can fall back within that same reservation. Exhausted budgets retain a
+terminal recovery document and block the work item.
+
+Local and container batch execution also check the context threshold after a
+clean Claude Code turn with a successful native result and final usage. A goal
+completion marker takes priority. A missing or failed native result does not
+trigger this terminal handoff.
+
+Recovery document paths and historical-document patterns use the same encoded
+canonical work-item identity. Numeric legacy identities retain their existing
+file names. Cancellation is registered before the first asynchronous execution
+creation: an execution returned after cancellation is stopped before the phase
+rejects, and its late result cannot complete the work or start another round.
+
 ### Failure diagnosis
 
 A failed run carries a **structured failure diagnosis**, not a free-text reason. The diagnosis separates four things that used to be one string:
@@ -130,6 +265,8 @@ A failed run carries a **structured failure diagnosis**, not a free-text reason.
 The agent's own report is the cause when there is one. The provider's captured stdout/stderr is evidence: it is kept as a truncated tail (4 KiB, last 40 lines) and its error lines are lifted into the cause, so a pre-commit hook's rejection is not replaced by the tail of a `pnpm` log.
 
 Timeouts are first-class failures. An idle timeout, a completion timeout and a hard timeout each have their own code, and carry the budget that ran out, the last known activity and the basis of the judgement.
+
+Batch execution counts arriving stdout and stderr chunks as activity, including repeated bytes after the captured output tail reaches its limit. When normalized usage reaches `contextHighTokens` while execution is still active, it returns `context_high` and leaves the process available for the coordinator to capture and stop. Completion, cancellation and known failure retain their outcomes; an exhausted completion deadline takes priority over context rotation. A Provider without intermediate usage cannot trigger proactive rotation before usage is observed.
 
 Whether repeating an attempt is meaningful is read from the diagnosis, not re-derived from a flattened string. The agent error-code vocabulary stays as it was: `AGENT_TURN_FAILED`, `AGENT_GONE` and `AGENT_IDLE` are facts about the agent run rather than verdicts on the work, and a timeout is a fact about the work.
 
@@ -203,6 +340,14 @@ another round — which pushed the baseline again.
 The **base branch**, the **target branch** and the **source branch** are
 read, never pushed.
 
+For the Git branch provider, remote synchronization belongs to workspace
+preparation, before the implementation or QA Agent starts. `preparePush`
+may fast-forward or merge at that point. Publication calls `push` without
+another synchronization. If the remote advances or diverges after review,
+push fails without changing the reviewed local HEAD; the run must prepare
+and verify again before publication. Required publication hooks still run
+before the push and change-request creation.
+
 The rule is stated where every agent reads it — the completion protocol,
 in both transports and for every phase — and again with the branch names
 in the `Execution repositories:` segment, so the agent does not have to
@@ -271,6 +416,19 @@ unreachable model fails with the probe's own diagnosis instead of a
 transport error from the wrong endpoint. The probe costs a live model
 round-trip, so it runs once per provider per run. See
 [ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md).
+
+Codex native resume is supported for batch work in a local development
+workspace using a spawned stdio app-server. The checkpoint identifies the
+native thread, last completed turn, canonical worktree, model provider and
+token watermark. Before sending new input, AFK checks the native workspace,
+turn and effective approval and sandbox policies. Explicit resume on exec,
+interactive, analysis, container or external endpoints is rejected. When a
+dispatched turn cannot be confirmed or another writer owns the thread, the workflow stops to avoid duplicate work.
+
+Each generation audits the difference from its saved usage watermark. Only
+notifications for its own thread and turn count. The work-item budget stores
+the cumulative native thread total. A missing or inconsistent resumed usage
+report fails the turn and prevents a new checkpoint. Each new cumulative reading must advance by the reported increment in every counter. Exact duplicate readings count once. Checkpoints require explicit completed status and matching native turn identities.
 
 The verification branch binds the same way. The QA reviewer resolves its
 provider and its runtime together: a reviewer that names its own provider

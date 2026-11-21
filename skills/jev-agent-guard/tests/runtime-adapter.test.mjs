@@ -6,6 +6,36 @@ import test from 'node:test';
 import { runAdapter } from '../scripts/adapters/runtime-adapter.mjs';
 import { loadLedger, recordAction, recordSkill } from '../scripts/skill-ledger.mjs';
 
+test('manual-only Skills skip prompt routing but retain manually activated contracts on every host', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev manual skill '));
+  try {
+    const env = { HOME: home, XDG_STATE_HOME: path.join(home, 'state') };
+    const project = path.join(home, 'project');
+    for (const [host, configuration] of [
+      ['claude-code', '.claude'], ['codex', '.agents'], ['opencode', '.opencode'],
+    ]) {
+      const skill = path.join(project, configuration, 'skills', 'manual-review');
+      fs.mkdirSync(skill, { recursive: true });
+      fs.writeFileSync(path.join(skill, 'SKILL.md'), [
+        '---', 'name: manual-review', 'description: Review changes.',
+        'disable-model-invocation: true', '---', '## Steps', '1. Review changes',
+      ].join('\n'));
+      const session = { cwd: project, session_id: `manual-${host}` };
+      const response = await runAdapter({ host, event: 'prompt', payload: {
+        ...session, prompt: 'Review changes',
+      }, env });
+      assert.equal(response.decision, 'allow', host);
+      assert.equal(response.nextStep, undefined, host);
+      await runAdapter({ host, event: 'after-action', payload: {
+        ...session, tool_name: 'Skill', tool_input: { skill: 'manual-review' }, tool_response: {},
+      }, env });
+      const ledger = loadLedger({ host, sessionId: session.session_id, projectRoot: project }, env);
+      assert.equal(ledger.skill.name, 'manual-review', host);
+      assert.deepEqual(ledger.skill.steps, ['Review changes'], host);
+    }
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
 test('safe local command skips Jev and allows host-native permissions', async () => {
   let calls = 0;
   const result = await runAdapter({ host: 'claude-code', event: 'before-action', payload: {

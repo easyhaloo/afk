@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import { WorkflowRunner } from './workflow-engine.js';
 import type { RunObserver } from '../observability/run-observer.js';
@@ -7,6 +7,9 @@ import { DEFAULT_CODEX_CONFIG, type CodexConfig } from '../domain/agents/codex-r
 import { AgentProviderRegistry, type AgentProvider } from '../domain/agents/index.js';
 import type { Step, StepResult } from '../domain/templates/types.js';
 import type { ObservationContext } from '@afk/core';
+import * as learningRuntime from './learning/runtime.js';
+
+afterEach(() => { vi.restoreAllMocks(); });
 
 /**
  * A step may run a different provider than the request did.
@@ -48,6 +51,8 @@ function runnerWith(input: {
 
 describe('WorkflowRunner runtime binding', () => {
   it.each(['codex', 'plugin-agent'])('binds the runtime of a step resolved from the isolated registry (%s)', async name => {
+    const recordSelection = vi.fn(async () => {});
+    vi.spyOn(learningRuntime, 'prepareExperienceContext').mockResolvedValue({ path: '.afk/experience-context.md', recordSelection });
     const provider: AgentProvider = { name, capabilities: new Set(), createExecution: vi.fn() };
     const registry = new AgentProviderRegistry();
     registry.register(provider);
@@ -69,9 +74,11 @@ describe('WorkflowRunner runtime binding', () => {
 
     expect(runPhase).toHaveBeenCalledWith(expect.objectContaining({
       agentProvider: provider,
+      recordSelection,
       runtime: name === 'codex' ? expect.objectContaining({ kind: 'codex', provider: 'afk-zyuncs', profile: 'afk' }) : undefined,
     }));
     expect(prepareRuntime).toHaveBeenCalledTimes(name === 'codex' ? 1 : 0);
+    expect(recordSelection).not.toHaveBeenCalled();
   });
 
   it('gives a Codex step the Codex runtime when the request level had none', async () => {

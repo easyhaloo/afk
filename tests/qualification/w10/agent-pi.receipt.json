@@ -1,0 +1,18 @@
+{
+  "date": "2026-11-20",
+  "provider": "wiscode-aiproxy",
+  "model": "deepseek/deepseek-v4-flash",
+  "readiness": "ready",
+  "installedCliVersion": "0.2.162",
+  "installedRun": {"status":"failed","code":"AGENT_ERROR","exitCode":0,"nativeSession":true,"usage":{"inputTokens":0,"outputTokens":0,"totalTokens":0},"matched":false,"indicators":["workspace","required","model"]},
+  "nativeProbe": {
+    "prompt": "Reply with W10_READY only.",
+    "flags": ["--mode", "json", "--print", "--no-session", "--no-tools", "--no-context-files", "--no-extensions", "--no-skills"],
+    "exitCode": 0,
+    "assistantStopReason": "error",
+    "httpStatus": 402,
+    "matched": false,
+    "inputTokens": 0,
+    "outputTokens": 0
+  }
+}

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { PluginManager, readInstalledPlugin } from './manager.js';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PluginManager, readInstalledPlugin, type InstalledPluginRecord } from './manager.js';
 import { readPluginConfiguration } from './configuration.js';
 import { loadInstalledPlugins } from './loader.js';
 import { PluginRuntime } from './runtime.js';
@@ -15,7 +16,7 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await fs.rm(directory, { recursive: true, force: true });
 });
 
-async function fixture(version = '1.0.0', overrides: Partial<PluginManifest> = {}) {
+async function fixture(version = '1.0.0', overrides: Partial<PluginManifest> & { entry?: string } = {}) {
   const root = await fs.mkdtemp(join(tmpdir(), 'plugin-install-'));
   directories.push(root);
   const source = join(root, 'source');
@@ -52,6 +53,79 @@ async function dependencyFixture(capability = 'example.provider', providerId = '
 }
 
 describe('PluginManager', () => {
+  async function authorize(manager: PluginManager, record: InstalledPluginRecord, override = {}) {
+    if (!record.treeIntegrity) throw new Error('Expected sealed verification fixture');
+    await manager.configure('policy.compliance-policy', {
+      rules: [{ id: 'source', effect: 'deny' }], sharedVerification: [{ project: 'github:w11/parcel', workspace: process.cwd(),
+        plugin: record.id, version: record.version, entry: record.entry, integrity: record.integrity, treeIntegrity: record.treeIntegrity, ...override }],
+    }, true);
+  }
+
+  it('protects one installed generation from upgrade and uninstall until both readers release', async () => {
+    const id = 'tool.scan-manifest';
+    const { homeDir, source } = await fixture('2.0.3', { id, provides: ['verification.provider'], concurrentVerification: true });
+    const manager = new PluginManager({ homeDir });
+    const original = await manager.install(fileURLToPath(new URL('./tool-assets/scan-manifest/', import.meta.url)));
+    await authorize(manager, original);
+    const first = await manager.beginActivation(id);
+    await manager.confirmActivation(id, first.record!, first.entry);
+    const second = await manager.beginActivation(id);
+    expect(second.record).toEqual(original);
+    await expect(manager.install(source)).rejects.toThrow(/active/);
+    await expect(manager.remove(id)).rejects.toThrow(/active/);
+    await first.release();
+    await expect(manager.remove(id)).rejects.toThrow(/active/);
+    await expect(manager.install(source)).rejects.toThrow(/active/);
+    expect(await readInstalledPlugin(join(homeDir, '.afk/plugins', id))).toEqual(original);
+    await second.release();
+    expect((await manager.install(source)).version).toBe('2.0.3');
+    const upgraded = await manager.beginActivation(id);
+    await manager.confirmActivation(id, upgraded.record!, upgraded.entry);
+    await upgraded.release();
+    await manager.remove(id);
+    expect(await readInstalledPlugin(join(homeDir, '.afk/plugins', id))).toBeUndefined();
+  });
+
+  it.each([undefined, { workspace: '/other-workspace' }, { version: '1.0.0' }, { plugin: 'tool.other' },
+    { entry: 'old-generation' }, { integrity: `sha256-${'A'.repeat(43)}=` }, { treeIntegrity: undefined },
+    { treeIntegrity: `sha256-${'A'.repeat(43)}=` }])('keeps unapproved installations exclusive (%j)', async override => {
+    const id = 'tool.scan-manifest';
+    const { homeDir, source } = await fixture('2.0.2', { id, provides: ['verification.provider'], concurrentVerification: true, entry: 'index.mjs' });
+    await fs.rename(join(source, 'dist/index.js'), join(source, 'index.mjs'));
+    const manager = new PluginManager({ homeDir });
+    const installed = await manager.install(source);
+    if (override) await authorize(manager, installed, override);
+    const first = await manager.beginActivation(id);
+    await manager.confirmActivation(id, installed, first.entry);
+    try { await expect(manager.beginActivation(id)).rejects.toThrow(/active/); }
+    finally { await first.release(); }
+  });
+
+  it.each([
+    { trusted: true, provides: ['context.provider'] },
+    { trusted: true, provides: ['verification.provider', 'context.provider'] },
+    { trusted: false, provides: ['verification.provider'] },
+  ])('rejects invalid shared activation declarations ($trusted, $provides)', async declaration => {
+    const { homeDir, source } = await fixture('1.0.0', { ...declaration, concurrentVerification: true });
+    await expect(new PluginManager({ homeDir }).install(source)).rejects.toThrow('Invalid plugin manifest');
+  });
+
+  it('refuses to join or release a live lease from a different installation', async () => {
+    const { homeDir } = await fixture();
+    const manager = new PluginManager({ homeDir });
+    const installed = await manager.install(fileURLToPath(new URL('./tool-assets/scan-manifest/', import.meta.url)));
+    await authorize(manager, installed);
+    const reader = await manager.beginActivation(installed.id);
+    await manager.confirmActivation(installed.id, installed, reader.entry);
+    const path = join(homeDir, '.afk/plugins', `.active-${installed.id}.json`);
+    const saved = await fs.readFile(path, 'utf8');
+    await fs.writeFile(path, JSON.stringify({ ...JSON.parse(saved), installation: 'previous-installation' }));
+    await expect(manager.beginActivation(installed.id)).rejects.toThrow(/active/);
+    await expect(reader.release()).rejects.toThrow(/identity changed/);
+    await fs.writeFile(path, saved);
+    await reader.release();
+  });
+
   describe.each(['disable', 'remove'] as const)('%s dependency protection', operation => {
     it('preserves disk state when an enabled dependent needs the last provider without executing plugins', async () => {
       const { manager, homeDir, marker, configPath } = await dependencyFixture();
@@ -164,6 +238,26 @@ describe('PluginManager', () => {
     expect(fetch).not.toHaveBeenCalled();
     await manager.setEnabled('notification.slack', false, true);
     await expect(manager.setEnabled('credential.enterprise', false, true)).resolves.toBeUndefined();
+  });
+
+  it('protects the exact Google credential dependency of enabled Gmail without authentication', async () => {
+    const { homeDir } = await fixture();
+    const manager = new PluginManager({ homeDir });
+    const { GoogleOAuthCredentialProvider } = await import('../../infrastructure/providers/google-oauth.js');
+    const resolve = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolve').mockRejectedValue(new Error('must not resolve credentials'));
+    const account = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolveAccount').mockRejectedValue(new Error('must not authenticate'));
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('must not access the network'));
+    await manager.configure('credential.google-oauth', {}, true);
+    await manager.configure('notification.gmail', {}, true);
+    const configPath = join(homeDir, '.afk', 'plugins.yml');
+    const previous = await fs.readFile(configPath, 'utf8');
+    await expect(manager.setEnabled('credential.google-oauth', false, true)).rejects.toThrow(/credential.google-oauth.*notification.gmail/);
+    expect(await fs.readFile(configPath, 'utf8')).toBe(previous);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(account).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    await manager.setEnabled('notification.gmail', false, true);
+    await expect(manager.setEnabled('credential.google-oauth', false, true)).resolves.toBeUndefined();
   });
 
   it('does not infer credential references from arbitrary trigger payloads', async () => {
@@ -327,7 +421,8 @@ describe('PluginManager', () => {
     const record = (await readInstalledPlugin(directory))!;
     await fs.writeFile(join(directory, record.entry), 'throw new Error("damaged entry must not execute");');
     await expect(manager.install(source)).resolves.toMatchObject({ id: 'example.primary', version: '1.0.0' });
-    expect(await fs.readFile(join(directory, record.entry), 'utf8')).toBe(await fs.readFile(join(source, 'dist', 'index.js'), 'utf8'));
+    const repaired = (await readInstalledPlugin(directory))!;
+    expect(await fs.readFile(join(directory, repaired.entry), 'utf8')).toBe(await fs.readFile(join(source, 'dist', 'index.js'), 'utf8'));
     expect(readPluginConfiguration(homeDir).plugins.find(entry => entry.id === 'example.dependent')?.enabled).toBe(true);
     expect(await fs.stat(marker).then(() => true, () => false)).toBe(false);
   });
@@ -460,6 +555,8 @@ describe('PluginManager', () => {
     expect(await runtime.getContextProvider('example')!.gather({ scope: 'project', prompt: 'q' })).toEqual([{ origin: 'project', content: 'ready' }]);
     await manager.setEnabled(installed.id, false);
     expect(await loadInstalledPlugins(new PluginRuntime(), { homeDir })).toEqual([]);
+    await expect(manager.remove(installed.id)).rejects.toThrow(/active.*reference/);
+    await runtime.dispose();
     await manager.remove(installed.id);
     expect(await readInstalledPlugin(join(homeDir, '.afk', 'plugins', installed.id))).toBeUndefined();
     expect(readPluginConfiguration(homeDir).plugins[0].enabled).toBe(false);
@@ -467,7 +564,7 @@ describe('PluginManager', () => {
 
   it('keeps the previous plugin and settings when dependencies or settings fail', async () => {
     const { source, homeDir } = await fixture();
-    const npm = vi.fn(async () => { throw new Error('npm failed'); });
+    const npm = vi.fn(async (_args: readonly string[], _cwd: string) => { throw new Error('npm failed'); });
     const manager = new PluginManager({ homeDir, runNpm: npm });
     await manager.install(source);
     await manager.configure('context.example', { scope: 'original' });
@@ -497,12 +594,43 @@ describe('PluginManager', () => {
     expect(await runtime.getContextProvider('example')!.gather({ scope: 'npm', prompt: 'q' })).toEqual([{ origin: 'npm', content: 'dependency installed' }]);
   }, 30_000);
 
+  it.each(['local', 'registry'] as const)('preserves relative file dependency links when publishing a %s plugin', async mode => {
+    const { source, homeDir, root } = await fixture();
+    const dependency = join(root, 'dependency');
+    await fs.mkdir(dependency);
+    await fs.writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'fixture-context-dependency', version: '1.0.0', type: 'module', main: 'index.js' }));
+    await fs.writeFile(join(dependency, 'index.js'), 'export default "relative dependency installed";');
+    await fs.writeFile(join(source, 'package.json'), JSON.stringify({ name: 'context-example', type: 'module', dependencies: { 'fixture-context-dependency': `file:${dependency}` } }));
+    const entry = join(source, 'dist', 'index.js');
+    await fs.writeFile(entry, `import helper from 'fixture-context-dependency';\n${(await fs.readFile(entry, 'utf8')).replace("content: 'ready'", 'content: helper')}`);
+    const npm = vi.fn(async (args: readonly string[], cwd: string) => {
+      expect(args).toContain('--ignore-scripts');
+      const packageRoot = mode === 'local' ? cwd : join(cwd, 'node_modules', 'context-example');
+      if (mode === 'registry') {
+        await fs.cp(source, packageRoot, { recursive: true });
+        await fs.writeFile(join(cwd, 'package.json'), JSON.stringify({ private: true, dependencies: { 'context-example': '1.0.0' } }));
+      }
+      const modules = join(packageRoot, 'node_modules');
+      await fs.mkdir(modules, { recursive: true });
+      await fs.symlink(relative(modules, dependency), join(modules, 'fixture-context-dependency'), 'dir');
+    });
+    const manager = new PluginManager({ homeDir, runNpm: npm });
+    await manager.install(mode === 'local' ? source : 'context-example@1.0.0');
+    await manager.configure('context.example', { scope: 'relative' });
+    const runtime = new PluginRuntime();
+    try {
+      expect(await loadInstalledPlugins(runtime, { homeDir })).toEqual(['context.example']);
+      expect(await runtime.getContextProvider('example')!.gather({ scope: 'relative', prompt: 'q' })).toEqual([{ origin: 'relative', content: 'relative dependency installed' }]);
+    } finally { await runtime.dispose(); }
+    expect(npm).toHaveBeenCalledOnce();
+  });
+
   it('rejects traversal, changed entry points, and concurrent manager writes', async () => {
     const { source, homeDir } = await fixture();
     const manager = new PluginManager({ homeDir });
     await expect(manager.setEnabled('../bad', false)).rejects.toThrow('invalid plugin id');
-    await manager.install(source);
-    await fs.writeFile(join(homeDir, '.afk', 'plugins', 'context.example', 'package', 'dist', 'index.js'), 'throw new Error("should not execute")');
+    const record = await manager.install(source);
+    await fs.writeFile(join(homeDir, '.afk', 'plugins', 'context.example', record.entry), 'throw new Error("should not execute")');
     const runtime = new PluginRuntime();
     expect(await loadInstalledPlugins(runtime, { homeDir })).toEqual([]);
     expect(await runtime.diagnostics()).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'load.failed', message: expect.stringContaining('integrity') })]));

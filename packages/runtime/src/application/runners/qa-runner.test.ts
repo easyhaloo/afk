@@ -1,25 +1,33 @@
 import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
-import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll, type Mocked } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js';
 import { retryBacklog } from '../../domain/backlog/commands.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
 import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { PluginRuntime } from '../plugins/runtime.js';
+import { createDefaultPluginRuntime } from '../plugins/default-runtime.js';
+import { createLearningPlugin } from '../plugins/learning.js';
 import type { LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import type { Step } from '../../domain/templates/types.js';
-
-const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
-vi.mock('../../infrastructure/io/index.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../infrastructure/io/index.js')>(),
-  configureStatusline: ioMocks.configureStatusline,
-}));
+import type { ContextQuery, EvidenceRecord, EvidenceStoreProvider, ProviderAbortSignal } from '../../plugin-sdk/capabilities.js';
+import type { AgentCapability, AgentExecution, AgentExecutionMetadata, AgentRuntimeSelection } from '../../domain/agents/types.js';
+import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider.js';
+import { ExperienceContextProvider } from '../learning/runtime.js';
+import { ExperienceStore } from '../learning/experience-store.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
+import { createPluginRunObserver, setPluginAuditEvidence } from '../plugins/observability.js';
+import type { AppendReceipt } from '@afk/core';
+import { simpleGit } from 'simple-git';
+import { GitBranchProvider } from '../../infrastructure/git/branches/git-provider.js';
+import { loadRun, queryExecutionHistory } from '@afk/application';
 
 /**
  * The QA worktree.
@@ -43,7 +51,7 @@ const config = {
   maxQaReworkAttempts: 3,
 } as any;
 
-function fixture() {
+function fixture(workspacePath = worktreePath) {
   const item = {
     id: '60',
     title: 'search mode',
@@ -64,24 +72,25 @@ function fixture() {
     resolveRework: vi.fn(async () => {}),
   };
   const changes = {
-    findForBacklog: vi.fn(async () => null),
+    findForBacklog: vi.fn(async (): Promise<ChangeRequest | null> => null),
     create: vi.fn(async ({ sourceBranch, targetBranch }: any) => ({ id: 'pr-60', sourceBranch, targetBranch, url: 'https://example.test/pr/60', mergeState: 'mergeable' })),
     get: vi.fn(async () => ({ id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', mergeState: 'mergeable', url: 'https://example.test/pr/60' })),
     merge: vi.fn(async () => {}),
   };
   const branches = {
-    createVerificationWorktree: vi.fn(async () => ({ branchName: 'qa-60', worktreePath: worktreePath })),
+    createVerificationWorktree: vi.fn(async () => ({ branchName: 'qa-60', worktreePath: workspacePath })),
     commit: vi.fn(async () => ({ sha: 'commit-60', skippedBinaryFiles: [] })),
+    verificationRevision: vi.fn(async (_path: string, _branch: string) => 'commit-60'),
     mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     listUnresolvedConflicts: vi.fn(async () => []),
     push: vi.fn(async () => {}),
     cleanup: vi.fn(async () => {}),
   };
-  const execution = {
+  const execution: Mocked<Omit<AgentExecution, 'metadata'>> & { metadata: AgentExecutionMetadata; telemetryPath?: string } = {
     id: 'execution-60',
     metadata: { provider: 'claude-code', transport: 'process' },
-    waitForEvent: vi.fn(async () => null),
-    waitForResult: vi.fn(async () => ({
+    waitForEvent: vi.fn<Parameters<AgentExecution['waitForEvent']>, ReturnType<AgentExecution['waitForEvent']>>(async () => null),
+    waitForResult: vi.fn<Parameters<AgentExecution['waitForResult']>, ReturnType<AgentExecution['waitForResult']>>(async () => ({
       version: 1,
       runId: 'execution-60',
       status: 'completed',
@@ -89,15 +98,15 @@ function fixture() {
       structuredOutput: { type: 'goal_complete', kind: 'qa', result: 'PASS', summary: 'all integration checks passed' },
       commits: [],
     })),
-    interrupt: vi.fn(async () => {}),
+    interrupt: vi.fn<Parameters<AgentExecution['interrupt']>, ReturnType<AgentExecution['interrupt']>>(async () => {}),
     kill: vi.fn(async () => {}),
     captureOutput: vi.fn(async () => ''),
-    captureSession: vi.fn(async () => undefined),
+    captureSession: vi.fn<Parameters<AgentExecution['captureSession']>, ReturnType<AgentExecution['captureSession']>>(async () => undefined),
     resume: vi.fn(),
   };
   const sandbox = {
     id: 'sandbox-60',
-    worktreePath: worktreePath,
+    worktreePath: workspacePath,
     workspacePath: process.cwd(),
     startAgent: vi.fn(async () => execution),
     close: vi.fn(async () => {}),
@@ -105,11 +114,158 @@ function fixture() {
   const sandboxProvider = { create: vi.fn(async () => sandbox) };
   const agentProvider = {
     name: 'claude-code',
-    capabilities: new Set(['streaming', 'structured-output']),
+    capabilities: new Set<AgentCapability>(['streaming', 'structured-output']),
     createExecution: vi.fn(async () => execution),
   };
   return { providers: { backlog, changes, branches } as any, changes, branches, sandboxProvider: sandboxProvider as any, agentProvider: agentProvider as any, sandbox, execution };
 }
+
+describe.each(['standalone', 'managed'] as const)('QARunner bounded evidence cancellation (%s)', ownership => {
+  it.each(['timeout', 'caller'] as const)('cancels the SDK on QA %s and preserves local terminal audit', async cancellation => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-evidence-cancellation-'));
+    const eventRoot = join(root, 'events');
+    const plugins = new PluginRuntime();
+    const caller = new AbortController();
+    const saved = new AbortController();
+    const records = new Map<string, EvidenceRecord>();
+    const identity = { traceId: 'qa-evidence-trace', runId: 'qa-evidence-managed', workItemId: 'github:org/repo#60',
+      profileId: 'qa-evidence-profile', attempt: 3, actor: { kind: 'system' as const, id: 'qa-evidence-owner' } };
+    const qaTimeout = 600;
+    let markPutStarted!: () => void;
+    const putStarted = new Promise<void>(resolve => { markPutStarted = resolve; });
+    let releasePut!: () => void;
+    const heldPut = new Promise<void>(resolve => { releasePut = resolve; });
+    let sdkSignal: ProviderAbortSignal | undefined;
+    let sdkAbortedAtQaCancellation: boolean | undefined;
+    let heldId = '';
+    let probeReceipt: AppendReceipt | undefined;
+    let pending: ReturnType<QARunner['process']> | undefined;
+    const sdk: EvidenceStoreProvider = {
+      id: 'qa-memory-evidence', capabilities: { put: true, get: true, classify: false },
+      put: vi.fn(async (record, options) => {
+        const summary = JSON.parse(Buffer.from(record.bytes).toString());
+        if (summary.kind === 'failure.classified') {
+          heldId = record.id;
+          sdkSignal = options?.signal;
+          markPutStarted();
+          if (cancellation === 'caller') caller.abort(new Error('controlled QA caller cancellation'));
+          await heldPut;
+        }
+        records.set(record.id, { ...record, bytes: Buffer.from(record.bytes) });
+        return { name: record.id, uri: `evidence://${record.id}` };
+      }),
+      get: vi.fn(async id => records.get(id)!),
+    };
+    vi.stubEnv('AFK_EVENT_STORE_DIR', eventRoot);
+    try {
+      const evidence = await createLocalEncryptedEvidenceStore(root);
+      const attachment = await evidence.put({ bytes: Buffer.from('synthetic owned QA evidence'), mediaType: 'text/plain',
+        classification: 'sensitive', redactionStatus: 'not_required' });
+      const recordOptions = { idempotencyKey: 'qa-cancellation-probe', evidence: [attachment] };
+      const onBeforeAgent = vi.fn(async (context: LifecycleContext) => {
+        expect(context.observation!.context.workItemId).toBe(identity.workItemId);
+        if (ownership === 'managed') {
+          expect(context.observation!.context).toEqual(identity);
+          expect(context.observation!.record).toBe(managedRecord);
+        }
+        context.signal!.addEventListener('abort', () => {
+          queueMicrotask(() => { sdkAbortedAtQaCancellation = sdkSignal?.aborted; });
+        }, { once: true });
+        probeReceipt = await context.observation!.record({ kind: 'failure.classified', failureClass: 'qa-cancellation-probe',
+          summary: 'synthetic QA evidence cancellation probe' }, recordOptions) as AppendReceipt;
+      });
+      const onCleanup = vi.fn(async (context: LifecycleContext) => {
+        if (ownership !== 'managed') return;
+        await context.observation!.record({ kind: 'qa.failed', reason: 'blocked', reasonCode: 'qa_execution_failed' });
+        await context.observation!.record({ kind: 'run.finished', outcome: 'cancelled' });
+      });
+      await plugins.activate({
+        manifest: { id: 'qa-evidence-cancellation', version: '1.0.0', apiVersion: 1,
+          provides: ['observe.evidence', 'workflow.lifecycle'], trusted: true },
+        activate(context) {
+          context.registerCapability('observe.evidence', sdk.id, sdk);
+          context.registerLifecycle({ name: 'qa-evidence-cancellation', failureMode: 'required', onBeforeAgent, onCleanup });
+        },
+      });
+      const selection = { provider: sdk.id, scopes: ['github:org/repo'], evidence, signal: saved.signal, timeoutMs: 3000 };
+      setPluginAuditEvidence(plugins, selection);
+      const observer = createPluginRunObserver(plugins, eventRoot);
+      const managedRecord = vi.fn<Parameters<NonNullable<LifecycleContext['observation']>['record']>,
+        ReturnType<NonNullable<LifecycleContext['observation']>['record']>>((data, options) =>
+        observer.record(identity, data, options));
+      if (ownership === 'managed') {
+        await observer.record(identity, { kind: 'run.requested', run: { id: identity.runId, workItemId: identity.workItemId,
+          profileId: identity.profileId, attempt: identity.attempt, status: 'pending' } });
+        await observer.record(identity, { kind: 'run.started' });
+        await observer.record(identity, { kind: 'qa.started' });
+      }
+      const current = fixture();
+      const item = await current.providers.backlog.get('60');
+      current.providers.backlog.get.mockResolvedValue({ ...item, workItemId: identity.workItemId });
+      const runner = new QARunner(current.providers, { ...config, qaTimeout }, { plugins, projectRoot: root,
+        sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider, executionMode: 'batch',
+        ...(ownership === 'managed' ? { observation: { context: identity, record: managedRecord } } : {}) });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const run = () => runner.process('60', { signal: caller.signal });
+      pending = ownership === 'managed'
+        ? withLogContext({ runId: identity.runId, workItemId: identity.workItemId }, run) : run();
+      if (cancellation === 'timeout') {
+        await Promise.race([putStarted, pending.then(() => { throw new Error('QA finished before evidence mirroring started'); })]);
+        expect(sdkSignal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(qaTimeout);
+      }
+      const result = await pending;
+      const events = new JsonlEventStore({ root: eventRoot });
+      const runId = ownership === 'managed' ? identity.runId : (await events.listRuns())[0];
+      const beforeLatePut = await loadRun(runId, events);
+      releasePut();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      const afterLatePut = await loadRun(runId, events);
+
+      expect(result).toMatchObject({ success: false, failureCode: 'qa_execution_failed' });
+      expect(onBeforeAgent).toHaveBeenCalledOnce();
+      expect(onCleanup).toHaveBeenCalledOnce();
+      expect(heldId).not.toBe('');
+      expect(records.has(heldId)).toBe(true);
+      expect(vi.mocked(sdk.get).mock.calls.map(([id]) => id)).not.toContain(heldId);
+      expect(afterLatePut).toEqual(beforeLatePut);
+      expect(afterLatePut.state).toMatchObject({ terminal: true, run: { workItemId: identity.workItemId, status: 'cancelled' } });
+      expect(afterLatePut.events.some(event => event.data.kind === 'qa.failed')).toBe(true);
+      const probe = afterLatePut.events.find(event => event.idempotencyKey === recordOptions.idempotencyKey)!;
+      expect(probe.evidence).toContainEqual(attachment);
+      expect(probeReceipt).toMatchObject({ runId, firstSequence: probe.sequence, lastSequence: probe.sequence,
+        lastHash: probe.integrity.hash });
+      expect(await evidence.get(attachment)).toEqual(Buffer.from('synthetic owned QA evidence'));
+      const capture = probe.evidence!.at(-1)!;
+      expect(JSON.parse(Buffer.from(await evidence.get(capture)).toString())).toMatchObject({ sourceEventId: probe.id, kind: 'failure.classified' });
+      expect(await events.verify(runId)).toMatchObject({ valid: true, lastSequence: afterLatePut.events.at(-1)!.sequence });
+      if (ownership === 'managed') expect(managedRecord).toHaveBeenCalledWith(probe.data, recordOptions);
+      const mirror = afterLatePut.events.find(event => event.causationId === probe.id && event.data.kind === 'effect.completed'
+        && event.data.effectKind === 'evidence.mirror')!;
+      expect(mirror.data).toMatchObject({ outcome: 'failed' });
+      expect(JSON.parse(mirror.data.kind === 'effect.completed' ? mirror.data.summary! : '{}'))
+        .toMatchObject({ sourceEventId: probe.id, sourceSequence: probe.sequence, reason: 'cancelled' });
+      expect(sdkAbortedAtQaCancellation).toBe(true);
+      expect(sdkSignal?.aborted).toBe(true);
+      expect(saved.signal.aborted).toBe(false);
+      expect(selection.signal).toBe(saved.signal);
+      const independent = { ...identity, runId: 'qa-independent-after-cancellation' };
+      await observer.record(independent, { kind: 'run.requested', run: { id: independent.runId, workItemId: independent.workItemId,
+        profileId: independent.profileId, attempt: independent.attempt, status: 'pending' } });
+      await observer.record(independent, { kind: 'qa.passed' });
+      const independentRun = await loadRun(independent.runId, events);
+      expect(independentRun.events.at(-1)?.data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'succeeded' });
+      expect(current.branches.push).not.toHaveBeenCalled();
+    } finally {
+      releasePut();
+      vi.useRealTimers();
+      await pending?.catch(() => undefined);
+      await plugins.dispose();
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe.each(['pre-merge-qa-verification', 'merge-conflict-resolution'])('QARunner specialized template %s', templateName => {
   const reviewer: Step = { id: 'reviewer', kind: 'agent', role: 'reviewer', prompt: 'Review the change and report PASS.' };
@@ -194,6 +350,218 @@ describe.each(['pre-merge-qa-verification', 'merge-conflict-resolution'])('QARun
 });
 
 describe('QARunner plugin publication policies', () => {
+  it.each(['unchanged', 'before-review', 'ahead', 'diverged', 'dirty', 'new-head', 'wrong-branch'] as const)('binds QA PASS to the reviewed local Git revision without a verification hook (%s)', async state => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-qa-publication-'));
+    try {
+      const repoPath = join(root, 'repository');
+      const remotePath = join(root, 'remote.git');
+      const publisherPath = join(root, 'publisher');
+      await mkdir(repoPath);
+      await mkdir(remotePath);
+      const git = simpleGit(repoPath);
+      await git.init();
+      await git.addConfig('user.email', 'test@example.com');
+      await git.addConfig('user.name', 'Test');
+      await writeFile(join(repoPath, 'base.txt'), 'base\n');
+      await git.add('base.txt');
+      await writeFile(join(repoPath, '.gitignore'), '/.afk/backlog-context.md\n');
+      await git.add('.gitignore');
+      await git.commit('base');
+      await git.raw(['branch', '-M', 'main']);
+      await git.checkoutLocalBranch('qa-60');
+      await simpleGit(remotePath).init(true);
+      await git.addRemote('origin', remotePath);
+      await git.push('origin', 'qa-60');
+      await simpleGit().clone(remotePath, publisherPath);
+      const publisher = simpleGit(publisherPath);
+      await publisher.checkout('qa-60');
+      await publisher.addConfig('user.email', 'test@example.com');
+      await publisher.addConfig('user.name', 'Test');
+      const advanceRemote = async () => {
+        await writeFile(join(publisherPath, 'remote-work.txt'), 'remote work\n');
+        await publisher.add('remote-work.txt');
+        await publisher.commit('remote work');
+        await publisher.push('origin', 'qa-60');
+      };
+      if (state === 'before-review' || state === 'diverged') {
+        await writeFile(join(repoPath, 'local-work.txt'), 'local work\n');
+        await git.add('local-work.txt');
+        await git.commit('local work');
+      }
+      if (state === 'before-review') await advanceRemote();
+
+      const current = fixture();
+      const branches = new GitBranchProvider(repoPath);
+      current.branches.createVerificationWorktree.mockResolvedValue({ branchName: 'qa-60', worktreePath: repoPath });
+      current.providers.branches.commit = vi.fn((path: string, message: string) => branches.commit(path, message));
+      current.providers.branches.verificationRevision = vi.fn((path: string, branch: string) => branches.verificationRevision(path, branch));
+      current.providers.branches.push = vi.fn((branch: string, path: string, commit?: string) => branches.push(branch, path, commit));
+      const preparePush = vi.fn((branch: string, path: string) => branches.preparePush(branch, path));
+      current.providers.branches.preparePush = preparePush;
+      const pass = await current.execution.waitForResult();
+      let reviewedHead = '';
+      current.execution.waitForResult.mockImplementation(async () => {
+        expect(preparePush).toHaveBeenCalledOnce();
+        reviewedHead = (await git.revparse(['HEAD'])).trim();
+        if (state === 'before-review') {
+          await expect(readFile(join(repoPath, 'remote-work.txt'), 'utf8')).resolves.toBe('remote work\n');
+          await expect(readFile(join(repoPath, 'local-work.txt'), 'utf8')).resolves.toBe('local work\n');
+        }
+        if (state === 'ahead' || state === 'diverged') await advanceRemote();
+        if (state === 'dirty') await writeFile(join(repoPath, 'unreviewed.txt'), 'uncommitted');
+        if (state === 'new-head') await git.commit('unreviewed', { '--allow-empty': null });
+        if (state === 'wrong-branch') await git.checkoutLocalBranch('unreviewed');
+        return pass;
+      });
+      const runner = new QARunner(current.providers, { ...config, qaTimeout: 30_000 }, {
+        sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      const result = await runner.process('60');
+      const shouldPublish = state === 'unchanged' || state === 'before-review';
+      expect(result.success, result.summary).toBe(shouldPublish);
+      expect(preparePush).toHaveBeenCalledOnce();
+      expect(preparePush.mock.invocationCallOrder[0]).toBeLessThan(current.agentProvider.createExecution.mock.invocationCallOrder[0]);
+      expect(current.changes.create).toHaveBeenCalledTimes(shouldPublish ? 1 : 0);
+      if (state !== 'new-head') expect((await git.revparse(['HEAD'])).trim()).toBe(reviewedHead);
+      const remoteHead = (await simpleGit(remotePath).revparse(['qa-60'])).trim();
+      if (shouldPublish) expect(remoteHead).toBe(reviewedHead);
+      else if (state === 'ahead' || state === 'diverged') {
+        expect(remoteHead).toBe((await publisher.revparse(['HEAD'])).trim());
+        expect(remoteHead).not.toBe(reviewedHead);
+        await expect(simpleGit(remotePath).raw(['show', 'qa-60:local-work.txt'])).rejects.toThrow();
+        expect(result.summary).toMatch(/rejected|failed to push/i);
+      } else {
+        expect(current.providers.branches.push).not.toHaveBeenCalled();
+        expect(result.summary).toMatch(/QA requires a clean|QA checkout moved/);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['allow', 'deny', 'prepare-fails'])('synchronizes QA before the agent and never reuses its PASS to synchronize again (%s)', async policy => {
+    const current = fixture();
+    const preparePush = vi.fn(async () => {
+      if (policy === 'prepare-fails') throw new Error('preparation failed');
+      return 'synchronized-60';
+    });
+    current.providers.branches.preparePush = preparePush;
+    const onCommit = vi.fn(async () => {});
+    const onBeforePublish = vi.fn(async () => {
+      expect(preparePush).toHaveBeenCalledOnce();
+      expect(onCommit).toHaveBeenCalledWith('commit-60', 'qa-60');
+      if (policy === 'deny') throw new Error('policy denied');
+    });
+    const plugins = await policyRuntime({ name: 'prepared-publication', failureMode: 'required', onBeforePublish });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider, onCommit,
+      });
+      const result = await runner.process('60');
+      expect(result.success).toBe(policy === 'allow');
+      if (policy !== 'allow') expect(result.summary).toContain(policy === 'deny' ? 'policy denied' : 'preparation failed');
+      expect(preparePush).toHaveBeenCalledWith('qa-60', worktreePath);
+      expect(current.agentProvider.createExecution).toHaveBeenCalledTimes(policy === 'prepare-fails' ? 0 : 1);
+      if (policy !== 'prepare-fails') {
+        expect(preparePush.mock.invocationCallOrder[0]).toBeLessThan(current.agentProvider.createExecution.mock.invocationCallOrder[0]);
+        expect(preparePush.mock.invocationCallOrder[0]).toBeLessThan(current.branches.verificationRevision.mock.invocationCallOrder[0]);
+      }
+      expect(preparePush).toHaveBeenCalledOnce();
+      expect(onBeforePublish).toHaveBeenCalledTimes(policy === 'prepare-fails' ? 0 : policy === 'deny' ? 1 : 2);
+      expect(current.branches.push).toHaveBeenCalledTimes(policy === 'allow' ? 1 : 0);
+      expect(current.changes.create).toHaveBeenCalledTimes(policy === 'allow' ? 1 : 0);
+      if (policy === 'allow') {
+        expect(onBeforePublish.mock.invocationCallOrder[0]).toBeLessThan(current.branches.push.mock.invocationCallOrder[0]);
+        expect(current.changes.create).toHaveBeenCalledWith(expect.objectContaining({ commitSha: 'commit-60' }));
+      }
+    } finally {
+      await plugins.dispose();
+    }
+  });
+
+  it.each([0, 1, 2, 3])('enforces saved command verification through managed QA publication (failure invocation=%s)', async failureInvocation => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-saved-verification-'));
+    const workspacePath = join(root, 'workspace');
+    await mkdir(workspacePath);
+    const current = fixture(workspacePath);
+    const item = await current.providers.backlog.get('60');
+    current.providers.backlog.get.mockResolvedValue({ ...item, workItemId: 'github:acme/wiki#60' } as typeof item);
+    const git = simpleGit(workspacePath);
+    await git.init().addConfig('user.name', 'QA verification test').addConfig('user.email', 'qa@example.test');
+    await git.commit('QA verification revision', { '--allow-empty': null });
+    vi.stubEnv('AFK_EVENT_STORE_DIR', join(root, 'events'));
+    const completion = join(root, 'agent-completed');
+    const receipt = join(root, 'verification.jsonl');
+    const completed = current.execution.waitForResult.getMockImplementation()!;
+    current.execution.waitForResult.mockImplementationOnce(async () => {
+      await writeFile(completion, 'actual QA completion');
+      return completed();
+    });
+    const command = [process.execPath, '-e', `const fs = require('node:fs');
+      if (fs.readFileSync(${JSON.stringify(completion)}, 'utf8') !== 'actual QA completion') process.exit(11);
+      fs.appendFileSync(${JSON.stringify(receipt)}, JSON.stringify({cwd:process.cwd()}) + '\\n');
+      const invocation = fs.readFileSync(${JSON.stringify(receipt)}, 'utf8').trim().split('\\n').length;
+      if (invocation === ${failureInvocation}) process.exit(7);`];
+    await mkdir(join(root, '.afk'));
+    await writeFile(join(root, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [],
+      integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } }));
+    const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
+    try {
+      const runner = new QARunner(current.providers, config, {
+        plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      const result = await runner.process('60');
+      expect(result).toMatchObject({ success: failureInvocation === 0 });
+      if (failureInvocation) expect(result.summary).toContain('Capability verification failed');
+      const receipts = (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      expect(receipts).toEqual(Array.from({ length: failureInvocation || 3 }, () => ({ cwd: expect.any(String) })));
+      for (const observed of receipts) expect(observed.cwd).toBe(await realpath(workspacePath));
+      expect(current.branches.commit).not.toHaveBeenCalled();
+      expect(current.branches.push).toHaveBeenCalledTimes(failureInvocation === 0 || failureInvocation === 3 ? 1 : 0);
+      expect(current.changes.create).toHaveBeenCalledTimes(failureInvocation === 0 ? 1 : 0);
+      expect(current.changes.merge).not.toHaveBeenCalled();
+      expect(current.branches.cleanup).toHaveBeenCalledWith(workspacePath, { preserve: failureInvocation !== 0 });
+      expect(current.sandbox.close).toHaveBeenCalledOnce();
+      const eventStore = new JsonlEventStore({ root: join(root, 'events') });
+      const runs = await eventStore.listRuns();
+      expect(runs).toHaveLength(1);
+      const { events, state } = await loadRun(runs[0], eventStore);
+      expect(events.some(event => event.data.kind === 'effect.completed')).toBe(true);
+      expect(state).toMatchObject({ terminal: true, run: {
+        workItemId: 'github:acme/wiki#60', status: failureInvocation === 0 ? 'succeeded' : 'failed',
+      } });
+    } finally {
+      await plugins.dispose();
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])('uses the managed observation owner and propagates audit failure=%s', async auditFails => {
+    const current = fixture();
+    const identity = { traceId: 'managed-trace', runId: 'managed-attempt', workItemId: 'github:org/repo#60',
+      profileId: 'managed-profile', attempt: 3, actor: { kind: 'system' as const, id: 'managed-owner' } };
+    const options = { idempotencyKey: 'managed-verification', evidence: [{ uri: `evidence://${'b'.repeat(64)}`,
+      sha256: 'b'.repeat(64), mediaType: 'application/json', classification: 'sensitive' as const, redactionStatus: 'not_required' as const }] };
+    const record = vi.fn(async () => { if (auditFails) throw new Error('managed audit unavailable'); });
+    const onAfterAgent = vi.fn(async (context: LifecycleContext) => {
+      expect(context.observation!.context).toEqual(identity);
+      await context.observation!.record({ kind: 'effect.completed', effectKind: 'verification',
+        idempotencyKey: 'managed-verification', outcome: 'succeeded' }, options);
+    });
+    const plugins = await policyRuntime({ name: 'managed-observation', failureMode: 'required', onAfterAgent });
+    try {
+      const runner = new QARunner(current.providers, config, { plugins, sandboxProvider: current.sandboxProvider,
+        agentProvider: current.agentProvider, observation: { context: identity, record } });
+      const result = await withLogContext({ runId: identity.runId, workItemId: identity.workItemId }, () => runner.process('60'));
+      expect(result.success).toBe(!auditFails);
+      if (auditFails) expect(result.summary).toContain('managed audit unavailable');
+      expect(onAfterAgent).toHaveBeenCalledOnce();
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ kind: 'effect.completed' }), options);
+      expect(current.branches.push).toHaveBeenCalledTimes(auditFails ? 0 : 1);
+    } finally { await plugins.dispose(); }
+  });
+
   it('gathers plugin context before the QA prompt and completes lifecycle before publication', async () => {
     const current = fixture();
     const contextFile = join(worktreePath, '.afk', 'plugin-context.md');
@@ -267,7 +635,7 @@ describe('QARunner plugin publication policies', () => {
   it('evaluates required policy against the actual QA worktree and blocks its branch push', async () => {
     const current = fixture();
     const onBeforePublish = vi.fn(async (_context: LifecycleContext) => { throw new Error('QA policy denied'); });
-    const onCleanup = vi.fn(async () => {});
+    const onCleanup = vi.fn(async (_context: LifecycleContext) => {});
     const plugins = await policyRuntime({ name: 'deny-publication', failureMode: 'required', onBeforePublish, onCleanup });
     try {
       const runner = new QARunner(current.providers, config, {
@@ -281,7 +649,9 @@ describe('QARunner plugin publication policies', () => {
       }));
       expect(current.branches.push).not.toHaveBeenCalled();
       expect(current.changes.create).not.toHaveBeenCalled();
-      expect(onCleanup).toHaveBeenCalledWith(onBeforePublish.mock.calls[0]![0]);
+      const publishedContext = onBeforePublish.mock.calls[0]![0];
+      expect(onCleanup).toHaveBeenCalledWith(expect.objectContaining({ ...publishedContext, signal: expect.any(AbortSignal) }));
+      expect(onCleanup.mock.calls[0]![0].signal).not.toBe(publishedContext.signal);
       expect(current.branches.cleanup).toHaveBeenCalledWith(worktreePath, { preserve: true });
     } finally {
       await plugins.dispose();
@@ -307,7 +677,7 @@ describe('QARunner plugin publication policies', () => {
       });
       expect(await runner.process('60')).toMatchObject({ success: false, summary: expect.stringContaining('publication evidence rejected') });
       expect(onBeforePublish).toHaveBeenCalledTimes(2);
-      expect(current.branches.push).toHaveBeenCalledWith('qa-60', worktreePath);
+      expect(current.branches.push).toHaveBeenCalledWith('qa-60', worktreePath, 'commit-60');
       expect(current.changes.create).not.toHaveBeenCalled();
       expect(refresh).not.toHaveBeenCalled();
       expect(current.changes.merge).not.toHaveBeenCalled();
@@ -332,7 +702,8 @@ describe('QARunner plugin publication policies', () => {
         plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
         beforeChange, onCommit, afterPublication,
       });
-      expect(await runner.process('60')).toMatchObject({ success: true, mrUrl: 'https://example.test/pr/60' });
+      expect(await withLogContext({ runId: 'qa-publication', workItemId: backlogId }, () => runner.process('60')))
+        .toMatchObject({ success: true, mrUrl: 'https://example.test/pr/60' });
       expect(onInit).toHaveBeenCalledOnce();
       expect(onBeforePublish).toHaveBeenCalledTimes(2);
       expect(onBeforePublish).toHaveBeenCalledWith(expect.objectContaining({ iid: 60, worktreePath }));
@@ -356,7 +727,7 @@ describe('QARunner plugin publication policies', () => {
 function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttempts = 3) {
   const issue: TrackedIssue = { id: 60, platform, title: 'search mode', description: 'support /s', labels: ['stage::qa', 'mode::afk'], state: 'opened', projectId: 'org/repo', url: '' };
   const comments: Array<{ id: string; body: string }> = [];
-  const tracker = {
+  const tracker: Partial<TrackerProvider> = {
     platform, projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue, labels: [...issue.labels] })),
     listIssues: vi.fn(async () => [issue]),
@@ -369,7 +740,7 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     updateIssueComment: vi.fn(async (_id, commentId, body) => {
       comments.find(comment => comment.id === commentId)!.body = body;
     }),
-  } satisfies Partial<TrackerProvider>;
+  };
   const createRunner = () => {
     const f = fixture();
     const backlog = new TrackerBacklogProvider(tracker as TrackerProvider, { atomicClaim: vi.fn() });
@@ -390,7 +761,9 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
         start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn(),
       } as any,
     });
-    return { runner, backlog, transition, setExecutionMode, createRework };
+    const process = () => withLogContext({ runId: `${platform}-qa-rework-${comments.length}`, workItemId: `${platform}:org/repo#60` },
+      () => runner.process('60'));
+    return { runner, process, backlog, transition, setExecutionMode, createRework };
   };
   return { comments, createRunner, resumeVerification: () => { issue.labels = ['stage::qa', 'mode::afk']; } };
 }
@@ -398,12 +771,12 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
 describe('QARunner runtime binding', () => {
   it('resolves and probes the reviewer from an isolated plugin registry', async () => {
     const plugins = new PluginRuntime();
-    const provider = { name: 'codex', capabilities: new Set(), createExecution: vi.fn() };
+    const provider = { name: 'codex', capabilities: new Set<AgentCapability>(), createExecution: vi.fn() };
     await plugins.activate({
       manifest: { id: 'agent.codex', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['agent.provider'] },
       activate(context) { context.registerAgentProvider('codex', provider); },
     });
-    const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+    const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
     try {
       const runner = new QARunner(fixture().providers, {
         ...config, agentDefault: 'codex', agents: { codex: codexConfig },
@@ -427,7 +800,7 @@ describe('QARunner runtime binding', () => {
   /** Register a Codex provider AFK can resolve by name. */
   function withCodexProvider<T>(body: (provider: { name: 'codex' }) => T): T {
     const original = createAgentProvider('codex');
-    const codex = { name: 'codex' as const, capabilities: new Set(), createExecution: vi.fn() };
+    const codex = { name: 'codex' as const, capabilities: new Set<AgentCapability>(), createExecution: vi.fn() };
     registerAgentProvider(codex);
     try {
       return body(codex);
@@ -454,7 +827,7 @@ describe('QARunner runtime binding', () => {
 
   it('probes a runtime the reviewer resolved itself before the agent starts', async () => {
     await withCodexProvider(async () => {
-      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
       const runner = new QARunner(fixture().providers, {
         ...config, agentDefault: 'codex', agents: { codex: codexConfig },
       } as any, { prepareRuntime });
@@ -467,7 +840,7 @@ describe('QARunner runtime binding', () => {
 
   it('does not probe a runtime the caller already probed', async () => {
     await withCodexProvider(async () => {
-      const prepareRuntime = vi.fn(async (runtime: unknown) => runtime);
+      const prepareRuntime = vi.fn(async (runtime: AgentRuntimeSelection) => runtime);
       const injected = { kind: 'codex', transport: 'exec', auth: 'unknown', provider: 'afk-zyuncs', profile: 'afk', startupTimeoutMs: 30_000 };
       const runner = new QARunner(fixture().providers, {
         ...config, agentDefault: 'codex', agents: { codex: codexConfig },
@@ -493,11 +866,272 @@ describe('QARunner runtime binding', () => {
 });
 
 describe('QARunner execution boundary', () => {
+  it.each(['accepted', 'budget', 'start-error', 'feedback-error', 'foreign-project', 'foreign-item', 'recall-error', 'receipt-error'] as const)(
+    'persists builtin context feedback at the QA dispatch boundary (%s)', async boundary => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-context-feedback-'));
+    const file = join(root, 'experience.sqlite');
+    const scope = 'github:acme/wiki';
+    const source = { runId: `qa-feedback-${boundary}`, workItemId: `${scope}#60` };
+    const observedSource = { ...source, workItemId: boundary === 'foreign-project' ? 'github:foreign/private#88'
+      : boundary === 'foreign-item' ? `${scope}#88` : source.workItemId };
+    const store = new ExperienceStore({ file });
+    const record = store.recordFailure({ scope, trigger: 'search mode', rootCause: 'search query parsing', action: 'verify search output',
+      evidence: ['run:search-failure#failure.classified'], source: { runId: 'search-failure', workItemId: `${scope}#42` } });
+    store.verify(record.id, { runId: 'search-qa', evidence: ['run:search-qa#regression'] });
+    store.close();
+    const provider = new ExperienceContextProvider(file);
+    const feedback = vi.spyOn(provider, 'recordSelections');
+    if (boundary === 'feedback-error') feedback.mockImplementation(() => { throw new Error('receipt persistence failed'); });
+    const plugins = new PluginRuntime();
+    await plugins.activate({ manifest: { id: provider.id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) { context.registerContextProvider(provider.id, provider); } });
+    const current = fixture();
+    const item = await current.providers.backlog.get('60');
+    current.providers.backlog.get.mockResolvedValue({ ...item, workItemId: source.workItemId });
+    const storageFailure = boundary === 'recall-error' ? vi.spyOn(ExperienceStore.prototype, 'recall')
+      : boundary === 'receipt-error' ? vi.spyOn(ExperienceStore.prototype, 'recordContextRetrieval') : undefined;
+    storageFailure?.mockImplementation(() => { throw new Error(`${boundary} storage unavailable`); });
+    if (boundary === 'start-error') current.agentProvider.createExecution.mockRejectedValue(new Error('provider refused execution'));
+    if (boundary === 'budget') current.agentProvider.promptLimits = { goalConditionMaxChars: 1 };
+    try {
+      const runner = new QARunner(current.providers, config, { plugins, sandboxProvider: current.sandboxProvider,
+        agentProvider: current.agentProvider, executionMode: boundary === 'budget' ? 'interactive' : 'batch' });
+      const result = await withLogContext(observedSource, () => runner.process('60'));
+      expect(result.success).toBe(boundary === 'accepted');
+      const preparationFailed = ['foreign-project', 'foreign-item', 'recall-error', 'receipt-error'].includes(boundary);
+      const reader = new ExperienceStore({ file });
+      try {
+        const receipts = reader.contextReceipts({ scope, source });
+        expect(receipts.filter(receipt => receipt.stage === 'retrieved')).toHaveLength(preparationFailed ? 0 : 1);
+        expect(receipts.filter(receipt => receipt.stage === 'selected')).toHaveLength(boundary === 'accepted' ? 1 : 0);
+        expect(receipts.map(receipt => receipt.source)).toEqual(receipts.map(() => source));
+        if (boundary === 'foreign-project' || boundary === 'foreign-item') {
+          expect(reader.contextReceipts({ scope: boundary === 'foreign-project' ? 'github:foreign/private' : scope, source: observedSource })).toEqual([]);
+        }
+        expect(reader.metrics({ scope }).adoptions).toBe(0);
+      } finally { reader.close(); }
+      if (boundary === 'budget' || preparationFailed) expect(current.agentProvider.createExecution).not.toHaveBeenCalled();
+      if (preparationFailed) {
+        expect(result.failureCode).toBe('qa_execution_failed');
+        expect(result.summary).toContain(boundary === 'recall-error' || boundary === 'receipt-error'
+          ? 'Experience retrieval feedback is incomplete' : 'Experience feedback requires the exact execution run and work item');
+        expect(current.execution.waitForResult).not.toHaveBeenCalled();
+      }
+      if (boundary === 'feedback-error') {
+        expect(result.summary).toContain('selection feedback is incomplete');
+        expect(current.execution.waitForResult).not.toHaveBeenCalled();
+      }
+      if (feedback.mock.calls.length) expect(current.agentProvider.createExecution.mock.invocationCallOrder[0]).toBeLessThan(feedback.mock.invocationCallOrder[0]);
+    } finally { await plugins.dispose(); feedback.mockRestore(); storageFailure?.mockRestore(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.each(['pass', 'rework', 'execution-failed', 'cleanup-failed', 'cancelled'] as const)('persists standalone QA outcome feedback after %s', async verdict => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-outcome-'));
+    const file = join(root, 'experience.sqlite');
+    const eventRoot = join(root, 'events');
+    const scope = 'github:acme/wiki';
+    const workItemId = `${scope}#60`;
+    vi.stubEnv('AFK_EVENT_STORE_DIR', eventRoot);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-16T00:00:00.000Z'));
+    const store = new ExperienceStore({ file });
+    const record = store.recordFailure({ scope, trigger: 'search mode', rootCause: 'search query parsing', action: 'verify search output',
+      source: { runId: 'original', workItemId: `${scope}#1` }, evidence: ['evidence://original'] });
+    store.verify(record.id, { runId: 'independent-qa', evidence: ['evidence://independent-qa'] });
+    const provider = new ExperienceContextProvider(file);
+    const plugins = new PluginRuntime();
+    try {
+      await plugins.activate({ manifest: { id: provider.id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+        activate(context) { context.registerContextProvider(provider.id, provider); } });
+      const checkout = join(root, 'checkout');
+      await mkdir(checkout);
+      const git = simpleGit(checkout);
+      await git.init();
+      await git.checkoutLocalBranch('qa-60');
+      await writeFile(join(checkout, '.gitignore'), '/.afk/\n');
+      await git.add('.gitignore');
+      await git.raw(['-c', 'user.name=QA fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Freeze QA input']);
+      const revision = (await git.revparse('HEAD')).trim();
+      const current = fixture(checkout);
+      const branches = new GitBranchProvider(checkout);
+      current.branches.verificationRevision.mockImplementation((path, branch) => branches.verificationRevision(path, branch));
+      const cancellation = new AbortController();
+      const item = await current.providers.backlog.get('60');
+      current.providers.backlog.get.mockResolvedValue({ ...item, workItemId });
+      current.execution.waitForResult.mockImplementation(async () => {
+        vi.setSystemTime(new Date('2026-11-16T00:00:01.000Z'));
+        if (verdict === 'cancelled') cancellation.abort(new Error('controlled QA cancellation'));
+        return { version: 1, runId: current.execution.id, status: verdict === 'execution-failed' ? 'failed' : 'completed',
+          provider: 'batch', commits: [], structuredOutput: { type: 'goal_complete', kind: 'qa',
+            result: verdict === 'rework' ? 'FAIL' : 'PASS', summary: 'controlled QA result' } };
+      });
+      if (verdict === 'cleanup-failed') current.sandbox.close.mockRejectedValue(new Error('injected cleanup failure'));
+      const runner = new QARunner(current.providers, { ...config, qaTimeout: 30_000 }, { plugins, projectRoot: root, sandboxProvider: current.sandboxProvider,
+        agentProvider: current.agentProvider, executionMode: 'batch' });
+      const runtimeRunId = `qa-60-${Date.now()}-runtime`;
+      if (verdict === 'cleanup-failed') await expect(runner.process('60')).rejects.toThrow(/cleanup/);
+      else expect(await runner.process('60', { signal: cancellation.signal })).toMatchObject({
+        success: verdict === 'pass',
+        ...(verdict === 'cancelled' ? { summary: expect.stringContaining('controlled QA cancellation') } : {}),
+      });
+      const receipts = store.contextReceipts({ scope, source: { runId: runtimeRunId, workItemId } });
+      expect(receipts.filter(receipt => receipt.stage === 'selected')).toHaveLength(1);
+      const source = receipts[0].source;
+      const outcomes = store.outcomeReceipts({ scope, source });
+      expect(outcomes).toHaveLength(verdict === 'pass' ? 1 : 2);
+      expect(outcomes.find(receipt => receipt.event.type === 'run.finished')).toMatchObject({ selected: { source },
+        event: { outcome: verdict === 'pass' ? 'succeeded' : verdict === 'cancelled' ? 'cancelled' : 'failed' }, benefit: 'unknown', recurrence: false });
+      expect(store.metrics({ scope }).adoptions).toBe(0);
+      const eventStore = new JsonlEventStore({ root: eventRoot });
+      expect((await eventStore.verify(source.runId)).valid).toBe(true);
+      const { events, state } = await loadRun(source.runId, eventStore);
+      expect(events.slice(0, 3).map(event => event.data.kind)).toEqual(['run.requested', 'run.started', 'qa.started']);
+      const target = events.filter(event => event.data.kind === 'decision.made' && event.data.command === 'experience.qa-target');
+      expect(target).toHaveLength(1);
+      expect(target[0]).toMatchObject({ context: { actor: { kind: 'system' } }, data: { accepted: true,
+        reason: JSON.stringify({ target: { project: scope, revision, dirty: false } }) } });
+      const commits = events.filter(event => event.data.kind === 'commit.recorded');
+      if (verdict === 'pass') {
+        expect(commits).toHaveLength(1);
+        expect(commits[0]).toMatchObject({ data: { phase: 'qa', commitSha: revision, branch: 'qa-60' } });
+        expect(commits[0].sequence).toBeGreaterThan(target[0].sequence);
+        expect(commits[0].sequence).toBeLessThan(events.find(event => event.data.kind === 'qa.passed')!.sequence);
+      } else if (verdict !== 'cleanup-failed') expect(commits).toHaveLength(0);
+      const status = verdict === 'pass' ? 'succeeded' : verdict === 'cancelled' ? 'cancelled' : 'failed';
+      expect(state).toMatchObject({ terminal: true, run: { id: source.runId, workItemId, status } });
+      expect(await queryExecutionHistory({ workItemId }, eventStore)).toMatchObject({ executions: [
+        { runId: source.runId, workItemId, status, terminal: true, startedAt: expect.any(String) },
+      ] });
+    } finally {
+      store.close();
+      await plugins.dispose();
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['run.requested', 'run.started'] as const)('blocks standalone QA when %s cannot be persisted', async failedEvent => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-initial-audit-'));
+    vi.stubEnv('AFK_EVENT_STORE_DIR', root);
+    const append = JsonlEventStore.prototype.append;
+    const failure = vi.spyOn(JsonlEventStore.prototype, 'append').mockImplementation(function (this: JsonlEventStore, drafts) {
+      if (drafts.some(draft => draft.data.kind === failedEvent)) return Promise.reject(new Error('initialization audit unavailable'));
+      return append.call(this, drafts);
+    });
+    try {
+      const current = fixture();
+      const item = await current.providers.backlog.get('60');
+      current.providers.backlog.get.mockResolvedValue({ ...item, workItemId: 'github:acme/wiki#60' });
+      const runner = new QARunner(current.providers, config, {
+        projectRoot: root, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
+      });
+      expect(await runner.process('60')).toMatchObject({ success: false, summary: expect.stringContaining('initialization audit unavailable') });
+      expect(current.agentProvider.createExecution).not.toHaveBeenCalled();
+      expect(current.branches.push).not.toHaveBeenCalled();
+      const eventStore = new JsonlEventStore({ root });
+      const runs = await eventStore.listRuns();
+      const loaded = await Promise.all(runs.map(run => loadRun(run, eventStore)));
+      const events = loaded.flatMap(run => run.events);
+      expect(events.map(event => event.data.kind)).toEqual(failedEvent === 'run.requested' ? [] : ['run.requested']);
+      if (events.length) expect(loaded[0].state).toMatchObject({ terminal: false, run: { status: 'pending' } });
+    } finally {
+      failure.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['workItemId', 'canonical-id'] as const)('binds standalone QA feedback to its own run and trusted backlog %s', async identitySource => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-default-feedback-'));
+    const file = join(root, 'experience.sqlite');
+    const scope = 'github:acme/wiki';
+    const workItemId = `${scope}#60`;
+    const store = new ExperienceStore({ file });
+    const record = store.recordFailure({ scope, trigger: 'search mode', rootCause: 'search query parsing', action: 'verify search output',
+      evidence: ['run:search-failure#failure.classified'], source: { runId: 'search-failure', workItemId: `${scope}#42` } });
+    store.verify(record.id, { runId: 'search-qa', evidence: ['run:search-qa#regression'] });
+    store.close();
+    const provider = new ExperienceContextProvider(file);
+    const plugins = new PluginRuntime();
+    await plugins.activate({ manifest: { id: provider.id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) { context.registerContextProvider(provider.id, provider); } });
+    const current = fixture();
+    const item = await current.providers.backlog.get('60');
+    current.providers.backlog.get.mockResolvedValue({ ...item,
+      ...(identitySource === 'workItemId' ? { workItemId } : { id: workItemId }) });
+    let executionRunId: string | undefined;
+    current.agentProvider.createExecution.mockImplementation(async () => {
+      executionRunId = getLogContext()?.runId;
+      return current.execution;
+    });
+    try {
+      expect(getLogContext()).toBeUndefined();
+      const runner = new QARunner(current.providers, config, { plugins, sandboxProvider: current.sandboxProvider,
+        agentProvider: current.agentProvider, executionMode: 'batch' });
+      expect(await runner.process('60')).toMatchObject({ success: true });
+      expect(executionRunId).toMatch(/^qa-60-\d+-runtime$/);
+      expect(current.agentProvider.createExecution).toHaveBeenCalledTimes(1);
+      expect(getLogContext()).toBeUndefined();
+      const reader = new ExperienceStore({ file });
+      try {
+        const receipts = reader.contextReceipts({ scope, source: { runId: executionRunId!, workItemId } });
+        expect(receipts.map(receipt => receipt.stage).sort()).toEqual(['retrieved', 'selected']);
+        expect(receipts.map(receipt => receipt.source)).toEqual(receipts.map(() => ({ runId: executionRunId, workItemId })));
+        expect(reader.metrics({ scope }).adoptions).toBe(0);
+      } finally { reader.close(); }
+    } finally { await plugins.dispose(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.each(['explicit', 'saved'] as const)('shares %s trusted context with knowledge, experience and independent QA audit', async source => {
+    const current = fixture();
+    const queries: ContextQuery[] = [];
+    const plugins = new PluginRuntime();
+    await plugins.activate({ manifest: { id: 'qa.context', version: '1.0.0', apiVersion: 1, trusted: true, provides: ['context.provider'] },
+      activate(context) {
+        for (const id of ['context.experience', 'context.knowledge']) context.registerContextProvider(id, {
+          id, capabilities: { 'read-only': true, summarize: false, search: true },
+          async gather(query) { queries.push(query); return [{ origin: `${id}:qa-evidence`, content: 'bounded context' }]; },
+        });
+      } });
+    const experienceContext = { applicability: { version: 'asset-2', environment: 'sandbox-ci' },
+      target: { project: 'github:acme/wiki', productVersions: { sqlite: '3.45' } } };
+    if (source === 'saved') await plugins.activate(createLearningPlugin({ config: { executionContexts: [experienceContext] } }));
+    const onExperienceTarget = vi.fn(async (_context: unknown) => {});
+    try {
+      const runner = new QARunner(current.providers, config, { plugins, experienceContext: source === 'explicit' ? experienceContext : undefined, onExperienceTarget,
+        sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+      await withLogContext({ runId: 'qa-context', workItemId: 'github:acme/wiki#60' }, () => runner.process('60'));
+      expect(queries).toHaveLength(2);
+      expect(queries[0]).toBe(queries[1]);
+      expect(queries[0]).toMatchObject({ scope: 'github:acme/wiki', ...experienceContext });
+      expect(onExperienceTarget).toHaveBeenCalledWith(expect.objectContaining(experienceContext));
+      const content = await readFile(join(worktreePath, '.afk/experience-context.md'), 'utf8');
+      expect(content).toContain('context.knowledge:qa-evidence');
+      expect(content).toContain('context.experience:qa-evidence');
+    } finally { await plugins.dispose(); }
+  });
+
+  it.each(['workItemId', 'canonical-id'] as const)('rejects a foreign QA logger identity before dispatch with backlog %s', async identitySource => {
+    const current = fixture();
+    const item = await current.providers.backlog.get('60');
+    current.providers.backlog.get.mockResolvedValue({ ...item,
+      ...(identitySource === 'workItemId' ? { workItemId: 'github:acme/wiki#60' } : { id: 'github:acme/wiki#60' }) });
+    const onExperienceTarget = vi.fn(async (_context: unknown) => {});
+    const runner = new QARunner(current.providers, config, { onExperienceTarget,
+      sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider });
+    const result = await withLogContext({ runId: 'foreign-qa-context', workItemId: 'github:foreign/private#88' }, () => runner.process('60'));
+    expect(result).toMatchObject({ success: false, failureCode: 'qa_execution_failed',
+      summary: expect.stringContaining('Experience feedback requires the exact execution run and work item') });
+    expect(current.agentProvider.createExecution).not.toHaveBeenCalled();
+    expect(onExperienceTarget).not.toHaveBeenCalled();
+  });
+
   it('resolves the configured agent provider when none is injected', () => {
     const original = createAgentProvider('codex');
     const codex = {
       name: 'codex' as const,
-      capabilities: new Set(),
+      capabilities: new Set<AgentCapability>(),
       createExecution: vi.fn(),
     };
     registerAgentProvider(codex);
@@ -689,6 +1323,7 @@ describe('QARunner execution boundary', () => {
     const previousLogDir = process.env.AFK_LOG_DIR;
     process.env.AFK_LOG_DIR = logRoot;
     try {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const runner = new QARunner(f.providers, { ...config, qaTimeout: 25 }, {
         sandboxProvider: f.sandboxProvider,
         agentProvider: f.agentProvider,
@@ -696,7 +1331,14 @@ describe('QARunner execution boundary', () => {
         mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
       });
 
-      await expect(runner.process('60')).resolves.toMatchObject({
+      const result = runner.process('60');
+      let settled = false;
+      void result.finally(() => { settled = true; });
+      while (!settled) {
+        await vi.advanceTimersByTimeAsync(0);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      await expect(result).resolves.toMatchObject({
         success: false,
         failureCode: 'agent_completion_timeout',
       });
@@ -705,6 +1347,7 @@ describe('QARunner execution boundary', () => {
       const snapshots = await readdir(join(logRoot, 'qa'));
       expect(snapshots).toEqual([expect.stringMatching(/^timeout-60-\d+\.log$/)]);
     } finally {
+      vi.useRealTimers();
       if (previousLogDir === undefined) delete process.env.AFK_LOG_DIR;
       else process.env.AFK_LOG_DIR = previousLogDir;
       await rm(logRoot, { recursive: true, force: true });
@@ -727,10 +1370,9 @@ describe('QARunner execution boundary', () => {
     expect(f.sandboxProvider.create.mock.calls[0][0]).toMatchObject({ executionMode: 'interactive', tmux });
   });
 
-  it('configures the interactive statusline after merging the QA worktree', async () => {
+  it('creates the interactive sandbox after merging the QA worktree', async () => {
     const f = fixture();
     const mergeFeatureIntoBaseline = vi.fn(async () => ({ merged: true, conflicts: [] }));
-    ioMocks.configureStatusline.mockClear();
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'interactive',
       tmux: {} as any, mergeFeatureIntoBaseline,
@@ -739,8 +1381,8 @@ describe('QARunner execution boundary', () => {
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
 
     expect(mergeFeatureIntoBaseline).toHaveBeenCalled();
-    expect(ioMocks.configureStatusline).toHaveBeenCalledWith(worktreePath);
-    expect(mergeFeatureIntoBaseline.mock.invocationCallOrder[0]).toBeLessThan(ioMocks.configureStatusline.mock.invocationCallOrder[0]);
+    expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ worktreePath }));
+    expect(mergeFeatureIntoBaseline.mock.invocationCallOrder[0]).toBeLessThan(f.sandboxProvider.create.mock.invocationCallOrder[0]);
   });
 
   it('publishes an independent QA runtime record through completion', async () => {
@@ -828,7 +1470,7 @@ describe('QARunner execution boundary', () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       f.resumeVerification();
       const current = f.createRunner();
-      const result = await current.runner.process('60');
+      const result = await current.process();
       expect(result.success).toBe(false);
       expect(result.summary).toContain('search shortcut failed');
       expect(result.failedCriteria).toEqual([{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }]);
@@ -850,7 +1492,7 @@ describe('QARunner execution boundary', () => {
       }
     }
     const subsequent = f.createRunner();
-    const subsequentResult = await subsequent.runner.process('60');
+    const subsequentResult = await subsequent.process();
     expect(subsequentResult).toMatchObject({ success: false });
     expect(subsequentResult.rework).not.toBe(true);
     await expect(subsequent.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
@@ -867,7 +1509,7 @@ describe('QARunner execution boundary', () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       f.resumeVerification();
       const current = f.createRunner();
-      const result = await current.runner.process('60');
+      const result = await current.process();
       expect(result.rework === true).toBe(attempt < 3);
     }
     const exhausted = f.createRunner();
@@ -883,7 +1525,7 @@ describe('QARunner execution boundary', () => {
     // rework again instead of an immediate block.
     f.resumeVerification();
     const afterRetry = f.createRunner();
-    const result = await afterRetry.runner.process('60');
+    const result = await afterRetry.process();
     expect(result.success).toBe(false);
     expect(result.rework).toBe(true);
     expect(result.summary).toContain('search shortcut failed');
@@ -896,7 +1538,7 @@ describe('QARunner execution boundary', () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       f.resumeVerification();
       const current = f.createRunner();
-      await current.runner.process('60');
+      await current.process();
     }
     const exhausted = f.createRunner();
     await expect(exhausted.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
@@ -907,7 +1549,7 @@ describe('QARunner execution boundary', () => {
     // work it belongs to and how much of the budget that round used.
     f.resumeVerification();
     const blocked = f.createRunner();
-    const result = await blocked.runner.process('60');
+    const result = await blocked.process();
     expect(result.rework).not.toBe(true);
     expect(result.summary).toContain('cycle 1');
     expect(result.summary).toContain('3/3');
@@ -918,7 +1560,7 @@ describe('QARunner execution boundary', () => {
     for (let attempt = 1; attempt <= limit; attempt++) {
       f.resumeVerification();
       const current = f.createRunner();
-      const result = await current.runner.process('60');
+      const result = await current.process();
       expect(result.rework === true).toBe(attempt < limit);
       await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ attempt });
       await expect(current.backlog.get('60')).resolves.toMatchObject({
@@ -984,8 +1626,8 @@ describe('QARunner execution boundary', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(mergeFeatureIntoBaseline).toHaveBeenCalledWith(worktreePath, 'main', 'afk/backlog-60');
-    expect(f.providers.branches.commit).toHaveBeenCalledWith(worktreePath, expect.stringContaining('QA'));
-    expect(f.providers.branches.push).toHaveBeenCalledWith('qa-60', worktreePath);
+    expect(f.providers.branches.commit).not.toHaveBeenCalled();
+    expect(f.providers.branches.push).toHaveBeenCalledWith('qa-60', worktreePath, 'commit-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({
       sourceBranch: 'qa-60', targetBranch: 'main', draft: false,
     }));
@@ -1125,7 +1767,12 @@ describe('QARunner execution boundary', () => {
       mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     });
 
-    const result = await runner.process('60');
+    const schedule = globalThis.setTimeout;
+    const clock = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, timeout?: number, ...args: unknown[]) =>
+      schedule(callback, timeout === 1500 ? 0 : timeout, ...args)) as typeof setTimeout);
+    let result;
+    try { result = await runner.process('60'); }
+    finally { clock.mockRestore(); }
 
     expect(result).toMatchObject({ success: true });
     expect(f.providers.backlog.createRework).not.toHaveBeenCalled();
@@ -1256,7 +1903,7 @@ describe('QARunner execution boundary', () => {
     expect(getLogContext()).toBeUndefined();
   });
 
-  it('does not call the audit hook when the branch provider reports no commit', async () => {
+  it('records the verified HEAD when no additional commit was necessary', async () => {
     const f = fixture();
     f.branches.commit.mockResolvedValue(undefined as never);
     const onCommit = vi.fn(async () => {});
@@ -1270,7 +1917,7 @@ describe('QARunner execution boundary', () => {
 
     await runner.process('60');
 
-    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommit).toHaveBeenCalledWith('commit-60', 'qa-60');
   });
 
   it.each(['tokens', 'handoffs', 'corrupt'] as const)('blocks QA before starting an agent for a %s budget ledger', async condition => {
@@ -1478,6 +2125,7 @@ describe('QARunner workspace independence', () => {
     expect(prepareRepositories.prepare).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ repoRoot: '/workspace/repo' })]),
       '/workspace',
+      expect.objectContaining({ claims: expect.arrayContaining([expect.any(String)]), assertClosed: expect.any(Function) }),
     );
     expect(order).toEqual(['prepare', 'createVerificationWorktree', 'cleanup', 'release']);
     expect(workspace.finish).not.toHaveBeenCalled();

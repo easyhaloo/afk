@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn().mockResolvedValue(true),
   service: { list: vi.fn().mockResolvedValue({ plugins: [], diagnostics: [] }), install: vi.fn().mockResolvedValue(true), setEnabled: vi.fn().mockResolvedValue(true), remove: vi.fn().mockResolvedValue(true), configure: vi.fn().mockResolvedValue(true), launchWorker: vi.fn() },
   google: { status: vi.fn().mockResolvedValue({ connected: false }), login: vi.fn().mockResolvedValue({ connected: true, email: "me@example.com" }), cancel: vi.fn().mockResolvedValue(undefined), logout: vi.fn().mockResolvedValue(undefined) },
-  experiences: { projects: vi.fn().mockResolvedValue(["github:acme/api"]), list: vi.fn().mockResolvedValue([]), verify: vi.fn(), revoke: vi.fn() },
+  experiences: { projects: vi.fn().mockResolvedValue(["github:acme/api"]), list: vi.fn().mockResolvedValue([]), outcomes: vi.fn().mockResolvedValue([]), verify: vi.fn(), revoke: vi.fn() },
 }));
 
 vi.mock("electron", () => ({
@@ -59,7 +59,7 @@ describe("plugin main/preload boundary", () => {
     expect(parseExperienceScope("gitlab:123")).toBe("gitlab:123");
     for (const scope of ["all", "github:../api", "github:acme/../api", "gitlab:git.example.com:99999/team/api", "github:acme/api#1"]) expect(() => parseExperienceScope(scope)).toThrow();
     expect(Object.keys(mocks.api!.plugins.google).sort()).toEqual(["cancel", "login", "logout", "status"]);
-    expect(Object.keys(mocks.api!.experiences).sort()).toEqual(["list", "projects", "revoke", "verify"]);
+    expect(Object.keys(mocks.api!.experiences).sort()).toEqual(["list", "outcomes", "projects", "revoke", "verify"]);
     await mocks.api!.plugins.google.login();
     await mocks.api!.plugins.google.cancel();
     await mocks.api!.plugins.google.status();
@@ -67,14 +67,17 @@ describe("plugin main/preload boundary", () => {
     await mocks.api!.experiences.projects();
     const selection = { scope: "github:acme/api", id: "e79b6ea0-a82d-4639-9f0e-a358eedbe2aa" };
     await mocks.api!.experiences.list({ scope: selection.scope, prompt: "network" });
+    const outcomeQuery = { scope: selection.scope, runId: "qa-run", workItemId: "github:acme/api#1" };
+    await mocks.api!.experiences.outcomes(outcomeQuery);
     await mocks.api!.experiences.verify({ ...selection, runId: "qa-run", action: "Correct network setup" });
     await mocks.api!.experiences.revoke(selection);
     expect(mocks.invoke.mock.calls).toEqual([
       [IPC_CHANNELS.googleLogin], [IPC_CHANNELS.googleCancel], [IPC_CHANNELS.googleStatus], [IPC_CHANNELS.googleLogout],
       [IPC_CHANNELS.experiencesProjects], [IPC_CHANNELS.experiencesList, { scope: selection.scope, prompt: "network" }],
+      [IPC_CHANNELS.experiencesOutcomes, outcomeQuery],
       [IPC_CHANNELS.experiencesVerify, { ...selection, runId: "qa-run", action: "Correct network setup" }], [IPC_CHANNELS.experiencesRevoke, selection],
     ]);
-    for (const channel of [IPC_CHANNELS.googleStatus, IPC_CHANNELS.googleLogin, IPC_CHANNELS.googleCancel, IPC_CHANNELS.googleLogout, IPC_CHANNELS.experiencesProjects, IPC_CHANNELS.experiencesList, IPC_CHANNELS.experiencesVerify, IPC_CHANNELS.experiencesRevoke]) {
+    for (const channel of [IPC_CHANNELS.googleStatus, IPC_CHANNELS.googleLogin, IPC_CHANNELS.googleCancel, IPC_CHANNELS.googleLogout, IPC_CHANNELS.experiencesProjects, IPC_CHANNELS.experiencesList, IPC_CHANNELS.experiencesOutcomes, IPC_CHANNELS.experiencesVerify, IPC_CHANNELS.experiencesRevoke]) {
       await expect(mocks.handlers.get(channel)!({ senderFrame: { url: "https://untrusted.example" } }, selection)).rejects.toThrow("拒绝");
     }
     await expect(mocks.handlers.get(IPC_CHANNELS.googleLogin)!(trusted, { clientFile: "/tmp/secret.json" })).rejects.toThrow();
@@ -84,9 +87,15 @@ describe("plugin main/preload boundary", () => {
     for (const input of [{ ...selection, id: "../file" }, { ...selection, runId: "qa-run", action: " " }, { ...selection, runId: "qa-run", action: "fix", verified: true }, { ...selection, runId: "qa-run\0", action: "fix" }]) {
       await expect(mocks.handlers.get(IPC_CHANNELS.experiencesVerify)!(trusted, input)).rejects.toThrow();
     }
+    for (const input of [{ scope: selection.scope }, { ...outcomeQuery, workItemId: "github:other/api#1" }, { ...outcomeQuery, limit: 101 }]) {
+      await expect(mocks.handlers.get(IPC_CHANNELS.experiencesOutcomes)!(trusted, input)).rejects.toThrow();
+    }
     expect(mocks.google.login).not.toHaveBeenCalled();
     expect(mocks.experiences.list).not.toHaveBeenCalled();
     expect(mocks.experiences.verify).not.toHaveBeenCalled();
+    expect(mocks.experiences.outcomes).not.toHaveBeenCalled();
+    await mocks.handlers.get(IPC_CHANNELS.experiencesOutcomes)!(trusted, outcomeQuery);
+    expect(mocks.experiences.outcomes).toHaveBeenCalledWith({ ...outcomeQuery, limit: 20 });
     await mocks.handlers.get(IPC_CHANNELS.experiencesRevoke)!(trusted, selection);
     expect(mocks.experiences.revoke).toHaveBeenCalledWith(selection);
   });

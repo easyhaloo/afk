@@ -1,0 +1,63 @@
+{
+  "installation": {
+    "version": "0.2.162",
+    "mode": "installed-local-candidate"
+  },
+  "cliDigest": "0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c",
+  "candidateId": "4cc64163ac59ad7f437307d06df67fd964b3ba3b7bc8ff7cfa622ac162663edf",
+  "original": "cc83fb84892ffc847dc7cbc73def65753f046882c03d73a27e9254435e1d5fc9",
+  "proposed": "8b1888f35698f71c0ca3ae96e60ae91f698c5ea6d72cc69a3b2ab164b6b15689",
+  "evidenceDigest": "f15d691e47da052a583dbbcdc82cf1baafd1b6d4ec2aa50f096899c03f5b3e76",
+  "expectedCommit": "0e642fc0a1996a186a9c2764cc43a4072a6591fc",
+  "baseImageId": "sha256:fe5830d27a7a300b4281620a5149881ecc1d7fcb31dc3e4b7b3d4011ffefc026",
+  "cases": [
+    {
+      "checkId": "behavior-1",
+      "checkDigest": "a347abd85e2ad93a4949f7dbe4f60a2c2c44e06818cef51068ce4d7325f2cad7"
+    },
+    {
+      "checkId": "behavior-2",
+      "checkDigest": "fe6569e0ae492e1dacad6b7657ec1f4163d03350f685dd16e04034746e98e6c3"
+    },
+    {
+      "checkId": "behavior-3",
+      "checkDigest": "efbf6217c6ebf907f148d23208f35d75b8634edd966822ad2ef0a3444d540efd"
+    }
+  ],
+  "issues": [],
+  "checkerProtocol": "proposal-semantic-v1",
+  "executionSchemaIssues": [],
+  "validate": {
+    "status": 1,
+    "stdout": "{\"status\":\"blocked\",\"code\":\"verification_failed\"}",
+    "stderr": ""
+  },
+  "before": {
+    "state": "candidate",
+    "version": 1
+  },
+  "after": {
+    "state": "candidate",
+    "version": 1
+  },
+  "sameCandidate": true,
+  "validationReceipt": null,
+  "archiveSha256": "a28e5003d4af18d313e02c2d0228dca3cc80eef022076ce6c3a7eb576960aaf6",
+  "revoked": {
+    "status": 1,
+    "stdout": "{\"status\":\"blocked\",\"code\":\"unauthorized\"}",
+    "stderr": ""
+  },
+  "containerExit": {
+    "id": "122cb53afceea17cd7277038b1e1a8828bee02721ea1a485ce1771941225f008",
+    "exit": "78",
+    "operation": "7b550fba-a2af-4e5c-b105-036a9311135d",
+    "timeNano": 1795104030051735584
+  },
+  "preflight": [
+    "/usr/local/bin/claude available",
+    "/opt/afk/checkers/skill-trace-v1.mjs available",
+    "/opt/afk/model/messages ENOENT"
+  ],
+  "checkerDiagnostic": "Error: ENOENT: no such file or directory, lstat '/opt/afk/model'"
+}

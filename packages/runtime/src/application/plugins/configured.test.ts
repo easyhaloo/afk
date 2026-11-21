@@ -3,20 +3,22 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createConfiguredPlugins, getConfiguredCredentialDependencies, type ConfiguredPluginsOptions } from './configured.js';
+import { configuredPluginManifests, createConfiguredPlugins, getConfiguredCredentialDependencies, inspectConfiguredPlugins, type ConfiguredPluginsOptions } from './configured.js';
 import { PluginRuntime } from './runtime.js';
 import { PluginManager } from './manager.js';
 import { readPluginConfiguration } from './configuration.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import type { CredentialRef } from '../../plugin-sdk/capabilities.js';
 import { WebhookTriggerProvider, ScheduleTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider, TestReportProvider, ObjectStorageProvider, GoogleOAuthCredentialProvider } from '../../infrastructure/providers/index.js';
-import type { CommandRequest } from '../../infrastructure/providers/dependencies.js';
+import type { CommandRequest, FetchTransport } from '../../infrastructure/providers/dependencies.js';
 import { GitHubClient } from '../../infrastructure/github/client.js';
 import { GitLabClient } from '../../infrastructure/gitlab/index.js';
 import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.js';
 import { LocalSandboxProvider, ContainerSandboxProvider } from '../../infrastructure/sandbox/providers/index.js';
 import { WorktreeManager } from '../../infrastructure/git/worktree.js';
 import type { RemoteContainerCliTransportOptions } from '../../infrastructure/sandbox/remote-container.js';
+import * as learning from './learning.js';
+import * as knowledgeRuntime from '../learning/knowledge-runtime.js';
 
 const environment = { TOKEN: 'fixture-token', HOOK: 'https://hooks.example.test/private-hook' };
 const subscription = { id: 'subscription', kind: 'webhook' };
@@ -88,6 +90,19 @@ async function load(selected: readonly Configuration[], options: Partial<Configu
 function config(id: string): Configuration { return configurations.find(item => item.id === id)!; }
 
 describe('configured plugin composition', () => {
+  it('observes live tool source decisions without delegating the verdict to the observer', async () => {
+    const readToolSourcePolicy = vi.fn().mockReturnValueOnce({ rules: [{ id: 'read', effect: 'allow' }] }).mockReturnValue(undefined);
+    const onToolSourceDecision = vi.fn((_request: unknown, decision: { allowed: boolean }) => { decision.allowed = !decision.allowed; });
+    const { runtime } = await load([config('policy.compliance-policy')], { readToolSourcePolicy, onToolSourceDecision });
+    const policy = runtime.getPolicyProvider('compliance-policy')!;
+    const request = { action: 'tool.source.read', context: { project: 'github:w11/parcel', extra: 'omit' } };
+    await expect(policy.evaluate(request)).resolves.toMatchObject({ allowed: true, rule: 'read' });
+    await expect(policy.evaluate(request)).resolves.toEqual({ allowed: false, rule: 'default-deny' });
+    await policy.evaluate({ action: 'deploy' });
+    expect(onToolSourceDecision).toHaveBeenCalledTimes(2);
+    expect(onToolSourceDecision.mock.calls[0]![0]).toEqual({ action: request.action, context: { project: request.context.project } });
+    expect(readToolSourcePolicy).toHaveBeenCalledTimes(2);
+  });
   it('exposes only schema-validated named credential dependencies without scanning ordinary user data', async () => {
     const network = vi.fn();
     const execute = vi.fn();
@@ -132,10 +147,51 @@ describe('configured plugin composition', () => {
     const [plugin] = await createConfiguredPlugins({ configurations: [{ ...configuration, config: references }], environment: {}, fetch: network, execute, onTrigger: vi.fn() });
     expect(resolve).not.toHaveBeenCalled();
     await runtime.activate(plugin);
-    expect(resolve).toHaveBeenCalled();
+    if (['artifact.report-platform', 'notification.feishu', 'notification.slack', 'credential.oauth', 'credential.enterprise', 'credential.oidc', 'sandbox.remote-container', 'repository.remote-workspace'].includes(configuration.id)) expect(resolve).not.toHaveBeenCalled();
+    else expect(resolve).toHaveBeenCalled();
     expect(runtime.listProvidersForPlugin(configuration.id)).not.toHaveLength(0);
     expect(network).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
+    if (configuration.id === 'sandbox.remote-container' || configuration.id === 'repository.remote-workspace') {
+      network.mockImplementation(async () => Response.json(configuration.id === 'sandbox.remote-container'
+        ? { iid: 1, path: '/remote', branch: 'main' }
+        : { commit: 'a'.repeat(40), branch: 'main', dirty: false }));
+      const invoke = configuration.id === 'sandbox.remote-container'
+        ? () => runtime.getSandboxProvider('remote-container')!.createWorktree({ iid: 1, baseBranch: 'main' })
+        : () => runtime.getRepositoryProvider('remote-workspace')!.snapshot({ url: 'team/repo' });
+      await invoke();
+      resolve.mockResolvedValueOnce({ secret: 'rotated-remote' });
+      await invoke();
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(resolve).toHaveBeenLastCalledWith({ name: 'TOKEN' }, expect.objectContaining({
+        signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
+      }));
+      expect(network.mock.calls.map(([, init]) => new Headers(init?.headers).get('authorization')))
+        .toEqual([`Bearer ${environment.TOKEN}`, 'Bearer rotated-remote']);
+      expect(execute).not.toHaveBeenCalled();
+    }
+    if (configuration.id === 'credential.oidc') {
+      network.mockImplementation(async (_url, init) => init?.method === 'GET'
+        ? Response.json({ issuer: references.issuer, token_endpoint: 'https://auth.example.test/token' })
+        : Response.json({ access_token: 'issued-token', token_type: 'Bearer', issued_token_type: 'urn:ietf:params:oauth:token-type:access_token' }));
+      const provider = runtime.getCredentialProvider('credential.oidc')!;
+      const options = { signal: new AbortController().signal, deadlineAt: Date.now() + 10_000 };
+      for (const secret of ['fresh-assertion-one', 'fresh-assertion-two']) {
+        resolve.mockResolvedValue({ secret });
+        await expect(provider.resolve({ name: 'api', scope: 'read' }, options)).resolves.toEqual({ secret: 'issued-token' });
+        const form = new URLSearchParams(String(network.mock.calls.at(-1)?.[1]?.body));
+        expect(form.get('client_assertion')).toBe(secret);
+        expect(form.get('grant_type')).toBe(references.exchange ? 'urn:ietf:params:oauth:grant-type:token-exchange' : 'client_credentials');
+        if (references.exchange) expect(form.get('subject_token')).toBe(secret);
+      }
+      expect(resolve.mock.calls.map(([ref]) => ref)).toEqual(Array.from({ length: 2 }, () => references.exchange
+        ? [{ name: 'TOKEN' }, { name: 'TOKEN' }] : [{ name: 'TOKEN' }]).flat());
+      for (let call = 1; call <= resolve.mock.calls.length; call++) expect(resolve).toHaveBeenNthCalledWith(call, { name: 'TOKEN' }, expect.objectContaining({
+        signal: expect.any(AbortSignal), deadlineAt: options.deadlineAt,
+      }));
+      expect(network).toHaveBeenCalledTimes(4);
+      expect(execute).not.toHaveBeenCalled();
+    }
   });
 
   it('validates credential references without resolving, probing or subscribing', async () => {
@@ -169,7 +225,7 @@ describe('configured plugin composition', () => {
     })).rejects.toThrow('invalid configuration fields');
   });
 
-  it('awaits scoped credential resolution through the runtime registry before registering the consumer', async () => {
+  it('registers the consumer passively and awaits scoped resolution at delivery', async () => {
     const runtime = new PluginRuntime();
     runtimes.push(runtime);
     let complete!: (value: { secret: string }) => void;
@@ -183,13 +239,13 @@ describe('configured plugin composition', () => {
       configurations: [{ id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'hook', scope: 'notify:write' } } }], fetch: network,
     });
     expect(resolve).not.toHaveBeenCalled();
-    const activation = runtime.activate(plugin);
-    await vi.waitFor(() => expect(resolve).toHaveBeenCalledWith({ name: 'hook', scope: 'notify:write' }));
-    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    await runtime.activate(plugin);
+    expect(resolve).not.toHaveBeenCalled();
+    const delivery = runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' });
+    await vi.waitFor(() => expect(resolve).toHaveBeenCalledWith({ name: 'hook', scope: 'notify:write' }, undefined));
     expect(network).not.toHaveBeenCalled();
     complete({ secret: environment.HOOK });
-    await activation;
-    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' })).resolves.toMatchObject({ delivered: true });
+    await expect(delivery).resolves.toMatchObject({ delivered: true });
     expect(String(network.mock.calls[0][0])).toBe(environment.HOOK);
   });
 
@@ -224,10 +280,10 @@ describe('configured plugin composition', () => {
       activate(context) { context.registerCredentialProvider('fixture', { id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve: async () => ({ secret: value as string }) }); },
     });
     const [plugin] = await createConfiguredPlugins({ configurations: [{ id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'hook' } } }] });
-    const activation = runtime.activate(plugin);
-    await expect(activation).rejects.toThrow();
-    if (typeof value === 'string' && value.trim()) await expect(activation).rejects.not.toThrow(value);
-    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
+    await runtime.activate(plugin);
+    const delivery = await runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Passed' });
+    expect(delivery.delivered).toBe(false);
+    if (typeof value === 'string' && value.trim()) expect(delivery.error).not.toContain(value);
     if (typeof value === 'string' && value.trim()) expect(JSON.stringify(await runtime.diagnostics())).not.toContain(value);
   });
 
@@ -279,11 +335,64 @@ describe('configured plugin composition', () => {
     expect(runtime.getIssueTrackerProvider('linear')).toBeUndefined();
   });
 
+  it('declares and activates Gmail after its exact registered Google credential provider', async () => {
+    const selected = [config('notification.gmail'), config('credential.google-oauth')];
+    const execute = vi.fn(async (_request: CommandRequest) => ({ stdout: '', stderr: '' }));
+    const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(Response.json({ id: 'fixture-message' }));
+    const inspected = inspectConfiguredPlugins({ configurations: selected });
+    expect(inspected.map(row => row.manifest.id)).toEqual(['credential.google-oauth', 'notification.gmail']);
+    expect(inspected[1].credentialDependencies).toEqual(['credential.google-oauth']);
+    expect(inspected[1].manifest.requires).toEqual(['credential.provider']);
+    expect(configuredPluginManifests().find(manifest => manifest.id === 'notification.gmail')?.requires).toEqual(['credential.provider']);
+    const plugins = await createConfiguredPlugins({ configurations: selected, fetch: network, execute });
+    expect(plugins.map(plugin => plugin.manifest.id)).toEqual(['credential.google-oauth', 'notification.gmail']);
+    expect(getConfiguredCredentialDependencies(plugins[1])).toEqual(['credential.google-oauth']);
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    for (const plugin of plugins) await runtime.activate(plugin);
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    const credentials = runtime.getCredentialProvider('credential.google-oauth');
+    expect(credentials).toBeInstanceOf(GoogleOAuthCredentialProvider);
+    const account = vi.spyOn(credentials as GoogleOAuthCredentialProvider, 'resolveAccount').mockResolvedValue({
+      secret: 'fixture-access-token', subject: 'fixture-subject', email: 'fixture@example.test',
+    });
+    await expect(runtime.getNotificationProvider('notification.gmail')!.notify({ title: 'Fixture', body: 'Fixture body' })).resolves.toEqual({ delivered: true, channel: 'gmail' });
+    expect(account).toHaveBeenCalledTimes(1);
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each(['unrelated', 'incompatible'])('rejects Gmail with an %s credential provider without private authentication', async kind => {
+    const network = vi.fn();
+    const execute = vi.fn();
+    const resolve = vi.fn();
+    const resolveAccount = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolveAccount');
+    const runtime = new PluginRuntime();
+    runtimes.push(runtime);
+    await runtime.activate({
+      manifest: { id: 'credential.fixture', version: '1.0.0', apiVersion: 1, provides: ['credential.provider'], trusted: true },
+      activate(context) {
+        context.registerCredentialProvider(kind === 'incompatible' ? 'credential.google-oauth' : 'unrelated', {
+          id: 'fixture', capabilities: { read: true, rotate: false, 'scoped-token': false }, resolve,
+        });
+      },
+    });
+    const [plugin] = await createConfiguredPlugins({ configurations: [config('notification.gmail')], fetch: network, execute });
+    await expect(runtime.activate(plugin)).rejects.toThrow(/credential provider.*credential.google-oauth/);
+    expect(runtime.getNotificationProvider('notification.gmail')).toBeUndefined();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(resolveAccount).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each(configurations)('constructs and registers $id with its declared capability', async configuration => {
     vi.useFakeTimers();
     const network = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
     const execute = vi.fn(async (_request: CommandRequest) => ({ stdout: '', stderr: '' }));
-    const [plugin] = await createConfiguredPlugins({ configurations: [configuration], environment, fetch: network, execute, onTrigger: () => undefined });
+    const plugins = await createConfiguredPlugins({ configurations: configuration.id === 'notification.gmail' ? [configuration, config('credential.google-oauth')] : [configuration], environment, fetch: network, execute, onTrigger: () => undefined });
+    const plugin = plugins.find(plugin => plugin.manifest.id === configuration.id)!;
     expect(plugin.manifest.id).toBe(configuration.id);
     expect(plugin.manifest.id.split('.')).toHaveLength(2);
     expect(plugin.manifest.trusted).toBe(true);
@@ -291,7 +400,7 @@ describe('configured plugin composition', () => {
     expect(vi.getTimerCount()).toBe(0);
     const runtime = new PluginRuntime();
     runtimes.push(runtime);
-    await runtime.activate(plugin);
+    for (const selected of plugins) await runtime.activate(selected);
     expect(vi.getTimerCount()).toBe(0);
     expect(runtime.listProvidersForPlugin(configuration.id)).toHaveLength(plugin.manifest.provides.length);
     expect(runtime.listProviders(plugin.manifest.provides[0])).toHaveLength(1);
@@ -404,6 +513,8 @@ describe('configured plugin composition', () => {
     ['credential.oidc', { issuer: 'https://auth.example.test', clientId: 'client', assertion: secretRef, exchange: { subjectToken: 'plaintext', subjectTokenType: 'jwt' } }],
     ['credential.enterprise', { values: {} }],
     ['artifact.object-storage', { endpoint: 'https://user:password@example.test' }],
+    ['artifact.object-storage', { presignedUrl: 'https://storage.example.test/object?signature=private' }],
+    ['artifact.object-storage', { endpoint: 'https://storage.example.test', presignedUrl: { env: 'TOKEN' } }],
     ['repository.multi-repository', { repositories: [{ name: 'same', path: 'a' }, { name: 'same', path: 'b' }] }],
     ['policy.compliance-policy', { rules: [] }],
     ['policy.license-policy', { allowlist: [] }],
@@ -632,4 +743,139 @@ describe('configured plugin composition', () => {
     await runtime.getArtifactProvider('object-storage')!.put({ name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) });
     expect(String(network.mock.calls[0]?.[0])).toBe('https://storage.example.test/bucket/file.txt');
   });
+
+  it('resolves the presigned URL through the credential registry for each object upload', async () => {
+    const first = 'https://storage.example.test/bucket/fixed-name?signature=first';
+    const second = 'https://storage.example.test/bucket/fixed-name?signature=second';
+    const network = vi.fn<Parameters<FetchTransport>, ReturnType<FetchTransport>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ uri: 'https://storage.example.test/first' })))
+      .mockResolvedValueOnce(new Response('second', { status: 403 }));
+    const { runtime } = await load([
+      { id: 'artifact.object-storage', config: { presignedUrl: { provider: 'credential.enterprise', name: 'upload' } } },
+      { id: 'credential.enterprise', config: { values: { upload: { env: 'TOKEN' } } } },
+    ], { fetch: network });
+    const credential = vi.spyOn(runtime.getCredentialProvider('credential.enterprise')!, 'resolve')
+      .mockResolvedValueOnce({ secret: first }).mockResolvedValueOnce({ secret: second });
+    const provider = runtime.getArtifactProvider('object-storage')!;
+    const artifact = { name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) };
+    await expect(provider.health!()).resolves.toMatchObject({ status: 'ok' });
+    expect(credential).not.toHaveBeenCalled();
+    await expect(provider.put(artifact)).resolves.toEqual({ name: 'file.txt', uri: 'https://storage.example.test/bucket/fixed-name' });
+    await expect(provider.put(artifact)).rejects.toThrow(/^Provider HTTP request failed \(403\)$/);
+    expect(network.mock.calls.map(([target]) => String(target))).toEqual([first, second]);
+    expect(network.mock.calls[0]?.[1]).toMatchObject({ method: 'PUT', redirect: 'error' });
+  });
+
+  it.each([
+    'http://storage.example.test/file?signature=private',
+    'https://account:secret@storage.example.test/file?signature=private',
+    'https://storage.example.test/file?signature=private#fragment',
+    'https://storage.example.test/file',
+    'not a URL',
+  ])('refuses unsafe presigned destinations before contacting the server', async destination => {
+    const network = vi.fn();
+    const { runtime } = await load([{ id: 'artifact.object-storage', config: { presignedUrl: { env: 'UPLOAD_URL' } } }], {
+      environment: { UPLOAD_URL: destination }, fetch: network,
+    });
+    await expect(runtime.getArtifactProvider('object-storage')!.put({ name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) }))
+      .rejects.toThrow(/^Invalid presigned upload URL$/);
+    expect(network).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('static configured plugin metadata', () => {
+  it.each([false, true])('inspects learning capabilities with knowledge=%s', async knowledge => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const { listPluginInventory } = await import('./inventory.js');
+    const config = { enabled: false, ...(knowledge ? { knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } : {}) };
+    const [metadata] = inspectConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config }], environment: {} });
+    const expected = knowledge ? ['workflow.action', 'context.provider'] : ['workflow.action'];
+    expect(metadata.manifest.provides).toEqual(expected);
+    const rows = await listPluginInventory({ configuration: { plugins: [{ id: 'learning.distiller', builtin: true, config }] } });
+    expect(rows.find(row => row.id === 'learning.distiller')?.capabilities).toEqual(expected);
+  });
+
+  it.each([false, true])('preserves factory learning capabilities with knowledge=%s', async knowledge => {
+    const config = { enabled: false, ...(knowledge ? { knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } : {}) };
+    const actual = learning.createLearningPlugin({ config }).manifest;
+    const [configured] = await createConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config }], environment: {} });
+    expect(actual.provides).toEqual(knowledge ? ['workflow.action', 'context.provider'] : ['workflow.action']);
+    expect(configured.manifest.provides).toEqual(actual.provides);
+  });
+
+  it.each([false, true])('activates learning and agrees with context registration with knowledge=%s', async knowledge => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const config = { enabled: false, ...(knowledge ? { knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } : {}) };
+    const { runtime, plugins } = await load([{ id: 'learning.distiller', config }]);
+    const [metadata] = inspectConfiguredPlugins({ configurations: [{ id: 'learning.distiller', config }] });
+    expect(runtime.listPlugins()).toEqual(['learning.distiller']);
+    expect(runtime.listCapabilities()).toEqual(metadata.manifest.provides);
+    expect(plugins[0].manifest.provides).toEqual(metadata.manifest.provides);
+    expect(runtime.listProviders('context.provider')).toEqual(knowledge ? ['context.knowledge'] : []);
+    expect(await runtime.dispatchSystemAction('learning.settings', {})).toMatchObject({ enabled: false });
+  });
+
+  it('keeps learning capability inspection passive without factories or credential resolution', async () => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const { listPluginInventory } = await import('./inventory.js');
+    const factory = vi.spyOn(learning, 'createLearningPlugin').mockImplementation(() => { throw new Error('Passive factory call'); });
+    const contextFactory = vi.spyOn(knowledgeRuntime, 'KnowledgeContextProvider').mockImplementation(() => { throw new Error('Passive context construction'); });
+    const resolve = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolve').mockImplementation(async () => { throw new Error('Passive credential resolution'); });
+    const configurations: readonly Configuration[] = [
+      { id: 'learning.distiller', config: { enabled: false, knowledge: { wikiScript: '/private/d01/wiki.py', grants: ['/private/d01/grant.json'] } } },
+      { id: 'credential.google-oauth', config: {} },
+      { id: 'notification.slack', config: { webhook: { provider: 'credential.google-oauth', name: 'ordinary-reference' } } },
+      { id: 'artifact.report-platform', config: { endpoint: 'https://reports.invalid', token: { env: 'D01_UNSET' } } },
+    ];
+    const inspected = inspectConfiguredPlugins({ configurations, environment: {} });
+    expect(inspected.find(row => row.manifest.id === 'notification.slack')?.credentialDependencies).toEqual(['credential.google-oauth']);
+    const rows = await listPluginInventory({ configuration: { plugins: configurations.map(entry => ({ ...entry, builtin: true })) } });
+    expect(rows.filter(row => configurations.some(entry => entry.id === row.id)).every(row => row.configuration === 'valid')).toBe(true);
+    expect(factory).not.toHaveBeenCalled();
+    expect(contextFactory).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('validates shape and dependencies without environment reads or provider construction', async () => {
+    const { inspectConfiguredPlugins } = await import('./configured.js');
+    const environment = {};
+    const rows = inspectConfiguredPlugins({ configurations: [
+      { id: 'artifact.report-platform', config: { endpoint: 'https://reports.invalid', token: { provider: 'credential.enterprise', name: 'report' } } },
+      { id: 'credential.enterprise', config: { values: { report: { env: 'STATIC_UNREAD' } } } },
+    ], environment });
+    expect(rows.map(row => row.manifest.id)).toEqual(['credential.enterprise', 'artifact.report-platform']);
+    expect(rows[1].credentialDependencies).toEqual(['credential.enterprise']);
+    expect(rows[1].manifest.requires).toEqual(['credential.provider']);
+    expect(JSON.stringify(rows)).not.toContain('STATIC_UNREAD');
+    expect(() => inspectConfiguredPlugins({ configurations: [{ id: 'host.ssh', config: { hosts: [] } }], environment })).toThrow('invalid configuration');
+    expect(() => inspectConfiguredPlugins({ configurations: [
+      { id: 'credential.enterprise', config: { values: { a: { provider: 'credential.oauth', name: 'a' } } } },
+      { id: 'credential.oauth', config: { tokenEndpoint: 'https://auth.invalid', clientId: 'test', clientSecret: { provider: 'credential.enterprise', name: 'b' } } },
+    ] })).toThrow('cyclic');
+  });
+});
+
+
+it('keeps final configured manifests aligned with the actual custom executable binding', async () => {
+  const { listPluginInventory, diagnosePluginInventory } = await import('./inventory.js');
+  const selected = { id: 'host.ssh', config: { hosts: [{ alias: 'fixture', address: 'fixture.invalid' }], binary: '/opt/d01-canary/ssh', scpBinary: '/opt/d01-canary/scp' } };
+  const hostExec = vi.fn(async (command: string) => {
+    if (command !== selected.config.binary) throw new Error('Wrong default executable');
+    return { code: 0, stdout: 'fixture', stderr: '' };
+  });
+  const { plugins, runtime } = await load([selected], { hostExec });
+  expect(plugins[0].manifest.externalTools).toEqual([]);
+  await runtime.getHostProvider('ssh')!.exec('fixture', ['printf', 'fixture']);
+  expect(hostExec).toHaveBeenCalledWith(selected.config.binary, expect.any(Array), undefined);
+  hostExec.mockClear();
+  const rows = (await listPluginInventory({ configuration: { plugins: [{ ...selected, builtin: true }] } })).filter(row => row.id === selected.id);
+  expect(rows[0].manifest).toEqual(plugins[0].manifest);
+  const execute = vi.fn(async () => { throw new Error('Unsupported custom bindings must never execute'); });
+  expect(await diagnosePluginInventory(rows, { probe: true, execute, executorLifecycle: 'trusted-cooperative' }))
+    .toEqual([expect.objectContaining({ command: selected.config.binary, status: 'unsupported' }), expect.objectContaining({ command: selected.config.scpBinary, status: 'unsupported' })]);
+  expect(hostExec).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
+  const [defaultPlugin] = await createConfiguredPlugins({ configurations: [{ id: 'host.ssh', config: { hosts: selected.config.hosts } }] });
+  expect(defaultPlugin.manifest.externalTools?.map(tool => tool.command)).toEqual(['ssh', 'scp']);
 });

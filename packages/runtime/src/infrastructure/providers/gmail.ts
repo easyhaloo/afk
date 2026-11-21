@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import type { NotificationMessage, NotificationProvider, NotificationReceipt, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
+import type { NotificationMessage, NotificationProvider, NotificationReceipt, ProviderDiagnostic, ProviderHealth, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, requestHttp, type FetchTransport } from './dependencies.js';
 import { GoogleOAuthCredentialProvider, GoogleOAuthError } from './google-oauth.js';
 import { systemProxyFetch } from './system-proxy-fetch.js';
 
 export interface GmailNotificationOptions {
-  readonly credentials?: Pick<GoogleOAuthCredentialProvider, 'resolveAccount'>;
+  readonly credentials?: Pick<GoogleOAuthCredentialProvider, 'resolveAccount'> & Partial<Pick<GoogleOAuthCredentialProvider, 'health'>>;
   readonly to?: string;
   readonly channel?: string;
   readonly fetch?: FetchTransport;
@@ -39,6 +39,31 @@ export class GmailNotificationProvider implements NotificationProvider {
   constructor(private readonly options: GmailNotificationOptions = {}) {
     if (options.to !== undefined) email(options.to);
     this.credentials = options.credentials ?? new GoogleOAuthCredentialProvider();
+  }
+
+  async health(options?: ProviderOperationOptions): Promise<ProviderHealth> {
+    checkAbort(options);
+    const boundary = 'Live Gmail API access and sending permission have not been validated; no message was sent';
+    try {
+      if (!this.credentials.health) return { status: 'degraded', message: `Credential metadata probe is unavailable; Google account readiness is unknown. ${boundary}` };
+      const health = await this.credentials.health(options);
+      checkAbort(options);
+      const readiness = health.status === 'ok' ? 'Local Google credentials are ready'
+        : health.status === 'unavailable' ? 'Google credentials are unavailable; run plugin doctor --plugin credential.google-oauth for passive details. If no account is saved, run plugin auth login google --client <desktop-client.json>'
+          : 'Google credential metadata needs attention; an expired access token may be refreshable. Run plugin doctor --plugin credential.google-oauth for passive details';
+      return { status: health.status, message: `${readiness}. ${boundary}` };
+    } catch {
+      checkAbort(options);
+      return { status: 'degraded', message: `Could not read Google credential metadata; run plugin doctor --plugin credential.google-oauth for passive details. ${boundary}` };
+    }
+  }
+
+  async doctor(options?: ProviderOperationOptions): Promise<readonly ProviderDiagnostic[]> {
+    const health = await this.health(options);
+    return [
+      { check: 'google-credentials', ok: health.status === 'ok', detail: health.message },
+      { check: 'passive-boundary', ok: true, detail: 'Live Gmail API access and sending permission have not been validated; passive diagnostics do not send messages' },
+    ];
   }
 
   async notify(message: NotificationMessage, options?: ProviderOperationOptions): Promise<NotificationReceipt> {

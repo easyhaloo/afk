@@ -1,8 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import type { RunEvent } from '@afk/core';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { redactUtf8 } from '../../infrastructure/observability/local-evidence-store.js';
+import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import { openSqlite, transaction, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
+import type { ContextQuery } from '../../plugin-sdk/capabilities.js';
+import { recallTerms } from '../../domain/context/terms.js';
+import { canonicalLearningJson } from './requests.js';
+import { readConfiguredPublishedLesson, type KnowledgeRuntimeOptions } from './knowledge-runtime.js';
+import { readExperienceKnowledgeConfiguration } from './experience-configuration.js';
+import { CandidateStore } from './candidate-store.js';
+import type { EvidenceSourceInput } from './evidence.js';
+import { selectKnowledgeValidationChecker, validationConfigurationSchema } from './validation-configuration.js';
+import { readValidationPrivateFile, readValidationSnapshotFile } from './validation-files.js';
 
 const MAX_RECORDS = 1000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -11,6 +22,102 @@ const MAX_RECEIPTS = 256;
 const DAY = 24 * 60 * 60 * 1000;
 const MAX_EXCHANGE_BYTES = 1024 * 1024;
 const MAX_ADOPTIONS = 64;
+const MAX_CONTEXT_RECEIPTS = 128;
+
+const recallExclusion = /\b(?:exclude|excluding|except|avoid|ignore|do\s+not|don't)\b|不要|不采用|不使用|排除/iu;
+const recallProjectMention = /\b(?:github|gitlab):[\w.-]+(?:\/[\w.-]+)+(?:#[1-9]\d*)?/giu;
+const recallNegativeCue = /\bis\s+absent\b|\bno\s+|没有/iu;
+const recallRequiresContext = /\b(?:validated|verified|tested)\s+only\s+(?:on|for)\b|仅在[^;；。\n]+?(?:验证|测试)/iu;
+const recallClauseBoundary = /[;；。！？!?\n,，]|\.(?=\s|$)|\s+(?:but|however|instead)\s+|但是|而是/iu;
+const aliasSegmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+const aliasNegation = /\b(?:no|not|never|without|absent)\b|n['’]t\b|没有|并非|不是|未见|未出现|未发生|不存在|无此/iu;
+
+function phraseSegments(value: string): string[] {
+  return [...aliasSegmenter.segment(value.toLowerCase())].map(part => part.segment).filter(segment => segment.trim());
+}
+
+function aliasQueryParts(clauses: string[]) {
+  return clauses.flatMap(clause => {
+    const exclusion = recallExclusion.exec(clause);
+    const parts = exclusion ? [clause.slice(0, exclusion.index), clause.slice(exclusion.index)] : [clause];
+    return parts.map((part, index) => ({ tokens: phraseSegments(part), denied: index === 1 || aliasNegation.test(part) }));
+  });
+}
+
+function aliasMatch(aliases: string[], parts: ReturnType<typeof aliasQueryParts>): 'absent' | 'affirmed' | 'denied' {
+  const phrases = aliases.map(phraseSegments);
+  let affirmed = false;
+  for (const { tokens, denied } of parts) {
+    if (!phrases.some(phrase => tokens.some((token, start) => token === phrase[0]
+      && phrase.every((word, offset) => tokens[start + offset] === word)))) continue;
+    if (denied) return 'denied';
+    affirmed = true;
+  }
+  return affirmed ? 'affirmed' : 'absent';
+}
+
+function recallDenialDescription(value: string): string | undefined {
+  return /\bno\s+(.+)$/u.exec(value)?.[1] ?? /^(.+?)\s+is\s+absent\b/u.exec(value)?.[1];
+}
+
+function recallProjectMatches(scope: string, clauses: string[]): boolean {
+  for (const clause of clauses) {
+    const mentions = [...clause.matchAll(recallProjectMention)];
+    for (const [index, mention] of mentions.entries()) {
+      const previous = mentions[index - 1];
+      const prefix = clause.slice(previous ? previous.index! + previous[0].length : 0, mention.index);
+      const suffix = clause.slice(mention.index! + mention[0].length, mentions[index + 1]?.index);
+      const exclusion = recallExclusion.exec(prefix);
+      const excluded = Boolean(exclusion && recallTerms(prefix.slice(exclusion.index + exclusion[0].length)).size <= 1)
+        || /^\s*(?:(?:must|should)\s+remain\s+unchanged\b|保持不变)/iu.test(suffix);
+      const project = mention[0].replace(/^(?:github|gitlab):/iu, prefix => prefix.toLowerCase()).replace(/#[1-9]\d*$/, '');
+      try { parseCanonicalProject(project); } catch { return false; }
+      if (excluded ? project === scope : project !== scope) return false;
+    }
+  }
+  return true;
+}
+
+function recallDenied(record: ExperienceRecord, clauses: string[]): boolean {
+  const trigger = record.trigger.toLowerCase();
+  const identifiers = record.trigger.match(/\b[A-Z][A-Z\d_]*(?:-\d+)?\b/gu) ?? [];
+  for (const clause of clauses) {
+    const normalized = clause.toLowerCase();
+    if (trigger.includes(normalized)) continue;
+    const deniedDescription = recallDenialDescription(normalized);
+    if (deniedDescription) {
+      const deniedTerms = [...recallTerms(deniedDescription)];
+      const failureTerms = recallTerms(`${record.trigger} ${record.rootCause}`);
+      if (deniedTerms.length >= 2 && deniedTerms.some(term => /^(?:errors?|failures?|faults?|issues?|failed)$/u.test(term))
+        && deniedTerms.every(term => failureTerms.has(term))) {
+        const describedAbsence = [record.trigger, record.rootCause].flatMap(value => value.toLowerCase().split(recallClauseBoundary)).some(part => {
+          const description = recallDenialDescription(part);
+          const descriptionTerms = description === undefined ? undefined : recallTerms(description);
+          return descriptionTerms?.size === deniedTerms.length && deniedTerms.every(term => descriptionTerms.has(term));
+        });
+        if (!describedAbsence) return true;
+      }
+    }
+    for (const identifier of identifiers) {
+      const anchor = identifier.toLowerCase();
+      if (!recallTerms(clause).has(anchor)) continue;
+      if (normalized.includes(`no ${anchor}`) || normalized.includes(`没有发生${anchor}`)
+        || ['is absent', 'is not present', 'is not applicable', 'is not the issue', 'did not occur', 'did not recur']
+          .some(denial => normalized.includes(`${anchor} ${denial}`))) return true;
+    }
+    for (const denied of normalized.matchAll(/没有(?:发生)?([^，,；;。且]+)/gu)) {
+      if (trigger.includes(denied[1].trim())) return true;
+    }
+    const exclusion = recallExclusion.exec(clause);
+    if (exclusion) {
+      const excluded = [...recallTerms(clause.slice(exclusion.index + exclusion[0].length))];
+      if (excluded.some(term => /[_:/-]/u.test(term) && recallTerms(trigger).has(term))) return true;
+      const action = record.action.toLowerCase();
+      if (excluded.length >= 2 && excluded.every(term => action.includes(term))) return true;
+    }
+  }
+  return false;
+}
 
 function text(maxBytes: number) {
   return z.string().max(maxBytes).trim().min(1).refine(value => Buffer.byteLength(value) <= maxBytes, 'Text exceeds byte limit')
@@ -27,6 +134,31 @@ function redact(value: string): string {
 }
 
 const identity = text(512).refine(value => redact(value) === value, 'Identity must not contain credentials');
+const versionKey = z.string().refine(value => value === value.trim() && value !== '__proto__', 'Expected an exact version map key').pipe(identity);
+const versionMapSchema = z.record(versionKey, identity).refine(value => Object.keys(value).length <= 32);
+function ownProperties(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, ownProperties(entry)]));
+}
+
+export const experienceQueryContextSchema = z.preprocess(ownProperties, z.object({
+  applicability: z.object({ version: identity.optional(), environment: identity.optional() }).strict().optional(),
+  target: z.object({ project: identity, revision: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/).optional(),
+    dirty: z.boolean().optional(), productVersions: versionMapSchema.optional(), runtimeVersions: versionMapSchema.optional(),
+    conditions: z.record(identity, z.boolean()).refine(value => Object.keys(value).length <= 32).optional(),
+  }).strict().optional(),
+}).strict());
+export type ExperienceQueryContext = Pick<ContextQuery, 'applicability' | 'target'>;
+
+export function experienceContextMatches(required: ExperienceQueryContext, actual: ExperienceQueryContext): boolean {
+  function matches(expected: unknown, observed: unknown): boolean {
+    if (!expected || typeof expected !== 'object') return expected === observed;
+    if (!observed || typeof observed !== 'object') return false;
+    return Object.entries(expected).every(([key, value]) => value === undefined
+      || (Object.hasOwn(observed, key) && matches(value, Reflect.get(observed, key))));
+  }
+  return matches(required, actual);
+}
 const sourceSchema = z.object({ runId: identity, workItemId: identity }).strict();
 const evidenceSchema = z.array(text(256).refine(value => !/[\r\n]/.test(value), 'Evidence must be a reference').transform(redact)).min(1).max(8)
   .transform(values => [...new Set(values)]);
@@ -62,11 +194,34 @@ const portableSchema = z.object({
 }).strict();
 const metricCountsSchema = z.object({ retrievals: z.number().int().nonnegative().safe(), adoptions: z.number().int().nonnegative().max(MAX_ADOPTIONS),
   recurrences: z.number().int().nonnegative().safe() }).strict();
+const publicationBindingSchema = z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), candidateId: z.string().regex(/^[a-f0-9]{64}$/),
+  validatedVersion: z.number().int().positive().safe(), candidateDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  evidenceDigest: z.string().regex(/^[a-f0-9]{64}$/), validatorVersion: identity, targetRef: identity }).strict();
+const adoptionBindingV1Schema = z.object({ version: z.literal(1), verificationDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  contextDigest: z.string().regex(/^[a-f0-9]{64}$/), acknowledgedAt: z.string().datetime() }).strict();
+const adoptionBindingSchema = z.discriminatedUnion('version', [adoptionBindingV1Schema,
+  adoptionBindingV1Schema.extend({ version: z.literal(2), source: sourceSchema, publication: publicationBindingSchema.optional() })]);
+const contextRetrievalSchema = z.object({ version: z.literal(1), stage: z.literal('retrieved'), experienceId: z.string().uuid(),
+  scope: identity, source: sourceSchema, selectionId: z.string().uuid(), verificationDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  contextDigest: z.string().regex(/^[a-f0-9]{64}$/), publication: publicationBindingSchema.optional(),
+  fragmentDigest: z.string().regex(/^[a-f0-9]{64}$/), recordedAt: z.string().datetime() }).strict();
+const contextReceiptSchema = z.discriminatedUnion('stage', [contextRetrievalSchema,
+  contextRetrievalSchema.extend({ stage: z.literal('selected'), retrievedFragmentDigest: z.string().regex(/^[a-f0-9]{64}$/) })]);
+const outcomeEventSchema = z.object({ runId: identity, sequence: z.number().int().positive().safe(), hash: z.string().regex(/^[a-f0-9]{64}$/),
+  type: z.enum(['run.finished', 'qa.failed', 'failure.classified', 'human_gate.opened']), outcome: z.enum(['succeeded', 'failed', 'cancelled', 'awaiting_merge']),
+  occurredAt: z.string().datetime(), observedAt: z.string().datetime() }).strict().refine(event =>
+  event.type === 'human_gate.opened' ? event.outcome === 'awaiting_merge'
+    : event.type === 'run.finished' ? event.outcome !== 'awaiting_merge' : event.outcome === 'failed', 'Outcome must match its event type');
+const outcomeReceiptSchema = z.object({ version: z.literal(1), stage: z.literal('outcome'),
+  selected: contextRetrievalSchema.extend({ stage: z.literal('selected'), retrievedFragmentDigest: z.string().regex(/^[a-f0-9]{64}$/) }),
+  event: outcomeEventSchema, recurrence: z.boolean(), benefit: z.literal('unknown'), recordedAt: z.string().datetime() }).strict();
 const recordSchema = failureSchema.omit({ expiresAt: true }).extend({
   id: z.string().uuid(),
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   failureFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   failureIdentity: failureIdentitySchema.optional(),
+  failureIdentityEvidence: z.object({ version: z.literal(2).optional(), id: identity, sequence: z.number().int().positive().safe(),
+    hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   status: statusSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -77,6 +232,7 @@ const recordSchema = failureSchema.omit({ expiresAt: true }).extend({
   provenanceSaturated: z.boolean().optional(),
   kind: kindSchema.optional(),
   origin: originSchema.optional(),
+  publication: publicationBindingSchema.optional(),
 }).strict();
 
 export type ExperienceStatus = z.infer<typeof statusSchema>;
@@ -85,7 +241,14 @@ export type ExperienceVerification = z.input<typeof verificationSchema>;
 export type ExperienceRecord = z.infer<typeof recordSchema>;
 export type ExperienceExchange = z.infer<typeof portableSchema>;
 export type ExperienceMetrics = z.infer<typeof metricCountsSchema>;
-export interface ExperienceStoreOptions { file: string; now?: () => Date }
+export type ExperienceAdoptionContext = { actual: ExperienceQueryContext; verified?: ExperienceQueryContext };
+export type ExperienceAdoptionReceipt = { experienceId: string; scope: string; source: RecordFailureInput['source'] } &
+  ({ binding: 'verified-version'; contextStatus: 'recorded' | 'unavailable' } & z.infer<typeof adoptionBindingSchema> | { binding: 'legacy-unbound' });
+export type ExperienceAdoptionResult = ExperienceMetrics & { receipt: ExperienceAdoptionReceipt };
+export type ExperienceContextReceipt = z.infer<typeof contextReceiptSchema>;
+export type ExperienceOutcomeEvent = z.infer<typeof outcomeEventSchema>;
+export type ExperienceOutcomeReceipt = z.infer<typeof outcomeReceiptSchema>;
+export interface ExperienceStoreOptions { file: string; now?: () => Date; knowledge?: KnowledgeRuntimeOptions; homeDir?: string }
 
 const verificationHistorySchema = `
 CREATE TABLE experience_verifications (
@@ -93,6 +256,15 @@ CREATE TABLE experience_verifications (
   run_hash TEXT NOT NULL,
   evidence_hash TEXT NOT NULL,
   PRIMARY KEY(experience_id, run_hash)
+) STRICT, WITHOUT ROWID;
+`;
+const applicabilityTableSchema = `
+CREATE TABLE experience_applicability (
+  experience_id TEXT PRIMARY KEY REFERENCES experiences(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  run_hash TEXT NOT NULL,
+  evidence_hash TEXT NOT NULL,
+  payload TEXT NOT NULL CHECK(length(payload) <= 16384)
 ) STRICT, WITHOUT ROWID;
 `;
 
@@ -116,18 +288,23 @@ CREATE TABLE experience_receipts (
   PRIMARY KEY(experience_id, source_hash)
 ) STRICT, WITHOUT ROWID;
 ${verificationHistorySchema}
+${applicabilityTableSchema}
 `;
 
 export class ExperienceStore {
   private readonly database: SqliteDatabase;
   private readonly now: () => Date;
+  private readonly knowledge?: KnowledgeRuntimeOptions;
+  private readonly homeDir?: string;
   private closed = false;
 
   constructor(options: ExperienceStoreOptions) {
-    const parsed = z.object({ file: text(4096), now: z.function().optional() }).strict().parse(options);
+    const parsed = z.object({ file: text(4096), now: z.function().optional(), knowledge: z.unknown().optional(), homeDir: text(4096).optional() }).strict().parse(options);
     this.now = options.now ?? (() => new Date());
+    this.knowledge = options.knowledge;
+    this.homeDir = options.homeDir;
     this.timestamp();
-    this.database = openSqlite({ file: parsed.file, schema, durability: 'FULL', version: 2,
+    this.database = openSqlite({ file: parsed.file, schema, durability: 'FULL', version: 3,
       migrations: [{ from: 1, to: 2, migrate: database => {
         database.exec(verificationHistorySchema);
         for (const row of database.prepare('SELECT payload FROM experiences').all()) {
@@ -135,7 +312,7 @@ export class ExperienceStore {
           if (record.verifiedEvidence) database.prepare('INSERT INTO experience_verifications VALUES (?, ?, ?)')
             .run(record.id, this.hash(record.verifiedEvidence.runId), this.hash([...record.verifiedEvidence.evidence].sort()));
         }
-      } }],
+      } }, { from: 2, to: 3, migrate: database => database.exec(applicabilityTableSchema) }],
     });
     try {
       const pageSize = Number(this.database.prepare('PRAGMA page_size').get()?.page_size);
@@ -146,44 +323,108 @@ export class ExperienceStore {
     }
   }
 
+  projectPublishedLesson(input: { scope: string; key: string }): ExperienceRecord {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity, key: publicationBindingSchema.shape.key }).strict().parse(input);
+    parseCanonicalProject(parsed.scope);
+    return transaction(this.database, () => {
+      const lesson = this.publishedLesson(parsed);
+      if (!lesson) throw new Error('Published lesson is unavailable or no longer valid');
+      const publication = this.publicationBinding(lesson);
+      const fingerprint = this.hash(['publication', parsed.scope, publication]);
+      const existing = this.read(this.database.prepare('SELECT payload FROM experiences WHERE fingerprint = ?').get(fingerprint));
+      const content = this.lessonContent(lesson);
+      const failure = this.publishedFailureIdentity(lesson);
+      if (existing) return this.withPublishedFailureIdentity(existing, failure);
+      const now = this.timestamp();
+      return this.save({ ...content, publication, ...failure, id: randomUUID(), fingerprint, status: 'verified',
+        createdAt: now, updatedAt: now, expiresAt: new Date(Date.parse(now) + 90 * DAY).toISOString(), occurrences: 1,
+        observations: [{ source: content.source, evidence: content.evidence, recordedAt: now }],
+        verifiedEvidence: { runId: lesson.qualification.binding.qa.qaRunId,
+          evidence: lesson.qualification.evidence.slice(0, 8).map(entry => entry.id), verifiedAt: now } });
+    });
+  }
+
   recordFailure(input: RecordFailureInput): ExperienceRecord {
     this.assertOpen();
     const parsed = failureSchema.parse(input);
+    return transaction(this.database, () => this.recordFailureBody(parsed).record);
+  }
+
+  recordUnselectedFailure(input: RecordFailureInput): ExperienceRecord | undefined {
+    this.assertOpen();
+    const parsed = failureSchema.parse(input);
+    return transaction(this.database, () => {
+      const selected = this.database.prepare(`SELECT receipts.experience_id, receipts.source_hash FROM experience_receipts AS receipts
+        JOIN experiences ON experiences.id = receipts.experience_id WHERE experiences.scope = ? AND receipts.run_hash = ?
+        AND receipts.source_hash LIKE 'metric:context:selected:%'`).all(parsed.scope, this.hash(parsed.source.runId))
+        .some(row => {
+          const receipt = this.readContextReceipt(String(row.experience_id), String(row.source_hash));
+          return receipt?.stage === 'selected' && receipt.scope === parsed.scope
+            && canonicalLearningJson(receipt.source) === canonicalLearningJson(parsed.source);
+        });
+      return selected ? undefined : this.recordFailureBody(parsed).record;
+    });
+  }
+
+  private recordFailureBody(parsed: z.infer<typeof failureSchema>, protectedIds: string[] = []): { record: ExperienceRecord; recurringIds: string[] } {
+    const legacy = this.database.prepare(`SELECT payload FROM experiences WHERE scope = ?
+      AND json_type(payload, '$.publication') = 'object' AND json_extract(payload, '$.failureIdentityEvidence.version') IS NOT 2`)
+      .all(parsed.scope).map(row => this.read(row)!);
+    for (const record of legacy) {
+      const lesson = this.publishedLesson({ scope: record.scope, key: record.publication!.key });
+      const failure = lesson && canonicalLearningJson(this.publicationBinding(lesson)) === canonicalLearningJson(record.publication)
+        ? this.publishedFailureIdentity(lesson) : undefined;
+      this.withPublishedFailureIdentity(record, failure, [...protectedIds, ...legacy.map(entry => entry.id)]);
+    }
+    const fingerprint = this.fingerprint(parsed);
+    const matches = this.database.prepare(`SELECT payload FROM experiences WHERE fingerprint = ?
+      OR (json_extract(payload, '$.failureFingerprint') = ? AND (json_type(payload, '$.publication') IS NULL
+        OR json_type(payload, '$.failureIdentityEvidence') = 'object')) ORDER BY fingerprint = ? DESC, id`)
+      .all(fingerprint, fingerprint, fingerprint)
+      .map(row => this.read(row)!);
+    const protectedMatches = [...new Set([...protectedIds, ...matches.map(record => record.id)])];
+    const results = matches.length ? matches.map(record => this.aggregateFailure(parsed, record, protectedMatches))
+      : [this.aggregateFailure(parsed, undefined, protectedMatches)];
+    return { record: results[0].record, recurringIds: results.filter(result => result.recurrence).map(result => result.record.id) };
+  }
+
+  private aggregateFailure(parsed: z.infer<typeof failureSchema>, existing: ExperienceRecord | undefined,
+    protectedIds: string[]): { record: ExperienceRecord; recurrence: boolean } {
     const now = this.timestamp();
     const expiry = new Date(parsed.expiresAt ?? Date.parse(now) + 90 * DAY).toISOString();
     const fingerprint = this.fingerprint(parsed);
-    return transaction(this.database, () => {
-      const existing = this.read(this.database.prepare("SELECT payload FROM experiences WHERE fingerprint = ? OR json_extract(payload, '$.failureFingerprint') = ?").get(fingerprint, fingerprint));
-      const receipt = { sourceHash: this.hash(parsed.source), runHash: this.hash(parsed.source.runId), evidenceHash: this.hash([...parsed.evidence].sort()) };
-      const seen = existing && this.database.prepare('SELECT evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash = ?')
-        .get(existing.id, receipt.sourceHash);
-      if (seen?.evidence_hash === receipt.evidenceHash) return existing!;
-      const previous = existing?.observations.find(entry => entry.source.runId === parsed.source.runId && entry.source.workItemId === parsed.source.workItemId);
-      if (existing?.provenanceSaturated && previous && parsed.evidence.every(ref => previous.evidence.includes(ref))) return existing;
-      if (Date.parse(expiry) <= Date.parse(now) || Date.parse(expiry) > Date.parse(now) + 365 * DAY) {
-        throw new Error('Experience expiry must be in the next 365 days');
-      }
-      const observation = { source: parsed.source, evidence: parsed.evidence, recordedAt: now };
-      if (!existing) {
-        return this.save({ ...parsed, id: randomUUID(), fingerprint, failureFingerprint: fingerprint,
-          failureIdentity: { trigger: parsed.trigger, rootCause: parsed.rootCause, action: parsed.action }, status: 'candidate', createdAt: now, updatedAt: now,
-          expiresAt: expiry, occurrences: 1, observations: [observation] }, receipt);
-      }
-      const observations = existing.observations.filter(entry => entry !== previous);
-      observations.push(previous ? { ...observation, evidence: [...new Set([...previous.evidence, ...parsed.evidence])].slice(-8) } : observation);
-      const expired = Date.parse(existing.expiresAt) <= Date.parse(now);
-      const knownRun = this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND run_hash = ?').get(existing.id, receipt.runHash);
-      const knownEvidence = this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND evidence_hash = ?').get(existing.id, receipt.evidenceHash);
-      const recurrence = !knownRun && !knownEvidence && parsed.evidence.some(ref =>
-        !existing.evidence.includes(ref) && !existing.observations.some(entry => entry.evidence.includes(ref)));
-      const keepVerified = existing.status === 'verified' && !expired && !recurrence;
-      if (recurrence && !existing.provenanceSaturated) this.incrementMetric(existing.id, 'recurrences');
-      return this.save({ ...existing, status: existing.status === 'revoked' ? 'revoked' : keepVerified ? 'verified' : 'candidate',
-        verifiedEvidence: existing.status === 'revoked' || keepVerified ? existing.verifiedEvidence : undefined,
-        evidence: [...new Set([...existing.evidence, ...parsed.evidence])].slice(-8), observations: observations.slice(-8),
-        occurrences: existing.occurrences + (seen || previous ? 0 : 1), updatedAt: now,
-        expiresAt: expired ? expiry : existing.expiresAt }, receipt);
-    });
+    const receipt = { sourceHash: this.hash(parsed.source), runHash: this.hash(parsed.source.runId), evidenceHash: this.hash([...parsed.evidence].sort()) };
+    const seen = existing && this.database.prepare('SELECT evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash = ?')
+      .get(existing.id, receipt.sourceHash);
+    if (seen?.evidence_hash === receipt.evidenceHash) return { record: existing!, recurrence: false };
+    const previous = existing?.observations.find(entry => entry.source.runId === parsed.source.runId && entry.source.workItemId === parsed.source.workItemId);
+    if (existing?.provenanceSaturated && previous && parsed.evidence.every(ref => previous.evidence.includes(ref))) return { record: existing, recurrence: false };
+    if (Date.parse(expiry) <= Date.parse(now) || Date.parse(expiry) > Date.parse(now) + 365 * DAY) {
+      throw new Error('Experience expiry must be in the next 365 days');
+    }
+    const observation = { source: parsed.source, evidence: parsed.evidence, recordedAt: now };
+    if (!existing) {
+      return { record: this.save({ ...parsed, id: randomUUID(), fingerprint, failureFingerprint: fingerprint,
+        failureIdentity: { trigger: parsed.trigger, rootCause: parsed.rootCause, action: parsed.action }, status: 'candidate', createdAt: now, updatedAt: now,
+        expiresAt: expiry, occurrences: 1, observations: [observation] }, receipt, protectedIds), recurrence: false };
+    }
+    const observations = existing.observations.filter(entry => entry !== previous);
+    observations.push(previous ? { ...observation, evidence: [...new Set([...previous.evidence, ...parsed.evidence])].slice(-8) } : observation);
+    const expired = Date.parse(existing.expiresAt) <= Date.parse(now);
+    const knownRun = existing.source.runId === parsed.source.runId
+      || existing.observations.some(entry => entry.source.runId === parsed.source.runId)
+      || this.database.prepare("SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' AND run_hash = ?").get(existing.id, receipt.runHash);
+    const knownEvidence = this.database.prepare("SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' AND evidence_hash = ?").get(existing.id, receipt.evidenceHash);
+    const recurrence = !knownRun && !knownEvidence && parsed.evidence.some(ref =>
+      !existing.evidence.includes(ref) && !existing.observations.some(entry => entry.evidence.includes(ref)));
+    const keepVerified = existing.status === 'verified' && !expired && !recurrence;
+    if (recurrence && !existing.provenanceSaturated) this.incrementMetric(existing.id, 'recurrences');
+    return { record: this.save({ ...existing, status: existing.status === 'revoked' ? 'revoked' : keepVerified ? 'verified' : 'candidate',
+      verifiedEvidence: existing.status === 'revoked' || keepVerified ? existing.verifiedEvidence : undefined,
+      evidence: existing.publication ? existing.evidence : [...new Set([...existing.evidence, ...parsed.evidence])].slice(-8), observations: observations.slice(-8),
+      occurrences: existing.occurrences + (seen || previous ? 0 : 1), updatedAt: now,
+      expiresAt: expired ? expiry : existing.expiresAt }, receipt, protectedIds), recurrence: Boolean(recurrence) };
   }
 
   recordSuccess(input: RecordFailureInput): ExperienceRecord {
@@ -216,7 +457,7 @@ export class ExperienceStore {
     this.assertOpen();
     const parsed = z.object({ scope: identity, limit: z.number().int().min(0).max(100).default(100) }).strict().parse(input);
     parseCanonicalProject(parsed.scope);
-    const records = this.database.prepare("SELECT payload FROM experiences WHERE scope = ? AND status <> 'revoked' AND expires_at > ? AND json_extract(payload, '$.provenanceSaturated') IS NOT 1 ORDER BY updated_at DESC, id LIMIT ?")
+    const records = this.database.prepare("SELECT payload FROM experiences WHERE scope = ? AND status <> 'revoked' AND expires_at > ? AND json_extract(payload, '$.publication') IS NULL AND json_extract(payload, '$.provenanceSaturated') IS NOT 1 AND NOT EXISTS (SELECT 1 FROM experience_applicability WHERE experience_id = experiences.id) ORDER BY updated_at DESC, id LIMIT ?")
       .all(parsed.scope, this.timestamp(), parsed.limit).map(row => this.read(row)!);
     const document: ExperienceExchange = { version: 1, scope: parsed.scope, experiences: records.map(record => this.portable(record)) };
     const json = JSON.stringify(document);
@@ -300,24 +541,181 @@ export class ExperienceStore {
     return counts;
   }
 
-  adopt(input: { id: string; scope: string; source: RecordFailureInput['source'] }): ExperienceMetrics {
+  adopt(input: { id: string; scope: string; source: RecordFailureInput['source'] }, context?: ExperienceAdoptionContext): ExperienceAdoptionResult {
     this.assertOpen();
     const parsed = z.object({ id: z.string().uuid(), scope: identity, source: sourceSchema }).strict().parse(input);
+    const { actual, verified } = z.preprocess(ownProperties, z.object({ actual: experienceQueryContextSchema,
+      verified: experienceQueryContextSchema.optional() }).strict()).parse(context === undefined ? { actual: {} } : context);
+    if (verified && canonicalLearningJson(verified) !== canonicalLearningJson(actual)) throw new Error('Adoption requires matching verified applicability and actual context');
+    const contextStatus = actual.target || actual.applicability?.version || actual.applicability?.environment ? 'recorded' : 'unavailable';
     parseCanonicalProject(parsed.scope);
     const workItem = parseWorkItemId(parsed.source.workItemId);
     if (`${workItem.platform}:${workItem.projectKey}` !== parsed.scope) throw new Error('Adoption work item does not belong to scope');
     return transaction(this.database, () => {
       const record = this.get(parsed.id, parsed.scope);
       if (!record || record.status !== 'verified' || Date.parse(record.expiresAt) <= Date.parse(this.timestamp())) throw new Error('Adoption requires a live verified experience in scope');
+      const required = this.database.prepare('SELECT payload FROM experience_applicability WHERE experience_id = ?').get(record.id);
+      if ((actual.target && actual.target.project !== parsed.scope) || this.applicableTriggers(record, actual) === undefined || ((required || record.publication) && !verified)) {
+        throw new Error('Adoption requires matching verified applicability');
+      }
       const key = `metric:adoption:${this.hash(parsed.source)}`;
-      if (this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(record.id, key)) return this.metrics({ scope: parsed.scope });
+      const previous = this.database.prepare('SELECT run_hash, evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(record.id, key);
+      const identity = { experienceId: record.id, scope: parsed.scope, source: parsed.source };
+      if (previous?.run_hash === 'metric' && previous.evidence_hash === 'metric') {
+        return { ...this.metrics({ scope: parsed.scope }), receipt: { ...identity, binding: 'legacy-unbound' } };
+      }
+      if (!record.verifiedEvidence) throw new Error('Adoption requires verification evidence');
+      const verificationDigest = this.verificationDigest(record, required);
+      const contextDigest = createHash('sha256').update(canonicalLearningJson(actual)).digest('hex');
+      const runHash = this.hash(parsed.source.runId);
+      if (previous) {
+        let binding: z.infer<typeof adoptionBindingSchema>;
+        try { binding = adoptionBindingSchema.parse(JSON.parse(String(previous.evidence_hash))); }
+        catch { throw new Error('Invalid adoption receipt binding'); }
+        if (previous.run_hash !== runHash || binding.verificationDigest !== verificationDigest || binding.contextDigest !== contextDigest
+          || (binding.version === 2 && canonicalLearningJson({ source: binding.source, publication: binding.publication })
+            !== canonicalLearningJson({ source: parsed.source, publication: record.publication }))) {
+          throw new Error('Adoption receipt binding conflicts with the current verified version or target context');
+        }
+        return { ...this.metrics({ scope: parsed.scope }), receipt: { ...identity, binding: 'verified-version', contextStatus, ...binding } };
+      }
+      const selections = this.database.prepare(`SELECT source_hash FROM experience_receipts WHERE experience_id = ? AND run_hash = ?
+        AND source_hash LIKE 'metric:context:selected:%'`).all(record.id, runHash)
+        .map(row => this.readContextReceipt(record.id, String(row.source_hash))!)
+        .filter(receipt => receipt.source.workItemId === parsed.source.workItemId);
+      if (selections.length && !selections.some(receipt => receipt.verificationDigest === verificationDigest)) {
+        throw new Error('Adoption requires the selected version to match the current verified experience');
+      }
       const count = this.database.prepare("SELECT COUNT(*) AS count FROM experience_receipts WHERE experience_id = ? AND source_hash LIKE 'metric:adoption:%'").get(record.id)!;
       if (Number(count.count) >= MAX_ADOPTIONS) throw new Error(`Experience adoption limit reached (${MAX_ADOPTIONS})`);
-      this.database.prepare('INSERT INTO experience_receipts VALUES (?, ?, ?, ?)').run(record.id, key, 'metric', 'metric');
+      const binding = { version: 2 as const, verificationDigest, contextDigest, acknowledgedAt: this.timestamp(), source: parsed.source,
+        ...(record.publication ? { publication: record.publication } : {}) };
+      this.database.prepare('INSERT INTO experience_receipts VALUES (?, ?, ?, ?)').run(record.id, key, runHash, JSON.stringify(binding));
       this.incrementMetric(record.id, 'adoptions');
       this.enforceBounds([record.id]);
-      return this.metrics({ scope: parsed.scope });
+      return { ...this.metrics({ scope: parsed.scope }), receipt: { ...identity, binding: 'verified-version', contextStatus, ...binding } };
     });
+  }
+
+  recordContextRetrieval(input: { id: string; scope: string; source: RecordFailureInput['source']; selectionId: string;
+    fragmentDigest: string; expectedRecord?: ExperienceRecord }, actual?: ExperienceQueryContext): ExperienceContextReceipt {
+    this.assertOpen();
+    const parsed = z.object({ id: z.string().uuid(), scope: identity, source: sourceSchema, selectionId: z.string().uuid(),
+      fragmentDigest: z.string().regex(/^[a-f0-9]{64}$/), expectedRecord: recordSchema.optional() }).strict().parse(input);
+    this.assertContextSource(parsed.scope, parsed.source);
+    const context = experienceQueryContextSchema.parse(actual === undefined ? {} : actual);
+    return transaction(this.database, () => {
+      const record = this.get(parsed.id, parsed.scope);
+      if (!record || record.status !== 'verified' || !record.verifiedEvidence || Date.parse(record.expiresAt) <= Date.parse(this.timestamp())) {
+        throw new Error('Context retrieval requires a live verified experience in scope');
+      }
+      if (parsed.expectedRecord && canonicalLearningJson(record) !== canonicalLearningJson(input.expectedRecord)) {
+        throw new Error('Context retrieval record changed since recall');
+      }
+      if ((context.target && context.target.project !== parsed.scope) || this.applicableTriggers(record, context) === undefined) {
+        throw new Error('Context retrieval requires matching applicability');
+      }
+      const required = this.database.prepare('SELECT payload FROM experience_applicability WHERE experience_id = ?').get(record.id);
+      return this.saveContextReceipt({ version: 1, stage: 'retrieved', experienceId: record.id, scope: parsed.scope, source: parsed.source,
+        selectionId: parsed.selectionId, verificationDigest: this.verificationDigest(record, required),
+        contextDigest: createHash('sha256').update(canonicalLearningJson(context)).digest('hex'),
+        ...(record.publication ? { publication: record.publication } : {}), fragmentDigest: parsed.fragmentDigest, recordedAt: this.timestamp() });
+    });
+  }
+
+  recordContextSelection(input: { retrieved: ExperienceContextReceipt; fragmentDigest: string }): ExperienceContextReceipt {
+    this.assertOpen();
+    const parsed = z.object({ retrieved: contextReceiptSchema, fragmentDigest: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(input);
+    if (parsed.retrieved.stage !== 'retrieved') throw new Error('Context selection requires a retrieved receipt');
+    const retrieved = parsed.retrieved;
+    this.assertContextSource(retrieved.scope, retrieved.source);
+    return transaction(this.database, () => {
+      const parent = this.readContextReceipt(retrieved.experienceId, this.contextReceiptKey(retrieved));
+      if (!parent || parent.stage !== 'retrieved' || canonicalLearningJson(parent) !== canonicalLearningJson(input.retrieved)) {
+        throw new Error('Context selection requires the original stored retrieved receipt');
+      }
+      return this.saveContextReceipt({ ...parent, stage: 'selected', retrievedFragmentDigest: parent.fragmentDigest,
+        fragmentDigest: parsed.fragmentDigest, recordedAt: this.timestamp() });
+    });
+  }
+
+  contextReceipts(input: { scope: string; source: RecordFailureInput['source']; limit?: number }): ExperienceContextReceipt[] {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity, source: sourceSchema,
+      limit: z.number().int().min(0).max(MAX_RECORDS * MAX_CONTEXT_RECEIPTS).default(MAX_CONTEXT_RECEIPTS) }).strict().parse(input);
+    this.assertContextSource(parsed.scope, parsed.source);
+    if (!parsed.limit) return [];
+    const rows = this.database.prepare(`SELECT receipts.experience_id, receipts.source_hash FROM experience_receipts AS receipts
+      JOIN experiences ON experiences.id = receipts.experience_id WHERE experiences.scope = ? AND receipts.run_hash = ?
+      AND receipts.source_hash LIKE 'metric:context:%' ORDER BY receipts.experience_id, receipts.source_hash`)
+      .all(parsed.scope, this.hash(parsed.source.runId));
+    return rows.map(row => this.readContextReceipt(String(row.experience_id), String(row.source_hash))!)
+      .filter(receipt => receipt.scope === parsed.scope && canonicalLearningJson(receipt.source) === canonicalLearningJson(parsed.source))
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt) || left.experienceId.localeCompare(right.experienceId)
+        || left.selectionId.localeCompare(right.selectionId) || left.stage.localeCompare(right.stage))
+      .slice(0, parsed.limit);
+  }
+
+  recordRunOutcome(input: { scope: string; source: RecordFailureInput['source']; event: ExperienceOutcomeEvent;
+    failure?: RecordFailureInput }): { receipts: ExperienceOutcomeReceipt[]; failure?: ExperienceRecord } {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity, source: sourceSchema, event: outcomeEventSchema, failure: failureSchema.optional() }).strict().parse(input);
+    this.assertContextSource(parsed.scope, parsed.source);
+    if (parsed.event.runId !== parsed.source.runId) throw new Error('Outcome event must belong to the consuming run');
+    if (parsed.failure && (parsed.event.outcome !== 'failed' || parsed.failure.scope !== parsed.scope
+      || canonicalLearningJson(parsed.failure.source) !== canonicalLearningJson(parsed.source))) {
+      throw new Error('Outcome failure requires a failed event and matching scope and source');
+    }
+    return transaction(this.database, () => {
+      const previous = this.outcomeReceipts({ scope: parsed.scope, source: parsed.source, limit: MAX_RECORDS * MAX_RECEIPTS })
+        .filter(receipt => receipt.event.sequence === parsed.event.sequence);
+      if (previous.some(receipt => canonicalLearningJson(receipt.event) !== canonicalLearningJson(parsed.event))) {
+        throw new Error('Outcome event conflicts with the stored receipt');
+      }
+      const selected = this.contextReceipts({ scope: parsed.scope, source: parsed.source, limit: MAX_RECORDS * MAX_CONTEXT_RECEIPTS })
+        .filter((receipt): receipt is ExperienceOutcomeReceipt['selected'] => receipt.stage === 'selected'
+          && Date.parse(parsed.event.occurredAt) > Date.parse(receipt.recordedAt)
+          && Date.parse(parsed.event.observedAt) > Date.parse(receipt.recordedAt));
+      if (!selected.length) return { receipts: [] };
+      const protectedIds = [...new Set(selected.map(receipt => receipt.experienceId))];
+      const failure = parsed.failure && !previous.length ? this.recordFailureBody(parsed.failure, protectedIds) : undefined;
+      if (failure) protectedIds.push(failure.record.id);
+      const recordedAt = this.timestamp();
+      const receipts = selected.map(selection => {
+        const key = this.outcomeReceiptKey(selection, parsed.event);
+        const saved = this.readOutcomeReceipt(selection.experienceId, key);
+        if (saved) return saved;
+        const count = this.database.prepare(`SELECT COUNT(*) AS count FROM experience_receipts
+          WHERE experience_id = ? AND source_hash LIKE 'metric:outcome:%'`).get(selection.experienceId)!;
+        if (Number(count.count) >= MAX_RECEIPTS) throw new Error(`Experience outcome receipt limit reached (${MAX_RECEIPTS})`);
+        const receipt = outcomeReceiptSchema.parse({ version: 1, stage: 'outcome', selected: selection, event: parsed.event,
+          recurrence: previous.length ? previous.some(entry => entry.selected.experienceId === selection.experienceId && entry.recurrence)
+            : Boolean(failure?.recurringIds.includes(selection.experienceId)),
+          benefit: 'unknown', recordedAt: previous[0]?.recordedAt ?? recordedAt });
+        this.database.prepare('INSERT INTO experience_receipts VALUES (?, ?, ?, ?)')
+          .run(selection.experienceId, key, this.hash(parsed.source.runId), JSON.stringify(receipt));
+        return receipt;
+      });
+      this.enforceBounds(protectedIds);
+      return { receipts, ...(failure ? { failure: failure.record } : {}) };
+    });
+  }
+
+  outcomeReceipts(input: { scope: string; source: RecordFailureInput['source']; limit?: number }): ExperienceOutcomeReceipt[] {
+    this.assertOpen();
+    const parsed = z.object({ scope: identity, source: sourceSchema,
+      limit: z.number().int().min(0).max(MAX_RECORDS * MAX_RECEIPTS).default(MAX_RECEIPTS) }).strict().parse(input);
+    this.assertContextSource(parsed.scope, parsed.source);
+    if (!parsed.limit) return [];
+    const rows = this.database.prepare(`SELECT receipts.experience_id, receipts.source_hash FROM experience_receipts AS receipts
+      JOIN experiences ON experiences.id = receipts.experience_id WHERE experiences.scope = ? AND receipts.run_hash = ?
+      AND receipts.source_hash LIKE 'metric:outcome:%' ORDER BY receipts.experience_id, receipts.source_hash`)
+      .all(parsed.scope, this.hash(parsed.source.runId));
+    return rows.map(row => this.readOutcomeReceipt(String(row.experience_id), String(row.source_hash))!)
+      .filter(receipt => receipt.selected.scope === parsed.scope && canonicalLearningJson(receipt.selected.source) === canonicalLearningJson(parsed.source))
+      .sort((left, right) => right.event.sequence - left.event.sequence || left.selected.experienceId.localeCompare(right.selected.experienceId)
+        || left.selected.selectionId.localeCompare(right.selected.selectionId))
+      .slice(0, parsed.limit);
   }
 
   get(id: string, scope: string): ExperienceRecord | undefined {
@@ -335,20 +733,42 @@ export class ExperienceStore {
       .map(row => this.read(row)!);
   }
 
-  recall(input: { scope: string; prompt: string; limit?: number; maxChars?: number }): ExperienceRecord[] {
+  recall(input: { scope: string; prompt: string; limit?: number; maxChars?: number } & ExperienceQueryContext): ExperienceRecord[] {
     this.assertOpen();
+    if ((input.target && !Object.hasOwn(input, 'target')) || (input.applicability && !Object.hasOwn(input, 'applicability'))) return [];
+    const context = experienceQueryContextSchema.safeParse({ applicability: input.applicability, target: input.target });
+    if (!context.success) return [];
+    const { applicability: _applicability, target: _target, ...request } = input;
     const parsed = z.object({ scope: identity, prompt: text(8192), limit: z.number().int().min(0).max(100).default(5),
-      maxChars: z.number().int().min(0).max(MAX_RECORD_BYTES).default(8000) }).strict().parse(input);
-    const terms = [...new Set(redact(parsed.prompt).toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])]
-      .filter(term => !['the', 'and', 'for', 'with', 'this', 'that', 'please', 'fix'].includes(term));
-    if (!terms.length || !parsed.limit || parsed.maxChars < 2) return [];
-    const candidates = this.database.prepare('SELECT payload FROM experiences WHERE scope = ? AND status = ? AND expires_at > ?')
-      .all(parsed.scope, 'verified', this.timestamp()).map(row => this.read(row)!)
-      .map(record => {
-        const content = `${record.trigger} ${record.rootCause} ${record.action}`.toLowerCase();
-        const words = new Set(content.match(/[\p{L}\p{N}_]{2,}/gu) ?? []);
-        return { record, score: terms.filter(term => words.has(term)).length };
-      }).filter(candidate => candidate.score > 0)
+      maxChars: z.number().int().min(0).max(MAX_RECORD_BYTES).default(8000) }).strict().parse(request);
+    const query = { ...parsed, ...context.data };
+    if (query.target && query.target.project !== parsed.scope) return [];
+    const prompt = redact(parsed.prompt);
+    const clauses = prompt.split(recallClauseBoundary).map(clause => clause.trim()).filter(Boolean);
+    if (!query.target && !recallProjectMatches(parsed.scope, clauses)) return [];
+    if (!parsed.limit || parsed.maxChars < 2) return [];
+    const records = this.database.prepare('SELECT payload FROM experiences WHERE scope = ? AND status = ? AND expires_at > ?')
+      .all(parsed.scope, 'verified', this.timestamp()).map(row => this.read(row)!);
+    const positive = clauses.map(clause => clause.slice(0, recallExclusion.exec(clause)?.index)).filter(Boolean);
+    const terms = [...recallTerms(positive.join('\n'))];
+    if (!terms.length) return [];
+    let aliasParts: ReturnType<typeof aliasQueryParts> | undefined;
+    const candidates = records
+      .flatMap(record => {
+        const aliases = this.applicableTriggers(record, query);
+        if (!aliases || recallDenied(record, clauses)) return [];
+        const alias = aliases.length ? aliasMatch(aliases, aliasParts ??= aliasQueryParts(clauses)) : 'absent';
+        if (alias === 'denied') return [];
+        const words = recallTerms(`${record.trigger} ${record.rootCause} ${record.action}`);
+        const trigger = recallTerms(record.trigger);
+        const score = terms.filter(term => words.has(term)).length;
+        const affirmative = recallTerms(positive.filter(clause => !recallNegativeCue.test(clause)
+          || record.trigger.toLowerCase().includes(clause.toLowerCase())).join('\n'));
+        const affirmativeScore = [...affirmative].filter(term => words.has(term)).length;
+        const matched = affirmativeScore >= Math.min(2, terms.length) || terms.some(term => trigger.has(term))
+          && (score >= 2 || [...affirmative].some(term => trigger.has(term)));
+        return matched || alias === 'affirmed' ? [{ record, score: matched ? score : 1 }] : [];
+      })
       .sort((left, right) => right.score - left.score || right.record.updatedAt.localeCompare(left.record.updatedAt) || left.record.id.localeCompare(right.record.id));
     const selected: ExperienceRecord[] = [];
     let remaining = parsed.maxChars - 2;
@@ -366,30 +786,42 @@ export class ExperienceStore {
     return selected;
   }
 
-  verify(id: string, input: ExperienceVerification): ExperienceRecord {
+  verify(id: string, input: ExperienceVerification, context?: ExperienceQueryContext): ExperienceRecord {
     this.assertOpen();
     const parsed = verificationSchema.parse(input);
     return transaction(this.database, () => {
       const record = this.require(id);
+      if (record.publication) throw new Error('Published lessons require independent candidate validation');
+      const previousContext = this.database.prepare('SELECT payload FROM experience_applicability WHERE experience_id = ?').get(record.id);
+      if (previousContext && !context) throw new Error('Existing applicability requires fresh explicit verification context');
+      const required = context && experienceQueryContextSchema.parse(context);
+      if (required && required.target?.project !== record.scope) {
+        throw new Error('Experience applicability requires an explicit target in the same project');
+      }
+      const contextPayload = required && JSON.stringify(required);
       const now = this.timestamp();
       if (record.status === 'revoked') throw new Error('Revoked experience cannot be verified');
       if (Date.parse(record.expiresAt) <= Date.parse(now)) throw new Error('Expired experience cannot be verified');
       if (record.provenanceSaturated) throw new Error('Experience provenance is saturated; independent verification cannot be established');
-      if (this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND run_hash = ?').get(record.id, this.hash(parsed.runId))) {
+      if (this.database.prepare("SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' AND run_hash = ?").get(record.id, this.hash(parsed.runId))) {
         throw new Error('Verification requires an independent run');
       }
       if (parsed.evidence.every(ref => record.observations.some(entry => entry.evidence.includes(ref)))
-        || this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND evidence_hash = ?')
+        || this.database.prepare("SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' AND evidence_hash = ?")
           .get(record.id, this.hash([...parsed.evidence].sort()))) {
         throw new Error('Verification requires new evidence');
       }
       const corrected = { ...record, failureFingerprint: record.failureFingerprint ?? record.fingerprint,
         failureIdentity: this.originalFailure(record), action: parsed.action ?? record.action, rootCause: parsed.rootCause ?? record.rootCause };
       const fingerprint = record.origin ? record.fingerprint : this.fingerprint(corrected);
-      const conflict = this.database.prepare("SELECT id FROM experiences WHERE (fingerprint = ? OR json_extract(payload, '$.failureFingerprint') = ?) AND id <> ?").get(fingerprint, fingerprint, record.id);
+      const conflict = this.database.prepare(`SELECT id FROM experiences WHERE (fingerprint = ? OR json_extract(payload, '$.failureFingerprint') = ?)
+        AND id <> ? AND json_type(payload, '$.publication') IS NULL`).get(fingerprint, fingerprint, record.id);
       if (conflict) throw new Error('Corrected experience already exists');
       if (record.status === 'verified' && record.verifiedEvidence?.runId === parsed.runId
-        && record.fingerprint === fingerprint && JSON.stringify(record.verifiedEvidence.evidence) === JSON.stringify(parsed.evidence)) return record;
+        && record.fingerprint === fingerprint && JSON.stringify(record.verifiedEvidence.evidence) === JSON.stringify(parsed.evidence)) {
+        if (contextPayload !== previousContext?.payload) throw new Error('Changing applicability requires fresh QA evidence');
+        return record;
+      }
       const runHash = this.hash(parsed.runId);
       const evidenceHash = this.hash([...parsed.evidence].sort());
       if (this.database.prepare('SELECT 1 FROM experience_verifications WHERE experience_id = ? AND (run_hash = ? OR evidence_hash = ?)')
@@ -397,7 +829,14 @@ export class ExperienceStore {
       const verifications = this.database.prepare('SELECT COUNT(*) AS count FROM experience_verifications WHERE experience_id = ?').get(record.id)!;
       if (Number(verifications.count) >= MAX_RECEIPTS) throw new Error(`Experience verification limit reached (${MAX_RECEIPTS})`);
       this.database.prepare('INSERT INTO experience_verifications VALUES (?, ?, ?)').run(record.id, runHash, evidenceHash);
-      return this.save({ ...corrected, fingerprint, status: 'verified', updatedAt: now, verifiedEvidence: { ...parsed, verifiedAt: now } });
+      const verified = this.save({ ...corrected, fingerprint, status: 'verified', updatedAt: now, verifiedEvidence: { ...parsed, verifiedAt: now } });
+      if (contextPayload) {
+        this.database.prepare(`INSERT INTO experience_applicability VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(experience_id) DO UPDATE SET fingerprint=excluded.fingerprint, run_hash=excluded.run_hash,
+          evidence_hash=excluded.evidence_hash, payload=excluded.payload`).run(record.id, this.fingerprint(verified), runHash, evidenceHash, contextPayload);
+        this.enforceBounds([record.id]);
+      }
+      return verified;
     });
   }
 
@@ -419,12 +858,139 @@ export class ExperienceStore {
     return z.date().parse(this.now()).toISOString();
   }
 
+  private applicableTriggers(record: ExperienceRecord, context: ExperienceQueryContext): string[] | undefined {
+    if (record.publication) {
+      const lesson = this.publishedLesson({ scope: record.scope, key: record.publication.key }, context);
+      if (!lesson || lesson.candidate.proposal.kind !== 'lesson'
+        || canonicalLearningJson(this.publicationBinding(lesson)) !== canonicalLearningJson(record.publication)) return undefined;
+      const content = this.lessonContent(lesson);
+      const current = canonicalLearningJson(content) === canonicalLearningJson({ scope: record.scope, trigger: record.trigger,
+        rootCause: record.rootCause, action: record.action, evidence: record.evidence, source: record.source })
+        && record.verifiedEvidence?.runId === lesson.qualification.binding.qa.qaRunId
+        && canonicalLearningJson(record.verifiedEvidence.evidence) === canonicalLearningJson(lesson.qualification.evidence.slice(0, 8).map(entry => entry.id));
+      return current ? lesson.candidate.proposal.payload.triggerAliases ?? [] : undefined;
+    }
+    const row = this.database.prepare('SELECT * FROM experience_applicability WHERE experience_id = ?').get(record.id);
+    const products = Object.keys(context.target?.productVersions ?? {});
+    if (!row) return !products.length && !recallRequiresContext.test(record.action) ? [] : undefined;
+    if (!record.verifiedEvidence || row.fingerprint !== this.fingerprint(record) || row.run_hash !== this.hash(record.verifiedEvidence.runId)
+      || row.evidence_hash !== this.hash([...record.verifiedEvidence.evidence].sort())) return undefined;
+    const required = experienceQueryContextSchema.parse(JSON.parse(String(row.payload)));
+    if (products.some(product => !Object.hasOwn(required.target?.productVersions ?? {}, product))) return undefined;
+    return experienceContextMatches(required, context) ? [] : undefined;
+  }
+
+  private publishedLesson(input: { scope: string; key: string }, context?: ExperienceQueryContext) {
+    const knowledge = this.knowledgeConfiguration();
+    return knowledge ? readConfiguredPublishedLesson(knowledge, { ...input, context }) : null;
+  }
+
+  private knowledgeConfiguration() {
+    return this.knowledge ?? (this.homeDir ? readExperienceKnowledgeConfiguration(this.homeDir) : undefined);
+  }
+
+  private publishedFailureIdentity(lesson: NonNullable<ReturnType<typeof readConfiguredPublishedLesson>>) {
+    const knowledge = this.knowledgeConfiguration();
+    if (!knowledge) return undefined;
+    const store = new CandidateStore({ file: knowledge.file });
+    try {
+      lesson.checkSourceRead?.();
+      const pack = store.getEvidencePack(lesson.candidate.evidenceDigest);
+      if (!pack || pack.completeness !== 'complete') return undefined;
+      const identity = { scope: lesson.request.scope, runId: lesson.request.sourceRunId!, analyzerVersion: lesson.request.analyzerVersion };
+      const cursor = store.getScanCursor(identity);
+      let sources: readonly EvidenceSourceInput[] | undefined;
+      if (cursor) {
+        const root = store.getScanSourceRoot(identity);
+        if (!root || !store.getScanRequestKeys(identity).includes(lesson.candidate.requestKey)) return undefined;
+        sources = [{ id: 'audit-1', kind: 'audit', runId: identity.runId,
+          path: new JsonlEventStore({ root }).pathFor(identity.runId), allowedRoot: root }];
+      } else {
+        if (!knowledge.validationConfigurationFile) return undefined;
+        const configuration = validationConfigurationSchema.parse(JSON.parse(
+          readValidationPrivateFile(knowledge.validationConfigurationFile).bytes.toString('utf8')));
+        sources = selectKnowledgeValidationChecker(configuration, identity.scope, lesson.qualification.binding.checkerId)
+          ?.evidence?.find(entry => entry.digest === pack.digest)?.sources;
+      }
+      const histories = new Map<string, RunEvent[]>();
+      for (const source of sources ?? []) {
+        if (source.kind !== 'audit' || source.runId !== identity.runId) continue;
+        const expected = pack.sources.find(entry => entry.id === source.id && entry.kind === 'audit');
+        lesson.checkSourceRead?.(source.path);
+        const bytes = readValidationSnapshotFile(source.path, source.allowedRoot, 64 * 1024 * 1024);
+        if (!expected?.sourceDigest || createHash('sha256').update(bytes).digest('hex') !== expected.sourceDigest) return undefined;
+        const history: RunEvent[] = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n')
+          .filter(line => line.trim()).map(line => JSON.parse(line));
+        if (history.length > 4096 || !verifyRunEventHistory(identity.runId, history).valid
+          || history.some(event => event.schemaVersion !== 1 || event.context.workItemId !== lesson.request.workItemId
+            || event.correlationId !== identity.runId || event.type !== event.data.kind)
+          || (cursor && history[cursor.sequence - 1]?.integrity.hash !== cursor.head)) return undefined;
+        histories.set(source.id, history);
+      }
+      const identities = new Map<string, { failureFingerprint: string; failureIdentity: z.infer<typeof failureIdentitySchema>;
+        failureIdentityEvidence: NonNullable<ExperienceRecord['failureIdentityEvidence']> }>();
+      for (const entry of pack.entries) {
+        if (!lesson.candidate.proposal.evidenceIds.includes(entry.ref.id) || entry.ref.kind !== 'audit'
+          || entry.ref.authority !== 'observed' || entry.ref.completeness !== 'complete') continue;
+        const reference: RunEvent = JSON.parse(entry.content);
+        const event = histories.get(entry.position.sourceId)?.[reference.sequence - 1];
+        if (!event || event.sequence !== reference.sequence || event.integrity.hash !== reference.integrity.hash
+          || entry.position.auditSequence !== event.sequence) return undefined;
+        if (event.context.runId !== lesson.request.sourceRunId || event.context.workItemId !== lesson.request.workItemId
+          || event.correlationId !== lesson.request.sourceRunId || event.context.purpose === 'learning'
+          || !['system', 'cli', 'loop'].includes(event.context.actor.kind) || event.type !== event.data.kind) continue;
+        const data = event.data;
+        if (data.kind !== 'failure.classified' && data.kind !== 'qa.failed') continue;
+        const code = data.kind === 'failure.classified' ? data.code
+          : data.reasonCode ?? (data.reason === 'rework' ? 'qa_rework' : 'qa_execution_failed');
+        if (!code) continue;
+        const identityResult = failureIdentitySchema.safeParse({ trigger: code,
+          rootCause: (data.summary ?? `Independent QA ${data.kind === 'qa.failed' ? data.reason ?? 'failed' : 'failed'}`).slice(0, 480),
+          action: `Inspect the ${code} evidence and validate a correction before retrying.` });
+        if (!identityResult.success) continue;
+        const failureIdentity = identityResult.data;
+        const failureFingerprint = this.fingerprint({ scope: lesson.request.scope, ...failureIdentity });
+        identities.set(failureFingerprint, { failureFingerprint, failureIdentity,
+          failureIdentityEvidence: { version: 2, id: entry.ref.id, sequence: event.sequence, hash: event.integrity.hash } });
+      }
+      return identities.size === 1 ? [...identities.values()][0] : undefined;
+    } catch { return undefined; }
+    finally { store.close(); }
+  }
+
+  private withPublishedFailureIdentity(record: ExperienceRecord,
+    failure: ReturnType<ExperienceStore['publishedFailureIdentity']>, protectedIds: string[] = []) {
+    const fields = { failureFingerprint: failure?.failureFingerprint, failureIdentity: failure?.failureIdentity,
+      failureIdentityEvidence: failure?.failureIdentityEvidence };
+    return canonicalLearningJson(fields) === canonicalLearningJson({ failureFingerprint: record.failureFingerprint,
+      failureIdentity: record.failureIdentity, failureIdentityEvidence: record.failureIdentityEvidence })
+      ? record : this.save({ ...record, ...fields }, undefined, protectedIds);
+  }
+
+  private publicationBinding(lesson: NonNullable<ReturnType<typeof readConfiguredPublishedLesson>>) {
+    return publicationBindingSchema.parse({ key: lesson.publication.key, candidateId: lesson.candidate.id,
+      validatedVersion: lesson.validation.validatedVersion, candidateDigest: lesson.candidate.digest,
+      evidenceDigest: lesson.candidate.evidenceDigest, validatorVersion: lesson.validation.validatorVersion, targetRef: lesson.publication.targetRef });
+  }
+
+  private lessonContent(lesson: NonNullable<ReturnType<typeof readConfiguredPublishedLesson>>) {
+    if (lesson.candidate.proposal.kind !== 'lesson') throw new Error('Expected a lesson');
+    return failureSchema.omit({ expiresAt: true }).parse({ scope: lesson.request.scope,
+      trigger: lesson.candidate.proposal.payload.trigger, rootCause: lesson.candidate.proposal.payload.rootCause,
+      action: lesson.candidate.proposal.payload.fix, evidence: lesson.candidate.proposal.evidenceIds.slice(0, 8),
+      source: { runId: lesson.request.sourceRunId, workItemId: lesson.request.workItemId } });
+  }
+
   private fingerprint(input: Pick<ExperienceRecord, 'scope' | 'trigger' | 'rootCause' | 'action' | 'kind'>): string {
     const parts = [input.scope, input.trigger, input.rootCause, input.action];
     return this.hash(input.kind === 'success' ? [...parts, 'success'] : parts);
   }
 
   private portable(record: ExperienceRecord): ExperienceExchange['experiences'][number] {
+    if (record.publication) throw new Error('Version 1 exchange cannot represent a publication binding');
+    if (this.database.prepare('SELECT 1 FROM experience_applicability WHERE experience_id = ?').get(record.id)) {
+      throw new Error('Version 1 exchange cannot represent structured applicability');
+    }
     const failureIdentity = this.originalFailure(record);
     if (record.kind !== 'success' && !failureIdentity) throw new Error('Original failure identity is unavailable; exchange cannot safely preserve recurrence');
     const receipts = this.database.prepare("SELECT source_hash, run_hash, evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash NOT LIKE 'metric:%' ORDER BY source_hash")
@@ -460,6 +1026,77 @@ export class ExperienceStore {
     return createHash('sha256').update(JSON.stringify(input)).digest('hex');
   }
 
+  private verificationDigest(record: ExperienceRecord, required: { [column: string]: unknown } | undefined): string {
+    return createHash('sha256').update(canonicalLearningJson({ id: record.id, scope: record.scope,
+      kind: record.kind ?? 'failure', trigger: record.trigger, rootCause: record.rootCause, action: record.action, expiresAt: record.expiresAt,
+      verification: record.verifiedEvidence, publication: record.publication,
+      applicability: required ? experienceQueryContextSchema.parse(JSON.parse(String(required.payload))) : {} })).digest('hex');
+  }
+
+  private assertContextSource(scope: string, source: RecordFailureInput['source']): void {
+    parseCanonicalProject(scope);
+    const workItem = parseWorkItemId(source.workItemId);
+    if (`${workItem.platform}:${workItem.projectKey}` !== scope) throw new Error('Context work item does not belong to scope');
+  }
+
+  private contextReceiptKey(receipt: Pick<ExperienceContextReceipt, 'stage' | 'source' | 'selectionId'>): string {
+    return `metric:context:${receipt.stage}:${this.hash({ source: receipt.source, selectionId: receipt.selectionId })}`;
+  }
+
+  private outcomeReceiptKey(selected: ExperienceOutcomeReceipt['selected'], event: ExperienceOutcomeEvent): string {
+    return `metric:outcome:${this.hash({ source: selected.source, selectionId: selected.selectionId, runId: event.runId, sequence: event.sequence })}`;
+  }
+
+  private readOutcomeReceipt(id: string, key: string): ExperienceOutcomeReceipt | undefined {
+    const row = this.database.prepare('SELECT run_hash, evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(id, key);
+    if (!row) return undefined;
+    const payload: unknown = JSON.parse(String(row.evidence_hash));
+    const receipt = outcomeReceiptSchema.parse(payload);
+    const selected = this.readContextReceipt(id, this.contextReceiptKey(receipt.selected));
+    if (canonicalLearningJson(payload) !== canonicalLearningJson(receipt) || receipt.selected.experienceId !== id
+      || !selected || canonicalLearningJson(selected) !== canonicalLearningJson(receipt.selected)
+      || this.outcomeReceiptKey(receipt.selected, receipt.event) !== key || receipt.event.runId !== receipt.selected.source.runId
+      || row.run_hash !== this.hash(receipt.event.runId)
+      || Date.parse(receipt.event.occurredAt) <= Date.parse(receipt.selected.recordedAt)
+      || Date.parse(receipt.event.observedAt) <= Date.parse(receipt.selected.recordedAt)) {
+      throw new Error('Invalid stored outcome receipt binding');
+    }
+    return receipt;
+  }
+
+  private readContextReceipt(id: string, key: string): ExperienceContextReceipt | undefined {
+    const row = this.database.prepare('SELECT run_hash, evidence_hash FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(id, key);
+    if (!row) return undefined;
+    const payload: unknown = JSON.parse(String(row.evidence_hash));
+    const receipt = contextReceiptSchema.parse(payload);
+    this.assertContextSource(receipt.scope, receipt.source);
+    if (canonicalLearningJson(payload) !== canonicalLearningJson(receipt) || receipt.experienceId !== id
+      || this.contextReceiptKey(receipt) !== key || row.run_hash !== this.hash(receipt.source.runId)
+      || !this.database.prepare('SELECT 1 FROM experiences WHERE id = ? AND scope = ?').get(id, receipt.scope)) {
+      throw new Error('Invalid stored context receipt binding');
+    }
+    return receipt;
+  }
+
+  private saveContextReceipt(input: ExperienceContextReceipt): ExperienceContextReceipt {
+    const receipt = contextReceiptSchema.parse(input);
+    const key = this.contextReceiptKey(receipt);
+    const previous = this.readContextReceipt(receipt.experienceId, key);
+    if (previous) {
+      if (canonicalLearningJson({ ...previous, recordedAt: receipt.recordedAt }) !== canonicalLearningJson(receipt)) {
+        throw new Error('Context receipt binding conflicts with the stored receipt');
+      }
+      return previous;
+    }
+    const count = this.database.prepare(`SELECT COUNT(*) AS count FROM experience_receipts
+      WHERE experience_id = ? AND source_hash LIKE 'metric:context:%'`).get(receipt.experienceId)!;
+    if (Number(count.count) >= MAX_CONTEXT_RECEIPTS) throw new Error(`Experience context receipt limit reached (${MAX_CONTEXT_RECEIPTS})`);
+    this.database.prepare('INSERT INTO experience_receipts VALUES (?, ?, ?, ?)')
+      .run(receipt.experienceId, key, this.hash(receipt.source.runId), JSON.stringify(receipt));
+    this.enforceBounds([receipt.experienceId]);
+    return receipt;
+  }
+
   private assertOpen(): void {
     if (this.closed) throw new Error('Experience store is closed');
   }
@@ -474,7 +1111,7 @@ export class ExperienceStore {
     return record;
   }
 
-  private save(input: ExperienceRecord, receipt?: { sourceHash: string; runHash: string; evidenceHash: string }): ExperienceRecord {
+  private save(input: ExperienceRecord, receipt?: { sourceHash: string; runHash: string; evidenceHash: string }, protectedIds: string[] = []): ExperienceRecord {
     let saturated = false;
     if (receipt) {
       const known = this.database.prepare('SELECT 1 FROM experience_receipts WHERE experience_id = ? AND source_hash = ?').get(input.id, receipt.sourceHash);
@@ -496,19 +1133,22 @@ export class ExperienceStore {
         ON CONFLICT(experience_id, source_hash) DO UPDATE SET evidence_hash=excluded.evidence_hash`)
         .run(record.id, receipt.sourceHash, receipt.runHash, receipt.evidenceHash);
     }
-    this.enforceBounds([record.id]);
+    this.enforceBounds([...new Set([record.id, ...protectedIds])]);
     return record;
   }
 
   private enforceBounds(protectedIds: string[]): void {
     for (;;) {
       const stats = this.database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0)
-        + (SELECT COUNT(*) * 384 FROM experience_receipts)
-        + (SELECT COUNT(*) * 256 FROM experience_verifications) AS bytes FROM experiences`).get()!;
+        + (SELECT COALESCE(SUM(length(CAST(experience_id AS BLOB)) + length(CAST(source_hash AS BLOB))
+          + length(CAST(run_hash AS BLOB)) + length(CAST(evidence_hash AS BLOB)) + 128), 0) FROM experience_receipts)
+        + (SELECT COUNT(*) * 256 FROM experience_verifications)
+        + (SELECT COALESCE(SUM(length(CAST(payload AS BLOB)) + 256), 0) FROM experience_applicability) AS bytes FROM experiences`).get()!;
       if (Number(stats.count) <= MAX_RECORDS && Number(stats.bytes) <= MAX_BYTES) break;
       this.database.prepare(`DELETE FROM experiences WHERE id = (SELECT id FROM experiences WHERE id NOT IN (${protectedIds.map(() => '?').join(',')}) ORDER BY
         (expires_at > ?) ASC, CASE status WHEN 'candidate' THEN 0 WHEN 'revoked' THEN 1 ELSE 2 END, updated_at, id LIMIT 1)`)
         .run(...protectedIds, this.timestamp());
+      if (!Number(this.database.prepare('SELECT changes() AS count').get()!.count)) throw new Error('Experience store capacity exceeded');
     }
   }
 }

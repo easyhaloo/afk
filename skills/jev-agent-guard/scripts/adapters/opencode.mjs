@@ -9,6 +9,7 @@ export async function JevAgentGuard({ directory, env = process.env } = {}) {
   return {
     'chat.message': async (input, output) => {
       if (input.role && input.role !== 'user') return;
+      recommendations.delete(input.sessionID);
       const prompt = (output.parts ?? []).filter(part => part.type === 'text').map(part => part.text).join(' ').slice(0, 2000);
       const decision = await runAdapter({ host: 'opencode', event: 'prompt', payload: {
         prompt, session_id: input.sessionID, cwd: directory,

@@ -5,23 +5,32 @@ import { tmpdir } from 'node:os';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '@afk/runtime/infrastructure/observability/jsonl-event-store';
+import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { claudeProjectSlug } from '@afk/runtime/shared/agent-transcript-path';
 import { registerRetroCommands, renderRetroHtml, reportSchema } from './retro.js';
 
-const childProcessMocks = vi.hoisted(() => ({ execFile: vi.fn() }));
-vi.mock('node:child_process', () => ({ execFile: childProcessMocks.execFile }));
+const analysisMocks = vi.hoisted(() => ({ executeAnalysis: vi.fn() }));
+vi.mock('@afk/runtime/execution', async importOriginal => ({
+  ...await importOriginal<typeof import('@afk/runtime/execution')>(),
+  executeAnalysis: analysisMocks.executeAnalysis,
+}));
+
+function analysisResult(report: unknown) {
+  return { analysisRunId: 'retro-analysis', output: { type: 'goal_complete', report } };
+}
 
 const roots: string[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  childProcessMocks.execFile.mockReset();
+  analysisMocks.executeAnalysis.mockReset();
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
 async function createRetroFixture(options: { indexedPath?: string; workspace: string; eventRoot: string; sessionId: string }): Promise<void> {
-  await fs.mkdir(join(options.workspace, '.afk', 'executions'), { recursive: true });
-  await fs.writeFile(join(options.workspace, '.afk', 'executions', 'run-1.jsonl'), '');
+  await fs.mkdir(options.workspace, { recursive: true });
+  await fs.mkdir(join(workspaceDataDirectory(options.workspace), 'executions'), { recursive: true });
+  await fs.writeFile(join(workspaceDataDirectory(options.workspace), 'executions', 'run-1.jsonl'), '');
   const store = new JsonlEventStore({ root: options.eventRoot });
   await store.append([{
     id: 'event-1', schemaVersion: 1, type: 'agent.session_recorded', sequence: 0,
@@ -114,13 +123,121 @@ describe('retro command', () => {
     await fs.mkdir(workspace, { recursive: true });
     await fs.writeFile(transcriptPath, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] } }) + '\n');
     await createRetroFixture({ workspace, eventRoot, indexedPath: transcriptPath, sessionId: 'synthetic-session' });
-    childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
+    analysisMocks.executeAnalysis.mockResolvedValue(analysisResult({ summary: 'ok', findings: [] }));
 
     const { runRetro } = await import('./retro.js');
     const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
 
     expect(report.sessions).toEqual([{ sessionId: 'synthetic-session', source: 'transcript_found', transcriptPath }]);
     expect(report.metrics.toolCallCount).toBe(1);
+  });
+
+  it('analyzes only sanitized inline evidence without personal skill or repository mounts', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-inline-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    const transcriptPath = join(root, 'native-session.jsonl');
+    await fs.mkdir(workspace);
+    await fs.writeFile(transcriptPath, JSON.stringify({ type: 'user', message: { content: `password=hunter2 ${workspace}/private-file.ts` } }));
+    await createRetroFixture({ workspace, eventRoot, indexedPath: transcriptPath, sessionId: 'session-1' });
+    analysisMocks.executeAnalysis.mockResolvedValue(analysisResult({ summary: 'ok', findings: [] }));
+    const { runRetro } = await import('./retro.js');
+    await runRetro({ runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'claude-code' });
+    expect(analysisMocks.executeAnalysis).toHaveBeenCalledOnce();
+    const [{ prompt, provider }] = analysisMocks.executeAnalysis.mock.calls[0] as [{ prompt: string; provider: { name: string } }];
+    expect(provider.name).toBe('claude-code');
+    expect(prompt).toContain('EvidencePack');
+    expect(prompt).not.toContain('hunter2');
+    expect(prompt).not.toContain(root);
+    expect(prompt).not.toContain('/.claude/skills/retro');
+  });
+
+  it.each(['invented', 'source-uri', 'mixed', 'known'])('binds retro finding evidence to this pack: %s', async reference => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-refs-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    const transcriptPath = join(root, 'session.jsonl');
+    await createRetroFixture({ workspace, eventRoot, indexedPath: transcriptPath, sessionId: 'session-1' });
+    await fs.writeFile(transcriptPath, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] } }));
+    await fs.writeFile(join(workspaceDataDirectory(workspace), 'executions', 'run-1.jsonl'), '{"kind":"completed"}\n');
+    analysisMocks.executeAnalysis.mockImplementation(async ({ prompt }: { prompt: string }) => {
+      const pack = JSON.parse(prompt.split('\n').at(-1)!);
+      const evidence = reference === 'known' ? [pack.entries[0].ref.id] : reference === 'source-uri' ? [`evidence://${pack.sources[0].sourceDigest}`]
+        : reference === 'mixed' ? [pack.entries[0].ref.id, 'evidence:invented'] : ['evidence:invented'];
+      return analysisResult({ summary: 'analysis', findings: [{ id: 'f1', category: 'information_access', severity: 'low', title: 'finding', evidence,
+        rootCause: 'cause', recommendation: 'record', confidence: 1, disposition: 'record_only' }] });
+    });
+    const { runRetro } = await import('./retro.js');
+    const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'claude-code' });
+    if (reference === 'known') {
+      expect(report.source).toBe('final');
+      expect(report.findings[0].id).toBe('f1');
+    } else {
+      expect(report.source).toBe('failure');
+      expect(report.summary).toMatch(/unknown evidence/i);
+      expect(report.findings[0].id).toBe('retro-execution-failed');
+    }
+  });
+
+  it('rejects unknown finding references in an existing cached report', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-cached-refs-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    await createRetroFixture({ workspace, eventRoot, sessionId: 'session-1' });
+    analysisMocks.executeAnalysis.mockImplementation(async ({ prompt }: { prompt: string }) => {
+      const pack = JSON.parse(prompt.split('\n').at(-1)!);
+      return analysisResult({ summary: 'partial analysis', findings: [{ id: 'f1', category: 'information_access', severity: 'low', title: 'finding',
+        evidence: [pack.entries[0].ref.id], rootCause: 'cause', recommendation: 'record', confidence: 1, disposition: 'record_only' }] });
+    });
+    const { runRetro } = await import('./retro.js');
+    const options = { runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'claude-code' as const };
+    const first = await runRetro(options);
+    expect(first.source).toBe('provisional');
+    const reportPath = join(workspaceDataDirectory(workspace), 'retro', first.retroId, 'report.json');
+    await fs.writeFile(reportPath, JSON.stringify({ ...first, findings: [{ ...first.findings[0], evidence: ['evidence:invented'] }] }));
+    const second = await runRetro(options);
+    expect(analysisMocks.executeAnalysis).toHaveBeenCalledTimes(2);
+    expect(second.source).toBe('provisional');
+    expect(second.findings[0].evidence).not.toContain('evidence:invented');
+  });
+
+  it('counts retries from the frozen journal evidence when the live journal changes during analysis', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-frozen-journal-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    await createRetroFixture({ workspace, eventRoot, sessionId: 'session-1' });
+    const journalPath = join(workspaceDataDirectory(workspace), 'executions', 'run-1.jsonl');
+    await fs.writeFile(journalPath, '{"kind":"retry","attempt":1}\n');
+    analysisMocks.executeAnalysis.mockImplementation(async () => {
+      await fs.appendFile(journalPath, '{"kind":"retry","attempt":2}\n');
+      return analysisResult({ summary: 'analysis', findings: [] });
+    });
+    const { runRetro } = await import('./retro.js');
+    const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'claude-code' });
+    const pack = JSON.parse(await fs.readFile(join(workspaceDataDirectory(workspace), 'retro', report.retroId, 'input.json'), 'utf8'));
+    expect(pack.entries.filter((entry: { position: { sourceId: string } }) => entry.position.sourceId === 'journal-1')).toHaveLength(1);
+    expect((await fs.readFile(journalPath, 'utf8')).match(/retry/g)).toHaveLength(2);
+    expect(report.metrics.retryCount).toBe(1);
+  });
+
+  it('does not follow transcript paths from a corrupt audit stream', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-corrupt-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    await createRetroFixture({ workspace, eventRoot, indexedPath: join(root, 'private.jsonl'), sessionId: 'session-1' });
+    const auditPath = join(eventRoot, `${Buffer.from('run-1').toString('base64url')}.jsonl`);
+    await fs.writeFile(auditPath, (await fs.readFile(auditPath, 'utf8')).replace('session-1', 'tampered-session'));
+    analysisMocks.executeAnalysis.mockResolvedValue(analysisResult({ summary: 'incomplete', findings: [] }));
+    const { runRetro } = await import('./retro.js');
+    const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'claude-code' });
+    expect(report.sessions).toEqual([]);
+    expect(report.source).toBe('provisional');
+    expect(report.metrics.missingEvidenceCount).toBeGreaterThan(0);
   });
 
   it.each([false, true])('reads provider updates instead of archive copies (indexed archive: %s)', async indexedArchive => {
@@ -140,7 +257,7 @@ describe('retro command', () => {
       await fs.mkdir(projectDir, { recursive: true });
       await fs.writeFile(transcriptPath, JSON.stringify({ type: 'assistant', sessionId: 'agent-session', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] } }) + '\n');
       await createRetroFixture({ workspace, eventRoot, sessionId: 'agent-session', ...(indexedArchive ? { indexedPath: archivedPath } : {}) });
-      childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
+      analysisMocks.executeAnalysis.mockResolvedValue(analysisResult({ summary: 'ok', findings: [] }));
 
       const { runRetro } = await import('./retro.js');
       const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
@@ -178,7 +295,7 @@ describe('retro command', () => {
       await fs.mkdir(projectDir, { recursive: true });
       await fs.writeFile(transcriptPath, JSON.stringify({ cwd: realWorkspace, sessionId: 'native-session' }) + '\n' + JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] } }) + '\n');
       await createRetroFixture({ workspace, eventRoot, sessionId: 'synthetic-session' });
-      childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
+      analysisMocks.executeAnalysis.mockResolvedValue(analysisResult({ summary: 'ok', findings: [] }));
 
       const { runRetro } = await import('./retro.js');
       const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });

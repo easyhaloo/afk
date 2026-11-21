@@ -218,6 +218,11 @@ Worker. JumpServer subprocesses use fixture binaries through PATH. Tests isolate
 HOME, workspaces and Electron user data, including the JSONL audit streams;
 they do not require real provider credentials or an AFK CLI executable.
 
+To verify the plugin Settings lifecycle in a packaged app, set
+`AFK_E2E_DESKTOP_EXECUTABLE` to the bundled executable and run
+`plugin-settings.spec.ts`. The test uses an isolated profile and attaches a
+receipt identifying the packaged renderer.
+
 Workflow coverage lives in `workflow.spec.ts` and `workflow-crud.spec.ts`.
 The CRUD suite edits managed steps through the UI, checks the saved YAML after
 reload, and exercises project template discovery, updates and removal through

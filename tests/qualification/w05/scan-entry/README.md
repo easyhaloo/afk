@@ -10,6 +10,8 @@ The revised program exits in 31 ms with the diagnostic 500 ms cancellation timer
 
 The 0.2.183 runtime accepts a control timer equal to the 5000 ms execution limit. Two opt-in native Docker checks passed from source using a local Node 22 base image. The direct control triggered 5021 ms after observing the container running. The paired proposal control recorded a baseline early exit with code 0 and triggered on the proposed process after 5027 ms. Both triggered runs confirmed SIGKILL and exit 137. Ownership checks found no remaining containers or images from the three operations. These checks use a synthetic long-running proposal. Formal `scan-entry` coverage remains 0/8, and grants for earlier host revisions must be reissued for `proposal-validation-runtime-v5`.
 
+A native Docker diagnostic compared a program that received `EROFS` while writing `/workspace/asset.js` with one that printed the same error without attempting the write. Both exited 23 with the same scratch digest and `historyCoverage: "not-observed"`. The formal denial case needs an independent witness of the operation, target and refusal. The recovery case needs an observed partial effect and a checkpoint read after interruption. This diagnostic does not change the frozen candidate or its 0/8 result.
+
 ## Replay
 
 Run from the checkout on Darwin arm64 with Node 24.18.0. Supply a fresh profile path whose parent exists. The profile and queued request survive the command. The original synthetic evidence home and archive are required.

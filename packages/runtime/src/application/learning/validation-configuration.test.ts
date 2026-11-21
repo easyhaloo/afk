@@ -85,7 +85,9 @@ describe('shared validation configuration', () => {
       target: '/workspace/guard', errno: 'EROFS' };
     const configured = { ...experiment(), kind: 'permission-denied', input: 'Deny the declared permissions', callInput: '{}', permissionDenial };
     const observer = `sha256:${'e'.repeat(64)}`;
-    const save = (configuredExperiment: typeof configured | (Omit<typeof configured, 'permissionDenial'> & { permissionDenial?: undefined }),
+    type ExperimentFixture = Omit<typeof configured, 'permissionDenial' | 'callInput'>
+      & Partial<Pick<typeof configured, 'permissionDenial' | 'callInput'>>;
+    const save = (configuredExperiment: ExperimentFixture,
       observerImageId = configuredExperiment.permissionDenial ? observer : undefined) => v2({ ...entry,
       sandbox: { ...entry.sandbox, ...(observerImageId === undefined ? {} : { permissionObserverImageId: observerImageId }) }, semantic: { ...entry.semantic,
       cases: [{ ...entry.semantic.cases[0], checkId: 'control-permission', experiment: configuredExperiment }] } });

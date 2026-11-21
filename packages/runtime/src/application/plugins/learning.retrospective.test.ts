@@ -75,7 +75,7 @@ function candidate(kind: 'process' | 'lesson' = 'process', state: LearningCandid
 
 function requestState(overrides: Partial<LearningRequestState> = {}): LearningRequestState {
   const candidates = [candidate(), candidate('lesson', 'candidate', 'f'.repeat(64), 4)];
-  return { job: { jobId: requestKey, scope, sourceId: `run:${runId}`, sourceRunId: runId, status: 'processed', attempts: [] },
+  return { job: { jobId: requestKey, scope, sourceId: `run:${runId}`, sourceRunId: runId, status: 'processed', canRun: false, attempts: [] },
     processing: { requestKey, outputDigest: '1'.repeat(64), candidateIds: candidates.map(entry => entry.id), warnings: [] },
     candidates, ...overrides };
 }

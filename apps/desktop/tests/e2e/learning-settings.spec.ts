@@ -171,14 +171,13 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
       if (live) {
         const { scope, requestKey, jobsFromCli } = fixture;
-        const readJob = async () => (await jobsFromCli()).find(job => job.jobId === requestKey);
-        expect(await readJob()).toMatchObject({ status: "pending", attempts: [] });
+        expect(await jobsFromCli()).toMatchObject([{ jobId: requestKey, status: "pending", attempts: [] }]);
         expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), scope)).toEqual([]);
         const jobs = learning.getByRole("region", { name: "学习任务", exact: true });
         const entry = jobs.getByRole("listitem").filter({ hasText: requestKey });
         await entry.getByRole("button", { name: "运行一次提炼", exact: true }).click();
         await expect(entry).toContainText(/已处理|受阻|失败/, { timeout: 135_000 });
-        expect(await readJob()).toMatchObject({ status: "processed", attempts: [{ status: "succeeded" }] });
+        expect(await jobsFromCli()).toMatchObject([{ jobId: requestKey, status: "processed", attempts: [{ status: "succeeded" }] }]);
         Object.assign(fixture, await fixture.readProcessedFact());
       }
       const initial = await fixture.inspect();
@@ -225,10 +224,9 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       await learning.getByRole("textbox", { name: "验证器 ID", exact: true }).fill(fixture.checkerId);
       await learning.getByRole("button", { name: "验证候选", exact: true }).click();
       const validated = learning.getByRole("status").filter({ hasText: "验证通过 · v1 → v2" });
-      const validationError = learning.getByRole("alert");
-      await expect(validated.or(validationError)).toBeVisible();
-      expect(await validationError.allTextContents()).toEqual([]);
-      await expect(validated).toBeVisible();
+      const blocked = learning.getByRole("status").filter({ hasText: "验证受阻 ·" });
+      const validationResult = validated.or(blocked).or(learning.getByRole("alert"));
+      await expect(validationResult).toHaveText("验证通过 · v1 → v2");
       await expect(candidate).toContainText("已验证 · v2");
       const afterValidation = await fixture.inspect();
       expect(afterValidation.candidate).toMatchObject({ state: "validated", version: 2 });

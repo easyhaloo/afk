@@ -42,9 +42,10 @@ export type LearningLedger = {
 const seedScript = `
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { CandidateStore } from ${JSON.stringify(storeModule)};
 import { buildEvidencePack } from ${JSON.stringify(source("packages/runtime/src/application/learning/evidence.ts"))};
+import { reconcileDistillationSources } from ${JSON.stringify(source("packages/runtime/src/application/learning/intake.ts"))};
 import { knowledgeFixture } from ${JSON.stringify(source("packages/runtime/src/application/learning/knowledge.fixture.spec.ts"))};
 import { JsonlEventStore } from ${JSON.stringify(source("packages/runtime/src/infrastructure/observability/jsonl-event-store.ts"))};
 const fixture = knowledgeFixture();
@@ -65,26 +66,43 @@ const policy = { targetRef: 'wiki:approval', subject: 'approval', rule: 'Approve
 const publish = approved => approved ? 'published' : 'denied';
 const observed = { withoutApproval: publish(false), withApproval: publish(true) };
 assert.deepEqual(observed, { withoutApproval: 'denied', withApproval: 'published' });
-const data = live ? { kind: 'effect.completed', effectKind: 'release.approval', idempotencyKey: 'approval-source',
-  outcome: 'succeeded', summary: JSON.stringify({ ...policy, ...observed }) }
-  : { kind: 'agent.session_recorded', sessionId: 'approval-session' };
-await events.append([{ id: 'observed-approval', schemaVersion: 1, type: data.kind,
+const approval = { kind: 'effect.completed', effectKind: 'release.approval', idempotencyKey: 'approval-source',
+  outcome: 'succeeded', summary: JSON.stringify({ ...policy, ...observed }) };
+const history = live ? [{ kind: 'qa.started' }, approval, { kind: 'qa.passed' }, { kind: 'run.finished', outcome: 'succeeded' }]
+  : [{ kind: 'agent.session_recorded', sessionId: 'approval-session' }];
+await events.append(history.map((data, index) => ({ id: 'approval-event-' + (index + 1), schemaVersion: 1, type: data.kind,
   occurredAt: '2026-11-11T00:00:00Z', correlationId: 'approval-source',
   context: { runId: 'approval-source', traceId: 'approval-trace', workItemId,
     profileId: 'default', attempt: 1, actor: { kind: 'system', id: 'desktop-e2e' } },
-  data }]);
+  data })));
 const audit = { id: 'audit-1', kind: 'audit', path: events.pathFor('approval-source'),
   allowedRoot: process.env.AFK_EVENT_STORE_DIR, runId: 'approval-source' };
-const pack = await buildEvidencePack({ sources: [audit] });
 const file = join(home, '.afk', 'learning', 'candidates.sqlite');
+if (live) {
+  mkdirSync(home, { recursive: true });
+  const capture = await reconcileDistillationSources({ directory: dirname(file), homeDir: home, eventRoot: events.root,
+    scope, runId: 'approval-source' });
+  assert.deepEqual(capture.blocked, []);
+  assert.equal(capture.submitted, 1);
+  assert.equal(capture.requestKeys.length, 1);
+}
 const store = new CandidateStore({ file });
-let candidate, requestKey;
+let candidate, requestKey, pack;
 try {
-  const request = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:approval-source',
-    sourceRunId: 'approval-source', workItemId, evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
-    evidence: pack.entries.map(entry => entry.ref) }, pack);
-  requestKey = request.key;
-  if (!live) {
+  if (live) {
+    const requests = store.listRequests();
+    assert.equal(requests.length, 1);
+    const [request] = requests;
+    assert.equal(request.request.reason, 'completed');
+    assert.deepEqual(store.getScanRequestKeys({ scope, runId: 'approval-source', analyzerVersion: request.request.analyzerVersion }), [request.key]);
+    requestKey = request.key;
+    pack = store.getEvidencePack(request.request.evidenceDigest);
+  } else {
+    pack = await buildEvidencePack({ sources: [audit] });
+    const request = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:approval-source',
+      sourceRunId: 'approval-source', workItemId, evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
+      evidence: pack.entries.map(entry => entry.ref) }, pack);
+    requestKey = request.key;
     const proposal = lesson ? { ...fixture.candidate.proposal, kind: 'lesson', payload: {
       trigger: 'Publication started before approval', rootCause: 'The approval guard was missing', rootCauseStatus: 'confirmed',
       attempts: ['Require approval before publication'], fix: 'Check approval before publishing',
@@ -99,17 +117,20 @@ try {
     assert.equal(store.getValidation(candidate.id), undefined);
   }
 } finally { store.close(); }
+assert.equal(pack.completeness, 'complete');
 const identity = { scope, checkerId: 'approval-rules', providerId: 'approval-oracle', version: '1' };
 const authorityFile = join(targetRoot, 'approval.json');
 const callsFile = join(fixture.root, 'checker-calls.jsonl');
+const authority = pack.entries.filter(entry => !live || entry.position.auditSequence === 2).map(entry => entry.ref.locator);
+assert.equal(authority.length, 1);
 writeFileSync(authorityFile, JSON.stringify({ subject: policy.subject, rule: policy.rule,
-  authority: pack.entries.map(entry => entry.ref.locator) }), { mode: 0o600 });
+  authority }), { mode: 0o600 });
 writeFileSync(callsFile, '', { mode: 0o600 });
 const configurationFile = join(fixture.root, 'checkers.json');
 writeFileSync(configurationFile, JSON.stringify({ version: 1, checkers: [{ ...identity,
   ...(lesson ? { allowLessonValidation: true } : {}),
   authorizationFile: fixture.authorizationFile, target: { ref: 'wiki:approval', root: targetRoot, path: 'approval.json' },
-  evidence: [{ digest: pack.digest, sources: [audit] }] }] }), { mode: 0o600 });
+  ...(live ? {} : { evidence: [{ digest: pack.digest, sources: [audit] }] }) }] }), { mode: 0o600 });
 const manifest = { id: 'verification.approval-desktop-e2e', version: '1.0.0', apiVersion: 1,
   provides: ['verification.provider'], trusted: true, entry: 'index.js',
   configSchema: { type: 'object', additionalProperties: false, required: ['authorityFile', 'callsFile'],

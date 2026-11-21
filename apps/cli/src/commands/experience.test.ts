@@ -844,6 +844,80 @@ describe('candidate correction', () => {
   });
 });
 
+describe('learning worker once', () => {
+  const requestKey = 'a'.repeat(64);
+  const args = ['worker', 'once', '--scope', scope, '--request', requestKey, '--json'];
+
+  it.each(['processed', 'blocked'] as const)('returns a bounded summary of the exact %s job', async status => {
+    const exitCode = process.exitCode;
+    const job = { jobId: requestKey, scope, status, canRun: status === 'blocked',
+      reasonCode: status === 'blocked' ? 'budget_exhausted' : 'PRIVATE_REASON' };
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({
+      job: { ...job, attempts: [{ sessionId: 'PRIVATE_SESSION' }], sourceId: 'PRIVATE_SOURCE' },
+      processing: { warnings: ['PRIVATE_WARNING'] }, candidates: [{ proposal: 'PRIVATE_PROPOSAL' }],
+    }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    try {
+      await test.parse(...args);
+      expect(plugins.dispatchSystemAction).toHaveBeenCalledOnce();
+      expect(plugins.dispatchSystemAction).toHaveBeenCalledWith('learning.worker.once', { scope, requestKey }, { signal: expect.any(AbortSignal) });
+      expect(plugins.dispose).toHaveBeenCalledOnce();
+      expect(test.query).not.toHaveBeenCalled();
+      expect(test.printed()).toBe(`${JSON.stringify({ job: { jobId: requestKey, scope, status, canRun: job.canRun,
+        attemptCount: 1, ...(status === 'blocked' ? { reasonCode: job.reasonCode } : {}) } })}\n`);
+      expect(process.exitCode).toBe(status === 'processed' ? exitCode : 1);
+    } finally { process.exitCode = exitCode; }
+  });
+
+  it.each([
+    ['Trigger queue is already owned by a live or unverifiable listener', 'learning_worker_busy'],
+    ['learning_disabled', 'learning_disabled'],
+    ['PRIVATE_TRANSCRIPT and PRIVATE_PATH', 'learning_worker_failed'],
+  ])('maps worker error %s to %s', async (message, code) => {
+    const plugins = { dispatchSystemAction: vi.fn().mockRejectedValue(new Error(message)), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await expect(test.parse(...args)).rejects.toThrow(new Error(code));
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(test.printed()).toBe('');
+  });
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('cancels work on %s and removes its listeners', async signalName => {
+    const signals = ['SIGINT', 'SIGTERM'] as const;
+    const listeners = signals.map(name => process.listeners(name));
+    const plugins = { dispatchSystemAction: vi.fn(async (_name, _target, { signal }: { signal: AbortSignal }) => {
+      const added = process.listeners(signalName).find(listener => !listeners[signals.indexOf(signalName)].includes(listener));
+      expect(added).toBeDefined();
+      Reflect.apply(added!, process, []);
+      expect(signal.aborted).toBe(true);
+      return { job: { jobId: requestKey, scope, status: 'processed', canRun: false, attempts: [] } };
+    }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await expect(test.parse(...args)).rejects.toThrow('learning_worker_cancelled');
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(signals.map(name => process.listeners(name))).toEqual(listeners);
+    expect(test.printed()).toBe('');
+  });
+
+  it.each([['--scope', 'noncanonical'], ['--request', 'A'.repeat(64)]])('rejects invalid %s before activation', async (flag, value) => {
+    const test = learningFixture();
+    await expect(test.parse(...args.map((part, index) => args[index - 1] === flag ? value : part)))
+      .rejects.toMatchObject({ code: 'commander.invalidArgument' });
+    expect(runtime.createCliPluginRuntime).not.toHaveBeenCalled();
+  });
+
+  it('rejects a result for a different request from a borrowed runtime', async () => {
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({ job: { jobId: 'b'.repeat(64), scope,
+      status: 'processed', canRun: false, attempts: [] } }), dispose: vi.fn() };
+    const test = learningFixture({ pluginRuntime: plugins as unknown as ExperienceCommandComposition['pluginRuntime'] });
+    await expect(test.parse(...args)).rejects.toThrow('learning_worker_failed');
+    expect(plugins.dispose).not.toHaveBeenCalled();
+    expect(test.printed()).toBe('');
+  });
+});
+
 describe('read-only learning governance', () => {
   it.each([
     { command: ['prepare', 'b'.repeat(64), '--expected-version', '2', '--target', 'wiki:retry'],

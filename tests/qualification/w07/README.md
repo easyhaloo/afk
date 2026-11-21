@@ -72,6 +72,10 @@ AFK_E2E_DESKTOP_LIVE_LEARNING=1 pnpm --dir apps/desktop exec playwright test --c
 
 同日用原 `0.2.184` CLI 和打包 Desktop 复跑整个学习设置套件，**8/8** 通过（1.1 分钟），其中修正后的真实 Claude 用例 **1/1**（29.8 秒）。打包 Desktop 点击启动，任务恰好有一次成功尝试，且账本只有一条事实候选。独立验证器核对审批主题、规则和审计定位符，再从设置页发布到隔离 Wiki。测试核对召回、来源失效后停止召回、撤回及重启后仍不可召回。跨端竞争、取消与退出回收仍待安装版验收。
 
+同日使用上述打包 Desktop 和仓库外安装的 CLI `0.2.185` 补验取消与正常退出，**2/2** 通过（21 秒）。分析使用隔离 `PATH` 中的可控 Claude 进程。Desktop 持有同一提炼请求时，CLI 退出码为 1，返回 `learning_worker_busy`，队列持有者、尝试次数及分析进程数均未变化。取消和正常退出均将该次尝试记为 `analysis_cancelled`，Worker、进程守卫及分析进程退出，临时目录删除，SQLite 队列持有记录清空。CLI 先持有、Desktop 后竞争的方向仍待验。
+
+同一组安装产物复跑 **3/3**（22.7 秒）。反向用例先在 Desktop 打开任务列表，再用安装版 CLI 启动同一提炼请求。点击旧列表中的按钮后，Desktop 拒绝启动，刷新后运行按钮消失。CLI 仍持有队列，只有一次尝试和一次分析进程启动。向 CLI 发送 `SIGTERM` 后，进程以 1 退出，报告 `learning_worker_cancelled`，同一尝试记为 `analysis_cancelled`，进程、临时目录及队列记录均已清理。三个场景使用可控 Claude 进程。
+
 ### 历史 QA 工作区归属
 
 通过失败运行 `7cbb0b81-8a53-4725-99a1-c801feff7a61` 的审计定位到它的隔离测试目录。恢复账本中四条分配有三条已关闭，唯一保留的分配 `e920ddad-2c4e-4c5d-aabb-e26a470b4d43` 仍为 `owned`。按工作区和仓库身份复算占用键后，确认三条执行占用均归属已归档为 `blocked` 的 `qa-1-1795185498504-runtime`。

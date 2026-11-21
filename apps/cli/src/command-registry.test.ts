@@ -132,6 +132,7 @@ describe('CLI command registry and dispatcher', () => {
     ['observe', ['timeline', '--help'], 'Show ordered audit events for a run'],
     ['log', ['--help'], 'Show one observed run and its verified timeline'],
     ['experience', ['verify', '--help'], 'Verify a scoped experience with correction evidence'],
+    ['experience', ['worker', 'once', '--help'], 'Process one exact learning request'],
   ] as const)('runs the nested parser for %s %j', async (command, args, expectedHelp) => {
     const captured: string[] = [];
     const originalWrite = process.stdout.write.bind(process.stdout);

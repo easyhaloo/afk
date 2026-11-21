@@ -163,7 +163,7 @@ console.log(JSON.stringify({ root: fixture.root, home, workspace, vault: fixture
   configurationFile, authorizationFile: fixture.authorizationFile, wikiScript: fixture.wikiScript }));
 `;
 
-export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', scopeOverride?: string, live = false) {
+export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', scopeOverride?: string, analysis: boolean | 'hold' = false) {
   const temporary = mkdtempSync(path.join(realpathSync(tmpdir()), "afk-desktop-learning-"));
   const home = path.join(temporary, "home");
   const env: Record<string, string> = {
@@ -182,7 +182,7 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
     const bin = path.join(temporary, "bin");
     mkdirSync(bin, { mode: 0o700 });
     const dependencies: Record<string, { executable: string; version: string }> = {};
-    for (const tool of ["python3", "rg", ...(live ? ["claude"] : [])]) {
+    for (const tool of ["python3", "rg", ...(analysis === true ? ["claude"] : [])]) {
       try {
         const found = await execute("/usr/bin/which", [tool], {
           env: { ...env, PATH: process.env.PATH ?? "" }, timeout: 5_000,
@@ -208,13 +208,29 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
       }
     }
     env.PATH = [bin, "/usr/bin", "/bin"].join(path.delimiter);
-    if (live) {
+    if (analysis === true) {
       env.CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR ?? path.join(userInfo().homedir, '.claude');
       if (process.env.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     }
+    const launches = path.join(temporary, 'analysis-launches.ndjson');
+    if (analysis === 'hold') {
+      writeFileSync(launches, '', { mode: 0o600 });
+      writeFileSync(path.join(bin, 'claude'), `#!${process.execPath}
+        const { appendFileSync } = require('node:fs');
+        if (process.argv.includes('--help')) {
+          console.log('--safe-mode --tools --permission-mode --permission-prompts --strict-mcp-config --mcp-config --disable-slash-commands --setting-sources --settings --no-session-persistence --no-chrome --session-id --system-prompt');
+        } else if (process.argv.includes('--version')) {
+          console.log('2.1.0');
+        } else if (process.argv.includes('--print') && process.argv.includes('--session-id')) {
+          appendFileSync(${JSON.stringify(launches)}, JSON.stringify({ pid: process.pid, guardPid: process.ppid, directory: process.cwd() }) + '\\n');
+          setTimeout(() => process.exit(90), 45_000);
+        }
+      `, { mode: 0o700 });
+    }
     const binary = path.resolve(process.env.AFK_E2E_CLI_ENTRY ?? path.join(repository, "apps/cli/dist/index.js"));
     if (!existsSync(binary)) throw new Error(`CLI entry not found: ${binary}. Build the CLI or set AFK_E2E_CLI_ENTRY.`);
-    const seed = await node(seedScript, live ? [kind, scopeOverride!, 'claude'] : scopeOverride === undefined ? [kind] : [kind, scopeOverride]);
+    if (analysis && !scopeOverride) throw new Error('Managed analysis needs an explicit project scope.');
+    const seed = await node(seedScript, analysis ? [kind, scopeOverride!, 'claude'] : scopeOverride === undefined ? [kind] : [kind, scopeOverride]);
     const fixture = seed as FixtureMetadata;
     const command = (...args: string[]) =>
       execute(process.execPath, [binary, ...args], { cwd: fixture.workspace, env, timeout: 15_000 });
@@ -228,14 +244,25 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
     const installed = readFileSync(path.join(home, ".afk", "plugins", fixture.pluginId, "install.json"), "utf8");
     if (!installed.includes(fixture.pluginId)) throw new Error("The real checker install receipt is missing.");
     await configure(fixture.pluginId, { authorityFile: fixture.authorityFile, callsFile: fixture.callsFile }, false);
-    await configure("learning.distiller", { enabled: true, dailyCalls: live ? 1 : 0,
+    await configure("learning.distiller", { enabled: true, dailyCalls: analysis === 'hold' ? 2 : analysis ? 1 : 0,
       validation: { configurationFile: fixture.configurationFile },
       knowledge: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } }, true);
     return {
       ...fixture, temporary, env, dependencies,
+      analysisLaunches: () => readFileSync(launches, 'utf8').trim().split('\n').filter(Boolean)
+        .map(line => JSON.parse(line) as { pid: number; guardPid: number; directory: string }),
+      queueOwners: () => node(`
+        import { DatabaseSync } from 'node:sqlite';
+        const database = new DatabaseSync(process.argv[1], { readOnly: true });
+        try {
+          console.log(JSON.stringify(database.prepare('SELECT pid FROM trigger_queue_owner').all().map(row => row.pid)));
+        } finally { database.close(); }
+      `, [path.join(path.dirname(fixture.file), 'distillation-queue.sqlite')]) as Promise<number[]>,
+      runWorkerFromCli: () => command('experience', 'worker', 'once', '--scope', fixture.scope, '--request', fixture.requestKey, '--json'),
       jobsFromCli: async () => {
         const { stdout } = await command("experience", "jobs", "--scope", fixture.scope, "--json");
-        return JSON.parse(stdout) as { jobId: string; scope: string; status: string; reasonCode?: string; attempts: unknown[] }[];
+        return JSON.parse(stdout) as { jobId: string; scope: string; status: string; reasonCode?: string;
+          attempts: { callId: string; ownerPid: number; status: string; errorCode?: string }[] }[];
       },
       readProcessedFact: async () => {
         const candidate = await node(`

@@ -1,6 +1,7 @@
 import { Command, InvalidArgumentError, Option } from 'commander';
 import { constants, promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
+import { z } from 'zod';
 import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState,
   candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningScopeSchema, verifyAdoptionRun, verifyExperienceRun,
   LearningReviewIncompleteError, learningReviewIncompleteSchema,
@@ -95,7 +96,8 @@ export function registerExperienceCommands(program: Command, composition: Experi
     try { await operation(store); }
     finally { store.close(); }
   };
-  const withRuntime = async <Result>(failure: string, operation: (plugins: PluginRuntime) => Promise<Result>): Promise<Result> => {
+  const withRuntime = async <Result>(failure: string, operation: (plugins: PluginRuntime) => Promise<Result>,
+    errorCode?: (error: unknown) => string | undefined): Promise<Result> => {
     const owned = !composition.pluginRuntime && !composition.createRuntime;
     let plugins: PluginRuntime | undefined;
     try {
@@ -103,7 +105,7 @@ export function registerExperienceCommands(program: Command, composition: Experi
         ? composition.createRuntime() : import('../composition-root.js').then(module => module.createCliPluginRuntime()));
       if (!plugins) throw new Error(failure);
       return await operation(plugins);
-    } catch { throw new Error(failure); }
+    } catch (error) { throw new Error(errorCode?.(error) ?? failure); }
     finally {
       if (owned) {
         try { await plugins?.dispose(); }
@@ -265,6 +267,56 @@ export function registerExperienceCommands(program: Command, composition: Experi
           ? `${result.candidateId} [validated] version ${result.validatedVersion}` : `[blocked] ${result.code}`}\n`);
         if (result.status === 'blocked') process.exitCode = 1;
     }));
+
+  const worker = experience.command('worker').description('Run the configured learning worker');
+  worker.command('once')
+    .description('Process one exact learning request')
+    .requiredOption('--scope <scope>', 'Canonical platform:projectKey', value => {
+      const scope = learningScopeSchema.safeParse(value);
+      if (!scope.success || scope.data !== value) throw new InvalidArgumentError('scope must be a canonical project (platform:projectKey)');
+      return value;
+    })
+    .requiredOption('--request <requestKey>', '64 lowercase hexadecimal learning request key', parseCandidateId)
+    .option('--json', 'Emit compact JSON')
+    .action(async (options: { scope: string; request: string; json?: boolean }) => {
+      const target = { scope: options.scope, requestKey: options.request };
+      const controller = new AbortController();
+      const { signal } = controller;
+      const abort = () => controller.abort();
+      process.on('SIGINT', abort);
+      process.on('SIGTERM', abort);
+      try {
+        const job = await withRuntime('learning_worker_failed', async plugins => {
+          signal.throwIfAborted();
+          const result = await plugins.dispatchSystemAction('learning.worker.once', target, { signal });
+          signal.throwIfAborted();
+          const { job } = z.object({ job: z.object({
+            jobId: z.literal(target.requestKey), scope: z.literal(target.scope),
+            status: z.enum(['pending', 'blocked', 'failed', 'processed']), canRun: z.boolean(),
+            reasonCode: z.string().optional(), attempts: z.custom<unknown[]>(Array.isArray),
+          }) }).parse(result);
+          const { attempts, reasonCode, ...summary } = job;
+          return { ...summary, attemptCount: attempts.length, reasonCode: learningCode(reasonCode) };
+        }, error => {
+          if (signal.aborted) return 'learning_worker_cancelled';
+          if (!(error instanceof Error)) return undefined;
+          switch (error.message) {
+            case 'Trigger queue is already owned by a live or unverifiable listener': return 'learning_worker_busy';
+            case "unknown system action 'learning.worker.once'": return 'learning_worker_unavailable';
+            case 'learning_disabled': return 'learning_disabled';
+            case 'learning_request_not_found': return 'learning_request_not_found';
+            case 'analysis_unsupported': return 'analysis_unsupported';
+            default: return undefined;
+          }
+        });
+        if (signal.aborted) throw new Error('learning_worker_cancelled');
+        process.stdout.write(`${JSON.stringify({ job }, null, options.json ? undefined : 2)}\n`);
+        if (job.status !== 'processed') process.exitCode = 1;
+      } finally {
+        process.off('SIGINT', abort);
+        process.off('SIGTERM', abort);
+      }
+    });
 
   const knowledge = experience.command('knowledge').description('Preview, publish and recover authorized knowledge');
   knowledge.command('prepare')

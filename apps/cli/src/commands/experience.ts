@@ -269,6 +269,37 @@ export function registerExperienceCommands(program: Command, composition: Experi
     }));
 
   const worker = experience.command('worker').description('Run the configured learning worker');
+  const withWorkerSignals = async <Result>(operation: (plugins: PluginRuntime, signal: AbortSignal) => Promise<Result>,
+    gracefulStop = false): Promise<Result> => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    const abort = () => controller.abort();
+    process.on('SIGINT', abort);
+    process.on('SIGTERM', abort);
+    try {
+      const result = await withRuntime('learning_worker_failed', plugins => {
+        signal.throwIfAborted();
+        return operation(plugins, signal);
+      }, error => {
+        if (signal.aborted && error === signal.reason) return 'learning_worker_cancelled';
+        if (!(error instanceof Error)) return undefined;
+        switch (error.message) {
+          case 'Trigger queue is already owned by a live or unverifiable listener': return 'learning_worker_busy';
+          case "unknown system action 'learning.worker.once'":
+          case "unknown system action 'learning.worker.watch'": return 'learning_worker_unavailable';
+          case 'learning_disabled': return 'learning_disabled';
+          case 'learning_request_not_found': return 'learning_request_not_found';
+          case 'analysis_unsupported': return 'analysis_unsupported';
+          default: return undefined;
+        }
+      });
+      if (signal.aborted && !gracefulStop) throw new Error('learning_worker_cancelled');
+      return result;
+    } finally {
+      process.off('SIGINT', abort);
+      process.off('SIGTERM', abort);
+    }
+  };
   worker.command('once')
     .description('Process one exact learning request')
     .requiredOption('--scope <scope>', 'Canonical platform:projectKey', value => {
@@ -280,42 +311,30 @@ export function registerExperienceCommands(program: Command, composition: Experi
     .option('--json', 'Emit compact JSON')
     .action(async (options: { scope: string; request: string; json?: boolean }) => {
       const target = { scope: options.scope, requestKey: options.request };
-      const controller = new AbortController();
-      const { signal } = controller;
-      const abort = () => controller.abort();
-      process.on('SIGINT', abort);
-      process.on('SIGTERM', abort);
-      try {
-        const job = await withRuntime('learning_worker_failed', async plugins => {
-          signal.throwIfAborted();
-          const result = await plugins.dispatchSystemAction('learning.worker.once', target, { signal });
-          signal.throwIfAborted();
-          const { job } = z.object({ job: z.object({
-            jobId: z.literal(target.requestKey), scope: z.literal(target.scope),
-            status: z.enum(['pending', 'blocked', 'failed', 'processed']), canRun: z.boolean(),
-            reasonCode: z.string().optional(), attempts: z.custom<unknown[]>(Array.isArray),
-          }) }).parse(result);
-          const { attempts, reasonCode, ...summary } = job;
-          return { ...summary, attemptCount: attempts.length, reasonCode: learningCode(reasonCode) };
-        }, error => {
-          if (signal.aborted) return 'learning_worker_cancelled';
-          if (!(error instanceof Error)) return undefined;
-          switch (error.message) {
-            case 'Trigger queue is already owned by a live or unverifiable listener': return 'learning_worker_busy';
-            case "unknown system action 'learning.worker.once'": return 'learning_worker_unavailable';
-            case 'learning_disabled': return 'learning_disabled';
-            case 'learning_request_not_found': return 'learning_request_not_found';
-            case 'analysis_unsupported': return 'analysis_unsupported';
-            default: return undefined;
-          }
-        });
-        if (signal.aborted) throw new Error('learning_worker_cancelled');
-        process.stdout.write(`${JSON.stringify({ job }, null, options.json ? undefined : 2)}\n`);
-        if (job.status !== 'processed') process.exitCode = 1;
-      } finally {
-        process.off('SIGINT', abort);
-        process.off('SIGTERM', abort);
-      }
+      const job = await withWorkerSignals(async (plugins, signal) => {
+        const result = await plugins.dispatchSystemAction('learning.worker.once', target, { signal });
+        signal.throwIfAborted();
+        const { job } = z.object({ job: z.object({
+          jobId: z.literal(target.requestKey), scope: z.literal(target.scope),
+          status: z.enum(['pending', 'blocked', 'failed', 'processed']), canRun: z.boolean(),
+          reasonCode: z.string().optional(), attempts: z.custom<unknown[]>(Array.isArray),
+        }) }).parse(result);
+        const { attempts, reasonCode, ...summary } = job;
+        return { ...summary, attemptCount: attempts.length, reasonCode: learningCode(reasonCode) };
+      });
+      process.stdout.write(`${JSON.stringify({ job }, null, options.json ? undefined : 2)}\n`);
+      if (job.status !== 'processed') process.exitCode = 1;
+    });
+  worker.command('watch')
+    .description('Watch the saved learning queue until stopped')
+    .option('--json', 'Emit compact JSON on shutdown')
+    .action(async (options: { json?: boolean }) => {
+      const result = await withWorkerSignals(async (plugins, signal) => {
+        const result = await plugins.dispatchSystemAction('learning.worker.watch', {}, { signal });
+        if (!signal.aborted) throw new Error('learning_worker_stopped_unexpectedly');
+        return z.object({ status: z.literal('stopped') }).parse(result);
+      }, true);
+      process.stdout.write(`${JSON.stringify(result, null, options.json ? undefined : 2)}\n`);
     });
 
   const knowledge = experience.command('knowledge').description('Preview, publish and recover authorized knowledge');

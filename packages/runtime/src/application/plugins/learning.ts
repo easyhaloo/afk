@@ -218,12 +218,14 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         const parsed = z.object({ scope: learningScopeSchema.optional() }).strict().parse(input);
         return reconcileKnowledge(parsed.scope);
       });
-      registerAction('learning.worker.once', async (input, operation) => withOperation(operation, async signal => {
+      const runWorker = (input: unknown, operation: PluginSystemActionOptions | undefined, watch: boolean) => withOperation(operation, async signal => {
         assertEnabled();
         const check = () => { assertEnabled(); checkAbort({ ...operation, signal }); };
         check();
-        const parsed = z.union([z.object({}).strict(), z.object({ scope: learningScopeSchema, requestKey: learningDigestSchema }).strict()]).parse(input);
-        const target = 'requestKey' in parsed ? parsed : undefined;
+        const empty = z.object({}).strict();
+        if (watch) empty.parse(input);
+        const target = watch ? undefined : z.union([z.object({ scope: learningScopeSchema, requestKey: learningDigestSchema }).strict(),
+          empty.transform(() => undefined)]).parse(input);
         const provider = resolveProvider?.();
         if (!provider?.capabilities.has('analysis') || provider.name !== 'claude-code') throw new Error('analysis_unsupported');
         const worker = new LearningWorker({ directory, ...config, provider, reconcileSources: async selected => {
@@ -238,11 +240,19 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         signal.addEventListener('abort', cancel, { once: true });
         try {
           check();
+          if (watch) {
+            await worker.watch(signal);
+            assertEnabled();
+            if (!signal.aborted) throw new Error('learning_worker_stopped_unexpectedly');
+            return { status: 'stopped' };
+          }
           const result = target ? await worker.runOnce(target) : await worker.runOnce();
           check();
           return result;
         } finally { signal.removeEventListener('abort', cancel); workers.delete(worker); await worker.close(); }
-      }));
+      });
+      registerAction('learning.worker.once', (input, operation) => runWorker(input, operation, false));
+      context.registerSystemAction('learning.worker.watch', (input, operation) => runWorker(input, operation, true));
       registerAction('learning.retrospective', async (input, operation) => withOperation(operation, async signal => {
         assertEnabled();
         const check = () => { assertEnabled(); checkAbort({ ...operation, signal }); };

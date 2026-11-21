@@ -76,6 +76,15 @@ AFK_E2E_DESKTOP_LIVE_LEARNING=1 pnpm --dir apps/desktop exec playwright test --c
 
 同一组安装产物复跑 **3/3**（22.7 秒）。反向用例先在 Desktop 打开任务列表，再用安装版 CLI 启动同一提炼请求。点击旧列表中的按钮后，Desktop 拒绝启动，刷新后运行按钮消失。CLI 仍持有队列，只有一次尝试和一次分析进程启动。向 CLI 发送 `SIGTERM` 后，进程以 1 退出，报告 `learning_worker_cancelled`，同一尝试记为 `analysis_cancelled`，进程、临时目录及队列记录均已清理。三个场景使用可控 Claude 进程。
 
+使用 macOS arm64 CLI `0.2.186` 的仓库外安装与同一个打包 Desktop 复跑 **5/5**（34.8 秒）。CLI 归档 SHA-256 为 `0274d8db353992c6ab49fbf6a31b0f782dfe8c010811109208542828bc221224`。新增验收覆盖 CLI `watch` 与 Desktop 双向竞争。监听者持有空队列时，稍后出现的完整运行审计被收集并触发提炼。`SIGINT` 和 `SIGTERM` 均返回 `{"status":"stopped"}` 与退出码 `0`。每次停止均清除 SQLite 占用、分析进程及临时目录。新监听者可重新获得队列并处理余下尝试。测试使用隔离配置、回环 Tracker 和可控 Claude 进程。Runtime 定向 **219/219**，CLI 定向 **475/475**，Runtime、CLI、Desktop 类型检查及文档检查通过。
+
+复跑这五项时，在已设置安装路径的环境中执行：
+
+```sh
+pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts learning-settings \
+  --grep 'releases a running packaged|rejects a stale packaged|installed CLI watch accepts'
+```
+
 ### 历史 QA 工作区归属
 
 通过失败运行 `7cbb0b81-8a53-4725-99a1-c801feff7a61` 的审计定位到它的隔离测试目录。恢复账本中四条分配有三条已关闭，唯一保留的分配 `e920ddad-2c4e-4c5d-aabb-e26a470b4d43` 仍为 `owned`。按工作区和仓库身份复算占用键后，确认三条执行占用均归属已归档为 `blocked` 的 `qa-1-1795185498504-runtime`。

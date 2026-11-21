@@ -344,8 +344,9 @@ test.describe("production Main learning IPC with an independent saved oracle", (
     await checkWikiPublication("localhost", true);
   });
 
-  for (const scenario of ['cancel', 'quit', 'cli-owner'] as const) {
-    test(scenario === 'cli-owner' ? 'rejects a stale packaged Desktop start while the installed CLI owns the learning request'
+  for (const scenario of ['cancel', 'quit', 'once', 'watch'] as const) {
+    const cliOwns = scenario === 'once' || scenario === 'watch';
+    test(cliOwns ? `rejects a stale packaged Desktop start while the installed CLI worker (${scenario}) owns the learning request`
       : `releases a running packaged learning worker on ${scenario}`, async () => {
       test.skip(!executable || !process.env.AFK_E2E_CLI_ENTRY || process.platform !== 'darwin', 'Requires macOS installed CLI and Desktop');
       const tracker = loopbackTracker();
@@ -368,8 +369,8 @@ test.describe("production Main learning IPC with an independent saved oracle", (
         const entry = jobs.getByRole('listitem').filter({ hasText: learningFixture.requestKey });
         const runOnce = entry.getByRole('button', { name: '运行一次提炼', exact: true });
         await expect(runOnce).toBeEnabled();
-        if (scenario === 'cli-owner') {
-          const cli = learningFixture.runWorkerFromCli();
+        if (scenario === 'once' || scenario === 'watch') {
+          const cli = learningFixture.runWorkerFromCli(scenario);
           cliChild = cli.child;
           cliResult = cli.catch((error: unknown) => error);
         } else {
@@ -386,7 +387,7 @@ test.describe("production Main learning IPC with an independent saved oracle", (
         expect(new Set(ownedPids).size).toBe(3);
         for (const pid of ownedPids) expect(() => process.kill(pid, 0)).not.toThrow();
         expect(existsSync(launch!.directory)).toBe(true);
-        if (scenario === 'cli-owner') {
+        if (cliOwns) {
           expect(workerPid).toBe(cliChild!.pid);
           await runOnce.click();
           await expect(learning.getByRole('alert')).toHaveText('提炼未完成，请刷新任务并检查已保存的学习配置。');
@@ -397,11 +398,18 @@ test.describe("production Main learning IPC with an independent saved oracle", (
           expect(await learningFixture.jobsFromCli()).toEqual(running);
           expect(learningFixture.analysisLaunches()).toEqual([launch]);
           expect(cliChild!.kill('SIGTERM')).toBe(true);
-          await expect(cliResult).resolves.toMatchObject({
-            code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_cancelled'),
-          });
+          if (scenario === 'watch') {
+            await expect(cliResult).resolves.toMatchObject({ stdout: '{"status":"stopped"}\n' });
+          } else {
+            await expect(cliResult).resolves.toMatchObject({
+              code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_cancelled'),
+            });
+          }
         } else if (scenario === 'cancel') {
           await expect(learningFixture.runWorkerFromCli()).rejects.toMatchObject({
+            code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_busy'),
+          });
+          await expect(learningFixture.runWorkerFromCli('watch')).rejects.toMatchObject({
             code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_busy'),
           });
           expect(await learningFixture.queueOwners()).toEqual([workerPid]);
@@ -431,6 +439,48 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       }
     });
   }
+
+  test('installed CLI watch accepts new audit work and releases the queue across restarts', async () => {
+    test.skip(!process.env.AFK_E2E_CLI_ENTRY || process.platform !== 'darwin', 'Requires macOS installed CLI');
+    const fixture = await createLearningFixture('fact', 'gitlab:localhost/acme/api', 'deferred');
+    try {
+      let jobId: string | undefined;
+      for (const [index, signal] of (['SIGINT', 'SIGTERM'] as const).entries()) {
+        const watcher = fixture.runWorkerFromCli('watch');
+        const result = watcher.catch((error: unknown) => error);
+        try {
+          await expect.poll(() => fixture.queueOwners()).toEqual([watcher.child.pid]);
+          if (index === 0) {
+            expect(await fixture.jobsFromCli()).toEqual([]);
+            expect(fixture.analysisLaunches()).toEqual([]);
+            fixture.publishAudit();
+          }
+          await expect.poll(() => fixture.analysisLaunches()).toHaveLength(index + 1);
+          const launch = fixture.analysisLaunches().at(-1)!;
+          const jobs = await fixture.jobsFromCli();
+          expect(jobs).toHaveLength(1);
+          jobId ??= jobs[0]!.jobId;
+          expect(jobs[0]).toMatchObject({ jobId, attempts: [
+            ...Array.from({ length: index }, () => expect.objectContaining({ status: 'cancelled' })),
+            expect.objectContaining({ ownerPid: watcher.child.pid, status: 'started' }),
+          ] });
+          expect(watcher.child.kill(signal)).toBe(true);
+          await expect(result).resolves.toMatchObject({ stdout: '{"status":"stopped"}\n' });
+          expect(await fixture.queueOwners()).toEqual([]);
+          expect(existsSync(launch.directory)).toBe(false);
+          for (const pid of [launch.pid, launch.guardPid]) {
+            expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+          }
+        } finally {
+          if (watcher.child.exitCode === null) watcher.child.kill('SIGTERM');
+          await result;
+        }
+      }
+      expect(await fixture.jobsFromCli()).toMatchObject([{ jobId, attempts: [
+        { status: 'cancelled', errorCode: 'analysis_cancelled' }, { status: 'cancelled', errorCode: 'analysis_cancelled' },
+      ] }]);
+    } finally { fixture.cleanup(); }
+  });
 
   test("shows missing independent lesson QA without validating or publishing", async () => {
     const fixture = await createLearningFixture("lesson");

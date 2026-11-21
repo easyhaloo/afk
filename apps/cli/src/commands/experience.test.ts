@@ -918,6 +918,36 @@ describe('learning worker once', () => {
   });
 });
 
+describe('learning worker watch', () => {
+  it('stops on SIGTERM, disposes its runtime and writes only the shutdown receipt', async () => {
+    const existing = process.listeners('SIGTERM');
+    const plugins = { dispatchSystemAction: vi.fn(async (_action, _input, { signal }: { signal: AbortSignal }) => {
+      const stop = process.listeners('SIGTERM').find(listener => !existing.includes(listener));
+      expect(stop).toBeDefined();
+      Reflect.apply(stop!, process, []);
+      expect(signal.aborted).toBe(true);
+      return { status: 'stopped', internal: '/private/ledger' };
+    }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await test.parse('worker', 'watch', '--json');
+    expect(plugins.dispatchSystemAction).toHaveBeenCalledOnce();
+    expect(plugins.dispatchSystemAction).toHaveBeenCalledWith('learning.worker.watch', {}, { signal: expect.any(AbortSignal) });
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(process.listeners('SIGTERM')).toEqual(existing);
+    expect(test.printed()).toBe('{"status":"stopped"}\n');
+  });
+
+  it('reports unexpected listener termination and cleans up the runtime', async () => {
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({ status: 'stopped' }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await expect(test.parse('worker', 'watch', '--json')).rejects.toThrow('learning_worker_failed');
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(test.printed()).toBe('');
+  });
+});
+
 describe('read-only learning governance', () => {
   it.each([
     { command: ['prepare', 'b'.repeat(64), '--expected-version', '2', '--target', 'wiki:retry'],

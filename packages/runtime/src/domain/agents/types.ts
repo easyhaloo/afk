@@ -133,7 +133,7 @@ export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'session'; sessionId: string; worktreePath?: string }
   | { type: 'usage'; usage: TokenUsage }
-  | { type: 'result'; result: unknown }
+  | { type: 'result'; result: unknown; completedTurnUsage?: TokenUsage }
   | { type: 'error'; error: Error };
 
 /** Provider-neutral options used by an execution host to start an agent. */

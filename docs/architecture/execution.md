@@ -240,6 +240,11 @@ handoff reservation before native resume or fresh startup; a failed native
 startup can fall back within that same reservation. Exhausted budgets retain a
 terminal recovery document and block the work item.
 
+Local and container batch execution also check the context threshold after a
+clean Claude Code turn with a successful native result and final usage. A goal
+completion marker takes priority. A missing or failed native result does not
+trigger this terminal handoff.
+
 Recovery document paths and historical-document patterns use the same encoded
 canonical work-item identity. Numeric legacy identities retain their existing
 file names. Cancellation is registered before the first asynchronous execution

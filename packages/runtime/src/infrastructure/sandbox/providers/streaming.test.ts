@@ -911,6 +911,34 @@ describe('StreamingAgentExecution', () => {
   });
 
   describe('context budget', () => {
+    it.each([
+      { name: 'successful final turn', expected: 'context_high' },
+      { name: 'completion signal', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>', expected: 'completed' },
+      { name: 'below threshold', threshold: 101, expected: 'failed', error: 'MISSING_RESULT' },
+      { name: 'nonterminal record', subtype: undefined, expected: 'failed', error: 'MISSING_RESULT' },
+      { name: 'native error', isError: true, expected: 'failed', error: 'AGENT_ERROR' },
+      { name: 'nonzero process exit', exitCode: 7, expected: 'failed', error: 'NON_ZERO_EXIT' },
+    ])('classifies $name with Claude usage on the final stdout record', async fixture => {
+      const provider = new ClaudeCodeProvider();
+      const native = JSON.stringify({ type: 'result', subtype: 'subtype' in fixture ? fixture.subtype : 'success',
+        is_error: fixture.isError ?? false, session_id: 'native-session', result: fixture.result ?? 'work in progress',
+        usage: { input_tokens: 60, cache_read_input_tokens: 20, output_tokens: 20 } });
+      const execution = new StreamingAgentExecution({
+        command: command(`process.stdin.resume(); process.stdin.once('end', () => {
+          process.stdout.write(${JSON.stringify(native)}); process.exitCode = ${fixture.exitCode ?? 0};
+        });`),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+        metadata: { ...PROCESS_METADATA }, parseLine: provider.parseLine.bind(provider),
+      });
+      execution.start();
+      try {
+        const result = await execution.waitForResult({ completionTimeoutMs: 5000, contextHighTokens: fixture.threshold ?? 100 });
+        expect(result).toMatchObject({ status: fixture.expected, usage: { totalTokens: 100 } });
+        expect(result.error?.code).toBe(fixture.error);
+        expect(execution.metadata.threadId).toBe('native-session');
+      } finally { await execution.kill(); }
+    });
+
     it.each([100, 101])('returns context_high at %i tokens without destroying the resumable process', async totalTokens => {
       const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: totalTokens - 20, outputTokens: 20, totalTokens } });
       const completed = JSON.stringify({ type: 'result', result: JSON.stringify({ type: 'goal_complete' }) });

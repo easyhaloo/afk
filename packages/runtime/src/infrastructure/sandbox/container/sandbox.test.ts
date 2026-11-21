@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { CursorProvider } from '../../../domain/agents/cursor.js';
 import { PiProvider } from '../../../domain/agents/pi.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
+import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
 import type { AgentStartOptions } from '../../../domain/agents/types.js';
 import { collectAgentTelemetry } from '../../observability/agent-telemetry.js';
 import { ContainerAgentExecution, ContainerSandbox } from './sandbox.js';
@@ -287,6 +288,20 @@ describe('container event and legacy boundaries', () => {
     await f.write(['usage']);
     expect(await f.start({ parseLine: () => [{ type: 'usage', usage }] }).waitForResult({ contextHighTokens: 1 }))
       .toMatchObject({ status: 'failed', usage, error: { code: 'MISSING_RESULT' } });
+  });
+
+  it('hands off a clean Claude turn using its final usage and preserves completion priority', async () => {
+    const f = await files();
+    const agent = new ClaudeCodeProvider();
+    const start = () => f.start({ metadata: { provider: agent.name, transport: 'process' }, parseLine: agent.parseLine.bind(agent) });
+    const native = { type: 'result', subtype: 'success', is_error: false, session_id: 'native-claude',
+      result: 'work in progress', usage: { input_tokens: 15, output_tokens: 4 } };
+    await f.write([native]);
+    await expect(start().waitForResult({ contextHighTokens: 19 }))
+      .resolves.toMatchObject({ status: 'context_high', usage });
+    await f.write([{ ...native, result: marker }]);
+    await expect(start().waitForResult({ contextHighTokens: 19 }))
+      .resolves.toMatchObject({ status: 'completed', usage, structuredOutput: goal });
   });
 
   it.each(['claude-code', 'codex'] as const)('reuses %s tool summaries, including events after completion', async name => {

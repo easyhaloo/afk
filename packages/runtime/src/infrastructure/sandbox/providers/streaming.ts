@@ -61,7 +61,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private copilotReport?: ReturnType<typeof createCopilotUsageReport>;
   private readonly processOwner = randomUUID();
   private done = false;
-  private analysisClosed = false;
+  private closedCleanly = false;
   private stopping?: Promise<void>;
   private readonly signalledDescendants = new Map<number, string>();
   private interruptAcked = false;
@@ -69,6 +69,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private error: ExecutionResult['error'] | undefined;
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
+  private completedTurnUsage?: TokenUsage;
   private readonly tools = new Map<string, AgentToolCallSummary>();
   private readonly stdoutDecoder = new StringDecoder('utf8');
   private readonly stderrDecoder = new StringDecoder('utf8');
@@ -170,7 +171,7 @@ export class StreamingAgentExecution implements AgentExecution {
 
     const child = this.proc;
     child.on('close', (code, signal) => {
-      this.analysisClosed = this.analysisSessionId !== undefined && !this.done && code === 0 && signal === null
+      this.closedCleanly = !this.done && code === 0 && signal === null
         && child.stdout?.readableEnded === true && child.stderr?.readableEnded === true;
       this.finishOutput();
     });
@@ -215,6 +216,7 @@ export class StreamingAgentExecution implements AgentExecution {
             };
             break;
           case 'result': {
+            this.completedTurnUsage = event.completedTurnUsage;
             if (this.analysisSessionId !== undefined) {
               this.structuredOutput = undefined;
               const nativeSession = events.find(candidate => candidate.type === 'session');
@@ -358,7 +360,8 @@ export class StreamingAgentExecution implements AgentExecution {
           },
         };
       }
-      if (!this.error && this.exitCode === undefined && this.usage && this.usage.totalTokens >= contextHighTokens) {
+      if (!this.error && !this.completedTurnUsage && this.exitCode === undefined
+        && this.usage && this.usage.totalTokens >= contextHighTokens) {
         return {
           version: 1,
           runId: this.id,
@@ -418,7 +421,7 @@ export class StreamingAgentExecution implements AgentExecution {
       };
     }
 
-    const error = this.error ?? (this.analysisSessionId !== undefined && !this.analysisClosed
+    const error = this.error ?? (this.analysisSessionId !== undefined && !this.closedCleanly
       ? { code: 'ANALYSIS_CLOSE_UNCONFIRMED', message: 'Guarded analysis did not close after draining both output streams' }
       : undefined);
     if (error || (this.exitCode !== undefined && this.exitCode !== 0)) {
@@ -437,6 +440,20 @@ export class StreamingAgentExecution implements AgentExecution {
     }
 
     if (!this.structuredOutput || !this.hasExpectedSignal()) {
+      const usage = this.completedTurnUsage;
+      if (this.analysisSessionId === undefined && this.closedCleanly && usage && usage.totalTokens >= contextHighTokens) {
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'context_high',
+          provider: 'batch',
+          sessionId: this.sessionId,
+          exitCode: this.exitCode,
+          usage,
+          tools: this.tools.size ? [...this.tools.values()] : undefined,
+          commits: [],
+        };
+      }
       return {
         version: 1,
         runId: this.id,

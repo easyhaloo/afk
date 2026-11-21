@@ -409,7 +409,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new KnowledgeBaseProvider({ ...config, fetch });
       return capability(provider, { contexts: [provider] });
     }),
-    'context.retrieval': define('context.provider', z.object({ documents: z.array(z.object({ origin: text, content: text }).strict()).min(1) }).strict(), config => {
+    'context.retrieval': define('context.provider', z.object({ documents: z.array(z.object({
+      origin: text,
+      content: z.string().trim().min(1).refine(value => !value.includes('\0'), 'must not contain NUL'),
+    }).strict()).min(1) }).strict(), config => {
       const provider = new RetrievalProvider(config.documents);
       return capability(provider, { contexts: [provider] });
     }),

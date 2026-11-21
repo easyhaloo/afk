@@ -523,7 +523,7 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `trigger.schedule` | 非空 `triggers[{id,kind: schedule,schedule,payload?,input?}]`；schedule 是不大于 `2147483647` 的正整数毫秒字符串，`payload`、`input` 支持嵌套 JSON |
 | `context.code`、`context.project-memory` | 分别为 `root`、`file` |
 | `context.knowledge-base` | `endpoint`、secret `token?`、`timeoutMs?`；Bearer 认证要求 HTTPS；具名凭据在每次 `gather` 时解析，遵循操作取消与期限；`timeoutMs` 限制 HTTP，包括响应体读取 |
-| `context.retrieval` | 非空 `documents[{origin,content}]` |
+| `context.retrieval` | 非空 `documents[{origin,content}]`。两个字段均去除首尾空白，且不得为空或包含 NUL。`origin` 为单行，`content` 保留内部换行。 |
 | `credential.system-keychain` | `service`、`command?` |
 | `credential.google-oauth` | `{}` 使用 `afk plugin auth login google --client <path>` 保存的 Google 凭据 |
 | `credential.oauth` | HTTPS `tokenEndpoint`、`clientId`、secret `clientSecret`、`authMethod?`（`client_secret_basic`/`client_secret_post`）、`timeoutMs?` |

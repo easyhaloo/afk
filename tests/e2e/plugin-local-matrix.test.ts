@@ -308,6 +308,23 @@ describe('context selection and persisted memory', () => {
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
   });
 
+  it('context.retrieval preserves Markdown line breaks in documents configured through the CLI', async () => {
+    const test = await sandbox();
+    const id = 'context.retrieval';
+    const markdown = '# Work-item relationships\r\n\r\n- `parentId` groups related work.\n- `dependsOn` controls scheduling.';
+    expect((await test.configure(id, { documents: [{ origin: ' guide.md ', content: `\n${markdown}\r\n ` }] })).stdout).toBe(`Configured ${id}\n`);
+    const result = await test.invoke('context.provider', id, 'gather', { scope: '.', prompt: 'parentId dependsOn', limit: 1 });
+    expect(JSON.parse(result.stdout)).toEqual([{ origin: 'guide.md', content: markdown, score: 2 }]);
+
+    for (const document of [
+      { origin: 'guide.md', content: ' \r\n\t ' },
+      { origin: 'guide.md', content: `${markdown}\0` },
+      { origin: 'guide\n.md', content: markdown },
+    ]) {
+      await expectRejected(test.configure(id, { documents: [document] }), 'Invalid plugin settings');
+    }
+  });
+
   it.each(['traversal', 'symlink', 'missing', 'oversized'])('context.code rejects %s without changing source files', async kind => {
     const test = await configured('context.code');
     let scope = '../outside.txt';

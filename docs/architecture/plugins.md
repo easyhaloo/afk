@@ -665,7 +665,7 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `trigger.schedule` | Nonempty `triggers[{id,kind: schedule,schedule,payload?,input?}]`; schedule is a positive integer millisecond string, at most `2147483647`; `payload` and `input` accept nested JSON |
 | `context.code`, `context.project-memory` | Respectively `root`, `file` |
 | `context.knowledge-base` | `endpoint`, secret `token?`, `timeoutMs?`; bearer authentication requires HTTPS; named credentials resolve on each `gather`, with operation cancellation and deadline; `timeoutMs` bounds HTTP including response-body reads |
-| `context.retrieval` | Nonempty `documents[{origin,content}]` |
+| `context.retrieval` | Nonempty `documents[{origin,content}]`. Both fields are trimmed and must be nonempty and NUL-free. `origin` is single-line, and `content` preserves internal line breaks. |
 | `credential.system-keychain` | `service`, `command?` |
 | `credential.google-oauth` | `{}` uses the Google credentials saved by `afk plugin auth login google --client <path>` |
 | `credential.oauth` | HTTPS `tokenEndpoint`, `clientId`, secret `clientSecret`, `authMethod?` (`client_secret_basic`/`client_secret_post`), `timeoutMs?` |

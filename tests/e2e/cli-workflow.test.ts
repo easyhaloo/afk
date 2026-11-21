@@ -11,7 +11,7 @@ import { COMMANDS } from '../../apps/cli/src/command-registry.js';
 import { parseWorkItemInventoryResult } from '../../apps/desktop/shared/backlog-contract.js';
 
 const exec = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())); });
 

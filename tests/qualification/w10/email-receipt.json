@@ -1,0 +1,36 @@
+{
+  "provider": "notification.email",
+  "observed": "2026-11-19T08:04:20.529449+00:00",
+  "release": {
+    "version": "0.2.148",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMinimum": "22.16.0"
+  },
+  "archiveSha256": "b3a764a4c67001399ca0bf981d9b631cd3a4675945edb46395aa7b74ba6daf92",
+  "senderImage": "sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a",
+  "receiverImage": "sha256:eb5d9c60d047664130b3c88bb9d3ff77cf809b4a524ee05aa3ac898940332d39",
+  "sendmail": "BusyBox v1.37.0 (2026-01-10 15:38:28 UTC) multi-call binary.",
+  "network": "none (shared loopback)",
+  "afk": {
+    "delivered": true,
+    "channel": "email"
+  },
+  "smtpEnvelope": [
+    "sender: sender@example.test",
+    "recips: ['receiver@example.test']"
+  ],
+  "smtpReadback": [
+    "b'From: sender@example.test'",
+    "b'To: receiver@example.test'",
+    "b'Subject: W10 email 556ddb4b-bb43-4fd2-9d34-2281984ea55d'",
+    "b'X-Urgency: high'",
+    "b'X-Peer: 127.0.0.1'",
+    "b''",
+    "b'Loopback readback 556ddb4b-bb43-4fd2-9d34-2281984ea55d'",
+    "b'.dot'",
+    "b'third'",
+    "b'last'"
+  ],
+  "smtpData": "Data: b'From: sender@example.test\\r\\nTo: receiver@example.test\\r\\nSubject: W10 email 556ddb4b-bb43-4fd2-9d34-2281984ea55d\\r\\nX-Urgency: high\\r\\n\\r\\nLoopback readback 556ddb4b-bb43-4fd2-9d34-2281984ea55d\\r\\n..dot\\r\\nthird\\r\\nlast'"
+}

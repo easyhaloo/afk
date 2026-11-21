@@ -1,0 +1,8 @@
+{
+  "id": "context.installed-tools",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "provides": ["context.provider"],
+  "trusted": true,
+  "entry": "index.mjs"
+}

@@ -1,6 +1,8 @@
 import { CommandVerificationProvider, type CommandVerificationOptions } from './command.js';
 
 export { runVerificationCommand } from './command.js';
+export { executeFrozenVerification } from './frozen-command.js';
+export type { FrozenVerificationRequest } from './frozen-command.js';
 export type { CommandVerificationOptions, VerificationCommandOptions, VerificationCommandResult, VerificationCommandRunner } from './command.js';
 
 export class TestRunnerVerificationProvider extends CommandVerificationProvider {

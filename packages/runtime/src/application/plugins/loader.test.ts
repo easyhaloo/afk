@@ -7,15 +7,16 @@ import { loadInstalledPlugins } from './loader.js';
 import { createConfiguredPlugins } from './configured.js';
 
 describe('loadInstalledPlugins', () => {
-  it.each(['resolution', 'activation'])('does not retry a configured consumer after an actual %s failure while other plugins progress', async failure => {
+  it.each(['resolution', 'activation'])('keeps loading progress and does not retry a configured consumer %s failure', async failure => {
     const runtime = new PluginRuntime();
     const resolve = vi.fn(async () => {
       if (failure === 'resolution') throw new Error('synthetic resolution failure');
       return { secret: 'https://webhook.example.test/fixture' };
     });
+    const network = vi.fn();
     const [consumer] = await createConfiguredPlugins({ configurations: [
       { id: 'notification.slack', config: { webhook: { provider: 'fixture', name: 'webhook' } } },
-    ] });
+    ], fetch: network });
     const activate = vi.spyOn(consumer, 'activate');
     try {
       const loaded = await loadInstalledPlugins(runtime, { entries: [], plugins: [
@@ -30,13 +31,21 @@ describe('loadInstalledPlugins', () => {
           },
         },
       ] });
-      expect(loaded).toEqual(['credential.fixture', 'test.progress', 'test.final']);
+      expect(loaded).toEqual(failure === 'resolution' ? ['credential.fixture', 'notification.slack', 'test.progress', 'test.final'] : ['credential.fixture', 'test.progress', 'test.final']);
       expect(activate).toHaveBeenCalledTimes(1);
-      expect(resolve).toHaveBeenCalledTimes(1);
-      expect(runtime.getPlugin('notification.slack')).toBeUndefined();
+      expect(resolve).not.toHaveBeenCalled();
       const errors = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.slack');
-      expect(errors.map(item => item.code)).toEqual(['activation.failed', 'load.failed']);
-      expect(errors[0].message).toContain(failure === 'resolution' ? 'credential resolution failed' : 'duplicate notification.provider');
+      if (failure === 'resolution') {
+        expect(runtime.getPlugin('notification.slack')).toBeDefined();
+        expect(errors).toEqual([]);
+        await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Delivery' })).resolves.toMatchObject({ delivered: false, error: 'Operation credential unavailable' });
+        expect(resolve).toHaveBeenCalledOnce();
+      } else {
+        expect(runtime.getPlugin('notification.slack')).toBeUndefined();
+        expect(errors.map(item => item.code)).toEqual(['activation.failed', 'load.failed']);
+        expect(errors[0].message).toContain('duplicate notification.provider');
+      }
+      expect(network).not.toHaveBeenCalled();
     } finally { await runtime.dispose(); }
   });
 

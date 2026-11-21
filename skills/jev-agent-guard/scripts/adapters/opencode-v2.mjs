@@ -16,6 +16,8 @@
 // and context-filter.mjs directly instead (neither has argv side effects).
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { listSkillMetadata, skillRoots } from '../skill-catalog.mjs';
+import { currentSkillTask, matchesSkillScope } from '../skill-scope.mjs';
 
 const denyError = reason => {
   const error = new Error(reason || 'jev-agent-guard blocked this action.');
@@ -57,11 +59,22 @@ export function jevAgentGuardV2({ scriptsRoot = resolveScriptsRoot(), env = proc
       // the next context transform.
       const recommendations = new Map();
       const sidOf = event => event?.sessionID ?? event?.session?.id ?? '';
+      let scopeRegistration;
 
       // V1: chat.message
       await ctx.session.hook('prompt', async event => {
+        if (ctx.skill) {
+          scopeRegistration ??= ctx.skill.transform(registry => {
+            const task = currentSkillTask(directory, env);
+            for (const skill of listSkillMetadata(skillRoots('opencode', directory, env))) {
+              if (!matchesSkillScope(skill.recallScope, task)) registry.remove(skill.name);
+            }
+          });
+          await scopeRegistration;
+        }
         try {
           const session = sidOf(event);
+          recommendations.delete(session);
           const prompt = (event?.prompt?.text ?? '').slice(0, 2000);
           const decision = await runAdapter({ host: 'opencode', event: 'prompt', payload: {
             prompt, session_id: session, cwd: directory,

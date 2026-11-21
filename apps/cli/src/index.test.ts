@@ -90,3 +90,13 @@ it('reports runtime construction failure once without attempting disposal', asyn
   expect(console.error).toHaveBeenCalledOnce();
   expect(console.error).toHaveBeenCalledWith('fixture activation failed');
 });
+
+it.each([new Error('PRIVATE_TRANSCRIPT credential=PRIVATE_TOKEN'), 'PRIVATE_TOKEN'])('sanitizes an owned runtime disposal rejection', async failure => {
+  dispose.mockRejectedValue(failure);
+  mocks.dispatch.mockImplementation(async (_command, _args, context: { createRuntime: () => Promise<PluginRuntime> }) => context.createRuntime());
+  await start('experience', 'validate');
+  await vi.waitFor(() => expect(process.exitCode).toBe(1));
+  expect(dispose).toHaveBeenCalledOnce();
+  expect(console.error).toHaveBeenCalledOnce();
+  expect(console.error).toHaveBeenCalledWith('Plugin runtime cleanup failed');
+});

@@ -2,12 +2,14 @@ import { Argument, Command, Option } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { GoogleOAuthCredentialProvider, GoogleOAuthError, configureGoogleAccountPlugins, PluginManager, readPluginConfiguration, builtinPluginManifests, createDefaultPluginRuntime, startPluginListener, startRemoteContainerService, invokeCapability, importManagedIssue, syncManagedIssue, managedIssueStateMapSchema, type PluginRuntime, type PluginConfigValue } from '@afk/runtime/plugin-sdk';
+import { GoogleOAuthCredentialProvider, GoogleOAuthError, configureGoogleAccountPlugins, PluginManager, readPluginConfiguration, builtinPluginManifests, createDefaultPluginRuntime, startPluginListener, startRemoteContainerService, invokeCapability, importManagedIssue, syncManagedIssue, managedIssueStateMapSchema, type PluginRuntime, type PluginConfigValue, listPluginInventory, diagnosePluginInventory, type ExternalToolDiagnosticOptions } from '@afk/runtime/plugin-sdk';
 import { assembleProviders } from '@afk/runtime/infrastructure/provider/assembly';
 import { parseCanonicalProject, parseWorkItemId } from '@afk/runtime/domain/work-item/identity';
 import type { CommandRegistrationContext } from '../command-registry.js';
 
 export interface PluginCommandComposition extends CommandRegistrationContext {
+  homeDir?: string;
+  toolDiagnostics?: Pick<ExternalToolDiagnosticOptions, 'execute' | 'executorLifecycle' | 'timeoutMs' | 'signal'>;
   createRuntime?: () => Promise<PluginRuntime>;
   pluginManager?: PluginManager;
   googleAuth?: Pick<GoogleOAuthCredentialProvider, 'login' | 'status' | 'logout'>;
@@ -29,7 +31,7 @@ export function registerPluginCommands(program: Command, composition: PluginComm
       ? composition.createRuntime()
       : import('../composition-root.js').then(module => module.createCliPluginRuntime());
 
-  const manager = composition.pluginManager ?? new PluginManager();
+  const manager = composition.pluginManager ?? new PluginManager({ homeDir: composition.homeDir });
   const plugin = program.command('plugin').description('Install, configure, and inspect capability plugins');
   plugin.command('import-issue <provider> <issue>')
     .description('Import an external tracker issue into a managed repository backlog')
@@ -137,6 +139,7 @@ export function registerPluginCommands(program: Command, composition: PluginComm
       process.stdout.write(`${JSON.stringify(result ?? null, null, 2)}\n`);
       if (result && typeof result === 'object' && (
         ('passed' in result && result.passed === false) || ('allowed' in result && result.allowed === false)
+        || ('removed' in result && result.removed === false)
         || ('delivered' in result && result.delivered === false) || ('code' in result && typeof result.code === 'number' && result.code !== 0)
       )) process.exitCode = 1;
     });
@@ -145,6 +148,19 @@ export function registerPluginCommands(program: Command, composition: PluginComm
     .action(async source => {
       const installed = await manager.install(source);
       process.stdout.write(`Installed ${installed.id}@${installed.version}\n`);
+    });
+  plugin.command('install-tool <recipe>')
+    .description('Install an explicitly approved local tool recipe')
+    .requiredOption('--target <target>', 'Explicit execution target; host-local only')
+    .option('--offline', 'Use only the private npm cache; never fetch')
+    .action(async (recipe, options) => {
+      const stop = new AbortController();
+      const abort = () => stop.abort(new Error('Tool installation cancelled'));
+      process.once('SIGINT', abort); process.once('SIGTERM', abort);
+      try {
+        const installed = await manager.installTool(recipe, { target: options.target, offline: options.offline === true, signal: stop.signal });
+        process.stdout.write(`Installed ${installed.id}@${installed.version}; browser/native prerequisites require separate provisioning\n`);
+      } finally { process.off('SIGINT', abort); process.off('SIGTERM', abort); }
     });
   plugin.command('configure <id>')
     .description('Save validated plugin settings from a JSON file')
@@ -186,7 +202,7 @@ export function registerPluginCommands(program: Command, composition: PluginComm
       let host: PluginRuntime | undefined;
       let listener: Awaited<ReturnType<typeof startPluginListener>> | undefined;
       try {
-        host = await createDefaultPluginRuntime({ activateTriggers: true, warn: message => process.stderr.write(`${message}\n`) });
+        host = await createDefaultPluginRuntime({ activateTriggers: true, queuePath: options.queue, warn: message => process.stderr.write(`${message}\n`) });
         if ((await host.diagnostics()).some(diagnostic => diagnostic.severity === 'error')) throw new Error('Plugin listener configuration failed validation; run plugin doctor for details');
         listener = await startPluginListener(host, { token, host: options.host, port: options.port, queuePath: options.queue });
         const address = listener.address;
@@ -233,9 +249,16 @@ export function registerPluginCommands(program: Command, composition: PluginComm
     });
   }
   plugin.command('list')
-    .description('List loaded plugins and capabilities')
+    .description('List static plugin metadata and configuration shape without activation')
+    .option('--loaded', 'Activate plugins and list runtime registrations (legacy behavior)')
     .option('--json', 'Emit JSON')
     .action(async options => {
+      if (!options.loaded) {
+        const rows = await listPluginInventory({ homeDir: composition.homeDir, configuration: (composition.readConfiguration ?? readPluginConfiguration)(composition.homeDir) });
+        if (options.json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+        else process.stdout.write(rows.map(row => `${row.id} — ${row.enabled ? 'enabled' : 'disabled'}; ${row.configuration}; ${row.capabilities.join(', ') || 'no declared capabilities'}`).join('\n') + '\n');
+        return;
+      }
       const host = await runtime();
       const rows = host.listPlugins().map(id => ({
         id,
@@ -247,10 +270,36 @@ export function registerPluginCommands(program: Command, composition: PluginComm
     });
 
   plugin.command('doctor')
-    .description('Run health and diagnostics for loaded plugins')
+    .description('Diagnose static plugin configuration and declared external tools')
+    .option('--probe', 'Run only approved builtin version probes; no authentication or installation')
+    .option('--loaded', 'Activate plugins and run provider health/diagnostics (legacy behavior)')
     .option('--plugin <id>', 'Limit checks to one plugin')
     .option('--json', 'Emit JSON')
     .action(async options => {
+      if (options.loaded && options.probe) throw new Error('--probe cannot be combined with --loaded');
+      if (!options.loaded) {
+        const rows = (await listPluginInventory({ homeDir: composition.homeDir, configuration: (composition.readConfiguration ?? readPluginConfiguration)(composition.homeDir) }))
+          .filter(row => !options.plugin || row.id === options.plugin);
+        const stop = new AbortController();
+        const abort = () => stop.abort();
+        process.once('SIGINT', abort); process.once('SIGTERM', abort);
+        try {
+          const diagnostics = rows.filter(row => row.enabled).flatMap(row => row.diagnostics);
+          if (options.plugin && !rows.length) diagnostics.push({ pluginId: options.plugin, severity: 'error', code: 'plugin.not-found', message: 'Plugin metadata is unavailable' });
+          const externalTools = await diagnosePluginInventory(rows, { ...composition.toolDiagnostics, probe: options.probe === true,
+            signal: composition.toolDiagnostics?.signal ? AbortSignal.any([stop.signal, composition.toolDiagnostics.signal]) : stop.signal });
+          const report = { inventory: rows, diagnostics, externalTools };
+          if (diagnostics.length || externalTools.some(tool => ['missing', 'outdated'].includes(tool.status) &&
+            !rows.find(row => row.id === tool.pluginId)?.externalTools.some(dependency => dependency.id === tool.id && 'optional' in dependency && dependency.optional))) process.exitCode = 1;
+          if (options.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+          else {
+            for (const row of rows) process.stdout.write(`${row.id}: ${row.enabled ? row.configuration : 'disabled'} (static)\n`);
+            for (const diagnostic of diagnostics) process.stdout.write(`ERROR ${diagnostic.pluginId} ${diagnostic.code}: ${diagnostic.message}\n`);
+            for (const tool of externalTools) process.stdout.write(`${tool.pluginId}/${tool.id} (${tool.location}): ${tool.status}${tool.reason ? ` — ${tool.reason}` : ''}\n`);
+          }
+        } finally { process.off('SIGINT', abort); process.off('SIGTERM', abort); }
+        return;
+      }
       const host = await runtime();
       const report = { health: await host.health(options.plugin), diagnostics: await host.diagnostics(options.plugin) };
       if (options.plugin && !host.getPlugin(options.plugin) && !report.diagnostics.length) {

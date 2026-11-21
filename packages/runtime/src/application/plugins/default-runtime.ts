@@ -5,20 +5,23 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { capabilitySelectionSchema as selectionSchema, createDefaultBuiltinProviderPlugins } from './builtin-manifests.js';
 import { loadInstalledPlugins } from './loader.js';
-import { PluginRuntime } from './runtime.js';
+import { PluginRuntime, type Plugin } from './runtime.js';
 import { invokeCapability } from './operations.js';
-import { createConfiguredPlugins } from './configured.js';
+import { createConfiguredPlugins, type ConfiguredPluginsOptions } from './configured.js';
 import { readPluginConfiguration, type PluginConfiguration } from './configuration.js';
 import { createCapabilityLifecycle } from './integrations.js';
+import { selectManagedRepository } from './repository-lifecycle.js';
 import type { ContextFragment } from '../../plugin-sdk/capabilities.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 import { assembleProviders } from '../../infrastructure/provider/assembly.js';
 import { parseCanonicalProject, parseWorkItemId } from '../../domain/work-item/identity.js';
 import { importManagedIssue, syncManagedIssue, managedIssueStateMapSchema } from './managed-issues.js';
 import { CONTEXT_MAX_CHARS, writeReferenceContext } from '../workflows/context-file.js';
-import { setPluginAuditArtifacts } from './observability.js';
+import { setPluginAuditArtifacts, setPluginAuditEvidence } from './observability.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
-import { currentTriggerDeliveryId } from './trigger-queue.js';
+import { evidenceStoreSelectionSchema, type EvidenceMirrorOptions } from '../../infrastructure/observability/run-observer-factory.js';
+import { currentTriggerDeliveryId, TriggerQueueFull, TriggerDeliveryConflict, type TriggerQueueOptions } from './trigger-queue.js';
+import { pluginTriggerQueue, closePluginTriggerQueue } from './listener.js';
 
 const identifier = z.string().min(1);
 
@@ -27,20 +30,59 @@ export interface DefaultPluginRuntimeOptions {
   readonly workspaceRoot?: string;
   readonly warn?: (message: string, error?: unknown) => void;
   readonly activateTriggers?: boolean;
+  readonly queuePath?: string;
+  readonly queueOptions?: TriggerQueueOptions;
+  readonly onToolSourceDecision?: ConfiguredPluginsOptions['onToolSourceDecision'];
 }
 
 export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOptions = {}): Promise<PluginRuntime> {
+  const runtime = new PluginRuntime();
+  if (options.activateTriggers) pluginTriggerQueue(runtime, {
+    queuePath: options.queuePath ?? join(options.homeDir ?? homedir(), '.afk', 'triggers', 'deliveries.sqlite'),
+    queueOptions: options.queueOptions,
+    warn: options.warn,
+  });
+  try {
+    if (options.activateTriggers) await runtime.activate({
+      manifest: { id: 'workflow.trigger-delivery', version: '0.1.0', apiVersion: 1, provides: [], trusted: true },
+      activate(context) { context.onDispose(() => closePluginTriggerQueue(runtime)); },
+    });
+    await configureDefaultPluginRuntime(runtime, options);
+    return runtime;
+  } catch (error) {
+    try { await closePluginTriggerQueue(runtime); }
+    finally { await runtime.dispose(); }
+    throw error;
+  }
+}
+
+async function configureDefaultPluginRuntime(runtime: PluginRuntime, options: DefaultPluginRuntimeOptions): Promise<PluginRuntime> {
   const homeDir = options.homeDir ?? homedir();
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const runtime = new PluginRuntime();
   const invalidSettings: string[] = [];
+  let requiredIntegrations: Plugin | undefined;
   let auditArtifacts: { provider: string; timeoutMs?: number } | undefined;
+  let auditEvidence: ReturnType<typeof createLocalEncryptedEvidenceStore> | undefined;
+  const initializeAuditEvidence = () => auditEvidence ??= createLocalEncryptedEvidenceStore(homeDir).catch(() => {
+    auditEvidence = undefined;
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });
+    throw new Error('Audit evidence storage could not be initialized');
+  });
+  const localEvidence: EvidenceMirrorOptions['evidence'] = {
+    async get(ref) { return (await initializeAuditEvidence()).get(ref); },
+    async put(input) { return (await initializeAuditEvidence()).put(input); },
+  };
   let configuration: PluginConfiguration;
   try { configuration = readPluginConfiguration(homeDir); }
   catch (error) {
     configuration = { plugins: [] };
     invalidSettings.push('Plugin configuration could not be validated');
     runtime.recordDiagnostic({ severity: 'error', code: 'config.invalid', message: error instanceof Error ? error.message : 'Invalid plugin configuration' });
+  }
+  const evidenceSelection = configuration.evidenceStore === undefined ? undefined : evidenceStoreSelectionSchema.safeParse(configuration.evidenceStore);
+  if (evidenceSelection && !evidenceSelection.success) {
+    invalidSettings.push('Evidence store selection could not be validated');
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-store-invalid', message: 'Evidence store selection could not be validated' });
   }
   const builtins: import('./runtime.js').Plugin[] = [
     {
@@ -80,14 +122,14 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
           if (result.status !== 'done' && result.status !== 'merge_ready') throw new Error(`Managed execution stopped: ${result.status}`);
           return result;
         });
-        context.registerSystemAction('capability.invoke', async context => {
-          const envelope = context && typeof context === 'object' ? context as { input?: unknown; worktreePath?: string } : undefined;
+        context.registerSystemAction('capability.invoke', async (context, operation) => {
+          const envelope = context && typeof context === 'object' ? context as { input?: unknown } : undefined;
           let input = context && typeof context === 'object' && 'capability' in context ? context : envelope?.input ?? context;
-          if (input && typeof input === 'object' && 'capability' in input && input.capability === 'verification.provider' && envelope?.worktreePath) {
+          if (input && typeof input === 'object' && 'capability' in input && input.capability === 'verification.provider' && operation?.authorizedWorkspace) {
             const request = input as { capability: string; input?: { target?: string } };
-            input = { ...request, input: { target: envelope.worktreePath, ...request.input } };
+            input = { ...request, input: { target: operation.authorizedWorkspace, ...request.input } };
           }
-          const result = await invokeCapability(runtime, input);
+          const result = await invokeCapability(runtime, input, operation);
           if (result && typeof result === 'object' && (
             ('passed' in result && result.passed === false) || ('allowed' in result && result.allowed === false)
             || ('delivered' in result && result.delivered === false) || ('code' in result && typeof result.code === 'number' && result.code !== 0)
@@ -115,9 +157,25 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
   try {
     plugins.push(...await createConfiguredPlugins({
       configurations: configured, homeDir, workspaceRoot, activateTriggers: options.activateTriggers,
+      onToolSourceDecision: options.onToolSourceDecision,
+      readToolSourcePolicy: () => readPluginConfiguration(homeDir).plugins.find(entry =>
+        entry.id === 'policy.compliance-policy' && entry.builtin && entry.enabled !== false)?.config,
       onTrigger: async event => {
         const entry = configured.find(candidate => candidate.id === event.pluginId);
         if (typeof entry?.action !== 'string') throw new Error('Trigger action is not configured');
+        if (event.pluginId === 'trigger.schedule') {
+          try {
+            if (!event.tick) throw new Error('Scheduled tick identity is missing');
+            const queue = pluginTriggerQueue(runtime);
+            if (!queue) throw new Error('Durable schedule queue is unavailable');
+            queue.enqueue(event.pluginId, JSON.stringify({ action: entry.action, input: event.trigger.input ?? event.payload ?? event.trigger.payload ?? {}, triggerId: event.trigger.id, tick: event.tick }), event.tick.id);
+          } catch (error) {
+            const code = error instanceof TriggerQueueFull ? 'trigger.queue-full' : error instanceof TriggerDeliveryConflict ? 'trigger.delivery-conflict' : 'trigger.persistence-failed';
+            runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code, message: 'Scheduled tick could not be durably accepted; inspect queue capacity, delivery conflicts and private storage' });
+            throw error;
+          }
+          return;
+        }
         try { await runtime.dispatchSystemAction(entry.action, event.trigger.input ?? event.payload ?? event.trigger.payload ?? {}); }
         catch {
           runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'trigger.action-failed', message: 'Configured trigger action failed' });
@@ -141,7 +199,10 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
       auditArtifacts = selection.evidence;
       const fragments = new Map<string, ContextFragment[]>();
       const module = createCapabilityLifecycle(runtime, {
+        verificationEvidence: localEvidence,
         policies: selection.policies.map(policy => ({ ...policy, input: context => ({ ...policy.input, context: { ...policy.input.context, worktreePath: context.worktreePath } }) })),
+        verifications: selection.verifications.map(({ provider, ...request }) => ({ provider,
+          request: context => ({ ...request, target: context.worktreePath }) })),
         contexts: selection.contexts.map(source => ({
           ...source, query: () => source.query,
           async consume(received, context) {
@@ -176,11 +237,18 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
         })),
         notifications: selection.notifications.map(notification => ({ ...notification, message: (_context, artifacts) => ({ ...notification.message, body: [notification.message.body, ...artifacts.map(artifact => artifact.artifact.uri)].join('\n') }) })),
       });
-      plugins.push({
+      const integration: Plugin = {
         manifest: { id: 'workflow.integrations', version: '0.1.0', apiVersion: 1, provides: ['workflow.lifecycle'], trusted: true },
         activate(context) {
           context.registerLifecycle({
             ...module,
+            async onInit(context) {
+              for (const verification of selection.verifications) {
+                if (!runtime.getVerificationProvider(verification.provider)) throw new Error('Configured verification provider is unavailable');
+              }
+              await module.onInit?.(context);
+              if (auditArtifacts) await initializeAuditEvidence();
+            },
             async onBeforeAgent(context) { fragments.delete(context.worktreePath); await module.onBeforeAgent?.(context); },
             async onCleanup(context) {
               if (fragments.has(context.worktreePath)) {
@@ -194,16 +262,38 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
           });
           context.onDispose(() => fragments.clear());
         },
-      });
+      };
+      if (selection.repository) selectManagedRepository(runtime, selection.repository.provider, integration);
+      plugins.push(integration);
+      if (selection.policies.length || selection.verifications.length || selection.repository) requiredIntegrations = integration;
     }
   }
   await loadInstalledPlugins(runtime, { ...options, homeDir, workspaceRoot, entries: configuration.plugins, plugins });
+  if (requiredIntegrations && runtime.getPlugin(requiredIntegrations.manifest.id) !== requiredIntegrations) {
+    invalidSettings.push('Configured capability gates are unavailable');
+    runtime.recordDiagnostic({ severity: 'error', code: 'config.integrations-unavailable', message: 'Configured capability gates are unavailable' });
+  }
   if (auditArtifacts) {
     try {
-      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: await createLocalEncryptedEvidenceStore(homeDir), captureEvents: true });
+      setPluginAuditArtifacts(runtime, { ...auditArtifacts, evidence: localEvidence, captureEvents: true });
     } catch {
       invalidSettings.push('Audit evidence storage could not be initialized');
       runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-invalid', message: 'Audit evidence storage could not be initialized; check the selected artifact provider and private local storage' });
+    }
+  }
+  if (evidenceSelection?.success) {
+    try {
+      let reported = false;
+      setPluginAuditEvidence(runtime, { ...evidenceSelection.data, evidence: localEvidence,
+        onFailure() {
+          if (reported) return;
+          reported = true;
+          runtime.recordDiagnostic({ severity: 'warning', code: 'evidence.mirror-failed', message: 'Evidence mirroring failed; local audit remains authoritative' });
+        },
+      });
+    } catch {
+      invalidSettings.push('Evidence store selection is unavailable');
+      runtime.recordDiagnostic({ severity: 'error', code: 'config.evidence-store-invalid', message: 'Evidence store selection is unavailable' });
     }
   }
   if (invalidSettings.length) await runtime.activate({
@@ -212,13 +302,16 @@ export async function createDefaultPluginRuntime(options: DefaultPluginRuntimeOp
       context.registerLifecycle({ name: 'invalid-plugin-settings', order: -1000, failureMode: 'required', async onInit() { throw new Error(invalidSettings.join('; ')); } });
     },
   });
+  let triggerActionsAvailable = true;
   if (options.activateTriggers) {
     for (const entry of configuration.plugins) {
       if (!entry.builtin || entry.enabled === false || !entry.id.startsWith('trigger.') || !runtime.getPlugin(entry.id)) continue;
       if (typeof entry.action === 'string' && runtime.listSystemActions().includes(entry.action)) continue;
+      triggerActionsAvailable = false;
       await runtime.dispose(entry.id);
       runtime.recordDiagnostic({ pluginId: entry.id, severity: 'error', code: 'trigger.action-missing', message: 'Configured trigger action is not registered' });
     }
   }
+  if (!invalidSettings.length && triggerActionsAvailable) pluginTriggerQueue(runtime)?.start();
   return runtime;
 }

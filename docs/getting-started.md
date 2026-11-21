@@ -23,13 +23,13 @@ bash /tmp/afk-install.sh
 ```
 
 An existing checkout can also run `./install.sh`; it downloads the same release
-without building the checkout. An update keeps the release it installed and the
-one it replaced — enough to roll back by hand — and removes older ones, because
-each release is a full ~36 MB copy under `~/.afk/cli/versions/`. Options:
+without building the checkout. Updates retain old releases because other prefixes
+and running processes may still use them. Set `AFK_HOME` to an absolute directory
+to isolate release storage and downloads. Use `--prefix` to choose the executable directory.
 
 ```bash
 bash /tmp/afk-install.sh --version 0.1.0 --skip-completion
-bash /tmp/afk-install.sh --prefix "$HOME/bin"
+AFK_HOME="$HOME/test-profile" bash /tmp/afk-install.sh --prefix "$HOME/test-profile/bin"
 bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-darwin-arm64.tar.gz.sha256
 ```
 

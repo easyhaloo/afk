@@ -1,0 +1,10 @@
+{
+  "id": "tool.scan-manifest",
+  "version": "2.0.2",
+  "apiVersion": 1,
+  "trusted": true,
+  "provides": ["verification.provider"],
+  "concurrentVerification": true,
+  "entry": "index.mjs",
+  "sourceDigest": "295e07217f82fd32deebbb03d129d1a9e7d242456871ca8e9060086e799ad8ea"
+}

@@ -1,0 +1,54 @@
+{
+  "afk": "0.2.176",
+  "stopSignal": "SIGKILL",
+  "intervalMs": 4000,
+  "downtimeMs": 8000,
+  "competingListenerRejected": true,
+  "beforeRestart": {
+    "deliveryId": "b37c8090c98b2eaba75f62d6239f5746db9acdc02f665c9a094a0724ad714b3b",
+    "providerId": "trigger.schedule",
+    "status": "processing",
+    "attempts": 1,
+    "receivedAt": 1795166139083,
+    "nextAttemptAt": 1795166139083
+  },
+  "recovered": {
+    "deliveryId": "b37c8090c98b2eaba75f62d6239f5746db9acdc02f665c9a094a0724ad714b3b",
+    "providerId": "trigger.schedule",
+    "status": "delivered",
+    "attempts": 2,
+    "receivedAt": 1795166139083,
+    "nextAttemptAt": 1795166150007
+  },
+  "firstNewTick": {
+    "deliveryId": "2be40a29b724280d5028e414fe909a86c6a6df6db9c0aaead623fcb58f2b7e80",
+    "providerId": "trigger.schedule",
+    "status": "delivered",
+    "attempts": 1,
+    "receivedAt": 1795166151995,
+    "nextAttemptAt": 1795166152999
+  },
+  "observedSuccessfulActions": 2,
+  "observedEffectsBeforeRestart": 1,
+  "observedEffectsTotal": 2,
+  "receiverPreservedOriginalEffect": true,
+  "receiverEffectIds": [
+    "2be40a29b724280d5028e414fe909a86c6a6df6db9c0aaead623fcb58f2b7e80",
+    "b37c8090c98b2eaba75f62d6239f5746db9acdc02f665c9a094a0724ad714b3b"
+  ],
+  "receiverTransport": "http-loopback",
+  "receiverRequests": {
+    "b37c8090c98b2eaba75f62d6239f5746db9acdc02f665c9a094a0724ad714b3b": 2,
+    "2be40a29b724280d5028e414fe909a86c6a6df6db9c0aaead623fcb58f2b7e80": 1
+  },
+  "receiverPids": [
+    96486,
+    96602
+  ],
+  "receiverStopSignal": "SIGKILL",
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "sourceCommit": "d65493537056781bcfaf8ca9f35a48885dc299ac",
+  "archiveSha256": "4cfc1c40871fd3ff5123d9437dee9b5db93f944afd00363dae5a1b495d4fddb3",
+  "harnessSha256": "d6b8ef3ef065e6da198f8d198c8482e11382f9bd50f2813e9ff6ed1524b29096"
+}

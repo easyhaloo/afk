@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const execute = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
+const runtime = resolve(process.env.AFK_E2E_RUNTIME_ROOT ?? 'packages/runtime/dist');
 const fixtures = resolve('tests/fixtures/plugin-matrix/local');
 const directories: string[] = [];
 const secret = 'synthetic-matrix-credential-42';
@@ -91,6 +92,44 @@ async function sandbox(credential?: string) {
 }
 
 type Sandbox = Awaited<ReturnType<typeof sandbox>>;
+
+it.each([0o700, 0o500])('keeps built CLI inventory and doctor read-only with selected audit artifacts and home mode %s', async mode => {
+  const test = await sandbox();
+  const system = join(test.home, '.afk');
+  const reports = join(system, 'reports');
+  const settings = join(system, 'plugins.yml');
+  await test.configure('artifact.test-report-local', { root: reports });
+  await writeFile(settings, JSON.stringify({
+    plugins: [{ id: 'artifact.test-report-local', builtin: true, config: { root: reports } }],
+    integrations: { evidence: { provider: 'test-report-local' } },
+  }));
+  const before = (await readdir(test.home, { recursive: true })).sort();
+  const configuration = await readFile(settings);
+  await chmod(system, mode);
+  await chmod(test.home, mode);
+  try {
+    const listed = JSON.parse((await test.cli('list', '--json')).stdout);
+    expect(listed.some((plugin: { id: string }) => plugin.id === 'artifact.test-report-local')).toBe(true);
+    const diagnosis = JSON.parse((await test.cli('doctor', '--plugin', 'artifact.test-report-local', '--loaded', '--json')).stdout);
+    expect(diagnosis.health).toEqual([expect.objectContaining({ pluginId: 'artifact.test-report-local', status: 'degraded' })]);
+    expect((await readdir(test.home, { recursive: true })).sort()).toEqual(before);
+    expect(await readFile(settings)).toEqual(configuration);
+    if (process.platform !== 'win32') {
+      expect((await lstat(test.home)).mode & 0o777).toBe(mode);
+      expect((await lstat(system)).mode & 0o777).toBe(mode);
+    }
+    expect(await test.calls()).toEqual([]);
+  } finally {
+    await chmod(test.home, 0o700);
+    await chmod(system, 0o700);
+  }
+  const receipt = JSON.parse((await test.invoke('artifact.provider', 'test-report-local', 'put', {
+    name: 'readiness-report.txt', mediaType: 'text/plain', bytes: Buffer.from(content).toString('base64'),
+  })).stdout);
+  expect(receipt.name).toBe('readiness-report.txt');
+  expect(await readFile(join(reports, receipt.name), 'utf8')).toBe(content);
+  expect(await test.optionalFile(join(system, 'evidence', 'encryption.key'))).toBeNull();
+});
 const verifyCommand = [process.execPath, '-e', 'require("node:fs").writeFileSync(process.env.PLUGIN_MATRIX_OUTPUT + "/verification.json", JSON.stringify({ cwd: process.cwd(), result: "verified" })); process.stdout.write("matrix verified");'];
 const message = { title: 'Matrix "title"', body: 'body with $HOME; $(touch injected)\nnext line', urgency: 'high' };
 const compliance = { rules: [
@@ -144,6 +183,16 @@ async function expectDecision(operation: Promise<unknown>, expected: object) {
   }
 }
 
+async function expectArtifactRef(ref: unknown, provider: string, output: string, name: string) {
+  const path = join(output, name);
+  const stored = await readFile(path);
+  expect(ref).toEqual({
+    name, uri: pathToFileURL(path).href,
+    ...(provider === 'evidence-bundle' && { storedContent: { sha256: digest(stored), mediaType: 'application/json' } }),
+  });
+  return stored;
+}
+
 async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
   const { provider } = test;
   const result = JSON.parse((await test.run()).stdout);
@@ -155,8 +204,7 @@ async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
     expect(result).toEqual([{ origin, content: provider.id === 'context.retrieval' ? content.trim() : content, score: 2 }]);
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
   } else if (provider.capability === 'artifact.provider') {
-    expect(result).toEqual({ name: 'result.txt', uri: pathToFileURL(join(test.output, 'result.txt')).href });
-    const stored = await readFile(join(test.output, 'result.txt'), 'utf8');
+    const stored = (await expectArtifactRef(result, provider.provider, test.output, 'result.txt')).toString('utf8');
     if (provider.provider === 'test-report-local') expect(stored).toBe(content);
     else {
       const records = [{ id: 'result.txt', mediaType: 'text/plain', sha256: digest(content), size: Buffer.byteLength(content) }];
@@ -177,7 +225,7 @@ async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
     const channel = provider.id === 'notification.email' ? 'email' : 'desktop';
     expect(result).toEqual({ delivered: true, channel });
     if (channel === 'email') {
-      expect(await readFile(join(test.output, 'message.eml'), 'utf8')).toBe(`From: sender@example.test\r\nTo: receiver@example.test\r\nSubject: ${message.title}\r\nX-Urgency: high\r\n\r\n${message.body}`);
+      expect(await readFile(join(test.output, 'message.eml'), 'utf8')).toBe(`From: sender@example.test\nTo: receiver@example.test\nSubject: ${message.title}\nX-Urgency: high\n\n${message.body}`);
       expect((await test.calls()).at(-1)).toEqual({ role: 'matrix-sendmail', args: ['-t', '-oi', '-f', 'sender@example.test'], input: expect.stringContaining(message.body) });
     } else expect(JSON.parse(await readFile(join(test.output, 'desktop.json'), 'utf8'))).toEqual({ role: 'notify-send', args: ['-u', 'critical', message.title, message.body], input: '' });
     expect(await test.optionalFile(join(test.workspace, 'injected'))).toBeNull();
@@ -197,7 +245,8 @@ describe('local plugin matrix: persisted lifecycle × public operation', () => {
     expect((await test.cli('disable', provider.id)).stdout).toBe(`Disabled ${provider.id}\n`);
     await expectRejected(test.run(), provider.id.startsWith('credential.') ? 'Matrix credential provider is not active' : 'Capability provider is not registered');
     expect(await test.effects()).toEqual(effects);
-    expect(JSON.parse((await test.cli('list', '--json')).stdout).some((entry: { id: string }) => entry.id === provider.id)).toBe(false);
+    expect(JSON.parse((await test.cli('list', '--json')).stdout)).toContainEqual(expect.objectContaining({ id: provider.id, enabled: false }));
+    expect(JSON.parse((await test.cli('list', '--loaded', '--json')).stdout).some((entry: { id: string }) => entry.id === provider.id)).toBe(false);
     await test.configure(provider.id, provider.config(test));
     await expectRejected(test.run(), provider.id.startsWith('credential.') ? 'Matrix credential provider is not active' : 'Capability provider is not registered');
     expect((await test.cli('enable', provider.id)).stdout).toBe(`Enabled ${provider.id}\n`);
@@ -209,6 +258,36 @@ describe('local plugin matrix: persisted lifecycle × public operation', () => {
 });
 
 describe('context selection and persisted memory', () => {
+  it('context.project-memory reads the active edition from the configured project on each invocation', async () => {
+    const primary = await configured('context.project-memory');
+    const other = await configured('context.project-memory');
+    const first = { origin: 'returns/v1', content: 'warehouse north accepts returns' };
+    const second = { origin: 'returns/v2', content: 'warehouse south accepts returns' };
+    const independent = { origin: 'orders/v1', content: 'warehouse east accepts orders' };
+    const query = { scope: '.', prompt: 'warehouse' };
+    await writeFile(join(primary.workspace, 'memory.json'), JSON.stringify([first]));
+    await writeFile(join(other.workspace, 'memory.json'), JSON.stringify([independent]));
+    expect(JSON.parse((await primary.run(query)).stdout)).toEqual([{ ...first, score: 1 }]);
+    await writeFile(join(primary.workspace, 'memory.json'), JSON.stringify([second]));
+    expect(JSON.parse((await primary.run(query)).stdout)).toEqual([{ ...second, score: 1 }]);
+    expect(JSON.parse((await other.run(query)).stdout)).toEqual([{ ...independent, score: 1 }]);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('context.code respects revocation and restoration of source file permissions', async () => {
+    const test = await configured('context.code');
+    const path = join(test.workspace, 'widget.ts');
+    const query = { scope: 'widget.ts', prompt: 'needle' };
+    const expected = [{ origin: 'widget.ts', content, score: 2 }];
+    expect(JSON.parse((await test.run(query)).stdout)).toEqual(expected);
+    await chmod(path, 0o000);
+    try {
+      await expectRejected(test.run(query), 'EACCES');
+    } finally {
+      await chmod(path, 0o600);
+    }
+    expect(JSON.parse((await test.run(query)).stdout)).toEqual(expected);
+  });
+
   it.each(['context.code', 'context.retrieval', 'context.project-memory'])('%s ranks matching fragments, filters misses, and enforces public limits', async id => {
     const test = await configured(id);
     const before = await test.effects();
@@ -227,6 +306,23 @@ describe('context selection and persisted memory', () => {
     ]);
     expect(JSON.parse((await test.run({ scope: '.', prompt: '' })).stdout)).toEqual([]);
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
+  });
+
+  it('context.retrieval preserves Markdown line breaks in documents configured through the CLI', async () => {
+    const test = await sandbox();
+    const id = 'context.retrieval';
+    const markdown = '# Work-item relationships\r\n\r\n- `parentId` groups related work.\n- `dependsOn` controls scheduling.';
+    expect((await test.configure(id, { documents: [{ origin: ' guide.md ', content: `\n${markdown}\r\n ` }] })).stdout).toBe(`Configured ${id}\n`);
+    const result = await test.invoke('context.provider', id, 'gather', { scope: '.', prompt: 'parentId dependsOn', limit: 1 });
+    expect(JSON.parse(result.stdout)).toEqual([{ origin: 'guide.md', content: markdown, score: 2 }]);
+
+    for (const document of [
+      { origin: 'guide.md', content: ' \r\n\t ' },
+      { origin: 'guide.md', content: `${markdown}\0` },
+      { origin: 'guide\n.md', content: markdown },
+    ]) {
+      await expectRejected(test.configure(id, { documents: [document] }), 'Invalid plugin settings');
+    }
   });
 
   it.each(['traversal', 'symlink', 'missing', 'oversized'])('context.code rejects %s without changing source files', async kind => {
@@ -341,7 +437,7 @@ describe('private credentials consumed by an installed local context plugin', ()
     await test.cli('enable', 'context.matrix-credential-probe');
     await test.mode('failure');
     const before = await readFile(join(test.output, 'credential-receipt.json'), 'utf8');
-    await expectRejected(test.run(), 'Matrix credential provider is not active');
+    await expectRejected(test.run(), 'Operation credential unavailable');
     expect(await readFile(join(test.output, 'credential-receipt.json'), 'utf8')).toBe(before);
   });
 });
@@ -371,6 +467,70 @@ describe.each(['artifact.test-report-local', 'artifact.evidence-bundle'])('%s fi
 });
 
 describe('repository snapshots against real temporary Git data', () => {
+  it('recovers a retained owned allocation through fresh built CLI processes', async () => {
+    const test = await sandbox();
+    await test.initializeGit();
+    const workspaceRoot = join(test.root, 'managed');
+    const storeRoot = join(test.home, '.loop-workspace', 'repos');
+    const bare = join(storeRoot, 'fixture.git');
+    await mkdir(storeRoot, { recursive: true });
+    await test.git('clone', '--bare', '--no-hardlinks', test.workspace, bare);
+    const repositories = [{ name: 'fixture', path: test.workspace, remoteUrl: 'https://fixture.invalid/repo.git',
+      baseBranch: 'main', leaseKey: 'gitlab:fixture.invalid/repo' }];
+    await test.configure('repository.multi-repository', { repositories, managed: { workspaceRoot } });
+    const providerModule = pathToFileURL(join(runtime, 'infrastructure/providers/repositories.js')).href;
+    const storeModule = pathToFileURL(join(runtime, 'infrastructure/git/repository-store.js')).href;
+    const setup = `
+      import { execFileSync } from 'node:child_process';
+      import { MultiRepositoryProvider, RepositoryPreparationCleanupError } from ${JSON.stringify(providerModule)};
+      import { RepositoryStore } from ${JSON.stringify(storeModule)};
+      const store = new RepositoryStore();
+      store.ensureCheckout = async (_url, path) => {
+        execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', ${JSON.stringify(bare)}, 'worktree', 'add', '--detach', path, 'main'], { stdio: 'pipe' });
+      };
+      store.removeCheckout = async () => { throw new Error('Fixture cleanup interruption'); };
+      const provider = new MultiRepositoryProvider({ repositories: ${JSON.stringify(repositories)},
+        managed: { workspaceRoot: ${JSON.stringify(workspaceRoot)}, store },
+        git: async () => { throw new Error('Fixture snapshot interruption'); } });
+      try { await provider.prepare({ repository: { url: 'fixture' }, runId: 'retained-fixture' }); }
+      catch (error) {
+        if (!(error instanceof RepositoryPreparationCleanupError)) throw error;
+        process.stdout.write(JSON.stringify({ allocationId: error.allocation.id }));
+      }
+    `;
+    const prepared = await execute(process.execPath, ['--input-type=module', '-e', setup], {
+      cwd: test.workspace, env: test.environment, timeout: 15_000, maxBuffer: 1024 * 1024,
+    });
+    const { allocationId } = JSON.parse(prepared.stdout) as { allocationId: string };
+    const records = JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {})).stdout);
+    expect(records).toEqual([{ allocation: { id: allocationId, repository: { url: 'fixture', ref: 'main' }, runId: 'retained-fixture' }, phase: 'retained' }]);
+    expect(JSON.stringify(records)).not.toContain(workspaceRoot);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId })).stdout)).toEqual({ removed: true });
+      expect(JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {})).stdout)).toEqual([]);
+      await expect(lstat(join(workspaceRoot, allocationId))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await test.git('-C', bare, 'worktree', 'list', '--porcelain')).stdout).not.toContain(allocationId);
+    }
+  });
+
+  it('uses configured managed recovery from the built CLI and preserves unknown allocations', async () => {
+    const test = await sandbox();
+    await test.initializeGit();
+    const workspaceRoot = join(test.root, 'managed');
+    const repositories = [{ name: 'fixture', path: test.workspace, remoteUrl: 'https://fixture.invalid/repo.git',
+      baseBranch: 'main', leaseKey: 'gitlab:fixture.invalid/repo' }];
+    await test.configure('repository.multi-repository', { repositories, managed: { workspaceRoot } });
+    expect(JSON.parse((await test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {})).stdout)).toEqual([]);
+    const allocationId = '42b689a2-b7de-4454-87c9-d7d162b97933';
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId }), 'Repository recovery failed');
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId, path: test.workspace }), 'Invalid or unsupported capability invocation');
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'recoverAllocation', { allocationId, force: true }), 'Invalid or unsupported capability invocation');
+    await expect(lstat(workspaceRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
+    await test.configure('repository.multi-repository', { repositories });
+    await expectRejected(test.invoke('repository.provider', 'multi-repository', 'listRecoveryAllocations', {}), 'does not support recovery');
+  });
+
   it('multi-repository resolves aliases and paths across two repositories and detects working tree changes', async () => {
     const test = await configured('repository.multi-repository');
     const second = join(test.root, 'second');
@@ -569,13 +729,24 @@ describe('notification commands are confined to local delivery files', () => {
   it.each([
     { platform: 'linux', role: 'notify-send', args: ['-u', 'critical', message.title, message.body], input: '' },
     { platform: 'darwin', role: 'osascript', args: ['-e', `display notification "${message.body}" with title "Matrix \\"title\\""`], input: '' },
-    { platform: 'win32', role: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command', '-'], input: `Add-Type -AssemblyName System.Windows.Forms\n[System.Windows.Forms.MessageBox]::Show('${message.body}', '${message.title}')` },
+    { platform: 'win32', role: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', '-'] },
   ])('desktop $platform delivers literal content to a mock executable and reports command failure', async row => {
     const test = await configured('notification.desktop');
     await test.configure(test.provider.id, { platform: row.platform, channel: 'matrix-desktop' });
     expect(JSON.parse((await test.run()).stdout)).toEqual({ delivered: true, channel: 'matrix-desktop' });
     const receipt = await readFile(join(test.output, 'desktop.json'), 'utf8');
-    expect(JSON.parse(receipt)).toEqual({ role: row.role, args: row.args, input: row.input });
+    const { role, args, input } = JSON.parse(receipt) as { role: string; args: string[]; input: string };
+    expect({ role, args }).toEqual({ role: row.role, args: row.args });
+    if (row.platform === 'win32') {
+      const fields = Array.from(input.matchAll(/^\s*\$notification\.BalloonTip(Title|Text) = \[System\.Text\.Encoding\]::UTF8\.GetString\(\[System\.Convert\]::FromBase64String\('([A-Za-z0-9+/=]+)'\)\)$/gm),
+        ([, field, encoded]) => [field, Buffer.from(encoded, 'base64').toString('utf8')]);
+      expect(fields).toEqual([['Title', message.title], ['Text', message.body]]);
+      expect(input).not.toContain(message.body);
+      expect(input).toContain('$notification.ShowBalloonTip(3000)');
+      expect(input).toMatch(/finally \{[^}]*\$notification\.Dispose\(\)/);
+    } else {
+      expect(input).toBe(row.input);
+    }
     expect(await test.optionalFile(join(test.workspace, 'injected'))).toBeNull();
     await test.mode('failure');
     await expectDecision(test.run(), { delivered: false, channel: 'matrix-desktop', error: expect.any(String) });
@@ -595,7 +766,7 @@ it('cross-validates context → verification → report → evidence digests wit
   for (const provider of ['test-report-local', 'evidence-bundle']) {
     const name = provider === 'test-report-local' ? 'verification-report.json' : 'verification-evidence.json';
     const ref = JSON.parse((await test.invoke('artifact.provider', provider, 'put', { name, mediaType: 'application/json', bytes: report.toString('base64') })).stdout);
-    expect(ref).toEqual({ name, uri: pathToFileURL(join(test.output, name)).href });
+    await expectArtifactRef(ref, provider, test.output, name);
   }
   expect(await readFile(join(test.output, 'verification-report.json'))).toEqual(report);
   const bundle = JSON.parse(await readFile(join(test.output, 'verification-evidence.json'), 'utf8'));

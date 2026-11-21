@@ -100,6 +100,27 @@ describe('context providers', () => {
     ]);
   });
 
+  it.each(['retrieval', 'code', 'memory'] as const)('recalls Chinese business context through %s', async kind => {
+    const path = await root();
+    const documents = [
+      { origin: 'login.md', content: '如何配置登录后的邮箱通知。' },
+      { origin: 'disk.md', content: '磁盘空间不足时应清理构建缓存，再重新运行测试。' },
+    ];
+    let provider: RetrievalProvider | CodeContextProvider | ProjectMemoryProvider;
+    if (kind === 'code') {
+      await Promise.all(documents.map(document => fs.writeFile(join(path, document.origin), document.content)));
+      provider = new CodeContextProvider({ root: path });
+    } else if (kind === 'memory') {
+      const memory = new ProjectMemoryProvider({ root: path, file: join(path, 'memory.json') });
+      for (const document of documents) await memory.remember(document);
+      provider = memory;
+    } else provider = new RetrievalProvider(documents);
+    await expect(provider.gather({ scope: '.', prompt: '如何解决磁盘空间不足导致的构建失败？', limit: 1 }))
+      .resolves.toEqual([expect.objectContaining({ origin: 'disk.md' })]);
+    await expect(provider.gather({ scope: '.', prompt: '如何同步企业联系人信息？' })).resolves.toEqual([]);
+    await expect(provider.gather({ scope: '.', prompt: '磁盘空间不足', limit: 0 })).resolves.toEqual([]);
+  });
+
   it('uses global knowledge-base fetch lazily and validates all returned fragments', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify([{ content: 'answer', origin: 'kb:1', score: 0.9 }])));
     vi.stubGlobal('fetch', fetch);
@@ -115,6 +136,150 @@ describe('context providers', () => {
   it('times out knowledge-base body reads', async () => {
     const provider = new KnowledgeBaseProvider({ endpoint: 'https://kb.example/query', timeoutMs: 10, fetch: async () => new Response(new ReadableStream()) });
     await expect(provider.gather({ scope: '.', prompt: 'x' })).rejects.toThrow('timed out');
+  });
+});
+
+describe('knowledge-base operation credentials', () => {
+  const endpoint = 'https://kb.example/query';
+  const query = { scope: 'project', prompt: 'answer' };
+
+  it('resolves a fresh secret only for each gather and forwards operation options', async () => {
+    const token = vi.fn().mockResolvedValueOnce({ secret: 'first' }).mockResolvedValueOnce({ secret: 'second' });
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>().mockImplementation(async () => new Response('[]'));
+    const provider = new KnowledgeBaseProvider({ endpoint, token, fetch });
+    expect(provider.id).toBe('context.knowledge-base');
+    expect(provider.capabilities.search).toBe(true);
+    expect(token).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    const options = { signal: new AbortController().signal, deadlineAt: Date.now() + 5000 };
+    await provider.gather(query, options);
+    await provider.gather(query, options);
+    expect(token.mock.calls).toEqual([[options], [options]]);
+    expect(fetch.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      { 'content-type': 'application/json', authorization: 'Bearer first' },
+      { 'content-type': 'application/json', authorization: 'Bearer second' },
+    ]);
+    expect(fetch.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify(query), redirect: 'error' }));
+  });
+
+  it.each([undefined, 'static-secret'])('retains anonymous HTTP and supports static HTTPS credentials (%s)', async token => {
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>().mockResolvedValue(new Response('[]'));
+    await new KnowledgeBaseProvider({ endpoint: token === undefined ? 'http://kb.example/query' : endpoint, token, fetch }).gather(query);
+    expect(new Headers(fetch.mock.calls[0][1]?.headers).get('authorization')).toBe(token === undefined ? null : `Bearer ${token}`);
+  });
+
+  it.each(['revoked', 'expired', 'unavailable', 'invalid', 'empty-static'])('blocks network for %s credentials with a sanitized error', async state => {
+    const token = state === 'empty-static' ? '' : vi.fn(async () => {
+      if (state === 'unavailable') throw new Error('private credential resolver details');
+      if (state === 'invalid') return { secret: 'private\r\nheader' };
+      return { secret: 'private-token', revoked: state === 'revoked', ...(state === 'expired' ? { expiresAt: '2000-01-01T00:00:00Z' } : {}) };
+    });
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>();
+    await expect(new KnowledgeBaseProvider({ endpoint, token, fetch }).gather(query)).rejects.toThrow(/^Operation credential unavailable$/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('checks revocation again after an earlier successful gather', async () => {
+    const token = vi.fn().mockResolvedValueOnce({ secret: 'private-token' }).mockResolvedValueOnce({ secret: 'private-token', revoked: true });
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>().mockResolvedValue(new Response('[]'));
+    const provider = new KnowledgeBaseProvider({ endpoint, token, fetch });
+    await provider.gather(query);
+    await expect(provider.gather(query)).rejects.toThrow(/^Operation credential unavailable$/);
+    expect(token).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('requires HTTPS before resolving a bearer credential', async () => {
+    const token = vi.fn(async () => ({ secret: 'private-token' }));
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>();
+    await expect(new KnowledgeBaseProvider({ endpoint: 'http://kb.example/query', token, fetch }).gather(query)).rejects.toThrow('bearer token requires HTTPS');
+    expect(token).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels pending credential resolution without exposing the abort reason or starting HTTP', async () => {
+    let rejectSecret!: (error: Error) => void;
+    const token = vi.fn(() => new Promise<never>((_resolve, reject) => { rejectSecret = reject; }));
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>();
+    const controller = new AbortController();
+    const pending = new KnowledgeBaseProvider({ endpoint, token, fetch }).gather(query, { signal: controller.signal });
+    await Promise.resolve();
+    expect(token).toHaveBeenCalledOnce();
+    controller.abort(new Error('private abort reason'));
+    await expect(pending).rejects.toThrow(/^Operation credential unavailable$/);
+    rejectSecret(new Error('private late rejection'));
+    await Promise.resolve();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('bounds pending credential resolution by the operation deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const token = vi.fn(() => new Promise<never>(() => undefined));
+      const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>();
+      const pending = new KnowledgeBaseProvider({ endpoint, token, fetch }).gather(query, { deadlineAt: Date.now() + 25 });
+      const rejected = expect(pending).rejects.toThrow(/^Operation credential unavailable$/);
+      await vi.advanceTimersByTimeAsync(25);
+      await rejected;
+      expect(token).toHaveBeenCalledOnce();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['aborted', 'deadline'])('does not resolve credentials for a pre-%s operation', async state => {
+    const controller = new AbortController();
+    controller.abort(new Error('private abort reason'));
+    const token = vi.fn(async () => ({ secret: 'private-token' }));
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>();
+    const options = state === 'aborted' ? { signal: controller.signal } : { deadlineAt: Date.now() - 1 };
+    await expect(new KnowledgeBaseProvider({ endpoint, token, fetch }).gather(query, options)).rejects.toThrow(state === 'aborted' ? /^Knowledge base request cancelled$/ : /deadline exceeded/);
+    expect(token).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['deadline', 'timeout'])('bounds authenticated HTTP body reads by the %s', async bound => {
+    vi.useFakeTimers();
+    try {
+      const token = async () => {
+        if (bound === 'deadline') await new Promise(resolve => setTimeout(resolve, 20));
+        return { secret: 'private-token' };
+      };
+      const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>().mockImplementation(async () => new Response(new ReadableStream()));
+      const provider = new KnowledgeBaseProvider({ endpoint, token, fetch, timeoutMs: bound === 'deadline' ? 100 : 25 });
+      const pending = provider.gather(query, bound === 'deadline' ? { deadlineAt: Date.now() + 25 } : undefined);
+      const rejected = expect(pending).rejects.toThrow(/^Provider HTTP request timed out$/);
+      if (bound === 'deadline') {
+        await vi.advanceTimersByTimeAsync(20);
+        expect(fetch).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(5);
+      } else await vi.advanceTimersByTimeAsync(25);
+      await rejected;
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['transport', 'redirect', 'unauthorized'])('does not expose tokens from %s errors or follow redirects', async failure => {
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>().mockImplementation(async () => {
+      if (failure === 'transport') throw new Error('Bearer private-token');
+      return new Response('Bearer private-token', { status: failure === 'redirect' ? 302 : 401, headers: { location: 'https://other.example/?secret=private-token' } });
+    });
+    const pending = new KnowledgeBaseProvider({ endpoint, token: 'private-token', fetch }).gather(query);
+    await expect(pending).rejects.toThrow(failure === 'transport' ? /^Provider HTTP transport failed$/ : new RegExp(`^Provider HTTP request failed \\(${failure === 'redirect' ? 302 : 401}\\)$`));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][1]?.redirect).toBe('error');
+  });
+
+  it('sanitizes abort reasons after the authenticated HTTP request starts', async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn<Parameters<typeof globalThis.fetch>, ReturnType<typeof globalThis.fetch>>().mockImplementation(async () => {
+      controller.abort(new Error('Bearer private-token'));
+      throw new Error('Bearer private-token');
+    });
+    await expect(new KnowledgeBaseProvider({ endpoint, token: 'private-token', fetch }).gather(query, { signal: controller.signal })).rejects.toThrow(/^Knowledge base request cancelled$/);
+    expect(fetch).toHaveBeenCalledOnce();
   });
 });
 

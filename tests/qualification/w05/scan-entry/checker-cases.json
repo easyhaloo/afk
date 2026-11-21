@@ -1,0 +1,165 @@
+[
+  {
+    "checkId": "behavior-1",
+    "checkDigest": "b658c5b3f7a9640b2bf40137af80c2609749ee406e94da9a1fa560f67711e5e4",
+    "experiment": {
+      "adapter": "node-json-argv-v1",
+      "assertions": [
+        {
+          "expected": 0,
+          "id": "exit",
+          "source": "exit-code"
+        },
+        {
+          "expected": {
+            "checked": 2,
+            "invalidLines": []
+          },
+          "id": "output",
+          "source": "stdout-json"
+        }
+      ],
+      "input": "\"9780306406157\\n5901234123457\"",
+      "kind": "normal",
+      "protocol": "proposal-semantic-v1"
+    }
+  },
+  {
+    "checkId": "behavior-2",
+    "checkDigest": "fe1557ddb3f72110228497156a6957c585b5a8fa2b1252c79d6445874bc5ce40",
+    "experiment": {
+      "adapter": "node-json-argv-v1",
+      "assertions": [
+        {
+          "expected": 0,
+          "id": "exit",
+          "source": "exit-code"
+        },
+        {
+          "expected": {
+            "checked": 4,
+            "invalidLines": [
+              1,
+              3,
+              4
+            ]
+          },
+          "id": "output",
+          "source": "stdout-json"
+        }
+      ],
+      "input": "\"\\n0012345678905\\n０\\n\"",
+      "kind": "normal",
+      "protocol": "proposal-semantic-v1"
+    }
+  },
+  {
+    "checkId": "behavior-3",
+    "checkDigest": "c38f168948bdd838609534fa53e93cf96fd410a165cacc7cc5911452aef7478b",
+    "experiment": {
+      "adapter": "node-json-argv-v1",
+      "assertions": [
+        {
+          "expected": 0,
+          "id": "exit",
+          "source": "exit-code"
+        },
+        {
+          "expected": {
+            "checked": 2,
+            "invalidLines": [
+              2
+            ]
+          },
+          "id": "output",
+          "source": "stdout-json"
+        }
+      ],
+      "input": "\"1234567890128\\n1234567890129\"",
+      "kind": "normal",
+      "protocol": "proposal-semantic-v1"
+    }
+  },
+  {
+    "checkId": "behavior-4",
+    "checkDigest": "d94ab32d5e982125c4be7fd21031c46b7059e2280c871d4298388b8d2c02b42e",
+    "experiment": {
+      "adapter": "node-json-argv-v1",
+      "assertions": [
+        {
+          "expected": 1,
+          "id": "exit",
+          "source": "exit-code"
+        },
+        {
+          "expected": "error: input must be a string",
+          "id": "output",
+          "source": "stderr"
+        }
+      ],
+      "input": "null",
+      "kind": "refusal",
+      "protocol": "proposal-semantic-v1"
+    }
+  },
+  {
+    "checkId": "control-cancellation",
+    "checkDigest": "f8f51860ca6dc3012d7fa44c28140f59f7635008a89a11c33d6d70f871a1402f",
+    "experiment": {
+      "adapter": "node-json-argv-v1",
+      "assertions": [
+        {
+          "expected": 137,
+          "id": "exit",
+          "source": "exit-code"
+        },
+        {
+          "expected": "cancellation",
+          "id": "control",
+          "path": [
+            "kind"
+          ],
+          "source": "control"
+        }
+      ],
+      "callInput": "\"9780306406157\\n5901234123457\"",
+      "control": {
+        "afterMs": 500,
+        "kind": "cancellation"
+      },
+      "input": "Cancel before and during execution",
+      "kind": "cancellation",
+      "protocol": "proposal-semantic-v1"
+    }
+  },
+  {
+    "checkId": "control-timeout",
+    "checkDigest": "299b002600d68d0c563f30cb3ae097a86d5c6ce7e339d3fa9e7b69b9399745f1",
+    "experiment": {
+      "adapter": "node-json-argv-v1",
+      "assertions": [
+        {
+          "expected": 137,
+          "id": "exit",
+          "source": "exit-code"
+        },
+        {
+          "expected": "timeout",
+          "id": "control",
+          "path": [
+            "kind"
+          ],
+          "source": "control"
+        }
+      ],
+      "callInput": "\"9780306406157\\n5901234123457\"",
+      "control": {
+        "afterMs": 5000,
+        "kind": "timeout"
+      },
+      "input": "Exceed 5000ms",
+      "kind": "timeout",
+      "protocol": "proposal-semantic-v1"
+    }
+  }
+]

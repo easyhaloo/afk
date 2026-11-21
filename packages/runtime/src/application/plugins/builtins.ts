@@ -19,7 +19,8 @@ export function createJumpserverPlugin(options: JmsHostConnectionOptions = {}): 
     async health() {
       const binary = await cli.resolveBinaryPath();
       return binary
-        ? { status: 'healthy', details: { binary } }
+        ? { status: 'unknown', message: 'jms CLI is available; authentication and target access have not been verified',
+          details: { binaryAvailable: true, authenticated: 'unknown', targetReachable: 'unknown' } }
         : { status: 'degraded', message: 'jms CLI not found on PATH' };
     },
   };

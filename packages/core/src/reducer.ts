@@ -23,7 +23,7 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
     throw new RunEventTransitionError(`event run '${event.context.runId}' does not match aggregate run '${state.run.id}'`);
   }
   if (state.terminal) {
-    if (event.data.kind === 'effect.completed' && event.data.effectKind === 'artifact.upload') return { ...state, sequence: event.sequence };
+    if (event.data.kind === 'effect.completed' && ['artifact.upload', 'observability.delivery', 'evidence.mirror'].includes(event.data.effectKind)) return { ...state, sequence: event.sequence };
     throw new RunEventTransitionError(`cannot apply '${event.type}' after terminal event`);
   }
 

@@ -20,12 +20,11 @@ bash /tmp/afk-install.sh
 ```
 
 已有源码仓库也可以直接运行 `./install.sh`，同样下载发布包，不构建当前源码。
-升级时会保留本次安装的版本和它替换掉的那个版本（留作手动回滚），更早的版本会被删除——
-每个版本都是 `~/.afk/cli/versions/` 下约 36 MB 的完整副本。常用参数：
+升级时保留旧版本，其他安装入口和运行中的进程可以继续使用。将 `AFK_HOME` 设为绝对路径可隔离发布包和下载缓存，使用 `--prefix` 指定可执行文件目录。
 
 ```bash
 bash /tmp/afk-install.sh --version 0.1.0 --skip-completion
-bash /tmp/afk-install.sh --prefix "$HOME/bin"
+AFK_HOME="$HOME/test-profile" bash /tmp/afk-install.sh --prefix "$HOME/test-profile/bin"
 bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-darwin-arm64.tar.gz.sha256
 ```
 

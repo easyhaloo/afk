@@ -9,11 +9,13 @@ import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { withLogContext } from '../../infrastructure/io/index.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
 import { RunObserver } from '../../observability/run-observer.js';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetStore } from './budget-store.js';
+import { PluginRuntime } from '../plugins/runtime.js';
 
 vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
@@ -29,11 +31,15 @@ async function readEvents(store: JsonlEventStore, runId: string): Promise<RunEve
 
 describe('WorkflowRunner default template commit audit', () => {
   it.each([
-    { createsCommit: true, codexOverride: false, sandboxName: 'local' as const, scenario: 'records the full local implementation SHA at publish' },
-    { createsCommit: false, codexOverride: false, sandboxName: 'local' as const, scenario: 'does not record a baseline or agent-reported SHA without a new commit' },
-    { createsCommit: false, codexOverride: true, sandboxName: 'local' as const, scenario: 'records native telemetry and budget for a Codex step in a Claude workflow' },
-    { createsCommit: false, codexOverride: false, sandboxName: 'docker' as const, scenario: 'records normalized container telemetry and budget without host transcripts' },
-  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName }) => {
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, scenario: 'records the full local implementation SHA at publish' },
+    { createsCommit: false, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, scenario: 'does not record a baseline or agent-reported SHA without a new commit' },
+    { createsCommit: false, codexOverride: true, recoverAc: false, sandboxName: 'local' as const, scenario: 'records native telemetry and budget for a Codex step in a Claude workflow' },
+    { createsCommit: false, codexOverride: false, recoverAc: false, sandboxName: 'docker' as const, scenario: 'records normalized container telemetry and budget without host transcripts' },
+    { createsCommit: false, codexOverride: false, recoverAc: true, sandboxName: 'local' as const, scenario: 'prepares and verifies publication after successful AC recovery' },
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, log: 'other', scenario: 'finishes its own run inside an unrelated log context' },
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, log: 'same', scenario: 'finishes its own run when the caller only binds matching logs' },
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, callerOwned: true, scenario: 'leaves the run open for its explicit caller even without a log context' },
+  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName, recoverAc, log, callerOwned }) => {
     const repoRoot = join(directory, 'repository');
     const worktreePath = join(directory, 'implementation');
     const runId = 'commit-audit-42';
@@ -82,6 +88,16 @@ describe('WorkflowRunner default template commit audit', () => {
     };
     const store = new JsonlEventStore({ root: join(directory, 'events') });
     let eventsAtPush: RunEvent[] = [];
+    let reviewedHead = '';
+    const preparePush = vi.fn(async () => (await simpleGit(worktreePath).revparse(['HEAD'])).trim());
+    const onBeforePublish = vi.fn(async () => {
+      expect(preparePush).toHaveBeenCalledWith(item.branchName, worktreePath);
+      expect((await simpleGit(worktreePath).revparse(['HEAD'])).trim()).toBe(reviewedHead);
+    });
+    const plugins = new PluginRuntime();
+    await plugins.activate({ id: 'publication-policy', version: '1.0.0', setup(context) {
+      context.registerLifecycle({ name: 'publication-policy', failureMode: 'required', onBeforePublish });
+    } });
     const providers = {
       backlog: {
         claim: vi.fn(async () => claim), transition: vi.fn(async () => undefined),
@@ -94,6 +110,7 @@ describe('WorkflowRunner default template commit audit', () => {
           return { branchName: backlog.branchName, worktreePath };
         }),
         createVerificationWorktree: vi.fn(),
+        preparePush,
         push: vi.fn(async () => { eventsAtPush = await readEvents(store, runId); }),
         commit: vi.fn(), cleanup: vi.fn(async () => undefined),
       },
@@ -107,10 +124,12 @@ describe('WorkflowRunner default template commit audit', () => {
       name: sandboxName, isolation: 'workspace', capabilities: new Set(), createWorktree: vi.fn(),
       create: vi.fn(async () => sandbox),
     };
+    let verifications = 0;
     const agent: AgentProvider = {
       name: 'claude-code', capabilities: new Set(),
       createExecution: vi.fn(async (options: AgentExecutionOptions) => {
-        const implementing = options.sessionId.endsWith('-implement');
+        expect(preparePush).toHaveBeenCalledOnce();
+        const implementing = vi.mocked(agent.createExecution).mock.calls.length % 2 === 1;
         const execution: AgentExecution = {
           id: options.sessionId, metadata: {
             provider: implementing && codexOverride ? 'codex' : 'claude-code', transport: 'process',
@@ -119,19 +138,22 @@ describe('WorkflowRunner default template commit audit', () => {
           ...(sandboxName === 'docker' ? { telemetryPath: hostTranscriptPath } : {}),
           waitForEvent: vi.fn(async () => null),
           waitForResult: vi.fn(async () => {
+            const acFailure = !implementing && recoverAc && ++verifications === 1;
             if (implementing && createsCommit) {
               await writeFile(join(options.worktreePath, 'implementation.txt'), 'implemented\n');
               const worktreeGit = simpleGit(options.worktreePath);
               await worktreeGit.add('implementation.txt');
               await worktreeGit.commit('fixture implementation');
             }
+            if (!implementing && !acFailure) reviewedHead = (await simpleGit(worktreePath).revparse(['HEAD'])).trim();
             return {
               version: 1 as const, runId: options.sessionId, status: 'completed' as const, provider: 'test', commits: [fakeSha],
               usage: sandboxName === 'docker' ? { inputTokens: 10, outputTokens: 5, totalTokens: 15 } : undefined,
               tools: implementing && codexOverride ? undefined : [{ id: 'tool-1', name: 'Bash', result: 'failed' as const, exitCode: 2 }],
               structuredOutput: implementing
                 ? { type: 'goal_complete', kind: 'task', summary: 'implemented' }
-                : { type: 'goal_complete', kind: 'ac_verification', result: 'PASS', summary: 'verified' },
+                : { type: 'goal_complete', kind: 'ac_verification', result: acFailure ? 'FAIL' : 'PASS', summary: acFailure ? 'needs correction' : 'verified',
+                  ...(acFailure ? { failedCriteria: [{ id: 'AC-1', expected: 'passes', actual: 'fails' }] } : {}) },
             };
           }),
           interrupt: vi.fn(async () => undefined), kill: vi.fn(async () => undefined),
@@ -143,7 +165,7 @@ describe('WorkflowRunner default template commit audit', () => {
     };
     if (codexOverride) vi.spyOn(createAgentProvider('codex'), 'createExecution').mockImplementation(options => agent.createExecution(options));
     const runner = new WorkflowRunner(providers, {
-      agentProvider: agent, sandboxProvider, observer: new RunObserver({ events: store }),
+      plugins, agentProvider: agent, sandboxProvider, observer: new RunObserver({ events: store }),
       watchdog: { arm: vi.fn(), disarm: vi.fn() } as never,
       runtimeManager: {
         start: vi.fn(async () => undefined), heartbeat: vi.fn(async () => undefined), finish: vi.fn(async () => undefined),
@@ -151,16 +173,20 @@ describe('WorkflowRunner default template commit audit', () => {
       } as never,
     });
 
-    await expect(runner.run({
+    const execute = () => runner.run({
       backlogId: item.id, session: 'worker-42', targetBranch: item.branchName, baseBranch: 'main',
       repoRoot, workspaceRoot: directory, executionMode: 'batch',
       observationRunId: runId, observationWorkItemId: workItemId,
-    })).resolves.toEqual({ success: true });
+      ...(callerOwned ? { observationRunOwner: 'caller' as const } : {}),
+    });
+    const logIdentity = log === 'other' ? { runId: 'parent-run', workItemId: 'github:acme/api#99' } : { runId, workItemId };
+    await expect(log ? withLogContext(logIdentity, execute) : execute()).resolves.toEqual({ success: true });
+    await plugins.dispose();
 
     const head = (await simpleGit(worktreePath).revparse(['HEAD'])).trim();
     const events = await readEvents(new JsonlEventStore({ root: store.root }), runId);
     const sessions = events.filter(event => event.type === 'agent.session_recorded');
-    expect(sessions).toHaveLength(2);
+    expect(sessions).toHaveLength(recoverAc ? 4 : 2);
     for (const [index, event] of sessions.entries()) {
       expect(event.data).toMatchObject({ tools: [{ id: 'tool-1', name: codexOverride && index === 0 ? 'command_execution' : 'Bash', result: 'failed', exitCode: 2 }] });
     }
@@ -178,14 +204,23 @@ describe('WorkflowRunner default template commit audit', () => {
     expect(head).toMatch(/^[0-9a-f]{40}$/);
     expect(head).not.toBe(fakeSha);
     expect(providers.branches.createBranch).toHaveBeenCalledWith(item, 'main');
-    expect(agent.createExecution).toHaveBeenCalledTimes(2);
+    expect(agent.createExecution).toHaveBeenCalledTimes(recoverAc ? 4 : 2);
     expect(vi.mocked(agent.createExecution).mock.calls.map(([options]) => options.sessionId))
-      .toEqual(['worker-42-implement', 'worker-42-verify-ac']);
+      .toEqual(['worker-42-implement', 'worker-42-verify-ac', ...(recoverAc ? ['worker-42', 'worker-42'] : [])]);
     expect(eventsAtPush.filter(event => event.type === 'step.completed').map(event => event.data))
       .toEqual([
         { kind: 'step.completed', stepId: 'implement', outcome: 'succeeded' },
+        ...(recoverAc ? [
+          { kind: 'step.completed', stepId: 'verify-ac', outcome: 'failed' },
+          { kind: 'step.completed', stepId: 'implement', outcome: 'succeeded' },
+        ] : []),
         { kind: 'step.completed', stepId: 'verify-ac', outcome: 'succeeded' },
       ]);
+    expect(preparePush).toHaveBeenCalledOnce();
+    expect(preparePush.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(agent.createExecution).mock.invocationCallOrder[0]);
+    expect(onBeforePublish).toHaveBeenCalledOnce();
+    expect(preparePush.mock.invocationCallOrder[0]).toBeLessThan(onBeforePublish.mock.invocationCallOrder[0]);
+    expect(onBeforePublish.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(providers.branches.push).mock.invocationCallOrder[0]);
     expect(providers.branches.push).toHaveBeenCalledTimes(1);
     expect(providers.branches.push).toHaveBeenCalledWith(item.branchName, worktreePath);
     expect(providers.backlog.transition).toHaveBeenCalledWith(item.id, 'verification', undefined);
@@ -194,6 +229,11 @@ describe('WorkflowRunner default template commit audit', () => {
     expect(claim.release).toHaveBeenCalledTimes(1);
     expect(events.find(event => event.type === 'implementation.completed')?.data)
       .toEqual({ kind: 'implementation.completed' });
+    expect(events.filter(event => event.type === 'implementation.completed' || event.type === 'run.finished').map(event => event.type))
+      .toEqual(callerOwned ? ['implementation.completed'] : ['implementation.completed', 'run.finished']);
+    expect(events.filter(event => event.type === 'run.finished').map(event => event.data)).toEqual(callerOwned ? [] : [
+      { kind: 'run.finished', outcome: 'succeeded', reason: 'implementation handed to QA' },
+    ]);
 
     if (createsCommit) {
       expect(head).not.toBe(baselineSha);

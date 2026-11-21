@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { EvidenceRef, EvidenceStorePort, EventStorePort, RunEventDraft } from '@afk/core';
 import type { ArtifactSink } from '../../plugin-sdk/capabilities.js';
+import { artifactRefSchema } from '../../plugin-sdk/artifact-ref.js';
 import { logger } from '../io/logger.js';
 import { redactUtf8 } from './local-evidence-store.js';
+import { recordEvidenceCaptureFailure, recordObservationDelivery } from '../../observability/run-observer.js';
 
 export interface ArtifactAuditOptions {
   readonly provider: ArtifactSink;
@@ -63,8 +65,8 @@ export function createArtifactAudit(events: Pick<EventStorePort, 'append'>, opti
             const result = await provider.put({ name, mediaType: ref.mediaType, bytes }, { signal: controller.signal });
             controller.signal.throwIfAborted();
             reason = 'invalid_artifact';
-            if (typeof result.name !== 'string' || !result.name.trim()) throw new Error('Invalid remote artifact name');
-            const uri = new URL(result.uri);
+            const receipt = artifactRefSchema.parse(result);
+            const uri = new URL(receipt.uri);
             if (!['http:', 'https:', 'file:', 's3:', 'gs:'].includes(uri.protocol) || (!uri.hostname && uri.protocol !== 'file:')) throw new Error('Invalid remote artifact URI');
             uri.username = '';
             uri.password = '';
@@ -72,14 +74,16 @@ export function createArtifactAudit(events: Pick<EventStorePort, 'append'>, opti
             uri.hash = '';
             artifact = {
               uri: Buffer.from(redactUtf8(Buffer.from(uri.href)).bytes).toString('utf8'),
-              name: Buffer.from(redactUtf8(Buffer.from(result.name)).bytes).toString('utf8'),
+              name: Buffer.from(redactUtf8(Buffer.from(receipt.name)).bytes).toString('utf8'),
             };
-            return { ...ref, uri: artifact.uri, sha256, redactionStatus };
+            const storedContent = receipt.storedContent ?? { sha256, mediaType: ref.mediaType };
+            return { ...ref, ...storedContent, uri: artifact.uri, redactionStatus };
           }),
           cancelled,
         ]);
       } catch {
-        logger.warn({ provider_id: providerId, reason }, 'Artifact upload failed; local audit remains authoritative');
+        try { logger.warn({ provider_id: providerId, reason }, 'Artifact upload failed; local audit remains authoritative'); }
+        catch { recordObservationDelivery('logging', 'failed'); }
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
@@ -116,12 +120,14 @@ export async function captureEventEvidence(source: RunEventDraft, options?: Arti
   if (truncated) summary.truncated = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: () => void = () => undefined;
+  const cancelledError = new Error('Event evidence capture aborted');
+  const timeoutError = new Error('Event evidence capture timed out');
   try {
     const cancelled = new Promise<never>((_resolve, reject) => {
-      abort = () => reject(new Error('Event evidence capture aborted'));
+      abort = () => reject(cancelledError);
       options.signal?.addEventListener('abort', abort, { once: true });
       if (options.signal?.aborted) abort();
-      timer = setTimeout(() => reject(new Error('Event evidence capture timed out')), options.timeoutMs ?? 5_000);
+      timer = setTimeout(() => reject(timeoutError), options.timeoutMs ?? 5_000);
     });
     const ref = await Promise.race([
       Promise.resolve().then(() => {
@@ -130,8 +136,10 @@ export async function captureEventEvidence(source: RunEventDraft, options?: Arti
       }), cancelled,
     ]);
     return { ...source, evidence: [...source.evidence ?? [], ref] };
-  } catch {
-    logger.warn({ reason: 'evidence_capture_failed' }, 'Event evidence capture failed; local audit remains authoritative');
+  } catch (error) {
+    recordEvidenceCaptureFailure(error === timeoutError ? 'timed_out' : error === cancelledError ? 'cancelled' : 'failed');
+    try { logger.warn({ reason: 'evidence_capture_failed' }, 'Event evidence capture failed; local audit remains authoritative'); }
+    catch { recordObservationDelivery('logging', 'failed'); }
     return source;
   } finally {
     clearTimeout(timer);

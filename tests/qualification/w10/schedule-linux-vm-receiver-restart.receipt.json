@@ -1,0 +1,57 @@
+{
+  "afk": "0.2.176",
+  "stopSignal": "SIGKILL",
+  "intervalMs": 4000,
+  "downtimeMs": 8000,
+  "competingListenerRejected": true,
+  "beforeRestart": {
+    "deliveryId": "492136f7405da2c83999d2236e80682fee07f018155cb6dc7d24a35d25af6a75",
+    "providerId": "trigger.schedule",
+    "status": "processing",
+    "attempts": 1,
+    "receivedAt": 1795171334926,
+    "nextAttemptAt": 1795171334926
+  },
+  "recovered": {
+    "deliveryId": "492136f7405da2c83999d2236e80682fee07f018155cb6dc7d24a35d25af6a75",
+    "providerId": "trigger.schedule",
+    "status": "delivered",
+    "attempts": 2,
+    "receivedAt": 1795171334926,
+    "nextAttemptAt": 1795171346442
+  },
+  "firstNewTick": {
+    "deliveryId": "f2e479a6f0000dea238ae5b1f3cd17db241ba189eeda92f56bd169f9f9392554",
+    "providerId": "trigger.schedule",
+    "status": "delivered",
+    "attempts": 1,
+    "receivedAt": 1795171348428,
+    "nextAttemptAt": 1795171349433
+  },
+  "observedSuccessfulActions": 2,
+  "observedEffectsBeforeRestart": 1,
+  "observedEffectsTotal": 2,
+  "receiverPreservedOriginalEffect": true,
+  "receiverEffectIds": [
+    "492136f7405da2c83999d2236e80682fee07f018155cb6dc7d24a35d25af6a75",
+    "f2e479a6f0000dea238ae5b1f3cd17db241ba189eeda92f56bd169f9f9392554"
+  ],
+  "receiverTransport": "http-docker-published-port",
+  "receiverRequests": {
+    "492136f7405da2c83999d2236e80682fee07f018155cb6dc7d24a35d25af6a75": 2,
+    "f2e479a6f0000dea238ae5b1f3cd17db241ba189eeda92f56bd169f9f9392554": 1
+  },
+  "receiverImage": "linux/arm64 sha256:eb5d9c60d047664130b3c88bb9d3ff77cf809b4a524ee05aa3ac898940332d39",
+  "receiverContainerIds": [
+    "bf763d03abf33f284f571f678cbd535e4431b257d4befdb5b45d48292d4f9af7",
+    "6ded2a5305d81e0146849fa81990b1cafb296373ed767a325d94eb52c3291512"
+  ],
+  "receiverStopSignal": "SIGKILL",
+  "archiveSha256": "4cfc1c40871fd3ff5123d9437dee9b5db93f944afd00363dae5a1b495d4fddb3",
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "sourceCommit": "d65493537056781bcfaf8ca9f35a48885dc299ac",
+  "harnessSha256": "130688a9200015fd314e01bac7d64a693cf1048abb8e3fc48397bd3eb9841afd",
+  "receiverContainersRemoved": true,
+  "sameHostControlPassed": true
+}

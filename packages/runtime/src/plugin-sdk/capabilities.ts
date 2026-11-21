@@ -23,6 +23,7 @@ export interface ProviderAbortSignal {
 /** Options threaded through every provider operation that can be cancelled. */
 export interface ProviderOperationOptions {
   readonly signal?: ProviderAbortSignal;
+  readonly deadlineAt?: number;
 }
 
 /** Outcome of a provider health probe. */
@@ -63,12 +64,41 @@ export interface VerificationRequest {
   readonly target: string;
   readonly command?: readonly string[];
   readonly timeoutMs?: number;
+  readonly input?: string;
+  readonly executionId?: string;
+}
+
+export interface VerificationExecutionObservation {
+  readonly protocol: 'verification-execution-v1';
+  readonly executionId: string;
+  readonly command: readonly string[];
+  readonly cwd: string;
+  readonly inputDigest: string;
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly closed: true;
+  readonly frozen?: {
+    readonly checkerDigest: string;
+    readonly baseImageId: string;
+    readonly targetDigest: string;
+    readonly operationId: string;
+    readonly containerId: string;
+    readonly imageId: string;
+    readonly inputDigest: string;
+    readonly contextDigest: string;
+    readonly commandDigest: string;
+    readonly policyDigest: string;
+    readonly containerRemoved: true;
+    readonly imageRemoved: true;
+  };
 }
 
 export interface VerificationResult {
   readonly passed: boolean;
   readonly durationMs: number;
   readonly output?: string;
+  readonly execution?: VerificationExecutionObservation;
 }
 
 export interface VerificationProvider extends CapabilityProvider<VerificationCapability> {
@@ -121,6 +151,18 @@ export interface ContextQuery {
   readonly scope: string;
   readonly prompt: string;
   readonly limit?: number;
+  readonly applicability?: {
+    readonly version?: string;
+    readonly environment?: string;
+  };
+  readonly target?: {
+    readonly project: string;
+    readonly revision?: string;
+    readonly dirty?: boolean;
+    readonly productVersions?: Readonly<Record<string, string>>;
+    readonly runtimeVersions?: Readonly<Record<string, string>>;
+    readonly conditions?: Readonly<Record<string, boolean>>;
+  };
 }
 
 export interface ContextFragment {
@@ -145,6 +187,7 @@ export interface CredentialRef {
 export interface CredentialValue {
   readonly secret: string;
   readonly expiresAt?: string;
+  readonly revoked?: boolean;
 }
 
 export interface CredentialProvider extends CapabilityProvider<CredentialCapability> {
@@ -164,6 +207,7 @@ export interface ArtifactDescriptor {
 export interface ArtifactRef {
   readonly uri: string;
   readonly name: string;
+  readonly storedContent?: { readonly sha256: string; readonly mediaType: string };
 }
 
 export interface ArtifactSink extends CapabilityProvider<ArtifactSinkCapability> {
@@ -174,7 +218,7 @@ export interface ArtifactSink extends CapabilityProvider<ArtifactSinkCapability>
 
 export type RepositoryLifecycleOperation = 'prepare' | 'checkout' | 'publish' | 'cleanup';
 
-export type RepositoryCapability = 'read' | 'clone' | 'push' | RepositoryLifecycleOperation;
+export type RepositoryCapability = 'read' | 'clone' | 'push' | 'recovery' | RepositoryLifecycleOperation;
 
 export interface RepositoryRef {
   readonly url: string;
@@ -196,6 +240,19 @@ export interface RepositoryWorkspaceRequest {
   readonly workspaceId: string;
 }
 
+export interface RepositoryPublishRequest extends RepositoryWorkspaceRequest {
+  readonly expectedCommit?: string;
+}
+
+export interface RepositoryCheckoutRequest extends RepositoryWorkspaceRequest {
+  readonly branch?: string;
+  readonly ref?: string;
+}
+
+export interface RepositoryRunRequest extends RepositoryPrepareRequest {
+  readonly checkout?: Pick<RepositoryCheckoutRequest, 'branch' | 'ref'>;
+}
+
 export interface RepositoryWorkspace {
   readonly id: string;
   readonly repository: RepositoryRef;
@@ -214,14 +271,33 @@ export interface RepositoryCleanupResult {
   readonly removed: boolean;
 }
 
+export interface RepositoryRecoveryEntry {
+  readonly allocation: Pick<RepositoryWorkspace, 'id' | 'repository' | 'runId'>;
+  readonly phase: 'intent' | 'reserved' | 'owned' | 'retained' | 'recovering' | 'removing' | 'closed';
+}
+
+export interface RepositoryWorkspaceLeaseRequest extends RepositoryWorkspaceRequest {
+  readonly path: string;
+  readonly expectedCommit: string;
+}
+
+export interface RepositoryWorkspaceLease {
+  readonly workspace: RepositoryWorkspace;
+  readonly leaseId: string;
+  readSnapshot(): RepositorySnapshot;
+}
+
 export interface RepositoryProvider extends Omit<CapabilityProvider<RepositoryCapability>, 'capabilities'> {
   withLifecycleLease?<Result>(request: RepositoryPrepareRequest, operation: () => Promise<Result>, options?: ProviderOperationOptions): Promise<Result>;
-  readonly capabilities: Readonly<Record<'read' | 'clone' | 'push', boolean> & Partial<Record<RepositoryLifecycleOperation, boolean>>>;
+  withWorkspaceLease?<Result>(request: RepositoryWorkspaceLeaseRequest, operation: (lease: RepositoryWorkspaceLease) => Promise<Result>, options?: ProviderOperationOptions): Promise<Result>;
+  readonly capabilities: Readonly<Record<'read' | 'clone' | 'push', boolean> & Partial<Record<RepositoryLifecycleOperation | 'recovery', boolean>>>;
   snapshot(repository: RepositoryRef, options?: ProviderOperationOptions): Promise<RepositorySnapshot>;
   prepare?(request: RepositoryPrepareRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
-  checkout?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
-  publish?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication>;
+  checkout?(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace>;
+  publish?(request: RepositoryPublishRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication>;
   cleanup?(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult>;
+  listRecoveryAllocations?(options?: ProviderOperationOptions): Promise<readonly RepositoryRecoveryEntry[]>;
+  recoverAllocation?(allocationId: string, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult>;
 }
 
 // --- Policy check ---

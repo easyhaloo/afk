@@ -1,0 +1,177 @@
+{
+  "archiveSha256": "6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475",
+  "sourceParent": "5f37d547eebb69e664c39a2e61316dd10cedb2f1",
+  "scenarios": [
+    {
+      "afk": "0.2.174",
+      "opencode": "opencode v2.2.7",
+      "model": "qualification/qualification/w10-qwen:latest",
+      "modelDigest": "3a4600d628370c09e14900393a168633b121a577121598251b79bca0d3f860bb",
+      "status": "completed",
+      "exitCode": 0,
+      "afkUsage": {
+        "inputTokens": 3085,
+        "outputTokens": 295,
+        "totalTokens": 3380
+      },
+      "roles": [
+        "user",
+        "assistant",
+        "assistant",
+        "assistant",
+        "idle"
+      ],
+      "finishes": [
+        "tool-calls",
+        "tool-calls",
+        "stop"
+      ],
+      "tools": [
+        {
+          "name": "read",
+          "status": "completed"
+        },
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "nativeTextSha256": "ffa1efbfcf2a457ba28ab94487a34b9e8166fa1ab6d194575020378f9ae559c2",
+      "nativeAnswerIsObject": true,
+      "summaryType": "str",
+      "numericSummary": "41",
+      "messageUsage": [
+        {
+          "inputTokens": 890,
+          "outputTokens": 93,
+          "totalTokens": 983
+        },
+        {
+          "inputTokens": 1019,
+          "outputTokens": 121,
+          "totalTokens": 1140
+        },
+        {
+          "inputTokens": 1176,
+          "outputTokens": 81,
+          "totalTokens": 1257
+        }
+      ],
+      "nativeUsage": {
+        "inputTokens": 3085,
+        "outputTokens": 295,
+        "totalTokens": 3380
+      },
+      "scenario": "batch-read",
+      "checks": {
+        "observedCliAndServer": true,
+        "familyExitedBeforeClose": true,
+        "close": true,
+        "missingAfterClose": true,
+        "session": true,
+        "roles": true,
+        "prompt": true,
+        "nativeStop": true,
+        "model": true,
+        "finalContent": true,
+        "read": false,
+        "answerMatchesNative": true,
+        "answer": true,
+        "sessionUsage": true,
+        "usage": true
+      },
+      "passed": false
+    },
+    {
+      "afk": "0.2.174",
+      "opencode": "opencode v2.2.7",
+      "model": "qualification/qualification/w10-qwen:latest",
+      "modelDigest": "3a4600d628370c09e14900393a168633b121a577121598251b79bca0d3f860bb",
+      "status": "completed",
+      "exitCode": 0,
+      "afkUsage": {
+        "inputTokens": 1798,
+        "outputTokens": 559,
+        "totalTokens": 2357
+      },
+      "roles": [
+        "user",
+        "assistant",
+        "assistant",
+        "idle"
+      ],
+      "finishes": [
+        "tool-calls",
+        "stop"
+      ],
+      "tools": [
+        {
+          "name": "skill",
+          "status": "error"
+        }
+      ],
+      "nativeTextSha256": "a05a59f4eb046a61c26f707f7217c72b7ec8587eeedeae9b960115b5ab39cb6e",
+      "nativeAnswerIsObject": true,
+      "summaryType": "str",
+      "numericSummary": null,
+      "messageUsage": [
+        {
+          "inputTokens": 642,
+          "outputTokens": 479,
+          "totalTokens": 1121
+        },
+        {
+          "inputTokens": 1156,
+          "outputTokens": 80,
+          "totalTokens": 1236
+        }
+      ],
+      "nativeUsage": {
+        "inputTokens": 1798,
+        "outputTokens": 559,
+        "totalTokens": 2357
+      },
+      "scenario": "batch-template",
+      "checks": {
+        "observedCliAndServer": true,
+        "familyExitedBeforeClose": true,
+        "close": true,
+        "missingAfterClose": true,
+        "session": true,
+        "roles": true,
+        "prompt": true,
+        "nativeStop": true,
+        "model": true,
+        "finalContent": true,
+        "noTools": false,
+        "answerMatchesNative": true,
+        "answer": false,
+        "sessionUsage": true,
+        "usage": true
+      },
+      "passed": false
+    },
+    {
+      "afk": "0.2.174",
+      "opencode": "opencode v2.2.7",
+      "model": "qualification/qualification/w10-qwen:latest",
+      "modelDigest": "3a4600d628370c09e14900393a168633b121a577121598251b79bca0d3f860bb",
+      "status": "aborted",
+      "exitCode": null,
+      "afkUsage": null,
+      "scenario": "cancel",
+      "checks": {
+        "observedCliAndServer": true,
+        "liveTextDelta": true,
+        "interrupt": true,
+        "familyExitedBeforeClose": true,
+        "aborted": true,
+        "cliExited": true,
+        "streamClosed": true,
+        "close": true,
+        "missingAfterClose": true
+      },
+      "passed": true
+    }
+  ]
+}

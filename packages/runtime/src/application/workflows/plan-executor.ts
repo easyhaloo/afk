@@ -18,11 +18,7 @@ export class PlanExecutor {
     for (const group of plan.groups) {
       const runnable = group.steps.filter(step => {
         if (!evaluateWhen(step.when, results)) return false;
-        // A normal dependency means the prerequisite completed successfully.
-        // A step with an explicit condition may intentionally recover from a
-        // failed prerequisite (for example review -> fix).
-        if (step.when) return true;
-        return (step.dependsOn ?? []).every(id => results[id]?.status === 'completed');
+        return (step.dependsOn ?? []).every(id => id === step.when?.step || results[id]?.status === 'completed');
       });
       const completed = await Promise.all(runnable.map(step => step.kind === 'agent'
         ? this.options.executeAgent(step, results)

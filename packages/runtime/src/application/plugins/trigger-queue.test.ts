@@ -4,7 +4,7 @@ import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
-import { currentTriggerDeliveryId, DurableTriggerQueue, TriggerDeliveryConflict, TriggerQueueFull, type TriggerQueueOptions } from './trigger-queue.js';
+import { currentTriggerDeliveryId, DurableTriggerQueue, TriggerDeliveryConflict, TriggerQueueFull, type TriggerQueueOptions, triggerQueueSchemaVersion } from './trigger-queue.js';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -26,12 +26,264 @@ function queue(file: string, dispatch: ConstructorParameters<typeof DurableTrigg
 }
 
 function database(file: string) {
-  const connection = openSqlite({ file, schema: '', durability: 'FULL', version: 2 });
+  const connection = openSqlite({ file, schema: '', durability: 'FULL', version: triggerQueueSchemaVersion });
   cleanup.push(() => connection.close());
   return connection;
 }
 
 describe('durable trigger queue', () => {
+  it('retains replay aliases across restart and releases their capacity when the original is pruned', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const options = { maxRecords: 2, maxBytes: 2, deliveredRetentionMs: 100 };
+    const first = queue(file, undefined, options);
+    const original = first.instance.enqueue('trigger.issue-event', '{}', 'original', true);
+    first.instance.enqueue('trigger.issue-event', '{}', 'alias', true);
+    await first.instance.close();
+    const { instance, dispatch } = queue(file, undefined, options);
+    expect(instance.storageUsage()).toMatchObject({ records: 2, bytes: 2 });
+    expect(instance.enqueue('trigger.issue-event', '{}', 'alias')).toMatchObject({ deliveryId: original.deliveryId, duplicate: true });
+    expect(() => instance.enqueue('trigger.issue-event', '[]', 'alias')).toThrow(TriggerDeliveryConflict);
+    expect(() => instance.enqueue('trigger.issue-event', '{}', 'third', true)).toThrow(TriggerQueueFull);
+    instance.start();
+    await vi.advanceTimersByTimeAsync(101);
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(instance.pruneDelivered()).toBe(1);
+    expect(instance.storageUsage()).toMatchObject({ records: 0, bytes: 0 });
+    expect(instance.enqueue('trigger.issue-event', '[]', 'alias')).toMatchObject({ duplicate: false });
+  });
+  it('dispatches only the selected enqueue delivery id and leaves unrelated work for a global owner', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const first = queue(file);
+    const sameScope = first.instance.enqueue('learning.distill', '{"scope":"github:acme/api"}', 'other-request');
+    const otherScope = first.instance.enqueue('learning.distill', '{"scope":"github:acme/other"}', 'other-scope');
+    const otherProvider = first.instance.enqueue('trigger.schedule', '{}', 'selected-request');
+    const selected = first.instance.enqueue('learning.distill', '{"scope":"github:acme/api"}', 'selected-request');
+    expect(selected.deliveryId).not.toBe('selected-request');
+    const selection = { deliveryId: selected.deliveryId };
+    first.instance.start(selection);
+    selection.deliveryId = sameScope.deliveryId;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.dispatch).toHaveBeenCalledOnce();
+    expect(first.dispatch).toHaveBeenCalledWith(expect.objectContaining({ deliveryId: selected.deliveryId }));
+    expect(first.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 1 });
+    for (const receipt of [sameScope, otherScope, otherProvider]) {
+      expect(first.instance.status(receipt.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+    }
+    expect(vi.getTimerCount()).toBe(0);
+    await first.instance.close();
+    expect(first.dispatch).toHaveBeenCalledOnce();
+    const restarted = queue(file);
+    restarted.instance.start();
+    await restarted.instance.close();
+    expect(restarted.dispatch).toHaveBeenCalledTimes(3);
+    expect(database(file).prepare("SELECT COUNT(*) AS count FROM trigger_deliveries WHERE status = 'delivered'").get()?.count).toBe(4);
+  });
+
+  it.each(['global', 'targeted'] as const)('rejects changing a %s selection after startup', async mode => {
+    vi.useFakeTimers();
+    const { instance, dispatch } = queue(queueFile());
+    const first = instance.enqueue('learning.distill', '{}', 'first');
+    const second = instance.enqueue('learning.distill', '{}', 'second');
+    if (mode === 'targeted') {
+      instance.start({ deliveryId: first.deliveryId });
+      instance.start({ deliveryId: first.deliveryId });
+      expect(() => instance.start()).toThrow('selection cannot change');
+      expect(() => instance.start({ deliveryId: second.deliveryId })).toThrow('selection cannot change');
+    } else {
+      instance.start();
+      instance.start();
+      expect(() => instance.start({ deliveryId: first.deliveryId })).toThrow('selection cannot change');
+    }
+    await vi.advanceTimersByTimeAsync(1);
+    expect(dispatch).toHaveBeenCalledTimes(mode === 'targeted' ? 1 : 2);
+    if (mode === 'targeted') {
+      expect(instance.status(second.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+      expect(() => instance.start()).toThrow('selection cannot change');
+    }
+  });
+
+  it('does not fall back to global dispatch when the selected id is absent or enqueue wakes it', async () => {
+    vi.useFakeTimers();
+    const { instance, dispatch } = queue(queueFile());
+    const pending = instance.enqueue('learning.distill', '{}', 'request-key');
+    instance.start({ deliveryId: 'request-key' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    const later = instance.enqueue('learning.distill', '{}', 'later-request');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    for (const receipt of [pending, later]) {
+      expect(instance.status(receipt.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+    }
+    await instance.close();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('schedules only selected retries and replays the same id after exhausting its attempts', async () => {
+    vi.useFakeTimers();
+    let fail = true;
+    const observedIds: Array<string | undefined> = [];
+    const dispatch = vi.fn(async () => {
+      observedIds.push(currentTriggerDeliveryId());
+      if (fail) throw new Error('retry selected');
+    });
+    const { instance, onError } = queue(queueFile(), dispatch);
+    const unrelated = instance.enqueue('learning.distill', '{}', 'unrelated');
+    const selected = instance.enqueue('learning.distill', '{}', 'selected');
+    instance.start({ deliveryId: selected.deliveryId });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(vi.getTimerCount()).toBe(1);
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      expect(instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 2 });
+      expect(schedule).toHaveBeenCalledOnce();
+      expect(schedule).toHaveBeenCalledWith(expect.any(Function), 20);
+    } finally { schedule.mockRestore(); }
+    await vi.advanceTimersByTimeAsync(20);
+    expect(instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'failed', attempts: 3 });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(instance.status(unrelated.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+    fail = false;
+    instance.replay(selected.deliveryId);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 1 });
+    expect(observedIds).toEqual(Array(4).fill(selected.deliveryId));
+    expect(currentTriggerDeliveryId()).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([true, false])('honors drain=%s for a selection closed before dispatch', async drain => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const first = queue(file);
+    const unrelated = first.instance.enqueue('learning.distill', '{}', 'unrelated');
+    const selected = first.instance.enqueue('learning.distill', '{}', 'selected');
+    first.instance.start({ deliveryId: selected.deliveryId });
+    await first.instance.close({ drain });
+    expect(first.dispatch).toHaveBeenCalledTimes(drain ? 1 : 0);
+    const restarted = queue(file);
+    expect(restarted.instance.status(unrelated.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: drain ? 'delivered' : 'pending', attempts: drain ? 1 : 0 });
+    restarted.instance.start();
+    await restarted.instance.close();
+    expect(restarted.dispatch).toHaveBeenCalledTimes(drain ? 1 : 2);
+  });
+
+  it('retains ownership during targeted cancellation and persists delayed retries for a later owner', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const first = queue(file, vi.fn(async () => { await pending; throw new Error('retry later'); }), { maxAttempts: 3, retryDelayMs: 60_000 });
+    const unrelated = first.instance.enqueue('learning.distill', '{}', 'unrelated');
+    const selected = first.instance.enqueue('learning.distill', '{}', 'selected');
+    first.instance.start({ deliveryId: selected.deliveryId });
+    await vi.advanceTimersByTimeAsync(1);
+    const closed = first.instance.close({ drain: false, timeoutMs: 10 });
+    const rejected = expect(closed).rejects.toThrow('ownership retained');
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      await rejected;
+      expect(() => new DurableTriggerQueue(file, vi.fn())).toThrow('already owned');
+      expect(first.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'processing', attempts: 1 });
+      expect(first.instance.status(unrelated.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 0 });
+    } finally { finish(); await first.instance.close({ drain: false }); }
+    expect(first.dispatch).toHaveBeenCalledOnce();
+    expect(first.dispatch).toHaveBeenCalledWith(expect.objectContaining({ deliveryId: selected.deliveryId }));
+    const restarted = queue(file);
+    restarted.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(restarted.instance.status(unrelated.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 1 });
+    expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'pending', attempts: 1 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 2 });
+    expect(restarted.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('expedites only the selected pending delivery without resetting its attempts', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const first = queue(file, vi.fn(async () => { throw new Error('retry later'); }), { retryDelayMs: 60_000 });
+    const unrelated = first.instance.enqueue('learning.distill', '{}', 'unrelated');
+    const selected = first.instance.enqueue('learning.distill', '{}', 'selected');
+    first.instance.start();
+    await first.instance.close();
+
+    const restarted = queue(file);
+    const unrelatedStatus = restarted.instance.status(unrelated.deliveryId)[0];
+    expect(unrelatedStatus).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(restarted.instance.status(selected.deliveryId)[0].nextAttemptAt).toBeGreaterThan(Date.now());
+    restarted.instance.start({ deliveryId: selected.deliveryId, expeditePending: true });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(restarted.instance.status(unrelated.deliveryId)[0]).toEqual(unrelatedStatus);
+    expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 2 });
+    expect(restarted.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it('bounds close without releasing an unconfirmed active consumer', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const first = queue(file, async () => pending);
+    first.instance.enqueue('trigger.schedule', '{}', 'active');
+    first.instance.enqueue('trigger.schedule', '{}', 'queued');
+    first.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    const closed = first.instance.close({ drain: false, timeoutMs: 10 });
+    let failure: unknown;
+    void closed.catch(error => { failure = error; });
+    await vi.advanceTimersByTimeAsync(10);
+    try {
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain('ownership retained');
+      expect(() => new DurableTriggerQueue(file, async () => {})).toThrow('already owned');
+      expect(first.instance.status().map(row => row.status).sort()).toEqual(['pending', 'processing']);
+      expect(() => first.instance.enqueue('trigger.schedule', '{}')).toThrow('unavailable');
+    } finally { finish(); await first.instance.close({ drain: false }); }
+    const next = queue(file);
+    expect(next.instance.status().map(row => row.status).sort()).toEqual(['delivered', 'pending']);
+  });
+
+  it('can stop dispatching on close while retaining pending work for a new owner', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    let finish!: () => void;
+    const active = new Promise<void>(resolve => { finish = resolve; });
+    const first = queue(file, vi.fn(async () => active));
+    first.instance.enqueue('learning.distill', '{}', 'first');
+    first.instance.enqueue('learning.distill', '{}', 'second');
+    first.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.dispatch).toHaveBeenCalledTimes(1);
+    const closed = first.instance.close({ drain: false });
+    finish();
+    await closed;
+    expect(first.dispatch).toHaveBeenCalledTimes(1);
+    const restarted = queue(file);
+    expect(restarted.instance.status().map(entry => entry.status).sort()).toEqual(['delivered', 'pending']);
+    restarted.instance.start();
+    await vi.advanceTimersByTimeAsync(1);
+    await restarted.instance.close();
+    expect(restarted.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not dispatch a scheduled delivery when explicitly paused before it starts', async () => {
+    const file = queueFile();
+    const first = queue(file);
+    first.instance.enqueue('learning.distill', '{}', 'first');
+    first.instance.start();
+    await first.instance.close({ drain: false });
+    expect(first.dispatch).not.toHaveBeenCalled();
+    expect(queue(file).instance.status()[0]?.status).toBe('pending');
+  });
   it('paginates retained deliveries with validated bounds while preserving status by ID', () => {
     const file = queueFile();
     const { instance } = queue(file);

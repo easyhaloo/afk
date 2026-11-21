@@ -23,6 +23,7 @@ import type {
   ProviderOperationOptions,
 } from '../../plugin-sdk/capabilities.js';
 import { checkAbort, requestHttp, type FetchTransport } from './dependencies.js';
+import { resolveOperationSecret, type OperationSecret } from './operation-secret.js';
 
 export type { ArtifactSinkCapability };
 
@@ -159,10 +160,16 @@ export class TestReportProvider implements ArtifactSink {
 
   async health(): Promise<ProviderHealth> {
     try {
-      await this.fs.mkdir(this.options.root, { recursive: true });
+      const root = await this.fs.lstat(this.options.root);
+      if (root.isSymbolicLink() || !root.isDirectory()) {
+        return { status: 'unavailable', message: 'artifact root must be a regular directory' };
+      }
       return { status: 'ok' };
     } catch (error) {
-      return { status: 'unavailable', message: `artifact root is not usable: ${(error as Error).message}` };
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { status: 'degraded', message: 'artifact root is not initialized' };
+      }
+      return { status: 'unavailable', message: 'artifact root could not be inspected' };
     }
   }
 
@@ -253,12 +260,14 @@ export class EvidenceBundleProvider implements ArtifactSink {
     assertSafeArtifactName(request.name);
     const bundle = this.build(request.records);
     const bytes = Buffer.from(JSON.stringify(bundle, null, 2), 'utf8');
+    const mediaType = 'application/json';
+    const sha256 = sha256Hex(bytes);
     checkAbort(options);
     const ref = await this.put(
-      { name: request.name, mediaType: 'application/json', bytes },
+      { name: request.name, mediaType, bytes },
       options,
     );
-    return { ref, bundle };
+    return { ref: { ...ref, storedContent: ref.storedContent ?? { sha256, mediaType } }, bundle };
   }
 
   private build(records: readonly EvidenceBundleRecord[]): EvidenceBundle {
@@ -292,6 +301,7 @@ export interface ObjectStorageProviderOptions {
   readonly endpoint?: string;
   /** Returns a presigned/upload URL for the artifact. Takes precedence. */
   readonly resolveUrl?: (artifact: ArtifactDescriptor) => string | Promise<string>;
+  readonly presignedUrl?: OperationSecret;
 }
 
 /**
@@ -316,7 +326,9 @@ export class ObjectStorageProvider implements ArtifactSink {
     if (typeof artifact.mediaType !== 'string' || artifact.mediaType.length === 0) {
       throw new Error('artifact mediaType is required');
     }
-    const target = await this.resolveTarget(artifact);
+    const target = this.options.presignedUrl === undefined
+      ? await this.resolveTarget(artifact)
+      : await this.resolvePresignedTarget(this.options.presignedUrl, options);
     const response = await requestHttp(
       this.options.transport,
       target,
@@ -327,15 +339,17 @@ export class ObjectStorageProvider implements ArtifactSink {
       },
       options,
     );
-    const uri = await this.extractUri(response, target);
+    const uri = this.options.presignedUrl === undefined
+      ? await this.extractUri(response, target)
+      : artifactHttpUri(target);
     return { uri, name: artifact.name };
   }
 
   async health(): Promise<ProviderHealth> {
-    if (!this.options.endpoint && !this.options.resolveUrl) {
+    if (!this.options.endpoint && !this.options.resolveUrl && this.options.presignedUrl === undefined) {
       return { status: 'unavailable', message: 'object storage requires an endpoint or a presigned URL resolver' };
     }
-    if (!this.options.resolveUrl) {
+    if (!this.options.resolveUrl && this.options.presignedUrl === undefined) {
       try { artifactHttpUri(this.options.endpoint); } catch {
         return { status: 'unavailable', message: 'invalid object storage endpoint' };
       }
@@ -352,6 +366,19 @@ export class ObjectStorageProvider implements ArtifactSink {
       return `${base}/${encodeURIComponent(artifact.name)}`;
     }
     throw new Error('object storage requires an endpoint or a presigned URL resolver');
+  }
+
+  private async resolvePresignedTarget(source: OperationSecret, options?: ProviderOperationOptions): Promise<string> {
+    const value = await resolveOperationSecret(source, options);
+    try {
+      const target = new URL(value);
+      const localHttp = target.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(target.hostname);
+      if ((target.protocol === 'https:' || localHttp) && !target.username && !target.password
+        && !value.includes('#') && target.search && !/[\s\u0000-\u001f\u007f]/u.test(value)) return target.href;
+    } catch {
+      throw new Error('Invalid presigned upload URL');
+    }
+    throw new Error('Invalid presigned upload URL');
   }
 
   /**
@@ -387,7 +414,7 @@ export interface ReportPlatformProviderOptions {
   /** Full upload endpoint that accepts the raw artifact body. */
   readonly endpoint: string;
   /** Optional bearer token sent as an Authorization header. */
-  readonly token?: string;
+  readonly token?: OperationSecret;
 }
 
 /**
@@ -406,6 +433,7 @@ export class ReportPlatformProvider implements ArtifactSink {
   constructor(private readonly options: ReportPlatformProviderOptions) {}
 
   async put(artifact: ArtifactDescriptor, options?: ProviderOperationOptions): Promise<ArtifactRef> {
+    if (this.options.token && options?.signal?.aborted) throw new Error('Report upload cancelled');
     checkAbort(options);
     assertSafeArtifactName(artifact.name);
     if (typeof artifact.mediaType !== 'string' || artifact.mediaType.length === 0) {
@@ -413,6 +441,7 @@ export class ReportPlatformProvider implements ArtifactSink {
     }
     const endpoint = new URL(artifactHttpUri(this.options.endpoint));
     if (this.options.token && endpoint.protocol !== 'https:') throw new Error('report platform bearer token requires HTTPS');
+    const token = !this.options.token ? undefined : await resolveOperationSecret(this.options.token, options);
     const response = await requestHttp(
       this.options.transport,
       this.options.endpoint,
@@ -421,11 +450,14 @@ export class ReportPlatformProvider implements ArtifactSink {
         body: Buffer.from(artifact.bytes),
         headers: {
           'content-type': artifact.mediaType,
-          ...(this.options.token ? { authorization: `Bearer ${this.options.token}` } : {}),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
       },
       options,
-    );
+    ).catch(error => {
+      if (this.options.token && options?.signal?.aborted) throw new Error('Report upload cancelled');
+      throw error;
+    });
     const uri = await this.readReturnedUri(response);
     if (!uri) throw new Error('report platform did not return a valid artifact URI');
     return { uri, name: artifact.name };

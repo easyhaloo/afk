@@ -57,11 +57,12 @@ export class GitBranchProvider implements BranchProvider {
       repoPath: this.repoRoot, baseBranch: verificationBase, reuseExistingBranch: true,
     });
     await shareNodeModules(this.repoRoot, handle.path);
+    await excludeGeneratedPaths(handle.path, ['/.afk/backlog-context.md', '/.afk/experience-context.md', '/.afk/plugin-context.md', '/.afk/artifacts.txt', '/.afk-signal.json', '/.claude/settings.local.json']);
     this.handles.set(handle.path, handle);
     return { branchName: handle.branch, worktreePath: handle.path };
   }
 
-  async push(branchName: string, worktreePath: string): Promise<void> {
+  async preparePush(branchName: string, worktreePath: string): Promise<string> {
     const git = simpleGit(worktreePath);
     await git.fetch('origin');
     const remoteBranch = `origin/${branchName}`;
@@ -76,7 +77,22 @@ export class GitBranchProvider implements BranchProvider {
         }
       }
     }
-    await git.push('origin', branchName);
+    return (await git.revparse(['HEAD'])).trim();
+  }
+
+  async verificationRevision(worktreePath: string, branchName: string, ownedContextPath?: string): Promise<string> {
+    const git = simpleGit(worktreePath);
+    const head = (await git.revparse(['HEAD'])).trim();
+    const status = await git.status(['--untracked-files=all']);
+    const clean = status.isClean() || (ownedContextPath !== undefined && status.files.length === 1 && status.not_added.includes(ownedContextPath));
+    if (!clean || status.current !== branchName || (await git.revparse(['HEAD'])).trim() !== head) {
+      throw new Error(`QA requires a clean, stable checkout of ${branchName}`);
+    }
+    return head;
+  }
+
+  async push(branchName: string, worktreePath: string, commitSha?: string): Promise<void> {
+    await simpleGit(worktreePath).push('origin', commitSha ? `${commitSha}:refs/heads/${branchName}` : branchName);
   }
 
   async commit(worktreePath: string, message: string): Promise<BranchCommitResult> {
@@ -148,7 +164,10 @@ export class GitBranchProvider implements BranchProvider {
     }
     // A merge in progress means the merge landed and is waiting for its
     // commit.
-    if ((await this.revParse(git, 'MERGE_HEAD')).trim()) return { merged: true, conflicts: [] };
+    if ((await this.revParse(git, 'MERGE_HEAD')).trim()) {
+      await git.raw(['commit', '--no-edit']);
+      return { merged: true, conflicts: [] };
+    }
     // Without one, the change branch carried nothing the baseline does not
     // have already — which is a clean merge, not a failure.
     const mergeBase = (await git.raw(['merge-base', featureRef, baselineRef]).catch(() => '')).trim();
@@ -265,14 +284,20 @@ async function shareNodeModules(repoRoot: string, worktreePath: string): Promise
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  await excludeGeneratedPaths(worktreePath, ['/node_modules']);
+  await linkNodeModules(source, target, repoRoot, worktreePath);
+}
+
+async function excludeGeneratedPaths(worktreePath: string, generated: string[]): Promise<void> {
   const excludePath = resolve(worktreePath, (await simpleGit(worktreePath).raw(['rev-parse', '--git-path', 'info/exclude'])).trim());
   const patterns = await readFile(excludePath, 'utf8').catch(error => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
     throw error;
   });
-  if (!patterns.split(/\r?\n/).includes('/node_modules')) {
+  const existing = new Set(patterns.split(/\r?\n/));
+  const missing = generated.filter(pattern => !existing.has(pattern));
+  if (missing.length) {
     await mkdir(dirname(excludePath), { recursive: true });
-    await appendFile(excludePath, '\n/node_modules\n');
+    await appendFile(excludePath, `\n${missing.join('\n')}\n`);
   }
-  await linkNodeModules(source, target, repoRoot, worktreePath);
 }

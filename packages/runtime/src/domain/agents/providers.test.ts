@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code.js';
+import { claudeStatuslineSettingsPath } from '../../shared/workspace-paths.js';
 import { CodexProvider } from './codex.js';
+import { CodexAppServerExecution } from './codex-app-server/execution.js';
 import { CursorProvider } from './cursor.js';
 import { PiProvider } from './pi.js';
 import { OpenCodeProvider, resolveOpenCodeModel } from './opencode.js';
@@ -16,7 +18,7 @@ import {
 } from './registry.js';
 import { AgentProviderRegistry, createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
 import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
-import type { AgentProvider } from './types.js';
+import type { AgentProvider, AgentStartOptions } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
 function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; interactive: boolean }> = {}) {
@@ -69,16 +71,16 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv).not.toContain('--settings');
     });
 
-    it('passes worktree-local settings explicitly for interactive readiness', () => {
+    it('passes workspace state settings explicitly for interactive readiness', () => {
       const command = new ClaudeCodeProvider().buildCommand({ ...opts(),
         worktreePath: '/tmp/worktree with spaces/qa', executionMode: 'interactive' });
       expect(command.argv).toEqual(['claude', '--dangerously-skip-permissions', '--settings',
-        '/tmp/worktree with spaces/qa/.claude/settings.local.json']);
+        claudeStatuslineSettingsPath('/tmp/worktree with spaces/qa')]);
     });
 
     it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {
       const execution = { id: 'execution-1' } as AgentExecution;
-      const startAgent = vi.fn(async () => execution);
+      const startAgent = vi.fn(async (_options: AgentStartOptions) => execution);
       const sandbox = { startAgent } as unknown as Sandbox;
 
       await expect(p.createExecution({
@@ -125,9 +127,9 @@ describe('Agent providers — fixture coverage', () => {
   describe('CodexProvider', () => {
     const p = new CodexProvider();
 
-    it('exposes correct name and capabilities (NO resume)', () => {
+    it('exposes transport-scoped resume', () => {
       expect(p.name).toBe('codex');
-      expect(p.capabilities.has('resume')).toBe(false);
+      expect(p.capabilities.has('resume')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
       expect(p.capabilities.has('interactive')).toBe(true);
     });
@@ -236,6 +238,26 @@ describe('Agent providers — fixture coverage', () => {
       }));
     });
 
+    it.each([
+      ['exec', false], ['app-server', false], ['exec', true], ['app-server', true],
+    ] as const)('rejects explicit resume before starting %s (remote=%s)', async (transport, remote) => {
+      const startAgent = vi.fn();
+      const startProviderExecution = vi.fn();
+      const appServer = vi.spyOn(CodexAppServerExecution, 'start').mockRejectedValue(new Error('unexpected start'));
+      try {
+        await expect(p.createExecution({
+          sandbox: { startAgent, ...(remote && { startProviderExecution }) } as unknown as Sandbox,
+          worktreePath: '/tmp/worktree', sessionId: 'sess-1', generation: 2,
+          prompt: 'continue', signalType: 'goal_complete', executionMode: 'batch',
+          runtime: { kind: 'codex', transport, auth: 'chatgpt', provider: 'openai', startupTimeoutMs: 5_000 },
+          resume: { sessionId: 'thread-1', generation: 1, checkpoint: null, summary: '', capturedAt: new Date().toISOString() },
+        })).rejects.toThrow('codex does not support explicit native resume');
+        expect(appServer).not.toHaveBeenCalled();
+        expect(startAgent).not.toHaveBeenCalled();
+        expect(startProviderExecution).not.toHaveBeenCalled();
+      } finally { appServer.mockRestore(); }
+    });
+
     it('selects app-server execution before delegating to a process sandbox', async () => {
       const startAgent = vi.fn();
       await expect(p.createExecution({
@@ -274,7 +296,7 @@ describe('Agent providers — fixture coverage', () => {
         usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 4 },
       }))).toContainEqual({
         type: 'usage',
-        usage: { inputTokens: 13, outputTokens: 4, totalTokens: 17 },
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
       });
 
       const [event] = p.parseLine(JSON.stringify({ type: 'error', message: 'request failed' }));
@@ -309,13 +331,13 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv).toContain('--print');
     });
 
-    it('buildCommand uses --interactive when interactive', () => {
+    it('buildCommand uses the default TUI when interactive', () => {
       const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv).toContain('--interactive');
+      expect(cmd.argv).toEqual(['cursor-agent']);
     });
 
     it('parseLine routes JSON events', () => {
-      const events = p.parseLine(JSON.stringify({ type: 'usage', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }));
+      const events = p.parseLine(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', usage: { inputTokens: 0, outputTokens: 0 } }));
       expect(events[0].type).toBe('usage');
     });
   });
@@ -329,15 +351,14 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('streaming')).toBe(true);
     });
 
-    it('buildCommand uses --non-interactive when not interactive', () => {
+    it('buildCommand uses print JSON mode when not interactive', () => {
       const cmd = p.buildCommand(opts({ interactive: false }));
-      expect(cmd.argv[0]).toBe('pi');
-      expect(cmd.argv).toContain('--non-interactive');
+      expect(cmd.argv).toEqual(['pi', '--print', '--mode', 'json']);
     });
 
-    it('buildCommand omits --non-interactive when interactive', () => {
+    it('buildCommand uses the default TUI when interactive', () => {
       const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv).not.toContain('--non-interactive');
+      expect(cmd.argv).toEqual(['pi']);
     });
   });
 
@@ -372,7 +393,7 @@ describe('Agent providers — fixture coverage', () => {
     it('passes the runner prompt intact when creating an interactive execution', async () => {
       const startAgent = vi.fn(async () => ({ id: 'interactive-opencode' } as AgentExecution));
       const prompt = '/goal Implement the assigned task.\nBacklog description: exact acceptance criteria.\nAFK interactive completion protocol: write .afk-signal.json.';
-      await p.createExecution({
+      const execution = await p.createExecution({
         worktreePath: '/tmp/worktree',
         sessionId: 'sess-1',
         sandbox: { startAgent } as unknown as Sandbox,
@@ -381,6 +402,7 @@ describe('Agent providers — fixture coverage', () => {
         signalType: 'goal_complete',
         executionMode: 'interactive',
       });
+      expect(execution).toBe(await startAgent.mock.results[0].value);
       expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
         command: expect.objectContaining({ argv: expect.arrayContaining(['--prompt', prompt.replace(/^\/goal\s*/, '')]) }),
         prompt,
@@ -391,6 +413,20 @@ describe('Agent providers — fixture coverage', () => {
       const cmd = p.buildCommand({ ...opts(), executionMode: 'batch' });
       expect(cmd.argv).toEqual(['opencode', 'run', '--format', 'json']);
       expect(cmd.cwd).toBe('/tmp/worktree');
+    });
+
+    it('isolates scoped batch runs and keeps the task out of other launches', () => {
+      const skillTask = { workspace: '/tmp/worktree', taskId: 'github:w11/parcel#42', runId: 'parcel-run',
+        target: { project: 'github:w11/parcel', productVersions: { parcel: '2.0' } }, applicability: { environment: 'staging' } };
+      const options = { ...opts(), skillTask };
+      const batch = p.buildCommand({ ...options, executionMode: 'batch' });
+      expect(batch.argv).toContain('--standalone');
+      expect(batch.env?.AFK_SKILL_TASK_CONTEXT).toBe(JSON.stringify(skillTask));
+      for (const other of [p.buildCommand({ ...options, worktreePath: '/tmp/other', executionMode: 'batch' }),
+        p.buildCommand({ ...options, executionMode: 'interactive' })]) {
+        expect(other.argv).not.toContain('--standalone');
+        expect(other.env?.AFK_SKILL_TASK_CONTEXT).toBeUndefined();
+      }
     });
 
     it('resolves --model from the environment and never hardcodes one', () => {
@@ -417,33 +453,69 @@ describe('Agent providers — fixture coverage', () => {
       expect(resolveOpenCodeModel({ AFK_OPENCODE_MODEL: '   ' })).toBeUndefined();
     });
 
-    it('routes step_finish tokens into usage and result events', () => {
-      const line = JSON.stringify({
-        type: 'step_finish',
-        timestamp: 1791992467521,
-        sessionID: 'ses_x',
-        part: { type: 'step-finish', reason: 'stop', tokens: { total: 703, input: 700, output: 3 } },
-      });
-      const events = p.parseLine(line);
-      const usage = events.find(e => e.type === 'usage');
-      expect(usage).toMatchObject({ usage: { inputTokens: 700, outputTokens: 3, totalTokens: 703 } });
-      expect(events.some(e => e.type === 'result')).toBe(true);
+    const row = (type: string, fields = {}, messageID = 'msg_one') => JSON.stringify({ type, sessionID: 'ses_one',
+      part: { type: type.replace('_', '-'), sessionID: 'ses_one', messageID, ...fields } });
+
+    async function batch() {
+      const startAgent = vi.fn(async (_options: AgentStartOptions) => ({ id: 'logical' }) as AgentExecution);
+      const execution = await p.createExecution({ ...opts(), sandbox: { startAgent } as unknown as Sandbox,
+        executionMode: 'batch', generation: 0, prompt: 'compute', signalType: 'goal_complete' });
+      return { execution, parse: startAgent.mock.calls[0][0].parseLine! };
+    }
+
+    it('binds the native session and publishes its stopped answer after usage', async () => {
+      const { execution, parse } = await batch();
+      expect(execution.sessionId).toBeUndefined();
+      expect(parse(row('step_start'))).toEqual([{ type: 'session', sessionId: 'ses_one' }]);
+      expect(execution.sessionId).toBe('ses_one');
+      expect(parse(row('text', { text: '41' }))).toEqual([{ type: 'text', text: '41' }]);
+      expect(parse(row('step_finish', { reason: 'stop', tokens: { input: 636, output: 119 } }))).toEqual([
+        { type: 'usage', usage: { inputTokens: 636, outputTokens: 119, totalTokens: 755 } }, { type: 'result', result: '41' }]);
+      await expect(p.restoreSession()).rejects.toThrow(/resume/);
     });
 
-    it('captures the session id from step_start', () => {
-      const line = JSON.stringify({ type: 'step_start', sessionID: 'ses_ec4e', part: { type: 'step-start' } });
-      const events = p.parseLine(line);
-      expect(events[0]).toEqual({ type: 'session', sessionId: 'ses_ec4e' });
+    it('isolates executions and excludes unrelated, intermediate and failed steps', async () => {
+      const { parse } = await batch();
+      const other = await batch();
+      parse(row('step_start'));
+      parse(row('text', { text: 'intermediate' }));
+      expect(other.parse(row('step_finish', { reason: 'stop' }))).toEqual([]);
+      expect(parse(row('step_finish', { reason: 'stop' }, 'wrong'))).toEqual([]);
+      expect(parse(row('step_finish', { reason: 'tool-calls', tokens: { input: 1 } }))).toEqual([]);
+      parse(row('step_start'));
+      expect(parse(row('text', { text: 'mixed', sessionID: 'ses_other' }))).toEqual([]);
+      expect(parse(row('step_finish', { reason: 'length' }))).toEqual([]);
+      parse(row('step_start'));
+      parse(row('text', { text: 'discard' }));
+      expect(parse(JSON.stringify({ type: 'error' }))[0].type).toBe('error');
+      expect(parse(row('step_finish', { reason: 'stop' }))).toEqual([]);
+      expect(parse('plain output')).toEqual([{ type: 'text', text: 'plain output' }]);
     });
 
-    it('exposes completion text to the batch signal reader', () => {
-      const text = '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>';
-      expect(p.parseLine(JSON.stringify({ type: 'text', part: { text } })))
-        .toContainEqual({ type: 'result', result: text });
+    it('counts completed tool and answer messages once, including cached and reasoning tokens', async () => {
+      const { parse } = await batch();
+      const text = '{"type":"goal_complete","summary":"intermediate"}';
+      parse(row('step_start'));
+      parse(row('text', { text }));
+      expect(parse(row('tool_use', { type: 'tool', state: { output: text } }))).toEqual([]);
+      const finish = row('step_finish', { reason: 'tool-calls', tokens: { input: 811, output: 92 } });
+      expect(parse(finish)).toEqual([{ type: 'usage', usage: { inputTokens: 811, outputTokens: 92, totalTokens: 903 } }]);
+      expect(parse(finish)).toEqual([]);
+      parse(row('step_start', {}, 'final'));
+      parse(row('text', { text: '{"type":"goal_complete",' }, 'final'));
+      parse(row('text', { text: '"summary":"41"}' }, 'final'));
+      expect(parse(row('step_finish', { reason: 'stop', tokens: { input: 36, output: 77, reasoning: 3, cache: { read: 900, write: 3 } } }, 'final')))
+        .toEqual([{ type: 'usage', usage: { inputTokens: 1750, outputTokens: 172, totalTokens: 1922 } },
+          { type: 'result', result: '{"type":"goal_complete","summary":"41"}' }]);
+      expect(parse(row('step_start', {}, 'extra'))[0]?.type).toBe('error');
     });
 
-    it('falls back to text for non-JSON lines', () => {
-      expect(p.parseLine('plain output')[0].type).toBe('text');
+    it('does not publish text from a tool-bearing stop', async () => {
+      const { parse } = await batch();
+      parse(row('step_start'));
+      parse(row('text', { text: 'intermediate' }));
+      parse(row('tool_use', { type: 'tool' }));
+      expect(parse(row('step_finish', { reason: 'stop' }))).toEqual([]);
     });
   });
 
@@ -457,10 +529,31 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('usage')).toBe(true);
     });
 
-    it('buildCommand uses --allow-all when non-interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: false }));
-      expect(cmd.argv[0]).toBe('copilot');
-      expect(cmd.argv).toContain('--allow-all');
+    it('uses stdin JSONL in batch and leaves the interactive command alone', () => {
+      expect(p.buildCommand(opts()).argv).toEqual(['copilot', '--output-format', 'json', '--stream', 'on']);
+      expect(p.buildCommand(opts({ interactive: true })).argv).toEqual(['copilot']);
+    });
+
+    it('accepts assistant content only on a matching successful terminal event', () => {
+      class Probe extends CopilotProvider { parser() { return this.createParser(); } }
+      const parse = new Probe().parser();
+      const row = (type: string, data: unknown) => parse(JSON.stringify({ type, data }));
+      const terminal = (exitCode: number, sessionId = 'native') => parse(JSON.stringify({ type: 'result', exitCode, sessionId }));
+      expect(row('session.start', { sessionId: 'native', context: { cwd: '/tmp/work' } })).toEqual([
+        { type: 'session', sessionId: 'native', worktreePath: '/tmp/work' },
+      ]);
+      expect(row('user.message', { content: 'goal_complete' })).toEqual([]);
+      expect(row('assistant.message_delta', { deltaContent: 'part' })).toEqual([{ type: 'text', text: 'part' }]);
+      expect(terminal(0)[0]?.type).toBe('error');
+      expect(row('assistant.message', { content: 'final', toolRequests: [] })).toEqual([]);
+      expect(terminal(1)[0]?.type).toBe('error');
+      expect(terminal(0, 'other')[0]?.type).toBe('error');
+      expect(terminal(0)).toEqual([{ type: 'result', result: 'final' }]);
+      row('assistant.turn_start', {});
+      row('assistant.message', { content: 'unfinished', toolRequests: [{ name: 'read' }] });
+      expect(terminal(0)[0]?.type).toBe('error');
+      expect(row('session.error', { message: 'offline' })[0]?.type).toBe('error');
+      expect(parse('not json')).toEqual([]);
     });
   });
 });
@@ -502,7 +595,7 @@ describe('Agent registry', () => {
 
 describe('Resume capability gating', () => {
   const resumeProvider = new CursorProvider(); // HAS resume
-  const noResumeProvider = new CodexProvider();   // NO resume
+  const noResumeProvider = new OpenCodeProvider();
 
   it('guardedRestoreSession throws for non-resume provider', async () => {
     await expect(guardedRestoreSession(noResumeProvider, {
@@ -517,8 +610,7 @@ describe('Resume capability gating', () => {
     })).rejects.toThrow(/does not support resume/);
   });
 
-  it('guardedRestoreSession succeeds for resume-capable provider', async () => {
-    // CursorProvider.restoreSession is a no-op; should not throw.
+  it('guardedRestoreSession rejects a synthetic snapshot for a resume-capable provider', async () => {
     await expect(guardedRestoreSession(resumeProvider, {
       snapshot: {
         sessionId: 'x',
@@ -528,7 +620,7 @@ describe('Resume capability gating', () => {
         capturedAt: new Date().toISOString(),
       },
       worktreePath: '/tmp',
-    })).resolves.toBeUndefined();
+    })).rejects.toThrow(/native session snapshot/);
   });
 
   it('guardedCaptureSession throws for non-resume provider', async () => {

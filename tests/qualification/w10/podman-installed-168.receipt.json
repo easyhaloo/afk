@@ -1,0 +1,49 @@
+{
+  "provider": "sandbox.podman",
+  "mode": "installed-cli",
+  "engine": {
+    "version": "podman version 5.4.2",
+    "arch": "arm64",
+    "oci": "crun",
+    "local": true,
+    "rootless": true
+  },
+  "image": "3d662a0e15b2ca0330d3757489cc6998c9d0ec8ad75d60f7040730eb4bd42c92",
+  "cli": "0.2.168",
+  "archiveSha256": "62f7f0fa89ac3292fe8388f0119818dcb5938550cdc04b283c81d72974d82478",
+  "installerSha256": "8376c5273aaa2a08b3ca2027dcb7571ee30a2a806546976eacec0dd9ee646af9",
+  "packageRun": "44595292353",
+  "entry": "afk plugin serve-container --sandbox podman",
+  "node": "v22.16.0",
+  "container": "c8e68ec56899a224e7f0012069e26eca01575ca372450b255fa3083318cf2a5c",
+  "mounts": [
+    [
+      "$RUN/home/.afk/workspaces/13e2dac9fa5938a8dbbed2770ed74f1f0c9549d6d29e31863eaf99cc24b50e2c",
+      "$RUN/home/.afk/workspaces/13e2dac9fa5938a8dbbed2770ed74f1f0c9549d6d29e31863eaf99cc24b50e2c"
+    ],
+    [
+      "$RUN/home/.afk/workspaces/13e2dac9fa5938a8dbbed2770ed74f1f0c9549d6d29e31863eaf99cc24b50e2c/result",
+      "/afk/result"
+    ],
+    [
+      "$RUN/home/.afk/workspaces/13e2dac9fa5938a8dbbed2770ed74f1f0c9549d6d29e31863eaf99cc24b50e2c/session",
+      "/afk/session"
+    ],
+    [
+      "$RUN/workspace",
+      "/workspace"
+    ]
+  ],
+  "commands": {
+    "uidGid": "1000:1000",
+    "success": 0,
+    "failure": 23,
+    "error": "NON_ZERO_EXIT",
+    "returnedSha256": "507605b8e45fc33d3d0c53c0cccfd6b3bd7b31197d6eeb980549e0feefb8dcf7"
+  },
+  "afterCloseService": "SANDBOX_MISSING",
+  "afterClose": {
+    "existsExit": 1,
+    "engineResponsive": true
+  }
+}

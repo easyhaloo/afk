@@ -73,6 +73,13 @@ const configs = [
   },
   {
     ...common,
+    entryPoints: [join(desktop, 'electron/worker/learning-worker.ts')],
+    outfile: join(output, 'learning-worker.js'),
+    format: 'esm',
+    banner: { js: "import { createRequire as createBundleRequire } from 'node:module'; const require = createBundleRequire(import.meta.url);" },
+  },
+  {
+    ...common,
     entryPoints: [join(desktop, 'electron/preload.cts')],
     outfile: join(output, 'electron/preload.cjs'),
     format: 'cjs',

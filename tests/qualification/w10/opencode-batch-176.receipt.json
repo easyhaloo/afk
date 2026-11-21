@@ -1,0 +1,143 @@
+{
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "sourceCommit": "d65493537056781bcfaf8ca9f35a48885dc299ac",
+  "archiveSha256": "4cfc1c40871fd3ff5123d9437dee9b5db93f944afd00363dae5a1b495d4fddb3",
+  "harnessSha256": "af52d1584130d05ddb72f5437439d1185e3f25e2a2439c4d89143cb9347a0bae",
+  "scenarios": [
+    {
+      "afk": "0.2.176",
+      "opencode": "opencode v2.2.7",
+      "model": "qualification/qwen3.5:4b",
+      "modelDigest": "7f3251fa6878a78a606bcb3c074283306e5ad2ea411a7774a9dd98a4bc7f2d13",
+      "status": "completed",
+      "exitCode": 0,
+      "afkUsage": {
+        "inputTokens": 336,
+        "outputTokens": 1091,
+        "totalTokens": 1427
+      },
+      "observedPids": [
+        77181,
+        77185
+      ],
+      "roles": [
+        "user",
+        "assistant",
+        "idle"
+      ],
+      "finishes": [
+        "stop"
+      ],
+      "tools": [],
+      "nativeTextSha256": "ffa1efbfcf2a457ba28ab94487a34b9e8166fa1ab6d194575020378f9ae559c2",
+      "nativeAnswerIsObject": true,
+      "summaryType": "str",
+      "numericSummary": "41",
+      "messageUsage": [
+        {
+          "inputTokens": 336,
+          "outputTokens": 1091,
+          "totalTokens": 1427
+        }
+      ],
+      "nativeUsage": {
+        "inputTokens": 336,
+        "outputTokens": 1091,
+        "totalTokens": 1427
+      },
+      "scenario": "batch-template",
+      "checks": {
+        "observedCliAndServer": true,
+        "familyExitedBeforeClose": true,
+        "close": true,
+        "missingAfterClose": true,
+        "session": true,
+        "roles": true,
+        "prompt": true,
+        "nativeStop": true,
+        "model": true,
+        "finalContent": true,
+        "noTools": true,
+        "answerMatchesNative": true,
+        "answer": true,
+        "sessionUsage": true,
+        "usage": true
+      },
+      "passed": true
+    },
+    {
+      "afk": "0.2.176",
+      "opencode": "opencode v2.2.7",
+      "model": "qualification/qwen3.5:4b",
+      "modelDigest": "7f3251fa6878a78a606bcb3c074283306e5ad2ea411a7774a9dd98a4bc7f2d13",
+      "status": "completed",
+      "exitCode": 0,
+      "afkUsage": {
+        "inputTokens": 1909,
+        "outputTokens": 170,
+        "totalTokens": 2079
+      },
+      "observedPids": [
+        78003,
+        78005
+      ],
+      "roles": [
+        "user",
+        "assistant",
+        "assistant",
+        "idle"
+      ],
+      "finishes": [
+        "tool-calls",
+        "stop"
+      ],
+      "tools": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "nativeTextSha256": "ffa1efbfcf2a457ba28ab94487a34b9e8166fa1ab6d194575020378f9ae559c2",
+      "nativeAnswerIsObject": true,
+      "summaryType": "str",
+      "numericSummary": "41",
+      "messageUsage": [
+        {
+          "inputTokens": 892,
+          "outputTokens": 89,
+          "totalTokens": 981
+        },
+        {
+          "inputTokens": 1017,
+          "outputTokens": 81,
+          "totalTokens": 1098
+        }
+      ],
+      "nativeUsage": {
+        "inputTokens": 1909,
+        "outputTokens": 170,
+        "totalTokens": 2079
+      },
+      "scenario": "batch-read",
+      "checks": {
+        "observedCliAndServer": true,
+        "familyExitedBeforeClose": true,
+        "close": true,
+        "missingAfterClose": true,
+        "session": true,
+        "roles": true,
+        "prompt": true,
+        "nativeStop": true,
+        "model": true,
+        "finalContent": true,
+        "read": true,
+        "answerMatchesNative": true,
+        "answer": true,
+        "sessionUsage": true,
+        "usage": true
+      },
+      "passed": true
+    }
+  ]
+}

@@ -51,13 +51,13 @@ describe('canonical command provider wiring', () => {
   beforeEach(() => { vi.clearAllMocks(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it('uses the canonical management bundle for backlog administration', async () => {
+  it.each(['github', 'gitlab'])('uses the canonical management bundle for %s backlog administration', async (platform) => {
     const initialize = vi.fn().mockResolvedValue(undefined);
     vi.mocked(createManagementProviders).mockResolvedValue({ backlog: { initialize } } as never);
 
-    await runCommand(registerBacklogCommands, 'backlog', 'init', '--project', 'group/repo');
+    await runCommand(registerBacklogCommands, 'backlog', 'init', '--project', 'group/repo', '--platform', platform);
 
-    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', process.cwd(), 'github', undefined);
+    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', process.cwd(), platform, undefined);
     expect(initialize).toHaveBeenCalledOnce();
   });
 

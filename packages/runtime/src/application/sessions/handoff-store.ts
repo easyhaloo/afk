@@ -25,6 +25,7 @@ import type {
   SessionStoreEntry,
 } from './types.js';
 import { SessionNotFoundError } from './types.js';
+import { handoffDocPath } from '../workflows/handoff.js';
 
 const HANDOFF_DIR = 'handoff';
 
@@ -44,12 +45,13 @@ export class HandoffSessionStore implements SessionStore {
   }
 
   private fileForRunId(runId: string): string | null {
-    // runId convention: 'issue-<iid>-gen-<n>' OR 'issue-<iid>-terminal'
-    const m = runId.match(/^issue-(\d+)-(gen-(\d+)|terminal)$/);
-    if (!m) return null;
-    const iid = m[1];
-    const gen = m[3] ?? 'terminal';
-    return join(workspaceDataDirectory(this.worktreePath), HANDOFF_DIR, `handoff-${iid}-${gen}.md`);
+    const match = runId.match(/^issue-(.+)-(?:gen-(\d+)|terminal)$/);
+    if (!match) return null;
+    try {
+      return handoffDocPath(this.worktreePath, match[1], match[2] === undefined ? 'terminal' : Number(match[2]));
+    } catch {
+      return null;
+    }
   }
 
   async load(options: SessionLoadOptions): Promise<SessionSnapshot> {
@@ -67,8 +69,8 @@ export class HandoffSessionStore implements SessionStore {
       throw err;
     }
 
-    const m = options.runId.match(/^issue-(\d+)-(gen-(\d+)|terminal)$/);
-    const generation = m && m[3] ? parseInt(m[3], 10) : 0;
+    const match = options.runId.match(/-gen-(\d+)$/);
+    const generation = match ? Number(match[1]) : 0;
     const stat = await fs.stat(filePath);
 
     return {
@@ -92,14 +94,13 @@ export class HandoffSessionStore implements SessionStore {
 
     const results: SessionStoreEntry[] = [];
     for (const name of entries) {
-      // handoff-42-1.md  -> issue-42-gen-1
-      // handoff-42-terminal.md -> issue-42-terminal
-      const m = name.match(/^handoff-(\d+)-(\d+|terminal)\.md$/);
-      if (!m) continue;
-      const iid = m[1];
-      const gen = m[2];
-      const runId = gen === 'terminal' ? `issue-${iid}-terminal` : `issue-${iid}-gen-${gen}`;
+      const match = name.match(/^handoff-(.+)-(\d+|terminal)\.md$/);
+      if (!match) continue;
       try {
+        const identity = decodeURIComponent(match[1]);
+        const gen = match[2];
+        const runId = gen === 'terminal' ? `issue-${identity}-terminal` : `issue-${identity}-gen-${gen}`;
+        if (this.fileForRunId(runId) !== join(dir, name)) continue;
         const stat = await fs.stat(join(dir, name));
         results.push({
           runId,

@@ -1,11 +1,15 @@
 import type { ProjectContext } from '../project/context.js';
 import type { PreparedRepository } from './multi-repository-preparer.js';
+import type { ProviderAbortSignal } from '../../plugin-sdk/capabilities.js';
+import { withCancellation } from '../plugins/cancellation.js';
+import type { EvidenceRef, ObservationContext, RunEventData } from '@afk/core';
 
 export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'before-publish' | 'cleanup';
 export type ModuleParamValue = string | number | boolean | null;
 export type ModuleParams = Record<string, Record<string, ModuleParamValue>>;
 
 export interface InitContext {
+  readonly signal?: ProviderAbortSignal;
   iid: number;
   projectName: string | undefined;
   baseBranch: string;
@@ -17,6 +21,14 @@ export interface InitContext {
 }
 
 export interface LifecycleContext {
+  readonly signal?: ProviderAbortSignal;
+  readonly observation?: {
+    context: ObservationContext;
+    record: (data: RunEventData, options?: {
+      evidence?: readonly EvidenceRef[];
+      idempotencyKey?: string;
+    }) => Promise<unknown>;
+  };
   iid: number;
   worktreePath: string;
   baseBranch: string;
@@ -30,6 +42,7 @@ export interface LifecycleContext {
 
 export interface LifecycleModule {
   name: string;
+  purposes?: readonly ('execution' | 'learning')[];
   order?: number;
   failureMode?: 'required' | 'best-effort';
   onInit?(ctx: InitContext): Promise<void>;
@@ -43,7 +56,10 @@ export class LifecycleDispatcher {
   private readonly modules: LifecycleModule[];
   private readonly extensions = new Map<LifecyclePhase, Array<{ order: number; index: number; handler: (ctx: InitContext | LifecycleContext) => Promise<void> }>>();
 
-  constructor(modules: LifecycleModule[] = []) {
+  constructor(modules: LifecycleModule[] = [], private readonly options: {
+    strictCleanup?: boolean;
+    isFatalError?: (error: unknown) => boolean;
+  } = {}) {
     this.modules = modules.map((module, index) => ({ ...module, order: module.order ?? index }));
     this.modules.sort((a, b) => a.order! - b.order!);
   }
@@ -56,27 +72,61 @@ export class LifecycleDispatcher {
   }
 
   async run(phase: LifecyclePhase, ctx: InitContext | LifecycleContext): Promise<void> {
+    const cleanup = phase === 'cleanup' && ctx.signal ? new AbortController() : undefined;
+    const timer = cleanup ? setTimeout(() => cleanup.abort(new Error('Lifecycle cleanup timed out')), 15_000) : undefined;
+    const context = cleanup ? { ...ctx, signal: cleanup.signal } : ctx;
+    try { await this.dispatch(phase, context); }
+    finally { if (timer) clearTimeout(timer); }
+  }
+
+  private async dispatch(phase: LifecyclePhase, ctx: InitContext | LifecycleContext): Promise<void> {
+    const options = ctx.signal ? { signal: ctx.signal } : undefined;
+    await withCancellation(() => undefined, options);
     const entries = phase === 'cleanup' ? [...this.modules].reverse() : this.modules;
+    const cleanupErrors: unknown[] = [];
     for (const module of entries) {
       const hook = phase === 'init' ? module.onInit
         : phase === 'before-agent' ? module.onBeforeAgent
           : phase === 'after-agent' ? module.onAfterAgent : phase === 'before-publish' ? module.onBeforePublish : module.onCleanup;
       if (!hook) continue;
       try {
-        await hook(ctx as never);
+        await withCancellation(() => hook(ctx as never), options);
       } catch (error) {
-        if (phase === 'init' || (phase !== 'cleanup' && module.failureMode === 'required')) throw error;
+        if (phase === 'cleanup' && this.options.strictCleanup) cleanupErrors.push(error);
+        else if (phase === 'init' || this.options.isFatalError?.(error) || (phase !== 'cleanup' && module.failureMode === 'required')) throw error;
+        else if (phase !== 'cleanup') {
+          await withCancellation(() => undefined, options);
+          const observation = (ctx as LifecycleContext).observation;
+          if (observation) await observation.record({
+            kind: 'effect.completed', effectKind: `workflow.lifecycle.${phase}`,
+            idempotencyKey: JSON.stringify([observation.context.runId, 'lifecycle', phase, 'module', module.name]),
+            outcome: 'failed', summary: 'optional_lifecycle_hook_failed',
+          });
+        }
       }
+      if (phase !== 'cleanup') await withCancellation(() => undefined, options);
     }
     const extensions = this.extensions.get(phase) ?? [];
     const ordered = phase === 'cleanup' ? [...extensions].reverse() : extensions;
     for (const extension of ordered) {
       try {
-        await extension.handler(ctx);
+        await withCancellation(() => extension.handler(ctx), options);
       } catch (error) {
-        if (phase === 'init') throw error;
+        if (phase === 'cleanup' && this.options.strictCleanup) cleanupErrors.push(error);
+        else if (phase === 'init' || this.options.isFatalError?.(error)) throw error;
+        else if (phase !== 'cleanup') {
+          await withCancellation(() => undefined, options);
+          const observation = (ctx as LifecycleContext).observation;
+          if (observation) await observation.record({
+            kind: 'effect.completed', effectKind: `workflow.lifecycle.${phase}`,
+            idempotencyKey: JSON.stringify([observation.context.runId, 'lifecycle', phase, 'extension', extension.index]),
+            outcome: 'failed', summary: 'optional_lifecycle_hook_failed',
+          });
+        }
       }
+      if (phase !== 'cleanup') await withCancellation(() => undefined, options);
     }
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Lifecycle cleanup failed');
   }
 }
 

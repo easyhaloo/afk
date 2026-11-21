@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import ts from 'typescript';
 
 function option(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -149,6 +150,20 @@ function stripComments(source) {
     .replace(/(^|\s)\/\/.*$/gm, '$1');
 }
 
+function moduleSpecifiers(source, file) {
+  const specifiers = [];
+  const visit = node => {
+    let specifier;
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) specifier = node.moduleSpecifier;
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) specifier = node.arguments[0];
+    else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) specifier = node.argument.literal;
+    if (specifier && ts.isStringLiteralLike(specifier)) specifiers.push(specifier.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(file, source, ts.ScriptTarget.Latest));
+  return specifiers;
+}
+
 function isTestFile(filePath) {
   return /(?:\.test|\.spec|\.integration\.test)\.(?:ts|tsx)$/.test(filePath);
 }
@@ -226,7 +241,8 @@ function checkStateMappingDuplicates() {
 }
 
 function checkFile(fullPath) {
-  const source = stripComments(readFileSync(fullPath, 'utf8'));
+  const rawSource = readFileSync(fullPath, 'utf8');
+  const source = stripComments(rawSource);
   const fromLayer = layerOf(fullPath);
   const testFile = isTestFile(fullPath);
   const filename = sourcePath(fullPath);
@@ -248,10 +264,7 @@ function checkFile(fullPath) {
 
   recordStateMappings(fullPath, source);
 
-  const importPattern = /(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g;
-  for (const match of source.matchAll(importPattern)) {
-    const specifier = match[2];
-    if (match[1] === '`' && specifier.includes('${')) continue;
+  for (const specifier of moduleSpecifiers(rawSource, fullPath)) {
     if (!specifier.startsWith('.')) continue;
 
     const resolved = resolveImport(fullPath, specifier);
@@ -327,14 +340,12 @@ function checkPackage(packageName, packageRoot) {
   const packageFiles = collectSourceFiles(sourceRoot).filter(file => !isTestFile(file));
   checkDuplicateModuleNames(`packages/${packageName}/src`, packageFiles);
   for (const fullPath of packageFiles) {
-    const source = stripComments(readFileSync(fullPath, 'utf8'));
+    const rawSource = readFileSync(fullPath, 'utf8');
+    const source = stripComments(rawSource);
     for (const globalName of domGlobals) {
       if (new RegExp(`\\b${globalName}\\b`).test(source)) addViolation(`${packageName} package must not use DOM global '${globalName}'`);
     }
-    for (const match of source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g)) {
-      const specifier = match[2];
-      if (match[1] === '`' && specifier.includes('${')) continue;
-
+    for (const specifier of moduleSpecifiers(rawSource, fullPath)) {
       if (specifier.startsWith('.')) {
         const resolved = resolveImport(fullPath, specifier);
         if (!resolved) {

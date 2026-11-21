@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,11 +9,14 @@ import { LifecycleDispatcher, type LifecycleContext } from '../workflows/lifecyc
 import type { PluginRuntime } from './runtime.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 import { GitPushTriggerProvider, IssueEventTriggerProvider } from '../../infrastructure/providers/triggers.js';
-import { startPluginListener } from './listener.js';
+import { startPluginListener, pluginTriggerQueue } from './listener.js';
 import { createPluginRunObserver } from './observability.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { createLocalEncryptedEvidenceStore } from '../../infrastructure/observability/local-evidence-store.js';
 import type { RunEvent } from '@afk/core';
+import { simpleGit } from 'simple-git';
+import { withObservationSignal } from '../../observability/run-observer.js';
+import type { EvidenceStoreProvider } from '../../plugin-sdk/capabilities.js';
 
 vi.mock('../workflows/execute-work-item.js', () => ({ executeWorkItem: vi.fn() }));
 
@@ -40,6 +43,19 @@ async function fixture(configuration?: unknown, options: DefaultPluginRuntimeOpt
   return { runtime, context, homeDir, workspaceRoot, lifecycle: new LifecycleDispatcher(runtime.getLifecycleModules()) };
 }
 
+async function verificationContext(runtime: PluginRuntime, context: LifecycleContext, homeDir: string) {
+  const git = simpleGit(context.worktreePath);
+  await git.init().addConfig('user.name', 'Verification test').addConfig('user.email', 'verification@example.test');
+  await git.commit('Initial verification revision', { '--allow-empty': null });
+  const events = new JsonlEventStore({ root: join(homeDir, 'verification-events') });
+  const observer = createPluginRunObserver(runtime, events.root);
+  const identity = { traceId: 'verification-trace', runId: 'verification-run', workItemId: 'github:acme/api#42',
+    profileId: 'test', attempt: 1, actor: { kind: 'system' as const, id: 'verification-test' } };
+  const observed: LifecycleContext = { ...context,
+    observation: { context: identity, record: (data, options) => observer.record(identity, data, options) } };
+  return { context: observed, events, revision: await git.revparse(['HEAD']) };
+}
+
 async function installedCredentialFixture(plugins: unknown[], requires = ['context.provider'], fail = false) {
   const { homeDir, workspaceRoot } = await fixture();
   const directory = join(homeDir, '.afk', 'plugins', 'credential.fixture', 'dist');
@@ -61,7 +77,276 @@ async function installedCredentialFixture(plugins: unknown[], requires = ['conte
   return { runtime, credential: await import(pathToFileURL(entry).href) };
 }
 
+async function installedEvidenceFixture(selection: unknown, artifacts = false, disabled = false) {
+  const { homeDir, workspaceRoot } = await fixture();
+  const directory = join(homeDir, '.afk', 'plugins', 'evidence.fixture', 'dist');
+  const remote = join(workspaceRoot, 'evidence-mirror');
+  const events = join(workspaceRoot, 'events');
+  await mkdir(directory, { recursive: true });
+  await mkdir(remote);
+  const entry = join(directory, 'index.js');
+  await writeFile(entry, `import { readFile, writeFile, readdir } from 'node:fs/promises';
+    import { join } from 'node:path';
+    export const calls = [];
+    const records = new Map();
+    export default {
+      manifest: { id: 'evidence.fixture', version: '1.0.0', apiVersion: 1, provides: ['observe.evidence'], trusted: true },
+      activate(context) {
+        context.registerCapability('observe.evidence', 'private', {
+          id: 'private', capabilities: { put: true, get: true, classify: false },
+          async put(record, operation) {
+            operation.signal.throwIfAborted();
+            const source = JSON.parse(Buffer.from(record.bytes).toString());
+            const history = (await Promise.all((await readdir(${JSON.stringify(events)})).filter(name => name.endsWith('.jsonl'))
+              .map(name => readFile(join(${JSON.stringify(events)}, name), 'utf8')))).join('\\n');
+            if (!history.split('\\n').filter(Boolean).some(line => JSON.parse(line).id === source.sourceEventId)) throw new Error('source not durable');
+            const { bytes, ...metadata } = record;
+            records.set(record.id, metadata);
+            await writeFile(join(${JSON.stringify(remote)}, record.id), bytes);
+            calls.push({ operation: 'put', id: record.id });
+            return { name: record.id, uri: 'file://' + join(${JSON.stringify(remote)}, record.id) };
+          },
+          async get(id, operation) {
+            operation.signal.throwIfAborted();
+            calls.push({ operation: 'get', id });
+            return { ...records.get(id), bytes: await readFile(join(${JSON.stringify(remote)}, id)) };
+          }
+        });
+      }
+    };`);
+  await writeFile(join(homeDir, '.afk', 'plugins.yml'), JSON.stringify({
+    plugins: [{ id: 'evidence.fixture', enabled: !disabled }],
+    ...(selection === undefined ? {} : { evidenceStore: selection }),
+    ...(artifacts ? { integrations: { evidence: { provider: 'test-report-local' } } } : {}),
+  }));
+  const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+  runtimes.push(runtime);
+  const plugin = await import(pathToFileURL(entry).href);
+  const context = { traceId: 'evidence-trace', runId: 'evidence-run', workItemId: 'github:org/repo#1', profileId: 'test', attempt: 1, actor: { kind: 'cli' as const, id: 'test' } };
+  return { homeDir, workspaceRoot, events, remote, runtime, plugin, context };
+}
+
+it('selects an installed SDK EvidenceStore from saved configuration without an ArtifactSink selection', async () => {
+  const { homeDir, events, remote, runtime, plugin, context } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] });
+  await expect(lstat(join(homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await createPluginRunObserver(runtime, events).record(context, { kind: 'qa.failed', summary: 'password=configuration-private' });
+  expect(plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get']);
+  const mirrored = await readFile(join(remote, plugin.calls[0].id));
+  expect(mirrored.toString()).not.toContain('configuration-private');
+  const audit = new JsonlEventStore({ root: events });
+  const history = [];
+  for await (const event of audit.read(context.runId)) history.push(event);
+  const ref = history[0].evidence![0];
+  expect(await (await createLocalEncryptedEvidenceStore(homeDir)).get(ref)).toEqual(mirrored);
+  expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'succeeded' });
+  expect(await audit.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+});
+
+it('keeps a pre-cancelled saved EvidenceStore selection local without contaminating the next run', async () => {
+  const { runtime, context, events, plugin } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] });
+  const observer = createPluginRunObserver(runtime, events);
+  const cancelled = new AbortController();
+  cancelled.abort(new Error('cancelled before audit'));
+  await withObservationSignal(cancelled.signal, () => observer.record(context, { kind: 'qa.failed' }));
+  expect(plugin.calls).toEqual([]);
+  const store = new JsonlEventStore({ root: events });
+  const history: RunEvent[] = [];
+  for await (const event of store.read(context.runId)) history.push(event);
+  expect(history[0].data.kind).toBe('qa.failed');
+  expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed', summary: expect.stringContaining('cancelled') });
+  expect(await store.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+  await observer.record({ ...context, runId: 'evidence-next-run' }, { kind: 'qa.passed' });
+  expect(plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get']);
+});
+
+it('isolates concurrent run cancellation with one saved EvidenceStore and rejects late readback', async () => {
+  const { runtime, context, events, plugin } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'], timeoutMs: 60_000 });
+  const provider = runtime.getProvider<EvidenceStoreProvider>('observe.evidence', 'private')!;
+  const originalPut = provider.put.bind(provider);
+  let enter!: (signal: AbortSignal) => void;
+  const entered = new Promise<AbortSignal>(resolve => { enter = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const put = vi.spyOn(provider, 'put').mockImplementationOnce(async (record, operation) => {
+    enter(operation!.signal! as AbortSignal);
+    await gate;
+    try { return await originalPut(record, { signal: new AbortController().signal }); }
+    finally { finish(); }
+  });
+  const readback = vi.spyOn(provider, 'get');
+  const first = new AbortController();
+  const second = new AbortController();
+  const observerA = createPluginRunObserver(runtime, events);
+  const observerB = createPluginRunObserver(runtime, events);
+  const pending = withObservationSignal(first.signal, () => observerA.record(context, { kind: 'qa.failed' }));
+  try {
+    const signal = await entered;
+    await withObservationSignal(second.signal, () => observerB.record({ ...context, runId: 'evidence-other-run' }, { kind: 'qa.passed' }));
+    first.abort(new Error('only first run cancelled'));
+    await pending;
+    expect(signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(false);
+    release();
+    await finished;
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(readback).toHaveBeenCalledTimes(1);
+    expect(plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get', 'put']);
+    const store = new JsonlEventStore({ root: events });
+    const history: RunEvent[] = [];
+    for await (const event of store.read(context.runId)) history.push(event);
+    expect(history[1].data).toMatchObject({ effectKind: 'evidence.mirror', outcome: 'failed', summary: expect.stringContaining('cancelled') });
+    expect(await store.verify(context.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+    expect(await store.verify('evidence-other-run')).toMatchObject({ valid: true, lastSequence: 2 });
+  } finally { first.abort(); release(); await pending; }
+});
+
+it('keeps registered but unselected SDK stores private and preserves ArtifactSink evidence configuration', async () => {
+  const unselected = await installedEvidenceFixture(undefined);
+  await createPluginRunObserver(unselected.runtime, unselected.events).record(unselected.context, { kind: 'qa.passed' });
+  expect(unselected.plugin.calls).toEqual([]);
+  expect(await readdir(unselected.remote)).toEqual([]);
+  await expect(lstat(join(unselected.homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+  const selected = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] }, true);
+  await createPluginRunObserver(selected.runtime, selected.events).record(selected.context, { kind: 'qa.passed' });
+  expect(selected.plugin.calls.map((call: { operation: string }) => call.operation)).toEqual(['put', 'get']);
+  const history = [];
+  for await (const event of new JsonlEventStore({ root: selected.events }).read(selected.context.runId)) history.push(event);
+  expect(history[0].evidence).toHaveLength(1);
+  expect(history.filter(event => event.data.kind === 'effect.completed').map(event => event.data)).toEqual([
+    expect.objectContaining({ effectKind: 'artifact.upload', outcome: 'succeeded' }),
+    expect.objectContaining({ effectKind: 'evidence.mirror', outcome: 'succeeded' }),
+  ]);
+});
+
+it.each([false, true])('blocks an unavailable saved EvidenceStore selection with disabled=%s', async disabled => {
+  const { runtime, homeDir, workspaceRoot } = await installedEvidenceFixture({ provider: disabled ? 'private' : 'missing-private', scopes: ['github:org/repo'] }, false, disabled);
+  const lifecycle = new LifecycleDispatcher(runtime.getLifecycleModules());
+  expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ code: 'config.evidence-store-invalid' }));
+  await expect(lifecycle.run('init', { iid: 1, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow('Evidence store selection is unavailable');
+  await expect(lstat(join(homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it('reports one safe runtime diagnostic for repeated SDK failures while preserving local evidence', async () => {
+  const { runtime, events, context } = await installedEvidenceFixture({ provider: 'private', scopes: ['github:org/repo'] });
+  const provider = runtime.getProvider<import('../../plugin-sdk/capabilities.js').EvidenceStoreProvider>('observe.evidence', 'private')!;
+  provider.put = async () => { throw new Error('token=private-provider-error'); };
+  const observer = createPluginRunObserver(runtime, events);
+  await observer.record(context, { kind: 'qa.passed' });
+  await observer.record(context, { kind: 'qa.passed' });
+  const diagnostics = await runtime.diagnostics();
+  expect(diagnostics.filter(entry => entry.code === 'evidence.mirror-failed')).toHaveLength(1);
+  expect(JSON.stringify(diagnostics)).not.toContain('private-provider-error');
+  const history: RunEvent[] = [];
+  for await (const event of new JsonlEventStore({ root: events }).read(context.runId)) history.push(event);
+  expect(history.filter(event => event.data.kind === 'qa.passed').every(event => event.evidence?.[0]?.uri.startsWith('evidence://'))).toBe(true);
+  expect(history.filter(event => event.data.kind === 'effect.completed').map(event => event.data)).toEqual([
+    expect.objectContaining({ effectKind: 'evidence.mirror', outcome: 'failed' }),
+    expect.objectContaining({ effectKind: 'evidence.mirror', outcome: 'failed' }),
+  ]);
+  expect(JSON.stringify(history)).not.toContain('private-provider-error');
+});
+
+it.each([
+  null, {}, { provider: 'private' }, { provider: 'private', scopes: [] },
+  { provider: 'private', scopes: ['github:org/repo', 'github:org/repo'] },
+  { provider: 'private', scopes: ['*'] }, { provider: 'private', scopes: ['github:org/repo#1'] },
+  { provider: 'private', scopes: ['github:org/repo'], maxBytes: 1024 * 1024 + 1 },
+  { provider: 'private', scopes: ['github:org/repo'], timeoutMs: 0 },
+  { provider: 'private', scopes: ['github:org/repo'], unknown: 'private-config-value' },
+])('rejects invalid explicit EvidenceStore selection without revealing configuration %#', async selection => {
+  const { runtime, context, lifecycle, homeDir } = await fixture({ evidenceStore: selection });
+  expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ code: 'config.evidence-store-invalid' }));
+  expect(JSON.stringify(await runtime.diagnostics())).not.toContain('private-config-value');
+  await expect(lifecycle.run('init', { iid: context.iid, projectName: undefined, baseBranch: context.baseBranch, params: {}, originalCwd: context.worktreePath })).rejects.toThrow('Evidence store selection');
+  await expect(lstat(join(homeDir, '.afk', 'evidence'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 describe('createDefaultPluginRuntime', () => {
+  it('keeps inventory and artifact diagnostics read-only when the home does not exist', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'default-plugins-readonly-'));
+    directories.push(root);
+    const homeDir = join(root, 'missing-home');
+    const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot: root });
+    runtimes.push(runtime);
+    expect(runtime.listPlugins()).toContain('artifact.test-report-local');
+    expect(await runtime.health('artifact.test-report-local')).toEqual([
+      expect.objectContaining({ pluginId: 'artifact.test-report-local', status: 'degraded' }),
+    ]);
+    expect(await runtime.diagnostics('artifact.test-report-local')).toEqual([]);
+    await expect(lstat(homeDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('does not initialize selected audit storage during inventory or health with a read-only home', async () => {
+    const { homeDir, workspaceRoot } = await fixture();
+    const root = join(homeDir, '.afk');
+    await writeFile(join(root, 'plugins.yml'), JSON.stringify({
+      plugins: [{ id: 'artifact.test-report-local', builtin: true, config: { root: join(root, 'reports') } }],
+      integrations: { evidence: { provider: 'test-report-local' } },
+    }));
+    const before = await readdir(homeDir, { recursive: true });
+    await chmod(root, 0o500);
+    await chmod(homeDir, 0o500);
+    try {
+      const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+      runtimes.push(runtime);
+      expect(runtime.listPlugins()).toContain('artifact.test-report-local');
+      expect(await runtime.health('artifact.test-report-local')).toEqual([
+        expect.objectContaining({ status: 'degraded' }),
+      ]);
+      expect((await runtime.diagnostics()).filter(diagnostic => diagnostic.severity === 'error')).toEqual([]);
+      expect(await readdir(homeDir, { recursive: true })).toEqual(before);
+      expect((await lstat(root)).mode & 0o777).toBe(0o500);
+      expect((await lstat(homeDir)).mode & 0o777).toBe(0o500);
+    } finally {
+      await chmod(homeDir, 0o700);
+      await chmod(root, 0o700);
+    }
+  });
+
+  it('initializes private audit storage only on controlled workflow init and reuses its key after restart', async () => {
+    const { runtime, homeDir, workspaceRoot, lifecycle } = await fixture({ integrations: { evidence: { provider: 'test-report-local' } } });
+    const evidenceRoot = join(homeDir, '.afk', 'evidence');
+    await expect(lstat(evidenceRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    await lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot });
+    const key = await readFile(join(evidenceRoot, 'encryption.key'));
+    expect(key).toHaveLength(32);
+    expect((await lstat(evidenceRoot)).mode & 0o777).toBe(0o700);
+    expect((await lstat(join(evidenceRoot, 'encryption.key'))).mode & 0o777).toBe(0o600);
+    const restarted = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+    runtimes.push(restarted);
+    const context = { traceId: 'lazy-evidence', runId: 'lazy-evidence', workItemId: 'github:acme/api#42', profileId: 'local', attempt: 1, actor: { kind: 'system' as const, id: 'test' } };
+    await Promise.all([runtime, restarted].map((current, index) => createPluginRunObserver(current, join(workspaceRoot, 'audit')).record(
+      { ...context, runId: `${context.runId}-${index}` }, { kind: 'qa.passed' },
+    )));
+    expect(await readFile(join(evidenceRoot, 'encryption.key'))).toEqual(key);
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    for (const index of [0, 1]) {
+      const store = new JsonlEventStore({ root: join(workspaceRoot, 'audit') });
+      const events: RunEvent[] = [];
+      for await (const event of store.read(`${context.runId}-${index}`)) events.push(event);
+      expect(events[0].evidence).toHaveLength(1);
+      expect(events[1].data).toMatchObject({ kind: 'effect.completed', outcome: 'succeeded' });
+      expect(JSON.parse(Buffer.from(await evidence.get(events[0].evidence![0])).toString('utf8'))).toMatchObject({ kind: 'qa.passed' });
+      expect(await store.verify(`${context.runId}-${index}`)).toMatchObject({ valid: true, lastSequence: 2 });
+    }
+  });
+
+  it('blocks controlled workflow init with a safe error when lazy audit storage cannot initialize', async () => {
+    const { runtime, homeDir, workspaceRoot, lifecycle } = await fixture({ integrations: { evidence: { provider: 'test-report-local' } } });
+    const evidenceRoot = join(homeDir, '.afk', 'evidence');
+    await rm(evidenceRoot, { recursive: true, force: true });
+    await writeFile(evidenceRoot, 'secret=private-storage-detail');
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Audit evidence storage could not be initialized');
+    const diagnostics = await runtime.diagnostics();
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'config.evidence-invalid', severity: 'error' }));
+    expect(JSON.stringify(diagnostics)).not.toMatch(/private-storage-detail|secret=|ENOTDIR/);
+    expect(JSON.stringify(diagnostics)).not.toContain(homeDir);
+    expect(await readFile(evidenceRoot, 'utf8')).toBe('secret=private-storage-detail');
+  });
+
   it('captures and exports evidence through the configured default runtime and keeps the key across restarts', async () => {
     const { runtime, homeDir, workspaceRoot } = await fixture({ integrations: { evidence: { provider: 'test-report-local', timeoutMs: 1000 } } });
     const root = join(workspaceRoot, 'audit');
@@ -81,7 +366,7 @@ describe('createDefaultPluginRuntime', () => {
   it('blocks configured audit capture when its artifact provider cannot write', async () => {
     const { runtime, lifecycle } = await fixture({ integrations: { evidence: { provider: 'missing-artifacts' } } });
     expect(await runtime.diagnostics()).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'config.evidence-invalid' })]));
-    await expect(lifecycle.run('init', { iid: 42, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow('Audit evidence');
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow('Audit evidence');
   });
 
   it('propagates durable delivery identity to managed execution and deduplicates HTTP redelivery', async () => {
@@ -102,8 +387,32 @@ describe('createDefaultPluginRuntime', () => {
       expect(vi.mocked(executeWorkItem).mock.calls).toHaveLength(before);
     } finally { await listener.close(); }
   });
-  it.each([false, true])('waits for an installed named credential provider across builtin activation (nested: %s)', async nested => {
+  it.each(['missing', 'disabled', 'enabled'])('loads Gmail only with its enabled exact Google credential dependency (%s)', async state => {
+    const { GoogleOAuthCredentialProvider } = await import('../../infrastructure/providers/google-oauth.js');
+    const account = vi.spyOn(GoogleOAuthCredentialProvider.prototype, 'resolveAccount').mockRejectedValue(new Error('must not authenticate'));
     const network = vi.fn();
+    vi.stubGlobal('fetch', network);
+    try {
+      const { runtime } = await fixture({ plugins: [
+        { id: 'notification.gmail', builtin: true, config: {} },
+        ...state === 'missing' ? [] : [{ id: 'credential.google-oauth', builtin: true, enabled: state === 'enabled', config: {} }],
+      ] });
+      expect(runtime.getCredentialProvider('credential.system-keychain')).toBeDefined();
+      const findings = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.gmail');
+      if (state === 'enabled') {
+        expect(runtime.getNotificationProvider('notification.gmail')).toBeDefined();
+        expect(findings.filter(item => item.severity === 'error')).toEqual([]);
+      } else {
+        expect(runtime.getNotificationProvider('notification.gmail')).toBeUndefined();
+        expect(findings).toContainEqual(expect.objectContaining({ code: 'load.dependencies' }));
+      }
+      expect(account).not.toHaveBeenCalled();
+      expect(network).not.toHaveBeenCalled();
+    } finally { account.mockRestore(); }
+  });
+
+  it.each([false, true])('waits for an installed named credential provider across builtin activation (nested: %s)', async nested => {
+    const network = vi.fn(async () => new Response('ok'));
     vi.stubGlobal('fetch', network);
     const { runtime, credential } = await installedCredentialFixture([
       { id: 'notification.slack', builtin: true, config: { webhook: { provider: nested ? 'credential.enterprise' : 'fixture', name: 'webhook' } } },
@@ -112,9 +421,12 @@ describe('createDefaultPluginRuntime', () => {
     expect(runtime.getCredentialProvider('credential.system-keychain')).toBeDefined();
     expect(runtime.getCredentialProvider('fixture')).toBeDefined();
     expect(runtime.getNotificationProvider('notification.slack')).toBeDefined();
-    expect(credential.resolutions).toBe(1);
+    expect(credential.resolutions).toBe(0);
     expect((await runtime.diagnostics()).filter(item => item.severity === 'error')).toEqual([]);
     expect(network).not.toHaveBeenCalled();
+    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Delivery' })).resolves.toMatchObject({ delivered: true });
+    expect(credential.resolutions).toBe(1);
+    expect(network).toHaveBeenCalledOnce();
   });
 
   it.each([false, true])('reports unresolved named credential dependencies without attempting activation (cycle: %s)', async cycle => {
@@ -129,16 +441,19 @@ describe('createDefaultPluginRuntime', () => {
     if (cycle) expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ pluginId: 'credential.fixture', code: 'load.dependencies' }));
   });
 
-  it('does not retry a named provider resolution that actually fails', async () => {
+  it('does not retry a named provider resolution that fails at delivery', async () => {
+    const network = vi.fn(); vi.stubGlobal('fetch', network);
     const { runtime, credential } = await installedCredentialFixture([
       { id: 'notification.slack', builtin: true, config: { webhook: { provider: 'fixture', name: 'webhook' } } },
     ], ['context.provider'], true);
     expect(runtime.getCredentialProvider('fixture')).toBeDefined();
-    expect(runtime.getNotificationProvider('notification.slack')).toBeUndefined();
-    expect(credential.resolutions).toBe(1);
+    expect(runtime.getNotificationProvider('notification.slack')).toBeDefined();
+    expect(credential.resolutions).toBe(0);
     const errors = (await runtime.diagnostics()).filter(item => item.pluginId === 'notification.slack');
-    expect(errors.map(item => item.code)).toEqual(['activation.failed', 'load.failed']);
-    expect(errors.every(item => item.message.includes('credential resolution failed'))).toBe(true);
+    expect(errors).toEqual([]);
+    await expect(runtime.getNotificationProvider('notification.slack')!.notify({ title: 'Build', body: 'Delivery' })).resolves.toMatchObject({ delivered: false, error: 'Operation credential unavailable' });
+    expect(credential.resolutions).toBe(1);
+    expect(network).not.toHaveBeenCalled();
   });
 
   it('activates configured credential references before their consumers regardless of input order', async () => {
@@ -201,6 +516,36 @@ describe('createDefaultPluginRuntime', () => {
     vi.mocked(executeWorkItem).mockResolvedValueOnce({ executionId: 'failed-execution', workItemId: input.workItemId, status: 'blocked' });
     await expect(runtime.dispatchSystemAction('work-item.execute', { input })).rejects.toThrow('blocked');
   });
+  it.each(['external', 'symlink-escape'] as const)('binds the production verification workspace before calling its provider (%s)', async kind => {
+    const { runtime, workspaceRoot, homeDir } = await fixture();
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify')
+      .mockResolvedValue({ passed: true, durationMs: 1, output: 'fixture' });
+    const escape = join(workspaceRoot, 'escape');
+    await symlink(homeDir, escape, 'dir');
+    await expect(runtime.dispatchSystemAction('capability.invoke', {
+      worktreePath: workspaceRoot,
+      input: { capability: 'verification.provider', provider: 'test-runner', operation: 'verify',
+        input: { target: kind === 'external' ? homeDir : escape } },
+    }, { authorizedWorkspace: workspaceRoot })).rejects.toThrow('Verification target escapes authorized local workspace');
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it.each(['default', 'root', 'subdirectory'] as const)('preserves an allowed production verification workspace (%s)', async kind => {
+    const { runtime, workspaceRoot } = await fixture();
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify')
+      .mockResolvedValue({ passed: true, durationMs: 1, output: 'fixture' });
+    const child = join(workspaceRoot, 'child');
+    await mkdir(child);
+    const input = kind === 'default' ? {} : { target: kind === 'root' ? workspaceRoot : child };
+    const options = { authorizedWorkspace: workspaceRoot, signal: new AbortController().signal };
+    await expect(runtime.dispatchSystemAction('capability.invoke', {
+      worktreePath: workspaceRoot,
+      input: { capability: 'verification.provider', provider: 'test-runner', operation: 'verify', input },
+    }, options)).resolves.toEqual({ passed: true, durationMs: 1, output: 'fixture' });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledWith({ target: await realpath(kind === 'subdirectory' ? child : workspaceRoot) }, options);
+  });
+
   it('loads shared providers and preserves false verification results as workflow failures', async () => {
     const { runtime, workspaceRoot } = await fixture();
     expect(runtime.listProviders('agent.provider')).toEqual(expect.arrayContaining(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']));
@@ -208,7 +553,7 @@ describe('createDefaultPluginRuntime', () => {
     await expect(runtime.dispatchSystemAction('capability.invoke', {
       worktreePath: workspaceRoot,
       input: { capability: 'verification.provider', provider: 'test-runner', operation: 'verify', input: { command: [process.execPath, '-e', 'process.exit(7)'] } },
-    })).rejects.toThrow('required check');
+    }, { authorizedWorkspace: workspaceRoot })).rejects.toThrow('required check');
   });
 
   it.each([
@@ -219,6 +564,125 @@ describe('createDefaultPluginRuntime', () => {
     const { runtime, lifecycle } = await fixture(configuration);
     expect((await runtime.diagnostics()).some(diagnostic => diagnostic.severity === 'error')).toBe(true);
     await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: '/' })).rejects.toThrow();
+  });
+
+  it('runs saved verifications against the execution worktree after agent work and before publishing', async () => {
+    const command = [process.execPath, '-e', "require('node:fs').appendFileSync('verification-marker', process.cwd() + '\\n')"];
+    const { runtime, lifecycle, context, homeDir, workspaceRoot } = await fixture({ integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } });
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify');
+    const worktreePath = join(homeDir, 'verification-execution');
+    await mkdir(worktreePath);
+    const observed = await verificationContext(runtime, { ...context, worktreePath }, homeDir);
+    await lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot });
+    await lifecycle.run('after-agent', observed.context);
+    await lifecycle.run('before-publish', observed.context);
+    expect(verify).toHaveBeenCalledTimes(2);
+    const actualWorktree = await realpath(worktreePath);
+    expect(verify).toHaveBeenCalledWith({ command, timeoutMs: 5000, target: actualWorktree, executionId: expect.any(String) }, { authorizedWorkspace: actualWorktree });
+    expect((await readFile(join(worktreePath, 'verification-marker'), 'utf8')).trim().split('\n')).toEqual([actualWorktree, actualWorktree]);
+    await expect(lstat(join(workspaceRoot, 'verification-marker'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const history: RunEvent[] = [];
+    for await (const event of observed.events.read('verification-run')) history.push(event);
+    expect(history.map(event => event.type)).toEqual(['effect.started', 'effect.completed', 'effect.started', 'effect.completed']);
+    expect(history.every(event => event.context.runId === 'verification-run' && event.context.workItemId === 'github:acme/api#42')).toBe(true);
+    const completed = history.filter(event => event.type === 'effect.completed');
+    expect(new Set(completed.map(event => event.idempotencyKey)).size).toBe(2);
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    for (const event of completed) {
+      expect(event.evidence).toHaveLength(1);
+      const receipt = JSON.parse(Buffer.from(await evidence.get(event.evidence![0])).toString('utf8'));
+      expect(receipt).toMatchObject({ protocol: 'capability-verification-v1', provider: 'test-runner',
+        observation: observed.context.observation!.context, workspace: actualWorktree,
+        revision: { before: { head: observed.revision }, after: { head: observed.revision } },
+        result: { passed: true, execution: { command, cwd: actualWorktree, exitCode: 0, closed: true } } });
+    }
+    expect((await observed.events.verify('verification-run')).valid).toBe(true);
+  });
+
+  it.each(['after-agent', 'before-publish'] as const)('blocks %s when the saved verification actually fails', async phase => {
+    const { runtime, lifecycle, context, homeDir } = await fixture({ integrations: { verifications: [{ provider: 'test-runner',
+      command: [process.execPath, '-e', 'process.exit(7)'] }] } });
+    const observed = await verificationContext(runtime, context, homeDir);
+    await expect(lifecycle.run(phase, observed.context)).rejects.toThrow('Capability verification failed');
+    const history: RunEvent[] = [];
+    for await (const event of observed.events.read('verification-run')) history.push(event);
+    const evidence = await createLocalEncryptedEvidenceStore(homeDir);
+    const completed = history.find(event => event.type === 'effect.completed')!;
+    expect(completed.evidence).toHaveLength(1);
+    const receipt = JSON.parse(Buffer.from(await evidence.get(completed.evidence![0])).toString('utf8'));
+    expect(receipt).toMatchObject({ result: { passed: false, execution: { exitCode: 7, closed: true } } });
+  });
+
+  it('does not invoke an unselected registered verifier', async () => {
+    const { runtime, lifecycle, context } = await fixture({ integrations: {} });
+    const verify = vi.spyOn(runtime.getVerificationProvider('test-runner')!, 'verify');
+    await lifecycle.run('after-agent', context);
+    await lifecycle.run('before-publish', context);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('blocks initialization when a saved verification provider is missing or disabled=%s', async disabled => {
+    const { lifecycle, workspaceRoot } = await fixture({
+      plugins: disabled ? [{ id: 'verification.test-runner', builtin: true, enabled: false }] : [],
+      integrations: { verifications: [{ provider: disabled ? 'test-runner' : 'missing-verifier' }] },
+    });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Configured verification provider is unavailable');
+  });
+
+  it.each([
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: { verifications: [{ provider: 'missing-verifier' }] } },
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }, { id: 'verification.test-runner', builtin: true, enabled: false }], integrations: { verifications: [{ provider: 'test-runner' }] } },
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: { verifications: [{ provider: 'test-runner', command: [process.execPath, '-e', 'process.exit(7)'] }] } },
+    { plugins: [{ id: 'workflow.integrations' }], integrations: { verifications: [{ provider: 'test-runner' }] } },
+    { plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: { policies: [{ provider: 'secret-scan', input: { action: 'pre-execution' } }] } },
+  ])('rejects a missing required integration gate despite saved selections: %j', async configuration => {
+    const { runtime, lifecycle, workspaceRoot } = await fixture(configuration);
+    const verify = runtime.getVerificationProvider('test-runner');
+    const execute = verify && vi.spyOn(verify, 'verify');
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Configured capability gates are unavailable');
+    if (execute) expect(execute).not.toHaveBeenCalled();
+    expect(await runtime.diagnostics()).toContainEqual(expect.objectContaining({ code: 'config.integrations-unavailable', severity: 'error' }));
+  });
+
+  it('allows a disabled integration module when no required gates are selected', async () => {
+    const { lifecycle, workspaceRoot } = await fixture({ plugins: [{ id: 'workflow.integrations', builtin: true, enabled: false }], integrations: {} });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).resolves.toBeUndefined();
+  });
+
+  it('rejects a replacement plugin that omits the required integration gate', async () => {
+    const { homeDir, workspaceRoot } = await fixture();
+    const directory = join(homeDir, '.afk', 'plugins', 'workflow.integrations', 'dist');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'index.js'), `export default {
+      manifest: { id: 'workflow.integrations', version: '1.0.0', apiVersion: 1, provides: [], trusted: true },
+      activate() {}
+    };`);
+    await writeFile(join(homeDir, '.afk', 'plugins.yml'), JSON.stringify({ plugins: [{ id: 'workflow.integrations' }],
+      integrations: { verifications: [{ provider: 'test-runner' }] } }));
+    const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot });
+    runtimes.push(runtime);
+    expect(runtime.getPlugin('workflow.integrations')).toBeDefined();
+    const lifecycle = new LifecycleDispatcher(runtime.getLifecycleModules());
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot }))
+      .rejects.toThrow('Configured capability gates are unavailable');
+  });
+
+  it('rejects more than 32 saved verification selections', async () => {
+    const { lifecycle, workspaceRoot } = await fixture({ integrations: { verifications: Array.from({ length: 33 }, () => ({ provider: 'test-runner' })) } });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow();
+  });
+
+  it.each([
+    { provider: 'test-runner', target: '/untrusted-target' },
+    { provider: 'test-runner', passed: true },
+    { provider: 'test-runner', command: [] },
+    { provider: 'test-runner', command: ['tool', '\0'] },
+    { provider: 'test-runner', timeoutMs: 0 },
+  ])('rejects invalid saved verification selection before execution: %j', async verification => {
+    const { lifecycle, workspaceRoot } = await fixture({ integrations: { verifications: [verification] } });
+    await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow();
   });
 
   it('writes selected context into the execution worktree and removes it on cleanup', async () => {
@@ -270,6 +734,9 @@ describe('createDefaultPluginRuntime', () => {
       const capture = vi.spyOn(runtime.getContextProvider('context.code')!, 'gather').mockResolvedValue([]);
       expect(runtime.getPlugin('workflow.invalid-settings')).toBeUndefined();
       await vi.advanceTimersByTimeAsync(1000);
+      expect(pluginTriggerQueue(runtime)!.status()).toEqual([expect.objectContaining({ providerId: 'trigger.schedule', status: 'pending' })]);
+      expect(capture).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
       expect(capture).toHaveBeenCalledWith(payload.input);
       await runtime.dispose();
       expect(vi.getTimerCount()).toBe(0);

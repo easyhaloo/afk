@@ -16,8 +16,7 @@
  *   [message..]                message to send; when stdin is piped, stdin is
  *                              prepended, so the goal is written to stdin
  *
- * Resume: opencode does not expose a documented --resume flag — sessions
- * are managed via its TUI. Capability: NO 'resume'.
+ * The adapter captures a batch session ID but does not implement resume.
  *
  * Model selection is runtime configuration, never product source: resolve
  * `AFK_OPENCODE_MODEL` (format `provider/model`) when set and omit --model
@@ -52,12 +51,20 @@ export function resolveOpenCodeModel(env: NodeJS.ProcessEnv = process.env): stri
 export class OpenCodeProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'opencode';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
+  protected readonly nativeSessions = 'batch' as const;
+
+  override async restoreSession(): Promise<void> {
+    throw new Error('OpenCode native resume is not supported');
+  }
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const model = resolveOpenCodeModel();
     if (options.executionMode === 'batch') {
       const argv = ['opencode', 'run', '--format', 'json'];
       if (model) argv.push('--model', model);
+      if (options.skillTask && options.skillTask.workspace === options.worktreePath) {
+        return { argv: [...argv, '--standalone'], cwd: options.worktreePath, env: { AFK_SKILL_TASK_CONTEXT: JSON.stringify(options.skillTask) } };
+      }
       return { argv, cwd: options.worktreePath };
     }
 
@@ -67,36 +74,53 @@ export class OpenCodeProvider extends ProcessAgentProvider {
     return { argv, cwd: options.worktreePath };
   }
 
-  parseLine(line: string): AgentEvent[] {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      return [{ type: 'text', text: line }];
-    }
-    if (!parsed || typeof parsed !== 'object') return [{ type: 'text', text: line }];
-    const event = parsed as { type?: unknown; part?: unknown; [key: string]: unknown };
-
-    if (event.type === 'text' && event.part && typeof event.part === 'object') {
-      const text = (event.part as { text?: unknown }).text;
-      if (typeof text === 'string') return [{ type: 'text', text }, { type: 'result', result: text }];
-    }
-
-    if (event.type === 'step_finish' && event.part && typeof event.part === 'object') {
-      const tokens = (event.part as { tokens?: { input?: unknown; output?: unknown } }).tokens;
-      if (tokens && typeof tokens === 'object') {
-        const input = typeof tokens.input === 'number' && Number.isFinite(tokens.input) ? tokens.input : 0;
-        const output = typeof tokens.output === 'number' && Number.isFinite(tokens.output) ? tokens.output : 0;
-        const usage: TokenUsage = { inputTokens: input, outputTokens: output, totalTokens: input + output };
-        return [{ type: 'usage', usage }, { type: 'result', result: event }];
+  protected override createParser(): (line: string) => AgentEvent[] {
+    let step: { session: string; message: string; text: string; usedTool: boolean } | undefined;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let stopped = false;
+    return line => {
+      let event;
+      try { event = JSON.parse(line); } catch { return [{ type: 'text', text: line }]; }
+      const part = event?.part;
+      if (event?.type === 'error') {
+        step = undefined;
+        return [{ type: 'error', error: new Error('OpenCode reported a session error') }];
       }
-      return [{ type: 'result', result: event }];
-    }
-
-    if (event.type === 'step_start' && typeof event.sessionID === 'string') {
-      return [{ type: 'session', sessionId: event.sessionID }];
-    }
-
-    return [{ type: 'text', text: line }];
+      if (!part || typeof event.sessionID !== 'string' || part.sessionID !== event.sessionID || typeof part.messageID !== 'string') return [];
+      if (event.type === 'step_start' && part.type === 'step-start') {
+        if (stopped) return [{ type: 'error', error: new Error('OpenCode started another step after stop') }];
+        step = { session: event.sessionID, message: part.messageID, text: '', usedTool: false };
+        return [{ type: 'session', sessionId: event.sessionID }];
+      }
+      if (!step || step.session !== part.sessionID || step.message !== part.messageID) return [];
+      if (event.type === 'tool_use' && part.type === 'tool') step.usedTool = true;
+      if (event.type === 'text' && part.type === 'text' && typeof part.text === 'string') {
+        step.text += part.text;
+        return [{ type: 'text', text: part.text }];
+      }
+      if (event.type !== 'step_finish' || part.type !== 'step-finish') return [];
+      const events: AgentEvent[] = [];
+      const usage = openCodeUsage(part.tokens);
+      if (usage) {
+        inputTokens += usage.inputTokens;
+        outputTokens += usage.outputTokens;
+        events.push({ type: 'usage', usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } });
+      }
+      stopped = part.reason === 'stop';
+      if (stopped && !step.usedTool && step.text) events.push({ type: 'result', result: step.text });
+      step = undefined;
+      return events;
+    };
   }
+}
+
+function openCodeUsage(tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }): TokenUsage | undefined {
+  if (!tokens || tokens.input === undefined || tokens.output === undefined) return undefined;
+  const { input, output, reasoning = 0, cache } = tokens;
+  const { read = 0, write = 0 } = cache ?? {};
+  if (![input, output, reasoning, read, write].every(count => Number.isSafeInteger(count) && count >= 0)) return undefined;
+  const inputTokens = input + read + write;
+  const outputTokens = output + reasoning;
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }

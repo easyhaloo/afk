@@ -2,11 +2,15 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dump } from 'js-yaml';
+import { sharedVerificationProject } from './shared-verification.js';
+import { verificationTreeDigest, verifiedSnapshot } from './verification-tree.js';
 import { validateManifest, validatePluginId, type PluginManifest } from '../../plugin-sdk/profile.js';
-import { pluginConfigurationPath, readPluginConfiguration, validatePluginConfig, type PluginConfiguration } from './configuration.js';
+import { pluginConfigurationPath, readPluginConfiguration, validatePluginConfig, type InstalledPluginEntry, type PluginConfiguration } from './configuration.js';
+import { activationLease, assertInactive, atomicWrite, pendingPath, readPending, restorePending, sameIdentity, verifyInstallation, withManagerLock, writePending, type PendingActivation } from './activation-recovery.js';
+import { TOOL_ASSETS, PLAYWRIGHT_PLUGIN_ID, assertToolTarget, prepareToolStage, sealToolStage, toolNpmArguments, toolNpmEnvironment, verifyToolPackage, type ToolInstallOptions } from './tool-recipes.js';
 
 export interface InstalledPluginRecord {
   readonly id: string;
@@ -14,13 +18,15 @@ export interface InstalledPluginRecord {
   readonly source: string;
   readonly entry: string;
   readonly integrity: string;
+  readonly treeIntegrity?: string;
   readonly installedAt: string;
   readonly manifest: PluginManifest;
+  readonly toolReceipt?: string;
 }
 
 export interface PluginManagerOptions {
   readonly homeDir?: string;
-  readonly runNpm?: (args: readonly string[], cwd: string) => Promise<void>;
+  readonly runNpm?: (args: readonly string[], cwd: string, options?: { readonly signal?: AbortSignal; readonly env?: NodeJS.ProcessEnv }) => Promise<void>;
 }
 
 interface PluginDependencyState {
@@ -28,15 +34,6 @@ interface PluginDependencyState {
   readonly credentials: ReadonlySet<string>;
   readonly opaqueCredentials: ReadonlySet<string>;
   readonly dependencies: ReadonlyMap<string, readonly string[]>;
-}
-
-async function atomicWrite(path: string, value: string): Promise<void> {
-  await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, value, { mode: 0o600 });
-    await fs.rename(temporary, path);
-  } finally { await fs.rm(temporary, { force: true }); }
 }
 
 function inside(root: string, path: string): boolean {
@@ -53,7 +50,8 @@ export async function readInstalledPlugin(directory: string): Promise<InstalledP
 
 export async function resolveInstalledPluginEntry(directory: string, record: InstalledPluginRecord): Promise<string> {
   validateManifest(record.manifest);
-  if (record.manifest.id !== record.id || isAbsolute(record.entry)) throw new Error('Invalid installed plugin record');
+  validatePluginId(record.id);
+  if (record.manifest.id !== record.id || record.version !== record.manifest.version || isAbsolute(record.entry)) throw new Error('Invalid installed plugin record');
   const root = await fs.realpath(directory);
   const entry = await fs.realpath(resolve(directory, record.entry));
   if (!inside(root, entry)) throw new Error('Plugin entry escapes its installation directory');
@@ -62,9 +60,12 @@ export async function resolveInstalledPluginEntry(directory: string, record: Ins
   return entry;
 }
 
-const runNpm: NonNullable<PluginManagerOptions['runNpm']> = (args, cwd) => new Promise((resolveCommand, reject) => {
-  execFile('npm', [...args], { cwd, timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }, error => {
-    if (error) reject(new Error('Plugin dependency installation failed; the previous installation was preserved'));
+const runNpm: NonNullable<PluginManagerOptions['runNpm']> = (args, cwd, options) => new Promise((resolveCommand, reject) => {
+  let failure: Error | null = null;
+  const child = execFile('npm', [...args], { cwd, env: options?.env, signal: options?.signal, killSignal: 'SIGKILL', timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }, error => { failure = error; });
+  child.once('close', () => {
+    if (options?.signal?.aborted) reject(options.signal.reason);
+    else if (failure) reject(new Error('Plugin dependency installation failed; the previous installation was preserved', { cause: failure }));
     else resolveCommand();
   });
 });
@@ -81,16 +82,78 @@ export class PluginManager {
   }
 
   private async locked<T>(operation: () => Promise<T>): Promise<T> {
-    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const lockPath = join(this.directory, '.manager.lock');
-    let lock;
-    try { lock = await fs.open(lockPath, 'wx', 0o600); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('Another plugin operation holds .manager.lock; retry after it finishes');
-      throw error;
-    }
-    try { return await operation(); }
-    finally { await lock.close(); await fs.rm(lockPath, { force: true }); }
+    return withManagerLock(this.directory, operation);
+  }
+
+  async beginActivation(id: string, workspaceRoot = process.cwd()) {
+    validatePluginId(id);
+    return this.locked(async () => {
+      const pending = await readPending(this.directory, id);
+      if (pending && pending.phase !== 'published' && pending.phase !== 'confirmed') await this.restoreActivationUnlocked(id);
+      const record = await this.installed(id, false);
+      if (record) await verifyInstallation(join(this.directory, id), record);
+      if (record && pending?.phase === 'published') await verifyInstallation(join(this.directory, id), pending.next);
+      const entry = record ? this.configuration().plugins.find(candidate => candidate.id === id) : undefined;
+      if (pending) await assertInactive(this.directory, id);
+      const workspace = resolve(workspaceRoot);
+      const currentProject = () => record?.manifest.concurrentVerification &&
+        sharedVerificationProject(this.configuration(), record, workspace);
+      const project = currentProject();
+      if (!project || !record?.treeIntegrity) return { record, entry, release: await activationLease(this.directory, id) };
+      const [generation, ...path] = record.entry.split(sep);
+      if (!/^\.version-[\da-f-]{36}$/.test(generation!) || path.some(part => !part || part === '..' || part === '.')) throw new Error('Invalid verification generation');
+      const snapshot = await verifiedSnapshot(join(this.directory, id, generation!), record.treeIntegrity);
+      try {
+        const releaseLease = await activationLease(this.directory, id, JSON.stringify([record.entry, project]));
+        const permits = async (...targets: string[]) => {
+          if ((targets.length && targets[0] !== project) || currentProject() !== project) return false;
+          await snapshot.checkBytes();
+          return currentProject() === project;
+        };
+        return { record, entry, modulePath: join(snapshot.root, ...path), permits,
+          release: async () => { try { await snapshot.dispose(); } finally { await releaseLease(); } } };
+      } catch (error) {
+        await snapshot.dispose();
+        throw error;
+      }
+    });
+  }
+
+  async restoreActivation(id: string, expected: InstalledPluginRecord): Promise<boolean> {
+    validatePluginId(id);
+    return this.locked(() => this.restoreActivationUnlocked(id, expected));
+  }
+
+  private async restoreActivationUnlocked(id: string, expected?: InstalledPluginRecord, installationFailure = false): Promise<boolean> {
+    const pending = await readPending(this.directory, id);
+    return restorePending(this.homeDir, id, (configuration, next, previous) =>
+      this.protectDependencies(id, configuration, next, previous.manifest, pending?.next.manifest), expected, installationFailure);
+  }
+
+  async confirmActivation(id: string, expected: InstalledPluginRecord, entry: InstalledPluginEntry | undefined): Promise<void> {
+    validatePluginId(id);
+    await this.locked(async () => {
+      const pending = await readPending(this.directory, id);
+      await verifyInstallation(join(this.directory, id), expected);
+      if (!sameIdentity(this.configuration().plugins.find(candidate => candidate.id === id), entry)) throw new Error('Plugin configuration changed during activation');
+      if (!pending) return;
+      if (!sameIdentity(pending.next, expected) || !['published', 'confirmed'].includes(pending.phase)) throw new Error('Pending activation identity changed');
+      if (pending.backup && pending.previous) {
+        const backup = join(this.directory, pending.backup);
+        if (pending.phase !== 'confirmed' || await fs.lstat(backup).then(() => true, () => false)) await verifyInstallation(backup, pending.previous, pending.previousUsable !== false);
+      }
+      pending.phase = 'confirmed';
+      await writePending(this.directory, pending);
+      if (pending.backup) {
+        const backup = join(this.directory, pending.backup);
+        if (await fs.lstat(backup).then(() => true, () => false)) {
+          const retired = join(this.directory, pending.backup.replace('.previous-', '.retired-'));
+          if (await fs.lstat(retired).then(() => true, () => false)) throw new Error('Retired plugin retention path already exists');
+          await fs.rename(backup, retired);
+        }
+      }
+      await fs.rm(pendingPath(this.directory, id));
+    });
   }
 
   private configuration(): PluginConfiguration {
@@ -135,10 +198,10 @@ export class PluginManager {
         try {
           if (entry.config === undefined) manifest = builtin;
           else {
-            const { createConfiguredPlugins, getConfiguredCredentialDependencies } = await import('./configured.js');
-            const [plugin] = await createConfiguredPlugins({ configurations: [entry], homeDir: this.homeDir, onTrigger: async () => {} });
-            manifest = plugin.manifest;
-            dependencies.set(entry.id, getConfiguredCredentialDependencies(plugin));
+            const { inspectConfiguredPlugins } = await import('./configured.js');
+            const [metadata] = inspectConfiguredPlugins({ configurations: [entry] });
+            manifest = metadata.manifest;
+            dependencies.set(entry.id, metadata.credentialDependencies);
           }
         } catch { throw new Error(`Invalid builtin plugin configuration for '${entry.id}'`); }
       } else {
@@ -186,8 +249,8 @@ export class PluginManager {
     return new Set(loaded.map(manifest => manifest.id));
   }
 
-  private async protectDependencies(id: string, configuration: PluginConfiguration, next: PluginConfiguration, replacement?: PluginManifest): Promise<void> {
-    const previous = await this.manifests(configuration, undefined, replacement?.id);
+  private async protectDependencies(id: string, configuration: PluginConfiguration, next: PluginConfiguration, replacement?: PluginManifest, priorReplacement?: PluginManifest): Promise<void> {
+    const previous = await this.manifests(configuration, priorReplacement, replacement?.id);
     const manifests = await this.manifests(next, replacement);
     const knownCredentials = new Set([...previous.credentials, ...manifests.credentials]);
     const before = this.availablePlugins(previous, knownCredentials);
@@ -201,39 +264,61 @@ export class PluginManager {
   }
 
   async install(source: string): Promise<InstalledPluginRecord> {
+    return this.installSource(source);
+  }
+
+  async installTool(recipe: string, options: ToolInstallOptions): Promise<InstalledPluginRecord> {
+    assertToolTarget(recipe, options);
+    return this.installSource(TOOL_ASSETS, options);
+  }
+
+  private async installSource(source: string, tool?: ToolInstallOptions): Promise<InstalledPluginRecord> {
     return this.locked(async () => {
+      tool?.signal?.throwIfAborted();
       const configuration = this.configuration();
       const stage = await fs.mkdtemp(join(this.directory, '.install-'));
       let destination: string | undefined;
       let backup: string | undefined;
       let published = false;
+      let pending: PendingActivation | undefined;
       try {
+        const versionRoot = join(stage, `.version-${randomUUID()}`);
+        await fs.mkdir(versionRoot);
         const local = resolve(source);
         const isLocal = await fs.stat(local).then(stat => stat.isDirectory(), () => false);
         let packageRoot: string;
         const args = ['install', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--legacy-peer-deps'];
         if (isLocal) {
           if (inside(await fs.realpath(local), await fs.realpath(stage))) throw new Error('Plugin source contains its installation directory');
-          packageRoot = join(stage, 'package');
+          packageRoot = join(versionRoot, 'package');
           await fs.cp(local, packageRoot, { recursive: true, filter: path => !['node_modules', '.git'].includes(path.split(sep).at(-1) ?? '') });
           const metadata = JSON.parse(await fs.readFile(join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: object; optionalDependencies?: object };
-          if (Object.keys(metadata.dependencies ?? {}).length || Object.keys(metadata.optionalDependencies ?? {}).length) await this.npm(args, packageRoot);
+          if (tool) await prepareToolStage(packageRoot, tool);
+          if (Object.keys(metadata.dependencies ?? {}).length || Object.keys(metadata.optionalDependencies ?? {}).length) {
+            if (tool) {
+              await this.npm(toolNpmArguments(args, tool), packageRoot, { signal: tool.signal, env: toolNpmEnvironment(packageRoot) });
+              tool.signal?.throwIfAborted();
+              await fs.rm(join(versionRoot, '.npm-home'), { recursive: true, force: true });
+              await fs.rm(join(versionRoot, '.npm-cache'), { recursive: true, force: true });
+            } else await this.npm(args, packageRoot);
+          }
         } else {
           if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*(?:@[A-Za-z0-9.*^~+<>=|-]+)?$/.test(source)) {
             throw new Error('Expected a local plugin directory or an npm package specification');
           }
-          await fs.writeFile(join(stage, 'package.json'), '{"private":true}');
-          await this.npm([...args, '--save-exact', source], stage);
-          const metadata = JSON.parse(await fs.readFile(join(stage, 'package.json'), 'utf8')) as { dependencies?: { [name: string]: string } };
+          await fs.writeFile(join(versionRoot, 'package.json'), '{"private":true}');
+          await this.npm([...args, '--save-exact', source], versionRoot);
+          const metadata = JSON.parse(await fs.readFile(join(versionRoot, 'package.json'), 'utf8')) as { dependencies?: { [name: string]: string } };
           const names = Object.keys(metadata.dependencies ?? {});
           if (names.length !== 1) throw new Error('The package manager did not resolve exactly one plugin package');
-          packageRoot = join(stage, 'node_modules', names[0]);
+          packageRoot = join(versionRoot, 'node_modules', names[0]);
         }
         let metadata: PluginManifest & { entry?: string };
         try {
           metadata = JSON.parse(await fs.readFile(join(packageRoot, 'plugin.json'), 'utf8')) as typeof metadata;
           validateManifest(metadata);
         } catch { throw new Error('Invalid plugin manifest'); }
+        if (metadata.id === PLAYWRIGHT_PLUGIN_ID && !tool) throw new Error('Managed plugin identity is reserved for the approved tool recipe');
         const entryPath = metadata.entry ?? 'dist/index.js';
         if (isAbsolute(entryPath)) throw new Error('Plugin entry must be a relative path');
         const root = await fs.realpath(packageRoot);
@@ -243,31 +328,64 @@ export class PluginManager {
         const sdkLink = join(packageRoot, 'node_modules', '@afk', 'runtime');
         await fs.rm(sdkLink, { recursive: true, force: true });
         await fs.symlink(fileURLToPath(new URL('../../../', import.meta.url)), sdkLink, 'dir');
+        const toolReceipt = tool ? await sealToolStage(packageRoot, tool) : undefined;
+        const stagedEntry = relative(await fs.realpath(stage), entry);
         const record: InstalledPluginRecord = {
           id: metadata.id, version: metadata.version, source: isLocal ? local : source,
-          entry: relative(await fs.realpath(stage), entry), manifest: metadata,
+          entry: stagedEntry, manifest: metadata,
           integrity: `sha256-${createHash('sha256').update(await fs.readFile(entry)).digest('base64')}`,
           installedAt: new Date().toISOString(),
+          ...(metadata.concurrentVerification ? { treeIntegrity: await verificationTreeDigest(versionRoot) } : {}),
+          ...(toolReceipt ? { toolReceipt } : {}),
         };
         await fs.writeFile(join(stage, 'install.json'), JSON.stringify(record, null, 2), { mode: 0o600 });
+        await assertInactive(this.directory, metadata.id);
+        if (await readPending(this.directory, metadata.id)) throw new Error('Plugin activation is pending; load or recover it before another installation');
+        if (!sameIdentity(configuration, this.configuration())) throw new Error('Plugin configuration changed concurrently; retry installation');
+        const previous = await this.installed(metadata.id, false);
+        let previousUsable = true;
         const existing = configuration.plugins.find(entry => entry.id === metadata.id);
         if (existing?.config !== undefined) this.validateSettings(metadata, existing.config);
-        const setting = { ...existing, id: metadata.id, enabled: true, builtin: false };
+        const setting = { ...existing, ...(tool && existing?.config === undefined ? { config: { execution: 'host-local' } } : {}), id: metadata.id, enabled: true, builtin: false };
         const next = { ...configuration, plugins: existing ? configuration.plugins.map(entry => entry.id === metadata.id ? setting : entry) : [...configuration.plugins, setting] };
         await this.protectDependencies(metadata.id, configuration, next, metadata);
+        if (!sameIdentity(configuration, this.configuration())) throw new Error('Plugin configuration changed concurrently; retry installation');
+        tool?.signal?.throwIfAborted();
         destination = join(this.directory, metadata.id);
         if (await fs.stat(destination).then(() => true, () => false)) {
-          backup = join(this.directory, `.backup-${randomUUID()}`);
-          await fs.rename(destination, backup);
+          if (!previous) throw new Error('Plugin installation has no verifiable previous identity');
+          await verifyInstallation(destination, previous, false);
+          try {
+            const priorEntry = await resolveInstalledPluginEntry(destination, previous);
+            if (previous.id === PLAYWRIGHT_PLUGIN_ID) {
+              if (!previous.toolReceipt) throw new Error('Previous managed tool receipt is missing');
+              await verifyToolPackage(dirname(priorEntry), previous.toolReceipt);
+            }
+          }
+          catch { previousUsable = false; }
+          backup = join(this.directory, `.previous-${metadata.id}-${randomUUID()}`);
         }
+        if (tool && !sameIdentity(configuration, this.configuration())) throw new Error('Plugin configuration changed concurrently; retry installation');
+        tool?.signal?.throwIfAborted();
+        if (previous) {
+          pending = { id: metadata.id, phase: 'prepared', stage: basename(stage), backup: backup ? basename(backup) : undefined,
+            previous, previousUsable, next: record, previousEntry: existing, nextEntry: setting };
+          await writePending(this.directory, pending);
+        }
+        if (backup) await fs.rename(destination, backup);
         await fs.rename(stage, destination);
         published = true;
         await atomicWrite(pluginConfigurationPath(this.homeDir), dump(next));
-        if (backup) await fs.rm(backup, { recursive: true, force: true });
+        if (pending) {
+          pending.phase = 'published';
+          await writePending(this.directory, pending);
+        }
         return record;
       } catch (error) {
-        if (published && destination) await fs.rm(destination, { recursive: true, force: true });
-        if (backup && destination) await fs.rename(backup, destination);
+        if (pending?.previous) await this.restoreActivationUnlocked(pending.id, undefined, true);
+        else {
+          if (published && destination) await fs.rm(destination, { recursive: true, force: true });
+        }
         throw error;
       } finally { await fs.rm(stage, { recursive: true, force: true }); }
     });
@@ -299,8 +417,8 @@ export class PluginManager {
       if (!builtin && !installed) throw new Error(`Plugin '${id}' is not installed`);
       if (builtin) {
         try {
-          const { createConfiguredPlugins } = await import('./configured.js');
-          await createConfiguredPlugins({ configurations: [{ id, config }], homeDir: this.homeDir, onTrigger: async () => {} });
+          const { inspectConfiguredPlugins } = await import('./configured.js');
+          inspectConfiguredPlugins({ configurations: [{ id, config }] });
         } catch { throw new Error(`Invalid plugin settings for '${id}'`); }
       }
       if (installed) this.validateSettings(installed.manifest, config);
@@ -316,9 +434,13 @@ export class PluginManager {
     validatePluginId(id);
     await this.locked(async () => {
       const directory = join(this.directory, id);
+      await assertInactive(this.directory, id);
+      if (await readPending(this.directory, id)) throw new Error('Plugin activation is pending; load or recover it before removal');
       if (!await this.installed(id)) throw new Error(`Plugin '${id}' is not installed`);
+      if (id === PLAYWRIGHT_PLUGIN_ID) throw new Error('Managed tool references are unknown; removal requires an authoritative worker/asset reference query');
       await this.setEnabledUnlocked(id, false);
-      await fs.rm(directory, { recursive: true, force: true });
+      // Keep plugin-written data; uninstall only removes the installed identity from its active path.
+      await fs.rename(directory, join(this.directory, `.removed-${id}-${randomUUID()}`));
     });
   }
 }

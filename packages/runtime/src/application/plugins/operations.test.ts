@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { HostConnectionPort } from '@afk/core';
 import type {
   ArtifactSink, ContextSource, CredentialProvider, NotificationProvider, PolicyCheckProvider,
@@ -83,6 +86,197 @@ async function fixture() {
 }
 
 describe('invokeCapability', () => {
+  it.each(['external', 'sibling-prefix', 'parent-traversal', 'symlink-escape', 'file', 'missing'] as const)(
+    'rejects an unauthorized verification workspace before provider dispatch (%s)', async kind => {
+      const current = await fixture();
+      const root = await mkdtemp(join(tmpdir(), 'verification-authorization-'));
+      const workspace = join(root, 'workspace');
+      const external = join(root, 'external');
+      const sibling = join(root, 'workspace-other');
+      try {
+        await Promise.all([mkdir(workspace), mkdir(external), mkdir(sibling)]);
+        await symlink(external, join(workspace, 'escape'), 'dir');
+        await writeFile(join(workspace, 'file'), 'fixture');
+        const targets = { external, 'sibling-prefix': sibling, 'parent-traversal': `${workspace}/../external`,
+          'symlink-escape': join(workspace, 'escape'), file: join(workspace, 'file'), missing: join(workspace, 'missing') };
+        await expect(invokeCapability(current.runtime, {
+          capability: 'verification.provider', provider: 'verification', operation: 'verify', input: { target: targets[kind] },
+        }, { authorizedWorkspace: workspace })).rejects.toThrow();
+        expect(current.verification.verify).not.toHaveBeenCalled();
+      } finally {
+        await current.runtime.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['root', 'subdirectory', 'internal-symlink', 'workspace-symlink'] as const)(
+    'canonicalizes an authorized verification workspace and forwards cancellation (%s)', async kind => {
+      const current = await fixture();
+      const root = await mkdtemp(join(tmpdir(), 'verification-authorization-'));
+      const workspace = join(root, 'workspace');
+      const child = join(workspace, 'child');
+      const signal = new AbortController().signal;
+      try {
+        await mkdir(child, { recursive: true });
+        await symlink(child, join(workspace, 'internal'), 'dir');
+        await symlink(workspace, join(root, 'alias'), 'dir');
+        const targets = { root: workspace, subdirectory: child, 'internal-symlink': join(workspace, 'internal'), 'workspace-symlink': workspace };
+        const options = { authorizedWorkspace: kind === 'workspace-symlink' ? join(root, 'alias') : workspace, signal };
+        const input = { target: targets[kind], command: ['checker'], input: '{}', executionId: 'execution-1', timeoutMs: 1000 };
+        await expect(invokeCapability(current.runtime, {
+          capability: 'verification.provider', provider: 'verification', operation: 'verify', input,
+        }, options)).resolves.toEqual({ passed: true, durationMs: 12, output: 'ok' });
+        expect(current.verification.verify).toHaveBeenCalledTimes(1);
+        expect(current.verification.verify).toHaveBeenCalledWith({ ...input, target: await realpath(targets[kind]) }, options);
+      } finally {
+        await current.runtime.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([undefined, '', '   '])('rejects an explicitly missing authorized verification workspace (%s)', async authorizedWorkspace => {
+    const current = await fixture();
+    try {
+      await expect(invokeCapability(current.runtime, {
+        capability: 'verification.provider', provider: 'verification', operation: 'verify', input: { target: '/standalone' },
+      }, { authorizedWorkspace })).rejects.toThrow('Verification requires an authorized Repository checkout workspace');
+      expect(current.verification.verify).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each([undefined, { signal: new AbortController().signal }])(
+    'preserves standalone verification workspace semantics when authorization is omitted (%s)', async options => {
+      const current = await fixture();
+      const input = { target: '/standalone/provider-defined-target' };
+      try {
+        await invokeCapability(current.runtime, { capability: 'verification.provider', provider: 'verification', operation: 'verify', input }, options);
+        expect(current.verification.verify).toHaveBeenCalledTimes(1);
+        expect(current.verification.verify).toHaveBeenCalledWith(input, ...(options ? [options] : []));
+      } finally { await current.runtime.close(); }
+    },
+  );
+
+  it('forwards bounded verification input and projects a structured execution observation', async () => {
+    const current = await fixture();
+    const input = { target: '/repo', command: ['checker'], input: '{}', executionId: 'execution-1' };
+    const execution = { protocol: 'verification-execution-v1' as const, executionId: 'execution-1', command: ['checker'],
+      cwd: '/repo', inputDigest: 'a'.repeat(64), exitCode: 0, stdout: '{}', stderr: 'diagnostic', closed: true as const };
+    const result = { passed: true, durationMs: 12, output: '{}\ndiagnostic', secret: 'discarded', execution };
+    current.verification.verify.mockResolvedValueOnce(result);
+    try {
+      expect(await invokeCapability(current.runtime, { capability: 'verification.provider', provider: 'verification', operation: 'verify', input }))
+        .toEqual({ passed: true, durationMs: 12, output: '{}\ndiagnostic', execution });
+      expect(current.verification.verify).toHaveBeenCalledWith(input);
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each([
+    { input: '😀'.repeat(65537), executionId: 'execution-large' },
+    { input: {}, executionId: 'execution-object' },
+    { input: '{}', executionId: 'invalid\nidentity' },
+    { input: '{}', executionId: '' },
+  ])('rejects malformed verification input before provider dispatch ($executionId)', async addition => {
+    const current = await fixture();
+    try {
+      await expect(invokeCapability(current.runtime, { capability: 'verification.provider', provider: 'verification', operation: 'verify',
+        input: { target: '/repo', ...addition } })).rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(current.verification.verify).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it('forwards validated applicability and target context through the public dispatcher', async () => {
+    const current = await fixture();
+    const input = { scope: 'github:acme/lesson', prompt: 'retry', applicability: { version: 'fixture-v1', environment: 'test' },
+      target: { project: 'github:acme/lesson', revision: 'a'.repeat(40), dirty: false, conditions: { approved: true } } };
+    try {
+      await invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input });
+      expect(current.context.gather).toHaveBeenCalledWith(input);
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each([
+    { applicability: { version: 1 } },
+    { applicability: { version: 'fixture-v1', command: 'untrusted' } },
+    { target: { project: 'github:acme/lesson', revision: 'uncommitted' } },
+    { target: { project: 'github:acme/lesson', conditions: { approved: 'true' } } },
+  ])('rejects invalid applicability context before calling its provider: %j', async context => {
+    const current = await fixture();
+    try {
+      await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather',
+        input: { scope: 'github:acme/lesson', prompt: 'retry', ...context } })).rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(current.context.gather).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it.each(['scope', 'prompt', 'limit', 'applicability', 'target'] as const)(
+    'rejects inherited context %s before calling its provider', async field => {
+      const current = await fixture();
+      const query = { scope: 'github:acme/lesson', prompt: 'retry', limit: 1, applicability: { version: 'fixture-v1' },
+        target: { project: 'github:acme/lesson', revision: 'a'.repeat(40), dirty: false } };
+      const input = Object.assign(Object.create({ [field]: query[field] }),
+        Object.fromEntries(Object.entries(query).filter(([key]) => key !== field)));
+      try {
+        expect(Object.hasOwn(input, field)).toBe(false);
+        await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input }))
+          .rejects.toThrow('Invalid or unsupported capability invocation');
+        expect(current.context.gather).not.toHaveBeenCalled();
+      } finally { await current.runtime.close(); }
+    });
+
+  it.each(['scope', 'prompt', 'limit', 'applicability', 'target'] as const)(
+    'rejects inherited context %s getters without evaluating them', async field => {
+      const current = await fixture();
+      const getter = vi.fn(() => { throw new Error('SYNTHETIC_PRIVATE_CONTEXT'); });
+      const prototype = Object.defineProperty({}, field, { enumerable: true, get: getter });
+      const input = Object.assign(Object.create(prototype),
+        Object.fromEntries(Object.entries({ scope: 'github:acme/lesson', prompt: 'retry' }).filter(([key]) => key !== field)));
+      try {
+        await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input }))
+          .rejects.toThrow('Invalid or unsupported capability invocation');
+        expect(getter).not.toHaveBeenCalled();
+        expect(current.context.gather).not.toHaveBeenCalled();
+      } finally { await current.runtime.close(); }
+    });
+
+  it.each(['capability', 'input'] as const)('rejects inherited invocation %s before parsing context', async field => {
+    const current = await fixture();
+    const getter = vi.fn(() => { throw new Error('SYNTHETIC_PRIVATE_CONTEXT'); });
+    const query = Object.defineProperty({ scope: 'github:acme/lesson', prompt: 'retry' }, 'target', { get: getter });
+    const request = { capability: 'context.provider', provider: 'context', operation: 'gather', input: query };
+    const input = Object.assign(Object.create({ [field]: request[field] }),
+      Object.fromEntries(Object.entries(request).filter(([key]) => key !== field)));
+    try {
+      await expect(invokeCapability(current.runtime, input)).rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(getter).not.toHaveBeenCalled();
+      expect(current.context.gather).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it('rejects own context target getters without evaluating them', async () => {
+    const current = await fixture();
+    const getter = vi.fn(() => { throw new Error('SYNTHETIC_PRIVATE_CONTEXT'); });
+    const input = Object.defineProperty({ scope: 'github:acme/lesson', prompt: 'retry' }, 'target', { get: getter });
+    try {
+      await expect(invokeCapability(current.runtime, { capability: 'context.provider', provider: 'context', operation: 'gather', input }))
+        .rejects.toThrow('Invalid or unsupported capability invocation');
+      expect(getter).not.toHaveBeenCalled();
+      expect(current.context.gather).not.toHaveBeenCalled();
+    } finally { await current.runtime.close(); }
+  });
+
+  it('accepts own context fields on null-prototype objects', async () => {
+    const current = await fixture();
+    const input = Object.assign(Object.create(null), { scope: 'github:acme/lesson', prompt: 'retry',
+      target: { project: 'github:acme/lesson', revision: 'a'.repeat(40), dirty: false } });
+    const request = Object.assign(Object.create(null), { capability: 'context.provider', provider: 'context', operation: 'gather', input });
+    try {
+      await invokeCapability(current.runtime, request);
+      expect(current.context.gather).toHaveBeenCalledWith(input);
+    } finally { await current.runtime.close(); }
+  });
+
   it('dispatches repository lifecycle and its execution callback in one resident runtime', async () => {
     const { runtime } = await fixture();
     const workspace = { id: 'owned', repository: { url: 'api' }, runId: 'run-1', snapshot: { commit: 'abc', branch: 'afk/run-1', dirty: false }, path: '/owned/api' };
@@ -99,7 +293,7 @@ describe('invokeCapability', () => {
       await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: 'repository', operation: 'prepare', input: { repository: { url: 'api' }, runId: 'run-1' } })).rejects.toThrow('does not support');
       const result = await invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation: 'run', input: { repository: { url: 'api' }, runId: 'run-1', action: 'repository.verify', input: { target: 'all' } } });
       expect(result).toMatchObject({ value: { passed: true }, publication: { commit: 'abc' }, cleanup: { removed: true } });
-      expect(execute).toHaveBeenCalledWith({ input: { target: 'all' }, repositoryWorkspace: workspace, worktreePath: '/owned/api' });
+      expect(execute).toHaveBeenCalledWith({ input: { target: 'all' }, repositoryWorkspace: workspace, worktreePath: '/owned/api' }, { authorizedWorkspace: '/owned/api' });
       expect(prepare).toHaveBeenCalledWith({ repository: { url: 'api' }, runId: 'run-1' }, undefined);
       for (const [operation, input] of [['prepare', { repository: { url: 'api' }, runId: 'run-1' }], ['checkout', { workspaceId: 'owned' }], ['publish', { workspaceId: 'owned' }], ['cleanup', { workspaceId: 'owned' }]] as const) {
         await invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation, input });
@@ -107,6 +301,60 @@ describe('invokeCapability', () => {
       await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: 'managed', operation: 'run', input: { repository: { url: 'api' }, runId: 'run-1', action: 'missing', input: {} } })).rejects.toThrow('not registered');
     } finally { await runtime.dispose(); }
   });
+  it('exposes managed recovery by allocation identity and projects private journal details away', async () => {
+    const { runtime } = await fixture();
+    const allocationId = '42b689a2-b7de-4454-87c9-d7d162b97933';
+    const listRecoveryAllocations = vi.fn(async () => [{ phase: 'retained' as const, allocation: {
+      id: allocationId, repository: { url: 'api', ref: 'main' }, runId: 'run-1', path: '/private/retained' },
+      marker: { content: 'private marker' }, owner: { pid: 1 }, configurationDigest: 'private configuration' }]);
+    const recoverAllocation = vi.fn(async (_id: string) => ({ removed: true, path: '/private/retained' }));
+    const provider = { id: 'recoverable', capabilities: { read: true, clone: false, push: false, recovery: true },
+      snapshot: async () => ({ commit: 'abc', branch: 'main', dirty: false }), listRecoveryAllocations, recoverAllocation };
+    await runtime.activate({ manifest: { id: 'repository.recovery', version: '1.0.0', apiVersion: 1,
+      provides: ['repository.provider'], trusted: true }, activate(context) { context.registerRepositoryProvider('recoverable', provider); } });
+    try {
+      const invocation = { capability: 'repository.provider', provider: 'recoverable' };
+      const records = await invokeCapability(runtime, { ...invocation, operation: 'listRecoveryAllocations', input: {} });
+      expect(records).toEqual([{ phase: 'retained', allocation: {
+        id: allocationId, repository: { url: 'api', ref: 'main' }, runId: 'run-1' } }]);
+      expect(await invokeCapability(runtime, { ...invocation, operation: 'recoverAllocation', input: { allocationId } })).toEqual({ removed: true });
+      expect(recoverAllocation).toHaveBeenCalledWith(allocationId);
+      for (const input of [{ allocationId, path: '/foreign' }, { allocationId: '../foreign' }, { allocationId, force: true }]) {
+        await expect(invokeCapability(runtime, { ...invocation, operation: 'recoverAllocation', input })).rejects.toThrow();
+      }
+      expect(recoverAllocation).toHaveBeenCalledTimes(1);
+      await expect(invokeCapability(runtime, { ...invocation, operation: 'listRecoveryAllocations', input: { path: '/foreign' } })).rejects.toThrow();
+      expect(listRecoveryAllocations).toHaveBeenCalledTimes(1);
+      provider.capabilities.recovery = false;
+      for (const [operation, input] of [['listRecoveryAllocations', {}], ['recoverAllocation', { allocationId }]] as const) {
+        await expect(invokeCapability(runtime, { ...invocation, operation, input })).rejects.toThrow('does not support recovery');
+      }
+      provider.capabilities.recovery = true;
+      recoverAllocation.mockRejectedValueOnce(new Error('/private/secret recovery failure'));
+      await expect(invokeCapability(runtime, { ...invocation, operation: 'recoverAllocation', input: { allocationId } }))
+        .rejects.toThrow(/^Repository recovery failed$/);
+      listRecoveryAllocations.mockRejectedValueOnce(new Error('/private/secret journal'));
+      await expect(invokeCapability(runtime, { ...invocation, operation: 'listRecoveryAllocations', input: {} }))
+        .rejects.toThrow(/^Repository recovery inspection failed$/);
+    } finally { await runtime.dispose(); }
+  });
+
+  it.each(['listRecoveryAllocations', 'recoverAllocation'] as const)('normalizes %s admission getter failures without exposing provider details', async operation => {
+    const { runtime } = await fixture();
+    const provider = { id: 'recovery-getter', capabilities: { read: true, clone: false, push: false, recovery: true },
+      snapshot: async () => ({ commit: 'abc', branch: 'main', dirty: false }) };
+    Object.defineProperty(provider, operation, { get() { throw new Error('/private/provider/secret'); } });
+    await runtime.activate({ manifest: { id: 'repository.recovery-getter', version: '1.0.0', apiVersion: 1,
+      provides: ['repository.provider'], trusted: true }, activate(context) { context.registerRepositoryProvider(provider.id, provider); } });
+    try {
+      const input = operation === 'recoverAllocation' ? { allocationId: '42b689a2-b7de-4454-87c9-d7d162b97933' } : {};
+      const message = operation === 'recoverAllocation' ? 'Repository recovery failed' : 'Repository recovery inspection failed';
+      await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: provider.id, operation, input })).rejects.toThrow(message);
+      Object.defineProperty(provider.capabilities, 'recovery', { get() { throw new Error('/private/capability/secret'); } });
+      await expect(invokeCapability(runtime, { capability: 'repository.provider', provider: provider.id, operation, input })).rejects.toThrow(message);
+    } finally { await runtime.dispose(); }
+  });
+
   it('calls typed verification, notification, context, repository and policy providers and projects results', async () => {
     const { runtime, verification, notification, context, repository, policy } = await fixture();
     const cases = [
@@ -132,6 +380,14 @@ describe('invokeCapability', () => {
       })).resolves.toEqual({ name: 'report.txt', uri: 'file:///report.txt' });
       expect(artifact.put).toHaveBeenLastCalledWith({ name: 'report.txt', mediaType: 'application/octet-stream', bytes });
     }
+  });
+
+  it('preserves stored content metadata in artifact operation receipts', async () => {
+    const { runtime, artifact } = await fixture();
+    const result = { name: 'bundle.json', uri: 'file:///bundle.json', storedContent: { sha256: 'd'.repeat(64), mediaType: 'application/json' } };
+    artifact.put.mockResolvedValue(result);
+    await expect(invokeCapability(runtime, { capability: 'artifact.provider', provider: 'artifact', operation: 'put',
+      input: { name: 'record.txt', mediaType: 'text/plain', bytes: 'b2s=' } })).resolves.toEqual(result);
   });
 
   it('registers and unregisters typed triggers', async () => {

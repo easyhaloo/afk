@@ -1,7 +1,11 @@
 import { z } from 'zod';
-import type { PluginRuntime } from './runtime.js';
+import { artifactRefSchema } from '../../plugin-sdk/artifact-ref.js';
+import type { PluginRuntime, PluginSystemActionOptions } from './runtime.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
+import { withCancellation } from './cancellation.js';
 import { RepositoryLifecycleService } from './repository-lifecycle.js';
+import { experienceQueryContextSchema } from '../learning/experience-store.js';
+import { localToolTarget } from './tool-recipes.js';
 
 const text = z.string().min(1).refine(value => value.trim().length > 0 && !value.includes('\0'));
 const timeout = z.number().int().positive().max(2_147_483_647);
@@ -22,17 +26,39 @@ const repositoryRef = z.object({ url: text, ref: text.optional() }).strict();
 const repositorySnapshot = z.object({ commit: text, branch: text, dirty: z.boolean() });
 const repositoryPrepare = z.object({ repository: repositoryRef, runId: text }).strict();
 const repositoryHandle = z.object({ workspaceId: text }).strict();
+const repositoryCheckout = repositoryHandle.extend({ branch: text.optional(), ref: text.optional() }).strict();
 const repositoryWorkspace = z.object({ id: text, repository: repositoryRef, runId: text, snapshot: repositorySnapshot, path: text.optional() });
 const repositoryPublication = z.object({ commit: text, branch: text, url: text.optional() });
 const repositoryCleanup = z.object({ removed: z.boolean() });
+const repositoryRecovery = z.object({ allocation: z.object({ id: z.string().uuid(), repository: repositoryRef, runId: text }),
+  phase: z.enum(['intent', 'reserved', 'owned', 'retained', 'recovering', 'removing', 'closed']) });
+const contextQuery = z.object({ scope: text, prompt: z.string(), limit: z.number().int().positive().optional(),
+  applicability: z.unknown().optional(), target: z.unknown().optional(),
+}).strict().transform(({ applicability, target, ...query }, context) => {
+  const parsed = experienceQueryContextSchema.safeParse({ applicability, target });
+  if (!parsed.success) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid context applicability' });
+    return z.NEVER;
+  }
+  return { ...query, ...parsed.data };
+});
 
+const verificationCommand = z.array(z.string()).min(1)
+  .refine(argv => argv.length > 0 && argv[0].trim().length > 0 && argv.every(arg => !arg.includes('\0')));
+const verificationExecutionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/);
 export const verificationRequestSchema = z.object({
   target: text,
-  command: z.array(z.string()).min(1).refine(argv => argv.length > 0 && argv[0].trim().length > 0 && argv.every(arg => !arg.includes('\0'))).optional(),
+  command: verificationCommand.optional(),
   timeoutMs: timeout.optional(),
+  input: z.string().refine(value => Buffer.byteLength(value, 'utf8') <= 256 * 1024).optional(),
+  executionId: verificationExecutionId.optional(),
 }).strict();
 export const verificationResultSchema = z.object({
   passed: z.boolean(), durationMs: z.number().finite().nonnegative(), output: z.string().optional(),
+  execution: z.object({ protocol: z.literal('verification-execution-v1'), executionId: verificationExecutionId,
+    command: verificationCommand, cwd: text, inputDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    exitCode: z.number().int().safe(), stdout: z.string(), stderr: z.string(), closed: z.literal(true),
+  }).strict().optional(),
 });
 export const contextFragmentsSchema = z.array(z.object({
   content: z.string(), origin: z.string(), score: z.number().finite().optional(),
@@ -40,7 +66,7 @@ export const contextFragmentsSchema = z.array(z.object({
 export const policyDecisionSchema = z.object({
   allowed: z.boolean(), rule: z.string().optional(), reason: z.string().optional(),
 });
-export const artifactRefSchema = z.object({ uri: text, name: text });
+export { artifactRefSchema };
 export const notificationReceiptSchema = z.object({ delivered: z.boolean(), channel: z.string(), error: z.string().optional() });
 const issue = z.object({
   id: text, key: text, projectId: text, title: z.string(), description: z.string(),
@@ -76,17 +102,19 @@ const invocationSchema = z.union([
   operation('notification.provider', 'notify', z.object({
     title: text, body: z.string(), channel: text.optional(), urgency: z.enum(['low', 'normal', 'high']).optional(),
   }).strict()),
-  operation('context.provider', 'gather', z.object({ scope: text, prompt: z.string(), limit: z.number().int().positive().optional() }).strict()),
+  operation('context.provider', 'gather', contextQuery),
   operation('artifact.provider', 'put', z.object({
     name: text, mediaType: text,
     bytes: z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value),
   }).strict()),
   operation('repository.provider', 'snapshot', repositoryRef),
   operation('repository.provider', 'prepare', repositoryPrepare),
-  operation('repository.provider', 'checkout', repositoryHandle),
+  operation('repository.provider', 'checkout', repositoryCheckout),
   operation('repository.provider', 'publish', repositoryHandle),
   operation('repository.provider', 'cleanup', repositoryHandle),
-  operation('repository.provider', 'run', repositoryPrepare.extend({ action: text, input: z.record(jsonValue) }).strict()),
+  operation('repository.provider', 'listRecoveryAllocations', empty),
+  operation('repository.provider', 'recoverAllocation', z.object({ allocationId: z.string().uuid() }).strict()),
+  operation('repository.provider', 'run', repositoryPrepare.extend({ action: text, input: z.record(jsonValue), checkout: repositoryCheckout.omit({ workspaceId: true }).optional() }).strict()),
   operation('policy.provider', 'evaluate', z.object({ action: text, context: z.record(scalar).optional() }).strict()),
   operation('trigger.provider', 'register', z.object({
     id: text, kind: z.enum(['schedule', 'webhook', 'manual']), schedule: text.optional(), payload: z.record(jsonValue).optional(), input: z.record(jsonValue).optional(),
@@ -155,44 +183,87 @@ function output<S extends z.ZodTypeAny>(schema: S, value: unknown): z.output<S> 
   return parsed.data;
 }
 
-export async function invokeCapability(runtime: PluginRuntime, input: unknown): Promise<unknown> {
-  const parsed = invocationSchema.safeParse(input);
+export async function invokeCapability(runtime: PluginRuntime, input: unknown, options?: PluginSystemActionOptions): Promise<unknown> {
+  const fields = input && typeof input === 'object' ? Object.getOwnPropertyDescriptors(input) : undefined;
+  const ownEnvelope = fields && ['capability', 'provider', 'operation', 'input']
+    .every(key => Object.hasOwn(fields, key) && Object.hasOwn(fields[key], 'value'));
+  const query = ownEnvelope && fields.capability.value === 'context.provider' ? fields.input.value : undefined;
+  const unsafeContext = query && typeof query === 'object' && ['scope', 'prompt', 'limit', 'applicability', 'target']
+    .some(key => key in query && !Object.hasOwn(Object.getOwnPropertyDescriptor(query, key) ?? {}, 'value'));
+  const parsed = invocationSchema.safeParse(ownEnvelope && !unsafeContext ? input : undefined);
   if (!parsed.success) throw new Error('Invalid or unsupported capability invocation; credential operations are private');
   const request = parsed.data;
+  if (request.capability === 'repository.provider') {
+    await withCancellation(() => undefined, options);
+    return dispatchCapability(runtime, request, options);
+  }
+  return withCancellation(() => dispatchCapability(runtime, request, options), options);
+}
+
+async function dispatchCapability(runtime: PluginRuntime, request: z.output<typeof invocationSchema>, options?: PluginSystemActionOptions): Promise<unknown> {
+  const forwarded: [] | [PluginSystemActionOptions] = options ? [options] : [];
   switch (request.capability) {
-    case 'verification.provider':
-      return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(request.input));
+    case 'verification.provider': {
+      let input = request.input;
+      if (options && Object.hasOwn(options, 'authorizedWorkspace')) {
+        const workspace = options.authorizedWorkspace;
+        if (typeof workspace !== 'string' || !workspace.trim()) {
+          throw new Error('Verification requires an authorized Repository checkout workspace');
+        }
+        const target = await withCancellation(() => localToolTarget(workspace, request.input.target), options);
+        input = { ...input, target };
+      }
+      return output(verificationResultSchema, await required(runtime.getVerificationProvider(request.provider)).verify(input, ...forwarded));
+    }
     case 'notification.provider':
-      return output(notificationReceiptSchema, await required(runtime.getNotificationProvider(request.provider)).notify(request.input));
+      return output(notificationReceiptSchema, await required(runtime.getNotificationProvider(request.provider)).notify(request.input, ...forwarded));
     case 'context.provider':
-      return output(contextFragmentsSchema, await required(runtime.getContextProvider(request.provider)).gather(request.input));
+      return output(contextFragmentsSchema, await required(runtime.getContextProvider(request.provider)).gather(request.input, ...forwarded));
     case 'artifact.provider':
       return output(artifactRefSchema, await required(runtime.getArtifactProvider(request.provider)).put({
         ...request.input, bytes: Buffer.from(request.input.bytes, 'base64'),
-      }));
+      }, ...forwarded));
     case 'repository.provider': {
       const provider = required(runtime.getRepositoryProvider(request.provider));
-      if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input));
+      if (request.operation === 'snapshot') return output(repositorySnapshot, await provider.snapshot(request.input, ...forwarded));
+      if (request.operation === 'listRecoveryAllocations') {
+        try {
+          if (provider.capabilities.recovery) {
+            const inspect = provider.listRecoveryAllocations;
+            if (typeof inspect === 'function') return output(z.array(repositoryRecovery), await inspect.call(provider, ...forwarded));
+          }
+        } catch { throw new Error('Repository recovery inspection failed'); }
+        throw new Error('Repository provider does not support recovery');
+      }
+      if (request.operation === 'recoverAllocation') {
+        try {
+          if (provider.capabilities.recovery) {
+            const recover = provider.recoverAllocation;
+            if (typeof recover === 'function') return output(repositoryCleanup, await recover.call(provider, request.input.allocationId, ...forwarded));
+          }
+        } catch { throw new Error('Repository recovery failed'); }
+        throw new Error('Repository provider does not support recovery');
+      }
       if (request.operation === 'run') {
         if (!runtime.listSystemActions().includes(request.input.action)) throw new Error('Repository execution action is not registered');
-        const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId }, workspace => runtime.dispatchSystemAction(request.input.action, {
+        const result = await new RepositoryLifecycleService(provider).run({ repository: request.input.repository, runId: request.input.runId, checkout: request.input.checkout }, workspace => runtime.dispatchSystemAction(request.input.action, {
           input: request.input.input, repositoryWorkspace: workspace, worktreePath: workspace.path,
-        }));
+        }, { ...options, authorizedWorkspace: workspace.path }), options);
         return output(z.object({ value: z.unknown(), workspace: repositoryWorkspace, publication: repositoryPublication, cleanup: repositoryCleanup }), result);
       }
       const operation = request.operation;
       if (!provider.capabilities[operation] || !provider[operation]) throw new Error(`Repository provider does not support ${operation}`);
-      if (operation === 'prepare') return output(repositoryWorkspace, await provider.prepare!(request.input));
-      if (operation === 'checkout') return output(repositoryWorkspace, await provider.checkout!(request.input));
-      if (operation === 'publish') return output(repositoryPublication, await provider.publish!(request.input));
-      return output(repositoryCleanup, await provider.cleanup!(request.input));
+      if (operation === 'prepare') return output(repositoryWorkspace, await provider.prepare!(request.input, ...forwarded));
+      if (operation === 'checkout') return output(repositoryWorkspace, await provider.checkout!(request.input, ...forwarded));
+      if (operation === 'publish') return output(repositoryPublication, await provider.publish!(request.input, ...forwarded));
+      return output(repositoryCleanup, await provider.cleanup!(request.input, ...forwarded));
     }
     case 'policy.provider':
-      return output(policyDecisionSchema, await required(runtime.getPolicyProvider(request.provider)).evaluate(request.input));
+      return output(policyDecisionSchema, await required(runtime.getPolicyProvider(request.provider)).evaluate(request.input, ...forwarded));
     case 'trigger.provider': {
       const provider = required(runtime.getTriggerProvider(request.provider));
       if (request.operation === 'register') return output(z.void(), await provider.register(request.input));
-      return output(z.void(), await provider.unregister(request.input.triggerId));
+      return output(z.void(), await provider.unregister(request.input.triggerId, ...forwarded));
     }
     case 'tracker.issue': {
       const provider = required(runtime.getIssueTrackerProvider(request.provider));
@@ -243,10 +314,10 @@ export async function invokeCapability(runtime: PluginRuntime, input: unknown): 
         case 'listHosts': return output(z.array(hostRecord), await provider.listHosts());
         case 'resolve': return output(hostRecord, await provider.resolve(request.input.host));
         case 'exec': return output(z.object({ code: z.number().int(), stdout: z.string(), stderr: z.string() }),
-          await provider.exec(request.input.host, request.input.argv, { timeoutMs: request.input.timeoutMs }));
+          await provider.exec(request.input.host, request.input.argv, { timeoutMs: request.input.timeoutMs, ...options }));
         case 'upload':
           if (!provider.upload) throw new Error('Host provider does not support upload');
-          return output(z.void(), await provider.upload(request.input.host, request.input.source, request.input.destination, { timeoutMs: request.input.timeoutMs }));
+          return output(z.void(), await provider.upload(request.input.host, request.input.source, request.input.destination, { timeoutMs: request.input.timeoutMs, ...options }));
       }
     }
   }

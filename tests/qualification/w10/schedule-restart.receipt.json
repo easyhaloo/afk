@@ -1,0 +1,163 @@
+{
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "afk": "0.2.174",
+  "archiveSha256": "6b16bc0ff253f18cb68fce2614cbf5d3f2f9f1a0fb5d68e5799520828aee3475",
+  "intervalMs": 4000,
+  "downtimeMs": 8000,
+  "scenarios": [
+    {
+      "stopSignal": "SIGTERM",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "e3ec208b71ab88b279ee47cc7970a7e42115a737cec2e2e5acd7cb8a09cedcc1",
+        "providerId": "trigger.schedule",
+        "status": "pending",
+        "attempts": 1,
+        "receivedAt": 1795149087140,
+        "nextAttemptAt": 1795149088144
+      },
+      "recovered": {
+        "deliveryId": "e3ec208b71ab88b279ee47cc7970a7e42115a737cec2e2e5acd7cb8a09cedcc1",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795149087140,
+        "nextAttemptAt": 1795149097599
+      },
+      "firstNewTick": {
+        "deliveryId": "bca85a86fa987e4e72922d235bc19693100d794ea767f523fd78461064c4d830",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795149099590,
+        "nextAttemptAt": 1795149100596
+      },
+      "observedSuccessfulActions": 2
+    },
+    {
+      "stopSignal": "SIGKILL",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "0aea4f9757790f0d6a626056b2e1681853263df14c5bc41e3bac609e03a24271",
+        "providerId": "trigger.schedule",
+        "status": "pending",
+        "attempts": 1,
+        "receivedAt": 1795149186934,
+        "nextAttemptAt": 1795149187937
+      },
+      "recovered": {
+        "deliveryId": "0aea4f9757790f0d6a626056b2e1681853263df14c5bc41e3bac609e03a24271",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795149186934,
+        "nextAttemptAt": 1795149197420
+      },
+      "firstNewTick": {
+        "deliveryId": "9fce70a614b479c7096e23b20d62fe2a270fc681d52420294c07b5043c5d2dc8",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795149199412,
+        "nextAttemptAt": 1795149200418
+      },
+      "observedSuccessfulActions": 2
+    },
+    {
+      "stopSignal": "SIGKILL",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "f51526fd49b518d273eba914118d320b8cde197a3354de733f6c524119273b0e",
+        "providerId": "trigger.schedule",
+        "status": "processing",
+        "attempts": 1,
+        "receivedAt": 1795149360131,
+        "nextAttemptAt": 1795149360131
+      },
+      "recovered": {
+        "deliveryId": "f51526fd49b518d273eba914118d320b8cde197a3354de733f6c524119273b0e",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795149360131,
+        "nextAttemptAt": 1795149370681
+      },
+      "firstNewTick": {
+        "deliveryId": "286a84876869b421c9882052dc25c2bbc648a4ad5ab3380280cf86f7c7197ee0",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795149372673,
+        "nextAttemptAt": 1795149373679
+      },
+      "observedSuccessfulActions": 2
+    },
+    {
+      "stopSignal": "SIGKILL",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "d274c93f995e95a1bae3f1e2d8a7098652d77348b7643ac00b4e70f1d6d49bea",
+        "providerId": "trigger.schedule",
+        "status": "processing",
+        "attempts": 1,
+        "receivedAt": 1795150312422,
+        "nextAttemptAt": 1795150312422
+      },
+      "recovered": {
+        "deliveryId": "d274c93f995e95a1bae3f1e2d8a7098652d77348b7643ac00b4e70f1d6d49bea",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795150312422,
+        "nextAttemptAt": 1795150323120
+      },
+      "firstNewTick": {
+        "deliveryId": "23ca8f6a5105d597ec56dcccf4eeebefa6338a0128c15a23a10f8f18b08adb92",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795150325110,
+        "nextAttemptAt": 1795150326115
+      },
+      "observedSuccessfulActions": 2,
+      "observedEffectsBeforeRestart": 1,
+      "observedEffectsTotal": 3
+    },
+    {
+      "stopSignal": "SIGKILL",
+      "competingListenerRejected": true,
+      "beforeRestart": {
+        "deliveryId": "df6cedebfbe8c8e83f592791e9026b7c19afc88f4354b7186a73c7f3b66c9a63",
+        "providerId": "trigger.schedule",
+        "status": "processing",
+        "attempts": 1,
+        "receivedAt": 1795150540440,
+        "nextAttemptAt": 1795150540440
+      },
+      "recovered": {
+        "deliveryId": "df6cedebfbe8c8e83f592791e9026b7c19afc88f4354b7186a73c7f3b66c9a63",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 2,
+        "receivedAt": 1795150540440,
+        "nextAttemptAt": 1795150551228
+      },
+      "firstNewTick": {
+        "deliveryId": "728a1589c5854299ed78f411a70b83d6fe0ad97da2d31a4c33a77534463bbf94",
+        "providerId": "trigger.schedule",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795150553224,
+        "nextAttemptAt": 1795150554226
+      },
+      "observedSuccessfulActions": 2,
+      "observedEffectsBeforeRestart": 1,
+      "observedEffectsTotal": 2,
+      "receiverEffectIds": [
+        "728a1589c5854299ed78f411a70b83d6fe0ad97da2d31a4c33a77534463bbf94",
+        "df6cedebfbe8c8e83f592791e9026b7c19afc88f4354b7186a73c7f3b66c9a63"
+      ]
+    }
+  ]
+}

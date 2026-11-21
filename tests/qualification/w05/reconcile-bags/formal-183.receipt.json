@@ -1,0 +1,82 @@
+{
+  "qualification": {
+    "exit": 1,
+    "result": {
+      "status": "blocked",
+      "code": "assertion_failed"
+    },
+    "before": {
+      "state": "candidate",
+      "version": 1
+    },
+    "after": {
+      "state": "candidate",
+      "version": 1
+    },
+    "sameCandidate": true,
+    "validationReceiptPresent": false,
+    "configurationIssues": 0,
+    "experimentIssues": 0
+  },
+  "revokedGrantControl": {
+    "exit": 1,
+    "result": {
+      "status": "blocked",
+      "code": "unauthorized"
+    },
+    "before": {
+      "state": "candidate",
+      "version": 1
+    },
+    "after": {
+      "state": "candidate",
+      "version": 1
+    },
+    "sameCandidate": true,
+    "validationReceiptPresent": false,
+    "configurationIssues": 0,
+    "experimentIssues": 0
+  },
+  "candidateId": "4cc64163ac59ad7f437307d06df67fd964b3ba3b7bc8ff7cfa622ac162663edf",
+  "expectedCommit": "0e642fc0a1996a186a9c2764cc43a4072a6591fc",
+  "sourceCommit": "25c39da071b5d83f014e3e48fa7a62144c21443e",
+  "evidenceDigest": "f15d691e47da052a583dbbcdc82cf1baafd1b6d4ec2aa50f096899c03f5b3e76",
+  "originalDigest": "cc83fb84892ffc847dc7cbc73def65753f046882c03d73a27e9254435e1d5fc9",
+  "proposedDigest": "8b1888f35698f71c0ca3ae96e60ae91f698c5ea6d72cc69a3b2ab164b6b15689",
+  "caseDigests": [
+    {
+      "checkId": "behavior-1",
+      "checkDigest": "a347abd85e2ad93a4949f7dbe4f60a2c2c44e06818cef51068ce4d7325f2cad7"
+    },
+    {
+      "checkId": "behavior-2",
+      "checkDigest": "fe6569e0ae492e1dacad6b7657ec1f4163d03350f685dd16e04034746e98e6c3"
+    },
+    {
+      "checkId": "behavior-3",
+      "checkDigest": "efbf6217c6ebf907f148d23208f35d75b8634edd966822ad2ef0a3444d540efd"
+    }
+  ],
+  "artifact": {
+    "version": "0.2.183",
+    "archiveSha256": "a5569b5eea04d496c56218ea48258e6d5390cb0bab8e1656ce19601c44c69f64",
+    "cliDigest": "0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c"
+  },
+  "image": {
+    "id": "sha256:acf0e0ad48c6fa847f3006953bc677965f916d12c9eef0c80a510166c9f40d79",
+    "checkerDigest": "e10259092410ff9f6fa870f7a1af47ea57abfe596f7bc0e4c57ac10242e665a0",
+    "fixtureDigest": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10"
+  },
+  "traceProtocol": "skill-trace-v1",
+  "limits": {
+    "timeoutMs": 120000,
+    "maxOutputBytes": 4096,
+    "memoryBytes": 268435456,
+    "swapBytes": 0,
+    "cpus": 1,
+    "pids": 64,
+    "scratchBytes": 16777216,
+    "network": "none"
+  },
+  "priorProbeDigest": "ff5dcdd7bf41d4b1f5193e6ab11d53d33e3a5a6f127179b6b45d1e2c2029a46f"
+}

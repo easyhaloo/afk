@@ -82,6 +82,11 @@ test('OpenCode routes a relevant Skill in system context without editing the use
     const context = { system: ['Existing instructions'] };
     await plugin['experimental.chat.system.transform']({ sessionID: 'session' }, context);
     assert.match(context.system.join('\n'), /Suggested Skill: debug/);
+    await plugin['chat.message']({ sessionID: 'session' }, message);
+    await plugin['chat.message']({ sessionID: 'session' }, { parts: [{ type: 'text', text: 'unrelated' }] });
+    const updated = { system: [] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'session' }, updated);
+    assert.deepEqual(updated.system, []);
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 
@@ -158,6 +163,11 @@ test('OpenCode V2 prompt stashes a recommendation that the next context injects 
   await ctx.registered['session:context']({ sessionID: 's1', system });
   assert.deepEqual(system, [{ type: 'text', text: 'Suggested Skill: debug' }]);
   const second = [];
+  await ctx.registered['session:context']({ sessionID: 's1', system: second });
+  assert.deepEqual(second, []);
+  await ctx.registered['session:prompt']({ sessionID: 's1', prompt: { text: 'diagnose' } });
+  runtime.behavior.prompt = { decision: 'allow' };
+  await ctx.registered['session:prompt']({ sessionID: 's1', prompt: { text: 'unrelated' } });
   await ctx.registered['session:context']({ sessionID: 's1', system: second });
   assert.deepEqual(second, []);
 });

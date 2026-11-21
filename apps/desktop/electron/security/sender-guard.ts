@@ -1,11 +1,19 @@
+import { app } from "electron";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 type SenderFrame = { url: string } | null | undefined;
 
 export function isTrustedRendererUrl(url: string, developmentOrigin = process.env.ELECTRON_RENDERER_URL) {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol === "file:") return parsed.pathname.endsWith("/dist/index.html");
+    if (parsed.protocol === "file:") {
+      return !parsed.hostname && fileURLToPath(parsed) === path.join(app.getAppPath(), "dist", "index.html");
+    }
     if (!developmentOrigin) return false;
-    return parsed.origin === new URL(developmentOrigin).origin;
+    const development = new URL(developmentOrigin);
+    return ["http:", "https:"].includes(parsed.protocol) && ["http:", "https:"].includes(development.protocol)
+      && parsed.origin === development.origin;
   } catch {
     return false;
   }

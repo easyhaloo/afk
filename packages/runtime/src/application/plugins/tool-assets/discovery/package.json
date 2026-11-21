@@ -1,0 +1,7 @@
+{
+  "name": "installed-tool-discovery",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "files": ["index.mjs", "plugin.json", "README.md"]
+}

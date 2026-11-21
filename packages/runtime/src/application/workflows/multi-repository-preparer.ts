@@ -5,7 +5,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import type { BranchHandle } from '../../domain/branches/types.js';
 import type { WorkflowRunRepository } from './run-request.js';
-import type { RunOutcomeStatus } from './resource-scope.js';
+import type { ExecutionCleanupOwnership, RunOutcomeStatus } from './resource-scope.js';
+import { assertWorkspaceOwnershipAvailable } from './resource-scope.js';
 import { gitLabCloneUrl } from '../../shared/gitlab-project.js';
 import { isAncestorCommit } from '../../infrastructure/git/git-ancestry.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
@@ -55,7 +56,16 @@ export interface PreparedRepository extends WorkflowRunRepository {
   original: RepositoryGitSnapshot;
 }
 
+interface RepositoryCleanupProgress {
+  cleanupStarted: boolean;
+  finalized: Set<PreparedRepository>;
+  captured: Set<PreparedRepository>;
+  dependenciesReleased: Set<PreparedRepository>;
+  cleaned: Set<PreparedRepository>;
+}
+
 export interface PreparedRepositorySet {
+  publish?(verified?: { path: string; commit: string }): Promise<void>;
   heartbeat?(): Promise<void>;
   repositories: PreparedRepository[];
   primary: PreparedRepository;
@@ -69,7 +79,7 @@ export interface PreparedRepositorySet {
 }
 
 export interface MultiRepositoryPreparationService {
-  prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string): Promise<PreparedRepositorySet>;
+  prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string, ownership?: ExecutionCleanupOwnership): Promise<PreparedRepositorySet>;
 }
 
 export interface WorkspaceLockDependencies {
@@ -92,16 +102,22 @@ export interface WorkspaceLockDependencies {
 export class MultiRepositoryPreparer implements MultiRepositoryPreparationService {
   constructor(private readonly dependencies: MultiRepositoryPreparerDependencies = defaultDependencies()) {}
 
-  async prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string): Promise<PreparedRepositorySet> {
+  async prepare(repositories: readonly WorkflowRunRepository[], workspaceRoot: string, ownership?: ExecutionCleanupOwnership): Promise<PreparedRepositorySet> {
     const primaryCount = repositories.filter(repository => repository.primary).length;
     if (primaryCount !== 1) throw new Error('repositories must contain exactly one primary repository');
     if (new Set(repositories.map(repository => repository.workingBranch)).size !== 1) {
       throw new Error('repositories must use the same working branch');
     }
 
+    await assertWorkspaceOwnershipAvailable(workspaceRoot, repositories, ownership?.claims);
     const lock = await this.dependencies.lock.acquire(workspaceRoot);
     let repositoryLeases: Awaited<ReturnType<RepositoryLeases['acquire']>> | undefined;
-    const release = async () => { try { await repositoryLeases?.release(); } finally { await lock.release(); } };
+    let nativeReleased = false;
+    let lockReleased = false;
+    const release = async () => {
+      if (!nativeReleased) { await repositoryLeases?.release(); nativeReleased = true; }
+      if (!lockReleased) { await lock.release(); lockReleased = true; }
+    };
     const prepared: PreparedRepository[] = [];
     try {
       repositoryLeases = await this.dependencies.repositoryLeases?.acquire(repositories.map(repository => `${repository.platform}:${repository.projectKey}`));
@@ -118,11 +134,23 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     const primary = prepared.find(repository => repository.primary)!;
     let finishPromise: Promise<void> | undefined;
     let releasePromise: Promise<void> | undefined;
+    let ownedTerminal: Promise<void> | undefined;
+    let ownedComplete = false;
+    const progress: RepositoryCleanupProgress = { cleanupStarted: false, finalized: new Set(), captured: new Set(), dependenciesReleased: new Set(), cleaned: new Set() };
+    const finishOwned = (operation: () => Promise<void>): Promise<void> => {
+      ownership!.assertClosed();
+      if (ownedComplete) return Promise.resolve();
+      return ownedTerminal ??= operation().then(release).then(() => { ownedComplete = true; }, error => {
+        ownedTerminal = undefined;
+        throw error;
+      });
+    };
     return {
       repositories: prepared,
       primary,
       ...(repositoryLeases ? { heartbeat: repositoryLeases.heartbeat } : {}),
-      finish: outcome => {
+      finish: async outcome => {
+        if (ownership) return finishOwned(() => this.finish(prepared, outcome.status, progress));
         finishPromise ??= this.finish(prepared, outcome.status).then(
           () => release(),
           async error => {
@@ -132,7 +160,11 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
         );
         return finishPromise;
       },
-      release: () => {
+      release: async () => {
+        if (ownership) return finishOwned(() => {
+          progress.cleanupStarted = true;
+          return this.cleanup(prepared, undefined, progress);
+        });
         releasePromise ??= this.cleanup(prepared).then(
           () => release(),
           async error => {
@@ -204,38 +236,61 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
     }
   }
 
-  private async finish(repositories: PreparedRepository[], status: RunOutcomeStatus): Promise<void> {
+  private async finish(repositories: PreparedRepository[], status: RunOutcomeStatus, progress?: RepositoryCleanupProgress): Promise<void> {
+    if (progress?.cleanupStarted) return this.cleanup(repositories, undefined, progress);
+    const errors: unknown[] = [];
     if (status !== 'success') {
       for (const repository of repositories) {
-        if (repository.managedByStore) {
-          await this.dependencies.dependencies?.capture(repository.repoRoot);
-          await this.dependencies.dependencies?.release(repository.repoRoot, true);
-        }
+        try {
+          if (repository.managedByStore) {
+            if (!progress?.captured.has(repository)) {
+              await this.dependencies.dependencies?.capture(repository.repoRoot);
+              progress?.captured.add(repository);
+            }
+            if (!progress?.dependenciesReleased.has(repository)) {
+              await this.dependencies.dependencies?.release(repository.repoRoot, true);
+              progress?.dependenciesReleased.add(repository);
+            }
+          }
+        } catch (error) { errors.push(error); }
       }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) throw new AggregateError(errors, 'multiple repository cleanups failed');
       return;
     }
-    const errors: unknown[] = [];
     for (const repository of repositories) {
       try {
-        await this.dependencies.git.finalize(repository.repoRoot, repository.workingBranch);
-        if (repository.managedByStore) await this.dependencies.dependencies?.capture(repository.repoRoot);
+        if (!progress?.finalized.has(repository)) {
+          await this.dependencies.git.finalize(repository.repoRoot, repository.workingBranch);
+          progress?.finalized.add(repository);
+        }
+        if (repository.managedByStore && !progress?.captured.has(repository)) {
+          await this.dependencies.dependencies?.capture(repository.repoRoot);
+          progress?.captured.add(repository);
+        }
       } catch (error) {
         errors.push(error);
       }
     }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, 'multiple repository finalizations failed');
-    await this.cleanup(repositories);
+    if (progress) progress.cleanupStarted = true;
+    await this.cleanup(repositories, undefined, progress);
   }
 
-  private async cleanup(repositories: PreparedRepository[], initialError?: unknown): Promise<void> {
+  private async cleanup(repositories: PreparedRepository[], initialError?: unknown, progress?: RepositoryCleanupProgress): Promise<void> {
     let firstError = initialError;
     for (const repository of [...repositories].reverse()) {
       try {
+        if (progress?.cleaned.has(repository)) continue;
         if (initialError !== undefined && repository.managedByStore && !repository.createdByRun) continue;
-        if (repository.managedByStore) await this.dependencies.dependencies?.release(repository.repoRoot);
+        if (repository.managedByStore && !progress?.dependenciesReleased.has(repository)) {
+          await this.dependencies.dependencies?.release(repository.repoRoot);
+          progress?.dependenciesReleased.add(repository);
+        }
         if (repository.createdByRun || repository.managedByStore) await this.dependencies.filesystem.removeTarget(repository.repoRoot);
         else await this.dependencies.git.restore(repository.repoRoot, repository.original, repository.workingBranch);
+        progress?.cleaned.add(repository);
       } catch (error) {
         firstError ??= error;
       }
@@ -387,32 +442,17 @@ export function defaultDependencies(): MultiRepositoryPreparerDependencies {
         // has to continue it: starting from the base again would make the
         // agent redo the work under a different commit, and the push would
         // then be rejected as a non-fast-forward.
-        if (await fetchRemoteBranch(git, workingBranch)) {
-          // A commit that was made and never published is the same kind of
-          // work — it is just not on the remote yet. Resetting to the
-          // published branch would drop it: the commit would become
-          // unreachable, the next attempt would find nothing to verify, and
-          // the work would be gone. So the local branch is kept whenever the
-          // published branch does not already contain it; the published work
-          // is merged back in when the branch is published.
-          const localHead = await localBranchHead(git, workingBranch);
-          const remoteHead = await remoteBranchHead(git, workingBranch);
-          if (localHead && remoteHead && !(await isAncestorCommit(git, localHead, remoteHead))) {
-            await git.raw(['checkout', '-B', workingBranch, localHead]);
-            return;
-          }
-          await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
-          return;
-        }
         if (await localBranchHead(git, workingBranch)) {
           await git.raw(['checkout', workingBranch]);
+          await reconcilePublishedBranch(git, workingBranch);
+        } else if (await fetchRemoteBranch(git, workingBranch)) {
+          await git.raw(['checkout', '-B', workingBranch, `origin/${workingBranch}`]);
         } else {
           await git.raw(['checkout', '-b', workingBranch, `origin/${baseBranch}`]);
         }
       }),
       finalize: (repoRoot, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, async () => {
         const git = simpleGit(repoRoot);
-        await reconcilePublishedBranch(git, workingBranch);
         await git.push('origin', workingBranch, ['--set-upstream']);
       }),
       restore: (repoRoot, snapshot, workingBranch) => repositoryStore.withCheckoutLock(repoRoot, () => restoreRepository(repoRoot, snapshot, workingBranch)),
@@ -708,16 +748,6 @@ async function remoteBranchHead(git: SimpleGit, branch: string): Promise<string 
   }
 }
 
-/**
- * Bring the published branch into the working branch before it is published
- * again.
- *
- * The push is rejected when the remote has commits the working branch does
- * not have, and the rejection would leave the run without a change request.
- * The published work is taken as it is when it is simply ahead, and merged in
- * when the two have diverged — the same rule the single-repository publisher
- * follows.
- */
 async function reconcilePublishedBranch(git: SimpleGit, branch: string): Promise<void> {
   if (!await fetchRemoteBranch(git, branch)) return;
   const localHead = await localBranchHead(git, branch);

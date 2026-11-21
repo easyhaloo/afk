@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 
 const execute = promisify(execFile);
-const binary = resolve('apps/cli/dist/index.js');
+const binary = resolve(process.env.AFK_E2E_CLI_ENTRY ?? 'apps/cli/dist/index.js');
 const message = { title: 'Matrix complete', body: 'Local service double only.\n第二行', urgency: 'high' };
 const artifactBytes = Buffer.from([0, 255, 13, 10, 65, 128]);
 const artifact = { name: 'matrix.bin', mediaType: 'application/octet-stream', bytes: artifactBytes.toString('base64') };
@@ -28,6 +28,7 @@ interface Reply {
   headers?: Record<string, string>;
   persist?: string;
   hang?: boolean;
+  verify?: (request: RecordedRequest) => Promise<unknown>;
 }
 interface RecordedRequest {
   method: string;
@@ -80,14 +81,16 @@ beforeEach(async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = Buffer.concat(chunks);
-      requests.push({ method: request.method!, path: request.url!, headers: request.headers, body });
+      const recorded = { method: request.method!, path: request.url!, headers: request.headers, body };
+      requests.push(recorded);
       const reply = replies.shift() ?? fallbackReply;
       events.emit('request', response);
       if (!reply) throw new Error(`Unexpected fixture request: ${request.method} ${request.url}`);
       if (reply.hang) return;
       if (reply.persist) await writeFile(reply.persist, body);
       response.writeHead(reply.status ?? 200, { 'content-type': reply.text === undefined ? 'application/json' : 'text/plain', ...reply.headers });
-      response.end(reply.text ?? JSON.stringify(reply.json ?? {}));
+      const payload = reply.verify ? await reply.verify(recorded) : reply.json;
+      response.end(reply.text ?? JSON.stringify(payload ?? {}));
     } catch (error) {
       fixtureErrors.push(error);
       response.writeHead(500).end();
@@ -184,6 +187,43 @@ const safeSettings = async (...secrets: string[]) => {
     expect(inventory).not.toContain(secret);
   }
 };
+
+it.each(['env', 'enterprise'] as const)('notification.feishu signs text using a %s reference for an independent receiver', async credentials => {
+  const webhook = `${http}/hooks/feishu/synthetic-private-path`;
+  const receiverSecret = 'synthetic-签名-key';
+  environment.MATRIX_HOOK = webhook;
+  environment.MATRIX_SIGNING_KEY = receiverSecret;
+  const signingSecret = await reference(credentials, 'signing_key', 'MATRIX_SIGNING_KEY');
+  const config = { webhook: { env: 'MATRIX_HOOK' }, signingSecret };
+  await configure('notification.feishu', config);
+  const verify = async (request: RecordedRequest) => {
+    const body = JSON.parse(request.body.toString());
+    expect(body).toEqual({ timestamp: expect.stringMatching(/^\d+$/), sign: expect.any(String), msg_type: 'text',
+      content: { text: '[HIGH] Matrix complete\nLocal service double only.\n第二行' } });
+    const fresh = Math.abs(Math.floor(Date.now() / 1000) - Number(body.timestamp)) < 3600;
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(`${body.timestamp}\n${receiverSecret}`),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const valid = await crypto.subtle.verify('HMAC', key, Buffer.from(body.sign, 'base64'), new Uint8Array());
+    return fresh && valid ? { code: 0 } : { code: 19021, msg: `rejected ${webhook} ${receiverSecret}` };
+  };
+  const notify = () => invocation('notification.provider', 'notification.feishu', 'notify', message);
+  replies.push({ verify });
+  expect(JSON.parse((await notify()).stdout)).toEqual({ delivered: true, channel: 'feishu' });
+  await safeSettings(webhook, receiverSecret);
+  environment.MATRIX_SIGNING_KEY = 'rotated-unmatched-test-key';
+  replies.push({ verify });
+  const rejected = await failure(notify());
+  expect(JSON.parse(rejected.stdout)).toEqual({ delivered: false, channel: 'feishu', error: 'Feishu rejected the message (code 19021)' });
+  for (const value of [webhook, receiverSecret, environment.MATRIX_SIGNING_KEY]) expect(rejected.stdout + rejected.stderr).not.toContain(value);
+  if (credentials === 'enterprise') {
+    await configure('notification.feishu', { ...config, signingSecret: { ...signingSecret, expiresAt: '2000-01-01T00:00:00Z' } });
+    expect(JSON.parse((await failure(notify())).stdout)).toMatchObject({ delivered: false, error: 'Operation credential unavailable' });
+  } else {
+    delete environment.MATRIX_SIGNING_KEY;
+    await failure(notify());
+  }
+  expect(requests).toHaveLength(2);
+}, 60_000);
 
 it.each([
   ['feishu', 'env'], ['feishu', 'enterprise'], ['slack', 'env'], ['slack', 'enterprise'],
@@ -400,11 +440,11 @@ it.each(['client_secret_basic', 'client_secret_post'] as const)('credential.oaut
   expect(await invoke('artifact.provider', 'report-platform', 'put', artifact)).toMatchObject({ uri: `${https}/report/8` });
   expect(requests).toHaveLength(4);
   for (const [reply, error] of [
-    [{ status: 400, json: { error: 'invalid_client' } }, /not registered/],
-    [{ json: { ...token, scope: 'unrelated' } }, /not registered/],
-    [{ json: { ...token, token_type: 'MAC' } }, /not registered/],
-    [{ text: 'broken-json' }, /not registered/],
-    [{ hang: true }, /not registered/],
+    [{ status: 400, json: { error: 'invalid_client' } }, /^Operation credential unavailable\n$/],
+    [{ json: { ...token, scope: 'unrelated' } }, /^Operation credential unavailable\n$/],
+    [{ json: { ...token, token_type: 'MAC' } }, /^Operation credential unavailable\n$/],
+    [{ text: 'broken-json' }, /^Operation credential unavailable\n$/],
+    [{ hang: true }, /^Operation credential unavailable\n$/],
   ] as const) {
     const count = requests.length;
     replies.push(reply);
@@ -449,11 +489,13 @@ it.each([false, true])('credential.oidc discovers and pins its endpoint, exchang
     { ...metadata, token_endpoint: `${http}/insecure-token` }]) {
     const count = requests.length;
     replies.push({ json: badMetadata });
-    await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /not registered/);
+    await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /^Operation credential unavailable\n$/);
     expect(requests).toHaveLength(count + 1);
   }
+  const beforeInvalidToken = requests.length;
   replies.push({ json: metadata }, { json: { ...issued, scope: 'wrong', access_token: 'invalid token' } });
-  await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /not registered/);
+  await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /^Operation credential unavailable\n$/);
+  expect(requests).toHaveLength(beforeInvalidToken + 2);
   await cli('disable', 'artifact.report-platform');
   await cli('disable', 'credential.oidc');
   await failure(invocation('artifact.provider', 'report-platform', 'put', artifact), /not registered/);
@@ -512,14 +554,23 @@ it('metadata management avoids OAuth activation and graph generation honors disa
   expect(requests).toHaveLength(0);
 }, 60_000);
 
-it.each(['credential.oauth', 'credential.oidc'] as const)('%s rejects insecure endpoint configuration and missing environment references without HTTP', async id => {
+it.each(['credential.oauth', 'credential.oidc'] as const)('%s rejects insecure endpoints and defers missing environment references until activation without HTTP', async id => {
   const valid = id === 'credential.oauth'
     ? { tokenEndpoint: `${https}/token`, clientId: 'fixture', clientSecret: { env: 'MATRIX_CLIENT_SECRET' } }
     : { issuer: `${https}/oidc`, clientId: 'fixture', assertion: { env: 'MATRIX_ASSERTION' } };
   await configure(id, valid);
   const previous = await settings();
   await failure(configure(id, { ...valid, [id === 'credential.oauth' ? 'tokenEndpoint' : 'issuer']: http }), /configuration|settings/);
-  await failure(configure(id, { ...valid, [id === 'credential.oauth' ? 'clientSecret' : 'assertion']: { env: 'MATRIX_NOT_SET' } }), /configuration|settings/);
+  expect(await settings()).toBe(previous);
+  await configure(id, { ...valid, [id === 'credential.oauth' ? 'clientSecret' : 'assertion']: { env: 'MATRIX_NOT_SET' } });
+  const diagnosis = JSON.parse((await cli('doctor', '--plugin', id, '--json')).stdout);
+  expect(diagnosis.inventory).toContainEqual(expect.objectContaining({ id, configuration: 'valid' }));
+  expect(requests).toHaveLength(0);
+  const rejected = await failure(cli('doctor', '--plugin', id, '--loaded', '--json'));
+  expect(JSON.parse(rejected.stdout).diagnostics).toContainEqual(expect.objectContaining({
+    pluginId: id, severity: 'error', code: 'config.provider-invalid',
+  }));
+  await configure(id, valid);
   expect(await settings()).toBe(previous);
   expect(requests).toHaveLength(0);
 });
@@ -589,7 +640,24 @@ if (action === 'read' || action === 'lookup') {
     upstream.once('close', () => { sockets.delete(upstream); socket.destroy(); });
   });
   environment = { ...environment, PATH: `${bin}:${environment.PATH}`, MATRIX_KEYCHAIN: keychain, HTTP_PROXY: http, HTTPS_PROXY: http, NO_PROXY: '' };
+  await configure('credential.google-oauth', {});
   await configure('notification.gmail', { to: 'recipient@example.test', channel: 'fixture-gmail' });
+  const savedSettings = await settings();
+  const expiredRecord = await readFile(keychain, 'utf8');
+  for (const id of ['credential.google-oauth', 'notification.gmail']) {
+    const report = await cli('doctor', '--plugin', id, '--loaded', '--json');
+    expect(JSON.parse(report.stdout).health).toContainEqual(expect.objectContaining({ pluginId: id, status: 'degraded' }));
+    expect(report.stdout).toMatch(/refreshable/i);
+    expect(report.stdout).toMatch(id === 'notification.gmail' ? /live.*not.*validated/i : /no refresh was attempted/i);
+    for (const value of [session.subject, session.email, session.clientId, session.clientSecret, session.accessToken, session.refreshToken]) {
+      expect(report.stdout).not.toContain(value);
+    }
+  }
+  expect(await readFile(keychain, 'utf8')).toBe(expiredRecord);
+  expect(await settings()).toBe(savedSettings);
+  await expect(readFile(join(home, '.afk', 'auth', 'google-oauth.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(tunnels).toEqual([]);
+  expect(requests).toEqual([]);
   replies.push({ json: { access_token: 'gmail-fixture-access', token_type: 'Bearer', expires_in: 3600, scope: session.scopes.join(' ') } }, { json: { id: 'mail-7' } });
   expect(await invoke('notification.provider', 'notification.gmail', 'notify', message)).toEqual({ delivered: true, channel: 'fixture-gmail' });
   expect(tunnels).toEqual(['oauth2.googleapis.com:443', 'gmail.googleapis.com:443']);
@@ -610,6 +678,16 @@ if (action === 'read' || action === 'lookup') {
   const persisted = JSON.parse(Buffer.from(await readFile(keychain, 'utf8'), 'base64url').toString());
   expect(persisted).toMatchObject({ ...session, accessToken: 'gmail-fixture-access', expiresAt: expect.any(Number) });
   expect(persisted.expiresAt).toBeGreaterThan(Date.now() + 3_500_000);
+  const refreshedRecord = await readFile(keychain, 'utf8');
+  for (const id of ['credential.google-oauth', 'notification.gmail']) {
+    const report = await cli('doctor', '--plugin', id, '--loaded', '--json');
+    expect(JSON.parse(report.stdout).health).toContainEqual(expect.objectContaining({ pluginId: id, status: 'healthy' }));
+    expect(report.stdout).toMatch(/live.*not.*validated/i);
+    expect(report.stdout).not.toContain('gmail-fixture-access');
+  }
+  expect(await readFile(keychain, 'utf8')).toBe(refreshedRecord);
+  expect(tunnels).toHaveLength(2);
+  expect(requests).toHaveLength(2);
   for (const [reply, error] of [[{ status: 403 }, /access was denied/], [{ json: {} }, /could not accept/]] as const) {
     replies.push(reply);
     const failed = await failure(invocation('notification.provider', 'notification.gmail', 'notify', message));

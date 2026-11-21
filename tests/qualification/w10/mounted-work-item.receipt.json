@@ -1,0 +1,347 @@
+[
+  {
+    "version": "0.2.168",
+    "archiveSha256": "2052628b8c6cc81cce726df6c4a8a7df0bc224c73daa2e5499f61c0f05bdf0bf",
+    "apache": "Server version: Apache/2.4.62 (Unix)",
+    "serviceSha256": "4c9b81a7aaa03c565f3d2c287dcdf950d2985c498ada054f39e9d19ac7388bf4",
+    "workItemId": "gitlab:127.0.0.1:55799/acme/api#1",
+    "agent": "local scripted claude",
+    "tracker": "loopback GitLab fixture with git http-backend",
+    "observations": [
+      {
+        "entry": "run",
+        "runId": "01ba06a2-c20d-403f-8f6d-1d674d231654",
+        "integrity": {
+          "valid": true,
+          "lastSequence": 21,
+          "lastHash": "39192b46c98a870ceb35b4db21b39a4c9dc17d41e6cc4ad3ed739fe77221c874"
+        },
+        "status": "awaiting_human",
+        "gate": "merge:2",
+        "events": [
+          {
+            "kind": "commit.recorded",
+            "phase": "implementation",
+            "commitSha": "62a2831cb88ce2da318725b307fb9f1ff5a18625",
+            "branch": "afk/backlog-1"
+          },
+          {
+            "kind": "commit.recorded",
+            "phase": "implementation",
+            "commitSha": "5496917680a900ff34ba36f9c76fafb24932eb84",
+            "branch": "afk/backlog-1"
+          },
+          {
+            "kind": "commit.recorded",
+            "phase": "qa",
+            "commitSha": "b8e4382f9b3dcd72fb090b4c8697e2de013bd353",
+            "branch": "afk/backlog-1-qa"
+          },
+          {
+            "kind": "qa.passed"
+          },
+          {
+            "kind": "change.published",
+            "changeId": "2",
+            "url": "http://127.0.0.1:55799/acme/api/-/merge_requests/2"
+          }
+        ]
+      }
+    ],
+    "handoffReadFaults": [],
+    "changeRequests": [
+      "POST /api/v4/projects/7/merge_requests"
+    ],
+    "rejected": "Error: backlog gitlab:127.0.0.1:55799/acme/api#1 is in merge_ready; QA requires verification state",
+    "samples": {
+      "implementation": [
+        {
+          "name": "api",
+          "claim": "0e089a1a-3bc3-4187-a49c-131bb18602a8",
+          "session": "a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e",
+          "runId": "01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "mount": "api@01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "branch": "afk/backlog-1",
+          "head": "36a798ec34ccb49048a5f2288caaa67819773ca3"
+        },
+        {
+          "name": "web",
+          "claim": "f163ff79-9f11-4bc8-831a-a9c6e81e2ae5",
+          "session": "cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea",
+          "runId": "01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "mount": "web@01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "branch": "afk/backlog-1",
+          "head": "87679145b2c2e9de2c40c8cf1ca8fb9272e50995"
+        }
+      ],
+      "ac": [
+        {
+          "name": "api",
+          "claim": "0e089a1a-3bc3-4187-a49c-131bb18602a8",
+          "session": "a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e",
+          "runId": "01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "mount": "api@01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "branch": "afk/backlog-1",
+          "head": "62a2831cb88ce2da318725b307fb9f1ff5a18625"
+        },
+        {
+          "name": "web",
+          "claim": "f163ff79-9f11-4bc8-831a-a9c6e81e2ae5",
+          "session": "cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea",
+          "runId": "01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "mount": "web@01ba06a2-c20d-403f-8f6d-1d674d231654",
+          "branch": "afk/backlog-1",
+          "head": "5496917680a900ff34ba36f9c76fafb24932eb84"
+        }
+      ],
+      "workflowQA": [
+        {
+          "name": "api",
+          "claim": "0e089a1a-3bc3-4187-a49c-131bb18602a8",
+          "session": "a939db6cc4b4e16ed2695e1c01b3caebf4edacf405f1aa16",
+          "runId": "qa-1-1795115463071-runtime",
+          "mount": "api@qa-1-1795115463071-runtime",
+          "branch": "afk/backlog-1-qa",
+          "head": "b8e4382f9b3dcd72fb090b4c8697e2de013bd353"
+        },
+        {
+          "name": "web",
+          "claim": "f163ff79-9f11-4bc8-831a-a9c6e81e2ae5",
+          "session": "1d9dd0b54d9d01348c10e7e7e5f99df47300d7e2b9fa1e7a",
+          "runId": "qa-1-1795115463071-runtime",
+          "mount": "web@qa-1-1795115463071-runtime",
+          "branch": "afk/backlog-1-qa",
+          "head": "5496917680a900ff34ba36f9c76fafb24932eb84"
+        }
+      ]
+    },
+    "publications": [
+      {
+        "name": "api",
+        "seed": "36a798ec34ccb49048a5f2288caaa67819773ca3",
+        "revision": "62a2831cb88ce2da318725b307fb9f1ff5a18625",
+        "qaRevision": "b8e4382f9b3dcd72fb090b4c8697e2de013bd353",
+        "main": "36a798ec34ccb49048a5f2288caaa67819773ca3",
+        "file": "applied api",
+        "remainingLeases": 0,
+        "remainingManagedWorktrees": 0,
+        "claimReleased": true
+      },
+      {
+        "name": "web",
+        "seed": "87679145b2c2e9de2c40c8cf1ca8fb9272e50995",
+        "revision": "5496917680a900ff34ba36f9c76fafb24932eb84",
+        "qaRevision": "5496917680a900ff34ba36f9c76fafb24932eb84",
+        "main": "87679145b2c2e9de2c40c8cf1ca8fb9272e50995",
+        "file": "applied web",
+        "remainingLeases": 0,
+        "remainingManagedWorktrees": 0,
+        "claimReleased": true
+      }
+    ],
+    "access": [
+      "GET /workspaces/api/snapshot 401",
+      "POST /workspaces/api/prepare 200",
+      "POST /workspaces/api/sessions/a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e/checkout 200",
+      "POST /workspaces/web/prepare 200",
+      "POST /workspaces/web/sessions/cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea/checkout 200",
+      "GET /workspaces/api/sessions/a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e/snapshot 200",
+      "POST /workspaces/api/sessions/a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e/publish 200",
+      "GET /workspaces/web/sessions/cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea/snapshot 200",
+      "POST /workspaces/web/sessions/cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea/publish 200",
+      "GET /workspaces/web/sessions/cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea/snapshot 200",
+      "POST /workspaces/web/sessions/cd3ba81185eb9ef1902cbe3a1bd006e56f1b8fe8929a71ea/cleanup 200",
+      "GET /workspaces/api/sessions/a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e/snapshot 200",
+      "POST /workspaces/api/sessions/a3470280a5bd50f6ddff776d074a830630bf0b5da60fd16e/cleanup 200",
+      "POST /workspaces/api/prepare 200",
+      "POST /workspaces/api/sessions/a939db6cc4b4e16ed2695e1c01b3caebf4edacf405f1aa16/checkout 200",
+      "POST /workspaces/web/prepare 200",
+      "POST /workspaces/web/sessions/1d9dd0b54d9d01348c10e7e7e5f99df47300d7e2b9fa1e7a/checkout 200",
+      "GET /workspaces/api/sessions/a939db6cc4b4e16ed2695e1c01b3caebf4edacf405f1aa16/snapshot 200",
+      "POST /workspaces/api/sessions/a939db6cc4b4e16ed2695e1c01b3caebf4edacf405f1aa16/publish 200",
+      "GET /workspaces/web/sessions/1d9dd0b54d9d01348c10e7e7e5f99df47300d7e2b9fa1e7a/snapshot 200",
+      "POST /workspaces/web/sessions/1d9dd0b54d9d01348c10e7e7e5f99df47300d7e2b9fa1e7a/publish 200",
+      "GET /workspaces/web/sessions/1d9dd0b54d9d01348c10e7e7e5f99df47300d7e2b9fa1e7a/snapshot 200",
+      "POST /workspaces/web/sessions/1d9dd0b54d9d01348c10e7e7e5f99df47300d7e2b9fa1e7a/cleanup 200",
+      "GET /workspaces/api/sessions/a939db6cc4b4e16ed2695e1c01b3caebf4edacf405f1aa16/snapshot 200",
+      "POST /workspaces/api/sessions/a939db6cc4b4e16ed2695e1c01b3caebf4edacf405f1aa16/cleanup 200"
+    ]
+  },
+  {
+    "version": "0.2.168",
+    "archiveSha256": "2052628b8c6cc81cce726df6c4a8a7df0bc224c73daa2e5499f61c0f05bdf0bf",
+    "apache": "Server version: Apache/2.4.62 (Unix)",
+    "serviceSha256": "4c9b81a7aaa03c565f3d2c287dcdf950d2985c498ada054f39e9d19ac7388bf4",
+    "workItemId": "gitlab:127.0.0.1:55892/acme/api#1",
+    "agent": "local scripted claude",
+    "tracker": "loopback GitLab fixture with git http-backend",
+    "observations": [
+      {
+        "entry": "run",
+        "runId": "2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+        "integrity": {
+          "valid": true,
+          "lastSequence": 15,
+          "lastHash": "3d43ad6fac9c4cad9096c29f9a372e39512d6e07b4b5968718a04659a9992eb5"
+        },
+        "status": "failed",
+        "events": [
+          {
+            "kind": "commit.recorded",
+            "phase": "implementation",
+            "commitSha": "9e3d0e6525dbbab0d7b72c91952759fd5dee06c5",
+            "branch": "afk/backlog-1"
+          },
+          {
+            "kind": "commit.recorded",
+            "phase": "implementation",
+            "commitSha": "e7da2b22cc30e3780952f7580b5973b72d1c2986",
+            "branch": "afk/backlog-1"
+          }
+        ]
+      },
+      {
+        "entry": "qa",
+        "runId": "qa-1-1795115486502-runtime",
+        "integrity": {
+          "valid": true,
+          "lastSequence": 7,
+          "lastHash": "acf77dcf67dfca6f70f4b6014fa10f96497cb5e90c01492b43c3b1fd9997ee95"
+        },
+        "status": "succeeded",
+        "events": [
+          {
+            "kind": "commit.recorded",
+            "phase": "qa",
+            "commitSha": "063885b56878f42e50bebb1538547270f7a0be09",
+            "branch": "afk/backlog-1-qa"
+          },
+          {
+            "kind": "qa.passed"
+          }
+        ]
+      }
+    ],
+    "handoffReadFaults": [
+      "GET issue in verification after implementation cleanup"
+    ],
+    "handoffDiagnostic": "Error: Response code 409 (Conflict)",
+    "changeRequests": [
+      "POST /api/v4/projects/7/merge_requests"
+    ],
+    "rejected": "Error: backlog gitlab:127.0.0.1:55892/acme/api#1 is in merge_ready; QA requires verification state",
+    "samples": {
+      "implementation": [
+        {
+          "name": "api",
+          "claim": "79fe5a09-19dc-4dcd-88d7-64489f4ea940",
+          "session": "42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061",
+          "runId": "2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "mount": "api@2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "branch": "afk/backlog-1",
+          "head": "09ae6c1004b35a707f9f56ba43087bab421e34e6"
+        },
+        {
+          "name": "web",
+          "claim": "0e5ec288-5fb4-4311-8d3c-5f55f65659eb",
+          "session": "2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40",
+          "runId": "2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "mount": "web@2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "branch": "afk/backlog-1",
+          "head": "552b42a2a992ea1ef23293c280daef421b70d5aa"
+        }
+      ],
+      "ac": [
+        {
+          "name": "api",
+          "claim": "79fe5a09-19dc-4dcd-88d7-64489f4ea940",
+          "session": "42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061",
+          "runId": "2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "mount": "api@2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "branch": "afk/backlog-1",
+          "head": "9e3d0e6525dbbab0d7b72c91952759fd5dee06c5"
+        },
+        {
+          "name": "web",
+          "claim": "0e5ec288-5fb4-4311-8d3c-5f55f65659eb",
+          "session": "2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40",
+          "runId": "2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "mount": "web@2a9ac336-53dd-4d6c-8d1c-4bf48eeed5f6",
+          "branch": "afk/backlog-1",
+          "head": "e7da2b22cc30e3780952f7580b5973b72d1c2986"
+        }
+      ],
+      "standaloneQA": [
+        {
+          "name": "api",
+          "claim": "88b8d5bf-73a6-4f42-bbd4-ea93cf3a85ff",
+          "session": "d0ce03107def8bb2b367a8ef1e8b831f07c291255347532f",
+          "runId": "qa-1-1795115486502-runtime",
+          "mount": "api@qa-1-1795115486502-runtime",
+          "branch": "afk/backlog-1-qa",
+          "head": "063885b56878f42e50bebb1538547270f7a0be09"
+        },
+        {
+          "name": "web",
+          "claim": "caceeaeb-c7bd-4ace-b992-55e1302ec2d1",
+          "session": "f733b93abb12227b03c0d245647b49fcd1444defc0450dc2",
+          "runId": "qa-1-1795115486502-runtime",
+          "mount": "web@qa-1-1795115486502-runtime",
+          "branch": "afk/backlog-1-qa",
+          "head": "e7da2b22cc30e3780952f7580b5973b72d1c2986"
+        }
+      ]
+    },
+    "publications": [
+      {
+        "name": "api",
+        "seed": "09ae6c1004b35a707f9f56ba43087bab421e34e6",
+        "revision": "9e3d0e6525dbbab0d7b72c91952759fd5dee06c5",
+        "qaRevision": "063885b56878f42e50bebb1538547270f7a0be09",
+        "main": "09ae6c1004b35a707f9f56ba43087bab421e34e6",
+        "file": "applied api",
+        "remainingLeases": 0,
+        "remainingManagedWorktrees": 0,
+        "claimReleased": true
+      },
+      {
+        "name": "web",
+        "seed": "552b42a2a992ea1ef23293c280daef421b70d5aa",
+        "revision": "e7da2b22cc30e3780952f7580b5973b72d1c2986",
+        "qaRevision": "e7da2b22cc30e3780952f7580b5973b72d1c2986",
+        "main": "552b42a2a992ea1ef23293c280daef421b70d5aa",
+        "file": "applied web",
+        "remainingLeases": 0,
+        "remainingManagedWorktrees": 0,
+        "claimReleased": true
+      }
+    ],
+    "access": [
+      "GET /workspaces/api/snapshot 401",
+      "POST /workspaces/api/prepare 200",
+      "POST /workspaces/api/sessions/42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061/checkout 200",
+      "POST /workspaces/web/prepare 200",
+      "POST /workspaces/web/sessions/2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40/checkout 200",
+      "GET /workspaces/api/sessions/42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061/snapshot 200",
+      "POST /workspaces/api/sessions/42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061/publish 200",
+      "GET /workspaces/web/sessions/2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40/snapshot 200",
+      "POST /workspaces/web/sessions/2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40/publish 200",
+      "GET /workspaces/web/sessions/2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40/snapshot 200",
+      "POST /workspaces/web/sessions/2786cc60da95ff8af3bed4f07951d66c4684dcf96c2f7d40/cleanup 200",
+      "GET /workspaces/api/sessions/42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061/snapshot 200",
+      "POST /workspaces/api/sessions/42b5bee1e1eb154eb81dc359d526d134c2e20bf60d3e0061/cleanup 200",
+      "POST /workspaces/api/prepare 200",
+      "POST /workspaces/api/sessions/d0ce03107def8bb2b367a8ef1e8b831f07c291255347532f/checkout 200",
+      "POST /workspaces/web/prepare 200",
+      "POST /workspaces/web/sessions/f733b93abb12227b03c0d245647b49fcd1444defc0450dc2/checkout 200",
+      "GET /workspaces/api/sessions/d0ce03107def8bb2b367a8ef1e8b831f07c291255347532f/snapshot 200",
+      "POST /workspaces/api/sessions/d0ce03107def8bb2b367a8ef1e8b831f07c291255347532f/publish 200",
+      "GET /workspaces/web/sessions/f733b93abb12227b03c0d245647b49fcd1444defc0450dc2/snapshot 200",
+      "POST /workspaces/web/sessions/f733b93abb12227b03c0d245647b49fcd1444defc0450dc2/publish 200",
+      "GET /workspaces/web/sessions/f733b93abb12227b03c0d245647b49fcd1444defc0450dc2/snapshot 200",
+      "POST /workspaces/web/sessions/f733b93abb12227b03c0d245647b49fcd1444defc0450dc2/cleanup 200",
+      "GET /workspaces/api/sessions/d0ce03107def8bb2b367a8ef1e8b831f07c291255347532f/snapshot 200",
+      "POST /workspaces/api/sessions/d0ce03107def8bb2b367a8ef1e8b831f07c291255347532f/cleanup 200"
+    ]
+  }
+]

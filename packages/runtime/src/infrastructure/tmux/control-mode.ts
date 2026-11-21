@@ -25,7 +25,7 @@ const enum ParserState {
 /**
  * tmux Control Mode connection.
  *
- * Spawns `tmux -CC attach-session -t <session>` and maintains a persistent
+ * Spawns `tmux -C attach-session -t <session>` and maintains a persistent
  * bidirectional channel over stdin/stdout.
  *
  * Protocol:
@@ -57,7 +57,7 @@ export class ControlModeConnection {
     const { session, pauseAfter } = options;
 
     this.proc = spawn('tmux', [
-      '-CC',
+      '-C',
       'attach-session',
       '-t', normalizeTmuxSessionName(session),
     ], {

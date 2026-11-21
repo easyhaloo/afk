@@ -95,7 +95,7 @@ Capability IDs are the values in `packages/runtime/src/plugin-sdk/profile.ts`.
 | Verification · `verification.provider` | Test runner, static scan, browser check | Installed test/lint/browser tools; optional project-specific service credentials | `verify` runs an argv command in the target workspace. Defaults are `npm test`, `npm run lint`, `playwright test`; these are command wrappers, not embedded analyzers. |
 | Notification · `notification.provider` | Feishu, Slack, email, Gmail, desktop | Feishu/Slack webhook URL; configured `sendmail` and mail transport for email; Gmail API and Google user OAuth; native desktop notification tool | `notify`; HTTP adapters default to global fetch with optional transport injection. Gmail defaults to the authenticated account as recipient. A delivery receipt reports actual success/failure. Desktop delivery depends on the OS tool. |
 | Trigger · `trigger.provider` | HMAC webhook, Git push, issue event, interval schedule | Webhook secret; resident listener and private SQLite queue for HTTP delivery; no account for local timers | `register/unregister`; `plugin listen --queue` supplies authenticated HTTP intake, durable receipts, retries, replay and explicit pruning through the resident listener. Interval timers remain process-local; schedule text is positive integer milliseconds. |
-| Context / memory · `context.provider` | Code context, knowledge base, retrieval, project memory | Readable workspace/files; knowledge-base HTTP endpoint and any authentication supplied by its transport | `gather`; code reads local content, retrieval uses supplied documents, memory reads a local file, knowledge base expects protocol-compatible JSON fragments. No automatic embedding or indexing service. |
+| Context / memory · `context.provider` | Code context, knowledge base, retrieval, project memory | Readable workspace/files; knowledge-base HTTP endpoint, optionally an operation-resolved bearer credential over HTTPS | `gather`; code reads local content, retrieval uses supplied documents, memory reads a local file, knowledge base expects protocol-compatible JSON fragments. No automatic embedding or indexing service. |
 | Credential / auth · `credential.provider` | System keychain, Google user OAuth, OAuth client credentials, OIDC assertion/exchange, enterprise environment credentials | Keychain access; Google Desktop app client JSON and browser consent; OAuth endpoint/client ID/secret; OIDC issuer/client/assertion; supplied environment/value entries | `resolve`; scopes only where advertised. Enterprise adapter reads configured values/environment; it is not an enterprise vault SDK. HTTP adapters default to global fetch with optional transport injection. Credential resolution remains private to SDK consumers. |
 | Artifact / report · `artifact.provider` | Local test reports, evidence bundles, object storage, report platform | Writable local path; upload URL/report endpoint, optionally bearer token | `put`; `integrations.evidence` selects audit evidence export through the audit bridge. Lifecycle report hooks remain separate. Local audit is authoritative; object storage does not implement AWS request signing. |
 | Repository / workspace · `repository.provider` | Multiple local repositories, remote workspace, special Git backend | Git/local paths; explicit managed root, remote, base branch and lease key; compatible remote/backend lifecycle protocol | Snapshot-only by default. Opt-in `prepare/checkout/publish/cleanup` and orchestrated `run` execute a registered action between checkout and publish; ownership, leases and clean/published state protect cleanup. |
@@ -114,8 +114,19 @@ a concrete configured builtin factory. Configured GitHub/GitLab participate in
 the same managed assembly through their registered tracker/backlog contracts;
 they are selected by project rather than treated as independent issue adapters.
 
-Observability is an additional extension surface, not a thirteenth family in
-this matrix. `observability.provider`, `observe.event-store`, `observe.evidence`,
+The Docker adapter also provides an internal frozen-execution primitive: capture
+a bounded input tree, build against a pinned image ID and execute as nonroot with
+a read-only root/input, no network, zero capabilities and bounded isolated scratch.
+Receipts bind actual inputs, commands, images and output. Ownership is reported
+before allocation; uncertain cleanup retains an ownership-carrying error rather
+than claiming release. Timeout, cancellation and output limits also terminate
+this invocation's output pipes. The primitive trusts the host runtime, daemon,
+administrators and base image. Ordinary development containers do not acquire
+equivalent isolation; Podman/remote equivalents, skill/tool semantic validation
+and product wiring require separate qualification.
+
+Observability is the thirteenth extension family, supplementing the twelve in
+the table. `observability.provider`, `observe.event-store`, `observe.evidence`,
 `observe.tracing`, and `observe.metrics` expose event/evidence/tracer/metrics
 contracts. Enabled generic and specialized tracing, metrics and event-store
 providers are discovered automatically; registrations of the same object are
@@ -123,6 +134,15 @@ deduplicated. Local JSONL remains the authoritative audit store.
 Workflow and presentation extension points are `workflow.lifecycle`,
 `workflow.template`, `workflow.action`, `surface.cli`, `surface.tui`, and
 `surface.desktop`; a surface registration alone does not mount a UI.
+
+With an observation recorder, optional lifecycle module and extension failures in
+`before-agent`, `after-agent` and `before-publish` append a failed `effect.completed`
+before continuing. The receipt binds the run, phase and module name or extension
+registration index; its reason is fixed and excludes the thrown error and stack.
+Recorder failure stops subsequent hooks. Init/required/fatal failures still block,
+and cleanup keeps its existing reverse-order and strict aggregation rules.
+Cancellation takes priority before the failure receipt; callers without a recorder
+retain best-effort compatibility. Learning hooks surround the plan, not each tool.
 
 ## Observability export
 
@@ -154,9 +174,29 @@ boolean values. Each header value must be an environment reference such as
 `{"env":"OTLP_AUTHORIZATION"}` or a credential reference such as
 `{"provider":"credential.enterprise","name":"otlp-authorization"}`.
 Set the referenced secret to the full header value; raw string values are
-rejected. Omit `headers` for an unauthenticated local collector.
+rejected. Omit `headers` for an unauthenticated local collector. Named header
+references resolve afresh on each actual `endSpan` or `record` export, including
+rotation, expiry and revocation checks. Discovery, activation, health, doctor,
+span start and event capture do not resolve them. Environment references retain
+construction-time capture. One absolute deadline bounds resolution and delivery:
+the earlier caller deadline or configured export timeout. Cancellation and disposal
+prevent late credentials or transport success from completing a failed export.
 `timeoutMs` defaults to 2000 and accepts at most 300000. The host's shared
 5000 ms deadline bounds all exports for one audit record.
+
+The parent run's cancellation signal also bounds event, trace and metric exports.
+A cancelled run starts no queued export, and cancellation stops waiting for an
+in-flight provider even if it ignores the signal. Cancelled exports count as
+`dropped`; an in-flight export that exhausts the shared deadline counts as
+`timed_out`. Late settlement cannot change the saved outcome. Local audit and its
+delivery summary remain durable; cancelling a request cannot undo an already
+accepted remote side effect.
+
+The Artifact audit bridge combines its configured signal with the parent run's
+signal for each append. Cancellation stops event-evidence capture and upload
+waiting without changing another run's signal. The durable source event and
+any existing local evidence remain authoritative; capture cancellation and an
+attempted upload's failure receipt retain their separate accounting.
 
 The host mirrors events only after a successful durable local append. An
 `EventStoreProvider` receives these persisted events; it cannot
@@ -190,7 +230,7 @@ integrations:
 
 Optional `timeoutMs` is an integer from 1 to 60000. Only when root
 `integrations.evidence` selects an enabled, writable Artifact provider does the
-default runtime initialize persistent local encrypted storage and enable
+default runtime initialize persistent local encrypted storage for this Artifact bridge and enable
 `captureEvents: true`. Selection or initialization failure installs a required
 initialization guard that blocks managed execution. Without this selection,
 the bridge does not automatically capture event evidence.
@@ -201,11 +241,42 @@ supported text formats and strips credentials/query/fragment from returned URIs.
 An `effect.completed` record for `artifact.upload` links the source event/sequence,
 local digest, remote reference or safe failure reason. Upload failures/timeouts
 preserve local audit authority; upload receipts do not recursively upload
-themselves. Existing after-agent report hooks remain a separate consumer.
+themselves. A sink that transforms the upload returns `storedContent` with the SHA-256
+and media type of the object at its URI. For `evidence-bundle` this covers the serialized
+JSON manifest. Sinks that preserve bytes and type can return just `uri` and `name`.
+Existing after-agent report hooks remain a separate consumer.
 SDK consumers can select the same bridge with `createPluginRunObserver`,
 `setPluginAuditArtifacts` and `PluginRunObserverOptions`, using
 `createLocalEncryptedEvidenceStore` for persistent local evidence. Key initialization
 is locked and reuses an existing key; text redaction preserves restricted status.
+
+SDK `EvidenceStoreProvider` has a separate explicit root selection without changing
+the ArtifactSink export above:
+
+```yaml
+evidenceStore:
+  provider: private
+  scopes: ["github:org/repo"]
+  timeoutMs: 2000
+  maxBytes: 65536
+```
+
+The registered name must resolve to an enabled `observe.evidence` or
+`observability.provider` supporting both `put/get`. Scopes are 1..32 distinct
+canonical projects without wildcards. Timeout is 1..60000 ms, default 2000;
+the byte limit is 1..1048576, default 65536. Unknown fields are rejected.
+This outlet is off by default; invalid selection installs a required init guard.
+Only new redacted event summaries for selected projects are mirrored: persist
+encrypted local evidence and the event first, then put/get and validate identity
+and hashes. Unselected stores receive no bytes through this outlet. Remote reads
+never replace local content; `evidence.mirror` receipts contain safe outcomes.
+Failures, cancellation and timeouts preserve local authority.
+An accepted saved selection becoming unavailable at runtime stops mirroring while
+new observers still record locally; explicitly invalid selections remain rejected.
+Configuration takes effect in a new Runtime, without hot reload, durable retries or remote-copy
+withdrawal. Cancellation cannot kill a trusted in-process plugin ignoring its
+signal. SDK entry points are `setPluginAuditEvidence` and
+`PluginRunObserverOptions.evidenceStore`; both export selections are independent.
 
 ## Standard manifest and API v1
 
@@ -291,7 +362,31 @@ Acquire resources during activation and register their cleanup with
 `context.onDispose`. Resources created during module import or factory execution
 are outside the activation batch and require factory-owned cleanup on failure.
 
+### External-tool declarations and SDK diagnosis
+
+API v1 manifests accept optional `externalTools`, read statically through `listExternalTools`. `diagnoseExternalTools` executes only with explicit probing and a trusted caller's exact command/argv/location allowlist. Host and backend are distinct execution locations; missing backends never fall back to the host. Unconfirmed cleanup retains `unknown` and `cleanup: unconfirmed`. The [integration standard](plugin-integration-standard.zh.md#21-外部工具声明与诊断) defines fields, deadlines and result contracts.
+
+Desktop notifications declare the actual platform's `osascript`, `notify-send` or `powershell`. An explicit `platform` also selects dependency metadata; probing another platform returns unsupported. These commands and `sendmail` have no version or delivery probe. Email declares the PATH program only for `sendmailPath: "sendmail"`; the default `/usr/sbin/sendmail` and other paths remain `unsupported/custom-binding`, so a different PATH executable cannot qualify the selected path. Windows submits a bounded script with finally cleanup through stdin without requiring the user to dismiss a dialog; native display still needs platform testing. Command success means submission to the local notification system or mail transport, without proving visibility or inbox delivery.
+
+CLI/manager discovery is static by default: `plugin list` does not activate plugins and `plugin doctor` returns static configuration/dependency diagnostics. `--loaded` explicitly retains activation-based inventory and health checks; `doctor --probe` probes only approved builtin host tools. Custom executables show actual configured bindings without automatic probes. Backend diagnostic execution is not wired and never falls back to the host. External dependency installation remains separately qualified; source URLs are informational and never trigger downloads or installation. See [execution entry points](execution.md#execution-entry-points) for flags and JSON shapes.
+
 ## Installation and configuration
+
+Installed plugins activate exclusively by default. For a trusted verification-only
+plugin that requests `concurrentVerification`, an operator can authorize shared
+activation after reviewing its code and dependencies. Use `afk plugin configure
+policy.compliance-policy --builtin --file policy.json` with the complete local
+policy. Add one `sharedVerification` entry containing `plugin` (receipt `id`), `version`, `entry`,
+`integrity` and `treeIntegrity` from the reviewed local `install.json`, a canonical `project`
+such as `github:org/repo`, and the absolute host `workspace`. `entry` identifies
+the installation generation. `integrity` is the SHA-256 of the entry module.
+`treeIntegrity` covers the entire installed generation including nested dependencies. The host SDK link identifies the trusted runtime. Entry-only receipts and grants keep exclusive activation. Reinstallation requires a fresh grant. Keep the existing policy `rules` in the file.
+
+The host checks for one exact match when acquiring the lease, then rechecks the
+project grant and installed tree on each shared verification and tool description read. Each shared activation imports from its own verified temporary copy so lazy imports use the approved bytes. Factories can use `installedEntryUrl` to identify the installation in source-read rules. Removing
+the grant blocks the next call through an existing shared handle. Reading scan
+source also requires `tool.source.read`. Update and removal require all active
+readers to release their leases.
 
 ```sh
 afk plugin install ./project-note
@@ -346,6 +441,15 @@ old installation to a backup, publishes the stage and enables configuration.
 An ordinary failed upgrade restores the old directory. This is not a
 crash-recoverable multi-file transaction, a package-tree signature, or a
 malicious-code sandbox. A process crash can also leave the manager lock behind.
+
+Approved dependency recipes use `afk plugin install-tool browser-check-1.62.1
+--target host-local [--offline]`. This first recipe supports darwin/arm64 and
+Node >=22.16, pins npm sources and integrity, disables lifecycle scripts and
+browser downloads, and verifies the complete installed CLI tree. Browser
+payloads and OS/backend prerequisites require separate provisioning. Its
+provider accepts only the startup workspace or a worktree authorized through
+internal `PluginSystemActionOptions`; action JSON cannot grant that authority.
+Managed removal remains blocked until authoritative reference checks exist.
 
 Configuration lives in `~/.afk/plugins.yml`:
 
@@ -452,6 +556,12 @@ After successful login, `PluginManager.configure` saves builtin
 enablement remain intact. No configuration is written when authentication
 fails. Login does not send a test email.
 
+Configured Gmail requires the exact registered `credential.google-oauth` provider.
+It activates after that dependency and does not create a private authentication
+instance when the provider is missing, disabled or incompatible. Disable Gmail
+before disabling its credential plugin. Inspection and activation do not resolve
+the account, refresh tokens or send mail.
+
 Credentials are stored through the macOS Keychain or Linux keychain service.
 Windows is explicitly unsupported; there is no token-file fallback. Keep
 Keychain access available to the CLI and subsequent notification processes.
@@ -462,6 +572,15 @@ owner PID; after an unclean process termination, remove a stale
 `~/.afk/auth/google-oauth.lock` only after confirming its owner is no longer running.
 Run `node scripts/check-google-oauth-keychain.mjs` after building to verify real
 native Keychain create/update/read/delete with an isolated synthetic record.
+Health/doctor for `credential.google-oauth` and `notification.gmail` are passive:
+they read saved local account metadata without refreshing tokens, acquiring an
+authentication write lock, opening a browser or sending mail. Auth status
+`connected` means a saved record exists; passive `ok` means local metadata is
+ready. Neither proves current Google authentication or Gmail API permissions.
+Expired or refresh-due access tokens report degraded and may still refresh;
+expiry alone does not establish revocation. Invalid records, missing accounts
+and unreadable storage produce sanitized diagnostics. Normal authorized use
+separately validates refresh and delivery.
 Google OAuth and Gmail HTTP requests respect `HTTP_PROXY`/`HTTPS_PROXY` and
 `NO_PROXY` (including lowercase forms). Without explicit proxy variables on
 macOS, they use the system HTTP/HTTPS proxy. Loopback bypasses the proxy;
@@ -537,42 +656,44 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `tracker.linear` | `baseUrl`, secret `token`, `teamId` |
 | `tracker.jira` | `baseUrl`, secret `token`, `projectKey`, `email?`, `issueType?` |
 | `verification.test-runner`, `verification.static-scan`, `verification.browser-check` | Nonempty argv `command`, `timeoutMs?` |
-| `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?` |
+| `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?`. Feishu also accepts an optional `signingSecret` credential reference. |
 | `notification.email` | `from`, `to` email addresses; `sendmailPath?`, `channel?` |
 | `notification.gmail` | `{}` sends to the authenticated Google account; optional email `to` overrides the recipient; `channel?` |
 | `notification.desktop` | `platform?` (`darwin`, `linux`, `win32`), `channel?` |
 | `trigger.webhook` | Secret `secret`, nonempty `triggers[{id,kind: webhook,payload?,input?}]`; `payload` is event filtering and `input` is static action input |
 | `trigger.git-push`, `trigger.issue-event` | Same webhook-kind `triggers`; Git push also accepts `includeDeleted?` |
 | `trigger.schedule` | Nonempty `triggers[{id,kind: schedule,schedule,payload?,input?}]`; schedule is a positive integer millisecond string, at most `2147483647`; `payload` and `input` accept nested JSON |
-| `context.code`, `context.knowledge-base`, `context.project-memory` | Respectively `root`, `endpoint`, `file` |
-| `context.retrieval` | Nonempty `documents[{origin,content}]` |
+| `context.code`, `context.project-memory` | Respectively `root`, `file` |
+| `context.knowledge-base` | `endpoint`, secret `token?`, `timeoutMs?`; bearer authentication requires HTTPS; named credentials resolve on each `gather`, with operation cancellation and deadline; `timeoutMs` bounds HTTP including response-body reads |
+| `context.retrieval` | Nonempty `documents[{origin,content}]`. Both fields are trimmed and must be nonempty and NUL-free. `origin` is single-line, and `content` preserves internal line breaks. |
 | `credential.system-keychain` | `service`, `command?` |
 | `credential.google-oauth` | `{}` uses the Google credentials saved by `afk plugin auth login google --client <path>` |
 | `credential.oauth` | HTTPS `tokenEndpoint`, `clientId`, secret `clientSecret`, `authMethod?` (`client_secret_basic`/`client_secret_post`), `timeoutMs?` |
 | `credential.oidc` | HTTPS `issuer`, `clientId`, secret `assertion`, `tokenEndpoint?`, `timeoutMs?`; optional `exchange:{subjectToken,subjectTokenType,audience?,resource?}` with secret `subjectToken` |
 | `credential.enterprise` | Nonempty `values` map of secret references |
 | `artifact.test-report-local`, `artifact.evidence-bundle` | `root`; evidence-bundle factory wraps the builder as an `ArtifactSink`, mapping `put` to a one-record bundle's `create` |
-| `artifact.object-storage`, `artifact.report-platform` | `endpoint`; report platform also accepts secret `token?` |
+| `artifact.object-storage` | Either `endpoint` or a secret reference in `presignedUrl` |
+| `artifact.report-platform` | `endpoint` and optional secret `token` |
 | `repository.multi-repository` | Nonempty `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`, unique names; optional `managed: {workspaceRoot}` requires each repository's remote URL, base branch and canonical lease key |
 | `repository.remote-workspace`, `repository.special-git-backend` | Respectively `baseUrl` plus secret `token?`, or `backend`; optional `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` selects supported operations |
+| `repository.remote-workspace`, `repository.special-git-backend` for managed execution | Add `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`. The backend creates a linked Git worktree at `<workspaceRoot>/<name>@<runId>` on the canonical absolute shared mount. Supply its absolute Git common directory. Each name must match a lifecycle repository with an explicit source ref. Use the same repository claim store and canonical tracker lease key across workers. See [install and recover the mounted Git service](../../services/mounted-workspace/README.md). |
 | `policy.secret-scan` | Fallback `root`, nonempty `files?`, `maxFileBytes?`; evaluation prefers the trusted lifecycle's `context.worktreePath` |
 | `policy.license-policy` | Nonempty `allowlist`, nonempty `licenses?` |
-| `policy.compliance-policy` | Nonempty `rules[{id,effect,actions?,when?,reason?}]`, `defaultEffect?`; effect is `allow`/`deny`, actions are nonempty, `when` is a scalar equality map |
+| `policy.compliance-policy` | Nonempty `rules[{id,effect,actions?,when?,reason?}]`, `defaultEffect?`, optional exact installation grants `sharedVerification[{project,workspace,plugin,version,entry,integrity,treeIntegrity}]`. Effect is `allow`/`deny`, actions are nonempty, `when` is a scalar equality map. |
 
 Explicit configured entries replace defaults with the same ID. `--builtin`
 validates configuration before saving; validation neither resolves credential
 provider references nor performs authentication/network calls or starts timers.
 Environment references are checked and captured during construction.
 
-Credential references are shape-checked first. At activation the factory looks
-up the exact credential provider in the existing Runtime registry, awaits
-`resolve({name, scope?})` once per referenced field, validates the actual value,
-then registers the consumer. Webhook URL validation runs after the asynchronous
-resolution. Missing providers, invalid results and resolution errors fail
-activation without publishing the consumer or exposing credential errors.
-Values injected through these generic references are captured for that
-activation; operations do not automatically resolve or refresh them.
-Reactivation resolves again. Gmail retains its own OAuth refresh behavior.
+Credential references are shape-checked first. Operation-resolved consumers
+listed under “Secret references and trigger lifetime” bind the exact named
+provider at activation without resolving a value; their operations validate
+fresh values. Other consumers resolve each referenced field during activation
+before publication and retain that value until reactivation. Webhook URL
+validation follows resolution. Missing named providers fail activation; invalid
+credentials and resolver failures for operation-resolved fields fail the operation
+without exposing credential errors. Gmail retains its separate refresh behavior.
 
 The shared composition root batches valid configured builtins. Within that
 batch, specific credential references order credential providers before their
@@ -582,8 +703,22 @@ same-capability `requires` edge for their own references. The shared loader also
 defers configured consumers until their exact named credential providers are
 registered, including providers from installed plugins. Missing or cyclic
 dependencies produce `load.dependencies`; actual resolution failures are not retried.
-Change an environment value or credential source by constructing a new Runtime;
-there is no automatic refresh of an existing consumer.
+Reconstruct configured consumers to recapture environment values or change a
+configured credential source. Operation-resolved fields read fresh values from
+their bound provider; other consumers retain activation-captured values.
+
+Ordinary command verification keeps `target` as its working directory. Optional
+`input` travels through stdin and is limited to 256 KiB of UTF-8; `executionId`
+is an identifier of at most 512 characters. When observation is requested, the
+default native runner returns a `verification-execution-v1` receipt only after
+the direct child closes. It records executionId, launched argv, canonical cwd,
+inputDigest, exit code and separate stdout/stderr; the public dispatcher retains
+that structure. Calls without observation retain their previous result shape.
+Injected runner results are not endorsed as native execution receipts. Cancel,
+signal termination and timeout cannot produce a successful observation; caller
+absolute deadlines apply before launch and after completion. A command receipt
+proves only that direct-child execution, not business assertions, Repository/
+Sandbox binding or learning-asset qualification.
 
 ## Loading, dependencies and disposal
 
@@ -647,7 +782,7 @@ trusted code from mutating global state, reading files or crashing the process.
 | Host operations | Runtime → `getHostProvider(name)` → shared Application host use cases → CLI `host` or a Desktop adapter. `jumpserver` is the CLI default; another provider must be selected explicitly. |
 | Linear/Jira managed import/sync | `IssueTrackerPort` supplies the source issue; `importManagedIssue` creates an idempotent canonical source-host backlog item and `syncManagedIssue` explicitly maps its state back to the bound source. Execution uses the managed repository's tracker/backlog. |
 | Repository lifecycle | `RepositoryLifecycleService.run` wraps the callback with prepare/checkout/publish/cleanup; public `repository.provider/run` dispatches a registered action with the workspace handle/path. |
-| Other capability operations | Typed getters and CLI `invoke` call the permitted operations. Root `integrations` selects policy, context, artifact and notification consumers for implementation and QA; credentials remain private SDK operations and resident triggers run through `listen`. |
+| Other capability operations | Typed getters and CLI `invoke` call the permitted operations. Root `integrations` selects policy, verification, context, artifact and notification consumers for implementation and QA; credentials remain private SDK operations and resident triggers run through `listen`. |
 | Lifecycle modules and system actions | `getLifecycleModules()` feeds engine and QA hooks; registered system actions serve workflow steps and trigger callbacks. Core transitions, audit, retry and the human merge gate remain mandatory. |
 | Templates and surfaces | Registry entries are available to explicit consumers. Registration alone does not replace existing command dispatch, template storage or Desktop rendering. |
 
@@ -686,7 +821,7 @@ owns. The diagram shows these implemented composition and invocation paths.
 | Configured builtin schemas / secret-field mappings | Implemented; concrete fields and examples checked against `configured.ts` |
 | System-step input, `capability.invoke`, required policy hooks | Implemented; negative operation results fail the step; checks run before Agent, after Agent and before publication |
 | Managed execution, QA, loop, schedule, run and Desktop Worker | Implemented; Runtime and registries are propagated into implementation/QA and disposed by their owner |
-| QA lifecycle and publication policy | Required init and before-agent hooks run before verification; context uses a file pointer; successful QA runs after-agent artifact/notification hooks; separate `before-publish` checks precede branch push and change-request publication |
+| QA lifecycle and publication policy | Git remote synchronization precedes implementation/QA Agent execution; required init and before-agent hooks run before verification; context uses a file pointer; successful QA runs after-agent artifact/notification hooks; separate `before-publish` checks precede branch push and change-request publication. Push never merges implicitly; rejection after a remote change preserves the reviewed local HEAD and requires preparation and verification again |
 | Desktop plugin management | Settings calls the shared manager for local/npm install, enable/disable, removal and JSON configuration import; cached inspection is distinct from future Worker state and the static dependency guard. |
 | Desktop external Agent selection | Implemented; menu uses registered providers and save rejects an unknown default/node provider |
 | Desktop Google / experience settings | Main-process services and validated IPC support account lifecycle and scoped verification/revocation; live Google consent/delivery remains an external check |
@@ -727,20 +862,35 @@ same managed operations to workflows.
 `prepare`, `checkout`, `publish` and `cleanup`. Optional `withLifecycleLease`
 wraps the full sequence: `prepare → checkout → callback(workspace) → publish → cleanup`.
 Public `repository.provider/run` input is
-`{repository:{url,ref?},runId,action,input}`; the registered system action receives
+`{repository:{url,ref?},runId,checkout?:{branch?,ref?},action,input}`; the registered system action receives
 `{input,repositoryWorkspace,worktreePath}`. The result is
 `{value,workspace,publication,cleanup}`. This explicit operation does not
 automatically replace the work-item runner.
 
 Managed local repositories use canonical repository leases and checkout
-ownership locks. Handles belong to the provider instance; checkout creates
-`afk/<runId>`. Publish validates the clean branch/commit and configured remote,
+ownership locks. Handles belong to the provider instance. Checkout accepts optional
+target `branch` and source `ref`, defaulting to `afk/<runId>` at the prepared revision.
+Prepare always uses the configured base; managed implementation uses its working branch
+and optional sourceBranch, while independent QA uses the implementation source and its own QA branch.
+Local explicit sources are fetched from the configured remote and pinned to a commit before
+branch creation; without a source, revision drift is refused. Both refs are validated;
+acquisition carries cancellation/deadlines. Publish binds the actual checkout branch,
+and successful checkout updates the unchanged-workspace cleanup baseline.
+Targets cannot equal the configured base. An existing target is reused only at the pinned
+revision; conflicting revisions are refused without reset or overwrite.
+Publish validates the clean branch/commit and configured remote,
 and never merges. Cleanup refuses dirty, relocated, unowned or unpublished work
 and nested worktrees. Remote/special backends must implement the selected
 lifecycle protocol; snapshot-only configuration does not enable it. Following
 checkout/callback/publication failure or cancellation, cleanup uses a separate
 15-second signal. Execution and cleanup failures are both retained; refused
 cleanup preserves the workspace instead of reporting success.
+
+When a Repository callback has no checkout path, its explicitly empty trusted authority
+makes the Verification dispatcher refuse before invoking the provider; it cannot verify
+the startup directory and publish a different repository. Other actions that need no
+local path can still use the remote handle. Independent direct calls that omit the
+authority field retain startup-workspace semantics.
 
 ### CLI invocation whitelist
 
@@ -828,6 +978,44 @@ This is separate from `plugin listen` on port `8374`, which delivers trigger
 events. It does not add agent/sandbox execution to `plugin invoke`'s 48-operation
 whitelist. Clients must implement the remote-container transport protocol.
 
+Provider-managed remote startup uses the host's optional
+`startProviderExecution` to select a registered server Agent; client argv does
+not authorize arbitrary server execution. Resume carries the unmodified
+snapshot actually captured by the same Sandbox and an optional continuation
+prompt. Generation must equal the captured generation plus one. The client
+checks capture provenance; the server rechecks native identity, provider,
+worktree and snapshot contents, and confirms old execution cleanup before
+starting its successor.
+
+`sandbox.create` can return canonical-host `worktreePath` separately from actual
+native-cwd `workspacePath`. The client retains both: Provider startup binds the
+host, while container commands and Codex `-C` use native cwd. Older responses
+fall back through their existing fields. Checkpoints bind both namespaces;
+capture additionally accepts the bound native cwd with trailing slashes removed,
+preserving `/`, strict host matching and the original checkpoint. Legacy
+same-namespace responses remain compatible.
+
+Remote provider startup accepts an omitted/default runtime or strict Codex exec
+settings, preserving provider, profile, auth and startupTimeoutMs. Analysis,
+app-server, endpoint, authTokenEnv and cross-provider settings are rejected;
+remote selection cannot start a local app-server. The wait response can carry
+the actual server execution metadata. After provider validation, the client
+uses that metadata without promoting a logical result session to a native
+thread ID. Older responses without metadata keep native identity unknown.
+Remote execution telemetry never reads the client's local transcripts.
+An authoritative failure that invalidates native identity also revokes saved
+snapshots. In-flight capture responses cannot restore that identity or enable
+resume; a new execution starts with independent session state.
+
+`context_high` and interrupt retain occupancy and the deadline; a terminal
+event cannot replace actual stop acknowledgement. Stop failures remain
+retryable, successful explicit kill clears the stop error, and a late failure
+from an earlier deadline cannot poison a stopped, terminal or superseded
+execution. These stop contracts use loopback and controlled Node fixtures.
+Ordinary local descendant tracking has been exercised on macOS with default
+environment inheritance; it is not hostile-code isolation or vendor-live
+qualification.
+
 ## Workflow and root integration recipes
 
 The examples use the configured factories, system actions and lifecycle hooks
@@ -878,7 +1066,7 @@ successful verification or an accepted policy. Downstream dependencies must
 observe that failed step. These checks supplement independent QA and the human
 merge gate; they do not replace either.
 
-### Configure policy gates and the agent context reference
+### Configure policy and verification gates and the agent context reference
 
 `integrations` is a root key in `~/.afk/plugins.yml`, alongside `plugins`; it is
 not a plugin entry's `config`. These selections refer to registered provider
@@ -890,6 +1078,10 @@ integrations:
     - provider: secret-scan
       input:
         action: pre-execution
+  verifications:
+    - provider: test-runner
+      command: [npm, test]
+      timeoutMs: 120000
   contexts:
     - provider: context.code
       query:
@@ -903,6 +1095,26 @@ Policy entries contain `{ provider, input }`; context entries contain
 providers; their concrete filesystem roots, settings and transports are still
 constructed by the configured factory. Do not add constructor fields to
 `integrations` or assume it creates a missing provider.
+
+`verifications` defaults to an empty list, with at most 32 entries containing
+only `{ provider, command?, timeoutMs? }`. The command is an argv array without
+shell expansion: its first item must be a nonblank executable and no argument
+may contain NUL. `timeoutMs` must be a positive integer. Omitted commands and
+timeouts use the selected Provider's defaults. Configuration cannot supply
+`target` or `passed`; the host binds the target to the actual execution worktree.
+A missing or disabled saved selection fails required initialization.
+When policies or verifiers are selected, a disabled, missing or replaced
+integration-gate module also fails initialization. Remove the corresponding
+saved selections to stop those gates; disabling the module alone cannot bypass them.
+
+Selected verifiers run after policy checks in `after-agent` and on every
+`before-publish` invocation. A false `passed`, exception or malformed result
+blocks that phase. An after-agent failure prevents subsequent artifact uploads
+and notifications; a publication failure blocks the corresponding push or
+change-request operation. Unselected verifiers do not run automatically, and a
+new Runtime reloads saved selections. Providers enforce command timeouts; this
+configuration does not add a global session-cancellation protocol. Ordinary
+executor success does not grant independent validation for learning assets.
 
 The managed policy lifecycle hook must use `failureMode: required`, so a denied
 decision, missing selected provider or failed evaluation blocks execution.
@@ -955,6 +1167,8 @@ replacement for evidence classification and redaction.
 
 ### Secret references and trigger lifetime
 
+For an object storage PUT URL issued by your storage service, configure `artifact.object-storage` with `{"presignedUrl":{"env":"OBJECT_UPLOAD_URL"}}`. A credential-provider reference also works. Set the variable in the invoking process or let the credential provider supply the URL per upload. The URL targets one object key, and the artifact name does not change that key. Use HTTPS for remote storage. Plain HTTP is accepted on `127.0.0.1` and `::1` for local storage. The returned artifact reference contains the object URL without its signature query.
+
 Configured secret values use either an environment reference, for example
 `{"env":"PROVIDER_TOKEN"}`, or a credential reference such as
 `{"provider":"credential.enterprise","name":"deployment"}` with optional
@@ -963,6 +1177,47 @@ expression is not the secret-reference syntax. The actual secret field
 names and supported provider settings belong to `configured.ts`; complete
 provider configuration examples must follow that implementation rather than
 guessing constructor-to-YAML mappings.
+
+Named references in OTLP headers, ReportPlatform tokens, Feishu/Slack webhooks,
+OAuth client secrets, OIDC assertions/exchange subject tokens, enterprise credential values and
+`context.knowledge-base.token` resolve on each operation. Knowledge-base bearer authentication
+requires HTTPS; anonymous access accepts HTTP(S). Its `deadlineAt` bounds credential resolution
+and HTTP; `timeoutMs` bounds HTTP including response-body reads.
+Named references in HTTP `sandbox.remote-container.token` and
+`repository.remote-workspace.token` resolve before every actual HTTP request,
+including container active health, repository snapshots and lifecycle preflight
+snapshots before publish/cleanup. Container health success does not establish
+execution readiness. Container CLI transport has no bearer token field; container
+HTTP transport accepts HTTP(S), while repository bearer authentication requires
+HTTPS (anonymous repository requests may use HTTP).
+These operation-resolved fields
+also accept an offset-aware ISO `expiresAt` on the reference. Activation and static
+inspection do not resolve them. Each operation checks reference and returned
+credential expiry, rejects `revoked: true`, forwards cancellation and the absolute
+`deadlineAt`, and rejects values arriving after that consumer activation is disposed.
+Enterprise forwarding retains the earlier reference or upstream expiry. Environment references
+are captured by schema preparation, not each operation; OIDC timing is detailed below. Other named-reference consumers retain activation-time
+resolution. Gmail retains its separate refresh flow. Disposal cannot undo requests
+already sent or forcibly stop an uncooperative credential resolver.
+
+Configured OIDC activation binds both exact named credential owners without resolving
+either input. Every actual `resolve` discovers and validates the exact HTTPS issuer,
+endpoint and optional endpoint pin before preparing fresh inputs. Discovery, assertion
+and subject preparation, token exchange and response-body consumption share one absolute
+budget: the earlier caller `deadlineAt` or configured `timeoutMs` (default 15 seconds,
+maximum 300 seconds). Input expiry can shorten the remaining preparation/exchange budget;
+expiry, revocation, cancellation and disposal prevent an accepted late result. Issued
+access-token expiry still comes from the token response, independently of input expiry.
+Direct string inputs and legacy `assertion(ref, tokenEndpoint)` / `subjectToken(ref)`
+callbacks remain supported. Callbacks may additionally accept operation options as the
+third/second argument and return `CredentialValue` metadata instead of a string.
+
+OIDC follows existing `defineOperation` environment capture semantics: environment-only
+configuration captures values when `createConfiguredPlugins` constructs it. If either
+input is a named reference, dependency preparation reparses the whole OIDC configuration
+at each activation and captures environment inputs again then. Neither case rereads the
+environment on each OIDC resolve. Reactivation registers a new OIDC provider; old
+provider references and pending operations remain disposed.
 
 A trigger plugin entry selects a registered `workflow.action` through its
 top-level `action` field, alongside `id`, `enabled`, `builtin` and `config`.
@@ -992,7 +1247,11 @@ duplicate flag; this acknowledges receipt, not completed work.
 
 Delivery identity combines provider name with `Idempotency-Key`,
 `X-GitHub-Delivery`, `X-GitLab-Event-UUID` (in that order), or a body hash.
-Reusing an ID with different bytes returns `409`. A private, single-owner
+For a Gitea `opened` issue with matching Gitea and GitHub delivery headers and no
+explicit key, a byte-identical redelivery to the same provider returns the retained
+receipt even if Gitea assigns a new UUID. Each new UUID consumes one record slot
+and expires when the original receipt is pruned. Reusing any retained ID with
+different bytes returns `409`. A private, single-owner
 SQLite queue retains `pending/processing/delivered/failed` states and recovers
 interrupted deliveries. Defaults are five attempts, 1000 ms retry delay, 10000
 retained rows and 64 MiB payloads. There is no automatic silent eviction: a full
@@ -1028,6 +1287,21 @@ runtime; pending queue entries survive restart. Interval timers remain
 process-local and do not backfill downtime. Callback completion still depends
 on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `TriggerQueueOptions` and
 `TriggerDeliveryStatus` for delivery context, queue limits and receipt contracts.
+
+### First connection to Slack, Feishu, Linear and Jira Cloud
+
+1. Choose a provider and create its credential using the official entry point. Supply the secret or complete webhook URL through the environment of the AFK process. Store the environment reference in the settings file.
+
+| Plugin ID | Obtain the configuration | `settings.json` contents (replace the sample target) |
+| --- | --- | --- |
+| `notification.slack` | Create an app in the test workspace, enable Incoming Webhooks, select an authorized test channel and copy the generated URL. [Slack apps](https://api.slack.com/apps) · [Webhook setup](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
+| `notification.feishu` | Add a custom bot in the target group's bot settings and copy its webhook into `FEISHU_WEBHOOK`. Under Security Settings, enable signature verification and copy the generated secret into `FEISHU_SIGNING_SECRET`. Omit `signingSecret` for an unsigned bot. Include any required keyword in the message. For error 19021, check the signing key and the sender's clock (the timestamp must be within one hour). [Feishu custom bots](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"},"signingSecret":{"env":"FEISHU_SIGNING_SECRET"}}` |
+| `tracker.linear` | Create a personal API key with read access to the target team and store the raw key. Run `query { teams { nodes { id name } } }` in the authorized workspace and select the team's `id`. [Linear API settings](https://linear.app/settings/api) · [GraphQL guide](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
+| `tracker.jira` | Create an account API token and supply the same account's email and the project key. Use the site root for an unscoped token or `https://api.atlassian.com/ex/jira/CLOUD_ID` for a scoped token. The adapter appends the REST path and builds Basic authentication from the email and token. [Create token](https://id.atlassian.com/manage-profile/security/api-tokens) · [Token and gateway guide](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
+
+2. Save the chosen JSON as `settings.json` and run `afk plugin configure <plugin-id> --builtin --file settings.json`.
+3. For a tracker, save `{}` as `empty.json`. Run `afk plugin invoke tracker.issue <linear-or-jira> health --input empty.json --json` and check for `status` equal to `ok`. Save `{"issueId":"DEMO-123"}` as `issue.json`, substituting a known authorized test issue. Run `afk plugin invoke tracker.issue <linear-or-jira> getIssue --input issue.json --json` and verify the returned issue. Both operations are read-only.
+4. For a notifier, confirm the webhook's destination accepts a test post. Save `{"title":"Plugin connection test","body":"Check CHECK-001"}` as `message.json`, substituting a unique check ID. Run `afk plugin invoke notification.provider <full-plugin-id> notify --input message.json --json`. Check for `delivered: true` and confirm the same ID in the destination group or channel.
 
 ### Complete configured example and scheduled invocation
 
@@ -1163,6 +1437,10 @@ does not execute the managed action or enforce its lifecycle policy gates.
 
 ## Operational limits
 
+JumpServer's read-only health returns `unknown` when `jms` is present, identifying binary availability separately from unverified authentication and target access. A missing binary remains `degraded`. The probe does not log in, list assets, execute remote commands or return the local executable path.
+
+Inventory and doctor do not create the local report root or initialize audit encryption storage. Report health inspects the existing directory; a missing root is degraded. A managed lifecycle init or actual evidence read/write initializes the private audit store on demand. Initialization failures remain visible and permit a later operation to retry; event export retains its existing best-effort semantics.
+
 - Trusted local modules execute with the host process's filesystem, environment
   and network access. `trusted: true`, npm `--ignore-scripts`, entry containment
   and an entry hash do not establish a security sandbox or publisher trust.
@@ -1212,6 +1490,8 @@ Implementation, QA/conflict resolution and CLI graph generation can select regis
 
 Selected reference context retains source identifiers and is capped at 32,000 characters per file; the lifecycle retains at most 64 bounded fragments per worktree. Experience retrieval selects at most five records within an 8,000-character serialized-record budget. Prompts carry short file references and remain subject to the provider's prompt limit. Only relevant, unexpired, verified records from the exact canonical project enter this context. The implementation runner audits a supplied experience context as `decision.made` with command `experience.recall`.
 
+Local Code, Retrieval and Project Memory ranking supports Chinese word segmentation alongside English queries, sharing the experience-recall tokenizer and filtering generic question words from the added Chinese terms. Experience recall applies its own relevance, exclusion and applicability filters after segmentation; a generic Context match does not grant experience verification or publication authority.
+
 Structured runner failures, including intermediate retryable failures, automatically create candidates with run/work-item provenance. A shared SQLite ledger isolates projects across checkouts and stores bounded redacted diagnoses and evidence references. It does not copy transcripts. Bounds are 1,000 records, 8 MiB logical payload/receipts, 32 KiB per record, 256 source identities per record and a default 90-day validity period. Eviction prefers expired and unverified records.
 
 `experience verify` requires an intact local audit chain, the same project, independent QA that started and passed, and additional evidence. The run must then finish successfully or publish a confirmed change and reach its matching human merge gate. Later QA or terminal failure disqualifies it. Experience verification never closes the human merge gate. Implementation success alone does not promote advice. Text corrections preserve the original failure identity; new evidence of recurrence withdraws verified state. Verification history prevents replaying earlier proof after recurrence. At the 256-source provenance limit, another recurrence still withdraws advice and blocks further promotion. Revoked and expired advice disappears from later context. Retrieval is lexical; no model weights are trained and no embedding service is created. The knowledge-base HTTP provider remains a retrieval adapter without generic remote writeback.
@@ -1229,8 +1509,98 @@ are required before recall.
 `experience metrics` separates retained-record retrievals, explicit adoptions
 and deduplicated recurrences. CLI `experience adopt` checks an intact audit for
 the exact target run/work item and requires a live verified lesson in scope;
-receipts deduplicate by run/work item and cap at 64 per lesson. Recall is not
-adoption; acknowledgement does not prove the model applied the lesson.
+receipts deduplicate by run/work item and cap at 64 per lesson. Its JSON retains
+`retrievals`, `adoptions` and `recurrences`, adding
+`receipt: { binding: 'verified-version', experienceId, scope, source, version: 2, verificationDigest, contextDigest, contextStatus: 'recorded' | 'unavailable', acknowledgedAt, publication? }`.
+New receipts persist `source: { runId, workItemId }`. Published lessons also persist
+the exact `publication: { key, candidateId, validatedVersion, candidateDigest, evidenceDigest, validatorVersion, targetRef }`;
+ordinary experiences omit it. Replay checks the saved consuming task and current publication
+binding; missing, tampered or foreign bindings reject. Existing version-1 bound receipts
+replay in their original format, without backfilling unsaved source/publication or counting again.
+`verificationDigest` is SHA-256 of canonical verified content, verification
+evidence and required applicability; `contextDigest` hashes the canonical actual
+target context when recorded (`contextStatus: 'recorded'`). When context is
+missing, it hashes canonical `{}` with `contextStatus: 'unavailable'`; no target
+is invented. `contextStatus` is additive to the bound receipt format. Repeating
+the same source with unchanged verified version and
+context returns the saved receipt and timestamp, counting once. Changed
+verification/version or target context conflicts; receipts are never relabelled.
+Corrupt bindings reject. Historical `metric`/`metric` receipts return only
+`{ binding: 'legacy-unbound', experienceId, scope, source }`, without invented
+digests/timestamps, another count or an upgrade.
+
+Managed workflows and independent QA persist separate version-one context events for builtin
+`context.experience`: `retrieved` means verified records actually returned; `selected` means
+nonempty fragments remained in the reference file and the executor accepted a task referencing
+that file, including a successful native resume. Both bind the target run/work item, selection ID,
+verification/context/fragment digests and timestamp; published experiences also bind their full
+publication identity. Retrieval compares the recalled record snapshot transactionally before
+binding the rendered fragment; concurrent reverification rejects rather than relabelling it.
+The run and work item come from one execution context. A conflicting work item is rejected
+before changing the reference file; retrieval-feedback failures propagate through Workflow
+and QA instead of becoming optional-context warnings.
+Selection retains the original retrieval snapshot and fragment digest.
+Ordinary searches only increment retrieval metrics; a generic Provider's display `origin` grants
+no experience identity. Each experience retains at most 128 context events. Equivalent replay
+preserves its timestamp; conflicts and capacity failures roll back without silent eviction.
+History remains readable after revocation, without granting fresh retrieval eligibility.
+Budget rejection or execution-start failure produces no selection. Feedback failure after
+execution acceptance stops the run with an explicit incomplete-feedback error; changed reference
+files also refuse confirmation. The expected reference digest comes from the serialized bytes,
+not a path reread after writing. Confirmation checks a regular file and reads bounded bytes
+through the same handle, using no-follow opening where the platform supports it.
+Dispatch and SQLite persistence are not a cross-system transaction.
+Selection proves neither model reading nor adoption or benefit. This currently covers the builtin
+experience Provider, with no generic plugin-feedback protocol or new CLI command.
+
+Persisted `run.finished`, `qa.failed` and `failure.classified` events now derive version-one
+outcome receipts for actual builtin experience selections. Each receipt preserves its full
+historical `selected` snapshot, event run/sequence/hash/type/outcome, occurrence and observation
+times, recurrence flag and `benefit: 'unknown'`. The exact scope/run/work item and intact local
+audit must match; both event times must follow selection. Only system/CLI/loop-owned events
+qualify, and learning-purpose events do not feed back. Retrieved-only context produces no
+outcome receipt. A matching failure identity may withdraw the selected experience's verified
+state; an unrelated failure is not attributed as its recurrence. Failure aggregation and
+outcome insertion share one SQLite transaction. Event replay preserves original timestamps
+and recurrence, while changed content at the same sequence conflicts. Each experience retains
+at most 256 outcome receipts within the existing store bounds. Historical selections remain
+readable after correction or revocation; they grant no fresh retrieval authority.
+After trusted QA starts and passes, publishing a change and opening its matching merge gate in the same attempt records `awaiting_merge`. Benefit remains `unknown`.
+
+The plugin observer derives feedback after audit persistence through the configured builtin
+Provider, even with model-based learning disabled. A derived-write failure retains the audit
+for explicit replay; it does not suppress enabled learning capture. Canonically identified
+standalone QA owns its start/QA/terminal audit when no caller supplies that ownership; managed
+QA retains caller ownership. Cancellation and cleanup failure cannot report successful QA
+completion. Successful execution does not increment adoption or establish causal benefit.
+Negative-benefit evaluation, new-version remediation and real cross-Agent reuse remain separate
+acceptance work.
+
+`verifyAdoptionRun` returns
+`{ actual: ExperienceQueryContext, verified?: ExperienceQueryContext }`.
+The exact task's trusted QA target snapshot supplies `actual`, including during
+an active run without completed QA. A trusted successful QA/completion audit
+additionally supplies `verified` only when the target is clean and its revision
+matches the recorded QA commit. Missing context yields `actual: {}`; agent-authored
+target claims cannot supply trusted context.
+
+Store adoption binds `actual` and always checks compatibility against `actual`
+before both a new receipt and an idempotent replay. For unchanged actual context,
+compatibility is consistent before and after QA; lessons without stored
+`applicability` also cannot bypass known `productVersions` compatibility checks.
+Lessons with stored `applicability` or a publication binding additionally require successful QA and
+matching applicability in `verified`, which must match `actual`; a recorded
+active snapshot alone cannot qualify them. An envelope with mismatched `actual`
+and `verified` is rejected. Ordinary lessons without stored `applicability` or a publication binding can still be
+explicitly acknowledged against an intact active run, including with unavailable
+context, subject to the actual-context compatibility check. Stored adoption
+run hashes are excluded from failure-source provenance: a later independent
+failure in that target run can still count as recurrence, and adoption alone
+does not disqualify independent QA. Receipt byte accounting uses actual stored
+text sizes within the shared ledger bounds. Adoption remains explicit
+acknowledgement, not observed use or outcome. Published lesson projections bind
+the CandidateStore candidate, validation version and actual publication identity;
+ordinary experiences do not acquire publication authority.
 The managed runner can also record a success lesson from an intact independent
 QA/completion audit, with workflow/commit/change references where recorded.
 Successful implementation alone still cannot create verified advice.
@@ -1238,3 +1608,214 @@ Successful implementation alone still cannot create verified advice.
 Implementation workflows execute the compiled Agent/System plan. The specialized `pre-merge-qa-verification` and `merge-conflict-resolution` templates each require exactly one inline Agent step; unsupported multi-step, System or file-prompt shapes fail before launching the reviewer and cannot silently omit checks.
 
 `observe` and `retro` inspect execution/session evidence; `experience` governs derived advice. These controls apply to sessions owned by AFK, not arbitrary sessions started directly in Agent CLIs. Desktop shares execution behavior and scoped experience verification/revocation; exchange and adoption use the CLI. The executable guarantee is evidence retention, scoped verified retrieval and withdrawal, rather than a promise that a model never repeats a mistake. See the [testing guide](../guides/testing.md) for the verification layers.
+
+### Session-distillation plugin kernel
+
+Desktop's fixed `learning` API provides project/job/candidate queries, independent validation and knowledge prepare/publish/reconcile. Main checks projects against work-item inventory, rechecks scope and candidate versions around operations, and projects bounded metadata; raw evidence, configuration and publication recovery paths stay outside IPC. Each operation owns a short-lived Runtime and prevents plugin file/enablement changes until disposal completes. This entry point does not start a distillation Worker; queries do not call a model. UI and complete Electron learning acceptance remain separate plan gates.
+
+`learning.distiller` uses the existing `workflow.action` protocol and defaults to disabled. It declares and registers `context.provider` only when saved `knowledge` configuration is present, so dependency checks cannot count an unconfigured knowledge provider. Base configuration is `{ enabled: false, provider: "claude-code", dailyCalls: 20, timeoutMs: 120000, executionContexts: [] }`; optional `knowledge` configuration is described below and unknown fields are rejected. Currently only Claude Code qualifies for the `analysis` profile; other Providers return `analysis_unsupported`.
+
+`executionContexts` stores trusted conditions for at most 64 unique projects, for example:
+
+```json
+{
+  "executionContexts": [{
+    "applicability": { "environment": "ci", "version": "knowledge-v2" },
+    "target": {
+      "project": "github:acme/api",
+      "productVersions": { "sqlite": "3.45" },
+      "runtimeVersions": { "node": "22.16" },
+      "conditions": { "transactional": true }
+    }
+  }]
+}
+```
+
+Default implementation and QA obtain these conditions through the configuration action and supply experience/knowledge consumption. Explicit context fields from trusted callers take precedence. Projects must match the work item and prepared repository; Git revision/dirty are observed from the actual worktree and cannot be configured. Version maps and conditions are bounded to 32 entries each; unknown fields, duplicate projects and invalid scopes are rejected. Prompts do not supply these conditions; inherited target/applicability properties are rejected at consumption boundaries. Disabling automatic learning still permits valid asset reads; disabling the plugin removes this action.
+
+Committed lessons are projected idempotently into ExperienceStore in the same learning directory. Bindings include the actual publication key (including a navigation successor), candidate ID/digest, validated version, evidence digest and validator version. Retry preserves the experience ID, expiry, metrics and adoption receipts; reconciliation never re-enables revoked experiences. Recall and adoption, including saved-receipt replay, recheck current source, QA, configuration, authorization, content and applicability. Historical visibility does not imply current eligibility. Version labels and environments use their validated ranges; a consumer revision need not equal the source QA revision. Contexts containing named productVersions/runtimeVersions are rejected until compatibility evidence supports those mappings.
+
+Production callers supply a trusted home and reread its single enabled builtin learning.distiller entry on consumption. config.enabled:false disables automatic learning while permitting eligible reads. An explicit custom experience file without home or trusted knowledge settings never falls back to the real user home. Publication-bound records are excluded from v1 export; copy and ordinary verify cannot transfer or grant their publication authority. If Wiki commit succeeds but projection fails, publication returns its committed receipt with experienceProjection.blocked; reconciliation reports experience_projection_blocked and can repair missing projections. Cancellation after commit preserves the original abort reason; later reconciliation can restore the projection.
+
+After Desktop publication or reconciliation returns a valid result, a failed candidate reread returns `candidateRefresh: "unavailable"` while preserving the checked publication receipt and projection blockers. The view reports that the result is retained but current data could not be checked, clears stale candidates and publication previews, and permits explicit reconciliation without automatically publishing again. Malformed responses and invalid candidate versions still fail; successful rereads retain scope/version checks, and the final project-permission check also covers the unavailable branch. This does not preserve results across Runtime disposal or final project-query failures, nor confirm current candidate state.
+
+| Standard action | Input | Behavior |
+| --- | --- | --- |
+| `learning.settings` | `{}` | Return an independent copy of instance configuration |
+| `learning.context` | `{ scope }` | Return a copy of trusted execution conditions for the exact project, or `{}` when absent; no model call |
+| `learning.distill` | `{ request, pack }` | Validate the evidence snapshot and persist a private inbox request without calling the model |
+| `learning.capture` | `{ scope, runId, eventRoot? }` | Reconcile verified audit for the exact project/run and atomically save requests with the scan cursor; return current snapshot `requestKeys`, including unchanged replay |
+| `learning.reconcile` | `{ scope?, runId?, eventRoot? }` | Reconcile missed sources and recover configured, authorized knowledge publication/withdrawal; return source results without calling the model |
+| `learning.jobs` | `{ scope }` | Query exact-project requests, blocking reasons and analysis attempts |
+| `learning.candidates` | `{ scope }` | Query exact-project candidates; model output cannot grant validation or publication state |
+| `learning.request` | `{ scope, requestKey }` | Query one exact request and its processing receipt; return only candidates named and bound by that receipt |
+| `learning.validate` | `{ scope, candidateId, expectedVersion, checkerId }` | Resolve verifier, grant and actual target from trusted configuration; run independent assertions and reject client results, commands or target overrides |
+| `learning.worker.once` | `{}` or `{ scope, requestKey }` | Process eligible requests globally or process only the exact request; unrelated queued deliveries remain untouched in targeted mode |
+| `learning.retrospective` | `{ scope, runId, kind: "process" \| "lesson" \| "skill" \| "tool", checkerId, workItemId?, repair?: true }` | Reconcile one run, require one current request and independently validate its receipt members of the selected kind; process/lesson prepare knowledge publication, skill/tool return exact validation receipts without publication preparation; never publish automatically |
+
+Retrospective rejects blocked, absent or ambiguous capture, a mismatched source run,
+missing processing receipts, ineligible candidate states and failed validation.
+For process/lesson, preparation uses the actual validated version. A validated
+replay rechecks current source, configuration, authorization and the requested
+checker before preparing.
+Blocked outcomes throw rather than completing a workflow step successfully.
+Capture keys exclude historical snapshots; new failed sources require the explicit
+repair opt-in below. Production fact publication remains disabled; this action
+does not grant new publication authority.
+
+Skill/tool require saved `validation` configuration but do not require `knowledge`.
+Before validating any candidate, the action checks all same-kind candidates in
+the exact processing receipt: an already `validated` candidate throws
+`learning_proposal_revalidation_required`; any other non-`candidate` state throws
+`learning_candidate_not_preparable`. Successful results return
+`{ scope, runId, requestKey, processing, validated }`, where each exact receipt
+contains `status: "validated"`, `candidateId`, `candidateVersion`,
+`validatedVersion`, `executionId` and `receiptDigest`; they do not return `prepared`
+or prepare knowledge publication. Existing checker and authorization guards
+still apply. These receipts do not establish publication or installation.
+
+Partial-validation failure contract: after any
+successful skill/tool validation in the current invocation, interruption raises
+`LearningReviewIncompleteError` with strict safe output
+`{ status: 'incomplete', scope, runId, requestKey, validated, interruptedCandidateId, reason }`,
+where `reason` is `'validation_blocked' | 'validation_failed' | 'cancelled'`.
+`validated` contains only exact successful receipts returned in this invocation;
+no historical receipts are synthesized. CLI review must print only this safe
+JSON after its owned Runtime's `dispose` attempt has settled, including when
+disposal fails, and exit nonzero. The Runner remains failed/cancelled; after a
+partial incomplete result, it must not dispatch subsequent system actions,
+including recovery actions gated on `when: { step: 'review', equals: 'failed' }`,
+or run the after-success Hook. The interrupted
+candidate may itself have committed validation before cancellation; inspect
+authoritative candidate state rather than assuming rollback. Reentry still
+rejects mixed candidates containing prior `validated` state with
+`learning_proposal_revalidation_required`; this is not a resume route and does
+not close skill installation or publication.
+
+The product review entry supplies canonical `scope/workItemId`, source `runId`
+and saved `checkerId`. `experience review --kind success|repair|skill|tool`
+defaults to `success`: success/repair select `success-review-preview` (process)
+and `repair-review-preview` (`kind: "lesson", repair: true`); skill/tool select
+`skill-optimization-validation` / `tool-optimization-validation` with the matching
+candidate kind. Repair requires saved checker
+`qa.repair.failure` and `qa.repair.fix` pins, each `{ runId, root, auditDigest }`,
+alongside independent QA's own `qa.runId/root/auditDigest/targetRevision`.
+The three role run IDs must be distinct and the selected source must match the
+saved failure in the exact project/work item. This route captures the failure
+from its saved root with failed intake explicitly enabled, persisting
+`reason: "failed"`; ordinary capture does not admit new failed sources.
+
+Retrospective source capture and targeted Worker execution do not run publication
+recovery, including on replay. Exact correction/import requests without a source
+run are processed without a global capture fallback. Both actions honor caller
+cancellation and plugin disposal; cancellation stops subsequent stages but does
+not roll back completed intake, validation or preparation records. Session roots
+come from the trusted host home configuration throughout capture, validation,
+publication, Context reads and recovery; action DTOs cannot override them.
+
+Learning-only templates declare `purpose: learning` and contain only explicit
+system steps with registered `learning.*` actions. They use the public runner's
+learning lifecycle and forward `input` directly with authorized-workspace and
+cancellation options; they do not claim source work or create implementation
+resources. The template purpose is validated before hooks and side effects.
+Lifecycle modules opt in with `purposes: ['learning']`, or both learning and
+execution; omitted purposes retain execution-only behavior. Step deadlines are
+cooperative and cleanup awaits started actions before recording the terminal
+outcome. A learning run cannot reuse a source run ID declared in its step inputs,
+including a valid single workflow envelope; preflight and dispatch share envelope
+normalization and the source identity schema, including trimming. Duplicate step
+IDs fail graph compilation before audit or hooks.
+Fatal audit failures stop pending sibling dispatch while awaiting started actions.
+Terminal persistence failures retain prior hook and cleanup errors.
+
+Learning actions accept their strict DTO directly or once inside an execution-workflow
+context `{ iid, worktreePath, branch, targetBranch, step, input }`. The learning
+registration boundary requires a positive integer `iid`, nonempty workspace and
+branch fields, own `step` and `input` properties, and a valid system step whose
+action matches the invoked action. Unknown envelope fields and nested DTO fields
+are rejected; recursive envelopes are not unwrapped. Templates put the DTO in
+`input`, including explicit `{}` for empty inputs. Context metadata grants no
+validation, execution or publication authority. Other plugin actions continue
+to receive the complete workflow context.
+
+The Worker uses the existing durable delivery queue, atomically reserving the UTC daily budget and recording an attempt before execution. Completed-request replay makes no extra model call. Unfinished prior attempts retain unknown outcomes and block automatic retry; absent usage is not zero. Plugin disposal cancels Workers owned by that instance.
+
+New requests, Evidence Packs and scan cursors commit in one SQLite transaction. Snapshots count toward pending and total byte limits; failures roll back together. Ledger version 2 preserves version-1 requests and legacy file-snapshot reads; older writers refuse upgraded ledgers. Budget reservation rechecks source blocks inside the transaction. Retry/reconciliation clears use expected-reason comparisons so they cannot overwrite newly arrived source invalidation.
+
+Analysis uses a fresh temporary directory and session with tools, MCP, automatic skills, Hooks and session persistence disabled; `retro` shares this executor. Input is a bounded, redacted Evidence Pack with source digests. Findings must cite exact evidence IDs from that snapshot. `goal_complete` is transport completion, not verification authority.
+
+When enabled, the Observer captures completion, human merge gates, verified merges, late sessions and QA failures after durable audit persistence. Intake failures report degradation without changing the original task result; the one-shot Worker entry reconciles missed audits before starting. Duplicate terminal events and identical session telemetry do not resubmit; additional session evidence creates a new checkpoint. Late failures block related requests and conflict their candidates. Only explicitly recorded transcripts within managed roots are read; learning-purpose runs cannot trigger learning. Current-user corrections use trusted CLI/UI use cases; authorization claims inside transcripts grant no authority.
+
+Reconciliation registers managed audit roots, recovering missed events and deleted known sources across custom roots after restart. Explicit imports without managed scan records are not treated as missing audits. Root ownership conflicts return `source_not_allowed` without withdrawing another root's source. Concurrent appends and incomplete trailing records return `audit_unstable` and temporarily block requests; verified rescans clear only `source_unstable`. Failures/tampering in the complete prefix still invalidate immediately and cannot hide behind a partial tail; `source_invalidated` never clears automatically. Degraded diagnostics persist per source across unrelated healthy targeted scans.
+
+Reconciliation returns `checkedSources` with the exact audit root and run identities that completed evidence revalidation; an unfinished QA round emits no such confirmation. Only checked identities clear retained capture diagnostics; a successful scoped repair also clears that source's earlier global-scan failure without clearing other sources. Path-resolution errors preserve temporary filesystem error codes while sanitizing messages. SQLite sidecar checks retry an observed unlinked owned regular file at most twice; the database itself, persistent unlinked metadata and unsafe replacements remain rejected.
+
+Normal admission is capped at 2,000 records/32 MiB. Source invalidation atomically blocks its request and conflicts derived candidates with immutable version history; transient source blocking and invalidation may use a safety reserve capped at twice the normal record/byte limits. Repeated invalidation is idempotent, and ordinary work, model calls, validation and publication cannot borrow the reserve. The SQLite main file has a 128 MiB physical cap for payloads and page overhead. Exhaustion of the safety reserve or actual disk capacity rolls back the transaction and reports storage failure.
+
+The Worker supports startup/periodic reconciliation, active cancellation and controlled retry. Native analysis currently requires Darwin and `/usr/bin/sandbox-exec`; unsupported platforms fail before launching analysis. The process guard denies descendants and detects Worker loss. Earlier live local Claude kernel evidence covered authentication, candidate generation, replay deduplication, source invalidation and nonexecution of transcript injection, malicious Hooks and MCP. The latest production-analysis and live-distillation reruns on November 11, 2026 still failed; historical success does not establish current model-service availability. Production-Main deterministic-checker E2E now covers an unvalidated candidate through verification, Wiki publication, Context retrieval, source invalidation and actual withdrawal, without a live model. Complete delivery remains in the [session-distillation plan](../superpowers/plans/2026-11-09-session-distillation.md).
+
+### Candidate verification integration
+
+The default Runtime connects saved `integrations.verifications` to the local encrypted Evidence Store. At `after-agent` and `before-publish`, the host assigns a distinct execution ID, overrides the requested target with the actual workspace realpath, and reads Git HEAD and branch before and after execution. The `capability-verification-v1` receipt retains Provider, full observation identity, phase, target, both revisions, structured result and classified failures. Existing `effect.started/completed` audit events bind the execution ID, and completion references encrypted evidence. Standalone QA first persists `run.requested/run.started/qa.started`, making verification receipts and final outcomes consumable by standard replay and execution history; managed QA reuses its caller's identity and observer.
+
+Missing observation context, mismatched execution binding, detected revision changes, cancellation, evidence persistence or audit failure block the required lifecycle. Results with execution observations are only `provider-result`; report-only results are `provider-reported`. Neither grants native execution provenance or asset-domain validation. Before/after HEAD and branch checks do not freeze dirty/untracked content or detect changes restored between those observations. Hand-built lifecycles without an Evidence Store retain their prior calling compatibility.
+
+Optional `validation: { configurationFile }` selects a canonical absolute path to private checker configuration. Its shape is `{ version: 1, checkers: [...] }`; each checker declares `scope/checkerId/providerId/version/authorizationFile/target`, with `target: { ref, root, path }`. Exact scope/checker identity selects a registered Verification Provider. Managed sources are reconstructed from ledger scan registration, audit integrity and recorded sessions. Unregistered imports need trusted configuration with a matching evidence-digest source manifest; clients cannot supply it.
+
+Verifiers must implement the independent-assertion `learning-validation-v1` protocol and stable identity; ordinary test-runner providers do not qualify. Fact/process use domain assertions. Lesson additionally requires saved configuration with explicit `allowLessonValidation: true` and `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`, retaining current grant scope, target and revocation checks. Original source identity and independent QA audit integrity, system events and repair revision are verified before independently observing root cause, fix, prevention and applicability. Passing QA cannot replace semantic validation. The oracle snapshot digest and QA Git revision are bound separately. This permission is for lesson validation only; publication separately requires an explicit lesson target grant. Skill/tool use proposal validation; real production qualification remains blocked by the unavailable skill interpreter and tool permission-denied experiment. The review route does not bypass these guards or establish publication/installation completion.
+
+The private proposal catalog v1 accepts optional `resources: [{ path, digest }]` for each skill. Paths are relative to the owning `SKILL.md` directory; `digest` is the SHA-256 of the resource bytes. Declarations must be nonempty when present, unique, and cannot claim another skill's files or a skill entry point. The existing bounded scan applies the same file and UTF-8 checks to resources and rejects unlisted, missing, or changed files. Declared resources are part of the inventory digest, must match the captured Git commit before staging, and remain identical across original and proposed inputs. These declarations neither grant tool permissions nor prove that a skill interpreter loaded or executed a resource.
+
+For repair review, `qa` additionally requires `repair: { failure, fix }` as pinned
+above. Validation binds the failed source audit, a successful implementation fix
+at `qa.targetRevision`, and independent QA at that same revision. The receipt
+adds `repair` and `repairEvidence` for the failure and fix events; replay and
+publication recheck those audits and the existing checker and grant guards.
+
+The budget starts at use-case entry, including ledger opening and lock waits. After acquiring the SQLite writer lock, synchronous checks reread source, grant, target, checker, deadline and actual lesson QA audit-byte digest; failure rolls back without promotion or receipts. Audit sequence determines state order without requiring monotonic occurredAt. Integration tests cover the real action, temporary authoritative snapshot verification, Wiki publication, context reading and invalidation withdrawal; they do not establish live-model or complete five-asset delivery.
+
+Current repair-review model output and semantic checks use synthetic fixtures;
+they do not establish live-model/service or full product E2E acceptance.
+
+The isolated scratch observer can bind saved fault/recovery/replay return
+assertions to raw stdout/stderr bytes and observed resource boundaries. Its host
+fragment uses `linux-native-scratch-recovery-v2`, helper wire v1 and a
+`bounded-recovery-return-state-v1` contract digest. Revalidation requires saved
+trusted options, an adapter-owned captured helper and independent operation and
+container identities; it recomputes the fragment rather than trusting flags.
+The maximum qualification is `qualified-bounded-returns-and-state`, with effect
+history always unobserved. Missing return assertions and requests for effect
+history remain unsupported. This contract is wired into saved production proposal
+configuration, execution grants, Runtime and final acceptance. Host execution
+grants use v3 and require independent reauthorization; saved configuration and
+grants bind the helper path and digest, while the host retains its owned capture
+API object and rechecks file identity. Each execution independently saves effective
+limits and operation/container identities. Final acceptance rechecks the contract,
+wrapper, helper, phase bytes and output without persisting trusted context.
+Semantic evidence revalidation errors return invalid_receipt, preserving timeout
+and cancellation priority. Mandatory permission-denied coverage still blocks
+before repository selection. This does not qualify tool publication or prove outer
+policy, cleanup, observer provenance or complete side effects. Current tests use
+synthetic observations, not container or native-execution acceptance.
+
+### Knowledge publication and reading integration
+
+Fact checkers can declare `factAuthorityPaths`, a list of 1–16 JSON files relative to the verification target root. Each record has `scope`, `targetRef`, `subject`, `rule`, `version`, `validUntil` and an optional `environment`. `validUntil` is a timestamp with a timezone and expires at the stated instant. A query requires at least one applicable current record and every applicable rule must match the published fact. Conflicting or expired authority excludes the fact from retrieval and preserves its publication and wiki page. Include each authority file in the allowed paths when using independent source read grants.
+
+A lesson can declare 1–8 single-line symptom phrases in `payload.triggerAliases`, up to 128 characters each. The checker must bind them to evidence in an observed `lesson.triggerAliases` assertion. Retrieval can match a complete phrase to the validated lesson. Set `applicability.productId` and `versions` on the candidate to constrain the product and editions.
+
+To control source reads independently, set `knowledge.sourceReadGrantFile` to the canonical absolute path of a private JSON file. Use `{ "version": 1, "grants": [...] }`. Each grant has `scope`, `targetRef`, `evidenceDigest`, `revoked` and `paths`. List the absolute evidence and verification target paths in `paths`. Setting `revoked` to `true` excludes the publication on the next query and preserves the wiki page and publication receipt. With this file configured, a missing, invalid or ambiguous grant denies the read. Existing configurations that omit this field use the existing wiki authorization and source checks.
+
+Optional knowledge configuration contains wikiScript (the trusted Wiki CLI canonical absolute path) and grants (1–64 distinct private grant-file paths). Saved plugin configuration resolves paths; actions accept scope, candidate, version and logical targets without overriding the vault, grants or script. Revoked grant metadata remains readable; writes and withdrawal check current authorization separately. Multiple grants for the same scope/logical target cannot route. Unavailable grants and orphaned publications produce individual blockers.
+
+Lesson target kinds must explicitly include lesson; existing fact/process defaults do not expand. Preparation, publication, reading and reconciliation recheck current independent QA, source, configuration and receipts; content retains validation and repair-version references. Authorization rules and required-absent directory rules enter the final read snapshot. Ordinary digest reads are capped at 64MiB and private grants at 1MiB. Preparation, navigation supersession and applied/committed promotion recheck synchronously after obtaining the database writer lock; drift rolls back. QA-only invalidation conflicts and withdraws the affected lesson without invalidating sibling fact/process candidates. Lesson eligibility reconciliation also runs without knowledge publication configured.
+
+| Standard action | Input | Behavior |
+| --- | --- | --- |
+| learning.knowledge.prepare | { scope, candidateId, expectedVersion, targetRef? } | Wiki preview for a candidate with a current validation receipt; persist immutable plan and prepared receipt. Retry failures propagate without initiating conflict or withdrawal; explicit publish/reconcile retains recovery and withdrawal guards |
+| learning.knowledge.publish | { scope, key } | Check current authorization, candidate, source and targets before publication/recovery |
+| learning.knowledge.reconcile | { scope? } | Reconcile all phases, including actual withdrawal of committed content; return per-record results and blockers |
+
+Automatic source reconciliation and startup/periodic Worker reconciliation share these use cases. Invalidated sources require actual content withdrawal; permission refusal or human edits preserve recovery state and report knowledge_publication_degraded. Prepared/applied phases retain full-plan, navigation and optimistic-hash checks. Committed assets continue to check authorization, provenance, validation and content; ordinary index/backlink growth must not invalidate existing facts.
+
+context.knowledge reads only currently authorized, unrevoked and applicable publications within count/byte limits; missing required trusted applicability fields exclude the asset. Plugin disposal cancels active Wiki subprocesses, and retained Provider references cannot bypass shutdown. These actions do not establish completion of the new validation entry point, installed CLI, Desktop or cross-Agent product loop.

@@ -59,6 +59,13 @@ pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts work-
 AFK_E2E_DESKTOP_LIVE_LEARNING=1 pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts learning-settings --grep 'live Claude candidate'
 ```
 
+2026-11-21，提交 `dbc360be` 的 macOS arm64 Desktop 使用仓库外的未签名打包应用，与同提交的 CLI `0.2.184` 仓库外安装版一起通过学习设置套件 **7/7** 项非模型用例（40.1 秒）。源码构建通过 **6/6** 项非模型用例（29.2 秒）。打包版内的两个场景由 CLI 提交纠正，设置页读取任务后仍为待处理，跨项目调用被拒绝。点击「运行一次提炼」后，设置页显示受阻并允许重试，CLI 独立读回 `budget_exhausted` 和零次尝试，原候选保持不变。真实 Claude、跨端提炼竞争和应用退出时回收的安装版用例待验。
+
+| 产物 | SHA-256 |
+| --- | --- |
+| CLI `0.2.184` macOS arm64 归档 | `822d40de5c95a13eedb3fd0060a838a3835f6ffea5490dd81693edab8379b99b` |
+| Desktop `app.asar` | `c4e741a95a05f8f4b79ee8f9132e17b6e73fff379c47c509c5454babd02f08ab` |
+
 ### 历史 QA 工作区归属
 
 通过失败运行 `7cbb0b81-8a53-4725-99a1-c801feff7a61` 的审计定位到它的隔离测试目录。恢复账本中四条分配有三条已关闭，唯一保留的分配 `e920ddad-2c4e-4c5d-aabb-e26a470b4d43` 仍为 `owned`。按工作区和仓库身份复算占用键后，确认三条执行占用均归属已归档为 `blocked` 的 `qa-1-1795185498504-runtime`。

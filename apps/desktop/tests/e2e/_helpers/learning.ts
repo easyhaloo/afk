@@ -232,6 +232,10 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
       knowledge: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } }, true);
     return {
       ...fixture, temporary, env, dependencies,
+      jobsFromCli: async () => {
+        const { stdout } = await command("experience", "jobs", "--scope", fixture.scope, "--json");
+        return JSON.parse(stdout) as { jobId: string; scope: string; status: string; reasonCode?: string; attempts: unknown[] }[];
+      },
       submitCorrectionFromCli: async (correction: string) => {
         const file = path.join(temporary, "cli-correction.txt");
         writeFileSync(file, correction, { mode: 0o600 });

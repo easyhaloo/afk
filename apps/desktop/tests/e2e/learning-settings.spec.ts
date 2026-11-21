@@ -187,6 +187,28 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       const candidate = learning.getByRole("button", { name: `选择候选 ${fixture.candidateId}`, exact: true });
       await candidate.click();
       await expect(candidate).toContainText("待验证 · v1");
+      if (!live) {
+        const workerFixture = fixture;
+        const scope = workerFixture.scope;
+        const { jobId: requestKey } = await workerFixture.submitCorrectionFromCli("Confirm that approval precedes publication.");
+        const jobs = learning.getByRole("region", { name: "学习任务", exact: true });
+        await learning.getByRole("button", { name: "重新读取学习数据", exact: true }).click();
+        const entry = jobs.getByRole("listitem").filter({ hasText: requestKey });
+        await expect(entry).toContainText("待处理");
+        await expect(entry).toContainText("尝试 0 次");
+        const readJob = async () => (await workerFixture.jobsFromCli()).find(job => job.jobId === requestKey);
+        expect(await readJob()).toMatchObject({ status: "pending", attempts: [] });
+        await expect(page.evaluate(target => window.afkDesktop.learning.worker.once(target), { scope: otherProject, requestKey })).rejects.toThrow();
+        expect(await readJob()).toMatchObject({ status: "pending", attempts: [] });
+        const runOnce = entry.getByRole("button", { name: "运行一次提炼", exact: true });
+        await runOnce.click();
+        await expect(entry).toContainText("受阻");
+        await expect(entry).toContainText("尝试 0 次");
+        expect(await readJob()).toMatchObject({ jobId: requestKey, scope, status: "blocked", reasonCode: "budget_exhausted", attempts: [] });
+        await expect(runOnce).toBeEnabled();
+        expect(await fixture.inspect()).toEqual(initial);
+        await candidate.click();
+      }
       await expect(learning.getByRole("button", { name: "准备知识预览", exact: true })).toBeDisabled();
       await learning.getByRole("textbox", { name: "验证器 ID", exact: true }).fill(fixture.checkerId);
       await learning.getByRole("button", { name: "验证候选", exact: true }).click();

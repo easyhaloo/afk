@@ -157,14 +157,32 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       }
       fixture = await createLearningFixture('fact', packaged && `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`, live);
       const otherProject = fixture.scope.replace(/\/api$/, '/web');
-      const initial = await fixture.inspect();
-      expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
       const navigation = fixture.navigation();
       expect(existsSync(fixture.asset)).toBe(false);
       const launched = await launchLearning(fixture, packaged);
       app = launched.app;
       const { page } = launched;
       expect(await page.evaluate(() => window.afkDesktop.learning.projects())).toContain(fixture.scope);
+      await page.locator(".sidebar-bottom .settings-entry").click();
+      const learning = page.getByRole("region", { name: "学习治理", exact: true });
+      await expect(learning).toBeVisible();
+      await learning.getByRole("button", { name: "学习项目", exact: true }).click();
+      await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
+      await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
+      if (live) {
+        const { scope, requestKey, jobsFromCli } = fixture;
+        const readJob = async () => (await jobsFromCli()).find(job => job.jobId === requestKey);
+        expect(await readJob()).toMatchObject({ status: "pending", attempts: [] });
+        expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), scope)).toEqual([]);
+        const jobs = learning.getByRole("region", { name: "学习任务", exact: true });
+        const entry = jobs.getByRole("listitem").filter({ hasText: requestKey });
+        await entry.getByRole("button", { name: "运行一次提炼", exact: true }).click();
+        await expect(entry).toContainText(/已处理|受阻|失败/, { timeout: 135_000 });
+        expect(await readJob()).toMatchObject({ status: "processed", attempts: [{ status: "succeeded" }] });
+        Object.assign(fixture, await fixture.readProcessedFact());
+      }
+      const initial = await fixture.inspect();
+      expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
       expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), fixture.scope))
         .toEqual([expect.objectContaining({ id: fixture.candidateId, state: "candidate", version: 1 })]);
       expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), otherProject)).toEqual([]);
@@ -178,12 +196,6 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       expect(fixture.calls()).toEqual([]);
       expect(await fixture.inspect()).toEqual(initial);
 
-      await page.locator(".sidebar-bottom .settings-entry").click();
-      const learning = page.getByRole("region", { name: "学习治理", exact: true });
-      await expect(learning).toBeVisible();
-      await learning.getByRole("button", { name: "学习项目", exact: true }).click();
-      await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
-      await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
       const candidate = learning.getByRole("button", { name: `选择候选 ${fixture.candidateId}`, exact: true });
       await candidate.click();
       await expect(candidate).toContainText("待验证 · v1");
@@ -212,7 +224,11 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       await expect(learning.getByRole("button", { name: "准备知识预览", exact: true })).toBeDisabled();
       await learning.getByRole("textbox", { name: "验证器 ID", exact: true }).fill(fixture.checkerId);
       await learning.getByRole("button", { name: "验证候选", exact: true }).click();
-      await expect(learning.getByRole("status").filter({ hasText: "验证通过 · v1 → v2" })).toBeVisible();
+      const validated = learning.getByRole("status").filter({ hasText: "验证通过 · v1 → v2" });
+      const validationError = learning.getByRole("alert");
+      await expect(validated.or(validationError)).toBeVisible();
+      expect(await validationError.allTextContents()).toEqual([]);
+      await expect(validated).toBeVisible();
       await expect(candidate).toContainText("已验证 · v2");
       const afterValidation = await fixture.inspect();
       expect(afterValidation.candidate).toMatchObject({ state: "validated", version: 2 });
@@ -312,7 +328,7 @@ test.describe("production Main learning IPC with an independent saved oracle", (
   test(`uses Settings to validate, publish and withdraw actual Wiki content after source invalidation (${executable ? 'packaged' : 'source'})`,
     () => checkWikiPublication("localhost"));
   if (executable) test("publishes and withdraws knowledge without exposing the project IP (packaged)", () => checkWikiPublication("127.0.0.1"));
-  test("validates, publishes and withdraws a live Claude candidate in packaged Settings", async () => {
+  test("starts a live Claude candidate in packaged Settings, then verifies, publishes and withdraws it", async () => {
     test.skip(process.env.AFK_E2E_DESKTOP_LIVE_LEARNING !== '1', 'Requires authenticated Claude Code and installed CLI and Desktop');
     if (!executable || !process.env.AFK_E2E_CLI_ENTRY) throw new Error('Set the installed CLI and Desktop entries');
     test.setTimeout(210_000);

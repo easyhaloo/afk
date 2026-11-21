@@ -18,6 +18,7 @@ type FixtureMetadata = {
   vault: string;
   file: string;
   scope: string;
+  requestKey: string;
   candidateId: string;
   candidateDigest: string;
   evidenceDigest: string;
@@ -160,7 +161,7 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
     const bin = path.join(temporary, "bin");
     mkdirSync(bin, { mode: 0o700 });
     const dependencies: Record<string, { executable: string; version: string }> = {};
-    for (const tool of ["python3", "rg"]) {
+    for (const tool of ["python3", "rg", ...(live ? ["claude"] : [])]) {
       try {
         const found = await execute("/usr/bin/which", [tool], {
           env: { ...env, PATH: process.env.PATH ?? "" }, timeout: 5_000,
@@ -175,45 +176,24 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
           : ["--version"];
         const result = await execute(executable, args, { env, timeout: 5_000 });
         const version = result.stdout.trim().split("\n")[0]!;
-        if (!(tool === "python3" ? /^3\.\d+\.\d+/ : /^ripgrep \d+\.\d+/).test(version)) {
+        const versionPattern = tool === "python3" ? /^3\.\d+\.\d+/ : tool === "claude" ? /^\d+\.\d+\.\d+/ : /^ripgrep \d+\.\d+/;
+        if (!versionPattern.test(version)) {
           throw new Error(`Unrecognized ${tool} version: ${version}`);
         }
         symlinkSync(executable, path.join(bin, tool));
         dependencies[tool] = { executable, version };
       } catch (error) {
-        throw new Error(`Desktop learning E2E dependency doctor failed for ${tool}; install executable Python 3.10+ and ripgrep on the runner PATH.`, { cause: error });
+        throw new Error(`Desktop learning E2E dependency doctor failed for ${tool}; install it on the runner PATH.`, { cause: error });
       }
     }
     env.PATH = [bin, "/usr/bin", "/bin"].join(path.delimiter);
+    if (live) {
+      env.CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR ?? path.join(userInfo().homedir, '.claude');
+      if (process.env.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
     const binary = path.resolve(process.env.AFK_E2E_CLI_ENTRY ?? path.join(repository, "apps/cli/dist/index.js"));
     if (!existsSync(binary)) throw new Error(`CLI entry not found: ${binary}. Build the CLI or set AFK_E2E_CLI_ENTRY.`);
     const seed = await node(seedScript, live ? [kind, scopeOverride!, 'claude'] : scopeOverride === undefined ? [kind] : [kind, scopeOverride]);
-    if (live) {
-      const release = path.dirname(path.dirname(realpathSync(binary)));
-      const runtime = (file: string) => pathToFileURL(path.join(release, 'node_modules/@afk/runtime/dist', file)).href;
-      const authHome = userInfo().homedir;
-      const result = await execute(process.execPath, ['--input-type=module', '--eval', `
-        import assert from 'node:assert/strict';
-        import { dirname } from 'node:path';
-        import { LearningWorker } from ${JSON.stringify(runtime('execution.js'))};
-        import { queryLearningRequest } from ${JSON.stringify(runtime('application/learning/worker.js'))};
-        import { ClaudeCodeProvider } from ${JSON.stringify(runtime('domain/agents/claude-code.js'))};
-        const [file, scope, requestKey] = process.argv.slice(1);
-        const directory = dirname(file);
-        const target = { scope, requestKey };
-        const worker = new LearningWorker({ directory, enabled: true, dailyCalls: 1, provider: new ClaudeCodeProvider() });
-        try { await worker.runOnce(target); } finally { await worker.close(); }
-        const { job, candidates } = queryLearningRequest({ directory, ...target });
-        const status = { job: job.status, reason: job.reasonCode, attempts: job.attempts.map(attempt => attempt.status),
-          kinds: candidates.map(candidate => candidate.proposal.kind) };
-        assert.deepEqual(status, { job: 'processed', reason: undefined, attempts: ['succeeded'], kinds: ['fact'] });
-        const [candidate] = candidates;
-        console.log(JSON.stringify({ candidateId: candidate.id, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest }));
-      `, seed.file, seed.scope, seed.requestKey], { cwd: seed.workspace, timeout: 140_000,
-        env: { ...env, HOME: authHome, USERPROFILE: authHome, PATH: process.env.PATH,
-          CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } });
-      Object.assign(seed, JSON.parse(result.stdout));
-    }
     const fixture = seed as FixtureMetadata;
     const command = (...args: string[]) =>
       execute(process.execPath, [binary, ...args], { cwd: fixture.workspace, env, timeout: 15_000 });
@@ -227,7 +207,7 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
     const installed = readFileSync(path.join(home, ".afk", "plugins", fixture.pluginId, "install.json"), "utf8");
     if (!installed.includes(fixture.pluginId)) throw new Error("The real checker install receipt is missing.");
     await configure(fixture.pluginId, { authorityFile: fixture.authorityFile, callsFile: fixture.callsFile }, false);
-    await configure("learning.distiller", { enabled: true, dailyCalls: 0,
+    await configure("learning.distiller", { enabled: true, dailyCalls: live ? 1 : 0,
       validation: { configurationFile: fixture.configurationFile },
       knowledge: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } }, true);
     return {
@@ -235,6 +215,23 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
       jobsFromCli: async () => {
         const { stdout } = await command("experience", "jobs", "--scope", fixture.scope, "--json");
         return JSON.parse(stdout) as { jobId: string; scope: string; status: string; reasonCode?: string; attempts: unknown[] }[];
+      },
+      readProcessedFact: async () => {
+        const candidate = await node(`
+          import assert from 'node:assert/strict';
+          import { CandidateStore } from ${JSON.stringify(storeModule)};
+          const store = new CandidateStore({ file: process.argv[1] });
+          try {
+            const { candidateIds } = store.getProcessingReceipt(process.argv[2]);
+            assert.equal(candidateIds.length, 1);
+            const [candidateId] = candidateIds;
+            const candidate = store.getCandidate(candidateId);
+            assert.equal(candidate.proposal.kind, 'fact');
+            console.log(JSON.stringify({ candidateId, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest }));
+          } finally { store.close(); }
+        `, [fixture.file, fixture.requestKey]) as Pick<FixtureMetadata, 'candidateId' | 'candidateDigest' | 'evidenceDigest'>;
+        Object.assign(fixture, candidate);
+        return candidate;
       },
       submitCorrectionFromCli: async (correction: string) => {
         const file = path.join(temporary, "cli-correction.txt");

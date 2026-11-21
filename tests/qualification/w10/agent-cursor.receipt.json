@@ -1,0 +1,34 @@
+{
+  "passed": false,
+  "phase": "workflow",
+  "afk": "0.2.156",
+  "cursor": "2026.07.09-a3815c0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "archiveSha256": "aea5c328e7e9a396d0af74aae51baefecc303bdd64270463832c1a3393ff3419",
+  "statusExitCode": 0,
+  "authenticated": true,
+  "nativeControl": {
+    "exitCode": 1,
+    "timedOut": false,
+    "initSeen": false,
+    "resultSeen": false,
+    "sessionMatches": false,
+    "answerMatches": false,
+    "authenticationRequired": true
+  },
+  "nativeStarts": 1,
+  "expectedSum": 9960,
+  "initSeen": false,
+  "resultSeen": false,
+  "answerMatches": false,
+  "batchArgvMatches": true,
+  "spawnCwdMatches": true,
+  "nativeExitCode": 1,
+  "nativeSignal": null,
+  "state": "blocked",
+  "diagnosticMarkers": [
+    "authentication required"
+  ],
+  "sessionMatches": false
+}

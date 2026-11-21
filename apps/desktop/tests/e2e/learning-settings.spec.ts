@@ -181,6 +181,7 @@ test.describe("production Main learning IPC with an independent saved oracle", (
       await learning.getByRole("button", { name: "学习项目", exact: true }).click();
       await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
       await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
+      let candidateIds: string[];
       if (live) {
         const { scope, requestKey, jobsFromCli } = fixture;
         expect(await jobsFromCli()).toMatchObject([{ jobId: requestKey, status: "pending", attempts: [] }]);
@@ -189,13 +190,22 @@ test.describe("production Main learning IPC with an independent saved oracle", (
         const entry = jobs.getByRole("listitem").filter({ hasText: requestKey });
         await entry.getByRole("button", { name: "运行一次提炼", exact: true }).click();
         await expect(entry).toContainText(/已处理|受阻|失败/, { timeout: 135_000 });
-        expect(await jobsFromCli()).toMatchObject([{ jobId: requestKey, status: "processed", attempts: [{ status: "succeeded" }] }]);
-        Object.assign(fixture, await fixture.readProcessedFact());
+        const processedJobs = await jobsFromCli();
+        const diagnostics = processedJobs.map(job => ({ reason: job.reasonCode, errors: job.attempts.map(attempt => attempt.errorCode) }));
+        expect(processedJobs, `Learning job diagnostics: ${JSON.stringify(diagnostics)}`)
+          .toMatchObject([{ jobId: requestKey, status: "processed", attempts: [{ status: "succeeded" }] }]);
+        const processed = await fixture.readProcessedFact();
+        Object.assign(fixture, processed.fact);
+        candidateIds = processed.candidateIds;
+      } else {
+        candidateIds = [fixture.candidateId];
       }
       const initial = await fixture.inspect();
       expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
-      expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), fixture.scope))
-        .toEqual([expect.objectContaining({ id: fixture.candidateId, state: "candidate", version: 1 })]);
+      const visibleCandidates = await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), fixture.scope);
+      expect(visibleCandidates.map(candidate => ({ id: candidate.id, state: candidate.state, version: candidate.version }))
+        .sort((left, right) => left.id.localeCompare(right.id)))
+        .toEqual([...candidateIds].sort().map(id => ({ id, state: "candidate", version: 1 })));
       expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), otherProject)).toEqual([]);
       if (packaged) expect([...requests]).toEqual(expect.arrayContaining(['/api/v4/user', '/api/v4/projects', '/api/v4/projects/1/issues']));
       const selection = { scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1, checkerId: fixture.checkerId };
@@ -460,10 +470,13 @@ test.describe("production Main learning IPC with an independent saved oracle", (
           const jobs = await fixture.jobsFromCli();
           expect(jobs).toHaveLength(1);
           jobId ??= jobs[0]!.jobId;
-          expect(jobs[0]).toMatchObject({ jobId, attempts: [
-            ...Array.from({ length: index }, () => expect.objectContaining({ status: 'cancelled' })),
+          const [job] = jobs;
+          expect(job.jobId).toBe(jobId);
+          expect(job.attempts).toHaveLength(index + 1);
+          expect(job.attempts.filter(attempt => attempt.status === 'cancelled')).toHaveLength(index);
+          expect(job.attempts).toEqual(expect.arrayContaining([
             expect.objectContaining({ ownerPid: watcher.child.pid, status: 'started' }),
-          ] });
+          ]));
           expect(watcher.child.kill(signal)).toBe(true);
           await expect(result).resolves.toMatchObject({ stdout: '{"status":"stopped"}\n' });
           expect(await fixture.queueOwners()).toEqual([]);

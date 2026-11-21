@@ -85,6 +85,10 @@ pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts learn
   --grep 'releases a running packaged|rejects a stale packaged|installed CLI watch accepts'
 ```
 
+同日按生产提交 `20939506` 重新打包了 macOS arm64 Desktop（`app.asar` SHA-256 `07ce798192afbfa8ab236695d21f80929a7f77f525aab508ffbb2f57903897df`），搭配上述 CLI `0.2.186`。第一次完整复跑 **12/13**，真实 Claude 成功产生两条候选，但原断言固定要求一条。以请求、项目、初始版本及种子审批规则精确选取待验证事实后，真实 Claude 独立复跑通过。第二次完整复跑 **12/13**，真实 Claude 已通过，Worker 重启测试因账本按键返回而非按尝试时间排序失败。消除该顺序假设后，不含真实 Claude 的安装套件 **12/12**。同期完整复跑 **12/13**，真实 Claude 的一次尝试因 `analysis_unsupported` 受阻，仍需同套件全绿。
+
+不调用模型的对照在打包 Electron 的 Node 模式中运行相同的受限 `claude --help`。24 次管道探测有 2 次以退出码 0 返回 8,192 字节且缺必要参数，另 22 次返回 16,384 字节。将相同守卫的标准输出接到普通文件后，24 次均返回 22,193 字节且包含必要参数。四平台 CLI 升级回滚工作流 `44852990423` 及常规 CI `44852922175` 均在生产提交 `20939506` 通过。
+
 ### 历史 QA 工作区归属
 
 通过失败运行 `7cbb0b81-8a53-4725-99a1-c801feff7a61` 的审计定位到它的隔离测试目录。恢复账本中四条分配有三条已关闭，唯一保留的分配 `e920ddad-2c4e-4c5d-aabb-e26a470b4d43` 仍为 `owned`。按工作区和仓库身份复算占用键后，确认三条执行占用均归属已归档为 `blocked` 的 `qa-1-1795185498504-runtime`。

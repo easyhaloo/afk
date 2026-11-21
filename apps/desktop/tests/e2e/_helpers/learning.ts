@@ -279,21 +279,36 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
           attempts: { callId: string; ownerPid: number; status: string; errorCode?: string }[] }[];
       },
       readProcessedFact: async () => {
-        const candidate = await node(`
+        const processed = await node(`
           import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
           import { CandidateStore } from ${JSON.stringify(storeModule)};
-          const store = new CandidateStore({ file: process.argv[1] });
+          const [file, requestKey, scope, authorityFile] = process.argv.slice(1);
+          const expected = JSON.parse(readFileSync(authorityFile, 'utf8'));
+          const store = new CandidateStore({ file });
           try {
-            const { candidateIds } = store.getProcessingReceipt(process.argv[2]);
-            assert.equal(candidateIds.length, 1);
-            const [candidateId] = candidateIds;
-            const candidate = store.getCandidate(candidateId);
-            assert.equal(candidate.proposal.kind, 'fact');
-            console.log(JSON.stringify({ candidateId, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest }));
+            const { candidateIds } = store.getProcessingReceipt(requestKey);
+            const candidates = candidateIds.map(id => {
+              const candidate = store.getCandidate(id);
+              assert.equal(candidate.requestKey, requestKey);
+              assert.equal(candidate.proposal.applicability.project, scope);
+              assert.equal(candidate.state, 'candidate');
+              assert.equal(candidate.version, 1);
+              return candidate;
+            });
+            const expectedFacts = candidates.filter(({ proposal }) => proposal.kind === 'fact'
+              && proposal.payload.subject === expected.subject && proposal.payload.rule === expected.rule);
+            assert.equal(expectedFacts.length, 1, 'Expected one fact for the seeded approval rule');
+            const [fact] = expectedFacts;
+            console.log(JSON.stringify({ candidateIds, fact: {
+              candidateId: fact.id, candidateDigest: fact.digest, evidenceDigest: fact.evidenceDigest,
+            } }));
           } finally { store.close(); }
-        `, [fixture.file, fixture.requestKey]) as Pick<FixtureMetadata, 'candidateId' | 'candidateDigest' | 'evidenceDigest'>;
-        Object.assign(fixture, candidate);
-        return candidate;
+        `, [fixture.file, fixture.requestKey, fixture.scope, fixture.authorityFile]) as {
+          candidateIds: string[];
+          fact: Pick<FixtureMetadata, 'candidateId' | 'candidateDigest' | 'evidenceDigest'>;
+        };
+        return processed;
       },
       submitCorrectionFromCli: async (correction: string) => {
         const file = path.join(temporary, "cli-correction.txt");

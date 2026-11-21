@@ -16,7 +16,7 @@ Each pair must have distinct committed publication keys, QA executions, candidat
 python3 scripts/w11-prospective/protocol.py template > "$study/spec.json"
 ```
 
-Fill in `node`, `cli` (installed `dist/index.js`), `agent`, `perSlotCents`, `totalCents` and the groups with available pairs. A `null` group registers six missing slots. The example shows the value of `groups.process`. Use the scenario's exact `PROMPTS` text, logical target, applicability and page paths from its actual releases for the other groups.
+Fill in `node`, `cli` (installed `dist/index.js`), `agent`, `perSlotCents`, `totalCents` and the groups with available pairs. A `null` group registers six missing slots. The example shows the value of `groups.process`. Use the scenario's exact `PROMPTS` text, logical target, applicability and page paths from its actual releases for the other groups. For `environment`, publish authorized fact snapshots that match the query's environment and version.
 
 ```json
 {
@@ -59,7 +59,7 @@ Each station operation must match a serial native Bash call and result in the sa
 {"adoption":{"quote":"先核对袋号，再登记签收","commands":[["核对袋号","{parcel}"],["登记签收","{parcel}"]]}}
 ```
 
-Choose commands that distinguish the edition's advice for both parameters. The final response cites the delivered origin, exact passage and one-based station steps. `observed` binds that claim to matching actions and reports their native tool IDs, even when the final task answer is wrong. With a registered rule and no matching citation the result is `unobserved`. An edition without a rule is `unregistered`. `none` is `inapplicable`. Use the AFK product receipt for product-level adoption.
+Choose commands that distinguish the edition's advice for both parameters. `{parcel}` resolves to the assigned parcel. Repair rules can also use `{pitch}` for the parcel's measured media pitch. The process station records a successful `核对清单` before `核对袋号` as a recurrence of the redundant step. Both routes can reach `已签收`. The final response cites the delivered origin, exact passage and one-based station steps. `observed` binds that claim to matching actions and reports their native tool IDs, even when the final task answer is wrong. With a registered rule and no matching citation the result is `unobserved`. An edition without a rule is `unregistered`. `none` is `inapplicable`. Use the AFK product receipt for product-level adoption.
 
 Every cited step must succeed in both the native tool result and the replayed station journal. A later successful retry supports adoption only if the claim cites that retry. Spend attribution also requires one native session across the stream. A foreign assistant message makes the cost `unknown` even if the terminal result reports a price within the cap. The current reservation remains charged against the seat budget and further launches stop.
 
@@ -94,4 +94,6 @@ python3 -B scripts/w11-prospective/blackbox.py --runner "$reference_dir/scripts/
 
 ### Formal experiment status
 
-The November 21 replay reports **6 pending seats** and **12 seats awaiting publication pairs**. The process pair has independent QA, committed releases and successful live recall of each exact edition. Environment and repair still need their independently verified pairs. The frozen experiment cap is **0¢**. The admission recheck made zero model calls and reserved zero cents. At the configured **75¢** per-seat ceiling, a matched three-arm sample requires **225¢** in authorized reservations. See the [admission record](receipts/2026-11-20-process-admission.md).
+The original process pair passed live recall on November 20 and its archived report still replays byte for byte. Its live profiles were absent at the November 21 recheck. See the [original process admission record](receipts/2026-11-20-process-admission.md).
+
+On November 21, installed AFK `0.2.188` qualified a replacement synthetic process pair through validation, publication preparation, and publication. The new publication supersedes the old one. The refreshed queue covers environment, repair, and process with a registered quotation and action sequence for each of the six editions. Offline station replay exercised all six rules for both parcels and distinguished the old three-step process from the new two-step route. All nine live recall checks passed, with 0 results for `none` and 1 each for `old` and `new` in every group. Admission and recheck made zero model calls. Frozen replay shows **18 pending seats** and zero cents reserved. The queue lock SHA-256 is `9ba49f8c6a6be51828069a860faa01673e48a5cdd981169cdaf43bb5fda04230`. The frozen cap is **0¢**. Formal measurement requires a new freeze with an authorized cap. At **75¢** per seat, one three-arm sample requires **225¢** in reservations.

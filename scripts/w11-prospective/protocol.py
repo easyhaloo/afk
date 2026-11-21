@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 
 sys.dont_write_bytecode = True
-from station import score
+from station import MEDIA_PITCH, score
 
 HERE = Path(__file__).resolve().parent
 SCOPE = 'github:w11/parcel'
@@ -135,10 +135,17 @@ def audit_edition(directory, query, page, name):
     prepared = read(directory/'plan.json')
     require(digest(prepared) == pub['key'] and digest(grant) == prepared['authorizationDigest'] and
             prepared['policyDigest'] == digest(grant['policy']), 'plan or grant digest')
-    require(prepared['classification'] == KINDS[name] and prepared['proposal']['targetRef'] == pub['targetRef'], 'scenario or target mismatch')
+    classification = 'snapshot' if name == 'environment' else KINDS[name]
+    proposal = prepared['proposal']
+    require(prepared['classification'] == classification and proposal['targetRef'] == pub['targetRef'], 'scenario or target mismatch')
     require(pub['phase'] == 'committed' and pub['observedDigest'] == pub['targetDigest'], 'publication incomplete')
     require(grant['revoked'] is False and grant['policy']['scope'] == query['scope'] and any(
-        item['ref'] == pub['targetRef'] and page in item['paths'] and KINDS[name] in item['kinds'] for item in grant['policy']['targets']), 'grant scope/target')
+        item['ref'] == pub['targetRef'] and page in item['paths'] and KINDS[name] in item['kinds']
+        and (name != 'environment' or item.get('snapshot') is True) for item in grant['policy']['targets']), 'grant scope/target')
+    if name == 'environment':
+        applicability = proposal['applicability']
+        require(applicability['project'] == query['scope'] and query['applicability']['environment'] in applicability['environments']
+                and query['applicability'].get('version') in applicability['versions'], 'environment snapshot applicability')
     require(validation['status'] == 'validated' and validation['validatedVersion'] == pub['candidateVersion'] and
             validation['candidateId'] == pub['candidateId'] == check['binding']['candidateId'] and
             check['binding']['scope'] == query['scope'] and check['binding']['target']['ref'] == pub['targetRef'] and
@@ -184,6 +191,7 @@ def check_pair(old, new):
 
 def gather(config, queryfile, edition, expected, directory):
     directory.mkdir()
+    directory = directory.resolve()
     profile = directory/'home'
     profile.mkdir()
     if edition:
@@ -307,7 +315,8 @@ def freeze(spec, root):
             if rule is not None:
                 require(isinstance(rule.get('quote'), str) and rule['quote'] and rule['quote'] in selected[0]['content'] and
                         isinstance(rule.get('commands'), list) and rule['commands'] and all(isinstance(cmd, list) and cmd and
-                        cmd != ['help'] and all(isinstance(arg, str) for arg in cmd) for cmd in rule['commands']), 'invalid adoption rule')
+                        cmd != ['help'] and all(isinstance(arg, str) and (name == 'repair' or '{pitch}' not in arg)
+                        for arg in cmd) for cmd in rule['commands']), 'invalid adoption rule')
     slots = [f'{name}-{repeat}-{arm}' for name in PROMPTS for repeat in [1,2] for arm in (ARMS if repeat == 1 else ARMS[::-1])]
     save(frozen/'schedule.json', slots)
     save(root/'lock.json', manifest(frozen))
@@ -491,7 +500,8 @@ def adoption_status(fragments, rule, claim, journal, ids, parcel):
     steps = claim.get('steps')
     if not isinstance(steps, list) or not all(type(step) is int and 1 <= step <= len(ids) for step in steps) or steps != sorted(set(steps)):
         return 'unobserved', []
-    expected = [[arg.replace('{parcel}', parcel) for arg in cmd] for cmd in rule['commands']]
+    expected = [[arg.replace('{parcel}', parcel).replace('{pitch}', str(MEDIA_PITCH[parcel]))
+                 for arg in cmd] for cmd in rule['commands']]
     cited = [journal[step-1] for step in steps]
     if any('error' in row['result'] for row in cited) or [row['command'] for row in cited] != expected:
         return 'unobserved', []

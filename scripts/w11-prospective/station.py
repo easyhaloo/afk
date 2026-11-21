@@ -5,10 +5,12 @@ import os
 import sys
 from pathlib import Path
 
+MEDIA_PITCH = {'W11-101': 104, 'W11-202': 84}
+
 
 def transition(scenario, parcel, commands):
     index = ['W11-101', 'W11-202'].index(parcel)
-    pitch = [104, 84][index]
+    pitch = MEDIA_PITCH[parcel]
     setting, margin = pitch - 4, 0
     impressions = 0
     status = '待核对'
@@ -18,7 +20,7 @@ def transition(scenario, parcel, commands):
         if command == ['help']:
             result = {'commands': {'environment': 'lookup <staging|production> <parcel>',
                                    'repair': 'media|print <parcel>; pitch|layout <parcel> <mm>',
-                                   'process': '核对袋号|登记签收 <parcel>'}[scenario]}
+                                   'process': '核对清单|核对袋号|登记签收 <parcel>'}[scenario]}
         elif scenario == 'environment' and len(command) == 3 and command[0] == 'lookup' and command[2] == parcel:
             codes = {'staging': ['s-78bf', 's-f501'], 'production': ['p-17c0', 'p-cb72']}
             if command[1] in codes:
@@ -26,7 +28,9 @@ def transition(scenario, parcel, commands):
         elif len(command) >= 2 and command[1] == parcel:
             operation = command[0]
             if scenario == 'process' and len(command) == 2:
-                if (operation, status) in [('核对袋号', '待核对'), ('登记签收', '已核对')]:
+                if operation == '核对清单' and status == '待核对':
+                    result = {'parcel': parcel, 'checklist': '已核对'}
+                elif (operation, status) in [('核对袋号', '待核对'), ('登记签收', '已核对')]:
                     status = '已核对' if operation == '核对袋号' else '已签收'
                     result = {'parcel': parcel, 'state': status}
             if scenario == 'repair':
@@ -70,9 +74,9 @@ def score(scenario, parcel, journal, answer):
         target = {'parcel': parcel, 'state': '已签收'}
         passed = target in results and same_record(answer, target)
         first_check = next((index for index, row in enumerate(results) if row.get('state') == '已核对'), len(results))
-        detour = ['登记签收', parcel] in commands[:first_check]
+        detour = ['登记签收', parcel] in commands[:first_check] or any('checklist' in row for row in results)
     else:
-        measured = {'W11-101': 104, 'W11-202': 84}[parcel]
+        measured = MEDIA_PITCH[parcel]
         passed = (len(results) >= 2 and all(row.get('pitch') == measured and abs(row['offset']) <= 0.25 for row in results[-2:])
                   and type(answer) is list and len(answer) == 2
                   and all(same_record(actual, expected) for actual, expected in zip(answer, results[-2:])))

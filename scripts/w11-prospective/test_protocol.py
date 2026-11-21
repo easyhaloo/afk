@@ -22,6 +22,7 @@ if '--version' in sys.argv:
     print('fixture-provider')
 else:
     plans = list((Path.home()/'.afk/learning/publications').glob('*/plan.json'))
+    assert Path.home() == Path.home().resolve()
     assert (Path.home()/'.afk/plugins.yml').is_file()
     with sqlite3.connect('file:'+str(Path.home()/'.afk/learning/candidates.sqlite')+'?mode=ro', uri=True) as db:
         assert db.execute('select count(*) from learning_ledger where kind="publication"').fetchone()[0] == len(plans)
@@ -75,7 +76,7 @@ class QueueTest(unittest.TestCase):
         self.config = protocol.template()
         self.config.update(cli=str(cli), agent=str(agent), node=sys.executable)
 
-    def edition(self, name, arm, predecessor=None):
+    def edition(self, name, arm, predecessor=None, snapshot_authorized=True):
         folder = self.base/(name+arm)
         store = folder/'.afk/learning'
         store.mkdir(parents=True)
@@ -83,6 +84,12 @@ class QueueTest(unittest.TestCase):
         page = arm+'.md'
         target = 'wiki:'+name
         grant = dict(revoked=False, policy=dict(scope=protocol.SCOPE,targets=[dict(ref=target,paths=[page],kinds=[protocol.KINDS[name]])]))
+        proposal = {'targetRef': target}
+        classification = protocol.KINDS[name]
+        if name == 'environment':
+            grant['policy']['targets'][0]['snapshot'] = snapshot_authorized
+            proposal['applicability'] = dict(project=protocol.SCOPE, environments=['staging'], versions=['2.0'])
+            classification = 'snapshot'
         protocol.save(folder/'grant.json',grant)
         content = name+arm
         pack = protocol.read(protocol.HERE/'fixtures/product-audit-pack.json')
@@ -97,7 +104,7 @@ class QueueTest(unittest.TestCase):
         common = dict(candidateId=content, candidateDigest=protocol.digest(content),evidenceDigest=pack['digest'],candidateVersion=2,
                       validatorVersion='learning-validation-v1:'+content,targetRef=target)
         change = dict(path=page,content=content,expected_sha256=None)
-        plan = dict(**common,plan={'changes':[change]},classification=protocol.KINDS[name],proposal={'targetRef':target},
+        plan = dict(**common,plan={'changes':[change]},classification=classification,proposal=proposal,
                     policyDigest=protocol.digest(grant['policy']),authorizationDigest=protocol.digest(grant),authorizationFile=str(folder/'grant.json'))
         key = protocol.digest(plan)
         plans = store/'publications'/key
@@ -124,15 +131,26 @@ class QueueTest(unittest.TestCase):
             edition['adoption'] = dict(quote=content,commands=commands[name])
         return key, edition
 
-    def group(self, name, linked=True):
+    def group(self, name, linked=True, snapshot_authorized=True):
         old_key, old = self.edition(name,'old')
-        _, new = self.edition(name,'new',old_key if linked else None)
+        _, new = self.edition(name,'new',old_key if linked else None, snapshot_authorized)
         self.config['groups'][name] = dict(old=old,new=new,targetRef='wiki:'+name,query=dict(scope=protocol.SCOPE,prompt=protocol.PROMPTS[name],limit=5,
-                                            applicability=dict(environment='staging'),target=dict(project=protocol.SCOPE)))
+                                            applicability=dict(environment='staging',version='2.0'),target=dict(project=protocol.SCOPE)))
 
     def freeze(self):
         protocol.save(self.spec,self.config)
         protocol.freeze(self.spec,self.root)
+
+    def test_environment_requires_snapshot_authorization_and_matching_version(self):
+        self.group('environment', snapshot_authorized=False)
+        self.config['groups']['environment']['query']['applicability']['version'] = '3.0'
+        with self.assertRaisesRegex(ValueError, 'environment snapshot applicability'):
+            self.freeze()
+        self.root = self.base/'unauthorized'
+        self.spec = self.base/'unauthorized.json'
+        self.config['groups']['environment']['query']['applicability']['version'] = '2.0'
+        with self.assertRaisesRegex(ValueError, 'grant scope/target'):
+            self.freeze()
 
     def test_full_queue_and_replay(self):
         for name in protocol.PROMPTS:
@@ -222,6 +240,16 @@ class QueueTest(unittest.TestCase):
         protocol.run(self.root,'process',1,225)
         with self.assertRaisesRegex(ValueError,'budget'):
             protocol.run(self.root,'process',2,225)
+
+    def test_recall_through_symlinked_scratch_directory(self):
+        self.group('repair')
+        self.freeze()
+        scratch = self.base/'scratch'
+        scratch.symlink_to(self.root, target_is_directory=True)
+        folder = self.root/'frozen/repair'
+        binding = protocol.read(folder/'bindings.json')['old']
+        actual = protocol.gather(self.config, folder/'query.json', folder/'old', binding, scratch/'live-recall')
+        self.assertEqual(actual, protocol.read(folder/'old-gather.json'))
 
     def test_ambiguous_recall_is_rejected_before_agent(self):
         self.group('process')
@@ -382,6 +410,33 @@ class QueueTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'uniquely recalled'):
             self.freeze()
         self.assertFalse((self.root/'preflight-process-none/health.json').exists())
+
+    def test_process_editions_complete_with_distinct_recurrence(self):
+        for parcel in protocol.PARAMETERS:
+            answer = {'parcel': parcel, 'state': '已签收'}
+            route = [['核对袋号', parcel], ['登记签收', parcel]]
+            for old in (False, True):
+                with self.subTest(parcel=parcel, old=old):
+                    commands = [['核对清单', parcel], *route] if old else route
+                    results = transition('process', parcel, commands)
+                    self.assertTrue(all('error' not in result for result in results))
+                    journal = [dict(command=command, result=result) for command, result in zip(commands, results)]
+                    self.assertEqual(score('process', parcel, journal, answer),
+                                     dict(passed=True, recurrence=old, stationCommands=len(commands)))
+                    if old:
+                        self.assertEqual(results[0], {'parcel': parcel, 'checklist': '已核对'})
+
+    def test_repair_adoption_matches_the_measured_pitch_for_each_parcel(self):
+        rule = dict(quote='按介质实测步距重新标定走纸', commands=[['media', '{parcel}'], ['pitch', '{parcel}', '{pitch}']])
+        claim = dict(origin='knowledge:repair', quote=rule['quote'], steps=[1, 2])
+        for parcel, pitch, wrong in [('W11-101', '104', '84'), ('W11-202', '84', '104')]:
+            for setting, adoption in [(pitch, ('observed', ['media', 'pitch'])), (wrong, ('unobserved', []))]:
+                with self.subTest(parcel=parcel, setting=setting):
+                    commands = [['media', parcel], ['pitch', parcel, setting]]
+                    journal = [dict(command=command, result=result)
+                               for command, result in zip(commands, transition('repair', parcel, commands))]
+                    self.assertEqual(protocol.adoption_status([dict(origin=claim['origin'])], rule, claim, journal,
+                                                             ['media', 'pitch'], parcel), adoption)
 
     def test_station_independent_negatives(self):
         parcel = 'W11-101'

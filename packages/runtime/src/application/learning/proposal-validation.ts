@@ -54,6 +54,7 @@ function describeChecker(checker: ProposalValidationChecker) {
   const configuration = { ...metadata, runtime: { request: runtime.request, expectedCommit: runtime.expectedCommit,
     inventory: runtime.inventory, inventoryDigest: runtime.inventoryDigest, inventoryRoot: runtime.inventoryRoot,
     artifactPath: runtime.artifactPath, baseImageId: runtime.baseImageId, repositoryId: repository.id,
+    ...(runtime.permissionObserverImageId === undefined ? {} : { permissionObserverImageId: runtime.permissionObserverImageId }),
     ...(runtime.scratchHelper === undefined ? {} : { scratchHelper: runtime.scratchHelper }),
     ...(runtime.sandbox.limits === undefined ? {} : { limits: runtime.sandbox.limits }),
     repositoryCapabilities: repository.capabilities, harness: harness && { id: harness.id, revision: harness.revision, kind: harness.kind, cases: harness.cases } } };
@@ -256,11 +257,13 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
           const semanticExperiment = prepareProposalExperiment(prepared.kind, executionOptions.artifactPath, check, configured.experiment,
             prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);
           if (semanticExperiment.status !== 'prepared') fail('insufficient_coverage');
-          if (semanticExperiment.experiment.recovery || semanticExperiment.experiment.skillTrace) {
+          if (semanticExperiment.experiment.recovery || semanticExperiment.experiment.skillTrace || semanticExperiment.experiment.permissionDenial) {
             const context = observation.semanticContext;
             const frozen = context?.options;
             if (!context || !frozen || (semanticExperiment.experiment.recovery && (!frozen.scratch || frozen.scratch.candidateVersion !== version
               || frozen.scratch.helper !== executionOptions.scratchHelper)) || frozen.baseImageId !== executionOptions.baseImageId
+              || (semanticExperiment.experiment.permissionDenial !== undefined && (executionOptions.permissionObserverImageId === undefined
+                || frozen.permissionDenial?.observerImageId !== executionOptions.permissionObserverImageId))
               || context.operationId !== binding.operationId || context.containerId !== execution.evidence.containerId
               || frozen.input.digest !== binding.inputTreeDigest
               || frozen.input.manifest.find(entry => entry.path === executionOptions.artifactPath)?.digest !== binding.artifactDigest

@@ -275,6 +275,7 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
       runtime: { repository, request: { repository: current.entry.repository.repository, runId: randomUUID() },
         expectedCommit: snapshot.commit, inventory: catalog.inventory, inventoryDigest: catalog.inventoryDigest,
         inventoryRoot: current.entry.repository.root, artifactPath: current.entry.asset.path, baseImageId: current.entry.sandbox.baseImageId,
+        ...(current.grant.sandbox.permissionObserverImageId === undefined ? {} : { permissionObserverImageId: current.grant.sandbox.permissionObserverImageId }),
         ...(scratchHelper === undefined ? {} : { scratchHelper }),
         harness: { id: current.entry.semantic.adapter, revision: current.entry.semantic.revision, kind: prepared.kind, cases,
           observe: async () => ({ status: 'unsupported', reason: 'Dedicated semantic observations are required' }) },

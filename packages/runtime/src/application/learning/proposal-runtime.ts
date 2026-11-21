@@ -49,6 +49,7 @@ export interface ProposalRuntimeOptions extends ProviderOperationOptions {
   inventoryRoot?: string;
   artifactPath: string;
   baseImageId: string;
+  permissionObserverImageId?: string;
   scratchHelper?: CapturedFrozenScratchHelper;
   binding: ProposalRuntimeBinding;
   sandbox: { executeFrozen(options: FrozenExecutionOptions): Promise<FrozenExecutionResult>;
@@ -257,6 +258,11 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   }
   const harness = { id: configured.id, revision: configured.revision, observe: configured.observe.bind(configured) };
   const baseImageId = supplied.baseImageId;
+  const permissionObserverImageId = supplied.permissionObserverImageId;
+  if ([...experiments.values()].some(experiment => experiment.permissionDenial !== undefined)
+    && (permissionObserverImageId === undefined || !/^sha256:[a-f0-9]{64}$/.test(permissionObserverImageId))) {
+    return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
+  }
   const scratchHelper = supplied.scratchHelper;
   if (scratchHelper !== undefined) assertFrozenScratchHelper(scratchHelper);
   if ([...experiments.values()].some(experiment => experiment.recovery !== undefined) && scratchHelper === undefined) {
@@ -286,7 +292,8 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   const executeFrozen = supplied.sandbox.executeFrozen.bind(supplied.sandbox);
   const configurationDigest = digest({ repositoryId, request, commit, artifactPath, baseImageId, inventoryDigest, inventoryRoot,
     binding, harnessId: harness.id, harnessRevision: harness.revision, cases, proposal: prepared,
-    ...(scratchHelper === undefined ? {} : { scratchHelper }), ...(limits === undefined ? {} : { limits }) });
+    ...(scratchHelper === undefined ? {} : { scratchHelper }), ...(limits === undefined ? {} : { limits }),
+    ...(permissionObserverImageId === undefined ? {} : { permissionObserverImageId }) });
   const current = async () => { checkAbort(signal); await assertCurrent(binding, { signal }); checkAbort(signal); };
   await current();
   const operationState: { outcome?: ProposalOperationOutcome; workspaceId?: string } = {};
@@ -336,6 +343,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
         const captured = version === 'original' ? original : proposed;
         if (!captured) throw new Error('Original skill input is unavailable');
         const experiment = experiments.get(check.checkId);
+        const observesContainer = Boolean(experiment?.recovery || experiment?.skillTrace || experiment?.permissionDenial);
         const registration: { ownership?: FrozenExecutionOwnership; containerId?: string; recorded: boolean } = { recorded: false };
         const remaining = remainingMs?.() ?? prepared.execution.timeoutMs;
         if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Proposal execution deadline exceeded');
@@ -343,11 +351,13 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           timeoutMs: Math.max(1, Math.floor(Math.min(prepared.execution.timeoutMs, limits?.timeoutMs ?? prepared.execution.timeoutMs, remaining))),
           maxOutputBytes: Math.min(DISTILLATION_LIMITS.outputBytes, limits?.maxOutputBytes ?? DISTILLATION_LIMITS.outputBytes), signal,
           ...(experiment?.control ? { control: experiment.control } : {}),
+          ...(experiment?.permissionDenial ? { permissionDenial: Object.freeze({ target: experiment.permissionDenial.target,
+            observerImageId: permissionObserverImageId! }) } : {}),
           ...(experiment?.recovery ? { scratch: Object.freeze({ helper: scratchHelper!, artifactPath, candidateVersion: version,
             callInput: experiment.callInput!, resources: experiment.recovery.resources,
             recovery: Object.freeze({ callInput: experiment.recovery.callInput, requireEffectHistory: experiment.recovery.requireEffectHistory,
               assertions: experiment.recovery.assertions, returnAssertions: experiment.recovery.returnAssertions }) }) } : {}),
-          ...(experiment?.recovery || experiment?.skillTrace ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
+          ...(observesContainer ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
             if (!registration.recorded || !registration.ownership || registration.containerId !== undefined
               || container.operationId !== registration.ownership.operationId || !learningIdentitySchema.safeParse(container.containerId).success) {
               throw new Error('Frozen container identity differs from recorded ownership registration');
@@ -375,7 +385,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
         checkAbort(signal);
         if (!registration.recorded || !registration.ownership || execution.evidence.operationId !== registration.ownership.operationId
           || execution.evidence.contextDigest !== registration.ownership.contextDigest) throw new Error('Frozen evidence differs from recorded ownership registration');
-        if ((experiment?.recovery || experiment?.skillTrace) && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
+        if (observesContainer && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
           throw new Error('Frozen evidence differs from independently recorded container identity');
         }
         if (execution.evidence.mechanism !== 'docker-frozen-image' || execution.evidence.inputDigest !== captured.digest || execution.evidence.baseImageId !== baseImageId
@@ -392,7 +402,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           imageId: execution.evidence.imageId, baseImageId, contextDigest: execution.evidence.contextDigest, executionDigest: digest(execution), argv: execution.evidence.argv,
           inputTreeDigest: execution.evidence.inputDigest, commandDigest: execution.evidence.commandDigest,
           policyDigest: execution.evidence.policyDigest, cwd: execution.evidence.cwd });
-        const semanticContext = experiment?.recovery || experiment?.skillTrace ? Object.freeze({ options: executionRequest,
+        const semanticContext = observesContainer ? Object.freeze({ options: executionRequest,
           operationId: registration.ownership.operationId, containerId: registration.containerId! }) : undefined;
         const semantic = experiment ? observeProposalExperiment(experiment, execution, semanticContext) : undefined;
         if (semantic?.skillTrace && !declaredSkillReads(semantic.skillTrace.calls.map(call => call.result), skill?.resources)) {

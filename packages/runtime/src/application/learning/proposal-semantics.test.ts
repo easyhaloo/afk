@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
+import { buildFrozenContext, captureFrozenInput } from '../../infrastructure/sandbox/container/frozen-input.js';
 import type { ProposalCheck } from './proposals.js';
 import { canonicalLearningJson } from './requests.js';
 
@@ -325,6 +329,46 @@ describe('proposal semantic observations', () => {
     const module = await implementation();
     expect(module.prepareProposalExperiment('tool', 'asset.js', { ...check, kind }, { ...experiment(), kind }))
       .toMatchObject({ status: 'unsupported' });
+  });
+
+  it('requires a schema-valid permission input and a bound witness, and treats zero matching writes as failure', async () => {
+    const module = await implementation();
+    const denied = { ...check, kind: 'permission-denied' as const, input: 'Deny the declared permissions' };
+    const configured = { ...experiment(), kind: denied.kind, input: denied.input, callInput: '{"key":"protected"}',
+      permissionDenial: { contractRevision: 'readonly-workspace-openat-v1', operation: 'openat-write',
+        target: '/workspace/guard', errno: 'EROFS' } };
+    const prepared = module.prepareProposalExperiment('tool', 'asset.js', denied, configured, inputSchema);
+    if (prepared.status !== 'prepared') throw new Error('Missing permission experiment');
+    expect(() => module.prepareProposalExperiment('tool', 'asset.js', denied, { ...configured, callInput: '{}' }, inputSchema))
+      .toThrow('does not satisfy tool input schema');
+    const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'permission-semantic-')));
+    try {
+      writeFileSync(join(temporary, 'asset.js'), '');
+      writeFileSync(join(temporary, 'guard'), 'protected');
+      const input = captureFrozenInput(temporary);
+      const baseImageId = `sha256:${'a'.repeat(64)}`;
+      const observerImageId = `sha256:${'b'.repeat(64)}`;
+      const imageId = `sha256:${'c'.repeat(64)}`;
+      const operationId = '61751660-93d2-4845-a877-65bd4351e3f4';
+      const containerId = 'd'.repeat(64);
+      const context = { operationId, containerId, options: { input, baseImageId, argv: prepared.experiment.argv, timeoutMs: 500,
+        permissionDenial: { target: configured.permissionDenial.target, observerImageId } } };
+      const execution = result();
+      const evidence: FrozenExecutionResult['evidence'] = { ...execution.evidence, operationId, containerId, imageId, baseImageId,
+        inputDigest: input.digest, contextDigest: buildFrozenContext(input, baseImageId, operationId).digest,
+        mechanism: 'docker-frozen-image', cwd: '/workspace', argv: [...execution.evidence.argv.slice(0, -1), configured.callInput],
+        policy: { ...execution.evidence.policy, id: containerId, operationId, imageId, status: 'exited', exitCode: 0 } };
+      const observe = (witness?: FrozenExecutionResult['evidence']['permissionDenial']) =>
+        module.observeProposalExperiment(prepared.experiment, { ...execution, evidence: { ...evidence, permissionDenial: witness } }, context);
+      const witness = { ...prepared.experiment.permissionDenial!, operationId, containerId, observerImageId, cgroupId: '123', deniedWrites: 1 };
+      expect(observe(witness)).toMatchObject({ passed: true, permissionDenial: witness });
+      expect(observe({ ...witness, deniedWrites: 0 })).toMatchObject({ passed: false, permissionDenial: { deniedWrites: 0 } });
+      expect(() => observe()).toThrow('requires a trusted operation witness');
+      for (const replaced of [{ ...witness, observerImageId: baseImageId }, { ...witness, containerId: 'f'.repeat(64) },
+        { ...witness, target: '/workspace/asset.js' }, { ...witness, deniedWrites: -1 }]) {
+        expect(() => observe(replaced)).toThrow('requires a trusted operation witness');
+      }
+    } finally { rmSync(temporary, { recursive: true, force: true }); }
   });
 
   it.each(['cancellation', 'timeout'] as const)('requires actual host %s control rather than a printed claim', async kind => {

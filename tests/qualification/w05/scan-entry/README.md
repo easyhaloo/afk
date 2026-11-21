@@ -38,6 +38,10 @@ Formal coverage remains 0/8. Formal validation requires a new candidate and matc
 
 The paired proposal runtime replay used a real temporary Git worktree and offline Docker. It observed an early baseline exit of `0` against the expected fault exit `23`. The checkpoint proposal returned `23`, `0`, `0`, and its receipt bound the phase observations to the proposal artifact, unchanged inputs and container. The three owned operations left no containers, images or Git worktrees. The replay exercised only the synthetic recovery check.
 
+The saved checker supports a `readonly-workspace-openat-v1` permission contract. It binds a write through `openat`, an exact absolute target under the read-only workspace, `EROFS`, the candidate's separate JSON input, and the local observer image ID to the checker digest. Preflight validates the input against the candidate's tool input schema and requires the same observer image ID in the independent execution grant. The product waits for the kernel observer before starting the container. The receipt binds its observed denial count to the requested operation, target and container. A missing witness blocks acceptance, and zero matching denials fail the check.
+
+On Docker Desktop with LinuxKit 6.10.14 and bpftrace 0.23.2, the product path reported one kernel denial for a startup write to the protected target and zero for a printed `EROFS`. Native observer controls confirmed that a different pathname and a separate container contributed no matches. The observer carries the same operation ownership labels as the worker for cleanup. Formal coverage remains 0/8 until the complete checker and candidate are frozen and run with a matching grant.
+
 ## Replay
 
 Run from the checkout on Darwin arm64 with Node 24.18.0. Supply a fresh profile path whose parent exists. The profile and queued request survive the command. The original synthetic evidence home and archive are required.

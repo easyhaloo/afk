@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import { assertFrozenScratchHelper, buildFrozenContext, type CapturedFrozenInput, type CapturedFrozenScratchHelper } from './frozen-input.js';
+import { startFrozenPermissionWitness } from './frozen-permission-observer.js';
 import type { ContainerProvider, FrozenCommandOptions, FrozenContainerInspection, FrozenContainerOperations, FrozenScratchAssertion, FrozenScratchBaselineFailure, FrozenScratchEvidence, FrozenScratchRecoveryEvidence, FrozenScratchRecoveryRequest, FrozenScratchResource, FrozenScratchSnapshot } from './types.js';
 import { FROZEN_CONTROL_OBSERVATION_MS, FROZEN_EXECUTION_MAX_MS } from './types.js';
 
@@ -23,8 +24,9 @@ export interface FrozenExecutionOptions {
   readonly signal?: AbortSignal;
   readonly control?: { readonly kind: 'cancellation' | 'timeout'; readonly afterMs: number };
   readonly scratch?: FrozenScratchObservation;
+  readonly permissionDenial?: { readonly target: string; readonly observerImageId: string };
   readonly onOwnership?: (ownership: FrozenExecutionOwnership) => void | Promise<void>;
-  readonly onContainer?: (binding: Readonly<{ operationId: string; containerId: string }>) => void;
+  readonly onContainer?: (binding: Readonly<{ operationId: string; containerId: string }>) => void | Promise<void>;
 }
 
 export interface FrozenExecutionOwnership {
@@ -55,6 +57,18 @@ export type FrozenControlEvidence = {
       readonly exitCode: number; readonly runningObservedMs: number | null; readonly triggeredMs: null }
 );
 
+export interface FrozenPermissionDenialEvidence {
+  readonly contractRevision: 'readonly-workspace-openat-v1';
+  readonly operation: 'openat-write';
+  readonly errno: 'EROFS';
+  readonly operationId: string;
+  readonly containerId: string;
+  readonly target: string;
+  readonly observerImageId: string;
+  readonly cgroupId: string;
+  readonly deniedWrites: number;
+}
+
 export interface FrozenExecutionResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -74,6 +88,7 @@ export interface FrozenExecutionResult {
     readonly durationMs: number;
     readonly scratch?: FrozenScratchEvidence;
     readonly control?: FrozenControlEvidence;
+    readonly permissionDenial?: FrozenPermissionDenialEvidence;
     readonly policy: FrozenContainerInspection;
   };
   readonly cleanup: { readonly containerRemoved: true; readonly imageRemoved: true };
@@ -468,13 +483,14 @@ function assertPolicy(inspected: FrozenContainerInspection, operationId: string,
   }
 }
 
-async function registerFrozenOwnership(options: FrozenExecutionOptions, ownership: FrozenExecutionOwnership, started: number): Promise<void> {
-  if (!options.onOwnership) return;
+async function registerFrozenStage<Binding>(options: FrozenExecutionOptions, started: number,
+  phase: 'ownership' | 'container', register: ((binding: Binding) => void | Promise<void>) | undefined, binding: Binding): Promise<void> {
+  if (!register) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort = () => {};
   try {
     await new Promise<void>((resolve, reject) => {
-      const expired = () => reject(new Error('Frozen ownership registration deadline exceeded'));
+      const expired = () => reject(new Error(`Frozen ${phase} registration deadline exceeded`));
       const complete = () => {
         if (options.signal?.aborted) reject(options.signal.reason);
         else if (performance.now() - started >= options.timeoutMs) expired();
@@ -486,7 +502,7 @@ async function registerFrozenOwnership(options: FrozenExecutionOptions, ownershi
       const remaining = options.timeoutMs - (performance.now() - started);
       if (remaining <= 0) { expired(); return; }
       timer = setTimeout(expired, remaining);
-      try { Promise.resolve(options.onOwnership!(ownership)).then(complete, reject); }
+      try { Promise.resolve(register(binding)).then(complete, reject); }
       catch (error) { reject(error); }
     });
   } finally {
@@ -495,8 +511,10 @@ async function registerFrozenOwnership(options: FrozenExecutionOptions, ownershi
   }
 }
 
-export async function executeFrozenContainer(provider: ContainerProvider, options: FrozenExecutionOptions): Promise<FrozenExecutionResult> {
+export async function executeFrozenContainer(provider: ContainerProvider, options: FrozenExecutionOptions,
+  startWitness = startFrozenPermissionWitness): Promise<FrozenExecutionResult> {
   options = { ...options, argv: Object.freeze([...options.argv]), ...(options.control === undefined ? {} : { control: Object.freeze({ ...options.control }) }),
+    ...(options.permissionDenial === undefined ? {} : { permissionDenial: Object.freeze({ ...options.permissionDenial }) }),
     ...(options.scratch === undefined ? {} : { scratch: Object.freeze({ ...options.scratch,
       resources: Object.freeze(options.scratch.resources.map(resource => Object.freeze({ ...resource }))) }) }) };
   const checkAbort = () => { if (options.signal?.aborted) throw options.signal.reason; };
@@ -511,6 +529,13 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
     || !['cancellation', 'timeout'].includes(options.control.kind) || !Number.isSafeInteger(options.control.afterMs)
     || options.control.afterMs < 1 || options.control.afterMs > options.timeoutMs)) throw new Error('Invalid frozen control experiment');
   if (options.control && typeof provider.frozen.killFrozenContainer !== 'function') throw new Error('Frozen control is not supported by provider');
+  const permission = options.permissionDenial;
+  if (permission && (options.control || options.scratch || Object.keys(permission).length !== 2
+    || !/^sha256:[a-f0-9]{64}$/.test(permission.observerImageId) || permission.target.length > 256
+    || !/^\/workspace(?:\/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)+$/.test(permission.target)
+    || !options.input.manifest.some(entry => entry.kind === 'file' && `/workspace/${entry.path}` === permission.target))) {
+    throw new Error('Invalid frozen permission observation');
+  }
   if (options.scratch) {
     validateScratch(options);
     const recovery = options.scratch.recovery;
@@ -535,8 +560,9 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
   let failure: unknown;
   let failed = false;
   let allocationUnconfirmed = false;
+  let witness: Awaited<ReturnType<typeof startFrozenPermissionWitness>> | undefined;
   try {
-    await registerFrozenOwnership(options, ownership, started);
+    await registerFrozenStage(options, started, 'ownership', options.onOwnership, ownership);
     checkAbort();
     allocationUnconfirmed = true;
     const imageId = await engine.buildFrozenImage(operationId, options.baseImageId, context.archive, administration);
@@ -550,7 +576,11 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
     const inspected = await engine.inspectFrozenContainer(containerId, administration);
     assertPolicy(inspected, operationId, containerId, imageId, argv);
     if (inspected.status !== 'created') throw new Error('Frozen container ran before policy verification');
-    options.onContainer?.(Object.freeze({ operationId, containerId }));
+    if (options.onContainer) {
+      await registerFrozenStage(options, performance.now(), 'container', options.onContainer, Object.freeze({ operationId, containerId }));
+    }
+    checkAbort();
+    if (permission) witness = await startWitness({ ...permission, operationId, containerId, timeoutMs: options.timeoutMs, signal: options.signal });
     checkAbort();
     const controlled = options.control ? await executeControlled(engine, containerId, operationId, options, started,
       inspection => assertPolicy(inspection, operationId, containerId, imageId, argv)) : undefined;
@@ -560,6 +590,15 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
     const completed = controlled?.completed ?? await engine.inspectFrozenContainer(containerId, administration);
     assertPolicy(completed, operationId, containerId, imageId, argv);
     if (completed.status !== 'exited' || completed.exitCode !== result.code) throw new Error('Frozen execution exit was not confirmed');
+    let permissionDenial: FrozenPermissionDenialEvidence | undefined;
+    if (permission && witness) {
+      const { cgroupId, deniedWrites } = await witness.finish();
+      if (!/^[1-9][0-9]{0,19}$/.test(cgroupId) || !Number.isSafeInteger(deniedWrites) || deniedWrites < 0) {
+        throw new Error('Invalid frozen permission observation result');
+      }
+      permissionDenial = Object.freeze({ ...permission, operationId, containerId, cgroupId, deniedWrites,
+        contractRevision: 'readonly-workspace-openat-v1', operation: 'openat-write', errno: 'EROFS' });
+    }
     const scratch = options.scratch ? scratchResult(result, options, operationId, containerId) : undefined;
     if (options.scratch?.recovery) verifyFrozenScratchRecoveryOutcome(options, scratch?.evidence.baselineFailure ?? scratch?.evidence.recovery, operationId, containerId);
     const digest = (input: unknown) => createHash('sha256').update(JSON.stringify(input)).digest('hex');
@@ -570,18 +609,21 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
         contextDigest: context.digest, commandDigest: digest({ argv: [...inspected.entrypoint, ...inspected.command], cwd: '/workspace' }),
         policyDigest: digest(policy), mechanism: 'docker-frozen-image', argv: [...inspected.entrypoint, ...inspected.command],
         cwd: '/workspace', durationMs: performance.now() - started, policy: policyInspection,
-        ...(controlled ? { control: controlled.control } : {}), ...(scratch ? { scratch: scratch.evidence } : {}) }, cleanup: { containerRemoved: true, imageRemoved: true } };
+        ...(controlled ? { control: controlled.control } : {}), ...(scratch ? { scratch: scratch.evidence } : {}),
+        ...(permissionDenial ? { permissionDenial } : {}) }, cleanup: { containerRemoved: true, imageRemoved: true } };
   } catch (error) { failure = error; failed = true; }
-  let cleanupFailure: unknown;
-  let cleanupFailed = false;
+  const cleanupErrors: unknown[] = [];
+  if (witness) {
+    try { await witness.close(); } catch (error) { cleanupErrors.push(error); }
+  }
   try {
     await engine.cleanupFrozenOperation(operationId, { ...administration, timeoutMs: 15_000 });
-  } catch (error) { cleanupFailure = error; cleanupFailed = true; }
-  if (cleanupFailed || allocationUnconfirmed) {
+  } catch (error) { cleanupErrors.push(error); }
+  if (cleanupErrors.length || allocationUnconfirmed) {
     const hasCause = failed || options.signal?.aborted === true;
     const cause = failed ? failure : options.signal?.aborted ? options.signal.reason : undefined;
     const errors = hasCause ? [cause] : [];
-    if (cleanupFailed) errors.push(cleanupFailure);
+    errors.push(...cleanupErrors);
     if (allocationUnconfirmed) errors.push(new Error('Frozen allocation completion is unconfirmed despite current cleanup inventory'));
     throw new FrozenCleanupError(ownership, errors, cause);
   }

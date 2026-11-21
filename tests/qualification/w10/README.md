@@ -33,6 +33,18 @@
 
 提交 `732786ed` 的 [W07 macOS arm64 CI 归档](../w07/README.md) 复跑同一召回套件，4 个文件共通过 31 项，跳过 9 项，耗时 92.85 秒。30 条冻结断言和 1 条工具授权检查的适用范围与上次一致。
 
+2026-11-21，提交 `84a4b188` 的 macOS arm64 安装版 `0.2.188` 通过 30 条冻结召回断言和 3 项对照检查。技能使用离线 OpenCode 2.2.7 提示词适配器。`local-artifact-audit.mjs` 通过测试报告和证据包两项独立读回。[同提交的四平台安装包验证通过，发布步骤跳过。](https://github.com/easyhaloo/afk/actions/runs/44898012725)
+
+使用带暂存回收补丁的 `install.sh` 从 `0.2.187` 升级至 `0.2.188`。在安装器收到 `SIGKILL` 后，旧版仍可运行。重试成功安装 `0.2.188`，回收中断暂存目录中 24,052,952 字节的常规文件，并保留仍在使用的暂存目录及旧格式目录。
+
+同提交的 Linux x64 CI 覆盖率为行和语句 90.23%、函数 87.01%、分支 88.83%。五个源码包均通过各自的基线门槛。`source-coverage` 中 `report.json` 的 SHA-256 为 `205aca4a3585b41242c72b3eca8f501873501569c6a2c9d36ec6b967013ed2a5`。[CI Verification 44898016119](https://github.com/easyhaloo/afk/actions/runs/44898016119)
+
+仓库外安装的 macOS arm64 CLI `0.2.188` 通过 205 项端到端测试。工作区诊断 2 项、插件执行及生命周期 71 项、HTTP 插件 29 项、本地插件 103 项。飞书、Slack、Linear 和 Jira 使用回环 HTTP 服务，真实账户验收仍待进行。以 `AFK_E2E_CLI_ENTRY` 指向安装版的 `dist/index.js`，运行 `pnpm exec vitest run tests/e2e/workspace-doctor-installed.test.ts tests/e2e/plugin-{execution,http,local}-matrix.test.ts` 可复验。运行日志的 SHA-256 为 `da17bcfc4cb68c6c52118ca5b0fc04d61848b78267df3badaac4935b47538fb9`。
+
+以 `84a4b188` 为基线的 macOS arm64 工作区使用 Node `24.18.0` 和 V8 运行全量测试。首次运行有 9,154 项通过、136 项跳过，知识撤回用例超时，退出码为 1。该用例在 V8 下单独复跑通过。首次运行测得行和语句覆盖率 90.64%、函数 87.17%、分支 88.18%，总体和五个源码包均达到基线门槛。
+
+使用本地未签名的 macOS 桌面包和安装版 CLI `0.2.188` 补验 CI 中跳过的六项。真实 Claude Code `2.1.326` 从桌面设置发起提炼，完成独立校验、发布和撤回。取消和退出均释放执行权，CLI 的 `once` 和 `watch` 占用请求时桌面拒绝重复启动。另一个 CLI 测试验证了 `watch` 信号退出后释放队列并可在重启后继续处理。打包版同时通过两项知识发布与撤回测试。签名和公证仍待验收。
+
 2026-11-21，同一 `0.2.183` 归档经真实 Claude Code `2.1.326` 通过两项受限提炼测试。合成审批样本记录了拒绝自审和独立审批通过的实际断言。一次模型调用得到一个候选，重放没有发起新调用。提示注入、Hook 和 MCP 的三个写入哨兵均未出现。追加 QA 失败事件后，候选进入冲突状态。测试证据来自增加审批断言和阶段诊断后的测试文件。
 
 同一归档以真实 Claude 从独立的合成包裹策略回执生成业务事实 `fact-01`。独立校验器核对规则，CLI 将 `seal-cutoff` 第 2 版发布到隔离 Wiki，知识提供器通过冻结问句召回该发布。随后 OpenCode `2.2.7` 在新受管工单 `github:w11/parcel#43` 中给出正确规则、产品版本 `2.0` 和同一发布出处。测试核对了生产与消费的运行 ID 和原生会话 ID 各不相同。发布回执键为 `91b09ecd2db168eda1b37abc86184d4185c6b8f6ccb483cfed86f2ae06c08ade`。
@@ -88,6 +100,8 @@ macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环
 安装版 0.2.168 通过 `afk run` 在两个共享挂载仓库完成实施、验收检查和 QA，停在人工合并门。另一工单在实施发布后遇到一次 HTTP 409，随后 `afk qa` 使用新租约完成独立 QA。两组均从裸仓读回输出，并核对租约与工作树清理。该场景使用回环 HTTPS、合成 Tracker 和脚本 Agent。跨主机挂载和真实模型 QA 待验。[双仓工单回执](mounted-work-item.receipt.json)
 
 2026-11-20，Cursor CLI `2026.07.09-a3815c0` 的 `cursor-agent status --format json` 返回 `authenticated`。在空白 Git 仓库，安装版 0.2.162 和 0.2.180 均经本地 Sandbox 收到 `NON_ZERO_EXIT`（退出码 1）。0.2.180 复验成功关闭 Sandbox。直接运行原生只读批处理同样以退出码 1 返回 `Authentication required`。`cursor-agent login` 完成后，仍需核对安装版的实际回包和原生会话。[Cursor 复验回执](agent-cursor-180-auth.receipt.json)
+
+2026-11-21，安装版 0.2.188 通过 `verification.provider test-runner verify` 查询 Cursor 原生模型目录。状态命令仍返回 `authenticated`，`cursor-agent models` 返回 `Authentication required`（退出码 1）。未取得模型目录，且未发起模型推理。脱敏回执的 SHA-256 为 `e985cdafd1c687b9b2c1a9e20042dfd20a35603fbc9e562b619f2fda017b7a62`。
 
 Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
 

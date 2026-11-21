@@ -33,6 +33,24 @@
 
 `44805570111` 第二次尝试补完 Linux x64，四个平台均通过离线安装、基于 `0.2.182` 的升级回滚和安装版验收。四份归档已核对 SHA-256、CLI 版本及平台元数据。Linux x64 归档的 SHA-256 为 `7f77b74a356241017d1068603f6f79bb28f93daa659675ebf66d2a187fd2f8f8`。仅验证模式跳过发布。
 
+### macOS arm64 Desktop 安装验收
+
+2026-11-21，使用提交 `25c39da0` 构建未签名的 Desktop `0.1.0`。DMG 通过完整性校验，以只读方式挂载，通过 `ditto` 将应用复制到仓库外的隔离目录后卸载。ZIP 完整性通过，打包应用的 `app.asar` 与 DMG 安装副本一致。
+
+| 产物 | SHA-256 |
+| --- | --- |
+| DMG | `fd36383965649ec35e3138319884d3b0543477725a781b0edac3777078df4647` |
+| ZIP | `c013f258c579fe63985980bbe3070a775027542c08b4e4e7e1dee3545d6cdef6` |
+| `app.asar` | `7bdedd2f5ddd8223cf4ed62bf712b71c7cda20c391d43d9c262db11152d5f477` |
+
+DMG 安装版与仓库外安装的 CLI `0.2.183` 通过 **4/4** 项 Electron E2E（48.6 秒）。覆盖设置界面验证、Wiki 内容发布与来源失效后的撤回、项目 IP 脱敏，以及 CLI 和 Desktop 分别先持有仓库租约的两个竞争场景。用例使用固定候选、本地脚本 Agent 和回环 Tracker。真实模型流程、签名和公证仍待验收。
+
+复跑时将 `AFK_E2E_DESKTOP_EXECUTABLE` 和 `AFK_E2E_CLI_ENTRY` 分别指向仓库外安装的 Desktop 可执行文件和 CLI 入口。
+
+```sh
+pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts work-item-single-claim learning-settings --grep 'holds the repository lease|\(packaged\)'
+```
+
 ### 历史 QA 工作区归属
 
 通过失败运行 `7cbb0b81-8a53-4725-99a1-c801feff7a61` 的审计定位到它的隔离测试目录。恢复账本中四条分配有三条已关闭，唯一保留的分配 `e920ddad-2c4e-4c5d-aabb-e26a470b4d43` 仍为 `owned`。按工作区和仓库身份复算占用键后，确认三条执行占用均归属已归档为 `blocked` 的 `qa-1-1795185498504-runtime`。

@@ -48,6 +48,21 @@ function checkInterrupted() {
   if (interruption) throw new Error(`interrupted by ${interruption}`);
 }
 
+async function reclaimInterruptedInstalls(storage) {
+  for (const entry of await readdir(storage, { withFileTypes: true })) {
+    const owner = /^\.install-pid-([1-9]\d*)-[a-zA-Z0-9]{6}$/.exec(entry.name);
+    if (!owner || !entry.isDirectory()) continue;
+    try {
+      process.kill(Number(owner[1]), 0);
+    } catch (error) {
+      if (error.code !== 'ESRCH') continue;
+      await rm(join(storage, entry.name), { recursive: true, force: true }).catch(cleanupError => {
+        console.warn(`Could not reclaim interrupted installation ${entry.name}: ${cleanupError.message}`);
+      });
+    }
+  }
+}
+
 async function execute(command, args, options, configure) {
   checkInterrupted();
   let result;
@@ -156,7 +171,9 @@ try {
   }
   await mkdir(versions, { recursive: true });
   await mkdir(downloads, { recursive: true });
-  temporary = await mkdtemp(join(storage, '.install-'));
+  await reclaimInterruptedInstalls(storage);
+  checkInterrupted();
+  temporary = await mkdtemp(join(storage, `.install-pid-${process.pid}-`));
   const asset = `afk-${process.platform}-${process.arch}.tar.gz`;
   let archive = resolve(options.archive || join(temporary, asset));
   let checksum = resolve(options.checksum || `${archive}.sha256`);

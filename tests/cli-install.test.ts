@@ -302,6 +302,37 @@ exec /usr/bin/tar "$@"
     expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.1');
   });
 
+  it('reclaims only dead installer staging on retry after SIGKILL', async () => {
+    const { root, home, env, command, install } = await fixture();
+    const first = await archive(root);
+    const next = await archive(root, '0.1.1');
+    await install('--archive', first.file, '--checksum', first.checksum);
+    const target = await readlink(command);
+    const tar = join(root, 'tools', 'tar');
+    await writeFile(tar, `#!/bin/sh
+set -e
+/usr/bin/tar "$@"
+if [ "$1" = "-xzf" ]; then kill -KILL "$PPID"; fi
+`, { mode: 0o755 });
+
+    const args = ['--archive', next.file, '--checksum', next.checksum];
+    await expect(install(...args)).rejects.toMatchObject({ signal: 'SIGKILL' });
+    expect(await readlink(command)).toBe(target);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+    const storage = join(home, '.afk/cli');
+    const deadStages = (await readdir(storage)).filter(entry => entry.startsWith('.install-'));
+    expect(deadStages).toHaveLength(1);
+    const liveStage = `.install-pid-${process.pid}-active`;
+    const legacyStage = '.install-legacy';
+    await mkdir(join(storage, liveStage));
+    await mkdir(join(storage, legacyStage));
+
+    await rm(tar);
+    await install(...args);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.1');
+    expect((await readdir(storage)).sort()).toEqual([legacyStage, liveStage, 'downloads', 'versions']);
+  });
+
   it('requires force before replacing an unrelated executable', async () => {
     const { root, command, install } = await fixture();
     const { file, checksum } = await archive(root);

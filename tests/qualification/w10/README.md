@@ -158,6 +158,7 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [G] | `docs/architecture/plugins.zh.md` 的 Gmail OAuth 手工记录 | 2026-11-07 浏览器授权后 CLI 发信、Gmail API 接受、用户确认收到 |
 | [T] | `docs/guides/testing.zh.md` 的“插件矩阵与源码覆盖率” | 11-09 安装版 0.2.44 复验刷新、scope、身份与 discovery HTTP 200，发信次数为零。另有真实 Claude、Docker、认证 HTTP/Docker/Claude 和 SSH 的范围 |
 | [W] | `docs/superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md` 的“已安装 CLI”、`plugin-matrix-wiki-claude-20261108-2` 和“真实经验” | GitLab MR !198、人工门、SSH 和已安装 `context.experience` gather |
+| [WH] | [Webhook 0.2.190 本机安装版](#webhook-02190-本机安装版) | 动作执行中的并发去重和载荷冲突、正常重启持久化、新 ID 正对照 |
 | [GH] | `docs/architecture/full-workflow-e2e-architecture.md` 的“GitHub 侧的附件 release” | 附件 HTTP 状态及字节，issue 操作待验 |
 | [S] | `../../w11-skill01-consumer/plugin-architecture/.codex/validation/skill-01/REPORT.md` 及同目录 `consumer-4/{workflow,session,scored}.json` | OpenCode 独立进程、历史 edition 2、宿主评分。新候选有单独的门禁记录 |
 | [P] | `$O/docs/superpowers/plans/2026-11-09-session-distillation.zh.md` 的“安装版与真实复用” | #704 的误差由 4 mm 降至 0 mm，因受测与发布提交不同，产品拒绝显式采纳 |
@@ -228,6 +229,18 @@ bash tests/qualification/w10/static-scan.sh "$O/.codex/validation/request-lifecy
 ```sh
 browser="$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-mac-arm64/chrome-headless-shell"
 bash tests/qualification/w10/browser-check.sh "$O/.codex/validation/request-lifecycle-20261118/release-142.saPyl47d/profile/bin/afk" "$browser" "$V"
+```
+
+## Webhook 0.2.190 本机安装版
+
+2026-11-22，macOS arm64 与 Node 24.18.0 上的离线安装版通过 `plugin configure`、`plugin listen --host 127.0.0.1 --port 0 --queue <队列路径>` 和 `plugin deliveries` 验证真实的 SQLite 队列。首次动作进程仍在运行时，两个本机发送进程重投同一 `Idempotency-Key`，均返回 `202`、同一交付 ID、`duplicate=true`、`processing` 和 `attempts=1`。同一键携带不同的已签名载荷时返回 `409`。正常重启后读回原 `delivered` 记录，重投仍为 `attempts=1`。相同载荷换新键后产生另一条 `delivered` 记录。动作日志和父进程 PID 对应两个监听器，每个监听器各启动一次动作，并以 `0` 退出。
+
+独立核对使用现有报告、脚本、回执、发行包及监听器和队列源码。证据等级为 `native`。分别待验托管发送方所用的原生交付 ID 与重投、实际服务的动作写回与读回，以及异常中止后的副作用恢复。本机动作由 `verification.test-runner` 执行 Python 进程。
+
+将 `W10_EVIDENCE_DIR` 设为保留 `TEST-REPORT.md`、`replay.py` 和 `receipt.json` 的目录，`W10_RELEASE_DIR` 设为包含 `install.sh`、`afk-darwin-arm64.tar.gz` 及其 `.sha256` 文件的离线发行目录，`W10_NODE_BIN` 设为 Node 24.18.0 可执行文件的路径。归档 SHA-256 为 `81e09097fec807a315cdac7fd430beb4593673e5c30b95ee18207a988d95105a`，回执 SHA-256 为 `e4af2d20c959c0842f8349383e3bc10894308b1ee1ab9819483842b829b906b2`。
+
+```sh
+python3 "${W10_EVIDENCE_DIR:?}/replay.py" "${W10_RELEASE_DIR:?}" "${W10_NODE_BIN:?}"
 ```
 
 ## [GP] 裸仓接收真实推送

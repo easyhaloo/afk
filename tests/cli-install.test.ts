@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { constants, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -273,6 +273,33 @@ describe('precompiled CLI installer', () => {
     }
     expect(await readlink(command)).toBe(target);
     expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+  });
+
+  it.each(['TERM', 'INT'] as const)('cleans staged files after SIG%s during extraction and allows retry', async signal => {
+    const { root, home, env, command, install } = await fixture();
+    const first = await archive(root);
+    const next = await archive(root, '0.1.1');
+    await install('--archive', first.file, '--checksum', first.checksum);
+    const target = await readlink(command);
+    const tar = join(root, 'tools', 'tar');
+    await writeFile(tar, `#!/bin/sh
+if [ "$1" = "-xzf" ]; then
+  mkdir "$5/partial"
+  kill -${signal} "$PPID"
+  exec sleep 1
+fi
+exec /usr/bin/tar "$@"
+`, { mode: 0o755 });
+
+    const args = ['--archive', next.file, '--checksum', next.checksum];
+    await expect(install(...args)).rejects.toMatchObject({ code: 128 + constants.signals[`SIG${signal}`] });
+    expect(await readlink(command)).toBe(target);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+    expect((await readdir(join(home, '.afk/cli'))).sort()).toEqual(['downloads', 'versions']);
+
+    await rm(tar);
+    await install(...args);
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.1');
   });
 
   it('requires force before replacing an unrelated executable', async () => {

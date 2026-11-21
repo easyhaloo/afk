@@ -214,9 +214,14 @@ export class DurableTriggerQueue {
     return receipt;
   }
 
-  start(options?: { readonly deliveryId: string }): void {
+  start(options?: { readonly deliveryId: string; readonly expeditePending?: boolean }): void {
     this.assertWritable();
     if (this.started && this.selectedDeliveryId !== options?.deliveryId) throw new Error('Trigger queue selection cannot change after startup');
+    if (!this.started && options?.expeditePending) {
+      const now = Date.now();
+      this.database.prepare("UPDATE trigger_deliveries SET nextAttemptAt = ? WHERE deliveryId = ? AND status = 'pending' AND nextAttemptAt > ?")
+        .run(now, options.deliveryId, now);
+    }
     this.selectedDeliveryId = options?.deliveryId;
     this.started = true;
     this.wake();

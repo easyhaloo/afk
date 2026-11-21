@@ -276,6 +276,8 @@ export const IPC_CHANNELS = {
   experiencesRevoke: "afk:experiences-revoke",
   learningProjects: "learning:projects",
   learningJobs: "learning:jobs",
+  learningWorkerOnce: "learning:worker-once",
+  learningWorkerCancel: "learning:worker-cancel",
   learningCandidates: "learning:candidates",
   learningCorrect: "learning:correct",
   learningValidate: "learning:validate",

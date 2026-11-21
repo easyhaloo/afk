@@ -36,6 +36,7 @@ export interface LearningJob {
   sourceRunId?: string;
   workItemId?: string;
   status: 'pending' | 'blocked' | 'failed' | 'processed';
+  canRun: boolean;
   reasonCode?: string;
   attempts: AnalysisAttempt[];
 }
@@ -60,15 +61,24 @@ export interface LearningRequestState {
   candidates: LearningCandidate[];
 }
 
+function permitsHandoff(reason: string | null | undefined): boolean {
+  return !reason || ['budget_exhausted', 'analysis_failed', 'analysis_cancelled', 'analysis_timed_out',
+    'analysis_invalid_output', 'storage_blocked'].includes(reason);
+}
+
 function learningJob(store: CandidateStore, entry: StoredDistillationRequest): LearningJob {
+  const processed = Boolean(store.getProcessingReceipt(entry.key));
+  const attempts = store.listAnalysisAttempts(entry.key);
   return {
     jobId: entry.key, scope: entry.request.scope, sourceId: entry.request.sourceId, sourceRunId: entry.request.sourceRunId,
     workItemId: entry.request.workItemId,
-    status: store.getProcessingReceipt(entry.key) ? 'processed' : entry.blockedReason
+    status: processed ? 'processed' : entry.blockedReason
       ? ['analysis_invalid_output', 'analysis_failed', 'attempts_exhausted'].includes(entry.blockedReason) ? 'failed' : 'blocked'
       : 'pending',
     ...(entry.blockedReason ? { reasonCode: entry.blockedReason } : {}),
-    attempts: store.listAnalysisAttempts(entry.key),
+    canRun: !processed && permitsHandoff(entry.blockedReason) && attempts.length < DISTILLATION_LIMITS.attempts
+      && !attempts.some(attempt => attempt.status === 'started'),
+    attempts,
   };
 }
 
@@ -156,7 +166,7 @@ export class LearningWorker {
       this.assertEnabled();
       const deliveryId = this.handoff(target);
       if (target) {
-        if (deliveryId) this.queue.start({ deliveryId });
+        if (deliveryId) this.queue.start({ deliveryId, expeditePending: true });
       } else this.queue.start();
       await this.queue.close();
     } catch (error) { await this.close(); throw error; }
@@ -219,8 +229,7 @@ export class LearningWorker {
     for (const entry of entries) {
       if (entry.key === this.activeJobId) continue;
       if (this.store.getProcessingReceipt(entry.key)) continue;
-      if (entry.blockedReason && !['budget_exhausted', 'analysis_failed', 'analysis_cancelled',
-        'analysis_timed_out', 'analysis_invalid_output', 'storage_blocked'].includes(entry.blockedReason)) continue;
+      if (!permitsHandoff(entry.blockedReason)) continue;
       const attempts = this.store.listAnalysisAttempts(entry.key);
       if (attempts.some(attempt => attempt.status === 'started')) {
         this.store.setRequestBlocked(entry.key, 'analysis_outcome_unknown', entry.blockedReason ?? null);

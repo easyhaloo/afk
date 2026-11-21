@@ -53,6 +53,14 @@ The renderer receives bounded metadata and version-bound results, without
 credentials, raw evidence, database access or a generic system-action bridge.
 These calls share Runtime's candidate ledger and do not start a distillation
 Worker or a model session when listing candidates and jobs.
+The task list can explicitly start one eligible request, including temporarily
+blocked or failed requests with attempts remaining. Main checks the current
+project inventory and Runtime's eligibility for the exact request before launching
+the bundled Electron Node child. The child reads saved Learning configuration, calls `learning.worker.once`
+with that request and uses Runtime's shared claim and budget with the CLI.
+Desktop owns the child and waits for it on quit. Cancel or loss of the parent
+IPC connection aborts the Runtime operation, and the child disposes Runtime
+before returning only the selected job's bounded status.
 Publication and reconciliation receipts remain visible when a subsequent list
 refresh fails; stale lists and prepared keys become unavailable. Reconciliation
 results are independent of the bounded candidate display page. Source withdrawal

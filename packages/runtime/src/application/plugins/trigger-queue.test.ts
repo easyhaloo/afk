@@ -207,6 +207,26 @@ describe('durable trigger queue', () => {
     expect(restarted.dispatch).toHaveBeenCalledTimes(2);
   });
 
+  it('expedites only the selected pending delivery without resetting its attempts', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const first = queue(file, vi.fn(async () => { throw new Error('retry later'); }), { retryDelayMs: 60_000 });
+    const unrelated = first.instance.enqueue('learning.distill', '{}', 'unrelated');
+    const selected = first.instance.enqueue('learning.distill', '{}', 'selected');
+    first.instance.start();
+    await first.instance.close();
+
+    const restarted = queue(file);
+    const unrelatedStatus = restarted.instance.status(unrelated.deliveryId)[0];
+    expect(unrelatedStatus).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(restarted.instance.status(selected.deliveryId)[0].nextAttemptAt).toBeGreaterThan(Date.now());
+    restarted.instance.start({ deliveryId: selected.deliveryId, expeditePending: true });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(restarted.instance.status(unrelated.deliveryId)[0]).toEqual(unrelatedStatus);
+    expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 2 });
+    expect(restarted.dispatch).toHaveBeenCalledOnce();
+  });
+
   it('bounds close without releasing an unconfirmed active consumer', async () => {
     vi.useFakeTimers();
     const file = queueFile();

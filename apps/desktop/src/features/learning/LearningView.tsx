@@ -91,9 +91,14 @@ export function LearningView({ api, enabled = true }: LearningViewProps) {
           <ul aria-label="发布阻断项">{data.reconciliation.blocked.map((failure, index) => <li key={`${failure.code}:${index}`}>{failure.code === "experience_projection_blocked" ? projectionBlockedNotice : failure.code}</li>)}</ul></> : null}
       </div>
     </section>
-    <section className="settings-section" aria-label="学习任务"><header><div><b>学习任务</b><small>最多展示 100 项；读取任务不会启动提炼或模型。</small></div></header>
+    <section className="settings-section" aria-label="学习任务"><header><div><b>学习任务</b><small>最多展示 100 项。运行提炼使用已保存的学习配置及模型预算。</small></div></header>
       {data.scope && !data.loading && !data.error && !data.jobs.length ? <p className="learning-note">暂无学习任务。</p> : null}
-      <ul className="learning-list">{data.jobs.map(job => <li key={job.jobId}><b>{jobStates[job.status]}</b><code>{job.jobId}</code><small>尝试 {job.attemptCount} 次</small></li>)}</ul>
+      <ul className="learning-list">{data.jobs.map(job => <li key={job.jobId}><b>{jobStates[job.status]}</b><code>{job.jobId}</code><small>尝试 {job.attemptCount} 次</small>
+        {data.workerRequestKey === job.jobId ? <div className="learning-toolbar"><button type="button" disabled={data.cancellingWorker}
+          onClick={() => { void data.cancelWorker(); }}>{data.cancellingWorker ? "正在停止提炼…" : "停止提炼"}</button></div>
+          : job.canRun ? <div className="learning-toolbar"><button type="button" disabled={!available || busy}
+            onClick={() => { void data.distill(job.jobId); }}>运行一次提炼</button></div> : null}
+      </li>)}</ul>
     </section>
   </section>;
 }

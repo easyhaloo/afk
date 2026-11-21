@@ -95,9 +95,13 @@ function fixture() {
   };
 }
 
+function cliJobs(jobs: LearningJob[]) {
+  return jobs.map(({ canRun, ...job }) => job);
+}
+
 function learningFixture(composition: ExperienceCommandComposition = {}) {
   const job: LearningJob = { jobId: 'a'.repeat(64), scope, sourceId: 'run:42', sourceRunId: 'source-run', workItemId,
-    status: 'blocked', reasonCode: 'budget_exhausted', attempts: [] };
+    status: 'blocked', canRun: true, reasonCode: 'budget_exhausted', attempts: [] };
   const proposal: LearningCandidate = { id: 'b'.repeat(64), requestKey: job.jobId, version: 1, state: 'candidate',
     digest: 'c'.repeat(64), evidenceDigest: 'd'.repeat(64), proposal: {
       kind: 'fact', title: 'Input validation', statement: 'Validate before writing', evidenceIds: ['audit-1'],
@@ -974,7 +978,7 @@ describe('read-only learning governance', () => {
   it.each(['jobs', 'candidates'])('returns existing %s DTOs without opening the experience store', async command => {
     const test = learningFixture();
     await test.parse(command, '--scope', scope, '--json');
-    expect(JSON.parse(test.printed())).toEqual(test.state[command as keyof LearningState]);
+    expect(JSON.parse(test.printed())).toEqual(command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates);
     expect(test.query).toHaveBeenCalledWith({ directory: '/tmp/afk-learning-command-test', scope });
     expect(runtime.ExperienceStore).not.toHaveBeenCalled();
   });
@@ -989,7 +993,7 @@ describe('read-only learning governance', () => {
     expect(dispatchSystemAction).toHaveBeenCalledWith(`learning.${command === 'jobs' ? 'jobs' : 'candidates'}`, { scope });
     expect(test.query).not.toHaveBeenCalled();
     expect(runtime.learningDirectory).not.toHaveBeenCalled();
-    expect(JSON.parse(test.printed())).toEqual(command === 'inspect' ? test.proposal : test.state[command as keyof LearningState]);
+    expect(JSON.parse(test.printed())).toEqual(command === 'inspect' ? test.proposal : command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates);
   });
 
   it.each(['jobs', 'candidates'])('filters %s to the exact scope before sorting and pagination', async command => {
@@ -1002,7 +1006,7 @@ describe('read-only learning governance', () => {
     { ...test.proposal, id: 'f'.repeat(64) }, test.proposal, { ...test.proposal, id: '1'.repeat(64) }];
     const original = structuredClone(test.state);
     await test.parse(command, '--scope', scope, '--limit', '1', '--offset', '1', '--json');
-    expect(JSON.parse(test.printed())).toEqual([command === 'jobs' ? test.job : test.proposal]);
+    expect(JSON.parse(test.printed())).toEqual(command === 'jobs' ? cliJobs([test.job]) : [test.proposal]);
     expect(test.state).toEqual(original);
   });
 
@@ -1014,7 +1018,8 @@ describe('read-only learning governance', () => {
     expect(JSON.parse(test.printed())).toHaveLength(100);
     test.output.length = 0;
     await test.parse(command, '--scope', scope, '--limit', '100', '--offset', '100', '--json');
-    expect(JSON.parse(test.printed())).toEqual(test.state[command as keyof LearningState].slice(0, 2).reverse());
+    const rows = command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates;
+    expect(JSON.parse(test.printed())).toEqual(rows.slice(0, 2).reverse());
     test.output.length = 0;
     await test.parse(command, '--scope', scope, '--limit', '0', '--offset', '0', '--json');
     expect(JSON.parse(test.printed())).toEqual([]);
@@ -1068,7 +1073,7 @@ describe('read-only learning governance', () => {
     test.job.attempts = [{ requestKey: test.job.jobId, callId: 'storage-call', day: '2026-11-10',
       startedAt: '2026-11-10T00:00:00Z', ownerPid: 42, host: 'local-host', status: 'failed', errorCode: 'storage_blocked' }];
     await test.parse('jobs', '--scope', scope, ...(json ? ['--json'] : []));
-    if (json) expect(JSON.parse(test.printed())).toEqual([test.job]);
+    if (json) expect(JSON.parse(test.printed())).toEqual(cliJobs([test.job]));
     else expect(test.printed()).toBe(`${test.job.jobId} [blocked] storage_blocked\n`);
   });
 
@@ -1088,7 +1093,7 @@ describe('read-only learning governance', () => {
 
   it.each(['jobs', 'candidates', 'inspect'])('emits only existing %s DTO fields, never pack or credential extensions', async command => {
     const test = learningFixture();
-    const expected = structuredClone(command === 'jobs' ? test.state.jobs : command === 'inspect' ? test.proposal : test.state.candidates);
+    const expected = structuredClone(command === 'jobs' ? cliJobs(test.state.jobs) : command === 'inspect' ? test.proposal : test.state.candidates);
     Object.assign(test.job, { pack: { content: 'PRIVATE_PACK_BODY' }, credentials: 'PRIVATE_TOKEN' });
     Object.assign(test.proposal, { pack: { content: 'PRIVATE_PACK_BODY' }, credentials: 'PRIVATE_TOKEN' });
     await test.parse(command, ...(command === 'inspect' ? [test.proposal.id] : []), '--scope', scope, '--json');
@@ -1100,7 +1105,7 @@ describe('read-only learning governance', () => {
     const test = learningFixture();
     test.job.reasonCode = 'RAW_TRANSCRIPT authorization: Bearer PRIVATE_TOKEN';
     await test.parse('jobs', '--scope', scope, '--json');
-    const { reasonCode, ...expected } = test.job;
+    const { reasonCode, canRun, ...expected } = test.job;
     expect(JSON.parse(test.printed())).toEqual([expected]);
     expect(test.printed()).not.toContain('PRIVATE_TOKEN');
   });
@@ -1194,7 +1199,7 @@ describe('read-only learning governance', () => {
     const before = readFileSync(join(directory, 'candidates.sqlite'));
     const test = learningFixture({ queryLearningState: input => actual.queryLearningState({ ...input, directory }) });
     await test.parse('jobs', '--scope', scope, '--json');
-    expect(JSON.parse(test.printed())).toEqual(actual.queryLearningState({ directory, scope }).jobs);
+    expect(JSON.parse(test.printed())).toEqual(cliJobs(actual.queryLearningState({ directory, scope }).jobs));
     expect(test.printed()).not.toContain('PRIVATE_EVIDENCE_PACK_BODY');
     expect(readFileSync(join(directory, 'candidates.sqlite'))).toEqual(before);
     expect(existsSync(join(directory, 'distillation-queue.sqlite'))).toBe(false);

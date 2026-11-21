@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
   api: undefined as DesktopApi | undefined,
   invoke: vi.fn(async (_channel: string, _input?: unknown) => undefined),
   dispatch,
+    launchWorker: vi.fn(async (_target: unknown, _signal: AbortSignal): Promise<unknown> => undefined),
   withRuntime: vi.fn(async (operation: (runtime: unknown) => Promise<unknown>) => operation({ dispatchSystemAction: dispatch })),
   inventory: vi.fn(async () => ({ items: [], projects: [{ platform: "github", projectKey: "acme/api" }], diagnostics: [], complete: true })),
   };
@@ -28,6 +29,7 @@ vi.mock("../../electron/work-items/inventory-service.js", () => ({
   createWorkItemInventoryService: () => ({ list: mocks.inventory, sync: mocks.inventory }),
 }));
 vi.mock("../../electron/services/plugin-service.js", () => ({ createPluginService: () => ({ withRuntime: mocks.withRuntime }) }));
+vi.mock("../../electron/adapters/learning-worker-adapter.js", () => ({ createLearningWorker: () => mocks.launchWorker }));
 
 const scope = "github:acme/api";
 const candidateId = "a".repeat(64);
@@ -51,13 +53,13 @@ describe("learning Main and preload integration", () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.dispatch.mockImplementation(async action => action === "learning.jobs" ? [{ jobId: "b".repeat(64), scope, status: "blocked", attempts: [], sourceId: "PRIVATE_SOURCE" }] : []);
+    mocks.dispatch.mockImplementation(async action => action === "learning.jobs" ? [{ jobId: "b".repeat(64), scope, status: "blocked", canRun: false, attempts: [], sourceId: "PRIVATE_SOURCE" }] : []);
   });
 
   it("projects inventory without creating a runtime and sends reads through the owned runtime composition", async () => {
     expect(await invoke(IPC_CHANNELS.learningProjects)).toEqual([scope]);
     expect(mocks.withRuntime).not.toHaveBeenCalled();
-    expect(await invoke(IPC_CHANNELS.learningJobs, { scope })).toEqual([{ jobId: "b".repeat(64), scope, status: "blocked", attemptCount: 0 }]);
+    expect(await invoke(IPC_CHANNELS.learningJobs, { scope })).toEqual([{ jobId: "b".repeat(64), scope, status: "blocked", attemptCount: 0, canRun: false }]);
     expect(mocks.withRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.dispatch).toHaveBeenCalledWith("learning.jobs", { scope });
   });
@@ -117,12 +119,46 @@ describe("learning Main and preload integration", () => {
     await expect(invoke(IPC_CHANNELS.learningJobs, { scope })).rejects.toThrow("学习操作失败，请检查学习配置、候选版本与授权后重试。");
   });
 
+  it.each(["pending", "blocked", "failed"])("starts the exact eligible %s request only through an explicit worker call", async status => {
+    const jobId = "b".repeat(64);
+    const target = { scope, requestKey: jobId };
+    mocks.dispatch.mockResolvedValueOnce({ job: { scope, jobId, status, canRun: true, attempts: [], sourceId: "PRIVATE" } });
+    const result = { status: "finished", job: { scope, jobId, status: "processed", attemptCount: 1, canRun: false } };
+    mocks.launchWorker.mockResolvedValueOnce(result);
+
+    expect(await invoke(IPC_CHANNELS.learningWorkerOnce, target)).toEqual(result);
+    expect(mocks.dispatch.mock.calls).toEqual([["learning.request", target]]);
+    expect(mocks.launchWorker.mock.calls).toEqual([[target, expect.any(AbortSignal)]]);
+  });
+
+  it("rejects malformed, untrusted, cross-project and ineligible launches", async () => {
+    const jobId = "b".repeat(64);
+    const target = { scope, requestKey: jobId };
+    const other = "github:acme/foreign";
+    await expect(invoke(IPC_CHANNELS.learningWorkerOnce, target, { senderFrame: { url: "https://untrusted.invalid" } })).rejects.toThrow();
+    await expect(invoke(IPC_CHANNELS.learningWorkerOnce, { ...target, scope: other })).rejects.toThrow("项目");
+    await expect(invoke(IPC_CHANNELS.learningWorkerOnce, { ...target, requestKey: "*" })).rejects.toThrow();
+    await expect(invoke(IPC_CHANNELS.learningWorkerOnce, { ...target, provider: "injected" })).rejects.toThrow();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+
+    for (const job of [{ scope: other, status: "pending", canRun: true }, { scope, status: "processed", canRun: false },
+      { scope, status: "blocked", canRun: false }, { scope, status: "failed", canRun: false }]) {
+      mocks.dispatch.mockResolvedValueOnce({ job: { ...job, jobId, attempts: [] } });
+      await expect(invoke(IPC_CHANNELS.learningWorkerOnce, target)).rejects.toThrow("没有可运行的对应任务");
+    }
+    expect(mocks.launchWorker).not.toHaveBeenCalled();
+  });
+
   it("exposes exactly the fixed learning methods and matching wire channels", async () => {
     const api = mocks.api!.learning;
-    expect(Object.keys(api).sort()).toEqual(["candidates", "correct", "jobs", "knowledge", "projects", "validate"]);
+    expect(Object.keys(api).sort()).toEqual(["candidates", "correct", "jobs", "knowledge", "projects", "validate", "worker"]);
     expect(Object.keys(api.knowledge).sort()).toEqual(["prepare", "publish", "reconcile"]);
+    expect(Object.keys(api.worker).sort()).toEqual(["cancel", "once"]);
+    const target = { scope, requestKey: "b".repeat(64) };
     await api.projects();
     await api.jobs({ scope });
+    await api.worker.once(target);
+    await api.worker.cancel(target);
     await api.candidates({ scope });
     await api.correct(correctionInput);
     await api.validate(selection);
@@ -130,7 +166,8 @@ describe("learning Main and preload integration", () => {
     await api.knowledge.publish({ scope, key: "e".repeat(64) });
     await api.knowledge.reconcile({ scope });
     expect(mocks.invoke.mock.calls).toEqual([
-      [IPC_CHANNELS.learningProjects], [IPC_CHANNELS.learningJobs, { scope }], [IPC_CHANNELS.learningCandidates, { scope }],
+      [IPC_CHANNELS.learningProjects], [IPC_CHANNELS.learningJobs, { scope }],
+      [IPC_CHANNELS.learningWorkerOnce, target], [IPC_CHANNELS.learningWorkerCancel, target], [IPC_CHANNELS.learningCandidates, { scope }],
       [IPC_CHANNELS.learningCorrect, correctionInput],
       [IPC_CHANNELS.learningValidate, selection], [IPC_CHANNELS.learningKnowledgePrepare, { scope, candidateId, expectedVersion: 1 }],
       [IPC_CHANNELS.learningKnowledgePublish, { scope, key: "e".repeat(64) }], [IPC_CHANNELS.learningKnowledgeReconcile, { scope }],

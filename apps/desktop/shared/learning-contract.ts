@@ -6,12 +6,15 @@ type RuntimePublication = Awaited<ReturnType<typeof prepareConfiguredKnowledge>>
 type RuntimePublicationResult = Awaited<ReturnType<typeof publishConfiguredKnowledge>>;
 type Validated = Extract<LearningValidationResult, { status: "validated" }>;
 export type LearningQuery = { scope: string };
+export type LearningWorkerTarget = LearningQuery & { requestKey: string };
 export type LearningSelection = LearningQuery & { candidateId: string; expectedVersion: number };
 export type LearningCorrectionInput = LearningSelection & { correction: string };
 export type LearningValidateInput = LearningSelection & { checkerId: string };
 export type KnowledgePrepareInput = LearningSelection & { targetRef?: string };
 export type KnowledgePublishInput = LearningQuery & { key: string };
-export type DesktopLearningJob = Pick<LearningJob, "jobId" | "scope" | "status"> & { attemptCount: number };
+export type DesktopLearningJob = Pick<LearningJob, "jobId" | "scope" | "status" | "canRun"> & { attemptCount: number };
+export type DesktopLearningWorkerResult = { status: "finished"; job: DesktopLearningJob }
+  | { status: "cancelled" };
 export type DesktopLearningCandidate = Pick<LearningCandidate, "id" | "requestKey" | "version" | "state"> & {
   scope: string; kind: LearningCandidate["proposal"]["kind"]; title: string; evidenceCount: number; targetRef?: string;
 };
@@ -28,6 +31,10 @@ export type DesktopLearningReconciliation = { results: DesktopLearningPublicatio
 export type DesktopLearningApi = {
   projects(): Promise<string[]>;
   jobs(input: LearningQuery): Promise<DesktopLearningJob[]>;
+  worker: {
+    once(input: LearningWorkerTarget): Promise<DesktopLearningWorkerResult>;
+    cancel(input: LearningWorkerTarget): Promise<boolean>;
+  };
   candidates(input: LearningQuery): Promise<DesktopLearningCandidate[]>;
   correct(input: LearningCorrectionInput): Promise<DesktopLearningCorrection>;
   validate(input: LearningValidateInput): Promise<DesktopLearningValidationResult>;
@@ -129,6 +136,22 @@ export function parseLearningQuery(value: unknown): LearningQuery {
   return checked(() => ({ scope: parseLearningScope(object(value, ["scope"]).scope) }));
 }
 
+export function parseLearningWorkerTarget(value: unknown): LearningWorkerTarget {
+  return checked(() => {
+    const input = object(value, ["scope", "requestKey"]);
+    return { scope: parseLearningScope(input.scope), requestKey: digest(input.requestKey) };
+  });
+}
+
+export function parseLearningWorkerResult(value: unknown): DesktopLearningWorkerResult {
+  return checked(() => {
+    const input = object(value, ["status", "job"]);
+    if (input.status === "finished") return { status: input.status, job: parseLearningJob(input.job) };
+    if (input.status === "cancelled" && !Object.hasOwn(input, "job")) return { status: input.status };
+    throw new Error();
+  });
+}
+
 export function parseLearningCorrectionInput(value: unknown): LearningCorrectionInput {
   return checked(() => {
     const keys = ["scope", "candidateId", "expectedVersion", "correction"];
@@ -181,9 +204,10 @@ export function parseKnowledgePublish(value: unknown): KnowledgePublishInput {
 
 export function parseLearningJob(value: unknown): DesktopLearningJob {
   return checked(() => {
-    const input = object(value, ["jobId", "scope", "status", "attemptCount"]);
+    const input = object(value, ["jobId", "scope", "status", "attemptCount", "canRun"]);
+    if (typeof input.canRun !== "boolean" || (input.status === "processed" && input.canRun)) throw new Error();
     return { jobId: digest(input.jobId), scope: parseLearningScope(input.scope), status: choice(input.status, ["pending", "blocked", "failed", "processed"]),
-      attemptCount: integer(input.attemptCount, 0, LEARNING_LIMITS.backendRecords) };
+      attemptCount: integer(input.attemptCount, 0, LEARNING_LIMITS.backendRecords), canRun: input.canRun };
   });
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   parseLearningProjects, parseLearningCandidates, parseLearningJobs, parseLearningValidate,
   parseLearningValidationResult, parseLearningPublication, parseLearningPublicationResult, parseLearningReconciliation,
-  parseLearningCorrectionInput, parseLearningCorrectionResult,
+  parseLearningCorrectionInput, parseLearningCorrectionResult, parseLearningWorkerResult,
   type DesktopLearningApi, type DesktopLearningCandidate, type DesktopLearningJob, type DesktopLearningPublication,
   type DesktopLearningPublicationResult, type DesktopLearningReconciliation, type DesktopLearningCorrection,
 } from "../../../shared/learning-contract.js";
@@ -12,8 +12,10 @@ type LearningState = {
   selectedId: string; loading: boolean; mutating: boolean; error: string; notice: string;
   preview?: DesktopLearningPublication; publication?: DesktopLearningPublicationResult; reconciliation?: DesktopLearningReconciliation;
   correction?: DesktopLearningCorrection;
+  workerRequestKey?: string;
+  cancellingWorker?: boolean;
 };
-type Operation = "validate" | "prepare" | "publish" | "reconcile" | "correct";
+type Operation = "validate" | "prepare" | "publish" | "reconcile" | "correct" | "distill";
 const initial: LearningState = { projects: [], scope: "", candidates: [], jobs: [], selectedId: "", loading: false, mutating: false, error: "", notice: "" };
 const readFailure = "学习数据读取失败，请检查项目来源、学习插件与验证／知识配置后重试。";
 const writeFailure = "学习操作未确认，请重新读取数据并检查候选版本、验证／知识配置与授权后重试。";
@@ -58,7 +60,7 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
   useEffect(() => {
     mounted.current = true;
     revision.current++;
-    update({ ...initial, mutating: changing.current });
+    update({ ...initial, mutating: changing.current, workerRequestKey: undefined, cancellingWorker: false });
     if (api && enabled) {
       const ticket = revision.current;
       update({ loading: true });
@@ -87,7 +89,8 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
     const snapshot = current.current;
     if (!api || !enabled || !mounted.current || changing.current || snapshot.loading || !snapshot.scope) return;
     const candidate = snapshot.candidates.find(entry => entry.id === snapshot.selectedId && entry.scope === snapshot.scope);
-    if (operation !== "reconcile" && !candidate) return;
+    if (operation !== "reconcile" && operation !== "distill" && !candidate) return;
+    if (operation === "distill" && !snapshot.jobs.some(job => job.jobId === value && job.scope === snapshot.scope && job.canRun)) return;
     if (operation === "validate" && (!candidate || !["candidate", "conflict"].includes(candidate.state))) return;
     if (operation === "prepare" && (!candidate || candidate.state !== "validated" || !["fact", "process"].includes(candidate.kind))) return;
     const preview = snapshot.preview;
@@ -105,11 +108,22 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
     }
     changing.current = true;
     const ticket = ++revision.current;
-    update({ mutating: true, error: "", notice: "", preview: undefined, publication: undefined, reconciliation: undefined, correction: undefined });
+    update({ mutating: true, error: "", notice: "", preview: undefined, publication: undefined, reconciliation: undefined, correction: undefined,
+      workerRequestKey: operation === "distill" ? value : undefined });
     let next: Partial<LearningState> = {};
     try {
       let validatedVersion: number | undefined;
-      if (operation === "validate" && validationInput && candidate) {
+      if (operation === "distill") {
+        const result = parseLearningWorkerResult(await api.worker.once({ scope: snapshot.scope, requestKey: value }));
+        if (!active(ticket)) return;
+        if (result.status === "finished" && (result.job.scope !== snapshot.scope || result.job.jobId !== value)) throw new Error();
+        next.notice = result.status === "cancelled" ? "已停止桌面提炼，请查看任务的当前状态。"
+          : result.job.status === "processed" ? "提炼完成，请查看候选。"
+          : result.job.status === "pending" ? "任务仍在等待，请刷新任务状态。"
+          : result.job.canRun ? "提炼受阻，请检查学习配置、预算与任务状态。"
+          : "提炼未完成，当前任务无法重试。";
+        update({ ...next, workerRequestKey: undefined });
+      } else if (operation === "validate" && validationInput && candidate) {
         const result = parseLearningValidationResult(await api.validate(validationInput));
         if (!active(ticket)) return;
         if (result.status === "validated" && (result.candidateId !== candidate.id || result.candidateVersion !== candidate.version)) throw new Error();
@@ -148,7 +162,7 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
       const result = await records(api, snapshot.scope);
       if (!active(ticket)) return;
       const updated = candidate && result.candidates.find(entry => entry.id === candidate.id);
-      if (operation !== "reconcile" && !updated) throw new Error();
+      if (operation !== "reconcile" && operation !== "distill" && !updated) throw new Error();
       if (next.correction && updated && (updated.version !== next.correction.candidateVersion || updated.state !== candidate?.state)) throw new Error();
       if (validatedVersion !== undefined && (!updated || updated.version !== validatedVersion || updated.state !== "validated")) throw new Error();
       if (next.preview && (!updated || updated.version !== next.preview.candidateVersion || updated.state !== "validated")) throw new Error();
@@ -164,16 +178,31 @@ export function useLearning(api: DesktopLearningApi | undefined, enabled: boolea
       }
       update({ ...result, ...next });
     } catch {
-      if (active(ticket)) update({ error: next.publication || next.reconciliation || next.correction ? receiptReadFailure : writeFailure, candidates: [], jobs: [], selectedId: "", preview: undefined,
+      if (active(ticket)) update({ error: next.publication || next.reconciliation || next.correction || (operation === "distill" && next.notice) ? receiptReadFailure
+        : operation === "distill" ? "提炼未完成，请刷新任务并检查已保存的学习配置。" : writeFailure, candidates: [], jobs: [], selectedId: "", preview: undefined,
         publication: next.publication, reconciliation: next.reconciliation, correction: next.correction });
     } finally {
       changing.current = false;
-      if (mounted.current) update({ mutating: false });
+      if (mounted.current) update({ mutating: false, workerRequestKey: undefined, cancellingWorker: false });
+    }
+  }
+
+  async function cancelWorker() {
+    const { scope, workerRequestKey, cancellingWorker } = current.current;
+    if (!api || !workerRequestKey || cancellingWorker) return;
+    const ticket = revision.current;
+    update({ cancellingWorker: true });
+    try { await api.worker.cancel({ scope, requestKey: workerRequestKey }); }
+    catch {
+      if (active(ticket) && current.current.workerRequestKey === workerRequestKey) {
+        update({ cancellingWorker: false, error: "无法停止桌面提炼，请检查项目权限。" });
+      }
     }
   }
 
   return { ...state, selected: state.candidates.find(candidate => candidate.id === state.selectedId), selectScope, selectCandidate,
     refresh: () => load(current.current.scope, true), validate: (checkerId: string) => run("validate", checkerId),
     correct: (correction: string) => run("correct", correction),
+    distill: (requestKey: string) => run("distill", requestKey), cancelWorker,
     prepare: () => run("prepare"), publish: () => run("publish"), reconcile: () => run("reconcile") };
 }

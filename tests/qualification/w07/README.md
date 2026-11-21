@@ -43,12 +43,20 @@
 | ZIP | `c013f258c579fe63985980bbe3070a775027542c08b4e4e7e1dee3545d6cdef6` |
 | `app.asar` | `7bdedd2f5ddd8223cf4ed62bf712b71c7cda20c391d43d9c262db11152d5f477` |
 
-DMG 安装版与仓库外安装的 CLI `0.2.183` 通过 **4/4** 项 Electron E2E（48.6 秒）。覆盖设置界面验证、Wiki 内容发布与来源失效后的撤回、项目 IP 脱敏，以及 CLI 和 Desktop 分别先持有仓库租约的两个竞争场景。用例使用固定候选、本地脚本 Agent 和回环 Tracker。真实模型流程、签名和公证仍待验收。
+DMG 安装版与仓库外安装的 CLI `0.2.183` 通过 **4/4** 项 Electron E2E（48.6 秒）。覆盖设置界面验证、Wiki 内容发布与来源失效后的撤回、项目 IP 脱敏，以及 CLI 和 Desktop 分别先持有仓库租约的两个竞争场景。用例使用固定候选、本地脚本 Agent 和回环 Tracker。签名和公证仍待验收。
 
 复跑时将 `AFK_E2E_DESKTOP_EXECUTABLE` 和 `AFK_E2E_CLI_ENTRY` 分别指向仓库外安装的 Desktop 可执行文件和 CLI 入口。
 
 ```sh
 pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts work-item-single-claim learning-settings --grep 'holds the repository lease|\(packaged\)'
+```
+
+2026-11-21，同一 DMG 安装副本与 `732786ed` 的 CLI `0.2.183` 归档通过真实 Claude 候选用例 **1/1**（41.9 秒）。Playwright 将合成审批审计提交到隔离账本，直接调用仓库外安装的 Runtime。真实 Claude Code `2.1.326` 产生一条事实候选。打包 Desktop 的设置页使用独立校验器检验主题、规则和证据定位符，经预览与确认发布到隔离 Wiki。测试核对安装版 CLI 的召回结果、来源失效后的排除及设置页撤回。Desktop 启动提炼 Worker 另行验收。回环 Tracker 提供隔离项目。关闭真实模型开关后，设置页套件其余七项全部通过（37.3 秒）。
+
+保留上面的两个安装入口变量。使用已登录的 Claude Code 复跑真实候选用例。
+
+```sh
+AFK_E2E_DESKTOP_LIVE_LEARNING=1 pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts learning-settings --grep 'live Claude candidate'
 ```
 
 ### 历史 QA 工作区归属

@@ -43,7 +43,7 @@ async function launchLearning(fixture: LearningFixture, packaged?: { executable:
   }
 }
 
-test.describe("production Main learning IPC with a deterministic saved oracle (no live model)", () => {
+test.describe("production Main learning IPC with an independent saved oracle", () => {
   test("deduplicates concurrent CLI and Desktop corrections and consumes the request once", async () => {
     const fixture = await createLearningFixture();
     let app: ElectronApplication | undefined;
@@ -129,7 +129,7 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
   test.setTimeout(120_000);
 
   const executable = process.env.AFK_E2E_DESKTOP_EXECUTABLE;
-  async function checkWikiPublication(host: "localhost" | "127.0.0.1") {
+  async function checkWikiPublication(host: "localhost" | "127.0.0.1", live = false) {
     const requests = new Set<string>();
     const gitlab = createServer((request, response) => {
       const route = new URL(request.url!, 'http://127.0.0.1').pathname;
@@ -155,7 +155,7 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
         if (!address || typeof address === 'string') throw new Error('Missing loopback port');
         packaged = { executable: path.resolve(executable), gitlabUrl: `http://${host}:${address.port}` };
       }
-      fixture = await createLearningFixture('fact', packaged && `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`);
+      fixture = await createLearningFixture('fact', packaged && `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`, live);
       const otherProject = fixture.scope.replace(/\/api$/, '/web');
       const initial = await fixture.inspect();
       expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
@@ -290,6 +290,12 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
   test(`uses Settings to validate, publish and withdraw actual Wiki content after source invalidation (${executable ? 'packaged' : 'source'})`,
     () => checkWikiPublication("localhost"));
   if (executable) test("publishes and withdraws knowledge without exposing the project IP (packaged)", () => checkWikiPublication("127.0.0.1"));
+  test("validates, publishes and withdraws a live Claude candidate in packaged Settings", async () => {
+    test.skip(process.env.AFK_E2E_DESKTOP_LIVE_LEARNING !== '1', 'Requires authenticated Claude Code and installed CLI and Desktop');
+    if (!executable || !process.env.AFK_E2E_CLI_ENTRY) throw new Error('Set the installed CLI and Desktop entries');
+    test.setTimeout(210_000);
+    await checkWikiPublication("localhost", true);
+  });
 
   test("shows missing independent lesson QA without validating or publishing", async () => {
     const fixture = await createLearningFixture("lesson");

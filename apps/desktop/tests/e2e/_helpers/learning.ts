@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -49,6 +49,7 @@ import { JsonlEventStore } from ${JSON.stringify(source("packages/runtime/src/in
 const fixture = knowledgeFixture();
 fixture.store.close();
 const lesson = process.argv[1] === 'lesson';
+const live = process.argv[3] === 'claude';
 const home = process.env.HOME;
 const workspace = join(process.env.TMPDIR, 'workspace');
 const targetRoot = join(fixture.root, 'authority');
@@ -59,38 +60,48 @@ fixture.policy.scope = scope;
 fixture.persistGrant();
 const workItemId = scope + '#42';
 const events = new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR });
-await events.append([{ id: 'observed-approval', schemaVersion: 1, type: 'agent.session_recorded',
+const policy = { targetRef: 'wiki:approval', subject: 'approval', rule: 'Approve before publishing', version: 'abc' };
+const publish = approved => approved ? 'published' : 'denied';
+const observed = { withoutApproval: publish(false), withApproval: publish(true) };
+assert.deepEqual(observed, { withoutApproval: 'denied', withApproval: 'published' });
+const data = live ? { kind: 'effect.completed', effectKind: 'release.approval', idempotencyKey: 'approval-source',
+  outcome: 'succeeded', summary: JSON.stringify({ ...policy, ...observed }) }
+  : { kind: 'agent.session_recorded', sessionId: 'approval-session' };
+await events.append([{ id: 'observed-approval', schemaVersion: 1, type: data.kind,
   occurredAt: '2026-11-11T00:00:00Z', correlationId: 'approval-source',
   context: { runId: 'approval-source', traceId: 'approval-trace', workItemId,
     profileId: 'default', attempt: 1, actor: { kind: 'system', id: 'desktop-e2e' } },
-  data: { kind: 'agent.session_recorded', sessionId: 'approval-session' } }]);
+  data }]);
 const audit = { id: 'audit-1', kind: 'audit', path: events.pathFor('approval-source'),
   allowedRoot: process.env.AFK_EVENT_STORE_DIR, runId: 'approval-source' };
 const pack = await buildEvidencePack({ sources: [audit] });
 const file = join(home, '.afk', 'learning', 'candidates.sqlite');
 const store = new CandidateStore({ file });
-let candidate;
+let candidate, requestKey;
 try {
   const request = store.submitRequest({ request: { version: 1, scope, sourceId: 'run:approval-source',
     sourceRunId: 'approval-source', workItemId, evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'import' },
     evidence: pack.entries.map(entry => entry.ref) }, pack);
-  const proposal = lesson ? { ...fixture.candidate.proposal, kind: 'lesson', payload: {
-    trigger: 'Publication started before approval', rootCause: 'The approval guard was missing', rootCauseStatus: 'confirmed',
-    attempts: ['Require approval before publication'], fix: 'Check approval before publishing',
-    prevention: ['Keep an independent approval regression'],
-  } } : fixture.candidate.proposal;
-  const completed = store.completeRequest(request.key, { version: 1, warnings: [],
-    candidates: [{ ...proposal, applicability: { ...proposal.applicability, project: scope },
-      evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
-  candidate = store.getCandidate(completed.candidateIds[0]);
-  assert.equal(candidate.state, 'candidate');
-  assert.equal(candidate.version, 1);
-  assert.equal(store.getValidation(candidate.id), undefined);
+  requestKey = request.key;
+  if (!live) {
+    const proposal = lesson ? { ...fixture.candidate.proposal, kind: 'lesson', payload: {
+      trigger: 'Publication started before approval', rootCause: 'The approval guard was missing', rootCauseStatus: 'confirmed',
+      attempts: ['Require approval before publication'], fix: 'Check approval before publishing',
+      prevention: ['Keep an independent approval regression'],
+    } } : fixture.candidate.proposal;
+    const completed = store.completeRequest(request.key, { version: 1, warnings: [],
+      candidates: [{ ...proposal, applicability: { ...proposal.applicability, project: scope },
+        evidenceIds: pack.entries.map(entry => entry.ref.id) }] });
+    candidate = store.getCandidate(completed.candidateIds[0]);
+    assert.equal(candidate.state, 'candidate');
+    assert.equal(candidate.version, 1);
+    assert.equal(store.getValidation(candidate.id), undefined);
+  }
 } finally { store.close(); }
 const identity = { scope, checkerId: 'approval-rules', providerId: 'approval-oracle', version: '1' };
 const authorityFile = join(targetRoot, 'approval.json');
 const callsFile = join(fixture.root, 'checker-calls.jsonl');
-writeFileSync(authorityFile, JSON.stringify({ subject: 'approval', rule: 'Approve before publishing',
+writeFileSync(authorityFile, JSON.stringify({ subject: policy.subject, rule: policy.rule,
   authority: pack.entries.map(entry => entry.ref.locator) }), { mode: 0o600 });
 writeFileSync(callsFile, '', { mode: 0o600 });
 const configurationFile = join(fixture.root, 'checkers.json');
@@ -124,13 +135,13 @@ writeFileSync(join(extension, 'index.js'), \`
     });
   } });
 \`);
-console.log(JSON.stringify({ root: fixture.root, home, workspace, vault: fixture.vault, file, scope,
-  candidateId: candidate.id, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest,
+console.log(JSON.stringify({ root: fixture.root, home, workspace, vault: fixture.vault, file, scope, requestKey,
+  candidateId: candidate?.id, candidateDigest: candidate?.digest, evidenceDigest: pack.digest,
   checkerId: identity.checkerId, pluginId: manifest.id, extension, authorityFile, callsFile,
   configurationFile, authorizationFile: fixture.authorizationFile, wikiScript: fixture.wikiScript }));
 `;
 
-export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', scopeOverride?: string) {
+export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', scopeOverride?: string, live = false) {
   const temporary = mkdtempSync(path.join(realpathSync(tmpdir()), "afk-desktop-learning-"));
   const home = path.join(temporary, "home");
   const env: Record<string, string> = {
@@ -174,9 +185,36 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
       }
     }
     env.PATH = [bin, "/usr/bin", "/bin"].join(path.delimiter);
-    const fixture = await node(seedScript, scopeOverride === undefined ? [kind] : [kind, scopeOverride]) as FixtureMetadata;
     const binary = path.resolve(process.env.AFK_E2E_CLI_ENTRY ?? path.join(repository, "apps/cli/dist/index.js"));
     if (!existsSync(binary)) throw new Error(`CLI entry not found: ${binary}. Build the CLI or set AFK_E2E_CLI_ENTRY.`);
+    const seed = await node(seedScript, live ? [kind, scopeOverride!, 'claude'] : scopeOverride === undefined ? [kind] : [kind, scopeOverride]);
+    if (live) {
+      const release = path.dirname(path.dirname(realpathSync(binary)));
+      const runtime = (file: string) => pathToFileURL(path.join(release, 'node_modules/@afk/runtime/dist', file)).href;
+      const authHome = userInfo().homedir;
+      const result = await execute(process.execPath, ['--input-type=module', '--eval', `
+        import assert from 'node:assert/strict';
+        import { dirname } from 'node:path';
+        import { LearningWorker } from ${JSON.stringify(runtime('execution.js'))};
+        import { queryLearningRequest } from ${JSON.stringify(runtime('application/learning/worker.js'))};
+        import { ClaudeCodeProvider } from ${JSON.stringify(runtime('domain/agents/claude-code.js'))};
+        const [file, scope, requestKey] = process.argv.slice(1);
+        const directory = dirname(file);
+        const target = { scope, requestKey };
+        const worker = new LearningWorker({ directory, enabled: true, dailyCalls: 1, provider: new ClaudeCodeProvider() });
+        try { await worker.runOnce(target); } finally { await worker.close(); }
+        const { job, candidates } = queryLearningRequest({ directory, ...target });
+        const status = { job: job.status, reason: job.reasonCode, attempts: job.attempts.map(attempt => attempt.status),
+          kinds: candidates.map(candidate => candidate.proposal.kind) };
+        assert.deepEqual(status, { job: 'processed', reason: undefined, attempts: ['succeeded'], kinds: ['fact'] });
+        const [candidate] = candidates;
+        console.log(JSON.stringify({ candidateId: candidate.id, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest }));
+      `, seed.file, seed.scope, seed.requestKey], { cwd: seed.workspace, timeout: 140_000,
+        env: { ...env, HOME: authHome, USERPROFILE: authHome, PATH: process.env.PATH,
+          CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } });
+      Object.assign(seed, JSON.parse(result.stdout));
+    }
+    const fixture = seed as FixtureMetadata;
     const command = (...args: string[]) =>
       execute(process.execPath, [binary, ...args], { cwd: fixture.workspace, env, timeout: 15_000 });
     let sequence = 0;

@@ -12,6 +12,24 @@ The 0.2.183 runtime accepts a control timer equal to the 5000 ms execution limit
 
 A native Docker diagnostic compared a program that received `EROFS` while writing `/workspace/asset.js` with one that printed the same error without attempting the write. Both exited 23 with the same scratch digest and `historyCoverage: "not-observed"`. The formal denial case needs an independent witness of the operation, target and refusal. The recovery case needs an observed partial effect and a checkpoint read after interruption. This diagnostic does not change the frozen candidate or its 0/8 result.
 
+## Synthetic W06 controls
+
+Run `pnpm exec vitest run tests/qualification/w05/scan-entry/control-fixtures.test.ts` from a built workspace. On a POSIX filesystem, the non-root permission test issues the same write to a writable control and to a `0444` synthetic asset. The host confirms `EACCES` for the exact protected path and reads back the original bytes. The tool checker still needs a binding for this witness.
+
+The recovery fixture scans two lines. A controlled exit after the first line leaves a partial checkpoint. Recovery and replay return the same result and preserve the final checkpoint bytes. The host test prepares the case with the product schema. The native Docker test checks the same frozen returns and checkpoint bytes under one owned operation. Docker 28.3.2 on Linux arm64 observed exits `23`, `0`, and `0`, with quiescence confirmed at each checkpoint. The run left zero operation containers, images, or compiler containers.
+
+With the suite's pinned image already present, replay the Docker case with:
+
+```sh
+AFK_FROZEN_SCRATCH_DOCKER=1 AFK_FROZEN_SCRATCH_EVIDENCE=/absolute/path/to/receipt.json \
+  pnpm --filter @afk/runtime exec vitest run src/infrastructure/sandbox/container/frozen-scratch-helper.test.ts \
+  -t 'reads the interrupted manifest scan checkpoint'
+```
+
+Formal coverage remains 0/8. The historical candidate accepts a string. Formal recovery requires a candidate that supports the checkpoint protocol, a checker bound to its checks, a native scratch helper and a matching digest-bound grant.
+
+The paired proposal runtime replay used a real temporary Git worktree and offline Docker. It observed an early baseline exit of `0` against the expected fault exit `23`. The checkpoint proposal returned `23`, `0`, `0`, and its receipt bound the phase observations to the proposal artifact, unchanged inputs and container. The three owned operations left no containers, images or Git worktrees. The replay exercised only the synthetic recovery check.
+
 ## Replay
 
 Run from the checkout on Darwin arm64 with Node 24.18.0. Supply a fresh profile path whose parent exists. The profile and queued request survive the command. The original synthetic evidence home and archive are required.

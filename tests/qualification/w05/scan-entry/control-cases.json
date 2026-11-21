@@ -1,0 +1,49 @@
+{
+  "permissionWitness": {
+    "checkId": "control-permission",
+    "target": "guard.txt",
+    "original": "frozen synthetic asset\n",
+    "replacement": "edited synthetic asset\n",
+    "expectedErrno": "EACCES"
+  },
+  "recovery": {
+    "check": {
+      "id": "control-recovery",
+      "kind": "recovery",
+      "input": "Resume an interrupted synthetic manifest scan",
+      "expected": "Partial checkpoint survives exit 23. Recovery and replay return the same result and final bytes."
+    },
+    "case": {
+      "checkId": "control-recovery",
+      "checkDigest": "1ca0820dc031fcc04e9a7d4126a0545253ae6dffad9f62b8bdfac08e51bb2738",
+      "experiment": {
+        "adapter": "node-json-argv-v1",
+        "assertions": [
+          { "expected": 0, "id": "exit", "source": "exit-code" },
+          { "expected": "{\"checked\":2,\"invalidLines\":[2]}{\"checked\":2,\"invalidLines\":[2]}", "id": "output", "source": "stdout" },
+          { "expected": "", "id": "no-stderr", "source": "stderr" }
+        ],
+        "callInput": "{\"phase\":\"fault\",\"manifest\":\"9780306406157\\n5901234123450\"}",
+        "input": "Resume an interrupted synthetic manifest scan",
+        "kind": "recovery",
+        "protocol": "proposal-semantic-v1",
+        "recovery": {
+          "contractRevision": "bounded-recovery-return-state-v1",
+          "resources": [{ "id": "checkpoint", "path": "scan-checkpoint.json" }],
+          "callInput": "{\"phase\":\"resume\",\"manifest\":\"9780306406157\\n5901234123450\"}",
+          "requireEffectHistory": false,
+          "assertions": {
+            "fault": [{ "id": "checkpoint", "path": "scan-checkpoint.json", "bytes": "eyJtYW5pZmVzdCI6Ijk3ODAzMDY0MDYxNTdcbjU5MDEyMzQxMjM0NTAiLCJuZXh0TGluZSI6MSwiaW52YWxpZExpbmVzIjpbXX0=" }],
+            "recovered": [{ "id": "checkpoint", "path": "scan-checkpoint.json", "bytes": "eyJtYW5pZmVzdCI6Ijk3ODAzMDY0MDYxNTdcbjU5MDEyMzQxMjM0NTAiLCJuZXh0TGluZSI6MiwiaW52YWxpZExpbmVzIjpbMl19" }],
+            "replayed": [{ "id": "checkpoint", "path": "scan-checkpoint.json", "bytes": "eyJtYW5pZmVzdCI6Ijk3ODAzMDY0MDYxNTdcbjU5MDEyMzQxMjM0NTAiLCJuZXh0TGluZSI6MiwiaW52YWxpZExpbmVzIjpbMl19" }]
+          },
+          "returnAssertions": {
+            "fault": { "exitCode": 23, "signal": null, "stdoutHex": "", "stderrHex": "" },
+            "recovery": { "exitCode": 0, "signal": null, "stdoutHex": "7b22636865636b6564223a322c22696e76616c69644c696e6573223a5b325d7d", "stderrHex": "" },
+            "replay": { "exitCode": 0, "signal": null, "stdoutHex": "7b22636865636b6564223a322c22696e76616c69644c696e6573223a5b325d7d", "stderrHex": "" }
+          }
+        }
+      }
+    }
+  }
+}

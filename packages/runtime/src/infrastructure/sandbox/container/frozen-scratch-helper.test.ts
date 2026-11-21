@@ -5,18 +5,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { DockerContainerProvider } from './docker.js';
-import { captureFrozenInput, captureFrozenScratchHelper } from './frozen-input.js';
+import { captureFrozenInput } from './frozen-input.js';
+import { compileScratchFixture, scratchCompilerImage as image, scratchCompilerLabel } from './frozen-scratch-compiler.fixture.spec.js';
 import { executeFrozenContainer, type FrozenExecutionOwnership, type FrozenExecutionResult } from './frozen-execution.js';
-import type { FrozenScratchRecoveryRequest } from './types.js';
+import type { FrozenScratchRecoveryRequest, FrozenScratchResource } from './types.js';
 
-const image = 'sha256:eb5d9c60d047664130b3c88bb9d3ff77cf809b4a524ee05aa3ac898940332d39';
 const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const roots: string[] = [];
 afterAll(() => roots.forEach(root => rmSync(root, { recursive: true, force: true })));
 const directory = () => { const root = realpathSync(mkdtempSync(join(tmpdir(), 'afk-scratch-s1-'))); roots.push(root); return root; };
 
 describe.runIf(process.env.AFK_FROZEN_SCRATCH_DOCKER === '1')('real native scratch observation, existing offline image only', () => {
-  let helper: ReturnType<typeof captureFrozenScratchHelper>;
+  let helper: ReturnType<typeof compileScratchFixture>;
   const provider = new DockerContainerProvider();
   const ownerships: FrozenExecutionOwnership[] = [];
   const receipts: FrozenExecutionResult[] = [];
@@ -29,7 +29,7 @@ describe.runIf(process.env.AFK_FROZEN_SCRATCH_DOCKER === '1')('real native scrat
       const images = execFileSync('docker', ['image', 'ls', '-aq', '--filter', filter], options).trim();
       return { ...ownership, containers, images };
     });
-    const compilers = execFileSync('docker', ['container', 'ls', '-aq', '--filter', 'label=afk.scratch.s1=offline-helper'],
+    const compilers = execFileSync('docker', ['container', 'ls', '-aq', '--filter', `label=${scratchCompilerLabel}`],
       { encoding: 'utf8', timeout: 5000 }).trim();
     if (process.env.AFK_FROZEN_SCRATCH_EVIDENCE) writeFileSync(process.env.AFK_FROZEN_SCRATCH_EVIDENCE,
       JSON.stringify({ image, helper, helperSourceDigest: digest(readFileSync(new URL('./frozen-scratch-helper.c', import.meta.url))),
@@ -37,31 +37,24 @@ describe.runIf(process.env.AFK_FROZEN_SCRATCH_DOCKER === '1')('real native scrat
     expect(compilers).toBe('');
     for (const resource of resources) { expect(resource.containers).toBe(''); expect(resource.images).toBe(''); }
   });
-  const compile = (source: Buffer) => {
-    const encoded = execFileSync('docker', ['run', '--rm', '--interactive', '--pull=never', '--label', 'afk.scratch.s1=offline-helper',
-      '--read-only', '--user', '1000:1000', '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
-      '--pids-limit', '64', '--memory', '268435456', '--memory-swap', '268435456', '--cpus', '1', '--ipc', 'private',
-      '--tmpfs', '/scratch:rw,noexec,nosuid,nodev,size=16777216,mode=700,uid=1000,gid=1000', '--entrypoint', '/usr/bin/env', image,
-      '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/scratch', 'TMPDIR=/scratch', 'sh', '-c',
-      'cc -std=c11 -Wall -Wextra -Werror -O2 -static -fno-pie -no-pie -x c -o /scratch/helper - && base64 -w0 /scratch/helper'],
-    { input: source, timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
-    const binary = Buffer.from(encoded.toString(), 'base64');
-    const path = join(directory(), 'helper'); writeFileSync(path, binary);
-    return captureFrozenScratchHelper(path, digest(binary));
-  };
+  const compile = (source?: Buffer) => compileScratchFixture(join(directory(), 'helper'), source);
   const prepare = () => {
     if (helper) return helper;
-    helper = compile(readFileSync(new URL('./frozen-scratch-helper.c', import.meta.url)));
+    helper = compile();
     return helper;
   };
-  const execute = async (source: string, candidateVersion: 'original' | 'proposed' = 'proposed', callInput = '{"key":"s1"}',
-    resourcePath = 'state.json', observationHelper?: ReturnType<typeof captureFrozenScratchHelper>, recovery?: FrozenScratchRecoveryRequest,
+  const execute = async (source: string | { entry: string; files: Record<string, string> },
+    candidateVersion: 'original' | 'proposed' = 'proposed', callInput = '{"key":"s1"}',
+    resource: string | FrozenScratchResource = 'state.json', observationHelper?: ReturnType<typeof compileScratchFixture>, recovery?: FrozenScratchRecoveryRequest,
     signal?: AbortSignal) => {
-    const root = directory(); writeFileSync(join(root, 'asset.js'), source);
+    const root = directory();
+    const { entry, files } = typeof source === 'string' ? { entry: 'asset.js', files: { 'asset.js': source } } : source;
+    for (const [path, contents] of Object.entries(files)) writeFileSync(join(root, path), contents);
     try {
       const result = await executeFrozenContainer(provider, { input: captureFrozenInput(root), baseImageId: image,
-        argv: ['node', 'asset.js', callInput], timeoutMs: 2500, signal, onOwnership: ownership => { ownerships.push(ownership); }, scratch: {
-          helper: observationHelper ?? prepare(), artifactPath: 'asset.js', candidateVersion, callInput, resources: [{ id: 'state', path: resourcePath }],
+        argv: ['node', entry, callInput], timeoutMs: 2500, signal, onOwnership: ownership => { ownerships.push(ownership); }, scratch: {
+          helper: observationHelper ?? prepare(), artifactPath: entry, candidateVersion, callInput,
+          resources: [typeof resource === 'string' ? { id: 'state', path: resource } : resource],
           ...(recovery ? { recovery } : {}),
         } });
       receipts.push(result);
@@ -166,6 +159,29 @@ describe.runIf(process.env.AFK_FROZEN_SCRATCH_DOCKER === '1')('real native scrat
   });
 
   describe('real S2 sequential recovery/replay in one native session', () => {
+    it('reads the interrupted manifest scan checkpoint through recovery and replay', async () => {
+      const fixtures = new URL('../../../../../../tests/qualification/w05/scan-entry/', import.meta.url);
+      const read = (name: string) => readFileSync(new URL(name, fixtures), 'utf8');
+      const { callInput, recovery: contract } = JSON.parse(read('control-cases.json')).recovery.case.experiment;
+      const entry = 'checkpoint.fixture.mjs';
+      const result = await execute({ entry, files: { [entry]: read(entry), 'scan-manifest.mjs': read('scan-manifest.mjs') } },
+        'proposed', callInput, contract.resources[0], undefined, {
+          callInput: contract.callInput, requireEffectHistory: contract.requireEffectHistory,
+          assertions: contract.assertions, returnAssertions: contract.returnAssertions,
+        });
+      const observed = result.evidence.scratch!.recovery!;
+      expect(observed.qualification).toBe('qualified-bounded-returns-and-state');
+      expect(observed.boundaries.initial.resources[0]!.present).toBe(false);
+      const boundaries = [['fault', 'fault'], ['recovery', 'recovered'], ['replay', 'replayed']] as const;
+      expect(observed.phases.map(phase => phase.phase)).toEqual(boundaries.map(([phase]) => phase));
+      for (const [index, [phase, boundary]] of boundaries.entries()) {
+        const { invocation, stdoutHex, stderrHex } = observed.phases[index]!;
+        expect({ exitCode: invocation.exitCode, signal: invocation.signal, stdoutHex, stderrHex }).toEqual(contract.returnAssertions[phase]);
+        expect(observed.boundaries[boundary].resources[0]!.bytes).toBe(contract.assertions[boundary][0].bytes);
+      }
+      expect(observed.phases[1]!.callInputDigest).toBe(observed.phases[2]!.callInputDigest);
+    }, 45_000);
+
     const faultInput = '{"phase":"fault","key":"s2","value":7}';
     const recoveryInput = '{"phase":"recover","key":"s2","value":7}';
     const partial = JSON.stringify({ key: 's2', value: 7, state: 'partial' });

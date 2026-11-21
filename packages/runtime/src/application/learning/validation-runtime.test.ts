@@ -745,8 +745,8 @@ describe('persisted learning validation runtime', () => {
     const setup = await fixture();
     const clock = vi.spyOn(performance, 'now').mockReturnValue(1000.75).mockReturnValueOnce(1000.25);
     try {
-      expect((await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs: 100 })).status).toBe('validated');
-      expect(setup.requests[0].timeoutMs).toBe(99);
+      expect((await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs: 5000 })).status).toBe('validated');
+      expect(setup.requests[0].timeoutMs).toBe(4999);
     } finally { clock.mockRestore(); }
   });
 

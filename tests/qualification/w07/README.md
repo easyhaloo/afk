@@ -89,6 +89,8 @@ pnpm --dir apps/desktop exec playwright test --config=playwright.config.ts learn
 
 不调用模型的对照在打包 Electron 的 Node 模式中运行相同的受限 `claude --help`。24 次管道探测有 2 次以退出码 0 返回 8,192 字节且缺必要参数，另 22 次返回 16,384 字节。将相同守卫的标准输出接到普通文件后，24 次均返回 22,193 字节且包含必要参数。四平台 CLI 升级回滚工作流 `44852990423` 及常规 CI `44852922175` 均在生产提交 `20939506` 通过。
 
+2026-11-21，使用仓库外安装的 macOS arm64 CLI `0.2.187` 与未签名的同平台 Desktop，完整 `learning-settings` 套件 **13/13**。真实 Claude 从 Desktop 设置启动，生成的事实通过独立验证、发布和撤回。其余用例覆盖 CLI 与 Desktop 的队列抢占保护、取消、退出、重启及失败验证。CLI 归档 SHA-256 为 `5e2b342432bed03d118e2189ddd956d70498ed9f1fa2dc773c70ae712d452105`，Desktop `app.asar` SHA-256 为 `f711f33938c563972f0423335524b2c128b00c8dcee874cee47c71d984ce8636`。
+
 ### 历史 QA 工作区归属
 
 通过失败运行 `7cbb0b81-8a53-4725-99a1-c801feff7a61` 的审计定位到它的隔离测试目录。恢复账本中四条分配有三条已关闭，唯一保留的分配 `e920ddad-2c4e-4c5d-aabb-e26a470b4d43` 仍为 `owned`。按工作区和仓库身份复算占用键后，确认三条执行占用均归属已归档为 `blocked` 的 `qa-1-1795185498504-runtime`。

@@ -258,8 +258,8 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
       validation: { configurationFile: fixture.configurationFile },
       knowledge: { wikiScript: fixture.wikiScript, grants: [fixture.authorizationFile] } }, true);
     const queueFile = path.join(path.dirname(fixture.file), 'distillation-queue.sqlite');
-    return {
-      ...fixture, temporary, env, dependencies,
+    return Object.assign(fixture, {
+      temporary, env, dependencies,
       publishAudit: () => renameSync(stagedAudit, fixture.auditPath),
       analysisLaunches: () => readFileSync(launches, 'utf8').trim().split('\n').filter(Boolean)
         .map(line => JSON.parse(line) as { pid: number; guardPid: number; directory: string }),
@@ -376,7 +376,7 @@ export async function createLearningFixture(kind: 'fact' | 'lesson' = 'fact', sc
       navigation: () => ["00-总览.md", "知识/入口.md"].map(file => readFileSync(path.join(fixture.vault, file), "utf8")),
       asset: path.join(fixture.vault, "知识/Approval.md"),
       cleanup: () => rmSync(temporary, { recursive: true, force: true }),
-    };
+    });
   } catch (error) {
     rmSync(temporary, { recursive: true, force: true });
     throw error;

@@ -1291,6 +1291,26 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen e
     expect(() => execFileSync('docker', ['image', 'inspect', result.evidence.imageId], { stdio: 'pipe' })).toThrow();
   }, 60_000);
 
+  it.each(['cancellation', 'timeout'] as const)('observes host %s of the bounded manifest scan', async kind => {
+    const fixtures = new URL('../../../../../../tests/qualification/w05/scan-entry/', import.meta.url);
+    const root = directory();
+    for (const name of ['checkpoint.fixture.mjs', 'scan-manifest.mjs']) {
+      writeFileSync(join(root, name), readFileSync(new URL(name, fixtures)));
+    }
+    const input = captureFrozenInput(root);
+    const afterMs = kind === 'timeout' ? 5000 : 500;
+    const callInput = JSON.stringify({ phase: 'wait', manifest: '9780306406157\n5901234123457' });
+    const result = await execute({ input, baseImageId, timeoutMs: 5000, control: { kind, afterMs },
+      argv: ['node', '/workspace/checkpoint.fixture.mjs', callInput] });
+    expect([result.exitCode, result.stdout, result.stderr]).toEqual([137, '', '']);
+    expect(result.evidence.control).toMatchObject({ kind, outcome: 'triggered', signal: 'SIGKILL', exitCode: 137,
+      operationId: result.evidence.operationId, containerId: result.evidence.containerId });
+    const control = result.evidence.control;
+    if (control?.outcome !== 'triggered') throw new Error('Expected triggered manifest scan control');
+    expect(control.triggeredMs - control.runningObservedMs).toBeGreaterThanOrEqual(afterMs);
+    expect(result.cleanup).toEqual({ containerRemoved: true, imageRemoved: true });
+  }, 60_000);
+
   it.each([0, 7])('records a real fast early exit %s without fake control success', async code => {
     const result = await execute({ input: captureFrozenInput(directory()), baseImageId, timeoutMs: 5000,
       control: { kind: 'timeout', afterMs: 500 }, argv: ['node', '-e', `console.log("candidate claimed cancellation");process.exit(${code})`] });

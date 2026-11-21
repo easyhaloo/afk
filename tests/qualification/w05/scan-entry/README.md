@@ -18,6 +18,14 @@ Run `pnpm exec vitest run tests/qualification/w05/scan-entry/control-fixtures.te
 
 The recovery fixture scans two lines. A controlled exit after the first line leaves a partial checkpoint. Recovery and replay return the same result and preserve the final checkpoint bytes. The host test prepares the case with the product schema. The native Docker test checks the same frozen returns and checkpoint bytes under one owned operation. Docker 28.3.2 on Linux arm64 observed exits `23`, `0`, and `0`, with quiescence confirmed at each checkpoint. The run left zero operation containers, images, or compiler containers.
 
+The same fixture accepts plain strings for the three historical scans, rejects the historical invalid input, and accepts a bounded `wait` phase for host controls. The normal and refusal cases leave no scratch files. In Docker the host observed the container running, triggered cancellation at 500 ms and the deadline at 5000 ms, and confirmed `SIGKILL`, exit `137`, and resource cleanup for both controls. Replay those two cases with:
+
+```sh
+AFK_TEST_FROZEN_DOCKER=1 AFK_TEST_FROZEN_IMAGE=<local-node-image-id> \
+  pnpm --filter @afk/runtime exec vitest run src/infrastructure/sandbox/container/frozen-execution.test.ts \
+  -t 'of the bounded manifest scan'
+```
+
 With the suite's pinned image already present, replay the Docker case with:
 
 ```sh
@@ -26,7 +34,7 @@ AFK_FROZEN_SCRATCH_DOCKER=1 AFK_FROZEN_SCRATCH_EVIDENCE=/absolute/path/to/receip
   -t 'reads the interrupted manifest scan checkpoint'
 ```
 
-Formal coverage remains 0/8. The historical candidate accepts a string. Formal recovery requires a candidate that supports the checkpoint protocol, a checker bound to its checks, a native scratch helper and a matching digest-bound grant.
+Formal coverage remains 0/8. Formal validation requires a new candidate and matching grant, a complete checker with the native scratch helper, and an independent permission witness bound to the proposed operation and target.
 
 The paired proposal runtime replay used a real temporary Git worktree and offline Docker. It observed an early baseline exit of `0` against the expected fault exit `23`. The checkpoint proposal returned `23`, `0`, `0`, and its receipt bound the phase observations to the proposal artifact, unchanged inputs and container. The three owned operations left no containers, images or Git worktrees. The replay exercised only the synthetic recovery check.
 

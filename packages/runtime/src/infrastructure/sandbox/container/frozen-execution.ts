@@ -602,7 +602,7 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
     const scratch = options.scratch ? scratchResult(result, options, operationId, containerId) : undefined;
     if (options.scratch?.recovery) verifyFrozenScratchRecoveryOutcome(options, scratch?.evidence.baselineFailure ?? scratch?.evidence.recovery, operationId, containerId);
     const digest = (input: unknown) => createHash('sha256').update(JSON.stringify(input)).digest('hex');
-    const policyInspection = controlled?.control.outcome === 'not-triggered' ? completed : inspected;
+    const policyInspection = permissionDenial || controlled?.control.outcome === 'not-triggered' ? completed : inspected;
     const { status: _status, exitCode: _exitCode, ...policy } = policyInspection;
     value = { exitCode: completed.exitCode, stdout: scratch?.stdout ?? result.stdout, stderr: scratch?.stderr ?? result.stderr,
       evidence: { operationId, containerId, baseImageId: options.baseImageId, imageId, inputDigest: options.input.digest,

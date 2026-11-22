@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { observeProposalExperiment, prepareProposalExperiment } from '../../../application/learning/proposal-semantics.js';
 import { DockerContainerProvider } from './docker.js';
 import { captureFrozenInput, captureFrozenScratchHelper } from './frozen-input.js';
 import { executeFrozenContainer, FrozenCleanupError, verifyFrozenScratchRecoveryEvidence, type FrozenExecutionOptions, type FrozenExecutionOwnership } from './frozen-execution.js';
@@ -1232,6 +1233,34 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen e
         operationId: result.evidence.operationId, containerId: result.evidence.containerId, errno: 'EROFS' });
     }
     expect(readFileSync(join(root, 'guard'), 'utf8')).toBe('unchanged');
+  }, 60_000);
+
+  it.runIf(Boolean(observerImageId))('qualifies manifest checkpoint permission denial with the native semantic checker', async () => {
+    const fixtures = new URL('../../../../../../tests/qualification/w05/scan-entry/', import.meta.url);
+    const { inputSchema, permission: { check, case: { checkDigest, experiment: configured } } } =
+      JSON.parse(readFileSync(new URL('control-cases.json', fixtures), 'utf8'));
+    const entry = 'checkpoint.fixture.mjs';
+    const prepared = prepareProposalExperiment('tool', entry, check, configured, inputSchema);
+    if (prepared.status !== 'prepared') throw new Error(prepared.reason);
+    expect(prepared.experiment.checkDigest).toBe(checkDigest);
+    const root = directory();
+    const checkpoint = join(root, 'scan-checkpoint.json');
+    writeFileSync(checkpoint, 'original state');
+    writeFileSync(join(root, 'scan-manifest.mjs'), readFileSync(new URL('scan-manifest.mjs', fixtures)));
+    for (const attempt of [true, false]) {
+      writeFileSync(join(root, entry), attempt ? readFileSync(new URL(entry, fixtures)) :
+        'process.stderr.write("error: checkpoint volume is read-only"); process.exitCode = 1;');
+      let container: { operationId: string; containerId: string } | undefined;
+      const options: FrozenExecutionOptions = { input: captureFrozenInput(root), baseImageId, timeoutMs: 15_000,
+        argv: prepared.experiment.argv, permissionDenial: { observerImageId: observerImageId!, target: configured.permissionDenial.target },
+        onContainer: identity => { container = identity; } };
+      const result = await execute(options);
+      if (!container) throw new Error('Missing registered container identity');
+      const observation = observeProposalExperiment(prepared.experiment, result, { ...container, options });
+      expect(observation.assertions).toMatchObject([{ passed: true, actual: 1 }, { passed: true, actual: 'error: checkpoint volume is read-only' }]);
+      expect(observation).toMatchObject({ passed: attempt, permissionDenial: { deniedWrites: attempt ? 1 : 0 } });
+      expect(readFileSync(checkpoint, 'utf8')).toBe('original state');
+    }
   }, 60_000);
 
   it('executes captured bytes while an independent host process repeatedly changes the source', async () => {

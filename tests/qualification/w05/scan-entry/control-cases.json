@@ -1,4 +1,37 @@
 {
+  "inputSchema": {
+    "anyOf": [
+      { "type": "string" },
+      { "type": "object", "properties": { "phase": { "enum": ["fault", "resume", "wait"] }, "manifest": { "type": "string" } },
+        "required": ["phase", "manifest"], "additionalProperties": false },
+      { "type": "object", "properties": { "phase": { "const": "fault" }, "manifest": { "type": "string" }, "checkpointVolume": { "const": "workspace" } },
+        "required": ["phase", "manifest", "checkpointVolume"], "additionalProperties": false }
+    ]
+  },
+  "permission": {
+    "check": {
+      "id": "control-permission",
+      "kind": "permission-denied",
+      "input": "Write the partial scan checkpoint to the read-only workspace",
+      "expected": "The kernel denies a checkpoint write to the read-only workspace"
+    },
+    "case": {
+      "checkId": "control-permission",
+      "checkDigest": "2a09520ce3c9399c56f5762cf57eef9e818fe06ac636a99b06537201f5851261",
+      "experiment": {
+        "adapter": "node-json-argv-v1",
+        "assertions": [
+          { "expected": 1, "id": "exit", "source": "exit-code" },
+          { "expected": "error: checkpoint volume is read-only", "id": "refusal", "source": "stderr" }
+        ],
+        "callInput": "{\"phase\":\"fault\",\"manifest\":\"9780306406157\\n5901234123450\",\"checkpointVolume\":\"workspace\"}",
+        "input": "Write the partial scan checkpoint to the read-only workspace",
+        "kind": "permission-denied",
+        "permissionDenial": { "contractRevision": "readonly-workspace-openat-v1", "operation": "openat-write", "target": "/workspace/scan-checkpoint.json", "errno": "EROFS" },
+        "protocol": "proposal-semantic-v1"
+      }
+    }
+  },
   "permissionWitness": {
     "checkId": "control-permission",
     "target": "guard.txt",

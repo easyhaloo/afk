@@ -308,7 +308,9 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
         checkBudget({ signal: controller.signal });
         const result = await validateProposalCandidate(parsed.data, assembled.dependencies, { ...options, signal: controller.signal,
           timeoutMs: Math.max(1, Math.floor(deadline - performance.now())) });
-        if (result.status === 'blocked' && (expired || performance.now() >= deadline)) return { status: 'blocked', code: 'timed_out' };
+        if (result.status === 'blocked' && result.code !== 'storage_failed' && (expired || performance.now() >= deadline)) {
+          return { status: 'blocked', code: 'timed_out' };
+        }
         return result;
       } finally {
         clearTimeout(timer);

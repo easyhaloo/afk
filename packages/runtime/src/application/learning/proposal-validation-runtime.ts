@@ -125,11 +125,13 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
     if (!(await reconcile(options)).current) return { status: 'blocked', code: 'source_unavailable' };
     failureCode = 'verification_failed';
     const prepared = prepareAssetProposal(candidate.proposal, catalog.inventory);
+    const semantic = initial.entry.semantic;
     if (prepared.artifact.targetRef !== initial.entry.asset.ref || prepared.execution.dependencies.length
-      || prepared.execution.permissions.length || prepared.execution.sideEffects !== 'none'
+      || prepared.execution.permissions.length || prepared.execution.sideEffects !== initial.grant.allowed.sideEffects
+      || (prepared.execution.sideEffects === 'filesystem' && (semantic.protocol !== 'proposal-semantic-v1'
+        || !semantic.cases.some(entry => entry.experiment.recovery !== undefined)))
       || prepared.execution.timeoutMs > initial.grant.limits.timeoutMs) return { status: 'blocked', code: 'unauthorized' };
     failureCode = 'insufficient_coverage';
-    const semantic = initial.entry.semantic;
     if (semantic.protocol === 'claude-explicit-load-v1') {
       const { skillObservation, ...grant } = initial.grant;
       if (!skillObservation) return { status: 'blocked', code: failureCode };
@@ -275,6 +277,7 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
       runtime: { repository, request: { repository: current.entry.repository.repository, runId: randomUUID() },
         expectedCommit: snapshot.commit, inventory: catalog.inventory, inventoryDigest: catalog.inventoryDigest,
         inventoryRoot: current.entry.repository.root, artifactPath: current.entry.asset.path, baseImageId: current.entry.sandbox.baseImageId,
+        ...(current.grant.sandbox.permissionObserverImageId === undefined ? {} : { permissionObserverImageId: current.grant.sandbox.permissionObserverImageId }),
         ...(scratchHelper === undefined ? {} : { scratchHelper }),
         harness: { id: current.entry.semantic.adapter, revision: current.entry.semantic.revision, kind: prepared.kind, cases,
           observe: async () => ({ status: 'unsupported', reason: 'Dedicated semantic observations are required' }) },

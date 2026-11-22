@@ -44,6 +44,7 @@ describeE2E('external TUI plugins', () => {
     const pluginDir = join(pluginHome, '.afk', 'plugins', 'example', 'dist');
     mkdirSync(pluginDir, { recursive: true });
     writeFileSync(join(pluginHome, '.afk', 'plugins.yml'), 'plugins:\n  - id: example\n    enabled: true\n');
+    writeFileSync(join(dirname(pluginDir), 'package.json'), '{"type":"module"}\n');
     writeFileSync(join(pluginDir, 'index.js'), `
       import React from ${JSON.stringify(reactUrl)};
       import { Text } from ${JSON.stringify(inkUrl)};

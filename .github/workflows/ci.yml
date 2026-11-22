@@ -371,7 +371,7 @@ jobs:
     # It still runs after changes land on main, alongside the required checks.
     if: needs.changes.outputs.shared == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -404,6 +404,9 @@ jobs:
 
       - name: Build PTY E2E native dependencies
         run: pnpm rebuild node-pty puppeteer --pending --reporter=append-only
+
+      - name: Build CLI
+        run: pnpm --filter 'afk...' build
 
       - name: Test (PTY E2E, advisory)
         continue-on-error: true

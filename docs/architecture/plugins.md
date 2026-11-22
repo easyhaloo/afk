@@ -1762,7 +1762,7 @@ Missing observation context, mismatched execution binding, detected revision cha
 
 Optional `validation: { configurationFile }` selects a canonical absolute path to private checker configuration. Its shape is `{ version: 1, checkers: [...] }`; each checker declares `scope/checkerId/providerId/version/authorizationFile/target`, with `target: { ref, root, path }`. Exact scope/checker identity selects a registered Verification Provider. Managed sources are reconstructed from ledger scan registration, audit integrity and recorded sessions. Unregistered imports need trusted configuration with a matching evidence-digest source manifest; clients cannot supply it.
 
-Verifiers must implement the independent-assertion `learning-validation-v1` protocol and stable identity; ordinary test-runner providers do not qualify. Fact/process use domain assertions. Lesson additionally requires saved configuration with explicit `allowLessonValidation: true` and `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`, retaining current grant scope, target and revocation checks. Original source identity and independent QA audit integrity, system events and repair revision are verified before independently observing root cause, fix, prevention and applicability. Passing QA cannot replace semantic validation. The oracle snapshot digest and QA Git revision are bound separately. This permission is for lesson validation only; publication separately requires an explicit lesson target grant. Skill/tool use proposal validation; real production qualification remains blocked by the unavailable skill interpreter and tool permission-denied experiment. The review route does not bypass these guards or establish publication/installation completion.
+Verifiers must implement the independent-assertion `learning-validation-v1` protocol and stable identity; ordinary test-runner providers do not qualify. Fact/process use domain assertions. Lesson additionally requires saved configuration with explicit `allowLessonValidation: true` and `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`, retaining current grant scope, target and revocation checks. Original source identity and independent QA audit integrity, system events and repair revision are verified before independently observing root cause, fix, prevention and applicability. Passing QA cannot replace semantic validation. The oracle snapshot digest and QA Git revision are bound separately. This permission is for lesson validation only; publication separately requires an explicit lesson target grant. Skill and tool proposals require supported semantic contracts and independent execution grants. The same requirements apply to the review route. Publication and installation have separate acceptance criteria.
 
 The private proposal catalog v1 accepts optional `resources: [{ path, digest }]` for each skill. Paths are relative to the owning `SKILL.md` directory; `digest` is the SHA-256 of the resource bytes. Declarations must be nonempty when present, unique, and cannot claim another skill's files or a skill entry point. The existing bounded scan applies the same file and UTF-8 checks to resources and rejects unlisted, missing, or changed files. Declared resources are part of the inventory digest, must match the captured Git commit before staging, and remain identical across original and proposed inputs. These declarations neither grant tool permissions nor prove that a skill interpreter loaded or executed a resource.
 
@@ -1792,11 +1792,18 @@ grants bind the helper path and digest, while the host retains its owned capture
 API object and rechecks file identity. Each execution independently saves effective
 limits and operation/container identities. Final acceptance rechecks the contract,
 wrapper, helper, phase bytes and output without persisting trusted context.
-Semantic evidence revalidation errors return invalid_receipt, preserving timeout
-and cancellation priority. Mandatory permission-denied coverage still blocks
-before repository selection. This does not qualify tool publication or prove outer
-policy, cleanup, observer provenance or complete side effects. Current tests use
-synthetic observations, not container or native-execution acceptance.
+Semantic evidence revalidation errors return `invalid_receipt`, preserving timeout
+and cancellation priority. Recovery evidence qualifies only the bounded returns
+and state in its contract. The recovery tests exercise synthetic observations.
+
+Tool `permission-denied` checks support `readonly-workspace-openat-v1` with a
+schema-validated `callInput`, an exact file in the frozen `/workspace` manifest,
+and the same `sandbox.permissionObserverImageId` in saved configuration and the
+independent execution grant. Missing supported configuration blocks preflight
+before repository selection. Acceptance requires a matching operation, container
+and cgroup receipt, at least one kernel `EROFS` denial of a write to the exact
+target, and passing exit and output assertions. This qualifies the observed
+operation. Full candidate qualification requires the remaining checks as well.
 
 ### Knowledge publication and reading integration
 

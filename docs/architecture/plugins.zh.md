@@ -1392,7 +1392,7 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 
 可选配置 `validation: { configurationFile }` 指向私有 checker 配置的规范绝对路径。配置为 `{ version: 1, checkers: [...] }`；每项声明 `scope/checkerId/providerId/version/authorizationFile/target`，`target` 为 `{ ref, root, path }`。按准确项目与 checker ID 唯一选择已注册的 Verification Provider。受管来源从账本扫描身份、审计链和已记录会话恢复；未注册导入需可信配置提供匹配证据摘要的来源清单，客户端不能补充该清单。
 
-验证器必须支持 `learning-validation-v1` 独立断言协议及稳定身份，普通 test-runner 不具备该资格。fact/process 使用领域断言；lesson 还要求保存配置显式设置 `allowLessonValidation: true` 和 `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`，并保留当前授权的项目、目标与撤销检查。先核验原始来源身份及独立 QA 的完整审计链、系统事件与修复版本，再独立观察根因、修复、预防及适用范围；QA 成功不能替代语义验证。oracle 的快照摘要与 QA 的 Git revision 分别绑定。该许可仅用于 lesson 验证，发布另需显式 lesson 目标授权；skill/tool 使用提案验证，真实生产资格仍受未实现的 skill 解释器及 tool 权限拒绝实验阻断。复盘路由不绕过这些闸门，也不证明发布/安装完成。
+验证器必须支持 `learning-validation-v1` 独立断言协议及稳定身份，普通 test-runner 不具备该资格。fact/process 使用领域断言；lesson 还要求保存配置显式设置 `allowLessonValidation: true` 和 `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`，并保留当前授权的项目、目标与撤销检查。先核验原始来源身份及独立 QA 的完整审计链、系统事件与修复版本，再独立观察根因、修复、预防及适用范围；QA 成功不能替代语义验证。oracle 的快照摘要与 QA 的 Git revision 分别绑定。该许可仅用于 lesson 验证，发布另需显式 lesson 目标授权。skill 和 tool 提案及其复盘路由都需要受支持的语义合同和独立执行许可。发布与安装各有独立验收条件。
 
 私有提案目录 v1 支持按技能选填 `resources: [{ path, digest }]`。路径相对于所属 `SKILL.md` 所在目录，`digest` 为资源字节的 SHA-256。填写时列表不得为空，路径不得重复、归属其他技能或指向技能入口。原有有界扫描同样对资源执行文件和 UTF-8 检查，拒绝未声明、缺失或发生变化的文件。声明纳入目录摘要，冻结前与 Git 提交的字节核对，原版和提案版共享相同资源。声明不授予工具权限，也不证明技能解释器加载或执行了资源。
 
@@ -1414,9 +1414,14 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 和最终验收。宿主执行授权使用 v3，旧授权不得继承；保存配置及授权必须绑定 helper
 路径与摘要，宿主持有 capture API 返回的自有对象并重验文件身份。每次执行独立保存
 实际限额、operation 和 container 身份；最终重新核验合同、wrapper、helper、阶段字节
-及输出，可信 context 不写入持久报告。语义证据重验异常返回 invalid_receipt，保留取消
-和超时优先级。必需权限拒绝实验仍在仓库选择前阻断；这不授予工具发布资格，也不证明
-外围隔离、清理、观察来源或完整副作用。当前测试使用合成观察，不是容器或原生执行验收。
+及输出，可信 context 不写入持久报告。语义证据重验异常返回 `invalid_receipt`，保留取消
+和超时优先级。恢复证据的资格限于合同约定的返回值与状态，当前恢复测试使用合成观察。
+
+工具的 `permission-denied` 实验支持 `readonly-workspace-openat-v1`。`callInput` 须通过
+工具输入 schema，目标须精确匹配冻结 `/workspace` 清单中的文件。保存配置与独立执行许可
+须绑定同一个 `sandbox.permissionObserverImageId`。缺少受支持的配置时，预检在选择仓库前
+阻断。验收须取得匹配的 operation、container 和 cgroup 收据，观察到至少一次内核以 `EROFS`
+拒绝对精确目标的写入，并通过退出与输出断言。完整候选验收还须通过其余检查。
 
 ### 知识发布与读取接线
 

@@ -469,11 +469,11 @@ collector 不具备完整语义资格。保存配置及新增实验遵守以下�
 
 实验使用 `proposal-semantic-v1`：
 
-- 保存配置提供 `{ protocol, adapter, kind, input, assertions, control?, callInput?, recovery? }`，拒绝未知字段。
+- 工具保存配置提供 `{ protocol, adapter, kind, input, assertions, control?, callInput?, recovery?, permissionDenial? }`，拒绝未知字段。
   当前 adapter 为 `node-json-argv-v1`；kind/input 必须与候选对应 `ProposalCheck` 完全一致，
   `input` 继续精确绑定场景身份。输入绑定已通过本地定向验证，不授原生场景资格。
   宿主固定调用本次冻结资产，不使用 shell 展开。
-- cancellation/timeout 新增 `callInput: string`，最长2048字符且不允许 NUL；它是实际 argv
+- cancellation/timeout/permission-denied 使用 `callInput: string`，最长2048字符且不允许 NUL。它是实际 argv
   第三项（`argv[2]`），必须为受限 JSON、通过候选 `tool.inputSchema`，并拒绝绝对路径参数。
   缺失时保持 unsupported，不回退为场景 `input`。normal/refusal 禁止使用 `callInput`
   替换既有输入，继续投递原始 `input` 字节；refusal 的畸形 JSON 输入合同保留。
@@ -493,12 +493,19 @@ collector 不具备完整语义资格。保存配置及新增实验遵守以下�
   是137或输出自称取消；它允许 baseline 比较继续，不能授予 proposed 控制资格。
 - 收据绑定 experimentDigest、输入摘要、实际 argv、类型化断言和宿主控制事实；
   `inputDigest` 仍绑定场景 `input`，`deliveredInputDigest` 按实际投递字节计算，
-  cancellation/timeout 使用原始 `callInput` 字节，不重新序列化 JSON。
+  cancellation/timeout/permission-denied 使用原始 `callInput` 字节，不重新序列化 JSON。
   生产执行与二次验证均从相同绑定重建一致 argv，并重新计算、比较摘要，
   不仅核对收据 hash、passed 或 assertions 数量。
-- 当前 permission-denied 和 skill interpreter 未具备完整实现，必须保持 unsupported。
+- `permission-denied` 仅适用于 `node-json-argv-v1` 工具实验。配置
+  `permissionDenial: { contractRevision: "readonly-workspace-openat-v1", operation: "openat-write", target, errno: "EROFS" }`。
+  `target` 必须精确指向冻结清单中的 `/workspace` 下的文件。保存配置和独立执行许可须绑定同一个
+  `sandbox.permissionObserverImageId`，格式为 `sha256:` 加 64 位小写十六进制。
+  缺少受支持的实验配置时，生产预检在选择仓库和分配执行资源前阻断。
+- 验收重验观察器镜像、冻结输入、精确目标、operation/container 与 cgroup 观察收据。
+  缺失或不匹配的收据拒绝验收。匹配收据须至少观察到一次被内核以 `EROFS` 拒绝的目标写入，
+  且保存的退出及输出断言均通过。观察计数为零时实验失败。该资格限于此写入操作和目标。
+- skill 解释器仅支持明确登记的有限合同。合同外的实验保持 unsupported。
   recovery 仅接受下述显式有界合同；旧 recovery 配置及要求完整副作用历史的实验仍不支持。
-  必需权限拒绝实验未实现时，生产预检必须在选择仓库及分配执行资源前阻断。
   baseline 的认证提前退出不阻止继续 proposed 比较；未知控制结果、
   kill 已开始后的失败、基础设施错误和清理失败仍然阻断。
   混用旧 callback 的基础测试通过，不代表全部语义合格或允许生产发布。

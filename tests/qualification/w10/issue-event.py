@@ -1,5 +1,6 @@
-"""Run with python3 issue-event.py /path/to/installed/afk /path/to/gitea."""
+"""Run with python3 issue-event.py /path/to/installed/afk /path/to/gitea [--webhook]."""
 
+import argparse
 import hashlib
 import hmac
 import http.client
@@ -41,7 +42,7 @@ def wait_for(check):
     raise TimeoutError(check.__name__)
 
 
-def qualify(afk, gitea, root):
+def qualify(afk, gitea, root, webhook=False):
     secret = secrets.token_hex(32)
     env = dict(HOME=str(root), TMPDIR=str(root), PATH=os.pathsep.join([str(Path(shutil.which(tool)).parent) for tool in ('node', 'git')] + ['/usr/bin', '/bin']), GIT_CONFIG_NOSYSTEM='1', GIT_TERMINAL_PROMPT='0')
     listener_env = {**env, 'ISSUE_AUTH': secret}
@@ -55,8 +56,16 @@ def qualify(afk, gitea, root):
 
     version = run(afk, '--version')
     effects = root / 'action.txt'
+    provider = 'trigger.webhook' if webhook else 'trigger.issue-event'
+    settings = {'triggers': [{'id': 'opened-ready', 'kind': 'webhook', 'payload': {'action': 'opened', 'label': 'ready'}, 'input': {'capability': 'verification.provider', 'provider': 'test-runner', 'operation': 'verify', 'input': {'target': str(root)}}}]}
+    before_actions = 1
+    if webhook:
+        settings['secret'] = {'env': 'ISSUE_AUTH'}
+        settings['triggers'][0]['id'] = 'gitea-message'
+        settings['triggers'][0]['payload'] = {'event': 'message'}
+        before_actions = 3
     configure('verification.test-runner', {'command': [sys.executable, '-c', 'import sys; open(sys.argv[1], "a").write("verified\\n")', str(effects)]})
-    configure('trigger.issue-event', {'triggers': [{'id': 'opened-ready', 'kind': 'webhook', 'payload': {'action': 'opened', 'label': 'ready'}, 'input': {'capability': 'verification.provider', 'provider': 'test-runner', 'operation': 'verify', 'input': {'target': str(root)}}}]}, '--action', 'capability.invoke')
+    configure(provider, settings, '--action', 'capability.invoke')
 
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
@@ -108,7 +117,7 @@ ENABLED = false
 
         listener_port, stop_listener = start_listener('listener', 0)
         listener = f'http://127.0.0.1:{listener_port}'
-        endpoint = '/triggers/trigger.issue-event'
+        endpoint = '/triggers/' + provider
         start('gitea', [*service, 'web'], env)
         def ready():
             try:
@@ -129,7 +138,7 @@ ENABLED = false
         hook = api('POST', route+'/hooks', {'type':'gitea', 'active':True, 'events':['issues'], 'config':{'url':listener+endpoint, 'content_type':'json', 'secret':secret}})
         issue = api('POST', route+'/issues', {'title':'signed issue qualification', 'labels':[label['id']]})
         number = issue['number']
-        wait_for(lambda: effects.exists() and effects.read_text().splitlines() == ['verified'])
+        wait_for(lambda: effects.exists() and 'verified' in effects.read_text().splitlines())
         api('PATCH', f'{route}/issues/{number}', {'state':'closed'})
         assert api('GET', f'{route}/issues/{number}')['state'] == 'closed'
 
@@ -139,9 +148,9 @@ ENABLED = false
                 rows = connection.execute('SELECT * FROM hook_task WHERE hook_id=? AND is_delivered=1 ORDER BY id', (hook['id'],)).fetchall()
                 return rows if len(rows) == 3 else None
         tasks = wait_for(completed_tasks)
-        def settled():
+        def settled(expected_count=len(tasks)):
             rows = json.loads(run(afk, 'plugin', 'deliveries', '--url', listener, '--token-env', 'ISSUE_AUTH', environment=listener_env))['deliveries']
-            return rows if len(rows) == len(tasks) and all(row['status'] == 'delivered' for row in rows) else None
+            return rows if len(rows) == expected_count and all(row['status'] == 'delivered' for row in rows) else None
         before_restart = wait_for(settled)
         stop_listener()
         restarted_port, stop_restarted = start_listener('restarted-listener', listener_port)
@@ -174,8 +183,8 @@ ENABLED = false
         deliveries = wait_for(settled)
         assert {row['deliveryId']: row['attempts'] for row in before_restart} == {row['deliveryId']: row['attempts'] for row in deliveries}
         assert {row['deliveryId'] for row in deliveries} == {event['accepted']['deliveryId'] for event in receipts}
-        assert all(row['providerId'] == 'trigger.issue-event' and row['attempts'] == 1 for row in deliveries)
-        assert effects.read_text().splitlines() == ['verified']
+        assert all(row['providerId'] == provider and row['attempts'] == 1 for row in deliveries)
+        assert effects.read_text().splitlines() == ['verified'] * before_actions
 
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         def web(path, form=None):
@@ -202,8 +211,14 @@ ENABLED = false
         accepted = json.loads(response)
         assert accepted['status'] == 202
         upstream = json.loads(accepted['body'])
-        assert upstream['duplicate'] and upstream['deliveryId'] == opened['accepted']['deliveryId'], (source_id == opened['sourceId'], upstream)
         assert source_id != opened['sourceId']
+        if webhook:
+            assert not upstream['duplicate'] and upstream['deliveryId'] != opened['accepted']['deliveryId'], upstream
+        else:
+            assert upstream['duplicate'] and upstream['deliveryId'] == opened['accepted']['deliveryId'], upstream
+        final_count = len(tasks) + int(webhook)
+        final_actions = before_actions + int(webhook)
+        final_deliveries = wait_for(lambda: settled(final_count))
         stop_restarted()
         assert start_listener('alias-restart', listener_port)[0] == listener_port
         changed = body + b' '
@@ -214,12 +229,18 @@ ENABLED = false
         assert conflict == 409, conflict
         status, raw = request(listener_port, 'POST', endpoint, body, signed(body))
         assert status == 202 and json.loads(raw)['deliveryId'] == upstream['deliveryId'] and json.loads(raw)['duplicate']
-        assert len(settled()) == 3 and effects.read_text().splitlines() == ['verified']
-        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, upstreamReplay={'sourceId': source_id, 'receipt': upstream, 'conflictAfterRestart': conflict}, actionCount=1)
+        assert settled(final_count) and effects.read_text().splitlines() == ['verified'] * final_actions
+        assert all(row['providerId'] == provider and row['attempts'] == 1 for row in final_deliveries)
+        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=final_deliveries, replayAfterListenerRestart=True, upstreamReplay={'sourceId': source_id, 'receipt': upstream, 'conflictAfterRestart': conflict}, actionCount=final_actions)
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('afk', type=Path)
+    parser.add_argument('gitea', type=Path)
+    parser.add_argument('--webhook', action='store_true')
+    args = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='w10-issue-event.') as temporary:
-        result = qualify(*(str(Path(arg).resolve(strict=True)) for arg in sys.argv[1:]), Path(temporary))
+        result = qualify(str(args.afk.resolve(strict=True)), str(args.gitea.resolve(strict=True)), Path(temporary), args.webhook)
         print(json.dumps(result, indent=2))

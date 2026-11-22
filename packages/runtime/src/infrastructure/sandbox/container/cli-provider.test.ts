@@ -152,6 +152,10 @@ describe('frozen Docker CLI adapter', () => {
     const argv = provider.calls[0].argv;
     expect(argv).toContain('--pull=never');
     expect(argv).toContain('--read-only');
+    expect(argv).toContain('--no-healthcheck');
+    expect(argv.slice(argv.indexOf('--user'), argv.indexOf('--user') + 2)).toEqual(['--user', '1000:1000']);
+    expect(argv.slice(argv.indexOf('--entrypoint'), argv.indexOf('--entrypoint') + 4))
+      .toEqual(['--entrypoint', '/usr/bin/env', '--workdir', '/workspace']);
     expect(argv).toContain('no-new-privileges');
     expect(argv).toContain('none');
     expect(argv).not.toContain('-v');

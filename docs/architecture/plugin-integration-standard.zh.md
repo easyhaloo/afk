@@ -454,7 +454,9 @@ collector 不具备完整语义资格。保存配置及新增实验遵守以下�
   许可也不能转借给其他候选、修订或证据；不匹配在证据重建和 Repository 选择前拒绝。
   配置及独立执行授权摘要须包含 `callInput`，变更实际调用输入即改变绑定。
   撤销或任何绑定变化均阻断。Wiki 发布许可不能替代执行许可。当前许可仅接受空 dependencies、
-  空 permissions、`sideEffects: none`，并限制 timeoutMs/maxOutputBytes，不隐式授权安装或外部副作用。
+  空 permissions，并限制 timeoutMs/maxOutputBytes。`allowed.sideEffects` 须与提案一致。
+  只有绑定 `scratchHelper` 且配置恢复实验的 tool 提案可授权 `filesystem`，范围限于沙箱内受限的
+  scratch 写入。执行许可不授予安装权限。
   当前宿主 revision 为 `proposal-validation-runtime-v5`。旧宿主执行许可须独立重新授权，
   不自动改写或沿用。adapter 与语义协议仍为 v1，不能用协议版本相同推导宿主兼容。
 - 超时与取消实验从宿主独立观察到容器运行时开始计时。`afterMs` 可等于实际执行上限。

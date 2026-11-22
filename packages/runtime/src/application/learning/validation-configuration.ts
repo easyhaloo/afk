@@ -209,9 +209,10 @@ export const proposalExecutionGrantSchema = z.object({ version: z.literal(1), pu
   checkerDigest: learningDigestSchema, kind: z.enum(['tool', 'skill']), repository: repositorySchema, asset: assetSchema,
   inventoryDigest: learningDigestSchema, sandbox: sandboxSchema,
   adapter: z.object({ id: adapterIdSchema, revision: learningIdentitySchema, hostRuntimeRevision: learningIdentitySchema }).strict(),
-  allowed: z.object({ dependencies: z.array(z.never()).max(0), permissions: z.array(z.never()).max(0), sideEffects: z.literal('none') }).strict(),
+  allowed: z.object({ dependencies: z.array(z.never()).max(0), permissions: z.array(z.never()).max(0), sideEffects: z.enum(['none', 'filesystem']) }).strict(),
   limits: z.object({ timeoutMs: z.number().int().positive().safe().max(120_000),
     maxOutputBytes: z.number().int().positive().safe().max(DISTILLATION_LIMITS.outputBytes) }).strict(),
 }).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.adapter.id) && (!value.skillObservation || value.kind === 'skill')
-  && (value.sandbox.permissionObserverImageId === undefined || value.kind === 'tool'));
+  && (value.sandbox.permissionObserverImageId === undefined || value.kind === 'tool')
+  && (value.allowed.sideEffects !== 'filesystem' || (value.kind === 'tool' && value.sandbox.scratchHelper !== undefined)));
 export type ProposalExecutionGrant = z.infer<typeof proposalExecutionGrantSchema>;

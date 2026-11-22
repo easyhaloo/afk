@@ -1786,15 +1786,17 @@ container identities; it recomputes the fragment rather than trusting flags.
 The maximum qualification is `qualified-bounded-returns-and-state`, with effect
 history always unobserved. Missing return assertions and requests for effect
 history remain unsupported. This contract is wired into saved production proposal
-configuration, execution grants, Runtime and final acceptance. Host execution
-grants use v3 and require independent reauthorization; saved configuration and
-grants bind the helper path and digest, while the host retains its owned capture
+configuration, execution grants, Runtime and final acceptance. The host revision
+is `proposal-validation-runtime-v5`. Saved configuration and grants bind the
+helper path and digest, while the host retains its owned capture
 API object and rechecks file identity. Each execution independently saves effective
 limits and operation/container identities. Final acceptance rechecks the contract,
 wrapper, helper, phase bytes and output without persisting trusted context.
 Semantic evidence revalidation errors return `invalid_receipt`, preserving timeout
 and cancellation priority. Recovery evidence qualifies only the bounded returns
-and state in its contract. The recovery tests exercise synthetic observations.
+and state in its contract. `allowed.sideEffects` must match the proposal. Only
+tool proposals with a pinned scratch helper and a configured recovery experiment
+can use `filesystem`. This grant covers bounded sandbox scratch writes.
 
 Tool `permission-denied` checks support `readonly-workspace-openat-v1` with a
 schema-validated `callInput`, an exact file in the frozen `/workspace` manifest,
@@ -1804,6 +1806,13 @@ before repository selection. Acceptance requires a matching operation, container
 and cgroup receipt, at least one kernel `EROFS` denial of a write to the exact
 target, and passing exit and output assertions. This qualifies the observed
 operation. Full candidate qualification requires the remaining checks as well.
+
+The persisted proposal receipt is capped at 32 KiB before base64 encoding. To
+reconstruct an observation, merge the report's `observationBinding`, comparison
+`binding` and observation `receipt.binding` in that order. Restore `expected`
+from the comparison and, for semantic observations, `actual` from
+`receipt.semantic.assertions`. Hash the reconstructed receipt to verify its
+`receiptDigest`.
 
 ### Knowledge publication and reading integration
 

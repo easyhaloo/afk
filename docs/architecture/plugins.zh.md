@@ -1411,17 +1411,23 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 适配器持有的 captured helper 及 operation/container 身份，重算片段而不信任布尔标志。
 最高资格为 `qualified-bounded-returns-and-state`，副作用历史始终未观察；缺少返回断言或
 要求完整历史时保持 unsupported。该合同已接入保存的生产提案配置、执行授权、Runtime
-和最终验收。宿主执行授权使用 v3，旧授权不得继承；保存配置及授权必须绑定 helper
+和最终验收。宿主 revision 为 `proposal-validation-runtime-v5`。保存配置及授权须绑定 helper
 路径与摘要，宿主持有 capture API 返回的自有对象并重验文件身份。每次执行独立保存
 实际限额、operation 和 container 身份；最终重新核验合同、wrapper、helper、阶段字节
 及输出，可信 context 不写入持久报告。语义证据重验异常返回 `invalid_receipt`，保留取消
-和超时优先级。恢复证据的资格限于合同约定的返回值与状态，当前恢复测试使用合成观察。
+和超时优先级。恢复证据的资格限于合同约定的返回值与状态。`allowed.sideEffects` 须与提案
+一致。只有绑定 scratch helper 且配置恢复实验的工具提案可使用 `filesystem`，许可范围限于
+沙箱内受限的 scratch 写入。
 
 工具的 `permission-denied` 实验支持 `readonly-workspace-openat-v1`。`callInput` 须通过
 工具输入 schema，目标须精确匹配冻结 `/workspace` 清单中的文件。保存配置与独立执行许可
 须绑定同一个 `sandbox.permissionObserverImageId`。缺少受支持的配置时，预检在选择仓库前
 阻断。验收须取得匹配的 operation、container 和 cgroup 收据，观察到至少一次内核以 `EROFS`
 拒绝对精确目标的写入，并通过退出与输出断言。完整候选验收还须通过其余检查。
+
+提案收据在 base64 编码前最多为 32 KiB。恢复观察收据时，依次合并报告级 `observationBinding`、
+对照级 `binding` 和观察级 `receipt.binding`。从对照恢复 `expected`，语义观察从
+`receipt.semantic.assertions` 恢复 `actual`。重算恢复后收据的摘要并核对 `receiptDigest`。
 
 ### 知识发布与读取接线
 

@@ -107,6 +107,8 @@ macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环
 
 Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
 
+AFK 0.2.190 安装版另用隔离回环模型复验 Pi 1.5.2 的工具调用、会话与用量关联、QA 入队，以及取消后的进程退出和无延迟写入。两项均退出 0。详见 [Pi 安装版验收](agent-pi.md#02190-安装版复跑)和 [0.2.190 回执](agent-pi-0.2.190.receipt.json)。
+
 安装版 0.2.168 经 Local Sandbox、Pi 1.5.2 和临时 Ollama 服务运行 Qwen3.5-2B。Pi 正确回答随机算术题，AFK 会话 ID 与 Pi 原生记录一致，输入 513、输出 80、合计 593 token，工具调用为零。加 `--cancel` 可复验流式输出中的取消。同版本 macOS arm64 CI 发行包复验时，Pi 在关闭 Sandbox 前退出，关闭后原句柄返回 `404 SANDBOX_MISSING`。云端 `wiscode-aiproxy` 的独立请求曾返回 HTTP 402。[复跑脚本](pi-local-inference.py) · [推理回执](pi-local-inference.receipt.json) · [取消回执](pi-local-cancel.receipt.json) · [云端回执](agent-pi.receipt.json)
 
 2026-11-20，安装版 0.2.162 通过 `plugin invoke repository.provider special-git-backend run` 驱动独立 Git 命令后端。首次执行因动作查询失败而清理工作树，裸仓库只有 `main`。同一 runId 重试后，裸仓库的 `review` 指向 `9e3aabe46203670a9a56bf61b08e2ac61ce91e92`，读回 `parcel.txt` 的内容为 `ready for review`。基线 `main` 仍指向 `d7e85a8f44cb3bb06a302f3b8c970e37176adeea`，临时工作树已移除。运行 `python3 tests/qualification/w10/special-git-backend.py <安装版 CLI 可执行文件>` 可在独立临时仓库复验。

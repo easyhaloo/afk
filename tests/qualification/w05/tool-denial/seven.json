@@ -1,0 +1,577 @@
+{
+  "version": "0.2.162",
+  "candidateId": "e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584",
+  "expectedCommit": "8b000c6686f72d0a06f4aff94e9c092833e64439",
+  "archiveDigest": "47e451118faf7d990d84ca713eeabe168fa5922c81a0d34823666ec7b5082e2f",
+  "checkerDigest": "57eeeecd222e76c2d10cec20b53c90f0a46dcf865c6dbac93835f3639ce5df9c",
+  "digests": {
+    "original": "2ae3a06ca5fd0059dff855c705025862312493881f0463816be03064baaa2902",
+    "proposed": "200564c2a4394ef30f393587a9aa680048fb042bcb0edb2b96499103eab821d0"
+  },
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "v24.18.0",
+  "nodeSha256": "ee6fb0e015284d83a91e8ec5213f43a157f8a392b58555301682892ba928c04a",
+  "originalCLI": {
+    "exit": 1,
+    "result": {
+      "status": "blocked",
+      "code": "insufficient_coverage"
+    }
+  },
+  "installedRuntime": {
+    "active": {
+      "status": "blocked",
+      "code": "insufficient_coverage"
+    },
+    "revoked": {
+      "status": "blocked",
+      "code": "unauthorized"
+    },
+    "selections": 0
+  },
+  "assurance": "diagnostic-only / darwin-seatbelt",
+  "rows": [
+    {
+      "check": {
+        "id": "behavior-1",
+        "kind": "normal",
+        "input": "\"9780306406157\\n5901234123457\"",
+        "expected": "{\"checked\":2,\"invalidLines\":[]}"
+      },
+      "preparation": {
+        "status": "prepared",
+        "experiment": {
+          "adapter": "node-json-argv-v1",
+          "argv": [
+            "node",
+            "/workspace/script/scan-manifest.mjs",
+            "\"9780306406157\\n5901234123457\""
+          ],
+          "artifactPath": "script/scan-manifest.mjs",
+          "assertions": [
+            {
+              "expected": 0,
+              "id": "exit",
+              "source": "exit-code"
+            },
+            {
+              "expected": {
+                "checked": 2,
+                "invalidLines": []
+              },
+              "id": "output",
+              "source": "stdout-json"
+            }
+          ],
+          "checkDigest": "b658c5b3f7a9640b2bf40137af80c2609749ee406e94da9a1fa560f67711e5e4",
+          "checkId": "behavior-1",
+          "input": "\"9780306406157\\n5901234123457\"",
+          "kind": "normal",
+          "protocol": "proposal-semantic-v1"
+        }
+      },
+      "observations": {
+        "original": {
+          "raw": "\"9780306406157\\n5901234123457\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 36
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"9780306406157\\\\n5901234123457\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 27
+          }
+        },
+        "proposed": {
+          "raw": "\"9780306406157\\n5901234123457\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 26
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"9780306406157\\\\n5901234123457\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 29
+          }
+        }
+      }
+    },
+    {
+      "check": {
+        "id": "behavior-2",
+        "kind": "normal",
+        "input": "\"\\n0012345678905\\n０\\n\"",
+        "expected": "{\"checked\":4,\"invalidLines\":[1,3,4]}"
+      },
+      "preparation": {
+        "status": "prepared",
+        "experiment": {
+          "adapter": "node-json-argv-v1",
+          "argv": [
+            "node",
+            "/workspace/script/scan-manifest.mjs",
+            "\"\\n0012345678905\\n０\\n\""
+          ],
+          "artifactPath": "script/scan-manifest.mjs",
+          "assertions": [
+            {
+              "expected": 0,
+              "id": "exit",
+              "source": "exit-code"
+            },
+            {
+              "expected": {
+                "checked": 4,
+                "invalidLines": [
+                  1,
+                  3,
+                  4
+                ]
+              },
+              "id": "output",
+              "source": "stdout-json"
+            }
+          ],
+          "checkDigest": "fe1557ddb3f72110228497156a6957c585b5a8fa2b1252c79d6445874bc5ce40",
+          "checkId": "behavior-2",
+          "input": "\"\\n0012345678905\\n０\\n\"",
+          "kind": "normal",
+          "protocol": "proposal-semantic-v1"
+        }
+      },
+      "observations": {
+        "original": {
+          "raw": "\"\\n0012345678905\\n０\\n\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 30
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"\\\\n0012345678905\\\\n０\\\\n\\\"\",\"value\":{\"checked\":4,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 45
+          }
+        },
+        "proposed": {
+          "raw": "\"\\n0012345678905\\n０\\n\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 28
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"\\\\n0012345678905\\\\n０\\\\n\\\"\",\"value\":{\"checked\":4,\"invalidLines\":[1,3,4]}}\n",
+            "stderr": "",
+            "elapsedMs": 28
+          }
+        }
+      }
+    },
+    {
+      "check": {
+        "id": "behavior-3",
+        "kind": "normal",
+        "input": "\"1234567890128\\n1234567890129\"",
+        "expected": "{\"checked\":2,\"invalidLines\":[2]}"
+      },
+      "preparation": {
+        "status": "prepared",
+        "experiment": {
+          "adapter": "node-json-argv-v1",
+          "argv": [
+            "node",
+            "/workspace/script/scan-manifest.mjs",
+            "\"1234567890128\\n1234567890129\""
+          ],
+          "artifactPath": "script/scan-manifest.mjs",
+          "assertions": [
+            {
+              "expected": 0,
+              "id": "exit",
+              "source": "exit-code"
+            },
+            {
+              "expected": {
+                "checked": 2,
+                "invalidLines": [
+                  2
+                ]
+              },
+              "id": "output",
+              "source": "stdout-json"
+            }
+          ],
+          "checkDigest": "c38f168948bdd838609534fa53e93cf96fd410a165cacc7cc5911452aef7478b",
+          "checkId": "behavior-3",
+          "input": "\"1234567890128\\n1234567890129\"",
+          "kind": "normal",
+          "protocol": "proposal-semantic-v1"
+        }
+      },
+      "observations": {
+        "original": {
+          "raw": "\"1234567890128\\n1234567890129\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 27
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"1234567890128\\\\n1234567890129\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 28
+          }
+        },
+        "proposed": {
+          "raw": "\"1234567890128\\n1234567890129\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 27
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"1234567890128\\\\n1234567890129\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[2]}}\n",
+            "stderr": "",
+            "elapsedMs": 28
+          }
+        }
+      }
+    },
+    {
+      "check": {
+        "id": "behavior-4",
+        "kind": "refusal",
+        "input": "null",
+        "expected": "error: input must be a string"
+      },
+      "preparation": {
+        "status": "prepared",
+        "experiment": {
+          "adapter": "node-json-argv-v1",
+          "argv": [
+            "node",
+            "/workspace/script/scan-manifest.mjs",
+            "null"
+          ],
+          "artifactPath": "script/scan-manifest.mjs",
+          "assertions": [
+            {
+              "expected": 1,
+              "id": "exit",
+              "source": "exit-code"
+            },
+            {
+              "expected": "error: input must be a string",
+              "id": "output",
+              "source": "stderr"
+            }
+          ],
+          "checkDigest": "d94ab32d5e982125c4be7fd21031c46b7059e2280c871d4298388b8d2c02b42e",
+          "checkId": "behavior-4",
+          "input": "null",
+          "kind": "refusal",
+          "protocol": "proposal-semantic-v1"
+        }
+      },
+      "observations": {
+        "original": {
+          "raw": "null",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 26
+          },
+          "directExport": {
+            "exit": 1,
+            "signal": null,
+            "stdout": "",
+            "stderr": "{\"raw\":\"null\",\"name\":\"TypeError\",\"message\":\"Cannot read properties of null (reading 'split')\"}\n",
+            "elapsedMs": 28
+          }
+        },
+        "proposed": {
+          "raw": "null",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 26
+          },
+          "directExport": {
+            "exit": 1,
+            "signal": null,
+            "stdout": "",
+            "stderr": "{\"raw\":\"null\",\"name\":\"TypeError\",\"message\":\"Cannot read properties of null (reading 'split')\"}\n",
+            "elapsedMs": 29
+          }
+        }
+      }
+    },
+    {
+      "check": {
+        "id": "control-cancellation",
+        "kind": "cancellation",
+        "input": "Cancel before and during execution",
+        "expected": "Execution stops; no further side effects; recovery remains possible"
+      },
+      "preparation": {
+        "status": "prepared",
+        "experiment": {
+          "adapter": "node-json-argv-v1",
+          "argv": [
+            "node",
+            "/workspace/script/scan-manifest.mjs",
+            "\"9780306406157\\n5901234123457\""
+          ],
+          "artifactPath": "script/scan-manifest.mjs",
+          "assertions": [
+            {
+              "expected": 137,
+              "id": "exit",
+              "source": "exit-code"
+            },
+            {
+              "expected": "cancellation",
+              "id": "control",
+              "path": [
+                "kind"
+              ],
+              "source": "control"
+            }
+          ],
+          "callInput": "\"9780306406157\\n5901234123457\"",
+          "checkDigest": "f8f51860ca6dc3012d7fa44c28140f59f7635008a89a11c33d6d70f871a1402f",
+          "checkId": "control-cancellation",
+          "control": {
+            "afterMs": 500,
+            "kind": "cancellation"
+          },
+          "input": "Cancel before and during execution",
+          "kind": "cancellation",
+          "protocol": "proposal-semantic-v1"
+        }
+      },
+      "observations": {
+        "original": {
+          "raw": "\"9780306406157\\n5901234123457\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 26,
+            "controlSent": false
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"9780306406157\\\\n5901234123457\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 27,
+            "controlSent": false
+          }
+        },
+        "proposed": {
+          "raw": "\"9780306406157\\n5901234123457\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 25,
+            "controlSent": false
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"9780306406157\\\\n5901234123457\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 27,
+            "controlSent": false
+          }
+        }
+      }
+    },
+    {
+      "check": {
+        "id": "control-timeout",
+        "kind": "timeout",
+        "input": "Exceed 5000ms",
+        "expected": "Execution terminates at the deadline; report partial effects"
+      },
+      "preparation": {
+        "status": "prepared",
+        "experiment": {
+          "adapter": "node-json-argv-v1",
+          "argv": [
+            "node",
+            "/workspace/script/scan-manifest.mjs",
+            "\"9780306406157\\n5901234123457\""
+          ],
+          "artifactPath": "script/scan-manifest.mjs",
+          "assertions": [
+            {
+              "expected": 137,
+              "id": "exit",
+              "source": "exit-code"
+            },
+            {
+              "expected": "timeout",
+              "id": "control",
+              "path": [
+                "kind"
+              ],
+              "source": "control"
+            }
+          ],
+          "callInput": "\"9780306406157\\n5901234123457\"",
+          "checkDigest": "299b002600d68d0c563f30cb3ae097a86d5c6ce7e339d3fa9e7b69b9399745f1",
+          "checkId": "control-timeout",
+          "control": {
+            "afterMs": 5000,
+            "kind": "timeout"
+          },
+          "input": "Exceed 5000ms",
+          "kind": "timeout",
+          "protocol": "proposal-semantic-v1"
+        }
+      },
+      "observations": {
+        "original": {
+          "raw": "\"9780306406157\\n5901234123457\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 27,
+            "controlSent": false
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"9780306406157\\\\n5901234123457\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 27,
+            "controlSent": false
+          }
+        },
+        "proposed": {
+          "raw": "\"9780306406157\\n5901234123457\"",
+          "entry": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "",
+            "stderr": "",
+            "elapsedMs": 27,
+            "controlSent": false
+          },
+          "directExport": {
+            "exit": 0,
+            "signal": null,
+            "stdout": "{\"raw\":\"\\\"9780306406157\\\\n5901234123457\\\"\",\"value\":{\"checked\":2,\"invalidLines\":[]}}\n",
+            "stderr": "",
+            "elapsedMs": 29,
+            "controlSent": false
+          }
+        }
+      }
+    },
+    {
+      "check": {
+        "id": "control-recovery",
+        "kind": "recovery",
+        "input": "Retry after interrupted execution",
+        "expected": "Pure deterministic function with no state or side effects; identical input always produces identical output\nNo recovery needed; pure computation with no failure modes beyond JavaScript runtime errors"
+      },
+      "preparation": {
+        "status": "unsupported",
+        "reason": "recovery_contract_unavailable"
+      },
+      "observations": {
+        "original": {
+          "independentFreshProcessSequence": [
+            {
+              "exit": 1,
+              "signal": null,
+              "stdout": "",
+              "stderr": "{\"raw\":\"null\",\"name\":\"TypeError\",\"message\":\"Cannot read properties of null (reading 'split')\"}\n",
+              "elapsedMs": 27
+            },
+            {
+              "exit": 0,
+              "signal": null,
+              "stdout": "{\"raw\":\"\\\"\\\\n0012345678905\\\\n０\\\\n\\\"\",\"value\":{\"checked\":4,\"invalidLines\":[]}}\n",
+              "stderr": "",
+              "elapsedMs": 28
+            },
+            {
+              "exit": 0,
+              "signal": null,
+              "stdout": "{\"raw\":\"\\\"\\\\n0012345678905\\\\n０\\\\n\\\"\",\"value\":{\"checked\":4,\"invalidLines\":[]}}\n",
+              "stderr": "",
+              "elapsedMs": 28
+            }
+          ]
+        },
+        "proposed": {
+          "independentFreshProcessSequence": [
+            {
+              "exit": 1,
+              "signal": null,
+              "stdout": "",
+              "stderr": "{\"raw\":\"null\",\"name\":\"TypeError\",\"message\":\"Cannot read properties of null (reading 'split')\"}\n",
+              "elapsedMs": 27
+            },
+            {
+              "exit": 0,
+              "signal": null,
+              "stdout": "{\"raw\":\"\\\"\\\\n0012345678905\\\\n０\\\\n\\\"\",\"value\":{\"checked\":4,\"invalidLines\":[1,3,4]}}\n",
+              "stderr": "",
+              "elapsedMs": 27
+            },
+            {
+              "exit": 0,
+              "signal": null,
+              "stdout": "{\"raw\":\"\\\"\\\\n0012345678905\\\\n０\\\\n\\\"\",\"value\":{\"checked\":4,\"invalidLines\":[1,3,4]}}\n",
+              "stderr": "",
+              "elapsedMs": 28
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

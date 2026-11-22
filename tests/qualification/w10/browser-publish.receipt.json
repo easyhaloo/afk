@@ -1,0 +1,212 @@
+{
+  "version": "0.2.173",
+  "platform": "darwin",
+  "arch": "arm64",
+  "launcherSha256": "0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c",
+  "playwright": "1.62.1",
+  "node": "v24.18.0",
+  "provider": "verification.browser-check",
+  "agent": "synthetic repository fixture",
+  "tracker": "loopback GitLab fixture",
+  "remote": "Git HTTP bare repositories",
+  "cases": [
+    {
+      "dom": "hidden",
+      "cliExit": 1,
+      "status": "failed",
+      "integrityValid": true,
+      "gates": [
+        {
+          "phase": "before-publish",
+          "branch": "afk/backlog-1",
+          "passed": false,
+          "closed": true,
+          "exitCode": 1,
+          "evidenceSha256": "17de09b02d56ac5e9c1792aa4cfe3a8c12d5efba42cd5c6f2ceba336e03e3779",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": false,
+          "width": 0,
+          "revision": "85b163282d86cccb7e1d5445750a0c77d406962f",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "93b13eaff5f6e0e0069d9378d38b75bde8369ac7"
+          },
+          "browserExit": 0
+        }
+      ],
+      "receivePackRequests": 0,
+      "receivePackPosts": 0,
+      "mrCreates": 0,
+      "remotes": [
+        {
+          "name": "api",
+          "refs": {
+            "refs/heads/main": "b7a63eac6bb03fca4ab67dffa4de3f5835380447"
+          }
+        },
+        {
+          "name": "web",
+          "refs": {
+            "refs/heads/main": "b0b9d689f0e93b036757b7a91d62e5623868f0d8"
+          }
+        }
+      ]
+    },
+    {
+      "dom": "repaired",
+      "cliExit": 0,
+      "status": "awaiting_human",
+      "integrityValid": true,
+      "gates": [
+        {
+          "phase": "before-publish",
+          "branch": "afk/backlog-1",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "6f2b1ee9a3b86a85993c41a072fcc4b55dcf6e1e329da1ddb756ac28459ec66f",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "f9794e7f303e7ba09440315c729b91316839777a",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        },
+        {
+          "phase": "after-agent",
+          "branch": "afk/backlog-1",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "e984f4c772b469940b49f855b5a427b46bb7cfebeb1e027bb050155482588247",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "f9794e7f303e7ba09440315c729b91316839777a",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        },
+        {
+          "phase": "before-publish",
+          "branch": "afk/backlog-1",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "5dce7c5c5010d691ff14a1031eed203388e5c6b87ac6fce86cb9c2757da29a53",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "f9794e7f303e7ba09440315c729b91316839777a",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        },
+        {
+          "phase": "before-publish",
+          "branch": "afk/backlog-1",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "744610ca8846f0bdcc9e5bba25dbf78f2b98d177f1edb7c4c559dffce5b48aae",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "24826ec38d5b8d9330e7dbcf1e3ae27b732ed96e",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        },
+        {
+          "phase": "after-agent",
+          "branch": "afk/backlog-1-qa",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "69c6bbf8801877c028d143ef60c279c71dea53d979e8e3d29167608f52275919",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "dccfcce628fd354baa6ad500fce03ef0531debe2",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        },
+        {
+          "phase": "before-publish",
+          "branch": "afk/backlog-1-qa",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "55d71e19dfd2e6008e96e5434cadcd42b9d7f4fdc0a122d09917a76b7d8381a7",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "dccfcce628fd354baa6ad500fce03ef0531debe2",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        },
+        {
+          "phase": "before-publish",
+          "branch": "afk/backlog-1-qa",
+          "passed": true,
+          "closed": true,
+          "exitCode": 0,
+          "evidenceSha256": "f1ca2c511979936cee998ce2bf0989048d8fb32d2a03c4ff579c148edcc414c9",
+          "browser": "149.0.7827.55",
+          "text": "Parcel ready",
+          "visible": true,
+          "width": 1264,
+          "revision": "dccfcce628fd354baa6ad500fce03ef0531debe2",
+          "blobs": {
+            "parcel.html": "d73b18e3acc2277b28514836b4df563b19279ebc",
+            "parcel.css": "e153f27148e94775b124ad462ff0c037ff7c347a"
+          },
+          "browserExit": 0
+        }
+      ],
+      "receivePackRequests": 8,
+      "receivePackPosts": 4,
+      "mrCreates": 1,
+      "remotes": [
+        {
+          "name": "api",
+          "refs": {
+            "refs/heads/afk/backlog-1": "f9794e7f303e7ba09440315c729b91316839777a",
+            "refs/heads/afk/backlog-1-qa": "dccfcce628fd354baa6ad500fce03ef0531debe2",
+            "refs/heads/main": "0de5c5acf26491f1dba09fe8ce0f273c8c68f6cb"
+          }
+        },
+        {
+          "name": "web",
+          "refs": {
+            "refs/heads/afk/backlog-1": "24826ec38d5b8d9330e7dbcf1e3ae27b732ed96e",
+            "refs/heads/afk/backlog-1-qa": "24826ec38d5b8d9330e7dbcf1e3ae27b732ed96e",
+            "refs/heads/main": "6f6db5e97d301d1796557af75e1516a462f8b0e6"
+          }
+        }
+      ]
+    }
+  ]
+}

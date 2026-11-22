@@ -1,8 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { readSignalSync } from '../io/signal.js';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 import { ControlModeConnection } from './control-mode.js';
@@ -16,6 +18,19 @@ describe('normalizeTmuxSessionName', () => {
   it('rewrites colons the same way tmux stores session names', () => {
     expect(normalizeTmuxSessionName('github:easyhaloo/afk#144')).toBe('github_easyhaloo/afk#144');
     expect(normalizeTmuxSessionName('afk-144-implement')).toBe('afk-144-implement');
+  });
+});
+
+describe('TmuxClient session status', () => {
+  it.each([
+    ['no current target\n', 'missing'],
+    ['error connecting to /tmp/tmux/default (Permission denied)\n', 'unknown'],
+  ])('classifies %j as %s', async (stderr, status) => {
+    const client = new TmuxClient();
+    vi.spyOn(client as unknown as { exec(args: string[]): Promise<string> }, 'exec')
+      .mockRejectedValue(new Error(`tmux command failed: ${stderr}`));
+
+    await expect(client.sessionStatus('afk-session')).resolves.toBe(status);
   });
 });
 
@@ -227,6 +242,81 @@ describe('ControlModeConnection pipe failures', () => {
   const hasTmux = (() => {
     try { execFileSync('tmux', ['-V'], { stdio: 'pipe' }); return true; } catch { return false; }
   })();
+
+  it.skipIf(!hasTmux || process.platform === 'win32').each(['attached', 'reparented', 'pane-exited', 'shared'])(
+    'scopes cleanup of a %s pane child to its owning session', async mode => {
+    const root = await mkdtemp('/tmp/afk-tmux-tree-');
+    const client = new TmuxClient();
+    const processOwner = randomUUID();
+    const runTmux = (...args: string[]) => execFileSync('tmux', ['-f', '/dev/null', ...args], { encoding: 'utf8' }).trim();
+    vi.stubEnv('TMUX_TMPDIR', root);
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('AFK_TEST_NODE', process.execPath);
+    let childPid: number | undefined;
+    try {
+      runTmux('new-session', '-d', '-s', 'unmanaged', 'sleep 30');
+      const unmanagedPid = Number(runTmux('display-message', '-p', '-t', 'unmanaged', '#{pane_pid}'));
+      await writeFile(join(root, 'detached.cjs'), `
+        const { spawn } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const launch = () => spawn(process.execPath, ['-e', ${JSON.stringify(`
+          const { writeFileSync } = require('node:fs');
+          writeFileSync('started', String(process.pid));
+          setTimeout(() => writeFileSync('late', ''), 1800);
+        `)}], { detached: true, stdio: 'ignore' });
+        if (['attached', 'shared'].includes(process.argv[2])) launch();
+        else if (process.argv[2] === 'reparented') {
+          const bridge = spawn(process.execPath, [__filename, 'child'], { stdio: 'ignore' });
+          bridge.on('exit', () => writeFileSync('bridge-exited', ''));
+          setTimeout(() => {}, 10000);
+        } else launch().unref();
+      `);
+      await client.createSession('owned', root, `exec "$AFK_TEST_NODE" detached.cjs ${mode}`, processOwner);
+      runTmux('rename-session', '-t', 'unmanaged', 'owned-unmanaged');
+      if (mode === 'attached') runTmux('link-window', '-s', 'owned-unmanaged:0', '-t', 'owned:1');
+      if (mode === 'shared') runTmux('link-window', '-s', 'owned:0', '-t', 'owned-unmanaged:1');
+      if (mode === 'reparented') await vi.waitFor(() => access(join(root, 'bridge-exited')));
+      if (mode === 'pane-exited') {
+        await vi.waitFor(async () => expect(await client.sessionStatus('owned')).toBe('missing'));
+        runTmux('new-session', '-d', '-s', 'owned', 'sleep 30');
+      }
+      childPid = await vi.waitFor(async () => Number(await readFile(join(root, 'started'), 'utf8')));
+      expect(() => process.kill(childPid, 0)).not.toThrow();
+      await client.killSession('owned', processOwner);
+      await client.killSession('owned', processOwner);
+      if (mode === 'shared') expect(() => process.kill(childPid, 0)).not.toThrow();
+      else {
+        await delay(1900);
+        await expect(access(join(root, 'late'))).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+      expect(runTmux('list-sessions', '-F', '#{session_name}').split('\n').sort())
+        .toEqual(mode === 'pane-exited' ? ['owned', 'owned-unmanaged'] : ['owned-unmanaged']);
+      expect(() => process.kill(unmanagedPid, 0)).not.toThrow();
+    } finally {
+      try { runTmux('kill-server'); } catch {}
+      if (mode === 'shared' && childPid !== undefined) try { process.kill(childPid, 'SIGKILL'); } catch {}
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!hasTmux)('delivers Ctrl-C to the foreground process through piped control mode', async () => {
+    const session = `afk-test-interrupt-${Date.now()}`;
+    const client = new TmuxClient();
+    try {
+      await client.createSession(session, tmpdir(), "printf 'ready-for-interrupt\\n'; exec sleep 30");
+      await vi.waitFor(async () => {
+        await expect(client.capturePane(session, 'main')).resolves.toContain('ready-for-interrupt');
+      });
+      await client.sendKeys(session, 'main', 'C-c');
+      await vi.waitFor(async () => {
+        await expect(client.hasSession(session)).resolves.toBe(false);
+      }, { timeout: 2000 });
+    } finally {
+      client.closeSession();
+      await client.killSession(session).catch(() => undefined);
+    }
+  });
 
   it.skipIf(!hasTmux)('does not write to a control pipe that closed with the session', async () => {
     const session = `afk-test-epipe-${Date.now()}`;

@@ -4,7 +4,7 @@ import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
-import { currentTriggerDeliveryId, DurableTriggerQueue, TriggerDeliveryConflict, TriggerQueueFull, type TriggerQueueOptions } from './trigger-queue.js';
+import { currentTriggerDeliveryId, DurableTriggerQueue, TriggerDeliveryConflict, TriggerQueueFull, type TriggerQueueOptions, triggerQueueSchemaVersion } from './trigger-queue.js';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -26,12 +26,32 @@ function queue(file: string, dispatch: ConstructorParameters<typeof DurableTrigg
 }
 
 function database(file: string) {
-  const connection = openSqlite({ file, schema: '', durability: 'FULL', version: 2 });
+  const connection = openSqlite({ file, schema: '', durability: 'FULL', version: triggerQueueSchemaVersion });
   cleanup.push(() => connection.close());
   return connection;
 }
 
 describe('durable trigger queue', () => {
+  it('retains replay aliases across restart and releases their capacity when the original is pruned', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const options = { maxRecords: 2, maxBytes: 2, deliveredRetentionMs: 100 };
+    const first = queue(file, undefined, options);
+    const original = first.instance.enqueue('trigger.issue-event', '{}', 'original', true);
+    first.instance.enqueue('trigger.issue-event', '{}', 'alias', true);
+    await first.instance.close();
+    const { instance, dispatch } = queue(file, undefined, options);
+    expect(instance.storageUsage()).toMatchObject({ records: 2, bytes: 2 });
+    expect(instance.enqueue('trigger.issue-event', '{}', 'alias')).toMatchObject({ deliveryId: original.deliveryId, duplicate: true });
+    expect(() => instance.enqueue('trigger.issue-event', '[]', 'alias')).toThrow(TriggerDeliveryConflict);
+    expect(() => instance.enqueue('trigger.issue-event', '{}', 'third', true)).toThrow(TriggerQueueFull);
+    instance.start();
+    await vi.advanceTimersByTimeAsync(101);
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(instance.pruneDelivered()).toBe(1);
+    expect(instance.storageUsage()).toMatchObject({ records: 0, bytes: 0 });
+    expect(instance.enqueue('trigger.issue-event', '[]', 'alias')).toMatchObject({ duplicate: false });
+  });
   it('dispatches only the selected enqueue delivery id and leaves unrelated work for a global owner', async () => {
     vi.useFakeTimers();
     const file = queueFile();
@@ -185,6 +205,26 @@ describe('durable trigger queue', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 2 });
     expect(restarted.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('expedites only the selected pending delivery without resetting its attempts', async () => {
+    vi.useFakeTimers();
+    const file = queueFile();
+    const first = queue(file, vi.fn(async () => { throw new Error('retry later'); }), { retryDelayMs: 60_000 });
+    const unrelated = first.instance.enqueue('learning.distill', '{}', 'unrelated');
+    const selected = first.instance.enqueue('learning.distill', '{}', 'selected');
+    first.instance.start();
+    await first.instance.close();
+
+    const restarted = queue(file);
+    const unrelatedStatus = restarted.instance.status(unrelated.deliveryId)[0];
+    expect(unrelatedStatus).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(restarted.instance.status(selected.deliveryId)[0].nextAttemptAt).toBeGreaterThan(Date.now());
+    restarted.instance.start({ deliveryId: selected.deliveryId, expeditePending: true });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(restarted.instance.status(unrelated.deliveryId)[0]).toEqual(unrelatedStatus);
+    expect(restarted.instance.status(selected.deliveryId)[0]).toMatchObject({ status: 'delivered', attempts: 2 });
+    expect(restarted.dispatch).toHaveBeenCalledOnce();
   });
 
   it('bounds close without releasing an unconfirmed active consumer', async () => {

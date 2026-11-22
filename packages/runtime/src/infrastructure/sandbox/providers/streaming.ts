@@ -39,6 +39,7 @@ import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js'
 import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 import { spawnGuardedAnalysis } from './analysis-process-guard.js';
+import { createCopilotUsageReport } from './copilot-usage.js';
 
 const OUTPUT_DRAIN_TIMEOUT_MS = 1000;
 
@@ -57,9 +58,10 @@ export class StreamingAgentExecution implements AgentExecution {
   private _mutableMetadata: AgentExecutionMetadata;
 
   private proc: ChildProcess | null = null;
+  private copilotReport?: ReturnType<typeof createCopilotUsageReport>;
   private readonly processOwner = randomUUID();
   private done = false;
-  private analysisClosed = false;
+  private closedCleanly = false;
   private stopping?: Promise<void>;
   private readonly signalledDescendants = new Map<number, string>();
   private interruptAcked = false;
@@ -67,6 +69,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private error: ExecutionResult['error'] | undefined;
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
+  private completedTurnUsage?: TokenUsage;
   private readonly tools = new Map<string, AgentToolCallSummary>();
   private readonly stdoutDecoder = new StringDecoder('utf8');
   private readonly stderrDecoder = new StringDecoder('utf8');
@@ -108,7 +111,11 @@ export class StreamingAgentExecution implements AgentExecution {
     if (this.proc) return;
 
     // prompt already contains the `/goal ` prefix (from the template).
-    const argv = this.command.argv;
+    const argv = [...this.command.argv];
+    if (this.metadata.provider === 'copilot' && argv[0] === 'copilot') {
+      this.copilotReport = createCopilotUsageReport();
+      argv.push('--usage-output-file', this.copilotReport.path);
+    }
 
     const spawnOptions: SpawnOptions = {
       cwd: this.command.cwd ?? this.worktreePath,
@@ -164,7 +171,7 @@ export class StreamingAgentExecution implements AgentExecution {
 
     const child = this.proc;
     child.on('close', (code, signal) => {
-      this.analysisClosed = this.analysisSessionId !== undefined && !this.done && code === 0 && signal === null
+      this.closedCleanly = !this.done && code === 0 && signal === null
         && child.stdout?.readableEnded === true && child.stderr?.readableEnded === true;
       this.finishOutput();
     });
@@ -209,6 +216,7 @@ export class StreamingAgentExecution implements AgentExecution {
             };
             break;
           case 'result': {
+            this.completedTurnUsage = event.completedTurnUsage;
             if (this.analysisSessionId !== undefined) {
               this.structuredOutput = undefined;
               const nativeSession = events.find(candidate => candidate.type === 'session');
@@ -223,7 +231,7 @@ export class StreamingAgentExecution implements AgentExecution {
             const extracted = this.extractSignal(raw);
             if (extracted) {
               this.structuredOutput = extracted;
-              if (this.analysisSessionId === undefined && this.hasExpectedSignal()) this.done = true;
+              if (this.analysisSessionId === undefined && !this.copilotReport && this.metadata.provider !== 'opencode' && this.hasExpectedSignal()) this.done = true;
             }
             break;
           }
@@ -352,7 +360,8 @@ export class StreamingAgentExecution implements AgentExecution {
           },
         };
       }
-      if (!this.error && this.exitCode === undefined && this.usage && this.usage.totalTokens >= contextHighTokens) {
+      if (!this.error && !this.completedTurnUsage && this.exitCode === undefined
+        && this.usage && this.usage.totalTokens >= contextHighTokens) {
         return {
           version: 1,
           runId: this.id,
@@ -412,7 +421,7 @@ export class StreamingAgentExecution implements AgentExecution {
       };
     }
 
-    const error = this.error ?? (this.analysisSessionId !== undefined && !this.analysisClosed
+    const error = this.error ?? (this.analysisSessionId !== undefined && !this.closedCleanly
       ? { code: 'ANALYSIS_CLOSE_UNCONFIRMED', message: 'Guarded analysis did not close after draining both output streams' }
       : undefined);
     if (error || (this.exitCode !== undefined && this.exitCode !== 0)) {
@@ -431,6 +440,20 @@ export class StreamingAgentExecution implements AgentExecution {
     }
 
     if (!this.structuredOutput || !this.hasExpectedSignal()) {
+      const usage = this.completedTurnUsage;
+      if (this.analysisSessionId === undefined && this.closedCleanly && usage && usage.totalTokens >= contextHighTokens) {
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'context_high',
+          provider: 'batch',
+          sessionId: this.sessionId,
+          exitCode: this.exitCode,
+          usage,
+          tools: this.tools.size ? [...this.tools.values()] : undefined,
+          commits: [],
+        };
+      }
       return {
         version: 1,
         runId: this.id,
@@ -582,6 +605,10 @@ export class StreamingAgentExecution implements AgentExecution {
   }
 
   private closeOutput(): void {
+    if (this.copilotReport) {
+      this.usage = this.copilotReport.finish();
+      this.copilotReport = undefined;
+    }
     clearTimeout(this.outputDrainTimer);
     this.outputDrainTimer = undefined;
     this.proc?.stdout?.destroy();
@@ -600,7 +627,7 @@ export class StreamingAgentExecution implements AgentExecution {
     } catch {
       // The buffer may instead contain a provider's raw completion marker.
     }
-    if (/^\s*[{["]/.test(this.stdoutBuffer)) return;
+    if (this.metadata.provider === 'copilot' || this.metadata.provider === 'opencode' || /^\s*[{["]/.test(this.stdoutBuffer)) return;
     const extracted = extractGoalComplete(this.stdoutBuffer);
     if (!extracted) return;
     this.structuredOutput = extracted;

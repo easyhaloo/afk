@@ -154,11 +154,18 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
   const execFn = options.exec ?? execute;
   const resolveBinaryFn = options.resolveBinary ?? (() => execFn('which', ['jms']).then(result => (result.ok ? result.stdout.trim() : '')));
 
+  async function inventory(args: string[], command: string): Promise<string> {
+    const result = await execFn('jms', args);
+    if (result.ok) return result.stdout;
+    if (/unknown command|no such command/i.test(result.stderr)) {
+      throw new Error(`Incompatible jms on PATH: the JumpServer SSH CLI must support ${command}`);
+    }
+    throw new Error(`JumpServer inventory failed (${command}, exit ${result.code ?? 'unknown'})`);
+  }
+
   return {
     async listServers(): Promise<JumpserverServer[]> {
-      const result = await execFn('jms', ['config', 'list']);
-      if (!result.ok) return [];
-      const lines = result.stdout.split(/\r?\n/);
+      const lines = (await inventory(['config', 'list'], 'config list')).split(/\r?\n/);
       const columns = lines.map(headerColumns).find(Boolean) ?? null;
       return lines.flatMap(line => {
         const server = columns ? parsePaddedServerLine(line, columns) : parseServerLine(line);
@@ -178,9 +185,7 @@ export function createJumpserverCli(options: JumpserverCliOptions = {}) {
     },
 
     async listAssets(serverAlias: string, opts?: { linuxOnly?: boolean }): Promise<JumpserverAssetRow[]> {
-      const result = await execFn('jms', ['ls', serverAlias]);
-      if (!result.ok) return [];
-      const lines = result.stdout.split(/\r?\n/);
+      const lines = (await inventory(['ls', serverAlias], 'ls')).split(/\r?\n/);
       const columns = lines.map(headerColumns).find(value => value?.has('Address')) ?? null;
       return lines.flatMap(line => {
         const row = columns ? parsePaddedAssetLine(line, columns) : parseAssetLine(line);

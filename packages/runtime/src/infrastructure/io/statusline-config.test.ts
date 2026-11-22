@@ -4,9 +4,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { configureStatusline } from './statusline-config.js';
+import { claudeStatuslineSettingsPath } from '../../shared/workspace-paths.js';
 
 describe('configureStatusline', () => {
-  it('preserves tracked project settings and writes an idempotent local override', async () => {
+  it('keeps checkout settings intact and writes an idempotent statusline-only overlay', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'afk-statusline-'));
     const claudeDir = join(worktree, '.claude');
     const trackedSettings = join(claudeDir, 'settings.json');
@@ -14,12 +15,17 @@ describe('configureStatusline', () => {
     const original = '{\n  "permissions": { "allow": ["Bash(git status)"] }\n}\n';
     await mkdir(claudeDir);
     await writeFile(trackedSettings, original);
+    const userSettings = '{"permissions":{"deny":["Write"]},"statusLine":{"command":"my-status"}}\n';
+    await writeFile(localSettings, userSettings);
 
     await configureStatusline(worktree);
     await configureStatusline(worktree);
 
     expect(await readFile(trackedSettings, 'utf8')).toBe(original);
-    const local = await readFile(localSettings, 'utf8');
+    expect(await readFile(localSettings, 'utf8')).toBe(userSettings);
+    const local = await readFile(claudeStatuslineSettingsPath(worktree), 'utf8');
+    expect(Object.keys(JSON.parse(local))).toEqual(['statusLine']);
+    expect(local).toContain('my-status');
     expect(local).toContain(join(workspaceDataDirectory(worktree), 'claude-status.json'));
     expect(local.match(/claude-status\.json/g)).toHaveLength(1);
   });

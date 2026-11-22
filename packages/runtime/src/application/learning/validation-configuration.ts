@@ -109,6 +109,7 @@ const semanticExperimentSchema = proposalSemanticConfigurationSchema.extend({ ad
       || Number(assertion.expected) < 0 || Number(assertion.expected) > 255)) reject();
   }
   const controlled = value.kind === 'cancellation' || value.kind === 'timeout';
+  if (value.skillTrace && value.adapter !== 'skill-trace-v1') reject();
   const recovering = value.kind === 'recovery';
   if (value.recovery !== undefined && !recovering) reject();
   if (!controlled && !recovering && value.callInput !== undefined) reject();
@@ -125,7 +126,7 @@ const semanticExperimentSchema = proposalSemanticConfigurationSchema.extend({ ad
   else if (controlled ? exits[0].expected !== 137 : value.kind === 'normal' || value.recovery !== undefined ? exits[0].expected !== 0
     : value.kind === 'refusal' && exits[0].expected === 0) reject();
   if (controlled && !value.assertions.some(assertion => assertion.source === 'control')) reject();
-  if (value.kind === 'normal') {
+  if (value.kind === 'normal' && value.adapter === 'node-json-argv-v1') {
     try { if (!boundedJson(JSON.parse(value.input))) reject(); } catch { reject(); }
   }
 });
@@ -140,14 +141,36 @@ function matchesAssetKind(kind: 'tool' | 'skill', ref: string | null, adapter: z
     : adapter === 'skill-trace-v1' && (ref === null || ref.startsWith('skill:'));
 }
 
+const skillLoadSchema = z.object({ protocol: z.literal('claude-explicit-load-v1'), adapter: z.literal('skill-trace-v1'),
+  revision: learningIdentitySchema, hostBinaryDigest: learningDigestSchema,
+  hostControls: z.object({ observerDigest: learningDigestSchema, cases: z.array(z.object({ checkId: learningIdentitySchema,
+    checkDigest: learningDigestSchema, denied: assetPath, fallback: assetPath.optional() }).strict()).min(2).max(16)
+    .refine(cases => new Set(cases.map(entry => entry.checkId)).size === cases.length) }).strict().optional(),
+  cases: z.array(z.object({ checkId: learningIdentitySchema, checkDigest: learningDigestSchema, resource: assetPath }).strict())
+    .min(1).max(16).refine(cases => new Set(cases.map(entry => entry.checkId)).size === cases.length),
+}).strict();
+
+const skillObservationSchema = z.object({ grantDigest: learningDigestSchema, hostBinaryDigest: learningDigestSchema,
+  hostTrace: z.object({ source: z.literal('claude-seatbelt-loopback-read-v1'), observerDigest: learningDigestSchema,
+    runs: z.array(z.object({ edition: z.enum(['original', 'proposed']), checkId: learningIdentitySchema, snapshotDigest: learningDigestSchema,
+      expandedBodyDigest: learningDigestSchema, events: z.array(z.discriminatedUnion('outcome', [
+        z.object({ outcome: z.literal('denied'), path: assetPath }).strict(),
+        z.object({ outcome: z.literal('read'), path: assetPath, digest: learningDigestSchema }).strict(),
+      ])).min(1).max(2) }).strict()).min(2).max(32) }).strict().optional(),
+  loads: z.array(z.object({ edition: z.enum(['original', 'proposed']), checkId: learningIdentitySchema,
+    artifactDigest: learningDigestSchema, inputDigest: learningDigestSchema, expandedBodyDigest: learningDigestSchema,
+    resource: assetPath, resourceDigest: learningDigestSchema }).strict()).min(2).max(32),
+}).strict();
+
 const assetCheckerSchema = z.object({ mode: z.literal('repository-asset'), scope: learningScopeSchema,
   checkerId: learningIdentitySchema, version: learningIdentitySchema, kind: z.enum(['tool', 'skill']),
   executionAuthorizationFile: absoluteAssetPath, repository: repositorySchema, asset: assetSchema,
   inventory: z.object({ file: absoluteAssetPath, digest: learningDigestSchema }).strict(), sandbox: sandboxSchema,
-  semantic: semanticSchema, evidence: evidenceSchema.optional(),
+  semantic: z.union([semanticSchema, skillLoadSchema]), evidence: evidenceSchema.optional(),
 }).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.semantic.adapter))
-  .refine(value => !value.semantic.cases.some(entry => entry.experiment.recovery !== undefined) || value.sandbox.scratchHelper !== undefined)
-  .refine(value => value.kind !== 'skill' || value.semantic.cases.every(entry => ['normal', 'refusal', 'recovery'].includes(entry.experiment.kind)))
+  .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || !value.semantic.cases.some(entry => entry.experiment.recovery !== undefined) || value.sandbox.scratchHelper !== undefined)
+  .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || value.kind !== 'skill' || value.semantic.cases.every(entry => ['normal', 'refusal', 'recovery'].includes(entry.experiment.kind)))
+  .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || value.kind !== 'skill' || new Set(value.semantic.cases.map(entry => entry.experiment.skillTrace?.checkerDigest)).size === 1)
   .refine(value => {
     const location = relative(value.repository.root, value.executionAuthorizationFile);
     return isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`);
@@ -174,6 +197,7 @@ export function selectKnowledgeValidationChecker(config: ValidationConfiguration
 }
 
 export const proposalExecutionGrantSchema = z.object({ version: z.literal(1), purpose: z.literal('proposal-validation-execution'),
+  skillObservation: skillObservationSchema.optional(),
   revoked: z.boolean(), scope: learningScopeSchema, checkerId: learningIdentitySchema, checkerVersion: learningIdentitySchema,
   candidateId: learningDigestSchema, candidateVersion: z.number().int().positive().safe(),
   candidateDigest: learningDigestSchema, evidenceDigest: learningDigestSchema,
@@ -183,5 +207,5 @@ export const proposalExecutionGrantSchema = z.object({ version: z.literal(1), pu
   allowed: z.object({ dependencies: z.array(z.never()).max(0), permissions: z.array(z.never()).max(0), sideEffects: z.literal('none') }).strict(),
   limits: z.object({ timeoutMs: z.number().int().positive().safe().max(120_000),
     maxOutputBytes: z.number().int().positive().safe().max(DISTILLATION_LIMITS.outputBytes) }).strict(),
-}).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.adapter.id));
+}).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.adapter.id) && (!value.skillObservation || value.kind === 'skill'));
 export type ProposalExecutionGrant = z.infer<typeof proposalExecutionGrantSchema>;

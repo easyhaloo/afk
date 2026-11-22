@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { frozenExecutionArgv, verifyFrozenScratchRecoveryEvidence, type FrozenExecutionOptions,
+import { frozenExecutionArgv, verifyFrozenScratchRecoveryOutcome, type FrozenExecutionOptions,
   type FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import { buildFrozenContext } from '../../infrastructure/sandbox/container/frozen-input.js';
+import type { FrozenScratchBaselineFailure } from '../../infrastructure/sandbox/container/types.js';
 import { DISTILLATION_LIMITS } from './contracts.js';
 import { canonicalLearningJson, learningIdentitySchema } from './requests.js';
 import type { PreparedAssetProposal, ProposalCheck } from './proposals.js';
+import { observeSkillTrace, skillTraceArgv, skillTraceBindingSchema } from './skill-trace.js';
 import { checkProposalToolParameterPaths, compileProposalToolSchema, type ProposalToolSchema } from './proposal-tool-schema.js';
 
 export function compareProposalActual(actual: unknown, expected: unknown): boolean {
@@ -68,7 +70,8 @@ const recoverySchema = z.object({
     > DISTILLATION_LIMITS.outputBytes) reject();
 });
 const experimentSchema = z.object({
-  protocol: z.literal('proposal-semantic-v1'), adapter: z.literal('node-json-argv-v1'),
+  protocol: z.literal('proposal-semantic-v1'), adapter: z.enum(['node-json-argv-v1', 'skill-trace-v1']),
+  skillTrace: skillTraceBindingSchema.optional(),
   kind: z.enum(['normal', 'refusal', 'recovery', 'cancellation', 'timeout', 'permission-denied']),
   input: z.string().max(2048), callInput: z.string().max(2048).refine(value => !value.includes('\0')).optional(),
   assertions: z.array(assertionSchema).min(2).max(32),
@@ -87,6 +90,9 @@ export interface ProposalSemanticExecutionContext {
 }
 export interface ProposalSemanticObservation {
   protocol: 'proposal-semantic-v1'; experimentDigest: string; deliveredInputDigest: string;
+  skillTrace?: ReturnType<typeof observeSkillTrace>['trace'];
+  baselineFailure?: { phase: FrozenScratchBaselineFailure['failedPhase']; reason: FrozenScratchBaselineFailure['reason'];
+    expectedExitCode: number; observedExitCode: number; phasesObserved: number; evidenceDigest: string };
   assertions: { id: string; source: ProposalSemanticConfiguration['assertions'][number]['source']; path?: string[];
     expected: unknown; actual?: unknown; status: 'observed' | 'unknown'; passed: boolean }[];
   passed: boolean;
@@ -111,6 +117,22 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
     }
   }
   if (recovery !== undefined && check.kind !== 'recovery') throw new Error('Semantic recovery differs from check kind');
+  if (configured.adapter === 'skill-trace-v1') {
+    const binding = configured.skillTrace;
+    if (kind !== 'skill' || !binding) return { status: 'unsupported', reason: 'skill_interpreter_unavailable' };
+    const exits = configured.assertions.filter(assertion => assertion.source === 'exit-code');
+    if (!['normal', 'refusal', 'recovery'].includes(check.kind) || configured.callInput !== undefined || configured.control || recovery
+      || !configured.input.trim() || configured.input.includes('\0') || !artifactPath.endsWith('/SKILL.md')
+      || (check.kind === 'normal') !== (binding.reads.length > 0) || exits.length !== 1
+      || (check.kind === 'refusal') === (exits[0]!.expected === 0)
+      || !configured.assertions.some(assertion => assertion.source.startsWith('stdout'))
+      || configured.assertions.some(assertion => !['exit-code', 'stdout', 'stdout-json'].includes(assertion.source))) {
+      throw new Error('Invalid read-only skill trace contract');
+    }
+    return { status: 'prepared', experiment: { ...configured, checkId: check.id, checkDigest: digest(check), artifactPath,
+      argv: skillTraceArgv(artifactPath, check.input, binding.checkerDigest) } };
+  }
+  if (configured.skillTrace) throw new Error('Unexpected skill trace binding on tool experiment');
   if (kind !== 'tool') return { status: 'unsupported', reason: 'skill_interpreter_unavailable' };
   if (!['normal', 'refusal', 'recovery', 'cancellation', 'timeout'].includes(check.kind)) return { status: 'unsupported', reason: 'control_experiment_unavailable' };
   const recovering = check.kind === 'recovery';
@@ -153,6 +175,7 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
 
 export function observeProposalExperiment(experiment: PreparedProposalExperiment, execution: Readonly<FrozenExecutionResult>,
   context?: ProposalSemanticExecutionContext): ProposalSemanticObservation {
+  let baselineFailure: ProposalSemanticObservation['baselineFailure'];
   if (experiment.recovery !== undefined) {
     if (!context?.options.scratch?.recovery) throw new Error('Semantic recovery requires trusted execution context');
     const { options, operationId, containerId } = context;
@@ -166,25 +189,33 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
       || execution.evidence.contextDigest !== buildFrozenContext(options.input, options.baseImageId, operationId, scratch.helper).digest
       || execution.evidence.mechanism !== 'docker-frozen-image' || execution.evidence.cwd !== '/workspace'
       || execution.exitCode !== 0) throw new Error('Semantic recovery differs from trusted execution context');
-    const verified = verifyFrozenScratchRecoveryEvidence(options, execution.evidence.scratch?.recovery, operationId, containerId);
-    if (verified.contractRevision !== experiment.recovery.contractRevision || verified.qualification !== 'qualified-bounded-returns-and-state'
-      || execution.stdout !== verified.phases.map(phase => Buffer.from(phase.stdoutHex, 'hex').toString('utf8')).join('')
+    const observation = execution.evidence.scratch;
+    const verified = verifyFrozenScratchRecoveryOutcome(options, observation?.baselineFailure ?? observation?.recovery, operationId, containerId);
+    if ('failedPhase' in verified) {
+      const phase = verified.phases.find(entry => entry.phase === verified.failedPhase)!;
+      baselineFailure = { phase: phase.phase, reason: verified.reason, expectedExitCode: recovery.returnAssertions[phase.phase].exitCode,
+        observedExitCode: phase.invocation.exitCode!, phasesObserved: verified.phases.length, evidenceDigest: digest(verified) };
+    } else if (verified.contractRevision !== experiment.recovery.contractRevision || verified.qualification !== 'qualified-bounded-returns-and-state') {
+      throw new Error('Semantic recovery qualification differs from saved returns');
+    }
+    if (execution.stdout !== verified.phases.map(phase => Buffer.from(phase.stdoutHex, 'hex').toString('utf8')).join('')
       || execution.stderr !== verified.phases.map(phase => Buffer.from(phase.stderrHex, 'hex').toString('utf8')).join('')) {
       throw new Error('Semantic recovery output or qualification differs from saved returns');
     }
     const { phase: _phase, ordinal: _ordinal, invocationId: _invocationId, stdoutHex: _stdoutHex, stderrHex: _stderrHex,
       ...firstEvidence } = verified.phases[0]!;
-    if (!isDeepStrictEqual(execution.evidence.scratch, { ...firstEvidence, recovery: verified })) {
+    if (!isDeepStrictEqual(observation, { ...firstEvidence, [baselineFailure ? 'baselineFailure' : 'recovery']: verified })) {
       throw new Error('Semantic recovery outer evidence differs from verified phases');
     }
   }
   const argv = ['/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/scratch', 'TMPDIR=/scratch',
     ...(experiment.recovery ? frozenExecutionArgv(context!.options, context!.operationId) : experiment.argv)];
   if (canonicalLearningJson(execution.evidence.argv) !== canonicalLearningJson(argv)
-    || experiment.argv[2] !== (experiment.callInput ?? experiment.input) || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) {
+    || (experiment.adapter === 'node-json-argv-v1' && experiment.argv[2] !== (experiment.callInput ?? experiment.input)) || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) {
     throw new Error('Semantic input delivery or cleanup differs from experiment');
   }
   const control = execution.evidence.control;
+  const skill = experiment.adapter === 'skill-trace-v1' ? observeSkillTrace(experiment, execution, context) : undefined;
   let controlTriggered = experiment.control === undefined;
   if (experiment.control !== undefined) {
     if (!control || control.kind !== experiment.control.kind || control.afterMs !== experiment.control.afterMs
@@ -235,5 +266,7 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
   });
   return { protocol: 'proposal-semantic-v1', experimentDigest: digest(experiment),
     deliveredInputDigest: createHash('sha256').update(experiment.callInput ?? experiment.input).digest('hex'), assertions,
-    passed: controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
+    ...(baselineFailure ? { baselineFailure } : {}),
+    ...(skill && { skillTrace: skill.trace }),
+    passed: (skill?.passed ?? true) && !baselineFailure && controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
 }

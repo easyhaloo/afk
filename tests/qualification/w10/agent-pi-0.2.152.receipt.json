@@ -1,7 +1,7 @@
 {
   "date": "2026-11-19",
   "installationSource": "parent-worktree-installed-release",
-  "baselineReceipt": "agent-pi.receipt.json",
+  "baselineReceipt": "agent-pi-0.2.150.receipt.json",
   "modelEvidenceLevel": "fixture",
   "runs": [
     {

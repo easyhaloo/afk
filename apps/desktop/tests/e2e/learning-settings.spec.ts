@@ -43,7 +43,7 @@ async function launchLearning(fixture: LearningFixture, packaged?: { executable:
   }
 }
 
-test.describe("production Main learning IPC with a deterministic saved oracle (no live model)", () => {
+test.describe("production Main learning IPC with an independent saved oracle", () => {
   test("deduplicates concurrent CLI and Desktop corrections and consumes the request once", async () => {
     const fixture = await createLearningFixture();
     let app: ElectronApplication | undefined;
@@ -129,7 +129,7 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
   test.setTimeout(120_000);
 
   const executable = process.env.AFK_E2E_DESKTOP_EXECUTABLE;
-  async function checkWikiPublication(host: "localhost" | "127.0.0.1") {
+  function loopbackTracker() {
     const requests = new Set<string>();
     const gitlab = createServer((request, response) => {
       const route = new URL(request.url!, 'http://127.0.0.1').pathname;
@@ -144,29 +144,68 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
         : /^\/api\/v4\/projects\/[12]\/issues$/.test(route) ? [] : undefined;
       response.writeHead(body ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
     });
-    let fixture: LearningFixture | undefined;
-    let app: ElectronApplication | undefined;
-    try {
-      let packaged: { executable: string; gitlabUrl: string } | undefined;
-      if (executable) {
+    return {
+      requests,
+      async start(host: "localhost" | "127.0.0.1") {
+        if (!executable) throw new Error('Set the installed Desktop entry');
         gitlab.listen(0, '127.0.0.1');
         await once(gitlab, 'listening');
         const address = gitlab.address();
         if (!address || typeof address === 'string') throw new Error('Missing loopback port');
-        packaged = { executable: path.resolve(executable), gitlabUrl: `http://${host}:${address.port}` };
-      }
-      fixture = await createLearningFixture('fact', packaged && `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`);
+        return { executable: path.resolve(executable), gitlabUrl: `http://${host}:${address.port}` };
+      },
+      async close() {
+        if (gitlab.listening) await new Promise<void>((resolve, reject) => gitlab.close(error => error ? reject(error) : resolve()));
+      },
+    };
+  }
+
+  async function checkWikiPublication(host: "localhost" | "127.0.0.1", live = false) {
+    const tracker = loopbackTracker();
+    const { requests } = tracker;
+    let fixture: LearningFixture | undefined;
+    let app: ElectronApplication | undefined;
+    try {
+      const packaged = executable ? await tracker.start(host) : undefined;
+      fixture = await createLearningFixture('fact', packaged && `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`, live);
       const otherProject = fixture.scope.replace(/\/api$/, '/web');
-      const initial = await fixture.inspect();
-      expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
       const navigation = fixture.navigation();
       expect(existsSync(fixture.asset)).toBe(false);
       const launched = await launchLearning(fixture, packaged);
       app = launched.app;
       const { page } = launched;
       expect(await page.evaluate(() => window.afkDesktop.learning.projects())).toContain(fixture.scope);
-      expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), fixture.scope))
-        .toEqual([expect.objectContaining({ id: fixture.candidateId, state: "candidate", version: 1 })]);
+      await page.locator(".sidebar-bottom .settings-entry").click();
+      const learning = page.getByRole("region", { name: "学习治理", exact: true });
+      await expect(learning).toBeVisible();
+      await learning.getByRole("button", { name: "学习项目", exact: true }).click();
+      await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
+      await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
+      let candidateIds: string[];
+      if (live) {
+        const { scope, requestKey, jobsFromCli } = fixture;
+        expect(await jobsFromCli()).toMatchObject([{ jobId: requestKey, status: "pending", attempts: [] }]);
+        expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), scope)).toEqual([]);
+        const jobs = learning.getByRole("region", { name: "学习任务", exact: true });
+        const entry = jobs.getByRole("listitem").filter({ hasText: requestKey });
+        await entry.getByRole("button", { name: "运行一次提炼", exact: true }).click();
+        await expect(entry).toContainText(/已处理|受阻|失败/, { timeout: 135_000 });
+        const processedJobs = await jobsFromCli();
+        const diagnostics = processedJobs.map(job => ({ reason: job.reasonCode, errors: job.attempts.map(attempt => attempt.errorCode) }));
+        expect(processedJobs, `Learning job diagnostics: ${JSON.stringify(diagnostics)}`)
+          .toMatchObject([{ jobId: requestKey, status: "processed", attempts: [{ status: "succeeded" }] }]);
+        const processed = await fixture.readProcessedFact();
+        Object.assign(fixture, processed.fact);
+        candidateIds = processed.candidateIds;
+      } else {
+        candidateIds = [fixture.candidateId];
+      }
+      const initial = await fixture.inspect();
+      expect(initial).toMatchObject({ candidate: { state: "candidate", version: 1 }, receipt: null, publications: [] });
+      const visibleCandidates = await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), fixture.scope);
+      expect(visibleCandidates.map(candidate => ({ id: candidate.id, state: candidate.state, version: candidate.version }))
+        .sort((left, right) => left.id.localeCompare(right.id)))
+        .toEqual([...candidateIds].sort().map(id => ({ id, state: "candidate", version: 1 })));
       expect(await page.evaluate(scope => window.afkDesktop.learning.candidates({ scope }), otherProject)).toEqual([]);
       if (packaged) expect([...requests]).toEqual(expect.arrayContaining(['/api/v4/user', '/api/v4/projects', '/api/v4/projects/1/issues']));
       const selection = { scope: fixture.scope, candidateId: fixture.candidateId, expectedVersion: 1, checkerId: fixture.checkerId };
@@ -178,19 +217,38 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
       expect(fixture.calls()).toEqual([]);
       expect(await fixture.inspect()).toEqual(initial);
 
-      await page.locator(".sidebar-bottom .settings-entry").click();
-      const learning = page.getByRole("region", { name: "学习治理", exact: true });
-      await expect(learning).toBeVisible();
-      await learning.getByRole("button", { name: "学习项目", exact: true }).click();
-      await learning.getByRole("combobox", { name: "搜索学习项目", exact: true }).fill(fixture.scope);
-      await learning.getByRole("option", { name: fixture.scope, exact: true }).click();
       const candidate = learning.getByRole("button", { name: `选择候选 ${fixture.candidateId}`, exact: true });
       await candidate.click();
       await expect(candidate).toContainText("待验证 · v1");
+      if (!live) {
+        const workerFixture = fixture;
+        const scope = workerFixture.scope;
+        const { jobId: requestKey } = await workerFixture.submitCorrectionFromCli("Confirm that approval precedes publication.");
+        const jobs = learning.getByRole("region", { name: "学习任务", exact: true });
+        await learning.getByRole("button", { name: "重新读取学习数据", exact: true }).click();
+        const entry = jobs.getByRole("listitem").filter({ hasText: requestKey });
+        await expect(entry).toContainText("待处理");
+        await expect(entry).toContainText("尝试 0 次");
+        const readJob = async () => (await workerFixture.jobsFromCli()).find(job => job.jobId === requestKey);
+        expect(await readJob()).toMatchObject({ status: "pending", attempts: [] });
+        await expect(page.evaluate(target => window.afkDesktop.learning.worker.once(target), { scope: otherProject, requestKey })).rejects.toThrow();
+        expect(await readJob()).toMatchObject({ status: "pending", attempts: [] });
+        const runOnce = entry.getByRole("button", { name: "运行一次提炼", exact: true });
+        await runOnce.click();
+        await expect(entry).toContainText("受阻");
+        await expect(entry).toContainText("尝试 0 次");
+        expect(await readJob()).toMatchObject({ jobId: requestKey, scope, status: "blocked", reasonCode: "budget_exhausted", attempts: [] });
+        await expect(runOnce).toBeEnabled();
+        expect(await fixture.inspect()).toEqual(initial);
+        await candidate.click();
+      }
       await expect(learning.getByRole("button", { name: "准备知识预览", exact: true })).toBeDisabled();
       await learning.getByRole("textbox", { name: "验证器 ID", exact: true }).fill(fixture.checkerId);
       await learning.getByRole("button", { name: "验证候选", exact: true }).click();
-      await expect(learning.getByRole("status").filter({ hasText: "验证通过 · v1 → v2" })).toBeVisible();
+      const validated = learning.getByRole("status").filter({ hasText: "验证通过 · v1 → v2" });
+      const blocked = learning.getByRole("status").filter({ hasText: "验证受阻 ·" });
+      const validationResult = validated.or(blocked).or(learning.getByRole("alert"));
+      await expect(validationResult).toHaveText("验证通过 · v1 → v2");
       await expect(candidate).toContainText("已验证 · v2");
       const afterValidation = await fixture.inspect();
       expect(afterValidation.candidate).toMatchObject({ state: "validated", version: 2 });
@@ -281,8 +339,7 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
       expect(await fixture.inspect()).toEqual(invalidated);
     } finally {
       try { await app?.close(); } finally {
-        if (gitlab.listening) await new Promise<void>((resolve, reject) => gitlab.close(error => error ? reject(error) : resolve()));
-        fixture?.cleanup();
+        try { await tracker.close(); } finally { fixture?.cleanup(); }
       }
     }
   }
@@ -290,6 +347,153 @@ test.describe("production Main learning IPC with a deterministic saved oracle (n
   test(`uses Settings to validate, publish and withdraw actual Wiki content after source invalidation (${executable ? 'packaged' : 'source'})`,
     () => checkWikiPublication("localhost"));
   if (executable) test("publishes and withdraws knowledge without exposing the project IP (packaged)", () => checkWikiPublication("127.0.0.1"));
+  test("starts a live Claude candidate in packaged Settings, then verifies, publishes and withdraws it", async () => {
+    test.skip(process.env.AFK_E2E_DESKTOP_LIVE_LEARNING !== '1', 'Requires authenticated Claude Code and installed CLI and Desktop');
+    if (!executable || !process.env.AFK_E2E_CLI_ENTRY) throw new Error('Set the installed CLI and Desktop entries');
+    test.setTimeout(210_000);
+    await checkWikiPublication("localhost", true);
+  });
+
+  for (const scenario of ['cancel', 'quit', 'once', 'watch'] as const) {
+    const cliOwns = scenario === 'once' || scenario === 'watch';
+    test(cliOwns ? `rejects a stale packaged Desktop start while the installed CLI worker (${scenario}) owns the learning request`
+      : `releases a running packaged learning worker on ${scenario}`, async () => {
+      test.skip(!executable || !process.env.AFK_E2E_CLI_ENTRY || process.platform !== 'darwin', 'Requires macOS installed CLI and Desktop');
+      const tracker = loopbackTracker();
+      let fixture: LearningFixture | undefined;
+      let app: ElectronApplication | undefined;
+      let cliChild: ReturnType<LearningFixture['runWorkerFromCli']>['child'] | undefined;
+      let cliResult: Promise<unknown> | undefined;
+      try {
+        const packaged = await tracker.start('localhost');
+        const learningFixture = fixture = await createLearningFixture('fact', `gitlab:${new URL(packaged.gitlabUrl).host}/acme/api`, 'hold');
+        const launched = await launchLearning(learningFixture, packaged);
+        app = launched.app;
+        const { page } = launched;
+        await page.locator('.sidebar-bottom .settings-entry').click();
+        const learning = page.getByRole('region', { name: '学习治理', exact: true });
+        await learning.getByRole('button', { name: '学习项目', exact: true }).click();
+        await learning.getByRole('combobox', { name: '搜索学习项目', exact: true }).fill(learningFixture.scope);
+        await learning.getByRole('option', { name: learningFixture.scope, exact: true }).click();
+        const jobs = learning.getByRole('region', { name: '学习任务', exact: true });
+        const entry = jobs.getByRole('listitem').filter({ hasText: learningFixture.requestKey });
+        const runOnce = entry.getByRole('button', { name: '运行一次提炼', exact: true });
+        await expect(runOnce).toBeEnabled();
+        if (scenario === 'once' || scenario === 'watch') {
+          const cli = learningFixture.runWorkerFromCli(scenario);
+          cliChild = cli.child;
+          cliResult = cli.catch((error: unknown) => error);
+        } else {
+          await runOnce.click();
+        }
+        await expect.poll(() => learningFixture.analysisLaunches()).toHaveLength(1);
+        const [launch] = learningFixture.analysisLaunches();
+        const running = await learningFixture.jobsFromCli();
+        expect(running).toMatchObject([{ jobId: learningFixture.requestKey, attempts: [{ status: 'started' }] }]);
+        const [attempt] = running[0]!.attempts;
+        const [workerPid] = await learningFixture.queueOwners();
+        expect(workerPid).toBe(attempt!.ownerPid);
+        const ownedPids = [workerPid!, launch!.pid, launch!.guardPid];
+        expect(new Set(ownedPids).size).toBe(3);
+        for (const pid of ownedPids) expect(() => process.kill(pid, 0)).not.toThrow();
+        expect(existsSync(launch!.directory)).toBe(true);
+        if (cliOwns) {
+          expect(workerPid).toBe(cliChild!.pid);
+          await runOnce.click();
+          await expect(learning.getByRole('alert')).toHaveText('提炼未完成，请刷新任务并检查已保存的学习配置。');
+          await learning.getByRole('button', { name: '重新读取学习数据', exact: true }).click();
+          await expect(entry).toContainText('尝试 1 次');
+          await expect(runOnce).toHaveCount(0);
+          expect(await learningFixture.queueOwners()).toEqual([workerPid]);
+          expect(await learningFixture.jobsFromCli()).toEqual(running);
+          expect(learningFixture.analysisLaunches()).toEqual([launch]);
+          expect(cliChild!.kill('SIGTERM')).toBe(true);
+          if (scenario === 'watch') {
+            await expect(cliResult).resolves.toMatchObject({ stdout: '{"status":"stopped"}\n' });
+          } else {
+            await expect(cliResult).resolves.toMatchObject({
+              code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_cancelled'),
+            });
+          }
+        } else if (scenario === 'cancel') {
+          await expect(learningFixture.runWorkerFromCli()).rejects.toMatchObject({
+            code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_busy'),
+          });
+          await expect(learningFixture.runWorkerFromCli('watch')).rejects.toMatchObject({
+            code: 1, stdout: '', stderr: expect.stringContaining('learning_worker_busy'),
+          });
+          expect(await learningFixture.queueOwners()).toEqual([workerPid]);
+          expect(await learningFixture.jobsFromCli()).toEqual(running);
+          expect(learningFixture.analysisLaunches()).toEqual([launch]);
+          await entry.getByRole('button', { name: '停止提炼', exact: true }).click();
+          await expect(entry).toContainText('受阻');
+          await expect(entry.getByRole('button', { name: '运行一次提炼', exact: true })).toBeEnabled();
+        } else {
+          const desktop = app.process();
+          await app.close();
+          app = undefined;
+          expect(desktop.exitCode).toBe(0);
+        }
+        for (const pid of ownedPids) expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+        expect(existsSync(launch!.directory)).toBe(false);
+        expect(await learningFixture.queueOwners()).toEqual([]);
+        expect(learningFixture.analysisLaunches()).toEqual([launch]);
+        expect(await learningFixture.jobsFromCli()).toMatchObject([{ jobId: learningFixture.requestKey,
+          status: 'blocked', reasonCode: 'analysis_cancelled', attempts: [{ ...attempt, status: 'cancelled', errorCode: 'analysis_cancelled' }] }]);
+      } finally {
+        cliChild?.kill('SIGTERM');
+        await cliResult;
+        try { await app?.close(); } finally {
+          try { await tracker.close(); } finally { fixture?.cleanup(); }
+        }
+      }
+    });
+  }
+
+  test('installed CLI watch accepts new audit work and releases the queue across restarts', async () => {
+    test.skip(!process.env.AFK_E2E_CLI_ENTRY || process.platform !== 'darwin', 'Requires macOS installed CLI');
+    const fixture = await createLearningFixture('fact', 'gitlab:localhost/acme/api', 'deferred');
+    try {
+      let jobId: string | undefined;
+      for (const [index, signal] of (['SIGINT', 'SIGTERM'] as const).entries()) {
+        const watcher = fixture.runWorkerFromCli('watch');
+        const result = watcher.catch((error: unknown) => error);
+        try {
+          await expect.poll(() => fixture.queueOwners()).toEqual([watcher.child.pid]);
+          if (index === 0) {
+            expect(await fixture.jobsFromCli()).toEqual([]);
+            expect(fixture.analysisLaunches()).toEqual([]);
+            fixture.publishAudit();
+          }
+          await expect.poll(() => fixture.analysisLaunches()).toHaveLength(index + 1);
+          const launch = fixture.analysisLaunches().at(-1)!;
+          const jobs = await fixture.jobsFromCli();
+          expect(jobs).toHaveLength(1);
+          jobId ??= jobs[0]!.jobId;
+          const [job] = jobs;
+          expect(job.jobId).toBe(jobId);
+          expect(job.attempts).toHaveLength(index + 1);
+          expect(job.attempts.filter(attempt => attempt.status === 'cancelled')).toHaveLength(index);
+          expect(job.attempts).toEqual(expect.arrayContaining([
+            expect.objectContaining({ ownerPid: watcher.child.pid, status: 'started' }),
+          ]));
+          expect(watcher.child.kill(signal)).toBe(true);
+          await expect(result).resolves.toMatchObject({ stdout: '{"status":"stopped"}\n' });
+          expect(await fixture.queueOwners()).toEqual([]);
+          expect(existsSync(launch.directory)).toBe(false);
+          for (const pid of [launch.pid, launch.guardPid]) {
+            expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+          }
+        } finally {
+          if (watcher.child.exitCode === null) watcher.child.kill('SIGTERM');
+          await result;
+        }
+      }
+      expect(await fixture.jobsFromCli()).toMatchObject([{ jobId, attempts: [
+        { status: 'cancelled', errorCode: 'analysis_cancelled' }, { status: 'cancelled', errorCode: 'analysis_cancelled' },
+      ] }]);
+    } finally { fixture.cleanup(); }
+  });
 
   test("shows missing independent lesson QA without validating or publishing", async () => {
     const fixture = await createLearningFixture("lesson");

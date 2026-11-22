@@ -9,6 +9,7 @@ import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { withLogContext } from '../../infrastructure/io/index.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
 import { RunObserver } from '../../observability/run-observer.js';
@@ -35,7 +36,10 @@ describe('WorkflowRunner default template commit audit', () => {
     { createsCommit: false, codexOverride: true, recoverAc: false, sandboxName: 'local' as const, scenario: 'records native telemetry and budget for a Codex step in a Claude workflow' },
     { createsCommit: false, codexOverride: false, recoverAc: false, sandboxName: 'docker' as const, scenario: 'records normalized container telemetry and budget without host transcripts' },
     { createsCommit: false, codexOverride: false, recoverAc: true, sandboxName: 'local' as const, scenario: 'prepares and verifies publication after successful AC recovery' },
-  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName, recoverAc }) => {
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, log: 'other', scenario: 'finishes its own run inside an unrelated log context' },
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, log: 'same', scenario: 'finishes its own run when the caller only binds matching logs' },
+    { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, callerOwned: true, scenario: 'leaves the run open for its explicit caller even without a log context' },
+  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName, recoverAc, log, callerOwned }) => {
     const repoRoot = join(directory, 'repository');
     const worktreePath = join(directory, 'implementation');
     const runId = 'commit-audit-42';
@@ -169,11 +173,14 @@ describe('WorkflowRunner default template commit audit', () => {
       } as never,
     });
 
-    await expect(runner.run({
+    const execute = () => runner.run({
       backlogId: item.id, session: 'worker-42', targetBranch: item.branchName, baseBranch: 'main',
       repoRoot, workspaceRoot: directory, executionMode: 'batch',
       observationRunId: runId, observationWorkItemId: workItemId,
-    })).resolves.toEqual({ success: true });
+      ...(callerOwned ? { observationRunOwner: 'caller' as const } : {}),
+    });
+    const logIdentity = log === 'other' ? { runId: 'parent-run', workItemId: 'github:acme/api#99' } : { runId, workItemId };
+    await expect(log ? withLogContext(logIdentity, execute) : execute()).resolves.toEqual({ success: true });
     await plugins.dispose();
 
     const head = (await simpleGit(worktreePath).revparse(['HEAD'])).trim();
@@ -222,6 +229,11 @@ describe('WorkflowRunner default template commit audit', () => {
     expect(claim.release).toHaveBeenCalledTimes(1);
     expect(events.find(event => event.type === 'implementation.completed')?.data)
       .toEqual({ kind: 'implementation.completed' });
+    expect(events.filter(event => event.type === 'implementation.completed' || event.type === 'run.finished').map(event => event.type))
+      .toEqual(callerOwned ? ['implementation.completed'] : ['implementation.completed', 'run.finished']);
+    expect(events.filter(event => event.type === 'run.finished').map(event => event.data)).toEqual(callerOwned ? [] : [
+      { kind: 'run.finished', outcome: 'succeeded', reason: 'implementation handed to QA' },
+    ]);
 
     if (createsCommit) {
       expect(head).not.toBe(baselineSha);

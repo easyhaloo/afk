@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -14,9 +14,10 @@ import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import type { ProviderAbortSignal, ProviderOperationOptions } from '../plugin-sdk/capabilities.js';
 import type { LifecycleContext, InitContext } from './workflows/lifecycle.js';
 import { LifecycleDispatcher } from './workflows/lifecycle.js';
-import type { RunResourceScope } from './workflows/resource-scope.js';
+import { RunResourceScope } from './workflows/resource-scope.js';
 import type { WorkflowRunRepository } from './workflows/run-request.js';
 import type { BranchHandle } from '../domain/branches/types.js';
+import type { ExecutionResult } from '../domain/agents/types.js';
 import { CommandVerificationProvider } from '../infrastructure/verification/command.js';
 import { FilesystemClaimLock, type ClaimLease } from '../domain/backlog/claim.js';
 import { createPluginRunObserver, setPluginAuditEvidence } from './plugins/observability.js';
@@ -128,7 +129,7 @@ async function fixture(kind: Kind, phase: Phase, processHook: boolean | 'verific
     changes: { findForBacklog: vi.fn(async () => null), create, get: vi.fn(async () => change) },
   };
   const execution = { id: 'local-agent', metadata: { provider: 'claude-code', transport: 'process' },
-    waitForResult: vi.fn(async () => ({ version: 1, runId: 'local-agent', status: 'completed', provider: 'batch', commits: [],
+    waitForResult: vi.fn(async (): Promise<ExecutionResult> => ({ version: 1, runId: 'local-agent', status: 'completed', provider: 'batch', commits: [],
       structuredOutput: { type: 'goal_complete', kind: kind === 'qa' ? 'qa' : 'task', result: 'PASS', summary: 'local success' } })),
     kill: vi.fn(async () => {}), captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined) };
   const agentProvider = { name: 'claude-code', capabilities: new Set<string>(), createExecution: vi.fn(async () => execution) };
@@ -274,6 +275,14 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
       const result = await bounded(pending);
       expect(result).not.toBe('still pending');
       expect(result).toMatchObject({ success: false, summary: expect.stringContaining(cause.message) });
+      if (kind === 'workflow') {
+        const events = f.observer.record.mock.calls.map(([, data]) => data);
+        expect(events.filter(data => data.kind === 'run.finished')).toEqual([
+          { kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: cause.message },
+        ]);
+        expect(events.some(data => data.kind === 'failure.classified')).toBe(false);
+        expect(f.runtimeManager.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'blocked', errorSummary: cause.message }));
+      }
       expect(f.contexts.length).toBeGreaterThan(0);
       expect(f.providerSignals.every(signal => signal === f.contexts[0])).toBe(true);
       expect(f.contexts[0].reason).toBe(cause);
@@ -297,6 +306,8 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
       expect(await bounded(f.entered.promise)).not.toBe('still pending');
       await vi.advanceTimersByTimeAsync(60_000);
       expect(await bounded(pending)).toMatchObject({ success: false, summary: expect.stringMatching(/timeout|deadline/i) });
+      if (kind === 'workflow') expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+        .toEqual([expect.objectContaining({ outcome: 'failed' })]);
       expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
       expect(f.cleanupSignals).toHaveLength(1);
     } finally { f.stopHanging(); await pending; }
@@ -312,6 +323,8 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
       else f.providers.backlog.get.mockRejectedValueOnce(new Error('QA repository lease lost'));
       await vi.advanceTimersByTimeAsync(10_000);
       expect(await bounded(pending)).toMatchObject({ success: false, summary: expect.stringContaining('lost') });
+      if (kind === 'workflow') expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+        .toEqual([expect.objectContaining({ outcome: 'failed' })]);
       expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
       expect(f.cleanupSignals).toHaveLength(1);
     } finally { f.stopHanging(); await pending; }
@@ -611,6 +624,92 @@ describe.each<Kind>(['workflow', 'qa'])('%s hook cancellation', kind => {
   });
 });
 
+it.each([true, false])('uses the caller reason only while the diagnosed attempt can retry (retryable: %s)', async retryable => {
+  const f = await fixture('workflow', 'init');
+  f.stopHanging();
+  f.config.maxRetries = 1;
+  const caller = new AbortController();
+  const code = retryable ? 'agent_turn_failed' : 'agent_process_failed';
+  f.execution.waitForResult.mockResolvedValueOnce({ version: 1, runId: 'local-agent', provider: 'batch', commits: [], status: 'failed',
+    error: { code: retryable ? 'AGENT_TURN_FAILED' : 'NON_ZERO_EXIT', message: 'fixture process failure' } });
+  f.observer.record.mockImplementation(async (_context, data) => {
+    if (data.kind === 'failure.classified' && data.code === code) caller.abort('operator stopped work');
+  });
+  expect(await f.run({ signal: caller.signal })).toMatchObject({ success: false });
+  expect(caller.signal.aborted).toBe(true);
+  const events = f.observer.record.mock.calls.map(([, data]) => data);
+  expect(events.filter(data => data.kind === 'run.finished')).toEqual([expect.objectContaining(retryable
+    ? { outcome: 'cancelled', reasonCode: 'user_cancelled', reason: 'operator stopped work' }
+    : { outcome: 'failed', reasonCode: 'agent_process_failed' })]);
+  expect(events.filter(data => data.kind === 'failure.classified').map(data => data.code))
+    .toEqual(retryable ? [code] : [code, 'workflow_crash']);
+  expect(f.push).not.toHaveBeenCalled();
+});
+
+it('preserves pre-cancellation on reuse after a classified failure', async () => {
+  const f = await fixture('workflow', 'init');
+  f.stopHanging();
+  f.execution.waitForResult.mockResolvedValueOnce({ version: 1, runId: 'local-agent', provider: 'batch', commits: [], status: 'failed',
+    error: { code: 'NON_ZERO_EXIT', message: 'first run failed' } });
+  expect(await f.run()).toMatchObject({ success: false });
+  expect(f.observer.record.mock.calls.map(([, data]) => data)).toContainEqual(expect.objectContaining({
+    kind: 'run.finished', outcome: 'failed', reasonCode: 'agent_process_failed',
+  }));
+  vi.clearAllMocks();
+  const caller = AbortSignal.abort(new Error('second run cancelled before entry'));
+  const result = await f.run({ signal: caller }) as { error: unknown };
+  expect(result.error).toBe(caller.reason);
+  expect(f.observer.record).not.toHaveBeenCalled();
+  expect(f.providers.backlog.get).not.toHaveBeenCalled();
+  expect(f.providers.backlog.claim).not.toHaveBeenCalled();
+  expect(f.runtimeManager.finish).not.toHaveBeenCalled();
+});
+
+it.each(['scope', 'dispatcher'] as const)('preserves caller cancellation when %s cleanup throws', async stage => {
+  const f = await fixture('workflow', 'before-agent');
+  const caller = new AbortController();
+  const cleanupError = new Error(`${stage} failed`);
+  if (stage === 'scope') f.release.mockRejectedValue(cleanupError);
+  else {
+    const dispatch = LifecycleDispatcher.prototype.run;
+    vi.spyOn(LifecycleDispatcher.prototype, 'run').mockImplementation(async function(this: LifecycleDispatcher, phase, context) {
+      await dispatch.call(this, phase, context);
+      if (phase === 'cleanup') throw cleanupError;
+    });
+  }
+  const pending = f.run({ signal: caller.signal });
+  try {
+    expect(await bounded(f.entered.promise)).not.toBe('still pending');
+    caller.abort(new Error('operator stopped work'));
+    const result = await bounded(pending);
+    assert(result !== 'still pending' && 'error' in result && result.error instanceof AggregateError);
+    expect(result.error.errors[0]).toBe(caller.signal.reason);
+    expect(result.error.errors[1]).toBe(cleanupError);
+    const events = f.observer.record.mock.calls.map(([, data]) => data);
+    expect(events.filter(data => data.kind === 'run.finished')).toEqual([
+      { kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: 'operator stopped work' },
+    ]);
+    expect(events.some(data => data.kind === 'failure.classified')).toBe(false);
+    expect(f.cleanupSignals).toHaveLength(1);
+    expect(f.create).not.toHaveBeenCalled();
+    const terminal = f.runtimeManager.finish.mock.calls.at(-1)?.[1];
+    expect(terminal).toMatchObject({ status: 'blocked', errorSummary: expect.stringContaining('operator stopped work') });
+    if (stage === 'scope') {
+      expect(terminal?.errorSummary).toContain(cleanupError.message);
+      const cause = result.error.cause;
+      assert(cause && typeof cause === 'object' && 'recovery' in cause);
+      const recovery = cause.recovery;
+      assert(recovery && typeof recovery === 'object' && 'scope' in recovery);
+      const scope = recovery.scope;
+      assert(scope instanceof RunResourceScope);
+      const attempts = f.release.mock.calls.length;
+      f.release.mockResolvedValue();
+      await scope.finish({ status: 'failed' });
+      expect(f.release).toHaveBeenCalledTimes(attempts + 1);
+    }
+  } finally { f.stopHanging(); await pending; }
+});
+
 it('releases a late claim without starting another operation', async () => {
   const f = await fixture('workflow', 'before-agent');
   const gate = deferred<void>();
@@ -626,6 +725,8 @@ it('releases a late claim without starting another operation', async () => {
     gate.resolve();
     expect(await bounded(pending)).toMatchObject({ success: false });
     expect(f.release).toHaveBeenCalledTimes(1);
+    expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+      .toEqual([{ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: 'cancel claim acquisition' }]);
     expect(f.providers.branches.createBranch).not.toHaveBeenCalled();
     expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
   } finally { f.stopHanging(); gate.resolve(); await pending; }
@@ -670,6 +771,8 @@ describe.each(['late-cancel', 'rework', 'run.started', 'lease.granted'] as const
         expect(runError).toBeInstanceOf(AuditPersistenceError);
         expect(runError).toMatchObject({ cause: original });
       } else expect(runError).toBe(original);
+      if (stage === 'late-cancel') expect(f.observer.record.mock.calls.map(([, data]) => data).filter(data => data.kind === 'run.finished'))
+        .toEqual([{ kind: 'run.finished', outcome: 'cancelled', reasonCode: 'user_cancelled', reason: original.message }]);
       if (releaseFails) {
         expect(result.error).toBeInstanceOf(AggregateError);
         expect(result.error.errors).toEqual([runError, earlyClaimIo.errors[0]]);
@@ -799,7 +902,7 @@ it.each(['sandbox', 'lifecycle', 'worktree', 'workspace'])('QA continues indepen
   expect(result).toMatchObject({ success: false, error: expect.objectContaining({ message: expect.stringContaining(failure.message) }) });
   expect(f.sandbox.close).toHaveBeenCalled();
   expect(cleanup).toHaveBeenCalled();
-  expect(f.providers.branches.cleanup).toHaveBeenCalled();
+  expect(f.providers.branches.cleanup).toHaveBeenCalledTimes(resource === 'sandbox' ? 0 : 1);
   const deferredWorkspace = resource === 'sandbox' || resource === 'worktree';
   expect(f.releaseWorkspace.mock.calls.length + f.finishWorkspace.mock.calls.length).toBe(deferredWorkspace ? 0 : 1);
   expect(f.runtimeManager.finish).toHaveBeenCalled();
@@ -807,6 +910,7 @@ it.each(['sandbox', 'lifecycle', 'worktree', 'workspace'])('QA continues indepen
     const retained = (result as { error: { cause: { recovery: { scope: RunResourceScope } } } }).error.cause.recovery.scope;
     expect(retained.ownershipClaims.length).toBeGreaterThan(0);
     await retained.finish({ status: 'failed' });
+    expect(f.providers.branches.cleanup).toHaveBeenCalledTimes(resource === 'sandbox' ? 1 : 2);
     expect(f.finishWorkspace).toHaveBeenCalledTimes(1);
     expect(retained.ownershipClaims).toHaveLength(0);
   }
@@ -845,8 +949,14 @@ it('QA retains conflict sandbox ownership when its local close fails', async () 
   expect(conflictSandbox.close.mock.calls.length).toBeGreaterThanOrEqual(2);
   expect(f.sandbox.close).toHaveBeenCalled();
   expect(f.cleanupSignals).toHaveLength(1);
-  expect(f.providers.branches.cleanup).toHaveBeenCalled();
+  expect(f.providers.branches.cleanup).not.toHaveBeenCalled();
   expect(f.runtimeManager.finish.mock.calls.at(-1)?.[1]).toMatchObject({ status: 'blocked', errorSummary: expect.stringContaining(failure.message) });
+  const retained = (result as { error: { cause: { recovery: { scope: RunResourceScope } } } }).error.cause.recovery.scope;
+  expect(retained.ownershipClaims.length).toBeGreaterThan(0);
+  conflictSandbox.close.mockResolvedValue(undefined);
+  await retained.finish({ status: 'failed' });
+  expect(f.providers.branches.cleanup).toHaveBeenCalledTimes(1);
+  expect(retained.ownershipClaims).toHaveLength(0);
 });
 
 it('Workflow cleanup retry retains its original workspace after another invocation resets the runner', async () => {

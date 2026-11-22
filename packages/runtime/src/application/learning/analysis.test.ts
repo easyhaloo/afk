@@ -10,6 +10,13 @@ function requestFor(pack: EvidencePack) {
 }
 
 describe('shared analysis without model execution', () => {
+  it('requires complete observations for lesson citations and separates target identity from publication authority', async () => {
+    const pack = await buildEvidencePack({ sources: [] });
+    const prompt = buildAnalysisPrompt(pack, requestFor(pack));
+    expect(prompt).toContain('For a lesson, every candidate.evidenceIds entry must have authority="observed" and completeness="complete"');
+    expect(prompt).toContain('A target in evidence does not confer publication authority');
+  });
+
   it('puts only validated inline evidence in an untrusted data block and requires the completion envelope', async () => {
     const pack = await buildEvidencePack({ sources: [] });
     const prompt = buildAnalysisPrompt(pack, requestFor(pack));
@@ -47,6 +54,10 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
     expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
     expect(prompt).toContain('report the gap in warnings and omit that process candidate');
+    expect(prompt).toContain('at least two distinct normal inputs');
+    expect(prompt).toContain('Encode each normal input and expected output as JSON text');
+    expect(prompt).toContain('Include a refusal with a schema-invalid input');
+    expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

@@ -1,0 +1,124 @@
+{
+  "afk": "0.2.164",
+  "gitea": "gitea version 28.4.0 built with go1.27.4 : bindata, sqlite, sqlite_unlock_notify",
+  "repository": "qualifier/parcel",
+  "repositoryId": 1,
+  "issue": 1,
+  "label": "ready",
+  "hookId": 1,
+  "events": [
+    {
+      "action": "opened",
+      "sourceId": "3eee822f-c541-4ea0-a51f-ac6e90613608",
+      "bodySha256": "497f20c978a66cccd41eaa6e2e718b45fcea7d2debca0b408ae0d9a9b06b2ff4",
+      "accepted": {
+        "deliveryId": "0cf865edb9fe3102a3d22b70dc06ab2818d97ca422f93ac3150d4a2cd78b86cb",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795108532790,
+        "nextAttemptAt": 1795108532790,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "0cf865edb9fe3102a3d22b70dc06ab2818d97ca422f93ac3150d4a2cd78b86cb",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795108532790,
+        "nextAttemptAt": 1795108533822,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "label_updated",
+      "sourceId": "58e8895c-8e5c-490b-90b0-3da1fc54efd1",
+      "bodySha256": "b04ff8e427ea259f946d33dcd0331ee413c4bf697960923f1dcc55689a014d30",
+      "accepted": {
+        "deliveryId": "e0eafe8190ab5ff3b34f790e7857b10fa5738ece3c864d802d15d3c1659e3ea6",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795108532809,
+        "nextAttemptAt": 1795108532809,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "e0eafe8190ab5ff3b34f790e7857b10fa5738ece3c864d802d15d3c1659e3ea6",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795108532809,
+        "nextAttemptAt": 1795108533824,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "closed",
+      "sourceId": "a8ac4e0f-3985-4f3c-828c-24f0938ddf4b",
+      "bodySha256": "403860909712ccd0e309d9415ac14872f8d7b90a4809b7cc522e5bb091c0ad1f",
+      "accepted": {
+        "deliveryId": "885fae39d1b32e0420eef6ccd1efa88449ddb94f37e99234432106ba232f5492",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795108532955,
+        "nextAttemptAt": 1795108532955,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "885fae39d1b32e0420eef6ccd1efa88449ddb94f37e99234432106ba232f5492",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795108532955,
+        "nextAttemptAt": 1795108533957,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    }
+  ],
+  "deliveries": [
+    {
+      "deliveryId": "885fae39d1b32e0420eef6ccd1efa88449ddb94f37e99234432106ba232f5492",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108532955,
+      "nextAttemptAt": 1795108533957
+    },
+    {
+      "deliveryId": "e0eafe8190ab5ff3b34f790e7857b10fa5738ece3c864d802d15d3c1659e3ea6",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108532809,
+      "nextAttemptAt": 1795108533824
+    },
+    {
+      "deliveryId": "0cf865edb9fe3102a3d22b70dc06ab2818d97ca422f93ac3150d4a2cd78b86cb",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108532790,
+      "nextAttemptAt": 1795108533822
+    }
+  ],
+  "replayAfterListenerRestart": true,
+  "upstreamReplay": {
+    "sourceId": "4e037c8e-285a-4ec8-8257-1d464f2d250c",
+    "receipt": {
+      "deliveryId": "0cf865edb9fe3102a3d22b70dc06ab2818d97ca422f93ac3150d4a2cd78b86cb",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795108532790,
+      "nextAttemptAt": 1795108533822,
+      "duplicate": true
+    },
+    "conflictAfterRestart": 409
+  },
+  "actionCount": 1
+}

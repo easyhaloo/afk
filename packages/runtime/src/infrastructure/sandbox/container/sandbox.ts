@@ -334,7 +334,7 @@ export class ContainerAgentExecution implements AgentExecution {
       if (exitCode !== undefined) {
         this._done = true;
         const [stdout, stderr] = await Promise.all([readOptional(this.outputPath), readOptional(this.errorPath)]);
-        const { structuredOutput, ...telemetry } = this.readStructuredOutput(stdout ?? '');
+        const { structuredOutput, completedTurnUsage, ...telemetry } = this.readStructuredOutput(stdout ?? '');
         if (exitCode !== 0) {
           return this.result('failed', {
             ...telemetry,
@@ -348,6 +348,9 @@ export class ContainerAgentExecution implements AgentExecution {
         const completion = structuredOutput ?? (signal?.type === this.signalType ? signal : undefined);
         if (completion) {
           return this.result('completed', { ...telemetry, exitCode, structuredOutput: completion });
+        }
+        if (completedTurnUsage && completedTurnUsage.totalTokens >= (options?.contextHighTokens ?? Infinity)) {
+          return this.result('context_high', { ...telemetry, exitCode, usage: completedTurnUsage });
         }
         return this.result('failed', {
           ...telemetry,
@@ -426,9 +429,11 @@ export class ContainerAgentExecution implements AgentExecution {
     };
   }
 
-  private readStructuredOutput(stdout: string): Pick<ExecutionResult, 'structuredOutput' | 'usage' | 'tools' | 'error'> {
+  private readStructuredOutput(stdout: string) {
     const lines = stdout.split(/\r?\n/);
-    const output: Pick<ExecutionResult, 'structuredOutput' | 'usage' | 'tools' | 'error'> = {
+    const output: Pick<ExecutionResult, 'structuredOutput' | 'usage' | 'tools' | 'error'> & {
+      completedTurnUsage?: ExecutionResult['usage'];
+    } = {
       tools: this.metadata.provider === 'claude-code' ? extractClaudeToolEvents(lines)
         : this.metadata.provider === 'codex' ? extractCodexToolEvents(lines) : undefined,
     };
@@ -441,6 +446,7 @@ export class ContainerAgentExecution implements AgentExecution {
           case 'session': this.metadata.threadId = event.sessionId; break;
           case 'error': output.error ??= { code: 'AGENT_ERROR', message: event.error.message }; break;
           case 'result': {
+            output.completedTurnUsage = event.completedTurnUsage;
             let parsed = event.result;
             if (typeof parsed === 'string') {
               const marker = extractGoalComplete(parsed);

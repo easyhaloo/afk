@@ -9,14 +9,14 @@ const match = source.match(/const analysisGuardSource = String\.raw`([\s\S]*?)`;
 if (!match) throw new Error('Analysis guard source was not found');
 const guard = match[1];
 
-function fixture() {
+function fixture(limited = '0') {
   const pipe = Object.assign(new EventEmitter(), { destroy: vi.fn(), end: vi.fn() });
   const child = Object.assign(new EventEmitter(), {
     pid: 202, exitCode: null as number | null, signalCode: null as string | null,
     stdio: [undefined, undefined, undefined, pipe], kill: vi.fn(),
   });
   const parent = Object.assign(new EventEmitter(), {
-    pid: 101, connected: true, argv: ['node', 'claude', '--help'], exit: vi.fn(),
+    pid: 101, connected: true, argv: ['node', limited, 'claude', '--help'], exit: vi.fn(),
   });
   const identity = vi.fn(() => '202 101 fixed-start-identity\n');
   const spawn = vi.fn(() => child);
@@ -82,16 +82,21 @@ describe('analysis start-gate failure ownership', () => {
   });
 
   it.each([0, 7, null])('preserves ordinary child exit %s', code => {
-    const { child, parent, pipe, spawn } = fixture();
+    const { child, parent, pipe } = fixture();
     child.emit('exit', code);
     expect(parent.exit).toHaveBeenCalledTimes(1);
     expect(parent.exit).toHaveBeenCalledWith(code ?? 1);
     expect(child.kill).not.toHaveBeenCalled();
     expect(pipe.destroy).not.toHaveBeenCalled();
+  });
+
+  it.each(['0', '1'])('passes limit mode %s ahead of the executable and arguments', limited => {
+    const { spawn } = fixture(limited);
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledWith('/usr/bin/sandbox-exec', [
       '-p', '(version 1)(allow default)(deny process-fork)', '/bin/sh', '-c',
-      'IFS= read -r permit <&3 && [ "$permit" = start ] && exec "$@"', 'analysis', 'claude', '--help',
+      'IFS= read -r permit <&3 && [ "$permit" = start ] && { [ "$1" = 0 ] || ulimit -f 128; } && shift && exec "$@"',
+      'analysis', limited, 'claude', '--help',
     ], { stdio: ['inherit', 'inherit', 'inherit', 'pipe'] });
   });
 });

@@ -247,7 +247,7 @@ describe('EvidenceBundleProvider', () => {
     ];
     const { ref, bundle } = await provider.create({ name: 'evidence.json', records });
 
-    expect(ref).toEqual({ uri: 'mem://evidence.json', name: 'evidence.json' });
+    expect(ref).toEqual({ uri: 'mem://evidence.json', name: 'evidence.json', storedContent: { sha256: sha256Hex(stored[0].bytes), mediaType: 'application/json' } });
     expect(bundle.recordCount).toBe(2);
     expect(bundle.totalBytes).toBe(bytesOf('second').byteLength + bytesOf('{"ok":true}').byteLength);
     expect(bundle.records.map(record => record.id)).toEqual(['a', 'b']);

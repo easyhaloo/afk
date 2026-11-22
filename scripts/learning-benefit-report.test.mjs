@@ -61,6 +61,10 @@ test('pairs same task and repeat, keeps negative gains, partial receipts and unk
   assert.equal(report(plan, [baseline, current]).pairs.find(pair => pair.gain.steps !== null).gain.success, null);
   current.outcomes = [terminal];
   assert.equal(report(plan, [current]).known.recurrence, 0);
+  current.outcomes = [{ ...terminal, event: { ...terminal.event, type: 'human_gate.opened', outcome: 'awaiting_merge' } }];
+  const pending = report(plan, [current]).rows.find(row => row.observed).observed;
+  assert.equal(pending.outcome, null);
+  assert.equal(pending.metrics.success, null);
   current.controls = 'different-model';
   const mismatch = report(plan, [baseline, current]);
   assert.ok(mismatch.rows.some(row => row.observed?.matchedControls === false));

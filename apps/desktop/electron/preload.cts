@@ -15,6 +15,8 @@ const IPC_CHANNELS = {
   experiencesRevoke: "afk:experiences-revoke",
   learningProjects: "learning:projects",
   learningJobs: "learning:jobs",
+  learningWorkerOnce: "learning:worker-once",
+  learningWorkerCancel: "learning:worker-cancel",
   learningCandidates: "learning:candidates",
   learningCorrect: "learning:correct",
   learningValidate: "learning:validate",
@@ -96,6 +98,10 @@ const api: DesktopApi = {
   learning: {
     projects: () => ipcRenderer.invoke(IPC_CHANNELS.learningProjects),
     jobs: input => ipcRenderer.invoke(IPC_CHANNELS.learningJobs, input),
+    worker: {
+      once: input => ipcRenderer.invoke(IPC_CHANNELS.learningWorkerOnce, input),
+      cancel: input => ipcRenderer.invoke(IPC_CHANNELS.learningWorkerCancel, input),
+    },
     candidates: input => ipcRenderer.invoke(IPC_CHANNELS.learningCandidates, input),
     correct: input => ipcRenderer.invoke(IPC_CHANNELS.learningCorrect, input),
     validate: input => ipcRenderer.invoke(IPC_CHANNELS.learningValidate, input),

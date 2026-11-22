@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import http.client
+import http.cookiejar
 import json
 import os
 import re
@@ -14,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -96,10 +99,14 @@ ENABLED = false
                     proc.kill()
                     proc.wait()
             stack.callback(stop)
-            return logfile
+            return logfile, stop
 
-        listener_log = start('listener', [afk, 'plugin', 'listen', '--host', '127.0.0.1', '--port', '0', '--queue', str(root/'queue.sqlite'), '--token-env', 'ISSUE_AUTH'], listener_env)
-        listener_port = int(wait_for(lambda: re.search(r'listener ready at 127\.0\.0\.1:(\d+)', listener_log.read_text())).group(1))
+        def start_listener(name, port):
+            log, stop = start(name, [afk, 'plugin', 'listen', '--host', '127.0.0.1', '--port', str(port), '--queue', str(root/'queue.sqlite'), '--token-env', 'ISSUE_AUTH'], listener_env)
+            address = wait_for(lambda: re.search(r'listener ready at 127\.0\.0\.1:(\d+)', log.read_text()))
+            return int(address.group(1)), stop
+
+        listener_port, stop_listener = start_listener('listener', 0)
         listener = f'http://127.0.0.1:{listener_port}'
         endpoint = '/triggers/trigger.issue-event'
         start('gitea', [*service, 'web'], env)
@@ -131,8 +138,16 @@ ENABLED = false
                 connection.row_factory = sqlite3.Row
                 rows = connection.execute('SELECT * FROM hook_task WHERE hook_id=? AND is_delivered=1 ORDER BY id', (hook['id'],)).fetchall()
                 return rows if len(rows) == 3 else None
+        tasks = wait_for(completed_tasks)
+        def settled():
+            rows = json.loads(run(afk, 'plugin', 'deliveries', '--url', listener, '--token-env', 'ISSUE_AUTH', environment=listener_env))['deliveries']
+            return rows if len(rows) == len(tasks) and all(row['status'] == 'delivered' for row in rows) else None
+        before_restart = wait_for(settled)
+        stop_listener()
+        restarted_port, stop_restarted = start_listener('restarted-listener', listener_port)
+        assert restarted_port == listener_port
         receipts = []
-        for row in wait_for(completed_tasks):
+        for row in tasks:
             outgoing = json.loads(row['request_content'])
             incoming = json.loads(row['response_content'])
             assert outgoing['url'] == listener+endpoint and outgoing['http_method'] == 'POST'
@@ -156,14 +171,51 @@ ENABLED = false
             assert status == 202 and repeated['duplicate'] and repeated['deliveryId'] == accepted['deliveryId']
             receipts.append(dict(action=payload['action'], sourceId=delivery, bodySha256=hashlib.sha256(body).hexdigest(), accepted=accepted, replay=repeated, tamperedStatus=401))
         assert sorted(item['action'] for item in receipts) == ['closed', 'label_updated', 'opened']
-        def settled():
-            rows = json.loads(run(afk, 'plugin', 'deliveries', '--url', listener, '--token-env', 'ISSUE_AUTH', environment=listener_env))['deliveries']
-            return rows if len(rows) == len(receipts) and all(row['status'] == 'delivered' for row in rows) else None
         deliveries = wait_for(settled)
+        assert {row['deliveryId']: row['attempts'] for row in before_restart} == {row['deliveryId']: row['attempts'] for row in deliveries}
         assert {row['deliveryId'] for row in deliveries} == {event['accepted']['deliveryId'] for event in receipts}
         assert all(row['providerId'] == 'trigger.issue-event' and row['attempts'] == 1 for row in deliveries)
         assert effects.read_text().splitlines() == ['verified']
-        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, actionCount=1)
+
+        client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        def web(path, form=None):
+            data = urllib.parse.urlencode(form).encode() if form is not None else None
+            req = urllib.request.Request(base + path, data=data, headers={'Origin': base, 'Referer': base + path})
+            with client.open(req, timeout=5) as response:
+                return response.read().decode()
+
+        web('/user/login')
+        password = re.search(r"generated random password is '([^']+)'", admin).group(1)
+        web('/user/login', {'user_name': 'qualifier', 'password': password})
+        history = f'/{project}/settings/hooks/{hook["id"]}'
+        opened = next(event for event in receipts if event['action'] == 'opened')
+        replay = history + '/replay/' + opened['sourceId']
+        assert f'action="{replay}"' in web(history)
+        web(replay, {})
+
+        def upstream_result():
+            with sqlite3.connect(f'file:{database}?mode=ro', uri=True) as connection:
+                return connection.execute('SELECT uuid, request_content, response_content FROM hook_task WHERE hook_id=? AND id>? AND is_delivered=1', (hook['id'], tasks[-1]['id'])).fetchone()
+        source_id, sent, response = wait_for(upstream_result)
+        body = json.loads(sent)['body'].encode()
+        assert hashlib.sha256(body).hexdigest() == opened['bodySha256']
+        accepted = json.loads(response)
+        assert accepted['status'] == 202
+        upstream = json.loads(accepted['body'])
+        assert upstream['duplicate'] and upstream['deliveryId'] == opened['accepted']['deliveryId'], (source_id == opened['sourceId'], upstream)
+        assert source_id != opened['sourceId']
+        stop_restarted()
+        assert start_listener('alias-restart', listener_port)[0] == listener_port
+        changed = body + b' '
+        def signed(payload):
+            return {'X-GitHub-Delivery':source_id, 'X-Gitea-Delivery':source_id, 'Content-Type':'application/json',
+                    'X-Hub-Signature-256':'sha256='+hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()}
+        conflict, _ = request(listener_port, 'POST', endpoint, changed, signed(changed))
+        assert conflict == 409, conflict
+        status, raw = request(listener_port, 'POST', endpoint, body, signed(body))
+        assert status == 202 and json.loads(raw)['deliveryId'] == upstream['deliveryId'] and json.loads(raw)['duplicate']
+        assert len(settled()) == 3 and effects.read_text().splitlines() == ['verified']
+        return dict(afk=version, gitea=run(gitea,'--version'), repository=project, repositoryId=repo['id'], issue=number, label='ready', hookId=hook['id'], events=receipts, deliveries=deliveries, replayAfterListenerRestart=True, upstreamReplay={'sourceId': source_id, 'receipt': upstream, 'conflictAfterRestart': conflict}, actionCount=1)
 
 
 if __name__ == '__main__':

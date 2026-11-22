@@ -58,6 +58,20 @@ async function append(root: string, data: RunEventData, options: { context?: Par
 }
 
 describe('audited experience outcomes', () => {
+  it('binds pending merge feedback to the published change after trusted QA and preserves it on replay', async () => {
+    const test = await fixture();
+    await append(test.root, { kind: 'qa.started' });
+    await append(test.root, { kind: 'qa.passed' });
+    await append(test.root, { kind: 'change.published', changeId: '73', url: 'https://example.org/changes/73' });
+    await append(test.root, { kind: 'human_gate.opened', gateId: 'merge:2', reason: 'awaiting human merge' });
+    const request = { ...source, file: test.file, root: test.root };
+    expect(await recordExperienceOutcomes(request)).toEqual([]);
+    const gate = await append(test.root, { kind: 'human_gate.opened', gateId: 'merge:73', reason: 'awaiting human merge' });
+    const receipts = await recordExperienceOutcomes({ ...request, event: { sequence: gate.lastSequence, hash: gate.lastHash } });
+    expect(receipts).toMatchObject([{ event: { type: 'human_gate.opened', outcome: 'awaiting_merge' }, benefit: 'unknown' }]);
+    expect(await recordExperienceOutcomes(request)).toEqual(receipts);
+  });
+
   it('binds a persisted success to the exact selected snapshot without granting adoption or benefit', async () => {
     const test = await fixture();
     const audit = await append(test.root, { kind: 'run.finished', outcome: 'succeeded' });
@@ -190,6 +204,26 @@ describe('production observation feedback', () => {
     } });
     return { ...test, runtime, capture };
   }
+
+  it('delivers feedback at the merge gate only for a trusted QA pass in the publishing attempt', async () => {
+    const test = await configured();
+    const observer = createPluginRunObserver(test.runtime, test.root);
+    const published = { kind: 'change.published' as const, changeId: '73', url: 'https://example.org/changes/73' };
+    const gate = { kind: 'human_gate.opened' as const, gateId: 'merge:73', reason: 'awaiting human merge' };
+    await observer.record(context(), { kind: 'qa.started' });
+    await observer.record(context({ actor: { kind: 'agent', id: 'worker' } }), { kind: 'qa.passed' });
+    await observer.record(context(), published);
+    await observer.record(context(), gate);
+    await observer.record(context(), { kind: 'qa.started' });
+    await observer.record(context(), { kind: 'qa.passed' });
+    await observer.record(context({ attempt: 2 }), published);
+    await observer.record(context({ attempt: 2 }), gate);
+    expect(test.store.outcomeReceipts({ scope, source })).toEqual([]);
+    for (const event of [{ kind: 'qa.started' } as const, { kind: 'qa.passed' } as const, published, gate]) {
+      await observer.record(context({ attempt: 2 }), event);
+    }
+    expect(test.store.outcomeReceipts({ scope, source })).toMatchObject([{ event: { outcome: 'awaiting_merge' }, benefit: 'unknown' }]);
+  });
 
   it('shares the default audit root with feedback and learning when the provider has a different home', async () => {
     const home = await mkdtemp(join(tmpdir(), 'outcome-audit-home-'));

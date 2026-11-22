@@ -5,12 +5,14 @@ import { parseNoInput } from "../../shared/experience-contract.js";
 import { LEARNING_LIMITS, parseLearningQuery, parseLearningValidate, parseKnowledgePrepare, parseKnowledgePublish,
   parseLearningProjects, parseLearningJob, parseLearningCandidate, parseLearningJobs, parseLearningCandidates,
   parseLearningValidationResult, parseLearningPublication, parseLearningPublicationResult, parseLearningReconciliation,
-  parseLearningCorrectionInput, parseLearningCorrectionResult,
-  type DesktopLearningApi, type DesktopLearningCandidate, type DesktopLearningPublication, type LearningQuery } from "../../shared/learning-contract.js";
+  parseLearningCorrectionInput, parseLearningCorrectionResult, parseLearningWorkerTarget, parseLearningWorkerResult,
+  type DesktopLearningApi, type DesktopLearningCandidate, type DesktopLearningPublication, type LearningQuery,
+  type DesktopLearningWorkerResult, type LearningWorkerTarget } from "../../shared/learning-contract.js";
 
 export type LearningServiceOptions = {
   projects: () => Promise<string[]>;
   withRuntime: <Result>(operation: (runtime: Pick<PluginRuntime, "dispatchSystemAction">) => Promise<Result>) => Promise<Result>;
+  launchWorker?: (target: LearningWorkerTarget, signal: AbortSignal) => Promise<unknown>;
 };
 
 class SelectionUnavailable extends Error {}
@@ -20,6 +22,11 @@ type Dispatch = PluginRuntime["dispatchSystemAction"];
 function batch(value: unknown): unknown[] {
   if (!Array.isArray(value) || value.length > LEARNING_LIMITS.backendRecords) throw new Error();
   return value;
+}
+
+export function projectLearningJob(value: unknown) {
+  const job = parseObject(value, "job");
+  return parseLearningJob({ jobId: job.jobId, scope: job.scope, status: job.status, attemptCount: batch(job.attempts).length, canRun: job.canRun });
 }
 
 function candidateProjection(value: unknown, scope: string): DesktopLearningCandidate | undefined {
@@ -62,7 +69,9 @@ function resultProjection(value: unknown, scope: string, candidates: readonly De
     ...(input.experienceProjection === undefined ? {} : { experienceProjection: input.experienceProjection }) });
 }
 
-export function createLearningService(options: LearningServiceOptions): DesktopLearningApi {
+export function createLearningService(options: LearningServiceOptions): DesktopLearningApi & { stopWorker(): Promise<void> | undefined } {
+  let activeWorker: { target: LearningWorkerTarget; controller: AbortController; done: Promise<DesktopLearningWorkerResult> } | undefined;
+  let quitting = false;
   async function projects(raw?: unknown): Promise<string[]> {
     parseNoInput(raw);
     try { return parseLearningProjects(await options.projects()); }
@@ -134,12 +143,63 @@ export function createLearningService(options: LearningServiceOptions): DesktopL
           const job = parseObject(value, "job");
           if (typeof job.scope !== "string") throw new Error();
           if (job.scope !== input.scope) continue;
-          jobs.push(parseLearningJob({ jobId: job.jobId, scope: input.scope, status: job.status,
-            attemptCount: batch(job.attempts).length }));
+          jobs.push(projectLearningJob(job));
           if (jobs.length === LEARNING_LIMITS.records) break;
         }
         return parseLearningJobs(jobs);
       });
+    },
+    worker: {
+      async once(raw) {
+        const input = parseLearningWorkerTarget(raw);
+        const launch = options.launchWorker;
+        if (quitting || !launch) throw new Error("学习 Worker 不可用。");
+        if (activeWorker) throw new Error("桌面端已有学习 Worker 正在运行。");
+        const controller = new AbortController();
+        const { signal } = controller;
+        const done = (async (): Promise<DesktopLearningWorkerResult> => {
+          try {
+            const canRun = await scoped(input.scope, async dispatch => {
+              const state = parseObject(await dispatch("learning.request", input), "selected request");
+              const job = projectLearningJob(state.job);
+              return job.scope === input.scope && job.jobId === input.requestKey && job.canRun;
+            });
+            if (!canRun) throw new Error("当前项目中没有可运行的对应任务，请刷新列表。");
+            signal.throwIfAborted();
+          } catch (error) {
+            if (signal.aborted) return { status: "cancelled" };
+            throw error;
+          }
+          try {
+            const result = parseLearningWorkerResult(await launch(input, signal));
+            if (signal.aborted) return { status: "cancelled" };
+            if (result.status !== "finished" || result.job.scope !== input.scope || result.job.jobId !== input.requestKey) throw new Error();
+            await requireProject(input.scope);
+            return signal.aborted ? { status: "cancelled" } : result;
+          } catch {
+            if (signal.aborted) return { status: "cancelled" };
+            throw new Error("学习 Worker 未完成，请检查已保存的学习配置与运行状态。");
+          }
+        })();
+        activeWorker = { target: input, controller, done };
+        try { return await done; }
+        finally { activeWorker = undefined; }
+      },
+      async cancel(raw) {
+        const input = parseLearningWorkerTarget(raw);
+        const worker = activeWorker;
+        if (!worker || worker.target.scope !== input.scope || worker.target.requestKey !== input.requestKey) return false;
+        await requireProject(input.scope);
+        if (worker !== activeWorker) return false;
+        worker.controller.abort();
+        return true;
+      },
+    },
+    stopWorker() {
+      quitting = true;
+      const worker = activeWorker;
+      worker?.controller.abort();
+      return worker?.done.then(() => {}, () => {});
     },
     async candidates(raw) {
       const input = parseLearningQuery(raw);

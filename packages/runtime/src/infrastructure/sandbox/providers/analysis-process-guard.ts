@@ -4,9 +4,11 @@ import { existsSync } from 'node:fs';
 const analysisGuardSource = String.raw`
   const { spawn, execFileSync } = require('node:child_process');
   if (!process.connected) process.exit(1);
+  const [limited, ...command] = process.argv.slice(1);
   let stopping = false;
   const child = spawn('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)(deny process-fork)',
-    '/bin/sh', '-c', 'IFS= read -r permit <&3 && [ "$permit" = start ] && exec "$@"', 'analysis', ...process.argv.slice(1)],
+    '/bin/sh', '-c', 'IFS= read -r permit <&3 && [ "$permit" = start ] && { [ "$1" = 0 ] || ulimit -f 128; } && shift && exec "$@"',
+    'analysis', limited, ...command],
     { stdio: ['inherit', 'inherit', 'inherit', 'pipe'] });
   const identity = () => {
     const output = execFileSync('ps', ['-o', 'pid=,ppid=,lstart=', '-p', String(child.pid)], { encoding: 'utf8', timeout: 750 });
@@ -35,11 +37,15 @@ const analysisGuardSource = String.raw`
   if (!stopping) child.stdio[3].end('start\n');
 `;
 
-export function spawnGuardedAnalysis(argv: string[], options: SpawnOptions) {
+export function assertAnalysisGuardAvailable() {
   if (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')) throw new Error('analysis_unsupported');
+}
+
+export function spawnGuardedAnalysis(argv: string[], options: SpawnOptions, helpOutput?: number) {
+  assertAnalysisGuardAvailable();
   const env = { ...(options.env ?? process.env) };
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
-  return spawn(process.execPath, ['--input-type=commonjs', '-e', analysisGuardSource, ...argv],
-    { ...options, env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+  return spawn(process.execPath, ['--input-type=commonjs', '-e', analysisGuardSource, helpOutput === undefined ? '0' : '1', ...argv],
+    { ...options, env, stdio: ['pipe', helpOutput ?? 'pipe', 'pipe', 'ipc'] });
 }

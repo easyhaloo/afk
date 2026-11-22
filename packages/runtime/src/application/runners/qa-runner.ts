@@ -4,7 +4,7 @@ import { join } from 'path';
 import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
-import { configureStatusline, logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
+import { logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
 import { getWorkflowConfig, repositoryExecutionDefaults } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { blockBacklog } from '../../domain/backlog/commands.js';
@@ -366,10 +366,6 @@ export class QARunner {
       const merge = await this.mergeIntoBaseline(worktreePath, baselineBranch, featureBranch);
       controller.signal.throwIfAborted();
       await this.logWorktreeDiagnostics(id, 'branches-merged', worktreePath);
-      if (this.executionMode === 'interactive') {
-        await configureStatusline(worktreePath);
-        await this.logWorktreeDiagnostics(id, 'statusline-configured', worktreePath);
-      }
 
       const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load('pre-merge-qa-verification');
       controller.signal.throwIfAborted();
@@ -484,6 +480,10 @@ export class QARunner {
           logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
         }
         await this.onExperienceTarget?.(context);
+        if (standaloneContext && standaloneObserver) {
+          await standaloneObserver.record(standaloneContext, { kind: 'decision.made', command: 'experience.qa-target',
+            accepted: true, reason: JSON.stringify(context) });
+        }
       }
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
@@ -547,6 +547,13 @@ export class QARunner {
         await withCancellation(() => dispatcher.run('after-agent', context), options);
       }
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName, verifiedCommit, assertVerified,
+        async () => {
+          await this.onCommit?.(verifiedCommit, handle.branchName);
+          if (standaloneContext && standaloneObserver) {
+            await standaloneObserver.record(standaloneContext, { kind: 'commit.recorded', phase: 'qa',
+              commitSha: verifiedCommit, branch: handle.branchName });
+          }
+        },
         () => withCancellation(() => dispatcher.run('before-publish', context), options), options,
         change => { publication = change; }, workspace?.publish && (async () => {
           await leaseScope.stopExecutions();
@@ -838,6 +845,7 @@ export class QARunner {
     verificationBranch: string,
     commitSha: string,
     assertVerified: () => Promise<void>,
+    recordVerifiedCommit: () => Promise<void>,
     beforePublish: () => Promise<void>,
     options?: ProviderOperationOptions,
     onPublished?: (change: ChangeRequest) => void,
@@ -851,7 +859,7 @@ export class QARunner {
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
       const targetBranch = (await this.resolvePlan(backlog)).targetRef;
       await assertVerified();
-      await this.onCommit?.(commitSha, verificationBranch);
+      await recordVerifiedCommit();
       await beforePublish();
       await assertVerified();
       await this.beforeChange?.('publish', backlog);
@@ -1079,7 +1087,7 @@ export class QARunner {
     const sandboxKind = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
     const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
     const { sessionId, usage } = telemetry;
-    if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
+    if (usage && budget.recordSession(sessionId, result.cumulativeSessionTokens ?? usage.totalTokens)) await store.save(budget.snapshot());
     await this.onSession?.({ kind: 'agent.session_recorded', ...telemetry });
   }
 

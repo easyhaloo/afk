@@ -4,6 +4,23 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RepositoryLeases, repositoryClaimIds, recoverRepositoryLease } from './repository-lease.js';
 describe('RepositoryLeases', () => {
+  it('cleans detached processes before recovering a claim whose session is missing', async () => {
+    const claim = { claimId: 'generation-1', owner: '{"recovery":"registered-tmux"}',
+      createdAt: '', heartbeatAt: '', expiresAt: '', ttlMs: 1000 };
+    const processOwner = 'cba99491-bc0b-4ea6-8199-99a5e2e35b57';
+    const resource = { kind: 'tmux', name: 'owned-session', metadata: { repositoryClaims: [claim.claimId], processOwner } };
+    const registry = { listAllActive: vi.fn(() => [resource]), markClosed: vi.fn() };
+    const tmux = { sessionStatus: vi.fn().mockResolvedValue('missing'), firstPaneId: vi.fn(), sessionOwnership: vi.fn(),
+      killSession: vi.fn().mockRejectedValueOnce(new Error('process observation failed')) };
+    const dependencies = { registry: registry as never, tmux, dead: () => true };
+    await expect(recoverRepositoryLease(claim, dependencies)).rejects.toThrow('process observation failed');
+    expect(registry.markClosed).not.toHaveBeenCalled();
+    await expect(recoverRepositoryLease(claim, dependencies)).resolves.toBe(true);
+    expect(tmux.killSession).toHaveBeenCalledTimes(2);
+    expect(tmux.killSession).toHaveBeenLastCalledWith('owned-session', processOwner);
+    expect(registry.markClosed).toHaveBeenCalledOnce();
+  });
+
   it('recovers only registered sessions with the expired generation ownership token', async () => {
     const claim = { claimId: 'generation-1', owner: JSON.stringify({ recovery: 'registered-tmux' }),
       createdAt: '', heartbeatAt: '', expiresAt: '', ttlMs: 1000 };

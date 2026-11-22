@@ -23,8 +23,9 @@ const nativeGuardAvailable = process.platform === 'darwin' && existsSync('/usr/b
 
 function runnerFixture(help = supportedFlags.join(' ')) {
   fixture();
-  const probe = vi.spyOn(analysisProcessGuard, 'spawnGuardedAnalysis').mockImplementation((_argv, options) =>
-    spawn(process.execPath, ['-e', `console.log(${JSON.stringify(help)})`], options));
+  vi.spyOn(analysisProcessGuard, 'assertAnalysisGuardAvailable').mockImplementation(() => {});
+  const probe = vi.spyOn(analysisProcessGuard, 'spawnGuardedAnalysis').mockImplementation((_argv, options, output) =>
+    spawn(process.execPath, ['-e', `console.log(${JSON.stringify(help)})`], { ...options, stdio: ['ignore', output ?? 'pipe', 'pipe'] }));
   const waitForResult = vi.fn(async (): Promise<ExecutionResult> => ({ version: 1, runId: 'fake-analysis',
     status: 'completed', provider: 'claude-code', structuredOutput: envelope, commits: [],
     usage: { inputTokens: 7, outputTokens: 3, totalTokens: 10 } }));
@@ -92,9 +93,11 @@ describe('analysis runner contract with an inert probe and fake execution on eve
   it.each(['registration', 'after help'] as const)('rejects a changed executable at %s before starting it', async phase => {
     const { directory } = fixture();
     const change = () => writeFileSync(join(directory, 'claude'), 'inert fixture data');
-    const guard = vi.spyOn(analysisProcessGuard, 'spawnGuardedAnalysis').mockImplementation((argv, options) => {
+    vi.spyOn(analysisProcessGuard, 'assertAnalysisGuardAvailable').mockImplementation(() => {});
+    const guard = vi.spyOn(analysisProcessGuard, 'spawnGuardedAnalysis').mockImplementation((argv, options, output) => {
       if (phase === 'registration' || !argv.includes('--help')) throw new Error('unexpected_guard_start');
-      return spawn(process.execPath, ['-e', `console.log(${JSON.stringify(supportedFlags.join(' '))})`], options).once('close', change);
+      return spawn(process.execPath, ['-e', `console.log(${JSON.stringify(supportedFlags.join(' '))})`],
+        { ...options, stdio: ['ignore', output ?? 'pipe', 'pipe'] }).once('close', change);
     });
     const result = await executeAnalysis({ provider: new ClaudeCodeProvider(), jobId: 'changed-executable', prompt: 'Analyze.',
       onStarted: phase === 'registration' ? change : undefined }).catch((error: unknown) => error);
@@ -226,6 +229,14 @@ describe('analysis runner contract with an inert probe and fake execution on eve
 });
 
 describe.skipIf(!nativeGuardAvailable)('macOS native analysis containment (sandbox-exec required)', () => {
+  it.each([24, 140])('checks capability flags after a %i KiB help prefix', async prefixKiB => {
+    const { capture } = fixture(undefined, `${'x'.repeat(prefixKiB * 1024)} ${supportedFlags.join(' ')}`);
+    const run = executeAnalysis({ provider: new ClaudeCodeProvider(), jobId: 'analysis-help-limit', prompt: 'Analyze.' });
+    if (prefixKiB < 128) await expect(run).resolves.toMatchObject({ output: envelope });
+    else await expect(run).rejects.toThrow(/^analysis_unsupported$/);
+    expect(existsSync(capture)).toBe(prefixKiB < 128);
+  });
+
   it.each(['inherited', 'explicit'] as const)('isolates the guard from %s Node startup settings', async mode => {
     const settings = { NODE_OPTIONS: '--no-warnings', NODE_PATH: '/unused/node-modules', LANG: 'C' };
     if (mode === 'inherited') {

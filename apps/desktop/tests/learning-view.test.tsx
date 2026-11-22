@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DesktopLearningApi, DesktopLearningCandidate, DesktopLearningPublication } from "../shared/learning-contract.js";
+import type { DesktopLearningApi, DesktopLearningCandidate, DesktopLearningPublication, LearningWorkerTarget } from "../shared/learning-contract.js";
 import { SelectMenu } from "../src/components/SelectMenu.js";
 import { LearningView } from "../src/features/learning/LearningView.js";
 import { createLearningService } from "../electron/services/learning-service.js";
@@ -27,8 +27,12 @@ function fixture() {
   let rows = [candidate];
   const api = {
     projects: vi.fn(async () => [scope, other]),
-    jobs: vi.fn(async () => [{ jobId: key, scope, status: "blocked" as const, attemptCount: 1 }]),
+    jobs: vi.fn(async (): ReturnType<DesktopLearningApi["jobs"]> => [{ jobId: key, scope, status: "blocked", attemptCount: 1, canRun: false }]),
     candidates: vi.fn(async () => rows),
+    worker: {
+      once: vi.fn(async (_input: LearningWorkerTarget): ReturnType<DesktopLearningApi["worker"]["once"]> => ({ status: "cancelled" })),
+      cancel: vi.fn(async (_input: LearningWorkerTarget) => true),
+    },
     correct: vi.fn(async (): Promise<Awaited<ReturnType<DesktopLearningApi["correct"]>>> => ({ jobId: key, scope, candidateId, candidateVersion: 2 })),
     validate: vi.fn(async (): Promise<Awaited<ReturnType<DesktopLearningApi["validate"]>>> => {
       rows = [{ ...candidate, state: "validated", version: 3 }];
@@ -57,7 +61,9 @@ const text = (renderer: ReturnType<typeof create>) => JSON.stringify(renderer.to
 async function selectScope(renderer: ReturnType<typeof create>, value = scope) {
   await act(async () => { renderer.root.findByType(SelectMenu).props.onChange(value); });
 }
-function button(renderer: ReturnType<typeof create>, label: string) { return renderer.root.findByProps({ "aria-label": label }); }
+function button(renderer: ReturnType<typeof create>, label: string) {
+  return renderer.root.findAllByType("button").find(entry => entry.props["aria-label"] === label || entry.children.includes(label))!;
+}
 async function click(renderer: ReturnType<typeof create>, label: string) { await act(async () => { button(renderer, label).props.onClick(); }); }
 function selectCandidate(renderer: ReturnType<typeof create>) { act(() => { button(renderer, `选择候选 ${candidateId}`).props.onClick(); }); }
 function checker(renderer: ReturnType<typeof create>, value = "verify.approval") {
@@ -65,6 +71,44 @@ function checker(renderer: ReturnType<typeof create>, value = "verify.approval")
 }
 
 describe("learning governance view", () => {
+  it("starts a pending request only when clicked and offers cancellation while running", async () => {
+    const { api } = fixture();
+    const outcome = deferred<Awaited<ReturnType<DesktopLearningApi["worker"]["once"]>>>();
+    api.jobs.mockResolvedValue([{ jobId: key, scope, status: "pending", attemptCount: 0, canRun: true }]);
+    api.worker.once.mockReturnValue(outcome.promise);
+    const renderer = await render(api);
+    await selectScope(renderer);
+    expect(api.worker.once).not.toHaveBeenCalled();
+    const action = (label: string) => renderer.root.findAllByType("button").find(button => button.children.includes(label))!;
+    await act(async () => { action("运行一次提炼").props.onClick(); });
+    expect(api.worker.once.mock.calls).toEqual([[{ scope, requestKey: key }]]);
+    await act(async () => { action("停止提炼").props.onClick(); });
+    expect(api.worker.cancel.mock.calls).toEqual([[{ scope, requestKey: key }]]);
+    expect(action("正在停止提炼…").props.disabled).toBe(true);
+    api.jobs.mockResolvedValue([{ jobId: key, scope, status: "blocked", attemptCount: 1, canRun: true }]);
+    await act(async () => { outcome.resolve({ status: "cancelled" }); });
+    expect(text(renderer)).toContain("已停止桌面提炼");
+    expect(action("运行一次提炼").props.disabled).toBe(false);
+    expect(api.worker.once).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers an explicit retry after a zero-budget run and hides it for a terminal request", async () => {
+    const { api } = fixture();
+    const job = { jobId: key, scope, status: "blocked", attemptCount: 0, canRun: true } as const;
+    api.jobs.mockResolvedValueOnce([{ ...job, status: "pending" }]).mockResolvedValueOnce([job])
+      .mockResolvedValueOnce([{ ...job, status: "failed", attemptCount: 2, canRun: false }]);
+    api.worker.once.mockResolvedValue({ status: "finished", job });
+    const renderer = await render(api);
+    await selectScope(renderer);
+    await click(renderer, "运行一次提炼");
+    expect(text(renderer)).toContain("提炼受阻");
+    expect(button(renderer, "运行一次提炼").props.disabled).toBe(false);
+    expect(api.worker.once).toHaveBeenCalledTimes(1);
+    await click(renderer, "运行一次提炼");
+    expect(api.worker.once.mock.calls).toEqual([[{ scope, requestKey: key }], [{ scope, requestKey: key }]]);
+    expect(text(renderer)).not.toContain("运行一次提炼");
+  });
+
   it("queues a version-bound correction only on submit and clears private text", async () => {
     const { api } = fixture();
     const renderer = await render(api);

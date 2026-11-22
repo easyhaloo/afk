@@ -8,11 +8,13 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { compareProposalActual, prepareAssetProposal, type ProposalInventory } from './proposals.js';
 import { verifyRepositoryAssetProposal, ProposalRuntimeCleanupError, type ProposalRuntimeOptions, type ProposalRuntimeResult } from './proposal-runtime.js';
 import { canonicalLearningJson } from './requests.js';
+import { prepareProposalExperiment, proposalSemanticConfigurationSchema } from './proposal-semantics.js';
 import { output } from './ledger-data.fixture.spec.js';
 import { MultiRepositoryProvider, RepositoryPreparationCleanupError } from '../../infrastructure/providers/repositories.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { DockerContainerProvider } from '../../infrastructure/sandbox/container/docker.js';
 import { executeFrozenContainer } from '../../infrastructure/sandbox/container/frozen-execution.js';
+import { compileScratchFixture, scratchCompilerImage } from '../../infrastructure/sandbox/container/frozen-scratch-compiler.fixture.spec.js';
 import type { FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import type { FrozenContainerInspection, FrozenContainerOperations } from '../../infrastructure/sandbox/container/types.js';
 import type { ProviderOperationOptions, RepositoryProvider, RepositoryWorkspace } from '../../plugin-sdk/capabilities.js';
@@ -863,6 +865,61 @@ function managedFixture() {
 }
 
 describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real temporary Git and Docker production orchestration', () => {
+  it('binds native manifest recovery to the paired proposal evidence', async () => {
+    const { options, root, prepared, owned } = managedFixture();
+    if (prepared.proposal.kind !== 'tool') throw new Error('Expected tool');
+    const fixtures = new URL('../../../../../tests/qualification/w05/scan-entry/', import.meta.url);
+    const read = (name: string) => readFileSync(new URL(name, fixtures), 'utf8');
+    const artifactPath = 'checkpoint.fixture.mjs';
+    git(root, 'mv', 'asset.js', artifactPath);
+    writeFileSync(join(root, 'scan-manifest.mjs'), read('scan-manifest.mjs'));
+    git(root, 'add', 'scan-manifest.mjs');
+    git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Freeze manifest baseline');
+    options.expectedCommit = git(root, 'rev-parse', 'HEAD');
+    options.artifactPath = artifactPath;
+    options.inventory.tools[0]!.source = { root, file: join(root, artifactPath) };
+    options.baseImageId = scratchCompilerImage;
+    options.scratchHelper = compileScratchFixture(join(directory(), 'helper'));
+    const resultText = '{"checked":2,"invalidLines":[2]}';
+    const changed = prepareAssetProposal({ ...prepared.proposal, payload: {
+      ...prepared.proposal.payload, source: read(artifactPath), timeoutMs: 5000,
+      inputSchema: { type: 'object', properties: { phase: { type: 'string', enum: ['fault', 'resume'] }, manifest: { type: 'string' } },
+        required: ['phase', 'manifest'], additionalProperties: false },
+      outputSchema: { type: 'object', properties: { checked: { type: 'number' }, invalidLines: { type: 'array', items: { type: 'number' } } },
+        required: ['checked', 'invalidLines'], additionalProperties: false },
+      tests: [
+        { kind: 'normal', input: JSON.stringify({ phase: 'resume', manifest: '9780306406157\n5901234123450' }), expected: resultText },
+        { kind: 'normal', input: JSON.stringify({ phase: 'resume', manifest: '9780306406157\n9780306406157' }), expected: '{"checked":2,"invalidLines":[]}' },
+        { kind: 'refusal', input: 'null', expected: 'Reject an invalid request' },
+      ],
+    } }, options.inventory);
+    if (changed.proposal.kind !== 'tool') throw new Error('Expected a prepared tool');
+    const check = changed.checks.find(entry => entry.kind === 'recovery')!;
+    const configured = proposalSemanticConfigurationSchema.parse({ ...JSON.parse(read('control-cases.json')).recovery.case.experiment, input: check.input });
+    const semantic = prepareProposalExperiment('tool', artifactPath, check, configured, changed.proposal.payload.inputSchema);
+    if (semantic.status !== 'prepared') throw new Error('Expected the bounded recovery check');
+    options.harness = { ...options.harness!, cases: [
+      { checkId: check.id, checkDigest: digest(check), argv: semantic.experiment.argv, expected: null, experiment: configured },
+      ...changed.checks.filter(entry => entry !== check).map(entry => ({ checkId: entry.id, checkDigest: digest(entry), argv: ['node', '--version'], expected: null })),
+    ], observe: async () => ({ status: 'unsupported', reason: 'outside this recovery witness' }) };
+    const operations: string[] = [];
+    options.recordOwnership = async ownership => { operations.push(ownership.operationId); };
+    const result = await verifyRepositoryAssetProposal(changed, options);
+    if (result.status !== 'blocked') throw new Error('Expected the other checks to remain unverified');
+    expect(result.observations.map(item => item.receipt.passed)).toEqual([false, true]);
+    const [baseline, proposal] = result.observations;
+    expect(baseline!.receipt.semantic?.baselineFailure).toMatchObject({ phase: 'fault', expectedExitCode: 23, observedExitCode: 0 });
+    expect(proposal!.execution.evidence.scratch?.recovery?.phases.map(phase => phase.invocation.exitCode)).toEqual([23, 0, 0]);
+    expect(proposal!.receipt.binding.nonAssetDigest).toBe(baseline!.receipt.binding.nonAssetDigest);
+    expect(proposal!.receipt.binding.artifactDigest).toBe(changed.artifact.digest);
+    expect(proposal!.semanticContext?.containerId).toBe(proposal!.execution.evidence.containerId);
+    expect(git(root, 'status', '--porcelain')).toBe('');
+    expect([...owned].every(path => !existsSync(path))).toBe(true);
+    expect(operations).toHaveLength(3);
+    for (const operation of operations) assertNoDockerResources(operation);
+    realEvidence.push({ kind: 'bounded-manifest-recovery', operations, result, cleanup: 'confirmed' });
+  }, 120_000);
+
   it.each(['cancellation', 'timeout'] as const)('compares a naturally exited baseline with an actually triggered %s proposal', async kind => {
     const { options, prepared, owned } = managedFixture();
     if (prepared.proposal.kind !== 'tool') throw new Error('Expected tool');
@@ -876,7 +933,7 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real temporary Git a
     const callInput = '{"key":"alpha"}';
     configured.argv = ['node', '/workspace/asset.js', callInput];
     configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind, input: check.input, callInput,
-      control: { kind, afterMs: 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
+      control: { kind, afterMs: kind === 'timeout' ? 5000 : 100 }, assertions: [{ id: 'exit', source: 'exit-code', expected: 137 },
         { id: 'trigger', source: 'control', path: ['kind'], expected: kind }] };
     options.harness!.cases = [configured, ...options.harness!.cases.filter(entry => entry !== configured)];
     options.harness!.observe = vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Remaining experiments are not configured' }));

@@ -44,6 +44,7 @@ export async function recoverRepositoryLease(claim: ExpiredClaim, dependencies: 
     const ids = resource.metadata.repositoryClaims;
     if (!Array.isArray(ids) || !ids.includes(claim.claimId)) continue;
     if (resource.kind !== 'tmux') return false;
+    const processOwner = resource.metadata.processOwner;
     const status = await tmux.sessionStatus(resource.name);
     if (status === 'unknown') return false;
     if (status === 'present') {
@@ -52,8 +53,11 @@ export async function recoverRepositoryLease(claim: ExpiredClaim, dependencies: 
       const window = resource.metadata.tmuxWindowName;
       if (typeof pane === 'string' && (typeof window !== 'string'
         || await tmux.firstPaneId(resource.name, window) !== pane)) return false;
-      await tmux.killSession(resource.name);
+      if (typeof processOwner === 'string') await tmux.killSession(resource.name, processOwner);
+      else await tmux.killSession(resource.name);
       if (await tmux.sessionStatus(resource.name) !== 'missing') return false;
+    } else if (typeof processOwner === 'string') {
+      await tmux.killSession(resource.name, processOwner);
     }
     registry.markClosed({ ...resource, status: status === 'missing' ? 'missing' : 'closed', detail: 'expired repository lease owner recovered' });
   }

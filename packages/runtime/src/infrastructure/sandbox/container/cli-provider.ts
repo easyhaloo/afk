@@ -22,7 +22,7 @@ import type {
   FrozenContainerInspection,
   FrozenContainerOperations,
 } from './types.js';
-import { ContainerError } from './types.js';
+import { ContainerError, FROZEN_CONTROL_OBSERVATION_MS, FROZEN_EXECUTION_MAX_MS } from './types.js';
 
 export abstract class CliContainerProvider implements ContainerProvider {
   abstract readonly engine: ContainerEngine;
@@ -147,8 +147,9 @@ export abstract class CliContainerProvider implements ContainerProvider {
     return `afk.frozen.operation=${operationId}`;
   }
 
-  private async frozenRun(args: string[], options: FrozenCommandOptions & { stdin?: Buffer; legacyBuild?: boolean }): Promise<{ stdout: string; stderr: string; code: number }> {
-    if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 120_000
+  private async frozenRun(args: string[], options: FrozenCommandOptions & { stdin?: Buffer; legacyBuild?: boolean },
+    maxTimeoutMs = FROZEN_EXECUTION_MAX_MS): Promise<{ stdout: string; stderr: string; code: number }> {
+    if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > maxTimeoutMs
       || !Number.isSafeInteger(options.maxOutputBytes) || options.maxOutputBytes < 1 || options.maxOutputBytes > 1024 * 1024) throw new Error('Invalid frozen command bounds');
     return this.run([this.binary, ...args], options);
   }
@@ -218,7 +219,7 @@ export abstract class CliContainerProvider implements ContainerProvider {
   }
 
   async startFrozenContainer(containerId: string, options: FrozenCommandOptions): Promise<{ stdout: string; stderr: string; code: number }> {
-    return this.frozenRun(['start', '--attach', containerId], options);
+    return this.frozenRun(['start', '--attach', containerId], options, FROZEN_EXECUTION_MAX_MS + 2 * FROZEN_CONTROL_OBSERVATION_MS);
   }
 
   async killFrozenContainer(operationId: string, containerId: string, options: FrozenCommandOptions): Promise<void> {

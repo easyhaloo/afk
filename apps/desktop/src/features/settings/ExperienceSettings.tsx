@@ -127,7 +127,7 @@ export function ExperienceSettings() {
       {outcomeBusy ? <p className="plugin-notice" role="status">正在读取结果收据…</p> : outcomeQueried ? <p className="plugin-notice" role="status">{outcomes.length ? `结果收据 ${outcomes.length} 条（最多 20 条）` : "没有结果收据"}</p> : null}
       <ul className="plugin-list">{outcomes.map(receipt => <li key={`${receipt.experienceId}:${receipt.selectionId}:${receipt.event.sequence}`}>
         <div className="plugin-description">
-          <b>{({ succeeded: "成功", failed: "失败", cancelled: "已取消" })[receipt.event.outcome]} · {receipt.recurrence ? "已记录复发" : "本收据未记录复发"} · 收益未知</b>
+          <b>{({ succeeded: "成功", failed: "失败", cancelled: "已取消", awaiting_merge: "QA 通过，等待人工合并" })[receipt.event.outcome]} · {receipt.recurrence ? "已记录复发" : "本收据未记录复发"} · 收益未知</b>
           <small>经验：{receipt.experienceId} · 选择：{receipt.selectionId}</small>
           <small>运行：{receipt.runId} · 工作项：{receipt.workItemId}</small>
           <small>事件：{receipt.event.type} · 序号 {receipt.event.sequence} · {receipt.event.occurredAt}</small>

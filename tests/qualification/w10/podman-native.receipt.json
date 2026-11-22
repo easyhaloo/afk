@@ -1,0 +1,46 @@
+{
+  "provider": "sandbox.podman",
+  "mode": "workspace-build",
+  "commit": "e5038e0cbf139a00a39f4f865af05de1f91164cc",
+  "cli": "0.2.166",
+  "runId": "44592073226",
+  "attempt": "1",
+  "engine": {
+    "version": "podman version 5.7.0",
+    "arch": "amd64",
+    "oci": "crun",
+    "local": true,
+    "rootless": true
+  },
+  "image": "b590f561090b4e81375fc84bbbdabd9f3f409d81edc976e39ec148351092334b",
+  "container": "afe3a8149e306a036a6df01dde3a111cd6f262a2096e63c92d7f9c0d476c2a48",
+  "mounts": [
+    [
+      "$RUN/home/.afk/workspaces/27a4647d3a916ac5b54c63335c336cbc0932b924599c9dcea44b118f71c1ae30",
+      "$RUN/home/.afk/workspaces/27a4647d3a916ac5b54c63335c336cbc0932b924599c9dcea44b118f71c1ae30"
+    ],
+    [
+      "$RUN/home/.afk/workspaces/27a4647d3a916ac5b54c63335c336cbc0932b924599c9dcea44b118f71c1ae30/result",
+      "/afk/result"
+    ],
+    [
+      "$RUN/home/.afk/workspaces/27a4647d3a916ac5b54c63335c336cbc0932b924599c9dcea44b118f71c1ae30/session",
+      "/afk/session"
+    ],
+    [
+      "$RUN/workspace",
+      "/workspace"
+    ]
+  ],
+  "commands": {
+    "uidGid": "1000:1000",
+    "success": 0,
+    "failure": 23,
+    "error": "NON_ZERO_EXIT",
+    "returnedSha256": "7f42aab5bd396280c7021a80f73b0d5a0d69adc23a1b85ee62ec67d56086c282"
+  },
+  "afterClose": {
+    "existsExit": 1,
+    "engineResponsive": true
+  }
+}

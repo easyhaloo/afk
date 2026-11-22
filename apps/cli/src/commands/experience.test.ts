@@ -95,9 +95,13 @@ function fixture() {
   };
 }
 
+function cliJobs(jobs: LearningJob[]) {
+  return jobs.map(({ canRun, ...job }) => job);
+}
+
 function learningFixture(composition: ExperienceCommandComposition = {}) {
   const job: LearningJob = { jobId: 'a'.repeat(64), scope, sourceId: 'run:42', sourceRunId: 'source-run', workItemId,
-    status: 'blocked', reasonCode: 'budget_exhausted', attempts: [] };
+    status: 'blocked', canRun: true, reasonCode: 'budget_exhausted', attempts: [] };
   const proposal: LearningCandidate = { id: 'b'.repeat(64), requestKey: job.jobId, version: 1, state: 'candidate',
     digest: 'c'.repeat(64), evidenceDigest: 'd'.repeat(64), proposal: {
       kind: 'fact', title: 'Input validation', statement: 'Validate before writing', evidenceIds: ['audit-1'],
@@ -840,6 +844,110 @@ describe('candidate correction', () => {
   });
 });
 
+describe('learning worker once', () => {
+  const requestKey = 'a'.repeat(64);
+  const args = ['worker', 'once', '--scope', scope, '--request', requestKey, '--json'];
+
+  it.each(['processed', 'blocked'] as const)('returns a bounded summary of the exact %s job', async status => {
+    const exitCode = process.exitCode;
+    const job = { jobId: requestKey, scope, status, canRun: status === 'blocked',
+      reasonCode: status === 'blocked' ? 'budget_exhausted' : 'PRIVATE_REASON' };
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({
+      job: { ...job, attempts: [{ sessionId: 'PRIVATE_SESSION' }], sourceId: 'PRIVATE_SOURCE' },
+      processing: { warnings: ['PRIVATE_WARNING'] }, candidates: [{ proposal: 'PRIVATE_PROPOSAL' }],
+    }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    try {
+      await test.parse(...args);
+      expect(plugins.dispatchSystemAction).toHaveBeenCalledOnce();
+      expect(plugins.dispatchSystemAction).toHaveBeenCalledWith('learning.worker.once', { scope, requestKey }, { signal: expect.any(AbortSignal) });
+      expect(plugins.dispose).toHaveBeenCalledOnce();
+      expect(test.query).not.toHaveBeenCalled();
+      expect(test.printed()).toBe(`${JSON.stringify({ job: { jobId: requestKey, scope, status, canRun: job.canRun,
+        attemptCount: 1, ...(status === 'blocked' ? { reasonCode: job.reasonCode } : {}) } })}\n`);
+      expect(process.exitCode).toBe(status === 'processed' ? exitCode : 1);
+    } finally { process.exitCode = exitCode; }
+  });
+
+  it.each([
+    ['Trigger queue is already owned by a live or unverifiable listener', 'learning_worker_busy'],
+    ['learning_disabled', 'learning_disabled'],
+    ['PRIVATE_TRANSCRIPT and PRIVATE_PATH', 'learning_worker_failed'],
+  ])('maps worker error %s to %s', async (message, code) => {
+    const plugins = { dispatchSystemAction: vi.fn().mockRejectedValue(new Error(message)), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await expect(test.parse(...args)).rejects.toThrow(new Error(code));
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(test.printed()).toBe('');
+  });
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('cancels work on %s and removes its listeners', async signalName => {
+    const signals = ['SIGINT', 'SIGTERM'] as const;
+    const listeners = signals.map(name => process.listeners(name));
+    const plugins = { dispatchSystemAction: vi.fn(async (_name, _target, { signal }: { signal: AbortSignal }) => {
+      const added = process.listeners(signalName).find(listener => !listeners[signals.indexOf(signalName)].includes(listener));
+      expect(added).toBeDefined();
+      Reflect.apply(added!, process, []);
+      expect(signal.aborted).toBe(true);
+      return { job: { jobId: requestKey, scope, status: 'processed', canRun: false, attempts: [] } };
+    }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await expect(test.parse(...args)).rejects.toThrow('learning_worker_cancelled');
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(signals.map(name => process.listeners(name))).toEqual(listeners);
+    expect(test.printed()).toBe('');
+  });
+
+  it.each([['--scope', 'noncanonical'], ['--request', 'A'.repeat(64)]])('rejects invalid %s before activation', async (flag, value) => {
+    const test = learningFixture();
+    await expect(test.parse(...args.map((part, index) => args[index - 1] === flag ? value : part)))
+      .rejects.toMatchObject({ code: 'commander.invalidArgument' });
+    expect(runtime.createCliPluginRuntime).not.toHaveBeenCalled();
+  });
+
+  it('rejects a result for a different request from a borrowed runtime', async () => {
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({ job: { jobId: 'b'.repeat(64), scope,
+      status: 'processed', canRun: false, attempts: [] } }), dispose: vi.fn() };
+    const test = learningFixture({ pluginRuntime: plugins as unknown as ExperienceCommandComposition['pluginRuntime'] });
+    await expect(test.parse(...args)).rejects.toThrow('learning_worker_failed');
+    expect(plugins.dispose).not.toHaveBeenCalled();
+    expect(test.printed()).toBe('');
+  });
+});
+
+describe('learning worker watch', () => {
+  it('stops on SIGTERM, disposes its runtime and writes only the shutdown receipt', async () => {
+    const existing = process.listeners('SIGTERM');
+    const plugins = { dispatchSystemAction: vi.fn(async (_action, _input, { signal }: { signal: AbortSignal }) => {
+      const stop = process.listeners('SIGTERM').find(listener => !existing.includes(listener));
+      expect(stop).toBeDefined();
+      Reflect.apply(stop!, process, []);
+      expect(signal.aborted).toBe(true);
+      return { status: 'stopped', internal: '/private/ledger' };
+    }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await test.parse('worker', 'watch', '--json');
+    expect(plugins.dispatchSystemAction).toHaveBeenCalledOnce();
+    expect(plugins.dispatchSystemAction).toHaveBeenCalledWith('learning.worker.watch', {}, { signal: expect.any(AbortSignal) });
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(process.listeners('SIGTERM')).toEqual(existing);
+    expect(test.printed()).toBe('{"status":"stopped"}\n');
+  });
+
+  it('reports unexpected listener termination and cleans up the runtime', async () => {
+    const plugins = { dispatchSystemAction: vi.fn().mockResolvedValue({ status: 'stopped' }), dispose: vi.fn() };
+    runtime.createCliPluginRuntime.mockResolvedValue(plugins);
+    const test = learningFixture();
+    await expect(test.parse('worker', 'watch', '--json')).rejects.toThrow('learning_worker_failed');
+    expect(plugins.dispose).toHaveBeenCalledOnce();
+    expect(test.printed()).toBe('');
+  });
+});
+
 describe('read-only learning governance', () => {
   it.each([
     { command: ['prepare', 'b'.repeat(64), '--expected-version', '2', '--target', 'wiki:retry'],
@@ -974,7 +1082,7 @@ describe('read-only learning governance', () => {
   it.each(['jobs', 'candidates'])('returns existing %s DTOs without opening the experience store', async command => {
     const test = learningFixture();
     await test.parse(command, '--scope', scope, '--json');
-    expect(JSON.parse(test.printed())).toEqual(test.state[command as keyof LearningState]);
+    expect(JSON.parse(test.printed())).toEqual(command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates);
     expect(test.query).toHaveBeenCalledWith({ directory: '/tmp/afk-learning-command-test', scope });
     expect(runtime.ExperienceStore).not.toHaveBeenCalled();
   });
@@ -989,7 +1097,7 @@ describe('read-only learning governance', () => {
     expect(dispatchSystemAction).toHaveBeenCalledWith(`learning.${command === 'jobs' ? 'jobs' : 'candidates'}`, { scope });
     expect(test.query).not.toHaveBeenCalled();
     expect(runtime.learningDirectory).not.toHaveBeenCalled();
-    expect(JSON.parse(test.printed())).toEqual(command === 'inspect' ? test.proposal : test.state[command as keyof LearningState]);
+    expect(JSON.parse(test.printed())).toEqual(command === 'inspect' ? test.proposal : command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates);
   });
 
   it.each(['jobs', 'candidates'])('filters %s to the exact scope before sorting and pagination', async command => {
@@ -1002,7 +1110,7 @@ describe('read-only learning governance', () => {
     { ...test.proposal, id: 'f'.repeat(64) }, test.proposal, { ...test.proposal, id: '1'.repeat(64) }];
     const original = structuredClone(test.state);
     await test.parse(command, '--scope', scope, '--limit', '1', '--offset', '1', '--json');
-    expect(JSON.parse(test.printed())).toEqual([command === 'jobs' ? test.job : test.proposal]);
+    expect(JSON.parse(test.printed())).toEqual(command === 'jobs' ? cliJobs([test.job]) : [test.proposal]);
     expect(test.state).toEqual(original);
   });
 
@@ -1014,7 +1122,8 @@ describe('read-only learning governance', () => {
     expect(JSON.parse(test.printed())).toHaveLength(100);
     test.output.length = 0;
     await test.parse(command, '--scope', scope, '--limit', '100', '--offset', '100', '--json');
-    expect(JSON.parse(test.printed())).toEqual(test.state[command as keyof LearningState].slice(0, 2).reverse());
+    const rows = command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates;
+    expect(JSON.parse(test.printed())).toEqual(rows.slice(0, 2).reverse());
     test.output.length = 0;
     await test.parse(command, '--scope', scope, '--limit', '0', '--offset', '0', '--json');
     expect(JSON.parse(test.printed())).toEqual([]);
@@ -1068,7 +1177,7 @@ describe('read-only learning governance', () => {
     test.job.attempts = [{ requestKey: test.job.jobId, callId: 'storage-call', day: '2026-11-10',
       startedAt: '2026-11-10T00:00:00Z', ownerPid: 42, host: 'local-host', status: 'failed', errorCode: 'storage_blocked' }];
     await test.parse('jobs', '--scope', scope, ...(json ? ['--json'] : []));
-    if (json) expect(JSON.parse(test.printed())).toEqual([test.job]);
+    if (json) expect(JSON.parse(test.printed())).toEqual(cliJobs([test.job]));
     else expect(test.printed()).toBe(`${test.job.jobId} [blocked] storage_blocked\n`);
   });
 
@@ -1088,7 +1197,7 @@ describe('read-only learning governance', () => {
 
   it.each(['jobs', 'candidates', 'inspect'])('emits only existing %s DTO fields, never pack or credential extensions', async command => {
     const test = learningFixture();
-    const expected = structuredClone(command === 'jobs' ? test.state.jobs : command === 'inspect' ? test.proposal : test.state.candidates);
+    const expected = structuredClone(command === 'jobs' ? cliJobs(test.state.jobs) : command === 'inspect' ? test.proposal : test.state.candidates);
     Object.assign(test.job, { pack: { content: 'PRIVATE_PACK_BODY' }, credentials: 'PRIVATE_TOKEN' });
     Object.assign(test.proposal, { pack: { content: 'PRIVATE_PACK_BODY' }, credentials: 'PRIVATE_TOKEN' });
     await test.parse(command, ...(command === 'inspect' ? [test.proposal.id] : []), '--scope', scope, '--json');
@@ -1100,7 +1209,7 @@ describe('read-only learning governance', () => {
     const test = learningFixture();
     test.job.reasonCode = 'RAW_TRANSCRIPT authorization: Bearer PRIVATE_TOKEN';
     await test.parse('jobs', '--scope', scope, '--json');
-    const { reasonCode, ...expected } = test.job;
+    const { reasonCode, canRun, ...expected } = test.job;
     expect(JSON.parse(test.printed())).toEqual([expected]);
     expect(test.printed()).not.toContain('PRIVATE_TOKEN');
   });
@@ -1194,7 +1303,7 @@ describe('read-only learning governance', () => {
     const before = readFileSync(join(directory, 'candidates.sqlite'));
     const test = learningFixture({ queryLearningState: input => actual.queryLearningState({ ...input, directory }) });
     await test.parse('jobs', '--scope', scope, '--json');
-    expect(JSON.parse(test.printed())).toEqual(actual.queryLearningState({ directory, scope }).jobs);
+    expect(JSON.parse(test.printed())).toEqual(cliJobs(actual.queryLearningState({ directory, scope }).jobs));
     expect(test.printed()).not.toContain('PRIVATE_EVIDENCE_PACK_BODY');
     expect(readFileSync(join(directory, 'candidates.sqlite'))).toEqual(before);
     expect(existsSync(join(directory, 'distillation-queue.sqlite'))).toBe(false);

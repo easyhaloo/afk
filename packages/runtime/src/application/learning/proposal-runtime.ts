@@ -14,6 +14,7 @@ import { compareProposalActual, prepareAssetProposal, type PreparedAssetProposal
 import { observeProposalExperiment, prepareProposalExperiment, type PreparedProposalExperiment,
   type ProposalSemanticConfiguration, type ProposalSemanticObservation, type ProposalSemanticExecutionContext } from './proposal-semantics.js';
 import { proposalRuntimeBindingSchema as bindingSchema, proposalExecutionOwnershipSchema as ownershipSchema } from './proposal-ownership.js';
+import { declaredSkillReads } from './skill-trace.js';
 
 const oracleResultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('observed'), actual: z.unknown().refine(value => value !== undefined),
@@ -240,6 +241,16 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
       const experiment = prepareProposalExperiment(prepared.kind, artifactPath, prepared.checks.find(entry => entry.id === check.checkId)!, check.experiment,
         prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);
       if (experiment.status === 'unsupported') return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
+      if (experiment.experiment.skillTrace) {
+        const permitsRead = (allowed: string | string[], denied: string | string[]) =>
+          [allowed].flat().length === 1 && [allowed].flat()[0] === 'Read' && [denied].flat().every(tool => ['Write', 'Bash', 'Edit'].includes(tool));
+        const boundReads = experiment.experiment.skillTrace.reads;
+        if (!skill?.['user-invocable'] || !prepared.invocation?.userInvocable
+          || !declaredSkillReads(boundReads, skill.resources)
+          || !permitsRead(skill['allowed-tools'], skill['disallowed-tools']) || !permitsRead(prepared.invocation.allowedTools, prepared.invocation.disallowedTools)) {
+          return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
+        }
+      }
       if (canonicalLearningJson(check.argv) !== canonicalLearningJson(experiment.experiment.argv)) throw new Error('Configured semantic command does not deliver the bound input');
       experiments.set(check.checkId, freezeJson(experiment.experiment));
     }
@@ -336,7 +347,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
             callInput: experiment.callInput!, resources: experiment.recovery.resources,
             recovery: Object.freeze({ callInput: experiment.recovery.callInput, requireEffectHistory: experiment.recovery.requireEffectHistory,
               assertions: experiment.recovery.assertions, returnAssertions: experiment.recovery.returnAssertions }) }) } : {}),
-          ...(experiment?.recovery ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
+          ...(experiment?.recovery || experiment?.skillTrace ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
             if (!registration.recorded || !registration.ownership || registration.containerId !== undefined
               || container.operationId !== registration.ownership.operationId || !learningIdentitySchema.safeParse(container.containerId).success) {
               throw new Error('Frozen container identity differs from recorded ownership registration');
@@ -364,7 +375,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
         checkAbort(signal);
         if (!registration.recorded || !registration.ownership || execution.evidence.operationId !== registration.ownership.operationId
           || execution.evidence.contextDigest !== registration.ownership.contextDigest) throw new Error('Frozen evidence differs from recorded ownership registration');
-        if (experiment?.recovery && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
+        if ((experiment?.recovery || experiment?.skillTrace) && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
           throw new Error('Frozen evidence differs from independently recorded container identity');
         }
         if (execution.evidence.mechanism !== 'docker-frozen-image' || execution.evidence.inputDigest !== captured.digest || execution.evidence.baseImageId !== baseImageId
@@ -381,9 +392,12 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           imageId: execution.evidence.imageId, baseImageId, contextDigest: execution.evidence.contextDigest, executionDigest: digest(execution), argv: execution.evidence.argv,
           inputTreeDigest: execution.evidence.inputDigest, commandDigest: execution.evidence.commandDigest,
           policyDigest: execution.evidence.policyDigest, cwd: execution.evidence.cwd });
-        const semanticContext = experiment?.recovery ? Object.freeze({ options: executionRequest,
+        const semanticContext = experiment?.recovery || experiment?.skillTrace ? Object.freeze({ options: executionRequest,
           operationId: registration.ownership.operationId, containerId: registration.containerId! }) : undefined;
         const semantic = experiment ? observeProposalExperiment(experiment, execution, semanticContext) : undefined;
+        if (semantic?.skillTrace && !declaredSkillReads(semantic.skillTrace.calls.map(call => call.result), skill?.resources)) {
+          throw new Error('Observed skill read outside declared resources');
+        }
         const actual = semantic ? { status: 'observed' as const, actual: semantic.assertions, assertions: semantic.assertions.length }
           : oracleResultSchema.parse(await harness.observe(execution, check, { signal }));
         await current();

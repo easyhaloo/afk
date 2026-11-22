@@ -85,7 +85,7 @@ describe('RunResourceScope', () => {
       expect(heartbeat).toHaveBeenCalledTimes(2);
       if (stage === 'sandbox' || stage === 'step' || stage === 'primary') expect(external).not.toHaveBeenCalled();
       if (stage !== 'claim') expect(claim).not.toHaveBeenCalled();
-      expect(step).toHaveBeenCalledTimes(1);
+      expect(step).toHaveBeenCalledTimes(stage === 'sandbox' ? 0 : 1);
       await scope.finish({ status: 'failed' });
       await next.acquireOwnership();
       await scope.finish({ status: 'failed' });
@@ -254,6 +254,50 @@ describe('RunResourceScope', () => {
     }
   });
 
+  it.each([true, false])('defers an overlapping heartbeat failure until claim release settles (released=%s)', async releaseSucceeds => {
+    vi.useFakeTimers();
+    let finishHeartbeat!: () => void;
+    const pendingHeartbeat = new Promise<void>(resolve => { finishHeartbeat = resolve; });
+    let finishRelease!: () => void;
+    const pendingRelease = new Promise<void>(resolve => { finishRelease = resolve; });
+    let released = false;
+    const heartbeatFailure = new Error('claim lease has been released');
+    const releaseFailure = new Error('claim release unconfirmed');
+    const heartbeat = vi.fn(async () => {
+      await pendingHeartbeat;
+      if (released) throw heartbeatFailure;
+    });
+    const release = vi.fn(async () => {}).mockImplementationOnce(async () => {
+      released = true;
+      await pendingRelease;
+      if (!releaseSucceeds) throw releaseFailure;
+    });
+    const onError = vi.fn();
+    const scope = new RunResourceScope({ repoRoot: '/repo', baseBranch: 'main', onCleanup: release });
+    scope.registerHeartbeat(heartbeat, 10, onError);
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      expect(heartbeat).toHaveBeenCalledOnce();
+      const finishing = scope.finish({ status: 'success' }).catch(error => error);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(release).toHaveBeenCalledOnce();
+      finishHeartbeat();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(heartbeat).toHaveBeenCalledOnce();
+      expect(onError).not.toHaveBeenCalled();
+
+      finishRelease();
+      expect(await finishing).toBe(releaseSucceeds ? undefined : releaseFailure);
+      if (releaseSucceeds) expect(onError).not.toHaveBeenCalled();
+      else expect(onError.mock.calls).toEqual([[heartbeatFailure]]);
+    } finally {
+      finishHeartbeat();
+      finishRelease();
+      await scope.finish({ status: 'failed' });
+      vi.useRealTimers();
+    }
+  });
+
   it('routes heartbeat failures to the error hook once and still finishes cleanup', async () => {
     vi.useFakeTimers();
     try {
@@ -301,9 +345,9 @@ describe('RunResourceScope', () => {
     expect(branch.cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it('continues cleanup after sandbox failure and preserves the first error', async () => {
+  it('closes the other sandboxes and retains the worktree until sandbox cleanup succeeds', async () => {
     const branch = strategy();
-    const failedSandbox = { close: vi.fn(async () => { throw new Error('sandbox close failed'); }) };
+    const failedSandbox = { close: vi.fn(async () => {}).mockRejectedValueOnce(new Error('sandbox close failed')) };
     const remainingSandbox = { close: vi.fn(async () => {}) };
     const scope = new RunResourceScope({ repoRoot: '/repo', git: simpleGit(), baseBranch: 'main' });
     scope.registerSandbox(remainingSandbox);
@@ -315,6 +359,11 @@ describe('RunResourceScope', () => {
 
     await expect(scope.finish({ status: 'failed' })).rejects.toThrow('sandbox close failed');
     expect(failedSandbox.close).toHaveBeenCalledTimes(1);
+    expect(remainingSandbox.close).toHaveBeenCalledTimes(1);
+    expect(branch.cleanup).not.toHaveBeenCalled();
+
+    await scope.finish({ status: 'failed' });
+    expect(failedSandbox.close).toHaveBeenCalledTimes(2);
     expect(remainingSandbox.close).toHaveBeenCalledTimes(1);
     expect(branch.cleanup).toHaveBeenCalledTimes(1);
   });

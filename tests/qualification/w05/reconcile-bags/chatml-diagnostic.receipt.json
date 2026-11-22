@@ -1,0 +1,149 @@
+{
+  "scope": "one backend-only ChatML correction, isolated replay with installed frozen executor and semantic observer",
+  "candidateId": "4cc64163ac59ad7f437307d06df67fd964b3ba3b7bc8ff7cfa622ac162663edf",
+  "expectedCommit": "0e642fc0a1996a186a9c2764cc43a4072a6591fc",
+  "artifactDigest": "8b1888f35698f71c0ca3ae96e60ae91f698c5ea6d72cc69a3b2ab164b6b15689",
+  "caseDigests": [
+    {
+      "checkId": "behavior-1",
+      "checkDigest": "a347abd85e2ad93a4949f7dbe4f60a2c2c44e06818cef51068ce4d7325f2cad7"
+    },
+    {
+      "checkId": "behavior-2",
+      "checkDigest": "fe6569e0ae492e1dacad6b7657ec1f4163d03350f685dd16e04034746e98e6c3"
+    },
+    {
+      "checkId": "behavior-3",
+      "checkDigest": "efbf6217c6ebf907f148d23208f35d75b8634edd966822ad2ef0a3444d540efd"
+    }
+  ],
+  "checkerDigest": "e10259092410ff9f6fa870f7a1af47ea57abfe596f7bc0e4c57ac10242e665a0",
+  "fixtureDigest": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10",
+  "imageId": "sha256:67112f201487065197f3aa07049c3ab70403d633382dfc84d6c73a30cd327049",
+  "previousImageId": "sha256:acf0e0ad48c6fa847f3006953bc677965f916d12c9eef0c80a510166c9f40d79",
+  "bridgeDigest": "c3d493972984641aebd090c10e1fa1319be9a79c67a4ac2656050dff1adae512",
+  "limits": {
+    "timeoutMs": 120000,
+    "maxOutputBytes": 4096
+  },
+  "durationMs": 63772,
+  "results": [
+    {
+      "checkId": "behavior-1",
+      "kind": "normal",
+      "edition": "proposed",
+      "operationId": "2b957ecb-f7a9-4344-ad34-179d631518ea",
+      "containerId": "382311a249aafcd9107cda6c9cf7ccccfe2a4a5b8061fee73763662092e823a3",
+      "exit": 2,
+      "stdoutSha256": "03fa08a81f644ba19828ae1a0ba7606e0554fb018f24f59293bdfa909c2f8ea1",
+      "stdoutBytes": 31,
+      "traceSha256": "a482d2c45c1f057abb9a30095fd2d6d77c8962f483116631c4331749e2c44ea5",
+      "inputTreeDigest": "72c02fc5d9bb410a0e001e5d6fdb52e05ccfab2b91d800f7bfced36be53e91ab",
+      "policyDigest": "f8cbf0b3dd6007c91fcdcea89398880771034c4097358571395db947ffcc9652",
+      "durationMs": 19161,
+      "cleanup": {
+        "containerRemoved": true,
+        "imageRemoved": true
+      },
+      "observed": true,
+      "passed": false,
+      "businessValid": false,
+      "reads": [
+        {
+          "path": "/business/handoff.json",
+          "digest": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10"
+        }
+      ],
+      "checks": [
+        {
+          "id": "exit",
+          "status": "observed",
+          "passed": false
+        },
+        {
+          "id": "answer",
+          "status": "unknown",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "checkId": "behavior-2",
+      "kind": "refusal",
+      "edition": "proposed",
+      "operationId": "68e9f4c4-e0ff-4000-9f49-b507e8065700",
+      "containerId": "2e93c79c6fb32b6afe341041c4f2ca89a9035372c070287fdb38609b60ec1777",
+      "exit": 2,
+      "stdoutSha256": "f8efbb64b3c0cc91f094e7241cfe7dcc091e731f252d1784b339f1a1bc1f4ad7",
+      "stdoutBytes": 71,
+      "traceSha256": "c3cdb557d731d1c04a8f032a48e5b28e5a2f65ddfef975c25ff772eaed15de61",
+      "inputTreeDigest": "72c02fc5d9bb410a0e001e5d6fdb52e05ccfab2b91d800f7bfced36be53e91ab",
+      "policyDigest": "80b13479d0a47bd824796515c64df44e0aeaf2a0cb4ad481bcfcdf26ecdd9d8b",
+      "durationMs": 20786,
+      "cleanup": {
+        "containerRemoved": true,
+        "imageRemoved": true
+      },
+      "observed": true,
+      "passed": false,
+      "businessValid": false,
+      "reads": [
+        {
+          "path": "/business/handoff.json",
+          "digest": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10"
+        }
+      ],
+      "checks": [
+        {
+          "id": "exit",
+          "status": "observed",
+          "passed": false
+        },
+        {
+          "id": "answer",
+          "status": "observed",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "checkId": "behavior-3",
+      "kind": "recovery",
+      "edition": "proposed",
+      "operationId": "809558ad-c688-4ae6-8f32-7353dd05d233",
+      "containerId": "f45a68b4f6952d4ac80503c8410bec2535cebc68ad06cff15587f0cf806fc285",
+      "exit": 2,
+      "stdoutSha256": "03fa08a81f644ba19828ae1a0ba7606e0554fb018f24f59293bdfa909c2f8ea1",
+      "stdoutBytes": 31,
+      "traceSha256": "913e517a52dd223ad23e42ec3d585f199033f0105b837a2e1bfb9a82cb987166",
+      "inputTreeDigest": "72c02fc5d9bb410a0e001e5d6fdb52e05ccfab2b91d800f7bfced36be53e91ab",
+      "policyDigest": "bf5a253f037540266bd3df4e7d2bd99615fd35a6037128ca1e0f7cf46b8fd33e",
+      "durationMs": 20317,
+      "cleanup": {
+        "containerRemoved": true,
+        "imageRemoved": true
+      },
+      "observed": true,
+      "passed": false,
+      "businessValid": false,
+      "reads": [
+        {
+          "path": "/business/handoff.json",
+          "digest": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10"
+        }
+      ],
+      "checks": [
+        {
+          "id": "exit",
+          "status": "observed",
+          "passed": false
+        },
+        {
+          "id": "answer",
+          "status": "observed",
+          "passed": false
+        }
+      ]
+    }
+  ]
+}

@@ -505,13 +505,16 @@ export class MultiRepositoryProvider implements RepositoryProvider {
 
 // --- Remote workspace (HTTP workspace API) ---
 
-export interface RemoteWorkspaceProviderOptions {
+export interface RemoteWorkspaceProviderOptions extends MountedLifecycleOptions {
   /** Base URL of the workspace API, e.g. `https://workspace.example/api`. */
   readonly baseUrl: string;
   /** Optional transport; defaults to global fetch at operation time. */
   readonly transport?: FetchTransport;
   /** Optional bearer token sent as an Authorization header. */
   readonly token?: OperationSecret;
+}
+
+interface MountedLifecycleOptions {
   readonly lifecycle?: RepositoryLifecycleConfig;
   readonly managed?: { workspaceRoot: string; repositories: readonly MountedRepository[] };
 }
@@ -519,19 +522,12 @@ export interface RemoteWorkspaceProviderOptions {
 interface MountedRepository { name: string; gitDirectory: string; leaseKey: string; remoteUrl: string }
 interface MountedLease { runId: string; repository: MountedRepository; path: string; common: string; active: boolean; identity?: string }
 
-/**
- * Snapshots a remote workspace through its HTTP API. `repository.url` carries
- * the workspace identifier. The JSON response is validated before it is trusted.
- */
-export class RemoteWorkspaceProvider implements RepositoryProvider {
-  readonly id = 'remote-workspace';
-  readonly capabilities: RepositoryProvider['capabilities'];
-  private readonly lifecycle?: ConfiguredRepositoryLifecycle;
-  private readonly lifetime = new AbortController();
+class MountedRepositoryLifecycle {
+  readonly lifecycle?: ConfiguredRepositoryLifecycle;
   readonly withLifecycleLease?: RepositoryProvider['withLifecycleLease'];
   private readonly mounted = new AsyncLocalStorage<MountedLease>();
 
-  constructor(private readonly options: RemoteWorkspaceProviderOptions) {
+  constructor(private readonly options: MountedLifecycleOptions, request: LifecycleRequest) {
     const leases = options.managed && new RepositoryLeases();
     if (options.managed) {
       const { workspaceRoot, repositories } = options.managed;
@@ -558,8 +554,7 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
     if (options.lifecycle) {
       this.lifecycle = new ConfiguredRepositoryLifecycle(options.lifecycle, async (operation, input, workspace, operationOptions) => {
         const repository = workspace?.repository ?? (input as RepositoryPrepareRequest).repository;
-        const route = workspace ? `sessions/${encodeURIComponent(workspace.id)}/${operation}` : operation;
-        const send = () => this.request(repository.url, route, operation === 'snapshot' ? undefined : input, operationOptions);
+        const send = () => request(operation, input, workspace, operationOptions);
         if (!leases) return send();
         const lease = this.mounted.getStore();
         if (!lease?.active || lease.repository.name !== repository.url || lease.runId !== (workspace?.runId ?? (input as RepositoryPrepareRequest).runId)) throw new Error('Managed workspace requires its active repository lease');
@@ -567,31 +562,7 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
         return leases.run([lease.repository.leaseKey], () => this.mountedOperation(lease, operation, input, workspace, send, operationOptions));
       }, !!options.managed);
     }
-    this.capabilities = this.lifecycle?.capabilities ?? SNAPSHOT_ONLY;
   }
-
-  async snapshot(repository: RepositoryRef, options?: ProviderOperationOptions): Promise<RepositorySnapshot> {
-    assertCurrentWorkspace(repository);
-    return validateSnapshot(await this.request(repository.url, 'snapshot', undefined, options));
-  }
-
-  async prepare(request: RepositoryPrepareRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
-    return this.operate(() => requireLifecycle(this.lifecycle).prepare(request, options), options);
-  }
-
-  async checkout(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
-    return this.operate(() => requireLifecycle(this.lifecycle).checkout(request, options), options);
-  }
-
-  async publish(request: RepositoryPublishRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication> {
-    return this.operate(() => requireLifecycle(this.lifecycle).publish(request, options), options);
-  }
-
-  async cleanup(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult> {
-    return this.operate(() => requireLifecycle(this.lifecycle).cleanup(request, options), options);
-  }
-
-  dispose(): void { this.lifetime.abort(); }
 
   private async mountedOperation(lease: MountedLease, operation: RepositoryLifecycleOperation | 'snapshot', input: LifecycleInput,
     workspace: RepositoryWorkspace | undefined, send: () => Promise<unknown>, options?: ProviderOperationOptions): Promise<unknown> {
@@ -635,6 +606,52 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
     lease.identity = identity;
     return { ...payload, path };
   }
+}
+
+/**
+ * Snapshots a remote workspace through its HTTP API. `repository.url` carries
+ * the workspace identifier. The JSON response is validated before it is trusted.
+ */
+export class RemoteWorkspaceProvider implements RepositoryProvider {
+  readonly id = 'remote-workspace';
+  readonly capabilities: RepositoryProvider['capabilities'];
+  private readonly lifecycle?: ConfiguredRepositoryLifecycle;
+  private readonly lifetime = new AbortController();
+  readonly withLifecycleLease?: RepositoryProvider['withLifecycleLease'];
+
+  constructor(private readonly options: RemoteWorkspaceProviderOptions) {
+    const configured = new MountedRepositoryLifecycle(options, (operation, input, workspace, operationOptions) => {
+      const repository = workspace?.repository ?? (input as RepositoryPrepareRequest).repository;
+      const route = workspace ? `sessions/${encodeURIComponent(workspace.id)}/${operation}` : operation;
+      return this.request(repository.url, route, operation === 'snapshot' ? undefined : input, operationOptions);
+    });
+    this.lifecycle = configured.lifecycle;
+    this.withLifecycleLease = configured.withLifecycleLease;
+    this.capabilities = this.lifecycle?.capabilities ?? SNAPSHOT_ONLY;
+  }
+
+  async snapshot(repository: RepositoryRef, options?: ProviderOperationOptions): Promise<RepositorySnapshot> {
+    assertCurrentWorkspace(repository);
+    return validateSnapshot(await this.request(repository.url, 'snapshot', undefined, options));
+  }
+
+  async prepare(request: RepositoryPrepareRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
+    return this.operate(() => requireLifecycle(this.lifecycle).prepare(request, options), options);
+  }
+
+  async checkout(request: RepositoryCheckoutRequest, options?: ProviderOperationOptions): Promise<RepositoryWorkspace> {
+    return this.operate(() => requireLifecycle(this.lifecycle).checkout(request, options), options);
+  }
+
+  async publish(request: RepositoryPublishRequest, options?: ProviderOperationOptions): Promise<RepositoryPublication> {
+    return this.operate(() => requireLifecycle(this.lifecycle).publish(request, options), options);
+  }
+
+  async cleanup(request: RepositoryWorkspaceRequest, options?: ProviderOperationOptions): Promise<RepositoryCleanupResult> {
+    return this.operate(() => requireLifecycle(this.lifecycle).cleanup(request, options), options);
+  }
+
+  dispose(): void { this.lifetime.abort(); }
 
   private async operate<Result>(operation: () => Promise<Result>, options?: ProviderOperationOptions): Promise<Result> {
     try { return await operation(); }
@@ -707,12 +724,11 @@ export class RemoteWorkspaceProvider implements RepositoryProvider {
 
 // --- Special git backend via an injectable snapshot command ---
 
-export interface SpecialGitBackendProviderOptions {
+export interface SpecialGitBackendProviderOptions extends MountedLifecycleOptions {
   /** Backend executable implementing `snapshot --json <repository> [--ref <ref>]`. */
   readonly backend: string;
   /** Defaults to the real process via {@link executeCommand}. */
   readonly executor?: CommandExecutor;
-  readonly lifecycle?: RepositoryLifecycleConfig;
 }
 
 /**
@@ -724,21 +740,21 @@ export class SpecialGitBackendProvider implements RepositoryProvider {
   readonly id = 'special-git-backend';
   readonly capabilities: RepositoryProvider['capabilities'];
   private readonly lifecycle?: ConfiguredRepositoryLifecycle;
-
+  readonly withLifecycleLease?: RepositoryProvider['withLifecycleLease'];
   private readonly executor: CommandExecutor;
 
   constructor(private readonly options: SpecialGitBackendProviderOptions) {
     this.executor = options.executor ?? executeCommand;
-    if (options.lifecycle) {
-      this.lifecycle = new ConfiguredRepositoryLifecycle(options.lifecycle, async (operation, input, workspace, operationOptions) => {
-        checkAbort(operationOptions);
-        const result = await runRepositoryCommand(this.executor, { command: this.options.backend, args: [operation, '--json'],
-          input: JSON.stringify({ ...input, ...(workspace ? { repository: workspace.repository, workspaceId: workspace.id } : {}) }),
-          signal: operationOptions?.signal, deadlineAt: operationOptions?.deadlineAt }, 'special git backend lifecycle command failed');
-        checkAbort(operationOptions);
-        try { return JSON.parse(result.stdout) as unknown; } catch { throw new Error('special git backend returned invalid JSON'); }
-      });
-    }
+    const configured = new MountedRepositoryLifecycle(options, async (operation, input, workspace, operationOptions) => {
+      checkAbort(operationOptions);
+      const result = await runRepositoryCommand(this.executor, { command: this.options.backend, args: [operation, '--json'],
+        input: JSON.stringify({ ...input, ...(workspace ? { repository: workspace.repository, workspaceId: workspace.id } : {}) }),
+        signal: operationOptions?.signal, deadlineAt: operationOptions?.deadlineAt }, 'special git backend lifecycle command failed');
+      checkAbort(operationOptions);
+      try { return JSON.parse(result.stdout) as unknown; } catch { throw new Error('special git backend returned invalid JSON'); }
+    });
+    this.lifecycle = configured.lifecycle;
+    this.withLifecycleLease = configured.withLifecycleLease;
     this.capabilities = this.lifecycle?.capabilities ?? SNAPSHOT_ONLY;
   }
 

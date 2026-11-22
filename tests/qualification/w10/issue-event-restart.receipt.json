@@ -1,0 +1,111 @@
+{
+  "afk": "0.2.162",
+  "gitea": "gitea version 28.4.0 built with go1.27.4 : bindata, sqlite, sqlite_unlock_notify",
+  "repository": "qualifier/parcel",
+  "repositoryId": 1,
+  "issue": 1,
+  "label": "ready",
+  "hookId": 1,
+  "events": [
+    {
+      "action": "opened",
+      "sourceId": "8f5b8a30-63de-4e7a-a4c0-c0de4b3b047b",
+      "bodySha256": "7883e50030071723c5989da9ccece13e7e3aa736c05ce5602ce401d240602b59",
+      "accepted": {
+        "deliveryId": "7cb9b3421af7b069a9a10ea07bc23e2d921765df56d642030ed1b17256fb8712",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795107537333,
+        "nextAttemptAt": 1795107537333,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "7cb9b3421af7b069a9a10ea07bc23e2d921765df56d642030ed1b17256fb8712",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795107537333,
+        "nextAttemptAt": 1795107538371,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "label_updated",
+      "sourceId": "cc716695-f7d8-4d8f-b457-edfcf4284b0f",
+      "bodySha256": "4fbe18c131ec4f8a256265561361a93b1137c980249543e1718fbb5f77c55d36",
+      "accepted": {
+        "deliveryId": "402ba917ff7ec6e27e2be44bce94d43e3a911c18c5a390542afe7f2ffb090e5d",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795107537353,
+        "nextAttemptAt": 1795107537353,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "402ba917ff7ec6e27e2be44bce94d43e3a911c18c5a390542afe7f2ffb090e5d",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795107537353,
+        "nextAttemptAt": 1795107538372,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "closed",
+      "sourceId": "eb5f638f-3b97-4bba-b868-b6ee32e3f8b4",
+      "bodySha256": "6347599bdd21608a740da4ada81101cb44b3912674e775700d3bd54ff5b62442",
+      "accepted": {
+        "deliveryId": "157b3d95de01f18102b463fa48d98f9a232132eef21474c78acd901ba19392fd",
+        "providerId": "trigger.issue-event",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795107537508,
+        "nextAttemptAt": 1795107537508,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "157b3d95de01f18102b463fa48d98f9a232132eef21474c78acd901ba19392fd",
+        "providerId": "trigger.issue-event",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795107537508,
+        "nextAttemptAt": 1795107538510,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    }
+  ],
+  "deliveries": [
+    {
+      "deliveryId": "157b3d95de01f18102b463fa48d98f9a232132eef21474c78acd901ba19392fd",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795107537508,
+      "nextAttemptAt": 1795107538510
+    },
+    {
+      "deliveryId": "402ba917ff7ec6e27e2be44bce94d43e3a911c18c5a390542afe7f2ffb090e5d",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795107537353,
+      "nextAttemptAt": 1795107538372
+    },
+    {
+      "deliveryId": "7cb9b3421af7b069a9a10ea07bc23e2d921765df56d642030ed1b17256fb8712",
+      "providerId": "trigger.issue-event",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795107537333,
+      "nextAttemptAt": 1795107538371
+    }
+  ],
+  "replayAfterListenerRestart": true,
+  "actionCount": 1
+}

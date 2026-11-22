@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "source": "f3f9f8edbe4d1b985662bf99dbc9da49f4a264d0",
+  "afk": "0.2.180",
+  "cursor": "2026.07.09-a3815c0",
+  "archiveSha256": "2b4c2f4a8029c0b48fae39625a2c4532ee21e6c105d80f7f8c5118dfff6d2e6d",
+  "reportedAuthStatus": "authenticated",
+  "scenario": "Empty synthetic Git repository and a completion prompt requesting zero tool calls",
+  "installed": {
+    "entry": "plugin serve-container / local / cursor",
+    "status": "failed",
+    "exitCode": 1,
+    "errorCode": "NON_ZERO_EXIT",
+    "authRequired": true,
+    "nativeEvents": [],
+    "sandboxClosed": true
+  },
+  "directReadOnlyBatch": {
+    "exitCode": 1,
+    "authRequired": true
+  },
+  "qualification": "blocked-by-native-authentication"
+}

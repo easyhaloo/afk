@@ -28,6 +28,7 @@ interface Reply {
   headers?: Record<string, string>;
   persist?: string;
   hang?: boolean;
+  verify?: (request: RecordedRequest) => Promise<unknown>;
 }
 interface RecordedRequest {
   method: string;
@@ -80,14 +81,16 @@ beforeEach(async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = Buffer.concat(chunks);
-      requests.push({ method: request.method!, path: request.url!, headers: request.headers, body });
+      const recorded = { method: request.method!, path: request.url!, headers: request.headers, body };
+      requests.push(recorded);
       const reply = replies.shift() ?? fallbackReply;
       events.emit('request', response);
       if (!reply) throw new Error(`Unexpected fixture request: ${request.method} ${request.url}`);
       if (reply.hang) return;
       if (reply.persist) await writeFile(reply.persist, body);
       response.writeHead(reply.status ?? 200, { 'content-type': reply.text === undefined ? 'application/json' : 'text/plain', ...reply.headers });
-      response.end(reply.text ?? JSON.stringify(reply.json ?? {}));
+      const payload = reply.verify ? await reply.verify(recorded) : reply.json;
+      response.end(reply.text ?? JSON.stringify(payload ?? {}));
     } catch (error) {
       fixtureErrors.push(error);
       response.writeHead(500).end();
@@ -184,6 +187,43 @@ const safeSettings = async (...secrets: string[]) => {
     expect(inventory).not.toContain(secret);
   }
 };
+
+it.each(['env', 'enterprise'] as const)('notification.feishu signs text using a %s reference for an independent receiver', async credentials => {
+  const webhook = `${http}/hooks/feishu/synthetic-private-path`;
+  const receiverSecret = 'synthetic-签名-key';
+  environment.MATRIX_HOOK = webhook;
+  environment.MATRIX_SIGNING_KEY = receiverSecret;
+  const signingSecret = await reference(credentials, 'signing_key', 'MATRIX_SIGNING_KEY');
+  const config = { webhook: { env: 'MATRIX_HOOK' }, signingSecret };
+  await configure('notification.feishu', config);
+  const verify = async (request: RecordedRequest) => {
+    const body = JSON.parse(request.body.toString());
+    expect(body).toEqual({ timestamp: expect.stringMatching(/^\d+$/), sign: expect.any(String), msg_type: 'text',
+      content: { text: '[HIGH] Matrix complete\nLocal service double only.\n第二行' } });
+    const fresh = Math.abs(Math.floor(Date.now() / 1000) - Number(body.timestamp)) < 3600;
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(`${body.timestamp}\n${receiverSecret}`),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const valid = await crypto.subtle.verify('HMAC', key, Buffer.from(body.sign, 'base64'), new Uint8Array());
+    return fresh && valid ? { code: 0 } : { code: 19021, msg: `rejected ${webhook} ${receiverSecret}` };
+  };
+  const notify = () => invocation('notification.provider', 'notification.feishu', 'notify', message);
+  replies.push({ verify });
+  expect(JSON.parse((await notify()).stdout)).toEqual({ delivered: true, channel: 'feishu' });
+  await safeSettings(webhook, receiverSecret);
+  environment.MATRIX_SIGNING_KEY = 'rotated-unmatched-test-key';
+  replies.push({ verify });
+  const rejected = await failure(notify());
+  expect(JSON.parse(rejected.stdout)).toEqual({ delivered: false, channel: 'feishu', error: 'Feishu rejected the message (code 19021)' });
+  for (const value of [webhook, receiverSecret, environment.MATRIX_SIGNING_KEY]) expect(rejected.stdout + rejected.stderr).not.toContain(value);
+  if (credentials === 'enterprise') {
+    await configure('notification.feishu', { ...config, signingSecret: { ...signingSecret, expiresAt: '2000-01-01T00:00:00Z' } });
+    expect(JSON.parse((await failure(notify())).stdout)).toMatchObject({ delivered: false, error: 'Operation credential unavailable' });
+  } else {
+    delete environment.MATRIX_SIGNING_KEY;
+    await failure(notify());
+  }
+  expect(requests).toHaveLength(2);
+}, 60_000);
 
 it.each([
   ['feishu', 'env'], ['feishu', 'enterprise'], ['slack', 'env'], ['slack', 'enterprise'],

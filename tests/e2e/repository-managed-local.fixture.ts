@@ -73,7 +73,8 @@ export async function startRepositoryServer(root: string, onPushRequest?: (reque
     close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
 }
 
-export async function prepareRepositoryRun(root: string, host: string, entry: string, dirty = false, verificationCommand?: string[]) {
+export async function prepareRepositoryRun(root: string, host: string, entry: string, dirty = false, verificationCommand?: string[], policy?: string,
+  verificationProvider = 'test-runner') {
   const bin = join(root, 'bin');
   const managed = join(root, 'managed');
   await mkdir(bin);
@@ -113,7 +114,8 @@ export async function prepareRepositoryRun(root: string, host: string, entry: st
     repositories: repositories.map(({ name, tracker }) => ({ ...tracker, name, checkoutPath: `repositories/${name}`, baseBranch: 'main', workingBranch: branch, primary: name === 'api' })) }));
   await writeFile(join(root, '.afk', 'plugins.yml'), JSON.stringify({ integrations: {
     repository: { provider: 'multi-repository' },
-    ...(verificationCommand && { verifications: [{ provider: 'test-runner', command: verificationCommand, timeoutMs: 5000 }] }),
+    ...(policy && { policies: [{ provider: policy, input: { action: 'publish' } }] }),
+    ...(verificationCommand && { verifications: [{ provider: verificationProvider, command: verificationCommand, timeoutMs: 5000 }] }),
   } }));
   const config = join(root, 'repositories.json');
   await writeFile(config, JSON.stringify({ repositories: repositories.map(repo => repo.config), managed: { workspaceRoot: managed } }));
@@ -148,6 +150,7 @@ for checkout in "$HOME"/managed/*; do
   git -C "$checkout" branch --show-current > "$HOME/$name.branch"
   git -C "$checkout" remote get-url --push origin > "$HOME/$name.origin"
   echo "applied $name" > "$checkout/shared.txt"
+  if test -f "$HOME/$name.shared.txt"; then cp "$HOME/$name.shared.txt" "$checkout/shared.txt"; fi
   git -C "$checkout" commit -qam "apply $name"
 done
 echo '${result('task')}'

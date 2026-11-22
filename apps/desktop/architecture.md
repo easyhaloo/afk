@@ -53,6 +53,14 @@ The renderer receives bounded metadata and version-bound results, without
 credentials, raw evidence, database access or a generic system-action bridge.
 These calls share Runtime's candidate ledger and do not start a distillation
 Worker or a model session when listing candidates and jobs.
+The task list can explicitly start one eligible request, including temporarily
+blocked or failed requests with attempts remaining. Main checks the current
+project inventory and Runtime's eligibility for the exact request before launching
+the bundled Electron Node child. The child reads saved Learning configuration, calls `learning.worker.once`
+with that request and uses Runtime's shared claim and budget with the CLI.
+Desktop owns the child and waits for it on quit. Cancel or loss of the parent
+IPC connection aborts the Runtime operation, and the child disposes Runtime
+before returning only the selected job's bounded status.
 Publication and reconciliation receipts remain visible when a subsequent list
 refresh fails; stale lists and prepared keys become unavailable. Reconciliation
 results are independent of the bounded candidate display page. Source withdrawal
@@ -209,6 +217,11 @@ remain live. The production runtime smoke loads the actual production main and
 Worker. JumpServer subprocesses use fixture binaries through PATH. Tests isolate
 HOME, workspaces and Electron user data, including the JSONL audit streams;
 they do not require real provider credentials or an AFK CLI executable.
+
+To verify the plugin Settings lifecycle in a packaged app, set
+`AFK_E2E_DESKTOP_EXECUTABLE` to the bundled executable and run
+`plugin-settings.spec.ts`. The test uses an isolated profile and attaches a
+receipt identifying the packaged renderer.
 
 Workflow coverage lives in `workflow.spec.ts` and `workflow-crud.spec.ts`.
 The CRUD suite edits managed steps through the UI, checks the saved YAML after

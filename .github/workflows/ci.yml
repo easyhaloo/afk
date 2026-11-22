@@ -113,7 +113,7 @@ jobs:
               package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json|vitest*.ts|.npmrc|.node-version|.nvmrc|.github/workflows/*|scripts/architecture-guard.mjs|scripts/check-workspace-imports.mjs|scripts/build-package.mjs)
                 global_config=true
                 ;;
-              packages/*|src/*|tests/*|apps/cli/*|scripts/*)
+              packages/*|src/*|tests/*|apps/cli/*|scripts/*|services/mounted-workspace/*)
                 if [[ "$path" != "scripts/check-doc-links.mjs" ]]; then
                   shared=true
                 fi
@@ -339,6 +339,9 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Verify mounted workspace recovery and Git readback
+        run: python3 tests/qualification/w10/mounted-workspace.py apps/cli
 
       - name: Test
         id: tests

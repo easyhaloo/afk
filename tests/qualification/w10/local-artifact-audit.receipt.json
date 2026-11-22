@@ -1,0 +1,20 @@
+{
+  "version": "0.2.168",
+  "commit": "90fbbadb",
+  "platform": "darwin-arm64",
+  "archiveSha256": "2052628b8c6cc81cce726df6c4a8a7df0bc224c73daa2e5499f61c0f05bdf0bf",
+  "test-report-local": {
+    "sourceEventId": "42b9997b-71f3-4148-a10f-9d48b3425dbd",
+    "sourceSha256": "88aea95c90baa4e27bbcdd3a24015ea86696bd240dce68f31adf465512bd6405",
+    "receiptSha256": "88aea95c90baa4e27bbcdd3a24015ea86696bd240dce68f31adf465512bd6405",
+    "fileSha256": "88aea95c90baa4e27bbcdd3a24015ea86696bd240dce68f31adf465512bd6405",
+    "size": 1210
+  },
+  "evidence-bundle": {
+    "sourceEventId": "6193513d-7d31-48b8-ba3e-f6dc836b7970",
+    "sourceSha256": "70d43f16f906b932272259d0b0a1f15043a4b7eed4b759744959670002fe985d",
+    "receiptSha256": "a0cb07650ef323d446f9061c66b084930331c51de916a7a1d1aff367d19d554e",
+    "fileSha256": "a0cb07650ef323d446f9061c66b084930331c51de916a7a1d1aff367d19d554e",
+    "size": 429
+  }
+}

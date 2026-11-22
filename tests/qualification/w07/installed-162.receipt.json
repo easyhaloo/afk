@@ -1,0 +1,66 @@
+{
+  "qualification": "W07",
+  "date": "2026-11-20",
+  "sourceCommit": "c220e380fef3eff1119e15817ca388702d9f8d83",
+  "cli": {
+    "version": "0.2.162",
+    "archive": "afk-darwin-arm64.tar.gz",
+    "sha256": "4e2f1fee69822fea9d905d5d31c9d0b5fdded9a79ec042033648cb571e47e6a2",
+    "node": "24.18.0",
+    "pnpm": "12.5.1",
+    "verifiedCommandEntries": 23
+  },
+  "templates": {
+    "suite": "tests/e2e/workflow-templates.test.ts",
+    "passed": 12,
+    "optionalHookFailureRuns": [
+      {
+        "template": "issue-implementation",
+        "failureSequences": [5, 16],
+        "subsequentMilestones": ["implementation.completed", "qa.passed"],
+        "verification": { "valid": true, "lastSequence": 22, "lastHash": "128946c60fcf2e2ce3134e152c0c915e71dc1898a5da876b8fa7e01352a75be5" },
+        "lastEvent": "human_gate.opened"
+      },
+      {
+        "template": "merge-conflict-resolution",
+        "failureSequences": [4],
+        "subsequentMilestones": ["qa.passed"],
+        "verification": { "valid": true, "lastSequence": 8, "lastHash": "a6069d78f66527d875416f0b0fe9a45d5f4fe9826dc7f36e6f3bbe5c81fb5384" },
+        "lastEvent": "run.finished",
+        "outcome": "succeeded"
+      },
+      {
+        "template": "success-review-preview",
+        "failureSequences": [4],
+        "subsequentMilestones": ["run.finished"],
+        "verification": { "valid": true, "lastSequence": 7, "lastHash": "499d3c22c5e0c3f6f192a200fcb797591069b3d48a9fafec6c3ad941d51b5ba6" },
+        "lastEvent": "run.finished",
+        "outcome": "succeeded"
+      }
+    ],
+    "review": {
+      "prevalidatedKinds": ["success", "repair"],
+      "validatedVersion": 2,
+      "publicationPhase": "prepared",
+      "zeroBudgetReason": "budget_exhausted",
+      "zeroBudgetSourceRunsByteIdentical": true
+    }
+  },
+  "claim": {
+    "suite": "apps/desktop/tests/e2e/work-item-single-claim.spec.ts",
+    "passed": 1,
+    "leaseHolder": "Desktop",
+    "contender": "CLI",
+    "contenderExitCode": 1,
+    "contenderError": "repository is leased by another execution",
+    "contenderJournalPresent": false,
+    "agentLaunchesDuringContention": 1,
+    "failedAgentExitCode": 1,
+    "desktopJournalPhases": ["requested", "implementing", "failed"],
+    "dirtyCheckoutRetry": { "exitCode": 1, "additionalAgentLaunches": 0, "userSettingsPreserved": true },
+    "cliRecoveryJournalPhases": ["requested", "implementing", "verifying", "publication_requested", "published", "merge_ready"],
+    "agentLaunchesOnRecovery": 3,
+    "distinctAgentProcessesAcrossAttempts": 4,
+    "localMergeRequestsCreated": 1
+  }
+}

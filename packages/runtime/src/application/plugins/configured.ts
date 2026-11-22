@@ -308,6 +308,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
     repositories: z.array(z.object({ url: text, ref: text.optional() }).strict()).min(1),
     operations: z.array(z.enum(['prepare', 'checkout', 'publish', 'cleanup'])).min(1),
   }).strict();
+  const managedMount = z.object({ workspaceRoot: text, repositories: z.array(z.object({ name: text, gitDirectory: text, leaseKey: text, remoteUrl: text }).strict()).min(1) }).strict();
+  const resolveMount = (mount?: z.infer<typeof managedMount>) => mount && ({ workspaceRoot: path(mount.workspaceRoot),
+    repositories: mount.repositories.map(repo => ({ ...repo, gitDirectory: path(repo.gitDirectory) })),
+  });
   const definitions: Record<string, Definition> = {
     'observability.otlp': defineOperation('observability.provider', secret => z.object({
       endpoint: baseUrl.refine(value => !/[?#]/.test(value), 'must not contain a query or fragment'),
@@ -355,7 +359,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new JiraTrackerProvider({ ...config, fetch });
       return capability(provider, { issueTrackers: [provider] });
     }),
-    'notification.feishu': defineOperation('notification.provider', secret => z.object({ webhook: secret.refine(value => typeof value !== 'string' || httpUrl.safeParse(value).success, 'invalid webhook configuration'), channel: text.optional() }).strict(), config => {
+    'notification.feishu': defineOperation('notification.provider', secret => z.object({
+      webhook: secret.refine(value => typeof value !== 'string' || httpUrl.safeParse(value).success, 'invalid webhook configuration'),
+      signingSecret: secret.optional(), channel: text.optional(),
+    }).strict(), config => {
       const provider = new FeishuNotificationProvider({ ...config, fetch });
       return capability(provider, { notifications: [provider] });
     }),
@@ -402,7 +409,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       const provider = new KnowledgeBaseProvider({ ...config, fetch });
       return capability(provider, { contexts: [provider] });
     }),
-    'context.retrieval': define('context.provider', z.object({ documents: z.array(z.object({ origin: text, content: text }).strict()).min(1) }).strict(), config => {
+    'context.retrieval': define('context.provider', z.object({ documents: z.array(z.object({
+      origin: text,
+      content: z.string().trim().min(1).refine(value => !value.includes('\0'), 'must not contain NUL'),
+    }).strict()).min(1) }).strict(), config => {
       const provider = new RetrievalProvider(config.documents);
       return capability(provider, { contexts: [provider] });
     }),
@@ -454,7 +464,10 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       };
       return capability(provider, { artifacts: [provider] });
     }),
-    'artifact.object-storage': define('artifact.provider', z.object({ endpoint: httpUrl }).strict(), config => {
+    'artifact.object-storage': defineOperation('artifact.provider', secret => z.union([
+      z.object({ endpoint: httpUrl }).strict(),
+      z.object({ presignedUrl: secret }).strict(),
+    ]), config => {
       const provider = new ObjectStorageProvider({ ...config, transport: fetch });
       return capability(provider, { artifacts: [provider] });
     }),
@@ -471,15 +484,13 @@ function configuredDefinitions(options: ConfiguredPluginsOptions) {
       return capability(provider, { repositories: [provider] });
     }),
     'repository.remote-workspace': defineOperation('repository.provider', secret => z.object({ baseUrl, token: secret.optional(), lifecycle: repositoryLifecycle.optional(),
-      managed: z.object({ workspaceRoot: text, repositories: z.array(z.object({ name: text, gitDirectory: text, leaseKey: text, remoteUrl: text }).strict()).min(1) }).strict().optional(),
+      managed: managedMount.optional(),
     }).strict(), config => {
-      const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch, managed: config.managed && {
-        workspaceRoot: path(config.managed.workspaceRoot), repositories: config.managed.repositories.map(repo => ({ ...repo, gitDirectory: path(repo.gitDirectory) })),
-      } });
+      const provider = new RemoteWorkspaceProvider({ ...config, transport: fetch, managed: resolveMount(config.managed) });
       return capability(provider, { repositories: [provider] });
     }),
-    'repository.special-git-backend': define('repository.provider', z.object({ backend: text, lifecycle: repositoryLifecycle.optional() }).strict(), config => {
-      const provider = new SpecialGitBackendProvider({ ...config, executor: execute });
+    'repository.special-git-backend': define('repository.provider', z.object({ backend: text, lifecycle: repositoryLifecycle.optional(), managed: managedMount.optional() }).strict(), config => {
+      const provider = new SpecialGitBackendProvider({ ...config, managed: resolveMount(config.managed), executor: execute });
       return capability(provider, { repositories: [provider] });
     }),
     'policy.secret-scan': define('policy.provider', z.object({ root: text, files: strings.optional(), maxFileBytes: z.number().int().positive().optional() }).strict(), config => {

@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import { assertFrozenScratchHelper, buildFrozenContext, type CapturedFrozenInput, type CapturedFrozenScratchHelper } from './frozen-input.js';
-import type { ContainerProvider, FrozenCommandOptions, FrozenContainerInspection, FrozenContainerOperations, FrozenScratchAssertion, FrozenScratchEvidence, FrozenScratchRecoveryEvidence, FrozenScratchRecoveryRequest, FrozenScratchResource, FrozenScratchSnapshot } from './types.js';
+import type { ContainerProvider, FrozenCommandOptions, FrozenContainerInspection, FrozenContainerOperations, FrozenScratchAssertion, FrozenScratchBaselineFailure, FrozenScratchEvidence, FrozenScratchRecoveryEvidence, FrozenScratchRecoveryRequest, FrozenScratchResource, FrozenScratchSnapshot } from './types.js';
+import { FROZEN_CONTROL_OBSERVATION_MS, FROZEN_EXECUTION_MAX_MS } from './types.js';
 
 export interface FrozenScratchObservation {
   readonly helper: CapturedFrozenScratchHelper;
@@ -242,7 +243,10 @@ function scratchRecoveryFrame(frame: unknown, options: FrozenExecutionOptions,
   const scratch = options.scratch!;
   const recovery = scratch.recovery!;
   scratchExact(frame, ['revision', 'operationId', 'inputDigest', 'helperDigest', 'artifactDigest', 'candidateVersion', 'initialSampledMs', 'initial', 'phases']);
-  if (frame.revision !== 'linux-native-scratch-recovery-v1' || !Array.isArray(frame.phases) || frame.phases.length !== 3) throw new Error('Invalid frozen scratch recovery phases');
+  const stopped = frame.revision === 'linux-native-original-exit-v1';
+  const comparable = scratch.candidateVersion === 'original' && recovery.returnAssertions !== undefined && !recovery.requireEffectHistory;
+  if (!Array.isArray(frame.phases) || (stopped ? !comparable || frame.phases.length < 1 || frame.phases.length > 3
+    : frame.revision !== 'linux-native-scratch-recovery-v1' || frame.phases.length !== 3)) throw new Error('Invalid frozen scratch recovery phases');
   const names = ['fault', 'recovery', 'replay'] as const;
   const assertions = [recovery.assertions.fault, recovery.assertions.recovered, recovery.assertions.replayed];
   const phases: FrozenScratchRecoveryEvidence['phases'][number][] = [];
@@ -250,6 +254,7 @@ function scratchRecoveryFrame(frame: unknown, options: FrozenExecutionOptions,
   const output = { stdout: '', stderr: '' };
   let outputBytes = 0;
   let firstEvidence: FrozenScratchEvidence | undefined;
+  let mismatch: Pick<FrozenScratchBaselineFailure, 'reason' | 'failedPhase'> | undefined;
   let previous = frame.initial;
   let sampledMs = frame.initialSampledMs;
   for (const [index, phase] of frame.phases.entries()) {
@@ -264,14 +269,17 @@ function scratchRecoveryFrame(frame: unknown, options: FrozenExecutionOptions,
     const invocation = observed.evidence.invocation;
     firstEvidence ??= observed.evidence;
     const identity = `${invocation.pid}:${invocation.startedIdentity}`;
-    if (identities.has(identity) || (index === 0 ? invocation.exitCode === 0 : invocation.exitCode !== 0)
-      || observed.evidence.final.resources.some((resource, resourceIndex) => resource.bytes !== assertions[index]![resourceIndex]!.bytes)) {
-      throw new Error('Frozen scratch recovery process or saved assertions differ');
-    }
+    const unexpectedExit = index === 0 ? invocation.exitCode === 0 : invocation.exitCode !== 0;
+    if (identities.has(identity) || unexpectedExit !== (stopped && index === frame.phases.length - 1)
+      || (comparable && invocation.signal !== null)) throw new Error('Frozen scratch recovery process or saved assertions differ');
     const expected = recovery.returnAssertions?.[names[index]!];
-    if (expected && (invocation.exitCode !== expected.exitCode || invocation.signal !== expected.signal
-      || phase.stdoutHex !== expected.stdoutHex || phase.stderrHex !== expected.stderrHex)) {
-      throw new Error('Frozen scratch recovery saved returns differ');
+    const stateDiffers = observed.evidence.final.resources.some((resource, resourceIndex) => resource.bytes !== assertions[index]![resourceIndex]!.bytes);
+    const reason = expected && (invocation.exitCode !== expected.exitCode || invocation.signal !== expected.signal) ? 'exit-code'
+      : expected && (phase.stdoutHex !== expected.stdoutHex || phase.stderrHex !== expected.stderrHex) ? 'phase-output'
+      : stateDiffers ? 'checkpoint' : undefined;
+    if (reason) {
+      if (!comparable) throw new Error(stateDiffers ? 'Frozen scratch recovery process or saved assertions differ' : 'Frozen scratch recovery saved returns differ');
+      mismatch ??= { failedPhase: names[index]!, reason };
     }
     identities.add(identity);
     outputBytes += ((phase.stdoutHex as string).length + (phase.stderrHex as string).length) / 2;
@@ -283,6 +291,9 @@ function scratchRecoveryFrame(frame: unknown, options: FrozenExecutionOptions,
     previous = phase.final;
     sampledMs = phase.sampledMs;
   }
+  if (mismatch) return { ...output, evidence: { ...firstEvidence!, baselineFailure: { revision: 'bounded-original-mismatch-v1',
+    helperRevision: stopped ? 'linux-native-original-exit-v1' : 'linux-native-scratch-recovery-v1',
+    contractDigest: scratchRecoveryContractDigest(options), phases, ...mismatch } } };
   const boundaries = { initial: phases[0]!.initial, fault: phases[0]!.final, recovered: phases[1]!.final, replayed: phases[2]!.final };
   if (boundaries.recovered.stateDigest !== boundaries.replayed.stateDigest) throw new Error('Frozen scratch replay changed terminal state');
   const returnAssertionsMatched = recovery.returnAssertions !== undefined;
@@ -297,6 +308,13 @@ function scratchRecoveryFrame(frame: unknown, options: FrozenExecutionOptions,
 
 export function verifyFrozenScratchRecoveryEvidence(options: FrozenExecutionOptions, evidence: unknown,
   operationId: string, containerId: string): FrozenScratchRecoveryEvidence {
+  const outcome = verifyFrozenScratchRecoveryOutcome(options, evidence, operationId, containerId);
+  if (!('qualification' in outcome)) throw new Error('Expected complete frozen scratch recovery evidence');
+  return outcome;
+}
+
+export function verifyFrozenScratchRecoveryOutcome(options: FrozenExecutionOptions, evidence: unknown,
+  operationId: string, containerId: string): FrozenScratchRecoveryEvidence | FrozenScratchBaselineFailure {
   if (!options.scratch?.recovery || !Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 120_000
     || !Number.isSafeInteger(options.maxOutputBytes ?? 64 * 1024) || (options.maxOutputBytes ?? 64 * 1024) < 1
     || typeof operationId !== 'string' || !operationId || typeof containerId !== 'string' || !containerId) {
@@ -307,12 +325,15 @@ export function verifyFrozenScratchRecoveryEvidence(options: FrozenExecutionOpti
   if ([options.input.digest, options.scratch.helper.digest, artifact.digest].some(value => !/^[a-f0-9]{64}$/.test(value))) {
     throw new Error('Invalid frozen scratch recovery verification digest');
   }
-  scratchExact(evidence, ['revision', 'helperRevision', 'contractRevision', 'contractDigest', 'phases', 'boundaries', 'assertionsDigest',
-    'assertionsMatched', 'returnAssertionsMatched', 'terminalStateIdempotent', 'trajectoryCoverage', 'replayBehaviorCoverage', 'historyCoverage', 'qualification']);
-  if (evidence.revision !== 'linux-native-scratch-recovery-v2' || evidence.helperRevision !== 'linux-native-scratch-recovery-v1'
-    || evidence.contractRevision !== 'bounded-recovery-return-state-v1' || !Array.isArray(evidence.phases) || evidence.phases.length !== 3) {
-    throw new Error('Unsupported frozen scratch recovery evidence revision or phases');
+  if (evidence && typeof evidence === 'object' && 'revision' in evidence && evidence.revision === 'bounded-original-mismatch-v1') {
+    scratchExact(evidence, ['revision', 'helperRevision', 'contractDigest', 'phases', 'failedPhase', 'reason']);
+  } else {
+    scratchExact(evidence, ['revision', 'helperRevision', 'contractRevision', 'contractDigest', 'phases', 'boundaries', 'assertionsDigest',
+      'assertionsMatched', 'returnAssertionsMatched', 'terminalStateIdempotent', 'trajectoryCoverage', 'replayBehaviorCoverage', 'historyCoverage', 'qualification']);
+    if (evidence.revision !== 'linux-native-scratch-recovery-v2' || evidence.helperRevision !== 'linux-native-scratch-recovery-v1'
+      || evidence.contractRevision !== 'bounded-recovery-return-state-v1') throw new Error('Unsupported frozen scratch recovery evidence revision');
   }
+  if (!Array.isArray(evidence.phases) || evidence.phases.length < 1 || evidence.phases.length > 3) throw new Error('Unsupported frozen scratch recovery evidence phases');
   const snapshot = (value: unknown) => {
     scratchExact(value, ['sampledMs', 'processState', 'quiescenceConfirmed', 'stateDigest', 'resources']);
     if (!Array.isArray(value.resources) || value.resources.length !== options.scratch!.resources.length) {
@@ -334,12 +355,13 @@ export function verifyFrozenScratchRecoveryEvidence(options: FrozenExecutionOpti
     return { phase, initial: snapshot(phase.initial), final: snapshot(phase.final) };
   });
   const first = phases[0]!;
-  const recomputed = scratchRecoveryFrame({ revision: 'linux-native-scratch-recovery-v1', operationId: first.phase.operationId,
+  const checked = scratchRecoveryFrame({ revision: evidence.helperRevision, operationId: first.phase.operationId,
     inputDigest: first.phase.inputDigest, helperDigest: first.phase.helperDigest, artifactDigest: first.phase.artifactDigest,
     candidateVersion: first.phase.candidateVersion, initialSampledMs: first.initial.sampledMs, initial: first.initial.resources,
     phases: phases.map(({ phase, final }) => ({ phase: phase.phase, ordinal: phase.ordinal, invocationId: phase.invocationId,
       callInputDigest: phase.callInputDigest, invocation: phase.invocation, sampledMs: final.sampledMs,
-      final: final.resources, stdoutHex: phase.stdoutHex, stderrHex: phase.stderrHex })) }, options, operationId, containerId).evidence.recovery!;
+      final: final.resources, stdoutHex: phase.stdoutHex, stderrHex: phase.stderrHex })) }, options, operationId, containerId).evidence;
+  const recomputed = checked.baselineFailure ?? checked.recovery!;
   if (!isDeepStrictEqual(evidence, recomputed)) throw new Error('Frozen scratch recovery evidence differs from independent recomputation');
   return recomputed;
 }
@@ -349,15 +371,15 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
     result: { stdout: string; stderr: string; code: number }; completed: FrozenContainerInspection; control: FrozenControlEvidence;
   }> {
   const control = options.control!;
-  const began = performance.now();
-  const deadline = began + options.timeoutMs;
+  let deadline = performance.now() + Math.min(FROZEN_CONTROL_OBSERVATION_MS, options.timeoutMs);
+  const attachDeadline = deadline + control.afterMs + FROZEN_CONTROL_OBSERVATION_MS;
   const controller = new AbortController();
   const abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });
   let outcome: { result: { stdout: string; stderr: string; code: number } } | { error: unknown } | undefined;
-  const bounded = (): FrozenCommandOptions => {
+  const bounded = (until = deadline): FrozenCommandOptions => {
     if (options.signal?.aborted) throw options.signal.reason;
-    const timeoutMs = Math.floor(deadline - performance.now());
+    const timeoutMs = Math.floor(until - performance.now());
     if (timeoutMs < 1) throw new Error('Frozen control execution deadline exceeded');
     return { signal: controller.signal, timeoutMs, maxOutputBytes: 256 * 1024 };
   };
@@ -372,7 +394,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
     return outcome !== undefined;
   };
   const earlyExit = async () => {
-    await pending;
+    if (!outcome) await wait(bounded().timeoutMs);
     bounded();
     if (!outcome || 'error' in outcome) throw outcome && 'error' in outcome ? outcome.error : new Error('Frozen attach exit was not confirmed');
     const completed = await engine.inspectFrozenContainer(containerId, bounded());
@@ -385,7 +407,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
       runningObservedMs, triggeredMs: null, terminatedMs: performance.now() - started } };
   };
   try {
-    pending = engine.startFrozenContainer(containerId, { ...bounded(), maxOutputBytes: options.maxOutputBytes ?? 64 * 1024 })
+    pending = engine.startFrozenContainer(containerId, { ...bounded(attachDeadline), maxOutputBytes: options.maxOutputBytes ?? 64 * 1024 })
       .then(result => { outcome = { result }; }, error => { outcome = { error }; });
     let inspected: FrozenContainerInspection;
     while (true) {
@@ -399,6 +421,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
       await wait(Math.min(20, bounded().timeoutMs));
     }
     const triggerAt = started + runningObservedMs + control.afterMs;
+    deadline = triggerAt + FROZEN_CONTROL_OBSERVATION_MS;
     while (performance.now() < triggerAt) {
       if (exited()) return await earlyExit();
       await wait(Math.min(20, Math.max(1, Math.ceil(triggerAt - performance.now())), bounded().timeoutMs));
@@ -410,7 +433,7 @@ async function executeControlled(engine: FrozenContainerOperations, containerId:
     if (inspected.status !== 'running') throw new Error('Frozen container stopped before control trigger');
     const triggeredMs = performance.now() - started;
     await engine.killFrozenContainer!(operationId, containerId, bounded());
-    await pending;
+    if (!outcome) await wait(bounded().timeoutMs);
     bounded();
     const completed = await engine.inspectFrozenContainer(containerId, bounded());
     verify(completed);
@@ -479,14 +502,14 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
   const checkAbort = () => { if (options.signal?.aborted) throw options.signal.reason; };
   checkAbort();
   if (provider.engine !== 'docker' || !provider.frozen) throw new Error('Provider has no supported frozen execution capability');
-  if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 120_000
+  if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > FROZEN_EXECUTION_MAX_MS
     || !options.argv.length || !options.argv[0]?.trim() || options.argv.length > 128 || options.argv.some(argument => typeof argument !== 'string' || argument.includes('\0'))
     || Buffer.byteLength(JSON.stringify(options.argv)) > 32 * 1024) throw new Error('Invalid frozen execution limits or command');
   const maxOutputBytes = options.maxOutputBytes ?? 64 * 1024;
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 1024 * 1024) throw new Error('Invalid frozen output limit');
   if (options.control !== undefined && (Object.keys(options.control).length !== 2
     || !['cancellation', 'timeout'].includes(options.control.kind) || !Number.isSafeInteger(options.control.afterMs)
-    || options.control.afterMs < 1 || options.control.afterMs >= options.timeoutMs)) throw new Error('Invalid frozen control experiment');
+    || options.control.afterMs < 1 || options.control.afterMs > options.timeoutMs)) throw new Error('Invalid frozen control experiment');
   if (options.control && typeof provider.frozen.killFrozenContainer !== 'function') throw new Error('Frozen control is not supported by provider');
   if (options.scratch) {
     validateScratch(options);
@@ -538,7 +561,7 @@ export async function executeFrozenContainer(provider: ContainerProvider, option
     assertPolicy(completed, operationId, containerId, imageId, argv);
     if (completed.status !== 'exited' || completed.exitCode !== result.code) throw new Error('Frozen execution exit was not confirmed');
     const scratch = options.scratch ? scratchResult(result, options, operationId, containerId) : undefined;
-    if (scratch?.evidence.recovery) verifyFrozenScratchRecoveryEvidence(options, scratch.evidence.recovery, operationId, containerId);
+    if (options.scratch?.recovery) verifyFrozenScratchRecoveryOutcome(options, scratch?.evidence.baselineFailure ?? scratch?.evidence.recovery, operationId, containerId);
     const digest = (input: unknown) => createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const policyInspection = controlled?.control.outcome === 'not-triggered' ? completed : inspected;
     const { status: _status, exitCode: _exitCode, ...policy } = policyInspection;

@@ -1,5 +1,6 @@
 import { workspaceDataDirectory } from '../workspace.js';
-import { spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { Signal } from '../../domain/schemas.js';
 import { readSignal, readSignalSync } from '../io/signal.js';
 import { TIMEOUTS } from '../../shared/constants.js';
@@ -44,10 +45,72 @@ export interface TmuxCaptureOptions {
 
 type SignalReaders = { readSignal: typeof readSignal; readSignalSync: typeof readSignalSync };
 
+function isMissingTmuxSession(error: unknown): boolean {
+  const message = String(error).trimEnd();
+  return message === 'Error: tmux command failed: no current target'
+    || /can't find session|no server running|error connecting to .*No such file or directory/i.test(message);
+}
+
+const PROCESS_OWNER_ENV = 'AFK_TMUX_EXECUTION_OWNER';
+const PROCESS_OWNER_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+async function stopPaneProcesses(panes: ReadonlyMap<number, number>, protectedPanes: ReadonlySet<number>, owner?: string): Promise<void> {
+  if ((!panes.size && !owner) || process.getuid === undefined) return;
+  const args = [...(owner ? ['eww'] : []), '-U', String(process.getuid()), '-o',
+    owner ? 'pid=,ppid=,lstart=,stat=,command=' : 'pid=,ppid=,lstart=,stat='];
+  const signalled = new Map<number, string>();
+  const deadline = Date.now() + 1000;
+  while (true) {
+    let output: string;
+    try {
+      output = execFileSync('ps', args, {
+        encoding: 'utf8', timeout: 1000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' },
+      });
+    } catch {
+      throw new Error('Tmux process ownership could not be inspected');
+    }
+    const children = new Map<number, number[]>();
+    const starts = new Map<number, string>();
+    const owned = new Set<number>();
+    const tagged = new Set<number>();
+    for (const line of output.split('\n')) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(\S+)(?:\s+(.*))?$/);
+      if (!match || match[4]!.startsWith('Z')) continue;
+      const pid = Number(match[1]);
+      const parentPid = Number(match[2]);
+      const start = match[3]!;
+      starts.set(pid, start);
+      const siblings = children.get(parentPid) ?? [];
+      siblings.push(pid);
+      children.set(parentPid, siblings);
+      if (panes.get(pid) === parentPid || signalled.get(pid) === start) owned.add(pid);
+      if (owner && match[5]?.split(/\s+/).includes(`${PROCESS_OWNER_ENV}=${owner}`)) tagged.add(pid);
+    }
+    if (!starts.has(process.pid)) throw new Error('Incomplete tmux process ownership observation');
+    if (![...protectedPanes].some(pid => tagged.has(pid))) {
+      for (const pid of tagged) owned.add(pid);
+    }
+    for (const pid of owned) {
+      for (const child of children.get(pid) ?? []) owned.add(child);
+    }
+    if (!owned.size) return;
+    for (const pid of owned) {
+      const start = starts.get(pid)!;
+      if (signalled.get(pid) === start) continue;
+      try { process.kill(pid, 'SIGKILL'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+      signalled.set(pid, start);
+    }
+    if (Date.now() >= deadline) throw new Error('Tmux process family did not exit after SIGKILL');
+    await delay(20);
+  }
+}
+
 /**
  * Tmux client wrapper for session management.
  *
- * Uses Control Mode (`tmux -CC`) for interactive operations (sendKeys, waitForSignal)
+ * Uses Control Mode (`tmux -C`) for interactive operations (sendKeys, waitForSignal)
  * to receive real-time events, and plain `exec()` for one-shot commands.
  */
 export class TmuxClient {
@@ -93,7 +156,8 @@ export class TmuxClient {
   /**
    * Create new tmux session, replacing any existing session with the same name.
    */
-  async createSession(name: string, dir: string, command: string = 'claude --dangerously-skip-permissions'): Promise<TmuxSession> {
+  async createSession(name: string, dir: string, command: string = 'claude --dangerously-skip-permissions', processOwner?: string): Promise<TmuxSession> {
+    if (processOwner !== undefined && !PROCESS_OWNER_PATTERN.test(processOwner)) throw new Error('Invalid tmux process owner');
     const window = 'main';
     const session = normalizeTmuxSessionName(name);
     // Kill any existing session first to avoid "duplicate session" errors.
@@ -104,6 +168,7 @@ export class TmuxClient {
       '-s', session,
       '-n', window,
       '-c', dir,
+      ...(processOwner ? ['-e', `${PROCESS_OWNER_ENV}=${processOwner}`] : []),
       command,
     ]);
     const paneId = await this.firstPaneId(session, window).catch(() => undefined);
@@ -129,7 +194,7 @@ export class TmuxClient {
    */
   async hasSession(name: string): Promise<boolean> {
     try {
-      await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
+      await this.exec(['has-session', '-t', `=${normalizeTmuxSessionName(name)}`]);
       return true;
     } catch {
       return false;
@@ -138,10 +203,10 @@ export class TmuxClient {
 
   async sessionStatus(name: string): Promise<'present' | 'missing' | 'unknown'> {
     try {
-      await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
+      await this.exec(['has-session', '-t', `=${normalizeTmuxSessionName(name)}`]);
       return 'present';
     } catch (error) {
-      return /can't find session|no server running|error connecting to .*No such file or directory/i.test(String(error)) ? 'missing' : 'unknown';
+      return isMissingTmuxSession(error) ? 'missing' : 'unknown';
     }
   }
 
@@ -171,10 +236,40 @@ export class TmuxClient {
   }
 
   /**
-   * Kill tmux session
+   * Stop the processes in unshared windows before removing the session.
    */
-  async killSession(name: string): Promise<void> {
-    await this.exec(['kill-session', '-t', normalizeTmuxSessionName(name)]);
+  async killSession(name: string, expectedOwner?: string): Promise<void> {
+    if (expectedOwner !== undefined && !PROCESS_OWNER_PATTERN.test(expectedOwner)) throw new Error('Invalid tmux process owner');
+    const session = normalizeTmuxSessionName(name);
+    let panes: string;
+    try {
+      panes = await this.exec(['list-panes', '-a', '-F', `#{session_id} #{pid} #{pane_pid} #{window_linked} #{pane_dead} #{${PROCESS_OWNER_ENV}} #{session_name}`]);
+    } catch (error) {
+      if (!isMissingTmuxSession(error)) throw error;
+      panes = '';
+    }
+    const processes = new Map<number, number>();
+    const protectedPanes = new Set<number>();
+    let sessionId: string | undefined;
+    let owner = expectedOwner;
+    for (const row of panes.split('\n')) {
+      const match = row.match(/^(\$\d+) (\d+) (\d+) ([01]) ([01]) (\S*) (.*)$/);
+      if (!match) continue;
+      const panePid = Number(match[3]);
+      const target = match[7] === session && (!expectedOwner || match[6] === expectedOwner);
+      if (match[5] === '0' && (!target || match[4] === '1')) protectedPanes.add(panePid);
+      if (!target) continue;
+      sessionId = match[1];
+      if (PROCESS_OWNER_PATTERN.test(match[6]!)) owner = match[6];
+      if (match[4] === '0' && match[5] === '0') processes.set(panePid, Number(match[2]));
+    }
+    await stopPaneProcesses(processes, protectedPanes, owner);
+    if (!sessionId) return;
+    try {
+      await this.exec(['kill-session', '-t', sessionId]);
+    } catch (error) {
+      if (!isMissingTmuxSession(error)) throw error;
+    }
   }
 
   /**

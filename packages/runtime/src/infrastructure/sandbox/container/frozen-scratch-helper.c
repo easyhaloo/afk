@@ -305,11 +305,16 @@ int main(int argc, char **argv) {
   for (int index = 0; index < resource_count; index++) if (boundaries[0][index].present) fail();
   double initial_sampled = now_ms() - began;
   size_t total_output = 0, sampled_bytes = 0;
+  int stopped_original = 0;
   for (int phase = 0; phase < phase_count; phase++) {
     char *command[] = { argv[separator + 1], argv[separator + 2], phase ? recovery_input : argv[separator + 3], NULL };
     invoke(command, began, timeout, output_limit, &total_output, &invocations[phase]);
     int status = invocations[phase].status;
-    if (recovery && (phase ? !WIFEXITED(status) || WEXITSTATUS(status) != 0 : WIFEXITED(status) && WEXITSTATUS(status) == 0)) fail();
+    if (recovery && (phase ? !WIFEXITED(status) || WEXITSTATUS(status) != 0 : WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+      if (strcmp(argv[6], "original") || !WIFEXITED(status)) fail();
+      phase_count = phase + 1;
+      stopped_original = 1;
+    }
     snapshot(boundaries[phase + 1], (int)resource_count);
     invocations[phase].sampled = now_ms() - began;
     if (invocations[phase].sampled >= timeout) fail();
@@ -317,7 +322,7 @@ int main(int argc, char **argv) {
   }
   if (2 * (sampled_bytes + total_output) + 8192 > 512 * 1024) fail();
   printf("{\"revision\":\"%s\",\"operationId\":\"%s\",\"inputDigest\":\"%s\",\"helperDigest\":\"%s\",\"artifactDigest\":\"%s\",\"candidateVersion\":\"%s\",",
-    recovery ? "linux-native-scratch-recovery-v1" : "linux-native-scratch-v1", argv[1], argv[2], argv[3], argv[4], argv[6]);
+    stopped_original ? "linux-native-original-exit-v1" : recovery ? "linux-native-scratch-recovery-v1" : "linux-native-scratch-v1", argv[1], argv[2], argv[3], argv[4], argv[6]);
   printf("\"initialSampledMs\":%.6f,\"initial\":", initial_sampled);
   print_resources(boundaries[0], (int)resource_count);
   if (recovery) fputs(",\"phases\":[", stdout);

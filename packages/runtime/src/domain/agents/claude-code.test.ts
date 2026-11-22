@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code.js';
+import { claudeStatuslineSettingsPath } from '../../shared/workspace-paths.js';
 import { CursorProvider } from './cursor.js';
 import { CodexProvider } from './codex.js';
 import { CodexAppServerExecution } from './codex-app-server/execution.js';
@@ -36,7 +37,7 @@ describe('restricted analysis profile', () => {
     expect(startAgent.mock.calls[0]![0]).toMatchObject({ prompt: 'Ordinary development task',
       command: { argv: ['claude', '--dangerously-skip-permissions', '--print', '--output-format', 'stream-json', '--verbose'], cwd: '/tmp/development' } });
     expect(provider.buildCommand({ worktreePath: '/tmp/development', sessionId: 'ordinary',
-      executionMode: 'interactive', executionProfile }).argv).toEqual(['claude', '--dangerously-skip-permissions', '--settings', '/tmp/development/.claude/settings.local.json']);
+      executionMode: 'interactive', executionProfile }).argv).toEqual(['claude', '--dangerously-skip-permissions', '--settings', claudeStatuslineSettingsPath('/tmp/development')]);
   });
 
   it('disables customizations and all tools without bypassing permissions or disabling OAuth', () => {

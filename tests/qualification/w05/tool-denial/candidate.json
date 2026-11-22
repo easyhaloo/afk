@@ -1,0 +1,77 @@
+{
+  "base": "2aca5d6b",
+  "version": "0.2.162",
+  "archiveDigest": "47e451118faf7d990d84ca713eeabe168fa5922c81a0d34823666ec7b5082e2f",
+  "formalSha256": "79c77750cb43aee3ef145fd1e567ea70495214b30916e7a62a6c47318a8d1986",
+  "candidateId": "e1316adc38460632b234887bb4e15cc0c5d770ff33c1b4ba47bdddfc5818a584",
+  "sourceDigest": "200564c2a4394ef30f393587a9aa680048fb042bcb0edb2b96499103eab821d0",
+  "historicalCandidateId": "bdea8b3209d77dc089065ac7d2d5e94128b70a5044d240cfb6906c73e828f37f",
+  "checks": [
+    {
+      "id": "behavior-1",
+      "kind": "normal"
+    },
+    {
+      "id": "behavior-2",
+      "kind": "normal"
+    },
+    {
+      "id": "behavior-3",
+      "kind": "normal"
+    },
+    {
+      "id": "behavior-4",
+      "kind": "refusal"
+    },
+    {
+      "id": "control-cancellation",
+      "kind": "cancellation"
+    },
+    {
+      "id": "control-timeout",
+      "kind": "timeout"
+    },
+    {
+      "id": "control-permission",
+      "kind": "permission-denied"
+    },
+    {
+      "id": "control-recovery",
+      "kind": "recovery"
+    }
+  ],
+  "configured": [
+    "control-permission"
+  ],
+  "experiment": {
+    "status": "unsupported",
+    "reason": "control_experiment_unavailable"
+  },
+  "originalCLI": {
+    "exit": 1,
+    "result": {
+      "status": "blocked",
+      "code": "insufficient_coverage"
+    }
+  },
+  "installedRuntime": {
+    "active": {
+      "status": "blocked",
+      "code": "insufficient_coverage"
+    },
+    "revoked": {
+      "status": "blocked",
+      "code": "unauthorized"
+    },
+    "selections": 0
+  },
+  "revokedCLI": {
+    "exit": 1,
+    "result": {
+      "status": "blocked",
+      "code": "unauthorized"
+    },
+    "state": "candidate",
+    "version": 1
+  }
+}

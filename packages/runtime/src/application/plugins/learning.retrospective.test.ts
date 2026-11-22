@@ -11,7 +11,7 @@ import { createLearningPlugin, type LearningConfiguration } from './learning.js'
 import { PluginRuntime } from './runtime.js';
 
 const mocks = vi.hoisted(() => ({
-  capture: vi.fn(), query: vi.fn(), queryAll: vi.fn(), worker: vi.fn(), runOnce: vi.fn(), closeWorker: vi.fn(),
+  capture: vi.fn(), query: vi.fn(), queryAll: vi.fn(), worker: vi.fn(), runOnce: vi.fn(), watch: vi.fn(), closeWorker: vi.fn(),
   validate: vi.fn(), prepare: vi.fn(), publish: vi.fn(), reconcileKnowledge: vi.fn(), reconcileLessons: vi.fn(),
   store: vi.fn(), closeStore: vi.fn(), processGuard: vi.fn(), lessonGuard: vi.fn(),
 }));
@@ -75,7 +75,7 @@ function candidate(kind: 'process' | 'lesson' = 'process', state: LearningCandid
 
 function requestState(overrides: Partial<LearningRequestState> = {}): LearningRequestState {
   const candidates = [candidate(), candidate('lesson', 'candidate', 'f'.repeat(64), 4)];
-  return { job: { jobId: requestKey, scope, sourceId: `run:${runId}`, sourceRunId: runId, status: 'processed', attempts: [] },
+  return { job: { jobId: requestKey, scope, sourceId: `run:${runId}`, sourceRunId: runId, status: 'processed', canRun: false, attempts: [] },
     processing: { requestKey, outputDigest: '1'.repeat(64), candidateIds: candidates.map(entry => entry.id), warnings: [] },
     candidates, ...overrides };
 }
@@ -131,7 +131,7 @@ beforeEach(() => {
     return requestState();
   });
   mocks.queryAll.mockReturnValue({ jobs: [], candidates: [candidate('process', 'candidate', '9'.repeat(64))] });
-  mocks.worker.mockImplementation(function () { return { runOnce: mocks.runOnce, close: mocks.closeWorker }; });
+  mocks.worker.mockImplementation(function () { return { runOnce: mocks.runOnce, watch: mocks.watch, close: mocks.closeWorker }; });
   mocks.runOnce.mockResolvedValue(requestState());
   mocks.closeWorker.mockResolvedValue(undefined);
   mocks.store.mockImplementation(function () { return { close: mocks.closeStore }; });
@@ -810,6 +810,26 @@ describe('review regressions: prepare-only recovery, operation cancellation and 
 });
 
 describe('related learning actions through the same real runtime and workflow executor', () => {
+  it('watches until the caller cancels, with cleanup, and rejects workflow envelopes', async () => {
+    const { execute, runtime } = await fixture();
+    const action = 'learning.worker.watch';
+    await expect(execute({}, action)).rejects.toMatchObject({ name: 'ZodError' });
+    expect(mocks.worker).not.toHaveBeenCalled();
+    const controller = new AbortController();
+    mocks.watch.mockImplementationOnce(async (signal: AbortSignal) => {
+      expect(signal.aborted).toBe(false);
+      controller.abort();
+      expect(signal.aborted).toBe(true);
+    });
+    await expect(runtime.dispatchSystemAction(action, {}, { signal: controller.signal })).resolves.toEqual({ status: 'stopped' });
+    expect(mocks.watch).toHaveBeenCalledOnce();
+    expect(mocks.runOnce).not.toHaveBeenCalled();
+    expect(mocks.closeWorker).toHaveBeenCalled();
+    const closes = mocks.closeWorker.mock.calls.length;
+    await runtime.close();
+    expect(mocks.closeWorker).toHaveBeenCalledTimes(closes);
+  });
+
   it.each([{}, target])('forwards worker.once input %# without broadening an exact target', async value => {
     const { execute, runtime } = await fixture();
     await execute(value, 'learning.worker.once');

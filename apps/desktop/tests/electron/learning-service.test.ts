@@ -25,7 +25,7 @@ function candidate(project = scope, id = candidateId): LearningCandidate {
 
 function fixture() {
   let rows = [candidate(), candidate(other, foreignId)];
-  const job: LearningJob = { jobId: requestKey, scope, status: "blocked", sourceId: "SECRET /private/source", reasonCode: "SECRET",
+  const job: LearningJob = { jobId: requestKey, scope, status: "blocked", canRun: false, sourceId: "SECRET /private/source", reasonCode: "SECRET",
     attempts: [{ requestKey, callId: "SECRET", day: "2026-11-11", startedAt: "2026-11-11T00:00:00Z", ownerPid: 123, host: "SECRET", status: "started" }] };
   const publication = { key, candidateId, candidateVersion: 3, targetRef: "wiki:approval", phase: "prepared",
     validatorVersion: "SECRET", candidateDigest: "d".repeat(64), evidenceDigest: "e".repeat(64),
@@ -49,6 +49,38 @@ function fixture() {
 }
 
 describe("desktop learning service", () => {
+  it("holds its worker slot through cancellation cleanup and shuts down only its own worker", async () => {
+    const data = fixture();
+    const target = { scope, requestKey };
+    const job = { ...data.job, status: "pending", canRun: true, attempts: [] };
+    const dispatchSystemAction = vi.fn(async () => ({ job }));
+    let cleanup!: () => void;
+    let launched!: (signal: AbortSignal) => void;
+    const started = new Promise<AbortSignal>(resolve => { launched = resolve; });
+    const launchWorker = vi.fn(async (_target, signal) => {
+      launched(signal);
+      return new Promise(resolve => { cleanup = () => resolve({ status: "cancelled" }); });
+    });
+    const service = createLearningService({ projects: data.projects, withRuntime: action => action({ dispatchSystemAction }), launchWorker });
+
+    const result = service.worker.once(target);
+    const signal = await started;
+    expect(await service.worker.cancel({ ...target, scope: other })).toBe(false);
+    expect(signal.aborted).toBe(false);
+    await expect(service.worker.once(target)).rejects.toThrow("正在运行");
+    const stopping = service.stopWorker();
+    expect(signal.aborted).toBe(true);
+    let stopped = false;
+    void stopping!.then(() => { stopped = true; });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    cleanup();
+    await expect(result).resolves.toEqual({ status: "cancelled" });
+    await stopping;
+    await expect(service.worker.once(target)).rejects.toThrow("不可用");
+    expect(launchWorker).toHaveBeenCalledTimes(1);
+  });
+
   it("submits only a correction action and returns the bound receipt without changing the candidate", async () => {
     const data = fixture();
     const before = structuredClone(data.rows);
@@ -321,12 +353,12 @@ describe("desktop learning service", () => {
   it("queries only existing read actions and projects bounded metadata without secrets", async () => {
     const { service, dispatchSystemAction } = fixture();
     expect(await service.projects()).toEqual([scope, other]);
-    expect(await service.jobs({ scope })).toEqual([{ jobId: requestKey, scope, status: "blocked", attemptCount: 1 }]);
+    expect(await service.jobs({ scope })).toEqual([{ jobId: requestKey, scope, status: "blocked", attemptCount: 1, canRun: false }]);
     const records = await service.candidates({ scope });
     expect(records).toEqual([{ id: candidateId, requestKey, scope, version: 2, state: "candidate", kind: "fact", title: "Approval", evidenceCount: 1, targetRef: "wiki:approval" }]);
     expect(JSON.stringify(records)).not.toContain("SECRET");
     expect(dispatchSystemAction.mock.calls.map(([action]) => action)).toEqual(["learning.jobs", "learning.candidates"]);
-    expect(Object.keys(service).sort()).toEqual(["candidates", "correct", "jobs", "knowledge", "projects", "validate"]);
+    expect(Object.keys(service).sort()).toEqual(["candidates", "correct", "jobs", "knowledge", "projects", "stopWorker", "validate", "worker"]);
     expect(Object.keys(service.knowledge).sort()).toEqual(["prepare", "publish", "reconcile"]);
   });
 

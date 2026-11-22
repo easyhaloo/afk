@@ -285,14 +285,24 @@ describe('built WorkflowRunner Agent × Sandbox (simulated agent outputs)', () =
       'claude-code': ['--dangerously-skip-permissions', '--print', '--output-format', 'stream-json', '--verbose'],
       codex: ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '-C', current.workspace],
       cursor: ['--print', '--output-format', 'stream-json'],
-      pi: ['--print', '--mode', 'json'], opencode: ['run', '--format', 'json'], copilot: ['--allow-all'],
+      pi: ['--print', '--mode', 'json'], opencode: ['run', '--format', 'json'],
+      copilot: ['--output-format', 'json', '--stream', 'on'],
     };
     expect(report.effect.binary).toBe({ 'claude-code': 'claude', codex: 'codex', cursor: 'cursor-agent', pi: 'pi', opencode: 'opencode', copilot: 'copilot' }[agent]);
-    expect(report.effect.argv).toEqual(commands[agent]);
-    if (agent === 'cursor' || agent === 'pi') {
+    const copilotUsageReport = agent === 'copilot' && (sandbox === 'local' || sandbox === 'remote-container');
+    expect(report.effect.argv).toEqual(copilotUsageReport
+      ? [...commands[agent], '--usage-output-file', expect.stringMatching(/\/afk-copilot-[^/]+\/usage\.json$/)]
+      : commands[agent]);
+    if (agent === 'cursor' || agent === 'pi' || agent === 'opencode') {
       expect(report.events.filter((event: { kind: string }) => event.kind === 'agent.session_recorded')).toEqual([
         expect.objectContaining({ kind: 'agent.session_recorded', sessionId: `matrix-${agent}-native`,
           usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } }),
+      ]);
+    }
+    if (agent === 'copilot') {
+      expect(report.events.filter((event: { kind: string }) => event.kind === 'agent.session_recorded')).toEqual([
+        expect.objectContaining({ kind: 'agent.session_recorded', sessionId: 'matrix-copilot-native',
+          ...(copilotUsageReport && { usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } }) }),
       ]);
     }
     expect(report.events).toContainEqual(expect.objectContaining({ kind: 'step.completed', stepId: 'implement', outcome: 'succeeded' }));

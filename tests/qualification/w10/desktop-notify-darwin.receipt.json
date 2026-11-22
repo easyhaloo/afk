@@ -1,0 +1,26 @@
+{
+  "startedAtUtc": "2026-11-20T17:19:41.333968+00:00",
+  "macOS": "15.2",
+  "node": "darwin arm64 v24.18.0",
+  "cli": "0.2.181",
+  "archiveSha256": "c5a8b5b5e45ea60ba69f4012c8ddd7df5e737bca8812e3b6aae54e79940ab9af",
+  "buildProvenance": "Existing locally packaged CLI used in W10 object-storage qualification",
+  "installerGitCommit": "f751e4306a6782c21bffcddff4a924496e605d11",
+  "input": {
+    "title": "AFK desktop qualification 747d9d578a",
+    "body": "Synthetic local macOS notification check."
+  },
+  "cliExit": 0,
+  "cliOutput": {
+    "delivered": true,
+    "channel": "desktop"
+  },
+  "native": {
+    "executable": "/usr/bin/osascript",
+    "exit": 0,
+    "stderr": "",
+    "measurement": "Private PATH probe enforces one exact call and returns its real status"
+  },
+  "displayObserved": null,
+  "displayObservation": "No independent visual observation was made."
+}

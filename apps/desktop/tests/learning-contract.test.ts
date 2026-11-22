@@ -108,7 +108,10 @@ describe("desktop learning wire contract", () => {
 
   it("strictly parses display DTOs and serializes without adding runtime objects", () => {
     expect(parseLearningCandidate(candidate)).toEqual(candidate);
-    expect(parseLearningJob({ jobId: key, scope, status: "pending", attemptCount: 0 })).toEqual({ jobId: key, scope, status: "pending", attemptCount: 0 });
+    const job = { jobId: key, scope, status: "pending", attemptCount: 0, canRun: true };
+    expect(parseLearningJob(job)).toEqual(job);
+    expect(() => parseLearningJob({ ...job, status: "processed" })).toThrow();
+    expect(() => parseLearningJob({ ...job, canRun: "true" })).toThrow();
     expect(parseLearningPublication(publication)).toEqual(publication);
     const result = parseLearningPublicationResult({ publication, withdrawal: { status: "rollback_blocked" }, errorCode: 4 });
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);

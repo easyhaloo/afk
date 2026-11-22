@@ -1,5 +1,6 @@
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode, SessionSnapshot } from '../../domain/agents/types.js';
 import { guardedRestoreSession } from '../../domain/agents/registry.js';
+import { NativeResumeDispatchError } from '../../domain/agents/types.js';
 import type { Sandbox, AgentExecution } from '../../infrastructure/sandbox/types.js';
 import type { SessionStoreChain } from '../sessions/types.js';
 import { logger } from '../../infrastructure/io/index.js';
@@ -7,6 +8,7 @@ import { logger } from '../../infrastructure/io/index.js';
 export interface ResumeContext {
   iid: number;
   session: string;
+  sourceThreadId?: string;
   wtPath: string;
   runId: string;
   generation: number;
@@ -24,10 +26,11 @@ export async function attemptNativeResume(
   beforeStart: () => Promise<void>,
 ): Promise<AgentExecution | undefined> {
   if (!agentProvider.capabilities.has('resume')) return undefined;
+  if (agentProvider.supportsResume && !agentProvider.supportsResume({ ...ctx, sandbox })) return undefined;
   let resumeSnapshot: SessionSnapshot;
   try {
     const loaded = await chainFactory().loadFirst({ runId: ctx.runId });
-    if (!loaded) return undefined;
+    if (!loaded || (ctx.sourceThreadId !== undefined && loaded.snapshot.sessionId !== ctx.sourceThreadId)) return undefined;
     resumeSnapshot = loaded.snapshot;
     await guardedRestoreSession(agentProvider, { snapshot: loaded.snapshot, worktreePath: ctx.wtPath });
   } catch (error) {
@@ -49,6 +52,7 @@ export async function attemptNativeResume(
       runtime: ctx.runtime,
     });
   } catch (error) {
+    if (error instanceof NativeResumeDispatchError) throw error;
     logger.info({ iid: ctx.iid, runId: ctx.runId, error }, 'native resume start failed; falling through to coordinator');
     return undefined;
   }

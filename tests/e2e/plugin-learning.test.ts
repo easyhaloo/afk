@@ -74,12 +74,19 @@ it('records a failed simulated agent, verifies evidence through the CLI, and sup
   expect(second.result.effect.prompt || second.result.effect.argv.join(' ')).toContain('.afk/experience-context.md');
   expect(await fs.readFile(join(second.workspace, '.afk', 'experience-context.md'), 'utf8')).toContain('bounded retries');
   expect(second.result.events).toContainEqual(expect.objectContaining({ kind: 'decision.made', command: 'experience.recall', accepted: true }));
-  expect(await outcomes(second.runId)).toEqual([]);
+  expect(second.result.events).toContainEqual(expect.objectContaining({ kind: 'run.finished', outcome: 'succeeded' }));
+  const successfulSelection = (runId: string) => expect.objectContaining({
+    selected: expect.objectContaining({ experienceId: candidate.id, source: { runId, workItemId: candidate.source.workItemId } }),
+    event: expect.objectContaining({ type: 'run.finished', outcome: 'succeeded', runId }),
+    recurrence: false, benefit: 'unknown',
+  });
+  expect(await outcomes(second.runId)).toEqual([successfulSelection(second.runId)]);
   await command('plugin', 'disable', 'context.experience');
   const disabled = await run('success');
   expect(disabled.result.result.success).toBe(true);
   expect(disabled.result.effect.prompt || disabled.result.effect.argv.join(' ')).not.toContain('.afk/experience-context.md');
   await expect(fs.readFile(join(disabled.workspace, '.afk', 'experience-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await outcomes(disabled.runId)).toEqual([]);
   await command('plugin', 'enable', 'context.experience');
   const enabled = await run('success');
   expect(enabled.result.result.success).toBe(true);
@@ -102,7 +109,7 @@ it('records a failed simulated agent, verifies evidence through the CLI, and sup
       integrity: { hash: receipt.event.hash }, data: { kind: receipt.event.type } });
   }
   expect(await outcomes(recurring.runId, 'github:matrix/repo#99')).toEqual([]);
-  expect(await outcomes(enabled.runId)).toEqual([]);
+  expect(await outcomes(enabled.runId)).toEqual([successfulSelection(enabled.runId)]);
   const repeated = JSON.parse((await cli('list', '--scope', candidate.scope, '--status', 'candidate', '--json')).stdout);
   expect(repeated.find((entry: { id: string }) => entry.id === candidate.id)).toMatchObject({ status: 'candidate', occurrences: 2 });
   const metrics = JSON.parse((await cli('metrics', '--scope', candidate.scope, '--json')).stdout);
@@ -129,6 +136,7 @@ it('records a failed simulated agent, verifies evidence through the CLI, and sup
   expect(third.result.result.success).toBe(true);
   expect(third.result.effect.prompt || third.result.effect.argv.join(' ')).not.toContain('.afk/experience-context.md');
   await expect(fs.readFile(join(third.workspace, '.afk', 'experience-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await outcomes(third.runId)).toEqual([]);
   const calls = (await fs.readFile(join(root, 'transport.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   expect(calls).toHaveLength(sequence);
   expect(calls.every((call: { binary: string }) => call.binary === 'claude')).toBe(true);

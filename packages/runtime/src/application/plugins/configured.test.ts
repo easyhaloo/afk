@@ -10,7 +10,7 @@ import { readPluginConfiguration } from './configuration.js';
 import type { PluginConfigValue } from '../../plugin-sdk/profile.js';
 import type { CredentialRef } from '../../plugin-sdk/capabilities.js';
 import { WebhookTriggerProvider, ScheduleTriggerProvider, GitPushTriggerProvider, IssueEventTriggerProvider, TestReportProvider, ObjectStorageProvider, GoogleOAuthCredentialProvider } from '../../infrastructure/providers/index.js';
-import type { CommandRequest } from '../../infrastructure/providers/dependencies.js';
+import type { CommandRequest, FetchTransport } from '../../infrastructure/providers/dependencies.js';
 import { GitHubClient } from '../../infrastructure/github/client.js';
 import { GitLabClient } from '../../infrastructure/gitlab/index.js';
 import { SandboxProviderRegistry } from '../../infrastructure/sandbox/registry.js';
@@ -513,6 +513,8 @@ describe('configured plugin composition', () => {
     ['credential.oidc', { issuer: 'https://auth.example.test', clientId: 'client', assertion: secretRef, exchange: { subjectToken: 'plaintext', subjectTokenType: 'jwt' } }],
     ['credential.enterprise', { values: {} }],
     ['artifact.object-storage', { endpoint: 'https://user:password@example.test' }],
+    ['artifact.object-storage', { presignedUrl: 'https://storage.example.test/object?signature=private' }],
+    ['artifact.object-storage', { endpoint: 'https://storage.example.test', presignedUrl: { env: 'TOKEN' } }],
     ['repository.multi-repository', { repositories: [{ name: 'same', path: 'a' }, { name: 'same', path: 'b' }] }],
     ['policy.compliance-policy', { rules: [] }],
     ['policy.license-policy', { allowlist: [] }],
@@ -740,6 +742,44 @@ describe('configured plugin composition', () => {
     expect(runtime.getArtifactProvider('object-storage')).toBeInstanceOf(ObjectStorageProvider);
     await runtime.getArtifactProvider('object-storage')!.put({ name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) });
     expect(String(network.mock.calls[0]?.[0])).toBe('https://storage.example.test/bucket/file.txt');
+  });
+
+  it('resolves the presigned URL through the credential registry for each object upload', async () => {
+    const first = 'https://storage.example.test/bucket/fixed-name?signature=first';
+    const second = 'https://storage.example.test/bucket/fixed-name?signature=second';
+    const network = vi.fn<Parameters<FetchTransport>, ReturnType<FetchTransport>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ uri: 'https://storage.example.test/first' })))
+      .mockResolvedValueOnce(new Response('second', { status: 403 }));
+    const { runtime } = await load([
+      { id: 'artifact.object-storage', config: { presignedUrl: { provider: 'credential.enterprise', name: 'upload' } } },
+      { id: 'credential.enterprise', config: { values: { upload: { env: 'TOKEN' } } } },
+    ], { fetch: network });
+    const credential = vi.spyOn(runtime.getCredentialProvider('credential.enterprise')!, 'resolve')
+      .mockResolvedValueOnce({ secret: first }).mockResolvedValueOnce({ secret: second });
+    const provider = runtime.getArtifactProvider('object-storage')!;
+    const artifact = { name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) };
+    await expect(provider.health!()).resolves.toMatchObject({ status: 'ok' });
+    expect(credential).not.toHaveBeenCalled();
+    await expect(provider.put(artifact)).resolves.toEqual({ name: 'file.txt', uri: 'https://storage.example.test/bucket/fixed-name' });
+    await expect(provider.put(artifact)).rejects.toThrow(/^Provider HTTP request failed \(403\)$/);
+    expect(network.mock.calls.map(([target]) => String(target))).toEqual([first, second]);
+    expect(network.mock.calls[0]?.[1]).toMatchObject({ method: 'PUT', redirect: 'error' });
+  });
+
+  it.each([
+    'http://storage.example.test/file?signature=private',
+    'https://account:secret@storage.example.test/file?signature=private',
+    'https://storage.example.test/file?signature=private#fragment',
+    'https://storage.example.test/file',
+    'not a URL',
+  ])('refuses unsafe presigned destinations before contacting the server', async destination => {
+    const network = vi.fn();
+    const { runtime } = await load([{ id: 'artifact.object-storage', config: { presignedUrl: { env: 'UPLOAD_URL' } } }], {
+      environment: { UPLOAD_URL: destination }, fetch: network,
+    });
+    await expect(runtime.getArtifactProvider('object-storage')!.put({ name: 'file.txt', mediaType: 'text/plain', bytes: new Uint8Array([1]) }))
+      .rejects.toThrow(/^Invalid presigned upload URL$/);
+    expect(network).not.toHaveBeenCalled();
   });
 });
 

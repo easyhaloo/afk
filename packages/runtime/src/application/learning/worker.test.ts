@@ -92,7 +92,7 @@ describe('distillation worker', () => {
       const instance = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
       const result = await instance.runOnce({ scope, requestKey: input.job.key });
       expect(launch).toHaveBeenCalledTimes(scenario === 'replay' ? 1 : 0);
-      expect(result.job).toMatchObject({ status: 'blocked', reasonCode: scenario === 'replay' ? 'analysis_outcome_unknown' : scenario });
+      expect(result.job).toMatchObject({ status: 'blocked', canRun: false, reasonCode: scenario === 'replay' ? 'analysis_outcome_unknown' : scenario });
       expect(result.candidates).toEqual([]);
       const attempts = store.listAnalysisAttempts(input.job.key);
       expect(attempts).toHaveLength(1);
@@ -429,20 +429,16 @@ describe('distillation worker', () => {
 
   it('charges cancelled attempts and permits only the remaining attempt after restart', async () => {
     const input = await fixture();
+    const target = { scope, requestKey: input.job.key };
     const cancelled = vi.fn(async () => { throw new Error('analysis_cancelled'); });
     const first = worker({ ...input, analyze: cancelled, enabled: true, provider: new ClaudeCodeProvider() });
-    await first.runOnce();
+    const firstResult = await first.runOnce(target);
     await first.close();
-    expect(queryLearningState({ directory: input.directory, scope }).jobs[0])
-      .toMatchObject({ status: 'blocked', reasonCode: 'analysis_cancelled', attempts: [{ status: 'cancelled' }] });
+    expect(firstResult.job)
+      .toMatchObject({ status: 'blocked', canRun: true, reasonCode: 'analysis_cancelled', attempts: [{ status: 'cancelled' }] });
     const second = worker({ ...input, analyze: cancelled, enabled: true, provider: new ClaudeCodeProvider() });
-    const controller = new AbortController();
-    const watching = second.watch(controller.signal);
-    try {
-      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledTimes(2), { timeout: 2500 });
-      await new Promise(resolve => setTimeout(resolve, 1200));
-      expect(cancelled).toHaveBeenCalledTimes(2);
-    } finally { controller.abort(); await watching; }
+    expect((await second.runOnce(target)).job).toMatchObject({ status: 'blocked', reasonCode: 'analysis_cancelled', canRun: false });
+    expect(cancelled).toHaveBeenCalledTimes(2);
     const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
     try {
       expect(store.getModelCallCount(new Date().toISOString().slice(0, 10))).toBe(2);
@@ -472,11 +468,12 @@ describe('distillation worker', () => {
 
   it('resumes a budget-blocked request when the budget is available', async () => {
     const input = await fixture();
+    const target = { scope, requestKey: input.job.key };
     const exhausted = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider(), dailyCalls: 0 });
-    expect((await exhausted.runOnce()).blocked).toBe(1);
+    expect((await exhausted.runOnce(target)).job).toMatchObject({ status: 'blocked', reasonCode: 'budget_exhausted', canRun: true, attempts: [] });
     await exhausted.close();
     const resumed = worker({ ...input, enabled: true, provider: new ClaudeCodeProvider(), dailyCalls: 1 });
-    expect((await resumed.runOnce()).processed).toBe(1);
+    expect((await resumed.runOnce(target)).job).toMatchObject({ status: 'processed', canRun: false });
     expect(input.analyze).toHaveBeenCalledTimes(1);
   });
 

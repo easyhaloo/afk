@@ -1,0 +1,317 @@
+{
+  "afk": "0.2.176",
+  "ingressRequests": {
+    "/v1/metrics 200": 4,
+    "/v1/traces 200": 2,
+    "/v1/metrics 401": 4,
+    "/v1/traces 401": 2
+  },
+  "allowed": {
+    "runId": "allowed-7c21b482a01764af",
+    "serviceName": "installed-otlp-allowed-7c21b482a01764af",
+    "audit": {
+      "valid": true,
+      "lastSequence": 4,
+      "lastHash": "d1833e1bb1e580791920f3576febc57e3eba61868d73eab671b0373a01357d21"
+    },
+    "deliveries": {
+      "run.requested": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 3,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 2,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      },
+      "run.finished": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 3,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 2,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      }
+    }
+  },
+  "denied": {
+    "runId": "denied-7c21b482a01764af",
+    "serviceName": "installed-otlp-denied-7c21b482a01764af",
+    "audit": {
+      "valid": true,
+      "lastSequence": 4,
+      "lastHash": "07b23ad1b8da7c69dc741ad91c308f3f72a06cc86955ea439f759aa4c78a1461"
+    },
+    "deliveries": {
+      "run.requested": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 2,
+          "failed": 1,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 0,
+          "failed": 2,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      },
+      "run.finished": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 2,
+          "failed": 1,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 0,
+          "failed": 2,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      }
+    }
+  },
+  "collectorObservations": [
+    "installed-otlp-allowed-7c21b482a01764af",
+    "allowed-7c21b482a01764af",
+    "github:acme/api#42",
+    "afk.run_events_total",
+    "run.event_persistence_ms"
+  ],
+  "stalled": {
+    "runId": "stalled-7c21b482a01764af",
+    "serviceName": "installed-otlp-stalled-7c21b482a01764af",
+    "audit": {
+      "valid": true,
+      "lastSequence": 4,
+      "lastHash": "83cc0a1d1d74fe59e666e8aac5a65c070aa35dfb2cc953166bf21b8184f282f5"
+    },
+    "deliveries": {
+      "run.requested": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 1,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 2,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 1,
+          "dropped": 1,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      },
+      "run.finished": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 1,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 2,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 1,
+          "dropped": 1,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      }
+    }
+  },
+  "stalledIngressRequests": {
+    "/v1/metrics 499": 2
+  },
+  "recovered": {
+    "runId": "recovered-7c21b482a01764af",
+    "serviceName": "installed-otlp-recovered-7c21b482a01764af",
+    "audit": {
+      "valid": true,
+      "lastSequence": 4,
+      "lastHash": "8860433cc639f8d35288cc4559e15f336a1229376187ad7b90338a10fce29b2b"
+    },
+    "deliveries": {
+      "run.requested": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 3,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 2,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      },
+      "run.finished": {
+        "events": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 1
+        },
+        "tracing": {
+          "succeeded": 3,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "metrics": {
+          "succeeded": 2,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        },
+        "logging": {
+          "succeeded": 0,
+          "failed": 0,
+          "timed_out": 0,
+          "dropped": 0,
+          "skipped": 0
+        }
+      }
+    }
+  },
+  "recoveredIngressRequests": {
+    "/v1/metrics 200": 4,
+    "/v1/traces 200": 2
+  },
+  "images": {
+    "otel/opentelemetry-collector:0.165.0": "linux/arm64 sha256:34b24b740c3c88d3467740e8642a397c13898ef76d7295c5425164c482ed1b73",
+    "nginx:1.27-alpine": "linux/arm64 sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
+  },
+  "archiveSha256": "4cfc1c40871fd3ff5123d9437dee9b5db93f944afd00363dae5a1b495d4fddb3",
+  "date": "2026-11-20",
+  "platform": "darwin-arm64",
+  "sourceCommit": "d65493537056781bcfaf8ca9f35a48885dc299ac",
+  "harnessSha256": "b0e62b5a2b1b4ab898fb060924f9c9190eaffdb2a9969df0a1bc1d2c5c5a1634",
+  "driverSha256": "2bb513c0eecb793e8b887ac6c2b2dfa15eaa5c33b68812cdde74b1ff0add2516"
+}

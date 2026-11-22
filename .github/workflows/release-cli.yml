@@ -4,17 +4,28 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Build and test the four archives without publishing a release
+        type: boolean
+        default: false
+      rollback_from_run:
+        description: Optional successful Release CLI run ID supplying the previous archives
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-cli
+  group: ${{ inputs.verify_only && format('verify-cli-{0}', github.ref) || 'release-cli' }}
   cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
@@ -30,9 +41,22 @@ jobs:
       - id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+          ROLLBACK_FROM_RUN: ${{ inputs.rollback_from_run }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -n "$ROLLBACK_FROM_RUN" ]]; then
+            [[ "$VERIFY_ONLY" == true && "$ROLLBACK_FROM_RUN" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'rollback_from_run requires verify_only and a numeric run ID' >&2
+              exit 1
+            }
+            baseline=$(gh run view "$ROLLBACK_FROM_RUN" --json workflowName,conclusion --jq '.workflowName + ":" + .conclusion')
+            [[ "$baseline" == 'Release CLI:success' ]] || {
+              echo 'rollback_from_run must refer to a successful Release CLI run' >&2
+              exit 1
+            }
+          fi
           version="$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('apps/cli/package.json', 'utf8')).version)")"
           tag="cli-v${version}"
 
@@ -43,7 +67,7 @@ jobs:
             tag="${GITHUB_REF_NAME}"
           fi
 
-          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if [[ "$VERIFY_ONLY" == true ]] || gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             publish=false
           else
             publish=true
@@ -64,7 +88,10 @@ jobs:
 
   package:
     needs: prepare
-    if: needs.prepare.outputs.publish == 'true'
+    if: inputs.verify_only || needs.prepare.outputs.publish == 'true'
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -107,7 +134,26 @@ jobs:
         run: pnpm exec vitest run tests/cli-install.test.ts tests/package-cli-validation.test.ts
       - name: Build, package and verify offline installation
         run: pnpm release:cli --version "${{ needs.prepare.outputs.version }}"
-      - name: Verify repository workflows against the installed archive
+      - name: Download the previous archive
+        if: inputs.verify_only && inputs.rollback_from_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.rollback_from_run }}
+          name: cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/rollback-baseline
+      - name: Verify upgrade and rollback against the previous archive
+        if: inputs.verify_only && inputs.rollback_from_run != ''
+        env:
+          ASSET: afk-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BASELINE: ${{ runner.temp }}/rollback-baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          old_version=$(tar -xOzf "$BASELINE/$ASSET" afk/release.json | node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).version')
+          bash tests/qualification/cli-upgrade.sh "$BASELINE" "$old_version" release/cli "$VERSION"
+      - name: Verify repository workflows, workspace recovery and audit artifacts against the installed archive
         env:
           ASSET: afk-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -117,8 +163,10 @@ jobs:
             --archive "release/cli/$ASSET" --checksum "release/cli/$ASSET.sha256"
           AFK_E2E_CLI_ENTRY="$profile/bin/afk" pnpm exec vitest run --no-file-parallelism \
             tests/e2e/repository-managed-local.test.ts tests/e2e/repository-managed-remote.test.ts \
+            tests/e2e/repository-managed-command.test.ts \
             tests/e2e/repository-verification-hook.test.ts tests/e2e/repository-verification-batch.test.ts \
-            tests/e2e/repository-verification-replay.test.ts
+            tests/e2e/repository-verification-replay.test.ts tests/e2e/workspace-doctor-installed.test.ts
+          node tests/qualification/w10/local-artifact-audit.mjs "$profile/bin/afk"
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.platform }}-${{ matrix.arch }}
@@ -127,7 +175,7 @@ jobs:
 
   publish:
     needs: [prepare, package]
-    if: needs.prepare.outputs.publish == 'true'
+    if: ${{ !inputs.verify_only && needs.prepare.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

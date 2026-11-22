@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CursorProvider } from '../../domain/agents/cursor.js';
 import { PiProvider } from '../../domain/agents/pi.js';
+import { NativeResumeDispatchError } from '../../domain/agents/types.js';
 import type { AgentExecution, AgentProvider, AgentStartOptions, SessionSnapshot } from '../../domain/agents/types.js';
 import type { Sandbox } from '../../infrastructure/sandbox/types.js';
 import type { SessionStoreChain } from '../sessions/types.js';
@@ -52,6 +53,15 @@ describe('native resume workflow bridge', () => {
     expect(host.startAgent).not.toHaveBeenCalled();
   });
 
+  it('skips a stored checkpoint from a different native execution', async () => {
+    const provider = new PiProvider();
+    const host = fixture(provider);
+    const source = { ...context, sourceThreadId: 'other-native-thread' };
+    expect(await attemptNativeResume(source, provider, host.sandbox, () => host.chain, host.beforeStart)).toBeUndefined();
+    expect(host.beforeStart).not.toHaveBeenCalled();
+    expect(host.startAgent).not.toHaveBeenCalled();
+  });
+
   it('falls back when no snapshot exists without launching a fresh session as a native resume', async () => {
     const provider = new PiProvider();
     const host = fixture(provider);
@@ -67,6 +77,15 @@ describe('native resume workflow bridge', () => {
     host.startAgent.mockRejectedValue(new Error('controlled native launch failure'));
     expect(await attemptNativeResume(context, provider, host.sandbox, () => host.chain, host.beforeStart)).toBeUndefined();
     expect(host.beforeStart).toHaveBeenCalledOnce();
+    expect(host.startAgent).toHaveBeenCalledOnce();
+  });
+
+  it('propagates an unconfirmed dispatch without falling back to a new generation', async () => {
+    const provider = new PiProvider();
+    const host = fixture(provider);
+    const error = new NativeResumeDispatchError('unconfirmed');
+    host.startAgent.mockRejectedValue(error);
+    await expect(attemptNativeResume(context, provider, host.sandbox, () => host.chain, host.beforeStart)).rejects.toBe(error);
     expect(host.startAgent).toHaveBeenCalledOnce();
   });
 });

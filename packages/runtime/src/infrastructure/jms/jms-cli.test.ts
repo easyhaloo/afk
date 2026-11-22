@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { createJumpserverCli, execute } from './jms-cli.js';
 
 describe('shared JumpServer adapter', () => {
+  it('distinguishes an empty inventory from incompatible commands and failed asset discovery', async () => {
+    const exec = vi.fn()
+      .mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ ok: false, stdout: '', stderr: "error: unknown command 'config'", code: 1 })
+      .mockResolvedValueOnce({ ok: false, stdout: '', stderr: 'private upstream response', code: 23 });
+    const cli = createJumpserverCli({ exec });
+    await expect(cli.listServers()).resolves.toEqual([]);
+    await expect(cli.listServers()).rejects.toThrow('Incompatible jms on PATH: the JumpServer SSH CLI must support config list');
+    await expect(cli.listAssets('private-alias')).rejects.toThrow(/^JumpServer inventory failed \(ls, exit 23\)$/);
+  });
+
   it('parses padded server columns even when the host and username touch', async () => {
     const row = (alias: string, host: string, username: string, marker: string) =>
       `${alias.padEnd(20)}${host.padEnd(36)}${username.padEnd(20)}${marker}`;

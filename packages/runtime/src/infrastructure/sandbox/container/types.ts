@@ -141,6 +141,9 @@ export interface ContainerProvider {
   inspect(containerId: string): Promise<ContainerInspectInfo>;
 }
 
+export const FROZEN_EXECUTION_MAX_MS = 120_000;
+export const FROZEN_CONTROL_OBSERVATION_MS = 5_000;
+
 export interface FrozenCommandOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs: number;
@@ -232,7 +235,7 @@ export interface FrozenScratchRecoveryEvidence {
   readonly helperRevision: 'linux-native-scratch-recovery-v1';
   readonly contractRevision: 'bounded-recovery-return-state-v1';
   readonly contractDigest: string;
-  readonly phases: readonly (Omit<FrozenScratchEvidence, 'recovery'> & {
+  readonly phases: readonly (Omit<FrozenScratchEvidence, 'recovery' | 'baselineFailure'> & {
     readonly phase: 'fault' | 'recovery' | 'replay';
     readonly ordinal: number;
     readonly invocationId: string;
@@ -278,4 +281,14 @@ export interface FrozenScratchEvidence {
   readonly final: FrozenScratchSnapshot;
   readonly historyCoverage: 'not-observed';
   readonly recovery?: FrozenScratchRecoveryEvidence;
+  readonly baselineFailure?: FrozenScratchBaselineFailure;
+}
+
+export interface FrozenScratchBaselineFailure {
+  readonly revision: 'bounded-original-mismatch-v1';
+  readonly helperRevision: 'linux-native-original-exit-v1' | 'linux-native-scratch-recovery-v1';
+  readonly contractDigest: string;
+  readonly phases: FrozenScratchRecoveryEvidence['phases'];
+  readonly failedPhase: 'fault' | 'recovery' | 'replay';
+  readonly reason: 'exit-code' | 'phase-output' | 'checkpoint';
 }

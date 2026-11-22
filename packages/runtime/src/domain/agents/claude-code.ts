@@ -6,7 +6,7 @@
  * command is built for execution inside a Sandbox.
  */
 
-import { join } from 'node:path';
+import { claudeStatuslineSettingsPath } from '../../shared/workspace-paths.js';
 import type {
   AgentProviderName,
   AgentCapability,
@@ -93,7 +93,7 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
     if (options.executionMode === 'batch') {
       argv.push('--print', '--output-format', 'stream-json', '--verbose');
     } else if (options.executionMode === 'interactive') {
-      argv.push('--settings', join(options.worktreePath, '.claude', 'settings.local.json'));
+      argv.push('--settings', claudeStatuslineSettingsPath(options.worktreePath));
     }
     return {
       argv,
@@ -112,7 +112,8 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
       }
       if (parsed.type === 'result') {
         const events: AgentEvent[] = [];
-        if (parsed.usage) events.push({ type: 'usage', usage: toTokenUsage(parsed.usage) });
+        const usage = parsed.usage ? toTokenUsage(parsed.usage) : undefined;
+        if (usage) events.push({ type: 'usage', usage });
         if (typeof parsed.session_id === 'string' && parsed.session_id.length > 0) {
           events.push({ type: 'session', sessionId: parsed.session_id });
         }
@@ -125,6 +126,11 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
             resultEvent,
           );
           return events;
+        }
+        if (parsed.subtype === 'success' && parsed.is_error === false && typeof parsed.result === 'string'
+          && typeof parsed.session_id === 'string' && parsed.session_id.length > 0
+          && usage && Number.isFinite(usage.totalTokens) && usage.totalTokens > 0) {
+          resultEvent.completedTurnUsage = usage;
         }
         events.push(resultEvent);
         return events;

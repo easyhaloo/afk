@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createDefaultPluginRuntime } from './default-runtime.js';
 import { PluginRuntime } from './runtime.js';
-import { DurableTriggerQueue, currentTriggerDeliveryId, TriggerDeliveryConflict } from './trigger-queue.js';
+import { DurableTriggerQueue, currentTriggerDeliveryId, TriggerDeliveryConflict, triggerQueueSchemaVersion } from './trigger-queue.js';
 import { pluginTriggerQueue } from './listener.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
@@ -40,7 +40,7 @@ it('persists the first activation tick before any listener exists and dispatches
   const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot: homeDir, activateTriggers: true });
   cleanup.push(() => runtime.dispose());
   expect(existsSync(file)).toBe(true);
-  const database = openSqlite({ file, schema: '', version: 2 });
+  const database = openSqlite({ file, schema: '', version: triggerQueueSchemaVersion });
   cleanup.push(() => database.close());
   const row = database.prepare('SELECT deliveryId, providerId, body, status FROM trigger_deliveries').get()!;
   expect(row).toMatchObject({ providerId: 'trigger.schedule', status: 'pending' });
@@ -109,7 +109,7 @@ it('deduplicates a tick and rejects another body under the same identity', async
   const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot: homeDir, activateTriggers: true });
   cleanup.push(() => runtime.dispose());
   ticks[0]();
-  const database = openSqlite({ file, schema: '', version: 2 });
+  const database = openSqlite({ file, schema: '', version: triggerQueueSchemaVersion });
   cleanup.push(() => database.close());
   const row = database.prepare('SELECT body FROM trigger_deliveries').get()!;
   const body = String(row.body);
@@ -194,7 +194,7 @@ it('diagnoses receipt persistence failure without falling back to a direct actio
   const dispatch = vi.spyOn(PluginRuntime.prototype, 'dispatchSystemAction').mockResolvedValue(undefined);
   const runtime = await createDefaultPluginRuntime({ homeDir, workspaceRoot: homeDir, activateTriggers: true });
   cleanup.push(() => runtime.dispose());
-  const database = openSqlite({ file, schema: '', version: 2 });
+  const database = openSqlite({ file, schema: '', version: triggerQueueSchemaVersion });
   cleanup.push(() => database.close());
   database.exec("CREATE TRIGGER reject_receipt BEFORE INSERT ON trigger_deliveries BEGIN SELECT RAISE(ABORT, 'private disk failure'); END");
   ticks[0]();

@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-21",
+  "releaseRunId": 44782222425,
+  "gitCommit": "f751e4306a6782c21bffcddff4a924496e605d11",
+  "version": "0.2.181",
+  "platform": "darwin-arm64",
+  "node": "v24.18.0",
+  "archiveSha256": "8f94971f3cc0730aa5c7b62267b0feab7e1be688e8014830ecf962f952342df2",
+  "observationSha256": "e622452a41c3bbd6de1ec8d7ce7427645c10e1ab744f92e23862fc267e6b12a7",
+  "arguments": ["--http-receiver-restart", "--ticks-after-restart", "48"],
+  "stopSignal": "SIGKILL",
+  "receiverStopSignal": "SIGKILL",
+  "receiverTransport": "http-loopback",
+  "recoveredAttempts": 2,
+  "receiverPreservedOriginalEffect": true,
+  "competingListenerRejected": true,
+  "newDeliveries": 48,
+  "newTickSpanMs": 188019,
+  "requests": 50,
+  "effects": 49
+}

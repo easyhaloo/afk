@@ -7,6 +7,7 @@ import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { directoryBytes } from '../../infrastructure/git/dependency-pool.js';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
+import { assertWorkspaceOwnershipAvailable, withWorkspaceOwnershipAvailable } from '../../infrastructure/runtime/workspace-ownership.js';
 import { resolveWorkspaceRoot, workspaceStateDirectory, executionWorkspacePath, workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { parseExecutionManifest, type ExecutionManifest } from './execution-manifest.js';
 
@@ -238,6 +239,7 @@ export async function inspectWorkspaceDisk(options: DiskOptions = {}): Promise<W
         if (entry.active !== false) entry.reason = 'active repository lease';
         else if (!completion.completed) entry.reason = 'execution is not safely completed';
         else if (bytes > 0) {
+          await assertWorkspaceOwnershipAvailable(workspace, manifest.repositories);
           await safeCheckouts(root, workspace, manifest);
           entry.reclaimableBytes = bytes;
           report.totals.reclaimableBytes += bytes;
@@ -272,7 +274,8 @@ export async function inspectWorkspaceDisk(options: DiskOptions = {}): Promise<W
         const manifest = manifestsByWorkspace.get(entry.path);
         if (!manifest || entry.reclaimableBytes === 0) throw new Error(entry.reason ?? 'workspace is not reclaimable');
         if (!leases.run) throw new Error('repository lease acquisition is unavailable');
-        await leases.run(manifest.repositories.map(repository => `${repository.platform}:${repository.projectKey}`), async () => {
+        const keys = manifest.repositories.map(repository => `${repository.platform}:${repository.projectKey}`);
+        await leases.run(keys, () => withWorkspaceOwnershipAvailable(entry.path, manifest.repositories, async () => {
           if (!(await completionState(entry.path)).completed) throw new Error('execution is no longer completed');
           const checkouts = await safeCheckouts(root, entry.path, manifest);
           const store = new RepositoryStore(join(root, 'repos'));
@@ -294,7 +297,7 @@ export async function inspectWorkspaceDisk(options: DiskOptions = {}): Promise<W
               parent = dirname(parent);
             }
           }
-        });
+        }));
       } else {
         const pool = join(root, 'deps');
         await safePath(root, pool);

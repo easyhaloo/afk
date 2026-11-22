@@ -76,11 +76,27 @@ export async function recordExperienceOutcomes(input: {
   const store = new ExperienceStore({ file, homeDir });
   try {
     const receipts: ExperienceOutcomeReceipt[] = [];
+    let qaAttempt: number | undefined;
+    let qaPassed = false;
+    let publishedChange: string | undefined;
     for (const event of history) {
+      const data = event.data;
+      const trustedQA = event.context.purpose !== 'learning' && ['system', 'cli'].includes(event.context.actor.kind);
+      if (event.context.attempt !== qaAttempt || ['qa.started', 'qa.failed', 'failure.classified', 'run.finished', 'change.merge_verified'].includes(data.kind)) {
+        qaAttempt = data.kind === 'qa.started' && trustedQA ? event.context.attempt : undefined;
+        qaPassed = false;
+        publishedChange = undefined;
+      }
+      if (data.kind === 'qa.passed') {
+        qaPassed = trustedQA && qaAttempt !== undefined;
+        publishedChange = undefined;
+      }
+      if (data.kind === 'change.published') publishedChange = trustedQA && qaPassed ? data.changeId : undefined;
       if (parsed.event && event.sequence !== parsed.event.sequence) continue;
       if (event.context.purpose === 'learning' || !['system', 'cli', 'loop'].includes(event.context.actor?.kind)) continue;
-      const data = event.data;
-      if (data.kind !== 'run.finished' && data.kind !== 'qa.failed' && data.kind !== 'failure.classified') continue;
+      if (data.kind === 'human_gate.opened') {
+        if (!trustedQA || !publishedChange || data.gateId !== `merge:${publishedChange}`) continue;
+      } else if (data.kind !== 'run.finished' && data.kind !== 'qa.failed' && data.kind !== 'failure.classified') continue;
       const source = { runId: parsed.runId, workItemId: parsed.workItemId };
       let failure: RecordFailureInput | undefined;
       const code = data.kind === 'failure.classified' ? data.code
@@ -93,7 +109,8 @@ export async function recordExperienceOutcomes(input: {
       }
       receipts.push(...store.recordRunOutcome({ scope, source, failure, event: { runId: parsed.runId,
         sequence: event.sequence, hash: event.integrity.hash, type: data.kind,
-        outcome: data.kind === 'run.finished' ? data.outcome : 'failed', occurredAt: event.occurredAt, observedAt: event.observedAt } }).receipts);
+        outcome: data.kind === 'run.finished' ? data.outcome : data.kind === 'human_gate.opened' ? 'awaiting_merge' : 'failed',
+        occurredAt: event.occurredAt, observedAt: event.observedAt } }).receipts);
     }
     return receipts;
   } finally { store.close(); }

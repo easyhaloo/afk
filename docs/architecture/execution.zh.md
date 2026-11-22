@@ -30,8 +30,10 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`、`import --scope <target> --file <file>`、`copy <id> --scope <source> --target-scope <target>`：交换最多 1 MiB / 100 条的可移植 JSON。导入与复制只产生候选，必须在目标项目独立验证；导出不携带验证权限且排除发布绑定经验；copy 不能移植其发布绑定。`metrics --scope <scope> [--json]` 区分检索、显式采纳与复发；`adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` 仍输出 JSON 指标（`retrievals`、`adoptions`、`recurrences`），新增 `receipt` 绑定已验证内容/验证/适用条件及已记录的实际目标上下文（`binding: 'verified-version'`，格式 `version: 2`，增量字段 `contextStatus: 'recorded' | 'unavailable'`）。可信 QA 目标快照可在进行中运行尚未完成 QA 时记录实际上下文；上下文缺失时绑定规范化的 `{}` 并标记 `contextStatus: 'unavailable'`，不虚构目标。相同来源、版本与上下文重放返回原收据和时间，不重复计数；验证或上下文变化报冲突，损坏绑定拒绝，历史收据保持 `legacy-unbound` 且不升级。采纳是显式确认，不代表观测到使用/结果；发布绑定经验另保留 CandidateStore 发布/版本身份；每条经验最多 64 个采纳收据。兼容性始终对实际上下文检查，同一上下文在 QA 前后结果一致；即使经验未存储 applicability，也不能绕过已知 `productVersions` 的兼容性检查。存储了 applicability 或发布绑定的经验额外要求成功 QA 及匹配实际上下文的已验证适用资格，包括干净目标及精确 QA revision；仅有进行中快照不能授予此资格。同时提供的实际与已验证上下文必须匹配。未存储 applicability 或发布绑定的普通经验可针对完整进行中运行确认，即使上下文不可用，仍须通过实际上下文兼容性检查。收据字段与来源规则见[经验复用](plugins.zh.md#执行治理与经验复用)。
 - `afk experience outcomes --scope <scope> --run-id <run> --work-item-id <规范ID> [--limit <0..100>] [--json]`：查询精确消费运行与工作项组合的历史结果收据，工作项必须属于scope。默认20条，按审计序号倒序、经验/选择身份稳定排序；默认格式化JSON数组，`--json`紧凑输出，无收据返回`[]`。保留所选引用、可选发布/版本身份、审计结果、复发关联及`benefit: "unknown"`。选择不等于显式采纳，成功不证明收益，`recurrence: false`不证明没有复发。查询不激活插件、不运行模型、不刷新凭据、不召回资产、不改变使用计数；关闭存储后再输出，查询或关闭失败不泄露私有错误。历史收据不授予当前召回或发布资格。
 - `afk experience correct <candidateId> --scope <scope> --expected-version <version> --file <path> [--json]`：仅向配置的 `learning.correct` 提交 `{ scope, candidateId, expectedVersion, correction }`，将纠正任务写入持久收件箱，不运行模型、不修改原候选。scope 必须是规范项目，候选 ID 为 64 位小写十六进制，预期版本为正安全整数；过期版本或其它项目的候选会被拒绝。纠正文仅从 UTF-8 普通文件读取，必须包含非空白文本、无 NUL，且最多 32768 字节（读取过程中也执行上限）。输入与文件检查通过后才延迟创建运行时。输出仅含 `{ jobId, scope, candidateId, candidateVersion }`（jobId 为 64 位小写十六进制，候选版本为正整数）；沿用 knowledge 命令格式，默认格式化 JSON，`--json` 输出紧凑 JSON。仅释放自己创建的运行时；失败仅报告 `Learning correction failed`，不泄露文件内容或 Provider 错误。
-- `afk experience validate <64位小写十六进制候选ID> --scope <scope> --expected-version <正安全整数> --checker <id> [--json]`：调用配置的 `learning.validate`；验证器、目标和授权从可信配置取得，客户端不能提供命令或结果。blocked 返回非零退出码；不访问旧经验存储，不创建缺失候选账本。fact / process 由支持专属协议的已注册验证器验证；lesson 另需保存的显式许可与匹配的独立 QA；skill / tool 未接专属验证器时阻断。
+- `afk experience validate <64位小写十六进制候选ID> --scope <scope> --expected-version <正安全整数> --checker <id> [--json]`：调用配置的 `learning.validate`；验证器、目标和授权从可信配置取得，客户端不能提供命令或结果。blocked 返回非零退出码；不访问旧经验存储，不创建缺失候选账本。fact / process 由支持专属协议的已注册验证器验证；lesson 另需保存的显式许可与匹配的独立 QA；skill / tool 未接专属验证器时阻断。 只读技能可配置 `proposal-semantic-v1` / `skill-trace-v1`，比对两版冻结资产的实际输出和 Read 调用。
 - `afk experience knowledge prepare <候选ID> --scope <scope> --expected-version <正安全整数> [--target <逻辑引用>] [--json]`：生成不可变的授权发布预览。`publish <64位小写十六进制发布键> --scope <scope> [--json]` 经共享守卫应用该精确计划，未 committed 返回非零退出码。`reconcile --scope <scope> [--json]` 恢复发布并撤回失效资产；恢复受阻或为保护人工编辑而不能撤回时返回非零，完成撤回成功。默认输出格式化 JSON，`--json` 输出紧凑 JSON；三命令共用学习运行时，仅释放自己创建的实例。
+- `afk experience worker once --scope <scope> --request <64位小写十六进制请求键> [--json]` 调用共享的 `learning.worker.once`，仅处理指定项目中的指定请求。标准输出为有界的 JSON `job` 摘要，包含 `jobId`、`scope`、`status`、`canRun`、`attemptCount` 及可选的白名单 `reasonCode`。`--json` 输出紧凑格式。仅 `processed` 返回退出码 `0`。队列被占用时退出码为 `1`，标准错误输出 `learning_worker_busy`，标准输出为空。SIGINT 或 SIGTERM 请求取消，退出码为 `1`，标准错误输出 `learning_worker_cancelled`，标准输出为空。
+- `afk experience worker watch [--json]` 在前台持续监听已保存的学习队列。它在配置的模型预算内处理各项目的合格请求，并使用与单次提炼相同的独占队列。SIGINT 或 SIGTERM 会取消正在进行的分析、释放队列并以退出码 `0` 输出 `{"status":"stopped"}`。启动或运行出错时以退出码 `1` 结束，并在标准错误输出错误码。
 - `afk experience record --scope <scope> --trigger <text> --root-cause <text> --action <text> --run-id <id> --work-item-id <id> --evidence <refs...>`：保存候选经验。`verify <id> --scope <scope> --run-id <id> --action <text> --evidence <refs...> [--root <事件存储>] [--root-cause <text>]` 要求同项目、审计完整、独立 QA 通过，随后成功结束或已确认发布并抵达对应人工合并闸门。`revoke <id> --scope <scope>` 撤销经验，后续检索不再提供它。
 - `afk loop start`：针对一个绑定 manifest 的工作项持续尝试，并委托给同一受管执行路径；它不是全局多工作项调度器。
 - `afk qa`：对 `verification` 条目重试验证，存在受管 manifest 时自动使用，也可通过 `--execution-manifest <path>` 指定。
@@ -57,7 +59,7 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk backlog baseline --id <prd>`：报告 PRD 积累切片的分支以及继承它的切片；`--branch <name>` 把分支写进 PRD 正文。
 - `afk backlog rework revise --id <backlog> --record <r2> --summary "<事实陈述>"`：把一条 open 返工记录修订成当前事实；记录保留自己的 id 与证据，只有陈述被替换，修订轨迹留在记录里。
 - `afk schedule --parent <规范身份>`：跨项目调度父项的可执行后代，重叠仓库集合串行，遵循依赖与人工合并闸门。`--max-concurrent`、`--load-limit`、`--poll-interval` 控制派发；poll 间隔即重评估节奏——有执行在跑时仍会按间隔重新看一眼，一旦有空出的槽位和可派发的条目就立刻补派。`--watch` 让调度持续运行直到被停止，等待外部状态变化；`--dry-run` 在不认领、不启动 Agent 的情况下预览批次，`--json` 输出最终报告。报告里每条等待项都会写明卡住它的约束——依赖未就绪、容量已满、仓库租约被占、系统过载、等待人工、或重试预算耗尽。预览的后续批次以前序人工合并及 reconcile 完成为前提。清单读失败不会让调度退出：它会退避重试，并说明「调度器还活着，但看不到工作项」。SIGINT/SIGTERM 停止新派发并等待在途执行结束。
-- `afk doctor [--workspace-root <path>] [--cleanup <target>] [--json]`：统计缓存、依赖池、受管工作区和租约，默认只读并兼容旧清单。清理必须指定唯一匹配的完整任务 ID 或工作区/依赖池绝对路径，保留未知、旧版、活动、脏、未发布和验证中的工作。空间与总量为清理前的逻辑估计；`afk observe doctor` 仍用于查看事件存储。
+- `afk doctor [--workspace-root <path>] [--cleanup <target>] [--fix] [--json]`：统计缓存、依赖池、受管工作区和租约，默认只读并兼容旧清单。`--cleanup` 清理唯一匹配的完整工作项 ID 或工作区、依赖池绝对路径，保留未知、旧版、活动、脏、未发布和验证中的工作，盘点反映清理前的状态。单独使用 `--fix` 时，先按心跳宽限期与 ADR-0038 的条件回收，再盘点剩余资源。盘点或回收出现诊断时，命令返回退出码 1。两种清理方式均保留存在未关闭执行占用的工作区或仓库，包括占用已过期的情况。`afk observe doctor` 用于查看事件存储。
 - `afk observe`：查看执行记录及其审计、证据投影。
 
 完整命令面以 `apps/cli/src/command-registry.ts` 为准，不应从旧示例或历史计划推断当前支持的命令。
@@ -73,6 +75,7 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - 实现成功及 QA 借用结束后移除存储托管的工作树，包括失败后重试复用的工作树。失败时保留源码和诊断证据；存储托管的脏工作区重试会把已跟踪与未跟踪修改写入 `afk-recovery-*` Git stash，准备工作分支后重新应用，冲突时仍保留 stash。独立 clone 继续拒绝脏准备。裸库、本地分支与恢复 stash 不随工作树移除。
 - Node 依赖池位于 `~/.loop-workspace/deps/<hash>/layout/`，哈希涵盖锁文件、所有 workspace package manifest、包管理配置与补丁、平台、架构及 Node ABI。受管阶段结束时收集已安装依赖，匹配阶段直接挂载。`node_modules` 保持真实目录，内部逐项软链，工作区包链接指向当前 checkout，pnpm 可变状态保留本地。外部链接或不支持的嵌套源码链接保留原安装，避免生成不可用缓存。Maven、Go 沿用原生全局缓存。
 - checkout 引用依赖池时保留 pin；释放受管 checkout 时归还引用，默认超过 8 GiB 后按 LRU 淘汰无引用池。裸库继续缓存；已有独立 clone 不自动迁移。全局包管理器 store prune 由操作者在依赖池验收后显式执行。
+- `afk doctor --fix` 按 ADR-0038 回收符合条件且超过 `workspaceReclaimGrace`（默认 24 小时）的工作区。它在持有仓库租约和执行占用门后重新读取运行记录，然后归集依赖、移除检出和工作区，并将活动记录以失败状态归档。租约无法取得、执行占用未关闭、心跳仍有效、运行证据缺失或阻塞、运行状态未知，或清单不可用时保留工作区。
 - Agent 完成信号和 QA artifact manifest 是执行期协议文件，不是通用配置或生命周期状态存储。
 
 以上是当前默认目录的职责摘要；具体路径解析以当前源码为准。数据权威边界见[架构概览：核心职责与边界](overview.zh.md#核心职责与边界)。
@@ -168,6 +171,9 @@ Provider backlog、Runtime 状态、run-event 审计轨迹和证据属于不同�
 revision、写入恢复文档，再等待执行清理后启动后继；清理失败不得继续启动。执行器在原生
 恢复或全新启动前持久化一次交接预算预留；原生启动失败后的fallback复用同一次预留。
 预算耗尽时保留terminal恢复文档，并阻塞工作项。
+
+本地和容器的 batch 执行也会在 Claude Code 正常退出后，根据成功的原生结果及最终用量
+判定是否达到上下文阈值。工作项完成信号优先。缺少原生结果或原生结果失败时，不触发这类交接。
 
 恢复文档路径与历史文档匹配使用同一份编码后的完整规范工作身份；旧数字身份保留原文件名。
 首次异步创建执行之前即登记取消清理，取消后晚返回的执行先停止再拒绝phase，其晚结果不得
@@ -291,6 +297,10 @@ AFK 跑一个 agent 需要两件事：**用哪个** agent，和**怎么**跑。�
 在运行期解析出来的运行时，会在 agent 启动前先做一次探测，这样模型不可达时给出的是探测自己的诊断，而不是来自错误端点的传输错误。探测要花一次真实的模型往返，所以每个 provider 每次运行只探一次。见 [ADR-0032](../adr/0032-provider-and-runtime-are-one-decision.md)。
 
 验证分支也是同样的绑定方式。QA 复核 agent 的 provider 与运行时是一起解析出来的：自己解析 provider 的复核 agent 会一并解析属于它的运行时；调用方已经探过的运行时直接复用 —— 复核 agent 不会对同一个运行时探测第二次。
+
+Codex 原生恢复支持本地开发工作区内经 stdio 启动的批处理 app-server。快照保存原生线程、最后完成的 turn、工作树真实路径、模型 provider 和累计用量。发送新输入前，AFK 核对原生工作区、turn、审批策略和沙箱权限。exec、交互、analysis、容器和外部端点均拒绝显式恢复。turn 已派发但无法确认时，工作流停止，以免重复执行。
+
+检测到其他写者占用线程时，工作流停止派发。每一代只采纳当前线程、当前 turn 的通知，审计记录相对快照的增量，工单预算保存该线程的累计用量。每个累计计数与上一条已确认计数之差必须等于本次对应增量，完全重复的读数只计一次。用量缺失或矛盾时，该轮失败。生成快照还要求原生 turn 身份一致且状态明确为 completed。
 
 ### agent TUI 里的模态框
 

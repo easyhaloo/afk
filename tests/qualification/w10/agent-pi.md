@@ -1,6 +1,6 @@
 # W10 原生 Pi 安装版验收
 
-2026-11-19 在 macOS arm64 从 `feat/session-distillation` 的 `ccd7b06a5fbd3611ee9886bfcdd93c8f8759aeaf` 构建并校验安装 AFK 0.2.150。安装包内的 `WorkflowRunner` 通过 `agent.pi` 和 `sandbox.local` 启动 PATH 上的 Pi 1.5.2。每次运行使用新的 HOME、Pi 会话目录及合成 Git 项目。工单与分支使用本地适配器。安装版 `afk run` 没有注入合成工单的参数，因此脚本直接使用安装包的 Runner 和产品事件存储。完整实测数据见[脱敏收据](agent-pi.receipt.json)。
+2026-11-19 在 macOS arm64 从 `feat/session-distillation` 的 `ccd7b06a5fbd3611ee9886bfcdd93c8f8759aeaf` 构建并校验安装 AFK 0.2.150。安装包内的 `WorkflowRunner` 通过 `agent.pi` 和 `sandbox.local` 启动 PATH 上的 Pi 1.5.2。每次运行使用新的 HOME、Pi 会话目录及合成 Git 项目。工单与分支使用本地适配器。安装版 `afk run` 没有注入合成工单的参数，因此脚本直接使用安装包的 Runner 和产品事件存储。完整实测数据见[脱敏收据](agent-pi-0.2.150.receipt.json)。
 
 | 场景 | 实测结果 | 证据范围 |
 | --- | --- | --- |

@@ -20,6 +20,7 @@ import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJu
 import { readAppearance, saveAppearance } from "../services/appearance-service.js";
 import { createRuntimeBacklogService } from '../services/runtime-backlog-service.js';
 import { createExecutionWorker } from '../adapters/execution-worker-adapter.js';
+import { createLearningWorker } from "../adapters/learning-worker-adapter.js";
 import { createBacklogControlService } from "../services/backlog-control-service.js";
 import { createBacklogRuntimeService } from "../services/backlog-runtime-service.js";
 import { createClipboardService } from "../services/clipboard-service.js";
@@ -56,7 +57,7 @@ import { createPluginService } from "../services/plugin-service.js";
 import { createGoogleAuthService } from "../services/google-auth-service.js";
 import { createExperienceService } from "../services/experience-service.js";
 import { createLearningService } from "../services/learning-service.js";
-import { parseLearningQuery, parseLearningValidate, parseLearningCorrectionInput, parseKnowledgePrepare, parseKnowledgePublish } from "../../shared/learning-contract.js";
+import { parseLearningQuery, parseLearningValidate, parseLearningCorrectionInput, parseKnowledgePrepare, parseKnowledgePublish, parseLearningWorkerTarget } from "../../shared/learning-contract.js";
 import { parseExperienceOutcomeQuery, parseExperienceQuery, parseExperienceSelection, parseExperienceVerify, parseNoInput } from "../../shared/experience-contract.js";
 import { parsePluginEnabled, parsePluginId, parsePluginInstall } from "../../shared/plugin-contract.js";
 
@@ -218,6 +219,7 @@ const experienceService = createExperienceService({ projects: async () => (await
 const learningService = createLearningService({
   projects: async () => (await workItemInventoryService.list()).projects.map(project => `${project.platform}:${project.projectKey}`),
   withRuntime: operation => pluginService.withRuntime(operation),
+  launchWorker: createLearningWorker(fileURLToPath(new URL('../learning-worker.js', import.meta.url)), launch => pluginService.launchWorker(launch)),
 });
 const workItemExecutionService = createWorkItemExecutionService({
   launchExecution: (input, workspace) => pluginService.launchWorker(() => createExecutionWorker(fileURLToPath(new URL('../execution-worker.js', import.meta.url)))(input, workspace)),
@@ -289,7 +291,17 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
 export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) {
   const jumpserverService = deps.jumpserverService ?? defaultJumpserverService;
   workItemInventorySyncService.start();
-  if (typeof app.once === "function") app.once("before-quit", () => {
+  let quitPending = false;
+  if (typeof app.on === "function") app.on("before-quit", event => {
+    const stopping = learningService.stopWorker();
+    if (stopping) {
+      event.preventDefault();
+      if (!quitPending) {
+        quitPending = true;
+        void stopping.then(() => app.quit());
+      }
+      return;
+    }
     void googleAuthService.cancel();
     workItemInventorySyncService.stop();
     workItemInventoryStore.close();
@@ -395,6 +407,8 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandler(IPC_CHANNELS.experiencesRevoke, parseExperienceSelection, input => experienceService.revoke(input));
   registerHandler(IPC_CHANNELS.learningProjects, parseNoInput, () => learningService.projects());
   registerHandler(IPC_CHANNELS.learningJobs, parseLearningQuery, input => learningService.jobs(input));
+  registerHandler(IPC_CHANNELS.learningWorkerOnce, parseLearningWorkerTarget, input => learningService.worker.once(input));
+  registerHandler(IPC_CHANNELS.learningWorkerCancel, parseLearningWorkerTarget, input => learningService.worker.cancel(input));
   registerHandler(IPC_CHANNELS.learningCandidates, parseLearningQuery, input => learningService.candidates(input));
   registerHandler(IPC_CHANNELS.learningCorrect, parseLearningCorrectionInput, input => learningService.correct(input));
   registerHandler(IPC_CHANNELS.learningValidate, parseLearningValidate, input => learningService.validate(input));

@@ -223,6 +223,7 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
     if (result.comparisons.length !== prepared.checks.length || new Set(result.comparisons.map(comparison => comparison.checkId)).size !== prepared.checks.length) fail('insufficient_coverage');
     const operations = new Set<string>();
     let nonAssetDigest: string | undefined;
+    const skillRevisionBaselines: boolean[] = [];
     for (const check of prepared.checks) {
       const comparison = result.comparisons.find(entry => entry.checkId === check.id);
       const configured = executionOptions.harness!.cases.find(entry => entry.checkId === check.id);
@@ -255,11 +256,11 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
           const semanticExperiment = prepareProposalExperiment(prepared.kind, executionOptions.artifactPath, check, configured.experiment,
             prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);
           if (semanticExperiment.status !== 'prepared') fail('insufficient_coverage');
-          if (semanticExperiment.experiment.recovery !== undefined) {
+          if (semanticExperiment.experiment.recovery || semanticExperiment.experiment.skillTrace) {
             const context = observation.semanticContext;
             const frozen = context?.options;
-            if (!context || !frozen?.scratch || frozen.scratch.candidateVersion !== version
-              || frozen.scratch.helper !== executionOptions.scratchHelper || frozen.baseImageId !== executionOptions.baseImageId
+            if (!context || !frozen || (semanticExperiment.experiment.recovery && (!frozen.scratch || frozen.scratch.candidateVersion !== version
+              || frozen.scratch.helper !== executionOptions.scratchHelper)) || frozen.baseImageId !== executionOptions.baseImageId
               || context.operationId !== binding.operationId || context.containerId !== execution.evidence.containerId
               || frozen.input.digest !== binding.inputTreeDigest
               || frozen.input.manifest.find(entry => entry.path === executionOptions.artifactPath)?.digest !== binding.artifactDigest
@@ -272,11 +273,13 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
           catch { checkAbort(); fail('invalid_receipt'); }
           if (!same(receipt.semantic, semantic) || !same(receipt.actual, semantic.assertions) || receipt.assertions !== semantic.assertions.length) fail('invalid_receipt');
           passed = semantic.passed;
+          if (semantic.skillTrace && version === 'original') skillRevisionBaselines.push(passed);
         } else if (receipt.semantic !== undefined) fail('invalid_receipt');
         if (receipt.passed !== passed) fail('invalid_receipt');
         if (version === 'proposed' && !passed) fail('assertion_failed');
       }
     }
+    if (skillRevisionBaselines.length && skillRevisionBaselines.every(passed => passed)) fail('assertion_failed');
     const executionId = randomUUID();
     const observations = result.comparisons.flatMap(comparison => comparison.original ? [comparison.original, comparison.proposed] : [comparison.proposed]);
     const observationBinding = Object.fromEntries(Object.entries(observations[0].receipt.binding).filter(([key, value]) =>

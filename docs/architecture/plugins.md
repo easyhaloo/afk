@@ -241,7 +241,10 @@ supported text formats and strips credentials/query/fragment from returned URIs.
 An `effect.completed` record for `artifact.upload` links the source event/sequence,
 local digest, remote reference or safe failure reason. Upload failures/timeouts
 preserve local audit authority; upload receipts do not recursively upload
-themselves. Existing after-agent report hooks remain a separate consumer.
+themselves. A sink that transforms the upload returns `storedContent` with the SHA-256
+and media type of the object at its URI. For `evidence-bundle` this covers the serialized
+JSON manifest. Sinks that preserve bytes and type can return just `uri` and `name`.
+Existing after-agent report hooks remain a separate consumer.
 SDK consumers can select the same bridge with `createPluginRunObserver`,
 `setPluginAuditArtifacts` and `PluginRunObserverOptions`, using
 `createLocalEncryptedEvidenceStore` for persistent local evidence. Key initialization
@@ -653,7 +656,7 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `tracker.linear` | `baseUrl`, secret `token`, `teamId` |
 | `tracker.jira` | `baseUrl`, secret `token`, `projectKey`, `email?`, `issueType?` |
 | `verification.test-runner`, `verification.static-scan`, `verification.browser-check` | Nonempty argv `command`, `timeoutMs?` |
-| `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?` |
+| `notification.feishu`, `notification.slack` | Secret `webhook` resolving to an HTTP URL, `channel?`. Feishu also accepts an optional `signingSecret` credential reference. |
 | `notification.email` | `from`, `to` email addresses; `sendmailPath?`, `channel?` |
 | `notification.gmail` | `{}` sends to the authenticated Google account; optional email `to` overrides the recipient; `channel?` |
 | `notification.desktop` | `platform?` (`darwin`, `linux`, `win32`), `channel?` |
@@ -662,17 +665,18 @@ fetch/executors/callbacks rather than serializing functions in YAML.
 | `trigger.schedule` | Nonempty `triggers[{id,kind: schedule,schedule,payload?,input?}]`; schedule is a positive integer millisecond string, at most `2147483647`; `payload` and `input` accept nested JSON |
 | `context.code`, `context.project-memory` | Respectively `root`, `file` |
 | `context.knowledge-base` | `endpoint`, secret `token?`, `timeoutMs?`; bearer authentication requires HTTPS; named credentials resolve on each `gather`, with operation cancellation and deadline; `timeoutMs` bounds HTTP including response-body reads |
-| `context.retrieval` | Nonempty `documents[{origin,content}]` |
+| `context.retrieval` | Nonempty `documents[{origin,content}]`. Both fields are trimmed and must be nonempty and NUL-free. `origin` is single-line, and `content` preserves internal line breaks. |
 | `credential.system-keychain` | `service`, `command?` |
 | `credential.google-oauth` | `{}` uses the Google credentials saved by `afk plugin auth login google --client <path>` |
 | `credential.oauth` | HTTPS `tokenEndpoint`, `clientId`, secret `clientSecret`, `authMethod?` (`client_secret_basic`/`client_secret_post`), `timeoutMs?` |
 | `credential.oidc` | HTTPS `issuer`, `clientId`, secret `assertion`, `tokenEndpoint?`, `timeoutMs?`; optional `exchange:{subjectToken,subjectTokenType,audience?,resource?}` with secret `subjectToken` |
 | `credential.enterprise` | Nonempty `values` map of secret references |
 | `artifact.test-report-local`, `artifact.evidence-bundle` | `root`; evidence-bundle factory wraps the builder as an `ArtifactSink`, mapping `put` to a one-record bundle's `create` |
-| `artifact.object-storage`, `artifact.report-platform` | `endpoint`; report platform also accepts secret `token?` |
+| `artifact.object-storage` | Either `endpoint` or a secret reference in `presignedUrl` |
+| `artifact.report-platform` | `endpoint` and optional secret `token` |
 | `repository.multi-repository` | Nonempty `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`, unique names; optional `managed: {workspaceRoot}` requires each repository's remote URL, base branch and canonical lease key |
 | `repository.remote-workspace`, `repository.special-git-backend` | Respectively `baseUrl` plus secret `token?`, or `backend`; optional `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` selects supported operations |
-| `repository.remote-workspace` for managed execution | Add `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`. Use the canonical absolute shared mount and absolute Git common directory. Each name must match a lifecycle repository with an explicit source ref. Use the same repository claim store and canonical tracker lease key across workers. |
+| `repository.remote-workspace`, `repository.special-git-backend` for managed execution | Add `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`. The backend creates a linked Git worktree at `<workspaceRoot>/<name>@<runId>` on the canonical absolute shared mount. Supply its absolute Git common directory. Each name must match a lifecycle repository with an explicit source ref. Use the same repository claim store and canonical tracker lease key across workers. See [install and recover the mounted Git service](../../services/mounted-workspace/README.md). |
 | `policy.secret-scan` | Fallback `root`, nonempty `files?`, `maxFileBytes?`; evaluation prefers the trusted lifecycle's `context.worktreePath` |
 | `policy.license-policy` | Nonempty `allowlist`, nonempty `licenses?` |
 | `policy.compliance-policy` | Nonempty `rules[{id,effect,actions?,when?,reason?}]`, `defaultEffect?`, optional exact installation grants `sharedVerification[{project,workspace,plugin,version,entry,integrity,treeIntegrity}]`. Effect is `allow`/`deny`, actions are nonempty, `when` is a scalar equality map. |
@@ -1163,6 +1167,8 @@ replacement for evidence classification and redaction.
 
 ### Secret references and trigger lifetime
 
+For an object storage PUT URL issued by your storage service, configure `artifact.object-storage` with `{"presignedUrl":{"env":"OBJECT_UPLOAD_URL"}}`. A credential-provider reference also works. Set the variable in the invoking process or let the credential provider supply the URL per upload. The URL targets one object key, and the artifact name does not change that key. Use HTTPS for remote storage. Plain HTTP is accepted on `127.0.0.1` and `::1` for local storage. The returned artifact reference contains the object URL without its signature query.
+
 Configured secret values use either an environment reference, for example
 `{"env":"PROVIDER_TOKEN"}`, or a credential reference such as
 `{"provider":"credential.enterprise","name":"deployment"}` with optional
@@ -1241,7 +1247,11 @@ duplicate flag; this acknowledges receipt, not completed work.
 
 Delivery identity combines provider name with `Idempotency-Key`,
 `X-GitHub-Delivery`, `X-GitLab-Event-UUID` (in that order), or a body hash.
-Reusing an ID with different bytes returns `409`. A private, single-owner
+For a Gitea `opened` issue with matching Gitea and GitHub delivery headers and no
+explicit key, a byte-identical redelivery to the same provider returns the retained
+receipt even if Gitea assigns a new UUID. Each new UUID consumes one record slot
+and expires when the original receipt is pruned. Reusing any retained ID with
+different bytes returns `409`. A private, single-owner
 SQLite queue retains `pending/processing/delivered/failed` states and recovers
 interrupted deliveries. Defaults are five attempts, 1000 ms retry delay, 10000
 retained rows and 64 MiB payloads. There is no automatic silent eviction: a full
@@ -1277,6 +1287,21 @@ runtime; pending queue entries survive restart. Interval timers remain
 process-local and do not backfill downtime. Callback completion still depends
 on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `TriggerQueueOptions` and
 `TriggerDeliveryStatus` for delivery context, queue limits and receipt contracts.
+
+### First connection to Slack, Feishu, Linear and Jira Cloud
+
+1. Choose a provider and create its credential using the official entry point. Supply the secret or complete webhook URL through the environment of the AFK process. Store the environment reference in the settings file.
+
+| Plugin ID | Obtain the configuration | `settings.json` contents (replace the sample target) |
+| --- | --- | --- |
+| `notification.slack` | Create an app in the test workspace, enable Incoming Webhooks, select an authorized test channel and copy the generated URL. [Slack apps](https://api.slack.com/apps) · [Webhook setup](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
+| `notification.feishu` | Add a custom bot in the target group's bot settings and copy its webhook into `FEISHU_WEBHOOK`. Under Security Settings, enable signature verification and copy the generated secret into `FEISHU_SIGNING_SECRET`. Omit `signingSecret` for an unsigned bot. Include any required keyword in the message. For error 19021, check the signing key and the sender's clock (the timestamp must be within one hour). [Feishu custom bots](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"},"signingSecret":{"env":"FEISHU_SIGNING_SECRET"}}` |
+| `tracker.linear` | Create a personal API key with read access to the target team and store the raw key. Run `query { teams { nodes { id name } } }` in the authorized workspace and select the team's `id`. [Linear API settings](https://linear.app/settings/api) · [GraphQL guide](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
+| `tracker.jira` | Create an account API token and supply the same account's email and the project key. Use the site root for an unscoped token or `https://api.atlassian.com/ex/jira/CLOUD_ID` for a scoped token. The adapter appends the REST path and builds Basic authentication from the email and token. [Create token](https://id.atlassian.com/manage-profile/security/api-tokens) · [Token and gateway guide](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
+
+2. Save the chosen JSON as `settings.json` and run `afk plugin configure <plugin-id> --builtin --file settings.json`.
+3. For a tracker, save `{}` as `empty.json`. Run `afk plugin invoke tracker.issue <linear-or-jira> health --input empty.json --json` and check for `status` equal to `ok`. Save `{"issueId":"DEMO-123"}` as `issue.json`, substituting a known authorized test issue. Run `afk plugin invoke tracker.issue <linear-or-jira> getIssue --input issue.json --json` and verify the returned issue. Both operations are read-only.
+4. For a notifier, confirm the webhook's destination accepts a test post. Save `{"title":"Plugin connection test","body":"Check CHECK-001"}` as `message.json`, substituting a unique check ID. Run `afk plugin invoke notification.provider <full-plugin-id> notify --input message.json --json`. Check for `delivered: true` and confirm the same ID in the destination group or channel.
 
 ### Complete configured example and scheduled invocation
 
@@ -1540,6 +1565,7 @@ outcome insertion share one SQLite transaction. Event replay preserves original 
 and recurrence, while changed content at the same sequence conflicts. Each experience retains
 at most 256 outcome receipts within the existing store bounds. Historical selections remain
 readable after correction or revocation; they grant no fresh retrieval authority.
+After trusted QA starts and passes, publishing a change and opening its matching merge gate in the same attempt records `awaiting_merge`. Benefit remains `unknown`.
 
 The plugin observer derives feedback after audit persistence through the configured builtin
 Provider, even with model-based learning disabled. A derived-write failure retains the audit

@@ -28,13 +28,13 @@ export abstract class ProcessAgentProvider implements AgentProvider {
    * not is measured against the strictest limit AFK knows of.
    */
   readonly promptLimits?: AgentPromptLimits;
-  protected readonly nativeSessions: boolean = false;
+  protected readonly nativeSessions: boolean | 'batch' = false;
 
   abstract buildCommand(options: AgentCommandOptions): AgentCommand;
   parseLine?(line: string): AgentEvent[];
 
   async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
-    this.assertExecutionProfile(options);
+    this.assertExecutionSupported(options);
     // A goal the provider would refuse is refused here, where the reason is
     // still known. Dispatching it would cost the whole idle timeout and
     // produce a timeout instead of a cause.
@@ -43,7 +43,6 @@ export abstract class ProcessAgentProvider implements AgentProvider {
     const executionMode = options.executionMode ?? (options.interactive ? 'interactive' : 'batch');
     const commandOptions = { ...options, executionMode, interactive: executionMode === 'interactive', goal: options.prompt };
     if (options.resume) {
-      if (!this.nativeSessions) throw new Error(`${this.name} does not support explicit native resume`);
       await this.restoreSession({ snapshot: options.resume, worktreePath: options.worktreePath });
       if (!Number.isSafeInteger(options.generation) || options.generation !== options.resume.generation + 1) {
         throw new Error('Resume generation must follow the captured generation');
@@ -72,7 +71,8 @@ export abstract class ProcessAgentProvider implements AgentProvider {
     let sessionError: string | undefined;
     let execution: AgentExecution | undefined;
     const expectedSessionId = this.resumeSessionId(commandOptions);
-    const parseLine = this.nativeSessions && parser ? (line: string): AgentEvent[] => {
+    const nativeSessions = this.nativeSessions === true || (this.nativeSessions === 'batch' && executionMode === 'batch');
+    const parseLine = nativeSessions && parser ? (line: string): AgentEvent[] => {
       const events = parser(line);
       for (const event of events) {
         if (event.type === 'usage') usage = event.usage;
@@ -102,7 +102,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
       metadata: this.executionMetadata(options),
       parseLine,
     });
-    if (!this.nativeSessions) return execution;
+    if (!nativeSessions) return execution;
     const source = execution;
     if (sessionError) await source.kill();
     return {
@@ -112,6 +112,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
       waitForEvent: () => source.waitForEvent(),
       waitForResult: async resultOptions => {
         const result = await source.waitForResult(resultOptions);
+        usage = result.usage ?? usage;
         const error = result.exitCode !== undefined && result.exitCode !== 0
           ? { code: 'NON_ZERO_EXIT', message: result.error?.message || `process exited with code ${result.exitCode}` }
           : sessionError
@@ -179,9 +180,12 @@ export abstract class ProcessAgentProvider implements AgentProvider {
     return { provider: this.name, transport: 'process' };
   }
 
-  protected assertExecutionProfile(options: AgentCommandOptions): void {
+  protected assertExecutionSupported(options: AgentCommandOptions): void {
     if (options.executionProfile === 'analysis' && !this.capabilities.has('analysis')) {
       throw new Error(`analysis_unsupported: ${this.name}`);
+    }
+    if (options.resume && !this.nativeSessions) {
+      throw new Error(`${this.name} does not support explicit native resume`);
     }
   }
 }

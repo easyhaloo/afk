@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { constants, lstatSync, promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
@@ -6,12 +7,36 @@ import { aborted } from 'node:util';
 import { z } from 'zod';
 import type { AgentExecution, AgentProvider, TokenUsage } from '../../domain/agents/types.js';
 import { LocalSandbox } from '../../infrastructure/sandbox/providers/local.js';
-import { spawnGuardedAnalysis } from '../../infrastructure/sandbox/providers/analysis-process-guard.js';
+import { assertAnalysisGuardAvailable, spawnGuardedAnalysis } from '../../infrastructure/sandbox/providers/analysis-process-guard.js';
 import { DISTILLATION_LIMITS } from './contracts.js';
 
 const requiredFlags = ['--safe-mode', '--tools', '--permission-mode', '--permission-prompts',
   '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--setting-sources',
   '--settings', '--no-session-persistence', '--no-chrome', '--session-id', '--system-prompt'];
+
+async function readGuardedHelp(executable: string, directory: string, signal: AbortSignal): Promise<string> {
+  const outputPath = join(directory, 'claude-help');
+  const output = await fs.open(outputPath, 'wx+', 0o600);
+  try {
+    await fs.unlink(outputPath);
+    signal.throwIfAborted();
+    const probe = spawnGuardedAnalysis([executable, '--help'], { signal, timeout: 10_000, killSignal: 'SIGTERM' }, output.fd);
+    try {
+      probe.stderr?.resume();
+      const [code] = await once(probe, 'close');
+      const size = (await output.stat()).size;
+      if (code !== 0 || size >= 128 * 1024) throw new Error('analysis_unsupported');
+      const bytes = Buffer.alloc(size);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesRead } = await output.read(bytes, offset, bytes.length - offset, offset);
+        if (bytesRead === 0) throw new Error('analysis_unsupported');
+        offset += bytesRead;
+      }
+      return bytes.toString('utf8');
+    } finally { probe.kill('SIGTERM'); }
+  } finally { await output.close(); }
+}
 
 function executableIdentity(path: string): string | undefined {
   const stats = lstatSync(path, { bigint: true, throwIfNoEntry: false });
@@ -61,6 +86,7 @@ export async function executeAnalysis(input: AnalysisExecutionInput): Promise<An
   const timeoutMs = z.number().int().positive().max(120_000).parse(input.timeoutMs ?? DISTILLATION_LIMITS.timeoutMs);
   if (!input.provider.capabilities.has('analysis') || input.provider.name !== 'claude-code') throw new Error('analysis_unsupported');
   if (input.signal?.aborted) throw new Error('analysis_cancelled');
+  assertAnalysisGuardAvailable();
   const controller = new AbortController();
   let timedOut = false;
   const deadline = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
@@ -82,28 +108,14 @@ export async function executeAnalysis(input: AnalysisExecutionInput): Promise<An
     if (recording) await Promise.race([recording, aborted(controller.signal, recording)]);
     if (controller.signal.aborted) throw cancellationError();
     selected.verifyExecutable();
+    directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'learning-analysis-'));
+    if (controller.signal.aborted) throw cancellationError();
     try {
-      const probe = spawnGuardedAnalysis([selected.executable, '--help'], { signal: controller.signal, timeout: 10_000, killSignal: 'SIGTERM' });
-      try {
-        help = await new Promise<string>((resolve, reject) => {
-          let output = '';
-          probe.stdout?.on('data', (chunk: Buffer) => {
-            if (Buffer.byteLength(output) + chunk.length > 128 * 1024) {
-              probe.kill('SIGTERM');
-              reject(new Error('analysis_unsupported'));
-            } else output += chunk.toString();
-          });
-          probe.stderr?.resume();
-          probe.on('error', reject);
-          probe.on('close', code => code === 0 ? resolve(output) : reject(new Error('analysis_unsupported')));
-        });
-      } finally { probe.kill('SIGTERM'); }
+      help = await readGuardedHelp(selected.executable, directory, controller.signal);
     }
     catch { throw controller.signal.aborted ? cancellationError() : new Error('analysis_unsupported'); }
     const supported = new Set(help.match(/--[a-z][a-z0-9-]*/g) ?? []);
     if (requiredFlags.some(flag => !supported.has(flag))) throw new Error('analysis_unsupported');
-    if (controller.signal.aborted) throw cancellationError();
-    directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'learning-analysis-'));
     if (controller.signal.aborted) throw cancellationError();
     const sandbox = new LocalSandbox({ id: analysisRunId, worktreePath: directory, workspaceRoot: directory,
       sessionName: `learning-${analysisRunId}`, runtimeRunId: analysisRunId, analysis: { ...selected, sessionId } });

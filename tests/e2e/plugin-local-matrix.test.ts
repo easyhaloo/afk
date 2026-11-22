@@ -183,6 +183,16 @@ async function expectDecision(operation: Promise<unknown>, expected: object) {
   }
 }
 
+async function expectArtifactRef(ref: unknown, provider: string, output: string, name: string) {
+  const path = join(output, name);
+  const stored = await readFile(path);
+  expect(ref).toEqual({
+    name, uri: pathToFileURL(path).href,
+    ...(provider === 'evidence-bundle' && { storedContent: { sha256: digest(stored), mediaType: 'application/json' } }),
+  });
+  return stored;
+}
+
 async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
   const { provider } = test;
   const result = JSON.parse((await test.run()).stdout);
@@ -194,8 +204,7 @@ async function expectSuccess(test: Awaited<ReturnType<typeof configured>>) {
     expect(result).toEqual([{ origin, content: provider.id === 'context.retrieval' ? content.trim() : content, score: 2 }]);
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
   } else if (provider.capability === 'artifact.provider') {
-    expect(result).toEqual({ name: 'result.txt', uri: pathToFileURL(join(test.output, 'result.txt')).href });
-    const stored = await readFile(join(test.output, 'result.txt'), 'utf8');
+    const stored = (await expectArtifactRef(result, provider.provider, test.output, 'result.txt')).toString('utf8');
     if (provider.provider === 'test-report-local') expect(stored).toBe(content);
     else {
       const records = [{ id: 'result.txt', mediaType: 'text/plain', sha256: digest(content), size: Buffer.byteLength(content) }];
@@ -249,6 +258,36 @@ describe('local plugin matrix: persisted lifecycle × public operation', () => {
 });
 
 describe('context selection and persisted memory', () => {
+  it('context.project-memory reads the active edition from the configured project on each invocation', async () => {
+    const primary = await configured('context.project-memory');
+    const other = await configured('context.project-memory');
+    const first = { origin: 'returns/v1', content: 'warehouse north accepts returns' };
+    const second = { origin: 'returns/v2', content: 'warehouse south accepts returns' };
+    const independent = { origin: 'orders/v1', content: 'warehouse east accepts orders' };
+    const query = { scope: '.', prompt: 'warehouse' };
+    await writeFile(join(primary.workspace, 'memory.json'), JSON.stringify([first]));
+    await writeFile(join(other.workspace, 'memory.json'), JSON.stringify([independent]));
+    expect(JSON.parse((await primary.run(query)).stdout)).toEqual([{ ...first, score: 1 }]);
+    await writeFile(join(primary.workspace, 'memory.json'), JSON.stringify([second]));
+    expect(JSON.parse((await primary.run(query)).stdout)).toEqual([{ ...second, score: 1 }]);
+    expect(JSON.parse((await other.run(query)).stdout)).toEqual([{ ...independent, score: 1 }]);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('context.code respects revocation and restoration of source file permissions', async () => {
+    const test = await configured('context.code');
+    const path = join(test.workspace, 'widget.ts');
+    const query = { scope: 'widget.ts', prompt: 'needle' };
+    const expected = [{ origin: 'widget.ts', content, score: 2 }];
+    expect(JSON.parse((await test.run(query)).stdout)).toEqual(expected);
+    await chmod(path, 0o000);
+    try {
+      await expectRejected(test.run(query), 'EACCES');
+    } finally {
+      await chmod(path, 0o600);
+    }
+    expect(JSON.parse((await test.run(query)).stdout)).toEqual(expected);
+  });
+
   it.each(['context.code', 'context.retrieval', 'context.project-memory'])('%s ranks matching fragments, filters misses, and enforces public limits', async id => {
     const test = await configured(id);
     const before = await test.effects();
@@ -267,6 +306,23 @@ describe('context selection and persisted memory', () => {
     ]);
     expect(JSON.parse((await test.run({ scope: '.', prompt: '' })).stdout)).toEqual([]);
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
+  });
+
+  it('context.retrieval preserves Markdown line breaks in documents configured through the CLI', async () => {
+    const test = await sandbox();
+    const id = 'context.retrieval';
+    const markdown = '# Work-item relationships\r\n\r\n- `parentId` groups related work.\n- `dependsOn` controls scheduling.';
+    expect((await test.configure(id, { documents: [{ origin: ' guide.md ', content: `\n${markdown}\r\n ` }] })).stdout).toBe(`Configured ${id}\n`);
+    const result = await test.invoke('context.provider', id, 'gather', { scope: '.', prompt: 'parentId dependsOn', limit: 1 });
+    expect(JSON.parse(result.stdout)).toEqual([{ origin: 'guide.md', content: markdown, score: 2 }]);
+
+    for (const document of [
+      { origin: 'guide.md', content: ' \r\n\t ' },
+      { origin: 'guide.md', content: `${markdown}\0` },
+      { origin: 'guide\n.md', content: markdown },
+    ]) {
+      await expectRejected(test.configure(id, { documents: [document] }), 'Invalid plugin settings');
+    }
   });
 
   it.each(['traversal', 'symlink', 'missing', 'oversized'])('context.code rejects %s without changing source files', async kind => {
@@ -710,7 +766,7 @@ it('cross-validates context → verification → report → evidence digests wit
   for (const provider of ['test-report-local', 'evidence-bundle']) {
     const name = provider === 'test-report-local' ? 'verification-report.json' : 'verification-evidence.json';
     const ref = JSON.parse((await test.invoke('artifact.provider', provider, 'put', { name, mediaType: 'application/json', bytes: report.toString('base64') })).stdout);
-    expect(ref).toEqual({ name, uri: pathToFileURL(join(test.output, name)).href });
+    await expectArtifactRef(ref, provider, test.output, name);
   }
   expect(await readFile(join(test.output, 'verification-report.json'))).toEqual(report);
   const bundle = JSON.parse(await readFile(join(test.output, 'verification-evidence.json'), 'utf8'));

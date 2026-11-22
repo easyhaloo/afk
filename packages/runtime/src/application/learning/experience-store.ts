@@ -208,9 +208,10 @@ const contextRetrievalSchema = z.object({ version: z.literal(1), stage: z.litera
 const contextReceiptSchema = z.discriminatedUnion('stage', [contextRetrievalSchema,
   contextRetrievalSchema.extend({ stage: z.literal('selected'), retrievedFragmentDigest: z.string().regex(/^[a-f0-9]{64}$/) })]);
 const outcomeEventSchema = z.object({ runId: identity, sequence: z.number().int().positive().safe(), hash: z.string().regex(/^[a-f0-9]{64}$/),
-  type: z.enum(['run.finished', 'qa.failed', 'failure.classified']), outcome: z.enum(['succeeded', 'failed', 'cancelled']),
+  type: z.enum(['run.finished', 'qa.failed', 'failure.classified', 'human_gate.opened']), outcome: z.enum(['succeeded', 'failed', 'cancelled', 'awaiting_merge']),
   occurredAt: z.string().datetime(), observedAt: z.string().datetime() }).strict().refine(event =>
-  event.type === 'run.finished' || event.outcome === 'failed', 'Only run.finished may have a non-failed outcome');
+  event.type === 'human_gate.opened' ? event.outcome === 'awaiting_merge'
+    : event.type === 'run.finished' ? event.outcome !== 'awaiting_merge' : event.outcome === 'failed', 'Outcome must match its event type');
 const outcomeReceiptSchema = z.object({ version: z.literal(1), stage: z.literal('outcome'),
   selected: contextRetrievalSchema.extend({ stage: z.literal('selected'), retrievedFragmentDigest: z.string().regex(/^[a-f0-9]{64}$/) }),
   event: outcomeEventSchema, recurrence: z.boolean(), benefit: z.literal('unknown'), recordedAt: z.string().datetime() }).strict();

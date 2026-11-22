@@ -1,0 +1,61 @@
+{
+  "platform": "darwin-arm64",
+  "cli": "0.2.171",
+  "archiveSha256": "81b8c8ec94b94520f3fb0cbea2a515f497557a6a55ad7d545bc2c82502f75a54",
+  "sourceCommit": "10e453b5c9e804ccfd93200d7c55163da80ab239",
+  "suiteTree": "224d0aed96342f33da99d58a6b1ed6ef1d9aa965",
+  "suite": "skills/wiki/scripts",
+  "python": "3.14.7",
+  "command": [
+    "python3",
+    "-B",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "skills/wiki/scripts",
+    "-p",
+    "test_*.py",
+    "-v"
+  ],
+  "provider": "verification.test-runner",
+  "mutation": "Remove the isSidechain predicate from the isolated export of session_source.py",
+  "runs": [
+    {
+      "executionId": "accepted",
+      "tests": 45,
+      "passed": true,
+      "exitCode": 0,
+      "closed": true,
+      "failedTests": [],
+      "stderrSha256": "7674225db00d4a616fb689b1859b06dad3d664c27b92f715f82b622fdab25087"
+    },
+    {
+      "executionId": "rejected",
+      "tests": 45,
+      "passed": false,
+      "exitCode": 1,
+      "closed": true,
+      "failedTests": [
+        "test_claude_jsonl_and_sidechain_filter"
+      ],
+      "stderrSha256": "7e08b52b47d20788e57080019e9858c5e465db7d91e4516989d431d09483a54b"
+    },
+    {
+      "executionId": "recovered",
+      "tests": 45,
+      "passed": true,
+      "exitCode": 0,
+      "closed": true,
+      "failedTests": [],
+      "stderrSha256": "2f264191013017c647b2a8c75d90c269260e0b29db084aa05b25ecac975cb2fd"
+    }
+  ],
+  "offlineUpgrade": {
+    "from": "0.2.170",
+    "to": "0.2.171",
+    "checksumMismatchRejected": true,
+    "configurationPreserved": true,
+    "rolledBack": true
+  }
+}

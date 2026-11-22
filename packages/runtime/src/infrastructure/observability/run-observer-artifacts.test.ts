@@ -219,6 +219,17 @@ it('rejects unsafe evidence references before invoking the local reader', async 
   expect(summary.localUri).toBeUndefined();
 });
 
+it.each([{ sha256: 'invalid', mediaType: 'application/json' }, { sha256: 'a'.repeat(64), mediaType: '' }])('rejects malformed stored content metadata without substituting the input digest', async storedContent => {
+  const { root, ref, evidence, provider, read } = await setup();
+  vi.mocked(provider.put).mockResolvedValue({ uri: 'file:///manifest.json', name: 'manifest.json', storedContent });
+  await createRunObserver(root, [], { artifacts: { provider, evidence } }).record(context, { kind: 'qa.passed' }, { evidence: [ref] });
+  const [source, receipt] = await read();
+  expect(source.evidence).toEqual([ref]);
+  expect(receipt.evidence).toBeUndefined();
+  expect(receipt.data).toMatchObject({ outcome: 'failed' });
+  expect(JSON.parse((receipt.data as { summary: string }).summary)).toMatchObject({ reason: 'invalid_artifact', localSha256: ref.sha256 });
+});
+
 it('keeps local audit persistence failures fatal and prevents external writes', async () => {
   const { root, ref, evidence, provider } = await setup();
   const { writeFile } = await import('node:fs/promises');

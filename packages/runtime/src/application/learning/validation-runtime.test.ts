@@ -745,8 +745,8 @@ describe('persisted learning validation runtime', () => {
     const setup = await fixture();
     const clock = vi.spyOn(performance, 'now').mockReturnValue(1000.75).mockReturnValueOnce(1000.25);
     try {
-      expect((await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs: 100 })).status).toBe('validated');
-      expect(setup.requests[0].timeoutMs).toBe(99);
+      expect((await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs: 5000 })).status).toBe('validated');
+      expect(setup.requests[0].timeoutMs).toBe(4999);
     } finally { clock.mockRestore(); }
   });
 
@@ -1330,14 +1330,17 @@ describe('persisted learning validation runtime', () => {
     expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
   });
 
-  it('rejects final doctor synchronous overrun even when the timeout callback cannot run', async () => {
+  it('rejects a deadline crossed during the final doctor before the timeout callback runs', async () => {
     const setup = await fixture();
+    const timeoutMs = 30_000;
+    const startedAt = 1_000;
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(startedAt);
     const diagnostics = vi.mocked(setup.provider.doctor!).getMockImplementation()!;
     vi.mocked(setup.provider.doctor!).mockImplementation(async operation => {
-      if (vi.mocked(setup.provider.doctor!).mock.calls.length === 4) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+      if (vi.mocked(setup.provider.doctor!).mock.calls.length === 4) clock.mockReturnValue(startedAt + timeoutMs + 1);
       return diagnostics(operation);
     });
-    expect(await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs: 100 })).toEqual(blocked('timed_out'));
+    expect(await validateConfiguredLearningCandidate(setup.input, { ...setup.options, timeoutMs })).toEqual(blocked('timed_out'));
     expect(setup.provider.doctor).toHaveBeenCalledTimes(4);
     expect(setup.store.getValidation(setup.candidateId)).toBeUndefined();
   });

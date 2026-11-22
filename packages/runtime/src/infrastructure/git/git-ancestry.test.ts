@@ -27,8 +27,7 @@ async function repositoryWithTwoLines(): Promise<{ root: string; repoRoot: strin
   const base = await commit(repoRoot, 'base.txt', 'base\n', 'base');
   await git.raw(['checkout', '-b', 'left']);
   const left = await commit(repoRoot, 'left.txt', 'left\n', 'left');
-  await git.raw(['checkout', 'master']);
-  await git.raw(['checkout', '-b', 'right']);
+  await git.raw(['checkout', '-b', 'right', base]);
   const right = await commit(repoRoot, 'right.txt', 'right\n', 'right');
   return { root, repoRoot, base, left, right };
 }

@@ -194,7 +194,9 @@ integrations:
 的有界摘要，源审计追加后上传引用的证据；校验内容 hash、拒绝 restricted 证据、对
 支持的文本格式脱敏，并移除返回 URI 中的凭据、query 和 fragment。
 `artifact.upload` 的 `effect.completed` 记录关联源事件/序号、本地摘要、远端引用或
-安全失败原因。上传异常/超时不替代本地审计，上传回执不递归触发上传。既有 after-agent
+安全失败原因。上传异常/超时不替代本地审计，上传回执不递归触发上传。转换上传内容的 sink
+通过 `storedContent` 返回其 URI 对应对象的 SHA-256 和媒体类型。`evidence-bundle` 对序列化的 JSON
+清单计算摘要。原样保存字节和类型的 sink 可以只返回 `uri` 和 `name`。既有 after-agent
 报告 hook 独立消费。SDK 调用方可通过 `createPluginRunObserver`、
 `setPluginAuditArtifacts`、`PluginRunObserverOptions` 选择同一 bridge，
 `createLocalEncryptedEvidenceStore` 提供持久本地证据；key 初始化加锁并复用已有 key，
@@ -512,7 +514,7 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `tracker.linear` | `baseUrl`、secret `token`、`teamId` |
 | `tracker.jira` | `baseUrl`、secret `token`、`projectKey`、`email?`、`issueType?` |
 | `verification.test-runner`、`verification.static-scan`、`verification.browser-check` | 非空 argv `command`、`timeoutMs?` |
-| `notification.feishu`、`notification.slack` | 解析为 HTTP URL 的 secret `webhook`、`channel?` |
+| `notification.feishu`、`notification.slack` | 解析为 HTTP URL 的 secret `webhook`、`channel?`。飞书还接受可选的凭据引用 `signingSecret`。 |
 | `notification.email` | 邮箱 `from`、`to`；`sendmailPath?`、`channel?` |
 | `notification.gmail` | `{}` 默认发给授权 Google 账号自身；邮箱 `to?` 可覆盖收件人，另可选 `channel?` |
 | `notification.desktop` | `platform?`（`darwin`、`linux`、`win32`）、`channel?` |
@@ -521,17 +523,18 @@ Fetch、executor 和 callback 由工厂注入，不是 YAML 中可序列化的�
 | `trigger.schedule` | 非空 `triggers[{id,kind: schedule,schedule,payload?,input?}]`；schedule 是不大于 `2147483647` 的正整数毫秒字符串，`payload`、`input` 支持嵌套 JSON |
 | `context.code`、`context.project-memory` | 分别为 `root`、`file` |
 | `context.knowledge-base` | `endpoint`、secret `token?`、`timeoutMs?`；Bearer 认证要求 HTTPS；具名凭据在每次 `gather` 时解析，遵循操作取消与期限；`timeoutMs` 限制 HTTP，包括响应体读取 |
-| `context.retrieval` | 非空 `documents[{origin,content}]` |
+| `context.retrieval` | 非空 `documents[{origin,content}]`。两个字段均去除首尾空白，且不得为空或包含 NUL。`origin` 为单行，`content` 保留内部换行。 |
 | `credential.system-keychain` | `service`、`command?` |
 | `credential.google-oauth` | `{}` 使用 `afk plugin auth login google --client <path>` 保存的 Google 凭据 |
 | `credential.oauth` | HTTPS `tokenEndpoint`、`clientId`、secret `clientSecret`、`authMethod?`（`client_secret_basic`/`client_secret_post`）、`timeoutMs?` |
 | `credential.oidc` | HTTPS `issuer`、`clientId`、secret `assertion`、`tokenEndpoint?`、`timeoutMs?`；可选 `exchange:{subjectToken,subjectTokenType,audience?,resource?}`，其中 `subjectToken` 是 secret |
 | `credential.enterprise` | 非空 `values` 映射，每个值为 secret 引用 |
 | `artifact.test-report-local`、`artifact.evidence-bundle` | `root`；evidence-bundle 工厂把 builder 包装成 `ArtifactSink`，`put` 调用单记录 bundle 的 `create` |
-| `artifact.object-storage`、`artifact.report-platform` | `endpoint`；报告平台另接受 secret `token?` |
+| `artifact.object-storage` | 二选一，`endpoint` 或 secret 引用 `presignedUrl` |
+| `artifact.report-platform` | `endpoint` 和可选 secret `token` |
 | `repository.multi-repository` | 非空 `repositories[{name,path,remoteUrl?,baseBranch?,leaseKey?}]`，名称唯一；可选 `managed: {workspaceRoot}` 要求各仓库提供 remote URL、base branch 和规范 lease key |
 | `repository.remote-workspace`、`repository.special-git-backend` | 分别为 `baseUrl` 加 secret `token?`，或 `backend`；可选 `lifecycle: {repositories:[{url,ref?}],operations:[prepare,checkout,publish,cleanup]}` 选择支持的操作 |
-| `repository.remote-workspace` 受管执行 | 增加 `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`。`workspaceRoot` 使用共享挂载的规范绝对路径，`gitDirectory` 指向 Git 公共目录的绝对路径。每个名称须对应声明了来源 ref 的生命周期仓库。多个执行器共用同一份租约存储和仓库对应的 Tracker 租约键。 |
+| `repository.remote-workspace`、`repository.special-git-backend` 受管执行 | 增加 `managed: {workspaceRoot,repositories:[{name,gitDirectory,leaseKey,remoteUrl}]}`。`workspaceRoot` 使用共享挂载的规范绝对路径。后端在 `<workspaceRoot>/<name>@<runId>` 创建 Git 关联工作树，`gitDirectory` 指向 Git 公共目录的绝对路径。每个名称须对应声明了来源 ref 的生命周期仓库。多个执行器共用同一份租约存储和仓库对应的 Tracker 租约键。见[服务安装与恢复说明](../../services/mounted-workspace/README.md)。 |
 | `policy.secret-scan` | 兜底 `root`、非空 `files?`、`maxFileBytes?`；评估优先使用可信 lifecycle 的 `context.worktreePath` |
 | `policy.license-policy` | 非空 `allowlist`、非空 `licenses?` |
 | `policy.compliance-policy` | 非空 `rules[{id,effect,actions?,when?,reason?}]`、`defaultEffect?`；effect 为 `allow`/`deny`，actions 非空，`when` 为 scalar 相等条件映射 |
@@ -912,6 +915,8 @@ QA 复用相同 Runtime 的 lifecycle modules。Required `init` 包括无效配�
 
 ### Secret 引用和 Trigger 生命周期
 
+对象存储服务签发 PUT URL 后，可为 `artifact.object-storage` 配置 `{"presignedUrl":{"env":"OBJECT_UPLOAD_URL"}}`，也可使用 Credential Provider 引用。在调用进程中注入环境变量，或由 Credential Provider 在每次上传时提供 URL。该 URL 指向固定对象键，产物名称不改变对象键。远程存储使用 HTTPS，本地存储可在 `127.0.0.1` 或 `::1` 使用 HTTP。返回的产物引用会移除 URL 中的签名查询参数。
+
 配置中的 secret 使用环境引用对象，例如 `{"env":"PROVIDER_TOKEN"}`，或 credential
 引用 `{"provider":"credential.enterprise","name":"deployment"}`，后者可带 `scope`。
 裸变量名、明文 secret 或 `${VAR}` 表达式不是该引用语法。
@@ -967,7 +972,9 @@ bearer 不能绕过。持久化前校验 payload；入队成功返回 `202` 和 
 尝试次数及 duplicate 标记，表示持久接收，不代表工作完成。
 
 投递身份由 Provider 名称与依次优先的 `Idempotency-Key`、`X-GitHub-Delivery`、
-`X-GitLab-Event-UUID` 或 body hash 组成。同一 ID 不同字节返回 `409`。私有、单拥有者
+`X-GitLab-Event-UUID` 或 body hash 组成。Gitea 重投工单 `opened` 事件时，若未指定显式幂等键、
+Gitea 与 GitHub 投递头一致，同一 Provider 收到字节完全相同的正文会返回保留的原回执。
+每个新 UUID 占一个记录名额，随原回执清理。任何已保留 ID 携带不同正文均返回 `409`。私有、单拥有者
 SQLite 队列保存 `pending/processing/delivered/failed` 并恢复中断投递；默认最多五次
 尝试、1000 ms 重试间隔、10000 行、64 MiB payload，不自动静默淘汰。队列满返回
 `503`，body 超限 `413`，未知路由/Provider `404`，认证失败 `401`，无效 payload `400`。
@@ -996,6 +1003,21 @@ journal 处于 `requested` 或 `failed` 时允许重试，绝不自动重复已�
 interval timer 仍在进程内，不补跑停机时段；callback 完成依赖 action 自身结束。
 SDK 提供 `currentTriggerDeliveryId()`、`TriggerQueueOptions`、
 `TriggerDeliveryStatus`，分别用于投递上下文、队列限制和回执契约。
+
+### 首次连接 Slack、飞书、Linear 和 Jira Cloud
+
+1. 选择一行，在官方入口创建凭据。将密钥或完整 webhook URL 存入启动 AFK 的进程环境，配置文件只保存环境变量引用。
+
+| 插件 ID | 获取配置 | `settings.json` 内容（替换示例目标） |
+| --- | --- | --- |
+| `notification.slack` | 在测试工作区创建应用，开启 Incoming Webhooks，选择获授权的测试频道并复制生成的 URL。[Slack 应用](https://api.slack.com/apps) · [配置步骤](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/) | `{"webhook":{"env":"SLACK_WEBHOOK"}}` |
+| `notification.feishu` | 在目标群的机器人设置中添加自定义机器人，将 webhook 存入 `FEISHU_WEBHOOK`。在「安全设置」启用「签名校验」，将生成的密钥存入 `FEISHU_SIGNING_SECRET`。无签名机器人省略 `signingSecret`。若启用关键词，消息须包含该词。遇到错误码 19021 时检查签名密钥和发送端时钟（时间戳与当前时间须相差一小时以内）。[飞书自定义机器人](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot) | `{"webhook":{"env":"FEISHU_WEBHOOK"},"signingSecret":{"env":"FEISHU_SIGNING_SECRET"}}` |
+| `tracker.linear` | 创建有目标团队读取权限的个人 API key，原样保存。在授权工作区运行查询 `query { teams { nodes { id name } } }`，选择目标团队的 `id`。[Linear API 设置](https://linear.app/settings/api) · [GraphQL 入门](https://linear.app/developers/graphql) | `{"baseUrl":"https://api.linear.app/graphql","teamId":"TEAM_UUID","token":{"env":"LINEAR_TOKEN"}}` |
+| `tracker.jira` | 创建账户 API token，填写同一账户邮箱及项目键。普通 token 使用站点根地址，带 scope 的 token 使用 `https://api.atlassian.com/ex/jira/CLOUD_ID`。适配器追加 REST 路径并使用邮箱和 token 构造 Basic 认证。[创建 token](https://id.atlassian.com/manage-profile/security/api-tokens) · [令牌与网关说明](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) | `{"baseUrl":"https://YOUR-SITE.atlassian.net","projectKey":"DEMO","email":"operator@example.com","token":{"env":"JIRA_TOKEN"}}` |
+
+2. 将所选行的 JSON 保存为 `settings.json`，运行 `afk plugin configure <插件 ID> --builtin --file settings.json`。
+3. 对工单插件，将 `{}` 保存为 `empty.json`。运行 `afk plugin invoke tracker.issue <linear 或 jira> health --input empty.json --json`，确认 `status` 为 `ok`。再将 `{"issueId":"DEMO-123"}` 保存为 `issue.json`（替换为获授权的已知测试工单），运行 `afk plugin invoke tracker.issue <linear 或 jira> getIssue --input issue.json --json`，核对返回的工单。这两个操作均为只读。
+4. 对通知插件，先确认 webhook 绑定的群或频道允许试发。将 `{"title":"插件接入测试","body":"测试编号 CHECK-001"}` 保存为 `message.json`，替换为本次唯一编号。运行 `afk plugin invoke notification.provider <完整插件 ID> notify --input message.json --json`。核对 `delivered: true`，并在目标群或频道核对相同编号。
 
 ### 完整配置与定时调用示例
 
@@ -1218,6 +1240,7 @@ version-1 outcome 收据。收据保存完整历史 `selected` 快照、事件 r
 不算该经验复发。失败聚合与结果收据同事务提交；重放保留时间和复发结论，同序号内容变化拒绝。
 每条经验最多保存 256 份结果收据，并受既有存储总量限制。纠正或撤回后仍可查看历史选择，
 但历史收据不授予新召回资格。
+同一次尝试中，可信执行器启动 QA 并通过检查、发布变更、打开对应的人工合并门禁后，系统记录 `awaiting_merge`，收益仍为 `unknown`。
 
 插件观察器在审计持久化后，通过实际配置的内建 Provider 派生反馈，关闭模型学习时仍有效。
 派生写入失败保留原审计供显式重放，也不阻止已启用的学习捕获。具有规范工作项身份的独立 QA

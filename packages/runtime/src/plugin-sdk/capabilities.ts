@@ -207,6 +207,7 @@ export interface ArtifactDescriptor {
 export interface ArtifactRef {
   readonly uri: string;
   readonly name: string;
+  readonly storedContent?: { readonly sha256: string; readonly mediaType: string };
 }
 
 export interface ArtifactSink extends CapabilityProvider<ArtifactSinkCapability> {

@@ -6,6 +6,7 @@ import { simpleGit } from 'simple-git';
 import { RepositoryLeases } from '../../infrastructure/git/repository-lease.js';
 import { FilesystemClaimLock } from '../../domain/backlog/claim.js';
 import { RepositoryStore } from '../../infrastructure/git/repository-store.js';
+import { executionOwnershipKeys } from '../../infrastructure/runtime/workspace-ownership.js';
 import { executionWorkspacePath, workspaceDataDirectory, workspaceStateDirectory } from '../../infrastructure/workspace.js';
 import { inspectWorkspaceDisk } from './workspace-disk.js';
 
@@ -91,6 +92,20 @@ describe('workspace disk inventory and targeted cleanup', () => {
     expect(report.workspaces[0].reclaimableBytes).toBe(report.workspaces[0].bytes);
     expect(report.diagnostics).toEqual([]);
     await expect(lstat(join(temporary, 'leases'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps a completed workspace quarantined by an expired execution claim', async () => {
+    const [ownershipKey] = await executionOwnershipKeys(workspace);
+    const lock = new FilesystemClaimLock();
+    const claim = await lock.acquire({ key: ownershipKey, owner: 'retained-doctor-test', ttlMs: 1 });
+    expect(claim).not.toBeNull();
+    try {
+      const report = await retained('quarantined');
+      expect(report.workspaces[0]).toMatchObject({ state: 'done', reclaimableBytes: 0 });
+      expect(await lock.inspect(ownershipKey)).toMatchObject({ claimId: claim!.claimId });
+    } finally {
+      await claim!.release();
+    }
   });
 
   it.each(['done', 'merge_ready'])('removes only the targeted clean generated %s workspace, retaining source, bare cache, and evidence', async state => {

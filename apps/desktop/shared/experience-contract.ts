@@ -25,7 +25,7 @@ export type DesktopExperienceOutcome = {
   selectionId: string;
   runId: string;
   workItemId: string;
-  event: { sequence: number; type: "run.finished" | "qa.failed" | "failure.classified"; outcome: "succeeded" | "failed" | "cancelled"; occurredAt: string };
+  event: { sequence: number; type: "run.finished" | "qa.failed" | "failure.classified" | "human_gate.opened"; outcome: "succeeded" | "failed" | "cancelled" | "awaiting_merge"; occurredAt: string };
   recurrence: boolean;
   benefit: "unknown";
   recordedAt: string;

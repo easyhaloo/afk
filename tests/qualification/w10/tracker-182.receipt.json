@@ -1,0 +1,32 @@
+{
+  "observedOn": "2026-11-21",
+  "platform": "darwin-arm64",
+  "afkVersion": "0.2.182",
+  "archiveSha256": "663b11a3b5ab736272120986b8627e88e12403c65581d701f7dfcc9c682afea0",
+  "accountReads": {
+    "entry": "plugin invoke tracker.provider <provider> getIssue --json",
+    "method": "GET",
+    "github": {"afkExit": 0, "independentTool": "gh", "independentExit": 0},
+    "gitlab": {"afkExit": 0, "independentTool": "glab", "independentExit": 0},
+    "matchingFieldsOnBoth": ["id", "title", "state", "url", "platform", "project"]
+  },
+  "loopbackGitLabWrite": {
+    "entry": "plugin invoke tracker.provider gitlab updateLabels --json",
+    "conflictHTTPStatus": 409,
+    "firstExit": 1,
+    "mutatedAfterConflict": false,
+    "separateRetryProcess": true,
+    "retryExit": 0,
+    "appliedWrites": 1,
+    "readBack": {"sameIssue": true, "oldStageRemoved": true, "newStageCount": 1, "unrelatedLabelRetained": true}
+  },
+  "cursorBatch": {
+    "nativeVersion": "2026.07.09-a3815c0",
+    "status": "authenticated",
+    "independentExit": 1,
+    "localSandboxExit": 1,
+    "authenticationRequiredOnBoth": true,
+    "nativeSessionEvents": 0,
+    "sandboxClosed": true
+  }
+}

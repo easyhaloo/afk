@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-22",
+  "sourceCommit": "0c0bbd77fe4ee7ffbeb1ae0f9b88c9fe7ee067b1",
+  "fixtureCommit": "4ed1a739e3f5288bf34c5379e5c2f2d96ffcf737",
+  "installationSource": "local-checksum-verified-release",
+  "modelEvidenceLevel": "fixture",
+  "runs": [
+    {
+      "scenario": "success",
+      "passed": true,
+      "phase": "complete",
+      "evidenceLevel": "native",
+      "modelSource": "isolated-loopback-fixture",
+      "platform": "darwin",
+      "afk": "0.2.190",
+      "pi": "1.5.2",
+      "archiveSha256": "f32f4112824ae40c30dd3da8c3c19a3dbbeef8fb3f96482aa76d0a085fff3940",
+      "arch": "arm64",
+      "workflowSuccess": true,
+      "state": "verification",
+      "queued": true,
+      "terminal": "succeeded",
+      "failureCodes": [],
+      "expected": 5187,
+      "artifactMatches": true,
+      "implementationCompleted": true,
+      "sessionMatches": true,
+      "assistantTurns": 3,
+      "nativeUsage": {
+        "inputTokens": 93,
+        "outputTokens": 21,
+        "totalTokens": 114
+      },
+      "productUsage": {
+        "inputTokens": 93,
+        "outputTokens": 21,
+        "totalTokens": 114
+      },
+      "exitCode": 0
+    },
+    {
+      "scenario": "cancel",
+      "passed": true,
+      "phase": "complete",
+      "evidenceLevel": "native",
+      "modelSource": "isolated-loopback-fixture",
+      "platform": "darwin",
+      "afk": "0.2.190",
+      "pi": "1.5.2",
+      "archiveSha256": "f32f4112824ae40c30dd3da8c3c19a3dbbeef8fb3f96482aa76d0a085fff3940",
+      "arch": "arm64",
+      "workflowSuccess": false,
+      "state": "blocked",
+      "queued": false,
+      "terminal": "cancelled",
+      "reasonCode": "user_cancelled",
+      "failureCodes": [],
+      "abortAfterStart": true,
+      "delayedWrite": false,
+      "processExited": true,
+      "exitCode": 0
+    }
+  ]
+}

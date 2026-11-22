@@ -20,7 +20,13 @@
 | 成功、session、usage | 通过，随机输入求和 6396 | 通过（退出码 0），随机输入求和 1497 与产物一致，记录 `implementation.completed`，进入 `verification`。两版均匹配原生 session，3 轮输入 93、输出 21、总计 114，产品与 Pi 一致。 |
 | 活跃任务取消 | 失败，终态 `failed`，分类 `workflow_crash` | 通过（退出码 0），`run.finished` 记录 `cancelled` 和 `user_cancelled`，无 `failure.classified`。两版均在命令启动后取消，原生进程退出，9 秒后无延迟写，工单 `blocked`，未入 QA。 |
 
-## 复跑
+## 0.2.190 安装版复跑
+
+2026-11-22 在 macOS arm64 从 `0c0bbd77fe4ee7ffbeb1ae0f9b88c9fe7ee067b1` 打包，校验归档并在隔离目录安装 AFK 0.2.190。首次打包在 `tar` 初始化本机 locale 时失败，使用 `LC_ALL=C` 复跑后通过安装和 23 个 CLI 入口检查。
+
+原生 Pi 1.5.2 的成功和取消用例均以退出码 0 完成。成功用例验证产物、会话关联、用量和 QA 入队。取消用例记录 `cancelled` 和 `user_cancelled`，原生进程退出，未出现延迟写，工单保持 `blocked`。模型使用隔离回环夹具，真实模型账号成功用例仍待验收。详见 [0.2.190 脱敏收据](agent-pi-0.2.190.receipt.json)。
+
+## 复跑命令
 
 从上述基线的仓库根目录执行，需要项目支持的 Node ≥22.16、pnpm、Python 3、Git、`ps` 和已安装的原生 `pi`。已有对应安装包时可直接将 `AFK_BIN` 指向安装器创建的可执行文件。首次构建及安装使用以下命令。
 
@@ -40,6 +46,6 @@ python3 tests/qualification/w10/agent-pi.py "$AFK_BIN" success "$receipts/succes
 python3 tests/qualification/w10/agent-pi.py "$AFK_BIN" cancel "$receipts/cancel.json"
 ```
 
-复跑 0.2.152 时，将 `AFK_BIN` 指向该安装目录的 `dist/index.js`，新建收据目录，在两条命令末尾各加 `--expected-version 0.2.152`。启动器核对目录名、`release.json` 和 CLI 实报版本。
+复跑其他版本时，安装对应版本并更新 `AFK_BIN`，新建收据目录，在两条命令末尾各加 `--expected-version <version>`。启动器核对目录名、`release.json` 和 CLI 实报版本。
 
-两条命令独立运行，收据必须使用新文件名。退出码 0 表示该用例全部断言通过。当前基线的回环结果分别为 0 和 1。配置模型也可单独复跑，在 `success` 命令末尾追加 `--model-dir "$APPROVED_PI_MODEL_DIR"` 并更换收据文件名。该选项使用指定目录里 `settings.json` 选中的默认 provider 和 model，以及 `models.json` 的简单 API key 配置，可能消耗模型额度。默认回环模式无需账号。启动器使用进程环境传递配置模型的密钥，临时目录在运行结束后删除。收据仅保留断言、计数、版本及归档校验值。
+两条命令独立运行，收据必须使用新文件名。退出码 0 表示该用例全部断言通过。0.2.150 的回环结果分别为 0 和 1，0.2.152 和 0.2.190 均为 0 和 0。配置模型也可单独复跑，在 `success` 命令末尾追加 `--model-dir "$APPROVED_PI_MODEL_DIR"` 并更换收据文件名。该选项使用指定目录里 `settings.json` 选中的默认 provider 和 model，以及 `models.json` 的简单 API key 配置，可能消耗模型额度。默认回环模式无需账号。启动器使用进程环境传递配置模型的密钥，临时目录在运行结束后删除。收据仅保留断言、计数、版本及归档校验值。

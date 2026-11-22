@@ -158,7 +158,7 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [G] | `docs/architecture/plugins.zh.md` 的 Gmail OAuth 手工记录 | 2026-11-07 浏览器授权后 CLI 发信、Gmail API 接受、用户确认收到 |
 | [T] | `docs/guides/testing.zh.md` 的“插件矩阵与源码覆盖率” | 11-09 安装版 0.2.44 复验刷新、scope、身份与 discovery HTTP 200，发信次数为零。另有真实 Claude、Docker、认证 HTTP/Docker/Claude 和 SSH 的范围 |
 | [W] | `docs/superpowers/plans/2026-11-08-runtime-learning-and-validation.zh.md` 的“已安装 CLI”、`plugin-matrix-wiki-claude-20261108-2` 和“真实经验” | GitLab MR !198、人工门、SSH 和已安装 `context.experience` gather |
-| [WH] | [Webhook 0.2.190 本机安装版](#webhook-02190-本机安装版) | 动作执行中的并发去重和载荷冲突、正常重启持久化、新 ID 正对照 |
+| [WH] | [Webhook 0.2.190 本机安装版](#webhook-02190-本机安装版) | 动作执行中的并发去重、正常重启持久化、Gitea 原生签名投递和重投 |
 | [GH] | `docs/architecture/full-workflow-e2e-architecture.md` 的“GitHub 侧的附件 release” | 附件 HTTP 状态及字节，issue 操作待验 |
 | [S] | `../../w11-skill01-consumer/plugin-architecture/.codex/validation/skill-01/REPORT.md` 及同目录 `consumer-4/{workflow,session,scored}.json` | OpenCode 独立进程、历史 edition 2、宿主评分。新候选有单独的门禁记录 |
 | [P] | `$O/docs/superpowers/plans/2026-11-09-session-distillation.zh.md` 的“安装版与真实复用” | #704 的误差由 4 mm 降至 0 mm，因受测与发布提交不同，产品拒绝显式采纳 |
@@ -241,6 +241,12 @@ bash tests/qualification/w10/browser-check.sh "$O/.codex/validation/request-life
 
 ```sh
 python3 "${W10_EVIDENCE_DIR:?}/replay.py" "${W10_RELEASE_DIR:?}" "${W10_NODE_BIN:?}"
+```
+
+同日用另一份离线构建（归档 SHA-256 `f32f4112824ae40c30dd3da8c3c19a3dbbeef8fb3f96482aa76d0a085fff3940`）验证 Gitea 28.4.0 直连通用 Webhook。三条原生 Issue 通知均以 Gitea 的 HMAC 签名和交付 UUID 获得 HTTP 202。监听器重启后按原 UUID 重放，返回原回执，动作计数仍为 3。Gitea 自带重投生成新 UUID，处理为第 4 条交付。再一次重启后，该新 UUID 的原载荷重放返回原回执，签名正确但字节不同的载荷返回 409。四条交付均只尝试一次。证据见 [Gitea 通用 Webhook 回执](webhook-gitea.receipt.json)。托管发送方、真实服务写回和异常中止恢复仍待验。
+
+```sh
+python3 tests/qualification/w10/issue-event.py /path/to/installed/afk /path/to/gitea --webhook
 ```
 
 ## [GP] 裸仓接收真实推送

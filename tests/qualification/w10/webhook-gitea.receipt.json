@@ -1,0 +1,132 @@
+{
+  "afk": "0.2.190",
+  "gitea": "gitea version 28.4.0 built with go1.27.4 : bindata, sqlite, sqlite_unlock_notify",
+  "repository": "qualifier/parcel",
+  "repositoryId": 1,
+  "issue": 1,
+  "label": "ready",
+  "hookId": 1,
+  "events": [
+    {
+      "action": "opened",
+      "sourceId": "79066e4c-bddd-42e5-914b-63534abc29dc",
+      "bodySha256": "cd4b5f9ed02df64f30b745ddbcc4fd3fb3ddec30a1ecfc29a80e919b9e550217",
+      "accepted": {
+        "deliveryId": "f9e9fee105a95edff2c7081c94b3ba691a6b2d147cda226beff654d05cf0d17a",
+        "providerId": "trigger.webhook",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795341398748,
+        "nextAttemptAt": 1795341398748,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "f9e9fee105a95edff2c7081c94b3ba691a6b2d147cda226beff654d05cf0d17a",
+        "providerId": "trigger.webhook",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795341398748,
+        "nextAttemptAt": 1795341399769,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "label_updated",
+      "sourceId": "b2aa8391-1ac9-40db-bf5a-cd941f100b8b",
+      "bodySha256": "ebc13ae566b761c5dd05fc3588b2b12eef7b60616fc2dfd81a0c11355c42d8b7",
+      "accepted": {
+        "deliveryId": "931ecdf2d12bdff47f58658d9b57b94cdb60608f02a79f670c1bd07d78232d5c",
+        "providerId": "trigger.webhook",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795341398771,
+        "nextAttemptAt": 1795341398771,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "931ecdf2d12bdff47f58658d9b57b94cdb60608f02a79f670c1bd07d78232d5c",
+        "providerId": "trigger.webhook",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795341398771,
+        "nextAttemptAt": 1795341399792,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    },
+    {
+      "action": "closed",
+      "sourceId": "a1ec186d-0dcc-4925-96b7-1ac122939a95",
+      "bodySha256": "69c5a7bb9f80047e4d197c812dd9d20e333a9c5aa8318e5adbdd76c3b56bb6cf",
+      "accepted": {
+        "deliveryId": "4b1f6f3ab5b6cc0b53d4dfada1316222e59c41bc7c914f4dbd68c363a5ed2b75",
+        "providerId": "trigger.webhook",
+        "status": "pending",
+        "attempts": 0,
+        "receivedAt": 1795341398894,
+        "nextAttemptAt": 1795341398894,
+        "duplicate": false
+      },
+      "replay": {
+        "deliveryId": "4b1f6f3ab5b6cc0b53d4dfada1316222e59c41bc7c914f4dbd68c363a5ed2b75",
+        "providerId": "trigger.webhook",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795341398894,
+        "nextAttemptAt": 1795341399911,
+        "duplicate": true
+      },
+      "tamperedStatus": 401
+    }
+  ],
+  "deliveries": [
+    {
+      "deliveryId": "48a3ed68e555307ccba3fdc1762fd3b438d2d570408521b5cfcf470a7d465ace",
+      "providerId": "trigger.webhook",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795341399931,
+      "nextAttemptAt": 1795341400949
+    },
+    {
+      "deliveryId": "4b1f6f3ab5b6cc0b53d4dfada1316222e59c41bc7c914f4dbd68c363a5ed2b75",
+      "providerId": "trigger.webhook",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795341398894,
+      "nextAttemptAt": 1795341399911
+    },
+    {
+      "deliveryId": "931ecdf2d12bdff47f58658d9b57b94cdb60608f02a79f670c1bd07d78232d5c",
+      "providerId": "trigger.webhook",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795341398771,
+      "nextAttemptAt": 1795341399792
+    },
+    {
+      "deliveryId": "f9e9fee105a95edff2c7081c94b3ba691a6b2d147cda226beff654d05cf0d17a",
+      "providerId": "trigger.webhook",
+      "status": "delivered",
+      "attempts": 1,
+      "receivedAt": 1795341398748,
+      "nextAttemptAt": 1795341399769
+    }
+  ],
+  "replayAfterListenerRestart": true,
+  "upstreamReplay": {
+    "sourceId": "668bd903-ddd3-4d12-8c66-0172f1bde7e3",
+    "receipt": {
+      "deliveryId": "48a3ed68e555307ccba3fdc1762fd3b438d2d570408521b5cfcf470a7d465ace",
+      "providerId": "trigger.webhook",
+      "status": "pending",
+      "attempts": 0,
+      "receivedAt": 1795341399931,
+      "nextAttemptAt": 1795341399931,
+      "duplicate": false
+    },
+    "conflictAfterRestart": 409
+  },
+  "actionCount": 4
+}

@@ -8,7 +8,7 @@ import type { LearningCandidate, ValidationReceipt } from './candidate-store.js'
 import { candidateProposalSchema, DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { ProposalRuntimeCleanupError, ProposalRuntimeLeaseError, verifyRepositoryAssetProposal,
   type ProposalRuntimeObservation, type ProposalRuntimeOptions } from './proposal-runtime.js';
-import { compareProposalActual, prepareAssetProposal } from './proposals.js';
+import { compareProposalActual, prepareAssetProposal, renderSkillProposal } from './proposals.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema, prepareDistillationRequest } from './requests.js';
 import { observeProposalExperiment, prepareProposalExperiment } from './proposal-semantics.js';
 import type { LearningValidationChecker, LearningValidationCommitSnapshot, LearningValidationDependencies, LearningValidationResult } from './validation.js';
@@ -63,6 +63,24 @@ export const proposalValidationReceiptSchema = receiptBindingSchema.omit({ targe
   originalArtifactDigest: learningDigestSchema.nullable(),
 });
 type ProposalValidationReceipt = z.infer<typeof proposalValidationReceiptSchema>;
+
+const artifactSourceSchema = z.string().refine(source => Buffer.byteLength(source) <= 64 * 1024);
+export const proposalValidationArtifactSchema = proposalValidationReceiptSchema.extend({ source: artifactSourceSchema });
+export const proposalArtifactInputSchema = z.object({ baseline: artifactSourceSchema.optional() }).strict();
+
+export function readProposalValidationArtifact(candidate: LearningCandidate, receipt: ProposalValidationReceipt, baseline?: string) {
+  const proposal = candidate.proposal;
+  const hash = (source: string) => createHash('sha256').update(source).digest('hex');
+  let source: string;
+  if (proposal.kind === 'skill') {
+    if ((baseline === undefined ? null : hash(baseline)) !== receipt.originalArtifactDigest) return null;
+    source = renderSkillProposal(proposal, baseline);
+  } else if (proposal.kind === 'tool' && baseline === undefined) {
+    source = proposal.payload.source;
+  } else return null;
+  if (hash(source) !== receipt.artifactDigest) return null;
+  return proposalValidationArtifactSchema.parse({ ...receipt, source });
+}
 
 export function readProposalValidationReceipt(candidate: LearningCandidate, saved: ValidationReceipt | undefined): ProposalValidationReceipt | null {
   const kind = candidate.proposal.kind;

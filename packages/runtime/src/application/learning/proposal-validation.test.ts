@@ -369,6 +369,12 @@ describe('shared proposal candidate validation foundation', () => {
       const target = { directory: learningDirectory(test.root), scope, candidateId: candidate.id };
       expect(queryProposalValidationReceipt(target)).toEqual(projection);
       expect(queryProposalValidationReceipt({ ...target, scope: 'github:other/api' })).toBeNull();
+      const baseline = readFileSync(join(test.root, 'repo', projection.artifactPath), 'utf8');
+      const artifact = kind === 'skill' ? { baseline } : {};
+      expect(queryProposalValidationReceipt({ ...target, artifact })).toEqual({ ...projection, source: test.prepared.artifact.content });
+      expect(queryProposalValidationReceipt({ ...target, artifact: { baseline: `${baseline}\n` } })).toBeNull();
+      expect(queryProposalValidationReceipt({ ...target, artifact, scope: 'github:other/api' })).toBeNull();
+      if (kind === 'skill') expect(queryProposalValidationReceipt({ ...target, artifact: {} })).toBeNull();
       const missing = join(test.root, 'missing');
       expect(queryProposalValidationReceipt({ ...target, directory: missing })).toBeNull();
       expect(existsSync(missing)).toBe(false);
@@ -383,6 +389,7 @@ describe('shared proposal candidate validation foundation', () => {
           .run(payload, Buffer.byteLength(payload));
       } finally { database.close(); }
       expect(queryProposalValidationReceipt(target)).toBeNull();
+      expect(queryProposalValidationReceipt({ ...target, artifact })).toBeNull();
     }
     finally { reopened.close(); }
   });

@@ -11,7 +11,7 @@ import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type Proc
 import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
 import { loadEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
-import { readProposalValidationReceipt } from './proposal-validation.js';
+import { proposalArtifactInputSchema, readProposalValidationArtifact, readProposalValidationReceipt } from './proposal-validation.js';
 
 export function learningDirectory(homeDir = homedir()): string {
   return join(homeDir, '.afk', 'learning');
@@ -123,7 +123,7 @@ export function queryLearningState(input: { directory: string; scope: string }):
   } finally { store.close(); }
 }
 
-export function queryProposalValidationReceipt(input: { directory: string; scope: string; candidateId: string }) {
+export function queryProposalValidationReceipt(input: { directory: string; scope: string; candidateId: string; artifact?: { baseline?: string } }) {
   const scope = learningScopeSchema.parse(input.scope);
   const candidateId = learningDigestSchema.parse(input.candidateId);
   const file = join(input.directory, 'candidates.sqlite');
@@ -133,7 +133,12 @@ export function queryProposalValidationReceipt(input: { directory: string; scope
     const candidate = store.getCandidate(candidateId);
     if (!candidate || candidate.proposal.applicability.project !== scope) return null;
     const validation = store.getValidation(candidateId);
-    try { return readProposalValidationReceipt(candidate, validation); }
+    try {
+      const receipt = readProposalValidationReceipt(candidate, validation);
+      if (!receipt || !input.artifact) return receipt;
+      const { baseline } = proposalArtifactInputSchema.parse(input.artifact);
+      return readProposalValidationArtifact(candidate, receipt, baseline);
+    }
     catch { return null; }
   } finally { store.close(); }
 }

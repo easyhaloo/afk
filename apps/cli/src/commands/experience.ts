@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { z } from 'zod';
 import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState, queryProposalValidationReceipt,
   candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningScopeSchema, proposalValidationReceiptSchema,
+  proposalValidationArtifactSchema,
   verifyAdoptionRun, verifyExperienceRun,
   LearningReviewIncompleteError, learningReviewIncompleteSchema,
   type LearningCandidate, type LearningJob, type LearningState, type LearningValidationResult,
@@ -220,19 +221,26 @@ export function registerExperienceCommands(program: Command, composition: Experi
     .description('Read one learning candidate in its exact project scope')
     .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
     .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
-    .option('--proposal-receipt', 'Read the saved validation identity for a skill or tool proposal')
-    .option('--json', 'Emit the candidate or proposal receipt as JSON')
+    .addOption(new Option('--proposal-receipt', 'Read the saved validation identity for a skill or tool proposal').conflicts('proposalArtifact'))
+    .option('--proposal-artifact [baseline-file]', 'Read the saved receipt and matching source; skill patches require their original file')
+    .option('--json', 'Emit compact JSON')
     .action(async (candidateId, options) => {
-      if (options.proposalReceipt) {
+      if (options.proposalReceipt || options.proposalArtifact !== undefined) {
         try {
-          const input = { scope: options.scope, candidateId };
-          const receipt = proposalValidationReceiptSchema.parse(composition.pluginRuntime
+          const input = { scope: options.scope, candidateId, ...(options.proposalArtifact === undefined ? {} : {
+            artifact: typeof options.proposalArtifact === 'string' ? { baseline: await readExchange(options.proposalArtifact, 64 * 1024) } : {},
+          }) };
+          const schema = input.artifact ? proposalValidationArtifactSchema : proposalValidationReceiptSchema;
+          const receipt = schema.parse(composition.pluginRuntime
             ? await composition.pluginRuntime.dispatchSystemAction('learning.proposal.receipt', input)
             : queryProposalValidationReceipt({ ...input, directory: learningDirectory() }));
           if (receipt.scope !== input.scope || receipt.candidateId !== input.candidateId) throw new Error('Receipt identity differs');
           process.stdout.write(`${JSON.stringify(receipt, null, options.json ? undefined : 2)}\n`);
           return;
-        } catch { throw new Error('Proposal validation receipt unavailable in scope'); }
+        } catch {
+          throw new Error(options.proposalArtifact === undefined ? 'Proposal validation receipt unavailable in scope'
+            : 'Validated proposal artifact unavailable in scope or does not match the supplied baseline');
+        }
       }
       const records = await queryLearning('candidates', options.scope);
       const record = records.find(candidate => candidate.id === candidateId);

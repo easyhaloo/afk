@@ -27,7 +27,7 @@ export { reconcileDistillationSources, submitLearningCorrection,
 export { LearningWorker, learningDirectory, queryLearningState, queryProposalValidationReceipt, submitDistillation,
   type LearningJob, type LearningState, type LearningWorkerOptions, type LearningWorkerResult } from './application/learning/worker.js';
 export type { LearningCandidate, AnalysisAttempt } from './application/learning/candidate-store.js';
-export { proposalValidationReceiptSchema } from './application/learning/proposal-validation.js';
+export { proposalValidationReceiptSchema, proposalValidationArtifactSchema } from './application/learning/proposal-validation.js';
 export { validateLearningCandidate, type LearningValidationResult, type LearningValidationChecker,
   type LearningValidationDependencies, type LearningValidationCommitSnapshot } from './application/learning/validation.js';
 export { validateConfiguredLearningCandidate, validationConfigurationSchema, type ValidationConfiguration,

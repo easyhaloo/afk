@@ -1100,7 +1100,9 @@ describe('read-only learning governance', () => {
     expect(JSON.parse(test.printed())).toEqual(command === 'inspect' ? test.proposal : command === 'jobs' ? cliJobs(test.state.jobs) : test.state.candidates);
   });
 
-  it.each([false, true])('projects the exact proposal receipt for the requested scope (foreign: %s)', async foreign => {
+  it.each([false, true].flatMap(foreign => [
+    { foreign, artifact: false }, { foreign, artifact: true },
+  ]))('projects a scoped receipt (foreign: $foreign, artifact: $artifact)', async ({ foreign, artifact }) => {
     const dispatchSystemAction = vi.fn();
     const pluginRuntime = { dispatchSystemAction } as unknown as NonNullable<ExperienceCommandComposition['pluginRuntime']>;
     const test = learningFixture({ pluginRuntime });
@@ -1108,18 +1110,18 @@ describe('read-only learning governance', () => {
       candidateVersion: 1, validatedVersion: 2, candidateDigest: test.proposal.digest, evidenceDigest: test.proposal.evidenceDigest,
       checkerId: 'behavior', executionId: 'e7669c6b-d9af-4a4d-9444-a98fad93062e', receiptDigest: 'a'.repeat(64),
       repositoryDigest: 'b'.repeat(64), commit: 'c'.repeat(40), artifactPath: 'tools/verify.mjs', artifactDigest: 'd'.repeat(64),
-      originalArtifactDigest: null };
+      originalArtifactDigest: null, ...(artifact ? { source: 'export default 42;' } : {}) };
     dispatchSystemAction.mockResolvedValue({ ...receipt, configurationFile: '/private/checker.json' });
-    const result = test.parse('inspect', test.proposal.id, '--scope', scope, '--proposal-receipt', '--json');
+    const result = test.parse('inspect', test.proposal.id, '--scope', scope, artifact ? '--proposal-artifact' : '--proposal-receipt', '--json');
     if (foreign) {
-      await expect(result).rejects.toThrow('Proposal validation receipt unavailable in scope');
+      await expect(result).rejects.toThrow(artifact ? 'Validated proposal artifact unavailable in scope' : 'Proposal validation receipt unavailable in scope');
       expect(test.printed()).toBe('');
     } else {
       await result;
       expect(JSON.parse(test.printed())).toEqual(receipt);
     }
     expect(dispatchSystemAction).toHaveBeenCalledOnce();
-    expect(dispatchSystemAction).toHaveBeenCalledWith('learning.proposal.receipt', { scope, candidateId: test.proposal.id });
+    expect(dispatchSystemAction).toHaveBeenCalledWith('learning.proposal.receipt', { scope, candidateId: test.proposal.id, ...(artifact ? { artifact: {} } : {}) });
     expect(test.query).not.toHaveBeenCalled();
   });
 

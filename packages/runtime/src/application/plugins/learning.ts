@@ -9,6 +9,7 @@ import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, Le
 import { validateEvidencePack } from '../learning/evidence.js';
 import { LearningWorker, learningDirectory, queryLearningRequest, queryLearningState, queryProposalValidationReceipt, submitDistillation } from '../learning/worker.js';
 import { CandidateStore } from '../learning/candidate-store.js';
+import { proposalArtifactInputSchema } from '../learning/proposal-validation.js';
 import { assertCurrentKnowledgePublication } from '../learning/knowledge-publication-guard.js';
 import { verifyLessonPublication } from '../learning/lesson-publication-guard.js';
 import { reconcileDistillationSources, submitLearningCorrection, type ReconcileDistillationOptions } from '../learning/intake.js';
@@ -188,7 +189,8 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         return queryLearningState({ directory, scope: parsed.scope }).candidates;
       });
       registerAction('learning.proposal.receipt', input => {
-        const parsed = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema }).strict().parse(input);
+        const parsed = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
+          artifact: proposalArtifactInputSchema.optional() }).strict().parse(input);
         return queryProposalValidationReceipt({ directory, ...parsed });
       });
       registerAction('learning.request', input => {

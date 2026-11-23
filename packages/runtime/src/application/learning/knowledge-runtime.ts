@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import type { ContextFragment, ContextQuery, ContextSource, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
@@ -267,7 +268,8 @@ export class KnowledgeContextProvider implements ContextSource {
       return await withStore({ ...this.options, signal }, async store => {
         const fragments: ContextFragment[] = [];
         const { bindings } = loadBindings(this.options.config);
-        let bytes = 0;
+        const budget = 8000;
+        let remaining = budget;
         const ranked = store.listPublications().flatMap(publication => {
           checkAbort({ signal });
           if (publication.phase !== 'committed') return [];
@@ -288,9 +290,23 @@ export class KnowledgeContextProvider implements ContextSource {
             validationConfigurationFile: this.options.validationConfigurationFile, homeDir: this.options.homeDir,
             applicability: query.applicability, target: query.target });
           checkAbort({ signal });
-          if (!knowledge || bytes + Buffer.byteLength(knowledge.content, 'utf8') > 8000) continue;
-          bytes += Buffer.byteLength(knowledge.content, 'utf8');
-          fragments.push({ origin: `knowledge:${publication.key}; target:${publication.targetRef}`, content: knowledge.content });
+          if (!knowledge) continue;
+          let content = knowledge.content;
+          if (Buffer.byteLength(content, 'utf8') > budget && knowledge.lesson) {
+            const { title, payload } = knowledge.lesson;
+            const heading = `Excerpt from published Wiki Lesson (${knowledge.path})\n\n`;
+            const excerpt = [title, `Trigger: ${payload.trigger}`, `Root cause: ${payload.rootCause}`,
+              `Fix: ${payload.fix}`, `Prevention: ${payload.prevention.join('; ')}`].join('\n');
+            const excerptBudget = remaining - Buffer.byteLength(heading, 'utf8');
+            if (excerptBudget <= 0) continue;
+            const body = new StringDecoder('utf8').write(Buffer.from(excerpt, 'utf8').subarray(0, excerptBudget));
+            if (!body) continue;
+            content = heading + body;
+          }
+          const size = Buffer.byteLength(content, 'utf8');
+          if (size > remaining) continue;
+          remaining -= size;
+          fragments.push({ origin: `knowledge:${publication.key}; target:${publication.targetRef}`, content });
           if (fragments.length >= limit) break;
         }
         return fragments;

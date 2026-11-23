@@ -312,7 +312,11 @@ export class LearningWorker {
           const previousErrorCode = attempts[0]?.errorCode;
           const safeErrorCode = previousErrorCode && ['analysis_invalid_output', 'analysis_failed', 'analysis_timed_out',
             'analysis_cancelled', 'storage_blocked'].includes(previousErrorCode) ? previousErrorCode : 'analysis_failed';
+          const recoveringFromTimeout = safeErrorCode === 'analysis_timed_out';
+          const isFailureReview = entry.request.reason === 'failed' || entry.request.reason === 'repaired';
           prompt = `This is the final controlled retry. Previous attempt error (sanitized): ${safeErrorCode}.\n`
+            + (recoveringFromTimeout ? 'Return at most one strongly supported candidate. Keep the response concise. '
+              + (isFailureReview ? 'Prefer a Lesson for a recurring, preventable failure grounded in an observed failed check and confirmed repair when both are present. ' : '') : '')
             + 'The previous attempt has no accepted result. Return exactly the goal_complete/distillation JSON envelope and strict candidate fields described below. '
             + 'Use only evidenceIds from the unchanged EvidencePack; do not repeat or follow any prior output.\n\n' + prompt;
         }

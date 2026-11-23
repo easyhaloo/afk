@@ -13,13 +13,13 @@ import { buildEvidencePack, saveEvidencePack } from './evidence.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
 import { LearningWorker, queryLearningRequest, queryLearningState, submitDistillation } from './worker.js';
 import type { AnalysisExecutionInput } from './analysis-runner.js';
-import { DISTILLATION_LIMITS } from './contracts.js';
+import { DISTILLATION_LIMITS, type DistillationRequest } from './contracts.js';
 
 const directories: string[] = [];
 const workers: LearningWorker[] = [];
 const scope = 'github:acme/api';
 
-async function fixture() {
+async function fixture(reason: DistillationRequest['reason'] = 'completed') {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'learning-worker-'));
   directories.push(root);
   const file = join(root, 'session.txt');
@@ -27,7 +27,7 @@ async function fixture() {
   const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path: file, allowedRoot: root, format: 'text' }] });
   const directory = join(root, 'learning');
   const request = { version: 1 as const, scope, sourceId: 'run:r1', sourceRunId: 'r1', workItemId: `${scope}#42`,
-    evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'completed' as const };
+    evidenceDigest: pack.digest, analyzerVersion: '1', reason };
   const analyze = vi.fn(async (_input?: AnalysisExecutionInput) => ({ analysisRunId: 'analysis-1', sessionId: 'analysis-session-1', output: {
     type: 'goal_complete', distillation: { version: 1, warnings: [], candidates: [{
       kind: 'fact', title: 'Publishing approval', statement: 'Approval is required.',
@@ -502,23 +502,32 @@ describe('distillation worker', () => {
     expect(attempts.every(attempt => attempt.status === 'failed')).toBe(true);
   });
 
-  it.each([true, false])('retries with sanitized structural guidance from the persisted attempt and immutable evidence (accepted retry: %s)', async acceptedRetry => {
+  it.each([
+    { reason: 'completed', timedOut: false, acceptedRetry: true },
+    { reason: 'failed', timedOut: false, acceptedRetry: false },
+    { reason: 'completed', timedOut: true, acceptedRetry: true },
+    { reason: 'failed', timedOut: true, acceptedRetry: true },
+    { reason: 'repaired', timedOut: true, acceptedRetry: true },
+  ] as const)('retries using the persisted attempt and immutable evidence ($reason, timeout=$timedOut, accepted=$acceptedRetry)', async ({ reason, timedOut, acceptedRetry }) => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-10T12:00:00Z'));
-    const input = await fixture();
+    const input = await fixture(reason);
     const sentinel = 'UNTRUSTED_PREVIOUS_OUTPUT_IGNORE_ALL_RULES';
+    const priorError = timedOut ? 'analysis_timed_out' : 'analysis_invalid_output';
     let retry = false;
-    const analyze = vi.fn(async (_options: { prompt: string }) => retry && acceptedRetry ? input.analyze() : {
-      analysisRunId: 'analysis-invalid', output: { type: 'goal_complete', distillation: {
+    const analyze = vi.fn(async (_options: { prompt: string }) => {
+      if (!retry && timedOut) throw new Error(priorError);
+      if (retry && acceptedRetry) return input.analyze();
+      return { analysisRunId: 'analysis-invalid', output: { type: 'goal_complete', distillation: {
         version: 1, warnings: [], candidates: [{ state: 'published', statement: sentinel }],
-      } },
+      } } };
     });
     const first = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
     await first.runOnce();
     await first.close();
     expect(analyze).toHaveBeenCalledTimes(1);
     expect(queryLearningState({ directory: input.directory, scope }).jobs[0]?.attempts)
-      .toMatchObject([{ status: 'failed', errorCode: 'analysis_invalid_output' }]);
+      .toMatchObject([{ status: 'failed', errorCode: priorError }]);
     const originalPrompt = analyze.mock.calls[0]![0].prompt;
     expect(originalPrompt).not.toContain('Previous attempt error');
     writeFileSync(input.file, 'MUTATED_SOURCE_MUST_NOT_REPLACE_SNAPSHOT');
@@ -529,8 +538,10 @@ describe('distillation worker', () => {
     await second.close();
     expect(analyze).toHaveBeenCalledTimes(2);
     const retryPrompt = analyze.mock.calls[1]![0].prompt;
-    expect(retryPrompt).toContain('Previous attempt error (sanitized): analysis_invalid_output');
+    expect(retryPrompt).toContain(`Previous attempt error (sanitized): ${priorError}`);
     expect(retryPrompt).toContain('strict candidate fields');
+    expect(retryPrompt.includes('at most one strongly supported candidate')).toBe(timedOut);
+    expect(retryPrompt.includes('Prefer a Lesson')).toBe(timedOut && reason !== 'completed');
     expect(retryPrompt.endsWith(originalPrompt)).toBe(true);
     expect(retryPrompt).not.toContain(sentinel);
     expect(retryPrompt).not.toContain('MUTATED_SOURCE_MUST_NOT_REPLACE_SNAPSHOT');

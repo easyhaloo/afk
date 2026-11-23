@@ -23,7 +23,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-async function fixture(options?: Pick<Parameters<typeof createLessonPublicationFixture>[0], 'versions' | 'applicability' | 'homeStorage' | 'triggerAliases'>) {
+async function fixture(options?: Pick<Parameters<typeof createLessonPublicationFixture>[0], 'versions' | 'applicability' | 'homeStorage' | 'triggerAliases' | 'lessonFix'>) {
   const current = await createLessonPublicationFixture({ registerCleanup: cleanup => cleanups.push(cleanup),
     versions: ['fixture-v1'], includeFact: true, ...options });
   writeFileSync(join(current.vault, 'template.md'), page('{{title}}', '{{knowledge}}'));
@@ -595,6 +595,23 @@ describe('validated lesson knowledge lifecycle', () => {
     expect(recalled[0].content).toBe(content);
     expect(await current.context.gather({ ...current.query, applicability: { version: 'fixture-v2' } })).toEqual([]);
     expect(current.provider.verify).toHaveBeenCalledTimes(1);
+  });
+
+  it('recalls a validated lesson when the published Chinese page exceeds the context budget', async () => {
+    const current = await fixture({ lessonFix: '在同一个事务中完成读取和写入' });
+    writeFileSync(join(current.vault, 'template.md'), page('{{title}}', `${'重试记录'.repeat(700)}\n\n{{knowledge}}`));
+    const plan = await current.prepare();
+    await current.publish(plan.key);
+    const content = readFileSync(current.target, 'utf8');
+    expect(Buffer.byteLength(content)).toBeGreaterThan(8000);
+    const [recalled] = await current.context.gather(current.query);
+    expect(recalled).toMatchObject({ origin: `knowledge:${plan.key}; target:wiki:retry` });
+    expect(recalled.content).toContain('check then write race');
+    expect(recalled.content).toContain('在同一个事务中完成读取和写入');
+    expect(Buffer.byteLength(recalled.content)).toBeLessThanOrEqual(8000);
+    expect(readFileSync(current.target, 'utf8')).toBe(content);
+    await current.append('independent-qa', [{ kind: 'qa.failed', reason: 'Competing retry recurred' }]);
+    expect(await current.context.gather(current.query)).toEqual([]);
   });
 
   it('blocks changed QA immediately and withdraws only that lesson with idempotent recovery', async () => {

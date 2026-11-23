@@ -11,7 +11,7 @@ import { LearningWorker, learningDirectory, queryLearningRequest, queryLearningS
 import { CandidateStore } from '../learning/candidate-store.js';
 import { assertCurrentKnowledgePublication } from '../learning/knowledge-publication-guard.js';
 import { verifyLessonPublication } from '../learning/lesson-publication-guard.js';
-import { reconcileDistillationSources, submitLearningCorrection } from '../learning/intake.js';
+import { reconcileDistillationSources, submitLearningCorrection, type ReconcileDistillationOptions } from '../learning/intake.js';
 import { learningDigestSchema, learningIdentitySchema } from '../learning/requests.js';
 import { experienceQueryContextSchema } from '../learning/experience-store.js';
 import { validateConfiguredLearningCandidate } from '../learning/validation-runtime.js';
@@ -99,7 +99,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
     }
   };
   const eventRootSchema = z.string().min(1).max(4096).refine(isAbsolute).optional();
-  const captureSources = async (input: { scope?: string; runId?: string; workItemId?: string; eventRoot?: string; includeFailed?: boolean } = {}) => {
+  const captureSources = async (input: Omit<ReconcileDistillationOptions, 'directory' | 'homeDir'> = {}) => {
     const reconciliation = await reconcileDistillationSources({ directory, homeDir: options.homeDir, ...input });
     const root = resolve(input.eventRoot ?? process.env.AFK_EVENT_STORE_DIR ?? join(options.homeDir ?? homedir(), '.afk', 'events'));
     for (const source of reconciliation.checkedSources) {
@@ -274,7 +274,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
             || new Set([qa.repair.failure.runId, qa.repair.fix.runId, qa.runId]).size !== 3) throw new Error('repair_checker_unavailable');
           repairRoot = qa.repair.failure.root;
         }
-        const source = { scope: parsed.scope, runId: parsed.runId,
+        const source = { scope: parsed.scope, runId: parsed.runId, retryAnalysis: true,
           ...(parsed.repair ? { includeFailed: true, eventRoot: repairRoot } : {}),
           ...(parsed.workItemId === undefined ? {} : { workItemId: parseWorkItemId(parsed.workItemId).id }) };
         const capture = await captureSources(source);

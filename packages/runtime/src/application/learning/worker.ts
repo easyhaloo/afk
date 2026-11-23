@@ -61,7 +61,7 @@ export interface LearningRequestState {
   candidates: LearningCandidate[];
 }
 
-function permitsHandoff(reason: string | null | undefined): boolean {
+export function permitsHandoff(reason: string | null | undefined): boolean {
   return !reason || ['budget_exhausted', 'analysis_failed', 'analysis_cancelled', 'analysis_timed_out',
     'analysis_invalid_output', 'storage_blocked'].includes(reason);
 }

@@ -2756,6 +2756,10 @@ Claude观察器故障透明、final flush及尾部收据修复已限定双审通
 
 #### 已提交切片与当前交付证据
 
+2026-11-23（Asia/Shanghai），CLI `0.2.195` 安装版通过 `process-06` 真实撤回用例。Claude Code 通过 `experience review` 提炼出新的 Process，经独立验证后发布。冻结查询在撤回前恰好召回一个来源，撤回回执为 `withdrawn`。撤回后，新启动的 OpenCode 任务记录 `verified`、`origin: null` 和 `steps: 0`。此前分析超时（120 秒）的记录仍保留。
+
+使用同一 CLI 安装版，历史 Claude Lesson 候选 `#710` 基于原 QA 证据重新验证并发布为 v2。OpenCode `2.2.7` 在新任务 `#713` 中消费该版本。独立 QA 退出码为 0，测得合成场景偏差从 7 mm 降至 0 mm。两次独立执行 `experience adopt` 返回同一回执。全新 Lesson 尝试 `#763` 在首个实施步骤等待 240 秒后以 `agent_completion_timeout` 结束，全新提炼仍待完成。
+
 2026-11-20，提交 `987eac6c` 的[四平台构建](https://github.com/easyhaloo/afk/actions/runs/44595292353)通过 Linux 与 macOS 各自的 x64、arm64 安装、工作流和产物审计。四个下载包均与随附 SHA-256 匹配。使用该次 macOS arm64 产物 `19ba337c1977027d422d8946508a18f2ee386f2f6873a138314740ce7fe59eb2` 从源码外运行，Pi 经本地 Ollama 回答 `16 + 23 = 39`，原生会话与 AFK 同为 514 个输入、80 个输出 token。双仓工单通过实施与独立 QA，两种场景结束时均有零剩余租约、零剩余工作树。工单使用脚本 Agent 与回环 Tracker。跨主机挂载仍待验证。
 
 2026-11-21，Release CLI 运行 `44782222425` 验证了提交 `f751e430` 的 CLI `0.2.181`。macOS 和 Linux 的 x64、arm64 均通过离线安装、基于运行 `44773404254` 的升级回滚、安装版仓库工作流及产物审计。四份下载归档的 SHA-256 与随附校验文件一致，元数据中的平台、架构和版本均正确。仅验证模式跳过发布。

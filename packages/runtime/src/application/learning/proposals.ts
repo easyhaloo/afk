@@ -9,7 +9,7 @@ import type { RepositoryWorkspace, VerificationProvider, VerificationResult, Pro
 import type { Sandbox, IsolationLevel } from '../../infrastructure/sandbox/types.js';
 import { LocalSandbox } from '../../infrastructure/sandbox/providers/local.js';
 import { recallTerms } from '../../domain/context/terms.js';
-import { checkProposalToolParameterPaths, compileProposalToolSchema } from './proposal-tool-schema.js';
+import { validateProposalToolCases } from './proposal-tool-schema.js';
 
 export interface ProposalInventory {
   skills: { name: string; description: string; 'disable-model-invocation': boolean; 'user-invocable': boolean;
@@ -334,20 +334,7 @@ export function prepareAssetProposal(input: unknown, inventory: ProposalInventor
       || matches(terms, entry.name, entry.description));
     if (!targetRef && existing.length) throw new Error(`Reuse existing tools before proposing source: ${existing.map(entry => entry.ref).join(', ')}`);
     if (payload.existingTools.some(ref => !inventory.tools.some(entry => entry.ref === ref || entry.name === ref))) throw new Error('Existing tool claims are absent from searched inventory');
-    const validInput = compileProposalToolSchema(payload.inputSchema);
-    const validOutput = compileProposalToolSchema(payload.outputSchema);
-    const normal = payload.tests.filter(entry => entry.kind === 'normal');
-    const parameters = normal.map(entry => {
-      const value: unknown = JSON.parse(entry.input);
-      checkProposalToolParameterPaths(value);
-      if (!validInput(value) || !validOutput(JSON.parse(entry.expected))) throw new Error('Normal tool case does not satisfy input/output schemas');
-      return canonicalLearningJson(value);
-    });
-    if (new Set(parameters).size < 2) throw new Error('Tool verification requires two distinct valid parameter sets');
-    const refusals = payload.tests.filter(entry => entry.kind === 'refusal');
-    if (!refusals.length || refusals.some(entry => {
-      try { return validInput(JSON.parse(entry.input)); } catch { return false; }
-    })) throw new Error('Malicious refusal cases must contain schema-invalid input');
+    validateProposalToolCases(payload);
     content = payload.source;
     checks = payload.tests.map((entry, index) => ({ id: `behavior-${index + 1}`, ...entry }));
     checks.push(

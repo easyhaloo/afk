@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DISTILLATION_LIMITS, distillationRequestSchema, parseDistillationOutput, type DistillationOutput, type DistillationRequest } from './contracts.js';
 import { redactEvidenceText, validateEvidencePack, type EvidencePack } from './evidence.js';
+import { validateProposalToolCases } from './proposal-tool-schema.js';
 
 const findingCategorySchema = z.string().transform(value => {
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -88,6 +89,9 @@ export function parseAnalysisOutput(raw: unknown, request: DistillationRequest, 
   if (output.candidates.some(candidate => candidate.kind === 'process'
     && processNeedsGap(pack)
     && !candidate.payload.steps.some(step => step.missingEvidence))) throw new Error('Partial evidence requires explicit process gaps');
+  for (const candidate of output.candidates) {
+    if (candidate.kind === 'tool') validateProposalToolCases(candidate.payload);
+  }
   return output;
 }
 

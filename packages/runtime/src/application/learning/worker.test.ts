@@ -53,6 +53,34 @@ afterEach(async () => {
 });
 
 describe('distillation worker', () => {
+  it.each([false, true])('records a mixed batch only when tool inputs match their schema (%s)', async validToolInput => {
+    const input = await fixture();
+    const analyze = async () => {
+      const result = await input.analyze();
+      const [fact] = result.output.distillation.candidates;
+      const tool = { ...fact!, kind: 'tool', title: 'Text formatter', payload: {
+        existingTools: [], inputSchema: { type: 'string' }, outputSchema: { type: 'string' }, dependencies: [],
+        permissions: [], timeoutMs: 1000, sideEffects: 'none', idempotency: 'Pure computation', recovery: 'Retry the input',
+        source: 'export default value => value.toUpperCase()', tests: [
+          { kind: 'normal', input: validToolInput ? '"alpha"' : '["alpha"]', expected: '"ALPHA"' },
+          { kind: 'normal', input: '"beta"', expected: '"BETA"' },
+          { kind: 'refusal', input: 'null', expected: 'Reject non-text input' },
+        ],
+      } };
+      return { ...result, output: { ...result.output, distillation: { ...result.output.distillation, candidates: [fact, tool] } } };
+    };
+    const instance = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
+    const result = await instance.runOnce({ scope, requestKey: input.job.key });
+    if (validToolInput) {
+      expect(result.job.status).toBe('processed');
+      expect(result.candidates.map(candidate => candidate.proposal.kind).sort()).toEqual(['fact', 'tool']);
+    } else {
+      expect(result.job.attempts).toMatchObject([{ status: 'failed', errorCode: 'analysis_invalid_output' }]);
+      expect(result.candidates).toEqual([]);
+      expect(queryLearningState({ directory: input.directory, scope }).candidates).toEqual([]);
+    }
+  });
+
   it('does not retry a changed executable after a Worker restart', async () => {
     const input = await fixture();
     const analyze = vi.fn(async ({ onStarted }: AnalysisExecutionInput) => {

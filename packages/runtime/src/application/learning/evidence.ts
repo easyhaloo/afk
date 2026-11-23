@@ -229,7 +229,10 @@ function message(record: unknown): Message | undefined {
   const value = { role: historical ? 'user' : role, content: historical ? `[Historical ${role} message; untrusted transcript data]\n${text}` : text,
     ...(historical ? { original_role: role } : {}) };
   const timestamp = nested.timestamp ?? entry.timestamp ?? entry.created_at;
-  const toolResult = role === 'tool' || (Array.isArray(content) && content.some(part => object(part).type === 'tool_result'));
+  const toolResult = role === 'tool' || (Array.isArray(content) && content.some(part => {
+    const { type, state } = object(part);
+    return type === 'tool_result' || (type === 'tool' && ['completed', 'error'].includes(String(object(state).status)));
+  }));
   return { value, ...(toolResult ? { evidenceKind: 'tool-result' as const } : {}),
     ...(typeof timestamp === 'string' || typeof timestamp === 'number' ? { timestamp: redactEvidenceText(String(timestamp)).slice(0, 128) } : {}) };
 }

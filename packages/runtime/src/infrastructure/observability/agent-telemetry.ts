@@ -102,10 +102,10 @@ export async function collectAgentTelemetry(
     : undefined;
   let usage = result.usage;
   let tools = result.tools;
-  if (transcript && telemetryProvider && result.cumulativeSessionTokens === undefined) {
-    const options = { provider: telemetryProvider, transcriptPath: transcript.path, sandboxKind };
-    if (!usage) usage = await readAgentTelemetry(options);
-    if (!tools) tools = await readAgentTools(options);
+  if (transcript && telemetryProvider && result.cumulativeSessionTokens === undefined && (!usage || !tools)) {
+    const telemetry = await readAgentTranscriptTelemetry({ provider: telemetryProvider, transcriptPath: transcript.path, sandboxKind });
+    usage ??= telemetry?.usage;
+    tools ??= telemetry?.tools;
   }
   return {
     sessionId: transcript?.sessionId ?? execution.metadata.threadId ?? result.sessionId ?? execution.id,
@@ -173,16 +173,24 @@ export function extractClaudeTranscriptTokens(lines: string[]): TokenUsage | und
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
 
+interface OpenCodeTranscriptTokens {
+  input?: unknown;
+  output?: unknown;
+  reasoning?: unknown;
+  cache?: { read?: unknown; write?: unknown };
+}
+
 export function extractOpenCodeTranscriptTokens(lines: string[]): TokenUsage | undefined {
   for (const raw of lines) {
     try {
       const parsed = JSON.parse(raw) as {
-        info?: { tokens?: { input?: unknown; output?: unknown; reasoning?: unknown; cache?: { read?: unknown; write?: unknown } } };
-        messages?: Array<{ info?: { role?: unknown; tokens?: { input?: unknown; output?: unknown; reasoning?: unknown; cache?: { read?: unknown; write?: unknown } } } }>;
+        info?: { tokens?: OpenCodeTranscriptTokens };
+        messages?: Array<{ type?: string; tokens?: OpenCodeTranscriptTokens; info?: { role?: string; tokens?: OpenCodeTranscriptTokens } }>;
       };
       const tokenSets = parsed.info?.tokens
         ? [parsed.info.tokens]
-        : (parsed.messages ?? []).filter(message => message.info?.role === 'assistant').map(message => message.info?.tokens).filter(tokens => tokens !== undefined);
+        : (parsed.messages ?? []).map(message => message.type === 'assistant' ? message.tokens
+          : message.info?.role === 'assistant' ? message.info.tokens : undefined).filter(tokens => tokens != null);
       if (!tokenSets.length) continue;
       const inputTokens = tokenSets.reduce((sum, tokens) => sum + num(tokens.input) + num(tokens.cache?.read) + num(tokens.cache?.write), 0);
       const outputTokens = tokenSets.reduce((sum, tokens) => sum + num(tokens.output) + num(tokens.reasoning), 0);
@@ -265,27 +273,42 @@ export interface ReadTelemetryOptions {
  * Never returns NaN — uses num() for every field.
  */
 export async function readAgentTelemetry(options: ReadTelemetryOptions): Promise<TokenUsage | undefined> {
-  const lines = await readTranscriptLines(options);
-  if (!lines) return undefined;
-  if (options.provider === 'claude-code') return extractClaudeTranscriptTokens(lines);
-  if (options.provider === 'codex') return extractCodexRolloutTokens(lines);
+  const transcript = await readTranscript(options);
+  return transcript && transcriptUsage(options.provider, transcript.lines);
+}
+
+function transcriptUsage(provider: ReadTelemetryOptions['provider'], lines: string[]): TokenUsage | undefined {
+  if (provider === 'claude-code') return extractClaudeTranscriptTokens(lines);
+  if (provider === 'codex') return extractCodexRolloutTokens(lines);
   return extractOpenCodeTranscriptTokens(lines);
 }
 
 export async function readAgentTranscript(options: ReadTelemetryOptions): Promise<string | undefined> {
-  const lines = await readTranscriptLines(options);
-  return lines?.join('\n');
+  const transcript = await readTranscript(options);
+  return transcript?.lines.join('\n');
 }
 
 export async function readAgentTools(options: ReadTelemetryOptions): Promise<AgentToolCallSummary[] | undefined> {
-  const lines = await readTranscriptLines(options);
-  if (!lines) return undefined;
-  if (options.provider === 'claude-code') return extractClaudeToolEvents(lines);
-  if (options.provider === 'codex') return extractCodexToolEvents(lines);
+  const transcript = await readTranscript(options);
+  return transcript && transcriptTools(options.provider, transcript.lines);
+}
+
+function transcriptTools(provider: ReadTelemetryOptions['provider'], lines: string[]): AgentToolCallSummary[] | undefined {
+  if (provider === 'claude-code') return extractClaudeToolEvents(lines);
+  if (provider === 'codex') return extractCodexToolEvents(lines);
   return extractOpenCodeToolEvents(lines);
 }
 
-async function readTranscriptLines(options: ReadTelemetryOptions): Promise<string[] | undefined> {
+export async function readAgentTranscriptTelemetry(options: ReadTelemetryOptions, includeNativeExport = false): Promise<{
+  usage?: TokenUsage; tools?: AgentToolCallSummary[]; nativeExport?: string;
+} | undefined> {
+  const transcript = await readTranscript(options);
+  if (!transcript) return undefined;
+  return { usage: transcriptUsage(options.provider, transcript.lines), tools: transcriptTools(options.provider, transcript.lines),
+    ...(includeNativeExport && transcript.nativeExport ? { nativeExport: transcript.nativeExport } : {}) };
+}
+
+async function readTranscript(options: ReadTelemetryOptions): Promise<{ lines: string[]; nativeExport?: string } | undefined> {
   const { transcriptPath, sandboxKind } = options;
   const { dirname, join, basename } = await import('node:path');
 
@@ -297,12 +320,22 @@ async function readTranscriptLines(options: ReadTelemetryOptions): Promise<strin
   let content: string;
   try {
     const { readdir, readFile, stat } = await import('node:fs/promises');
-    if (transcriptPath.startsWith('opencode://session/')) {
+    if (options.provider === 'opencode' && transcriptPath.startsWith('opencode://session/')) {
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       const sessionId = decodeURIComponent(transcriptPath.slice('opencode://session/'.length));
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(sessionId)) return undefined;
+      const runOpenCode = promisify(execFile);
+      const commandOptions = { maxBuffer: 16 * 1024 * 1024, timeout: 15_000 };
+      const exported = await runOpenCode('opencode', ['session', 'export', '--standalone', '--sanitize', sessionId], commandOptions)
+        .catch(() => undefined);
+      if (exported) {
+        const value = JSON.parse(exported.stdout) as { info?: { id?: string }; messages?: unknown };
+        return value?.info?.id === sessionId && Array.isArray(value.messages)
+          ? { lines: [JSON.stringify(value)], nativeExport: exported.stdout } : undefined;
+      }
       const query = async <T>(sql: string): Promise<T[]> => {
-        const result = await promisify(execFile)('opencode', ['db', sql, '--pure', '--format', 'json'], { maxBuffer: 16 * 1024 * 1024 });
+        const result = await runOpenCode('opencode', ['db', sql, '--pure', '--format', 'json'], commandOptions);
         return JSON.parse(result.stdout) as T[];
       };
       const escaped = sessionId.replaceAll("'", "''");
@@ -321,12 +354,13 @@ async function readTranscriptLines(options: ReadTelemetryOptions): Promise<strin
         parts.push(...page);
         if (page.length < pageSize) break;
       }
+      if (!sessionTokens && !messages.length) return undefined;
       const partsByMessage = new Map<string, unknown[]>();
       for (const part of parts) partsByMessage.set(part.message_id, [...(partsByMessage.get(part.message_id) ?? []), { type: 'tool', callID: part.call_id, tool: part.tool, state: { status: part.status } }]);
-      return [JSON.stringify({
+      return { lines: [JSON.stringify({
         info: sessionTokens ? { tokens: { input: sessionTokens.tokens_input, output: sessionTokens.tokens_output, reasoning: sessionTokens.tokens_reasoning, cache: { read: sessionTokens.tokens_cache_read, write: sessionTokens.tokens_cache_write } } } : undefined,
-        messages: messages.map(message => ({ info: { id: message.id, sessionID: sessionId, role: message.role }, parts: partsByMessage.get(message.id) ?? [] })),
-      })];
+        messages: messages.map(message => ({ info: { id: message.id, sessionID: sessionId, role: message.role, tokens: message.tokens ? JSON.parse(message.tokens) : undefined }, parts: partsByMessage.get(message.id) ?? [] })),
+      })] };
     }
     if (options.provider === 'opencode' && (await stat(transcriptPath)).isDirectory()) {
       const messageFiles = (await readdir(transcriptPath)).filter(name => name.endsWith('.json'));
@@ -337,7 +371,7 @@ async function readTranscriptLines(options: ReadTelemetryOptions): Promise<strin
         const parts = await readdir(partPath).catch(() => []);
         return { info: message, parts: await Promise.all(parts.filter(part => part.endsWith('.json')).map(part => readFile(join(partPath, part), 'utf8').then(JSON.parse))) };
       }));
-      return [JSON.stringify({ messages })];
+      return { lines: [JSON.stringify({ messages })] };
     }
     const { readFileSync } = await import('node:fs');
     content = readFileSync(transcriptPath, 'utf-8');
@@ -345,7 +379,7 @@ async function readTranscriptLines(options: ReadTelemetryOptions): Promise<strin
     return undefined;
   }
 
-  return content.split('\n').filter(l => l.trim());
+  return { lines: content.split('\n').filter(line => line.trim()) };
 }
 
 /**

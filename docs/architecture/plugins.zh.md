@@ -1441,7 +1441,7 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 
 lesson 目标的 kinds 必须显式包含 lesson；既有 fact/process 默认不扩大。准备、发布、读取及补查核对当前独立 QA、来源、配置与收据，正文保存验证及修复版本引用。授权规则和必须不存在的目录规则进入最终读取快照，普通文件摘要读取上限64MiB、私有 grant 上限1MiB。准备、导航替换及 applied/committed 晋级获得数据库写锁后再次同步复核；漂移回滚。QA 单独失效只使对应 lesson 冲突并安排撤回，不失效同请求的 fact/process；未配置 knowledge 时仍补查 lesson 资格。
 
-committed lesson 自动幂等投影到同一学习目录的 ExperienceStore，绑定实际发布 key（包括导航更新后的 successor）、候选 ID/摘要、验证版本、证据摘要及验证器版本。重试保留原经验 ID、有效期、指标和采纳收据；撤销的经验不会因补查重新启用。每次召回和采纳（包括旧收据重放）重查当前来源、QA、配置、授权、正文及适用条件；历史记录可查看不代表当前可消费。版本标签及环境按已验证范围匹配，新的消费 revision 不必等于来源 QA revision；尚无具名 productVersions/runtimeVersions 兼容证明时拒绝携带这些映射的上下文。
+committed lesson 自动幂等投影到同一学习目录的 ExperienceStore，绑定实际发布 key（包括导航更新后的 successor）、候选 ID/摘要、验证版本、证据摘要及验证器版本。重试保留原经验 ID、有效期、指标和采纳收据。撤销的经验不会因补查重新启用。每次召回和采纳（包括旧收据重放）都重查当前来源、QA、配置、授权、正文及适用条件。版本和环境须匹配已验证范围，消费 revision 可以与来源 QA revision 不同。具备已验证 `productId` 的 lesson 要求 `target.productVersions` 仅包含该产品。同时提供 `applicability.version` 时，两处版本必须一致。没有已验证产品的 lesson 使用标量版本，并拒绝非空产品版本映射。已发布 lesson 暂不支持非空 `target.runtimeVersions` 映射。
 
 生产调用方传入可信 home，每次消费重读其中唯一启用的内置 learning.distiller 配置；config.enabled:false 只关闭自动学习，仍允许有效资产读取。显式自定义经验文件未提供 home 或可信 knowledge 配置时，不回退真实用户目录。发布经验不进入 v1 导出，copy 和普通 verify 不能移植或授予其发布证明。Wiki 已提交而经验投影失败时，保留提交结果并返回 experienceProjection.blocked；reconcile 报 experience_projection_blocked 并可修复缺失投影。发布后取消保留原取消原因，已提交发布由后续补查恢复投影。
 

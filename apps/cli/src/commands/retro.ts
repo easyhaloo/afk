@@ -1,6 +1,6 @@
 import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { createHash } from 'node:crypto';
-import { promises as fs, realpathSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Command } from 'commander';
@@ -10,7 +10,7 @@ import type { CommandRegistrationContext } from '../command-registry.js';
 import { JsonlEventStore } from '@afk/runtime/infrastructure/observability/jsonl-event-store';
 import { readAgentTranscriptTelemetry, findCodexRollout } from '@afk/runtime/infrastructure/observability/agent-telemetry';
 import { defaultSessionStoreChain } from '@afk/runtime/application/sessions/chain';
-import { claudeProjectSlug } from '@afk/runtime/shared/agent-transcript-path';
+import { claudeTranscriptPath } from '@afk/runtime/shared/agent-transcript-path';
 import { ClaudeCodeProvider } from '@afk/runtime/domain/agents/claude-code';
 import { buildEvidencePack, saveEvidencePack, buildRetroPrompt, executeAnalysis,
   retroModelOutputSchema as modelOutputSchema, retroReportSchema as reportSchema,
@@ -125,10 +125,7 @@ async function findStateRoot(workspace: string, executionId: string): Promise<st
 async function transcriptPath(workspace: string, provider: RetroOptions['provider'], sessionId: string): Promise<string | undefined> {
   if (provider === 'codex') return findCodexRollout(sessionId);
   if (provider === 'opencode') return `opencode://session/${encodeURIComponent(sessionId)}`;
-  let realWorkspace = workspace;
-  try { realWorkspace = realpathSync(workspace); } catch { /* workspace may be a fixture */ }
-  const slug = claudeProjectSlug(realWorkspace);
-  return join(homedir(), '.claude', 'projects', slug, `${sessionId}.jsonl`);
+  return claudeTranscriptPath(workspace, sessionId);
 }
 
 function assertRetroEvidence(findings: z.infer<typeof modelOutputSchema>['findings'], pack: EvidencePack): void {

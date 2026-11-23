@@ -96,7 +96,9 @@ export async function collectAgentTelemetry(
   const transcript = sandboxKind === 'local' && telemetryProvider
     ? await resolveAgentTranscript({
       provider: telemetryProvider,
-      telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
+      telemetryPath: telemetryProvider === 'claude-code'
+        ? await (execution as { telemetryPath?: string | Promise<string | undefined> }).telemetryPath
+        : undefined,
       threadId: execution.metadata.threadId,
     })
     : undefined;

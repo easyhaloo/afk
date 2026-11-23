@@ -11,6 +11,7 @@ import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type Proc
 import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
 import { loadEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
+import { readProposalValidationReceipt } from './proposal-validation.js';
 
 export function learningDirectory(homeDir = homedir()): string {
   return join(homeDir, '.afk', 'learning');
@@ -119,6 +120,21 @@ export function queryLearningState(input: { directory: string; scope: string }):
   try {
     const jobs = store.listRequests().filter(entry => entry.request.scope === scope).map(entry => learningJob(store, entry));
     return { jobs, candidates: store.listCandidates().filter(entry => entry.proposal.applicability.project === scope) };
+  } finally { store.close(); }
+}
+
+export function queryProposalValidationReceipt(input: { directory: string; scope: string; candidateId: string }) {
+  const scope = learningScopeSchema.parse(input.scope);
+  const candidateId = learningDigestSchema.parse(input.candidateId);
+  const file = join(input.directory, 'candidates.sqlite');
+  if (!existsSync(file)) return null;
+  const store = new CandidateStore({ file });
+  try {
+    const candidate = store.getCandidate(candidateId);
+    if (!candidate || candidate.proposal.applicability.project !== scope) return null;
+    const validation = store.getValidation(candidateId);
+    try { return readProposalValidationReceipt(candidate, validation); }
+    catch { return null; }
   } finally { store.close(); }
 }
 

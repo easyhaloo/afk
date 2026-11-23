@@ -2,8 +2,9 @@ import { Command, InvalidArgumentError, Option } from 'commander';
 import { constants, promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState,
-  candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningScopeSchema, verifyAdoptionRun, verifyExperienceRun,
+import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState, queryProposalValidationReceipt,
+  candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningScopeSchema, proposalValidationReceiptSchema,
+  verifyAdoptionRun, verifyExperienceRun,
   LearningReviewIncompleteError, learningReviewIncompleteSchema,
   type LearningCandidate, type LearningJob, type LearningState, type LearningValidationResult,
   type ExperienceQueryContext, type publishConfiguredKnowledge, type reconcileConfiguredKnowledge } from '@afk/runtime/execution';
@@ -219,8 +220,20 @@ export function registerExperienceCommands(program: Command, composition: Experi
     .description('Read one learning candidate in its exact project scope')
     .argument('<candidateId>', '64 lowercase hexadecimal characters', parseCandidateId)
     .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
-    .option('--json', 'Emit the existing candidate DTO as JSON')
+    .option('--proposal-receipt', 'Read the saved validation identity for a skill or tool proposal')
+    .option('--json', 'Emit the candidate or proposal receipt as JSON')
     .action(async (candidateId, options) => {
+      if (options.proposalReceipt) {
+        try {
+          const input = { scope: options.scope, candidateId };
+          const receipt = proposalValidationReceiptSchema.parse(composition.pluginRuntime
+            ? await composition.pluginRuntime.dispatchSystemAction('learning.proposal.receipt', input)
+            : queryProposalValidationReceipt({ ...input, directory: learningDirectory() }));
+          if (receipt.scope !== input.scope || receipt.candidateId !== input.candidateId) throw new Error('Receipt identity differs');
+          process.stdout.write(`${JSON.stringify(receipt, null, options.json ? undefined : 2)}\n`);
+          return;
+        } catch { throw new Error('Proposal validation receipt unavailable in scope'); }
+      }
       const records = await queryLearning('candidates', options.scope);
       const record = records.find(candidate => candidate.id === candidateId);
       if (!record) throw new Error('Candidate not found in scope');

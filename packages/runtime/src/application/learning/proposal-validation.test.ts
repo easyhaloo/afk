@@ -12,11 +12,11 @@ import { completeFixtureRequest, output } from './ledger-data.fixture.spec.js';
 import { prepareAssetProposal, type ProposalInventory } from './proposals.js';
 import { canonicalLearningJson } from './requests.js';
 import { PROPOSAL_VALIDATION_RUNTIME_REVISION } from './proposal-validation-runtime.js';
-import type { ProposalValidationChecker, ProposalValidationDependencies } from './proposal-validation.js';
+import { readProposalValidationReceipt, type ProposalValidationChecker, type ProposalValidationDependencies } from './proposal-validation.js';
 import * as proposalRuntime from './proposal-runtime.js';
 import * as proposalSemantics from './proposal-semantics.js';
 import { skillTraceArgv } from './skill-trace.js';
-import { learningDirectory } from './worker.js';
+import { learningDirectory, queryProposalValidationReceipt } from './worker.js';
 import { createLearningPlugin } from '../plugins/learning.js';
 import { PluginRuntime } from '../plugins/runtime.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
@@ -48,7 +48,7 @@ async function fixture(kind: 'skill' | 'tool' = 'tool', existing = true, evidenc
   frozenSkill = false, pairedTool?: { assetPath: string; baseline: string; proposal: Partial<Extract<CandidateProposal, { kind: 'tool' }>['payload']> }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'proposal-validation-')));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  const file = pairedTool ? join(learningDirectory(root), 'candidates.sqlite') : join(root, 'private', 'ledger.sqlite');
+  const file = join(learningDirectory(root), 'candidates.sqlite');
   const store = new CandidateStore({ file });
   cleanups.push(() => store.close());
   const events = new JsonlEventStore({ root: join(root, 'events') });
@@ -353,7 +353,37 @@ describe('shared proposal candidate validation foundation', () => {
         binding: { ...saved.report.observationBinding, ...comparison.binding, ...observation.receipt.binding } })).toBe(observation.receiptDigest);
     }
     const reopened = new CandidateStore({ file: test.file });
-    try { expect(reopened.getCandidate(test.candidate.id)?.state).toBe('validated'); expect(reopened.getValidation(test.candidate.id)).toEqual(receipt); }
+    try {
+      const candidate = reopened.getCandidate(test.candidate.id)!;
+      expect(candidate.state).toBe('validated');
+      expect(reopened.getValidation(test.candidate.id)).toEqual(receipt);
+      if (result.status !== 'validated') throw new Error('Expected a validated fixture');
+      const projection = {
+        candidateId: result.candidateId, candidateVersion: result.candidateVersion, validatedVersion: result.validatedVersion,
+        executionId: result.executionId, receiptDigest: result.receiptDigest, kind, scope,
+        candidateDigest: candidate.digest, evidenceDigest: test.pack.digest,
+        checkerId: test.checker.id, repositoryDigest: digest(test.checker.runtime.request.repository), commit: test.checker.runtime.expectedCommit,
+        artifactPath: test.checker.runtime.artifactPath, artifactDigest: test.prepared.artifact.digest,
+        originalArtifactDigest: test.prepared.artifact.originalDigest,
+      };
+      const target = { directory: learningDirectory(test.root), scope, candidateId: candidate.id };
+      expect(queryProposalValidationReceipt(target)).toEqual(projection);
+      expect(queryProposalValidationReceipt({ ...target, scope: 'github:other/api' })).toBeNull();
+      const missing = join(test.root, 'missing');
+      expect(queryProposalValidationReceipt({ ...target, directory: missing })).toBeNull();
+      expect(existsSync(missing)).toBe(false);
+      const corrupted = Buffer.from(JSON.stringify({ ...saved, receiptDigest: '0'.repeat(64) })).toString('base64');
+      expect(readProposalValidationReceipt(candidate, { ...receipt,
+        results: corrupted.match(/.{1,1800}/g)!.map(chunk => `json-base64-v1:${chunk}`) })).toBeNull();
+      expect(readProposalValidationReceipt({ ...candidate, state: 'revoked' }, receipt)).toBeNull();
+      const database = openSqlite({ file: test.file, schema: '', version: 2 });
+      try {
+        const payload = JSON.stringify({ ...receipt, results: ['json-base64-v1:e2JhZA=='] });
+        database.prepare("UPDATE learning_ledger SET payload = ?, bytes = ? WHERE kind = 'validation'")
+          .run(payload, Buffer.byteLength(payload));
+      } finally { database.close(); }
+      expect(queryProposalValidationReceipt(target)).toBeNull();
+    }
     finally { reopened.close(); }
   });
 
@@ -512,6 +542,7 @@ describe('shared proposal candidate validation foundation', () => {
     const validation = test.store.getValidation(test.candidate.id)!;
     const saved = JSON.parse(Buffer.from(validation.results.map(chunk => chunk.slice('json-base64-v1:'.length)).join(''), 'base64').toString());
     expect(saved.report.comparisons.every((comparison: { original?: unknown }) => comparison.original === undefined)).toBe(true);
+    expect(readProposalValidationReceipt(test.store.getCandidate(test.candidate.id)!, validation)).toMatchObject({ originalArtifactDigest: null });
   });
 
   it('permits original failures only when every proposed oracle passes', async () => {

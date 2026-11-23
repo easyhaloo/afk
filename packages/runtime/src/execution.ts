@@ -24,9 +24,10 @@ export { buildAnalysisPrompt, parseAnalysisOutput, buildRetroPrompt, parseModelJ
 export { executeAnalysis, type AnalysisExecutionInput, type AnalysisExecutionResult } from './application/learning/analysis-runner.js';
 export { reconcileDistillationSources, submitLearningCorrection,
   type ReconcileDistillationOptions, type DistillationReconciliation } from './application/learning/intake.js';
-export { LearningWorker, learningDirectory, queryLearningState, submitDistillation,
+export { LearningWorker, learningDirectory, queryLearningState, queryProposalValidationReceipt, submitDistillation,
   type LearningJob, type LearningState, type LearningWorkerOptions, type LearningWorkerResult } from './application/learning/worker.js';
 export type { LearningCandidate, AnalysisAttempt } from './application/learning/candidate-store.js';
+export { proposalValidationReceiptSchema } from './application/learning/proposal-validation.js';
 export { validateLearningCandidate, type LearningValidationResult, type LearningValidationChecker,
   type LearningValidationDependencies, type LearningValidationCommitSnapshot } from './application/learning/validation.js';
 export { validateConfiguredLearningCandidate, validationConfigurationSchema, type ValidationConfiguration,

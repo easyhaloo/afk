@@ -50,7 +50,10 @@ describe('shared analysis without model execution', () => {
     const pack = await buildEvidencePack({ sources: [] });
     const prompt = buildAnalysisPrompt(pack, requestFor(pack));
     for (const field of ['applicability', 'evidenceIds', 'rootCauseStatus', 'evaluationCases', 'sideEffects']) expect(prompt).toContain(field);
-    expect(prompt).toContain('preserve both verbatim in the fact payload');
+    expect(prompt).not.toMatch(/"distillation":\{"version":1,"candidates":\[\]/);
+    expect(prompt).toContain('Emit candidates for supported findings even when other findings are uncertain');
+    expect(prompt).toContain('Return an empty candidates array only if no candidate is supported');
+    expect(prompt).toMatch(/preserve both verbatim in the fact payload/i);
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
     expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
     expect(prompt).toContain('report the gap in warnings and omit that process candidate');

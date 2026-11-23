@@ -852,7 +852,11 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('candidate use case w
     const operations = ownership.mock.results.flatMap(entry => entry.type === 'return' ? [entry.value.ownership.operationId] : []);
     const remaining = operations.flatMap(operation => ['container', 'image', 'volume'].map(kind => ({ operation, kind,
       ids: execFileSync('docker', [kind, 'ls', kind === 'volume' ? '-q' : '-aq', '--filter', `label=afk.frozen.operation=${operation}`], { encoding: 'utf8', timeout: 5000 }).trim() })));
-    writeFileSync(join(bundle, 'configured-candidate-validation.json'), JSON.stringify({ result, registered: test.candidate, validation, operations, remaining }, null, 2));
+    const receiptPath = process.env.AFK_TEST_W06_RECEIPT;
+    if (receiptPath) {
+      writeFileSync(receiptPath, JSON.stringify({ result, registered: test.candidate, validation, operations, remaining }, null, 2),
+        { mode: 0o600, flag: 'wx' });
+    }
     expect(existsSync(checkoutPath)).toBe(false);
     expect(remaining.every(entry => entry.ids === '')).toBe(true);
     expect(result.status).toBe('validated');

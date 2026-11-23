@@ -87,7 +87,7 @@ export function redactEvidenceText(value: string): string {
     .replace(/-----BEGIN ([A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g, '[redacted:private-key]')
     .replace(/\b(?:https?|ssh):\/\/(?:[^\s<>"'`\\]|\\&)+/gi, '[redacted:url]')
     .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, '[redacted:authorization]')
-    .replace(/((?:[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
+    .replace(/((?:(?<![\w-])[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
     .replace(/("(?:[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)"\s*:\s*")(?:\\.|[^"\\])*"/gi, '$1[redacted]"')
     .replace(/(\b(?:user(?:[_-]?(?:name|id))?|login|account(?:[_-]?(?:id|name))?|e[_-]?mail)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
     .replace(/("(?:user(?:[_-]?(?:name|id))?|login|account(?:[_-]?(?:id|name))?|e[_-]?mail)"\s*:\s*")(?:\\.|[^"\\])*"/gi, '$1[redacted]"')

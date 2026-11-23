@@ -24,7 +24,8 @@ const handoff = {
 
 const authorityCases = ['fact-05', 'fact-06'];
 type LiveSource = false | 'observations' | 'policy-receipt';
-async function installedKnowledge(caseId: string, live: LiveSource = false) {
+type PublicationInterruption = 'applied' | 'committed';
+async function installedKnowledge(caseId: string, live: LiveSource = false, interruptAt?: PublicationInterruption) {
   if (!installed || !isAbsolute(installed)) throw new Error('AFK_E2E_CLI_ENTRY must name the installed CLI');
   const binary = await fs.realpath(installed);
   const release = dirname(dirname(binary));
@@ -34,11 +35,15 @@ async function installedKnowledge(caseId: string, live: LiveSource = false) {
   expect(JSON.parse(await fs.readFile(join(release, 'release.json'), 'utf8')).version).toBe(expectedVersion);
   const runtime = await fs.realpath(join(release, 'node_modules/@afk/runtime/dist'));
   expect(runtime.startsWith(`${release}/`)).toBe(true);
-  await observeKnowledge(caseId, binary, runtime, expectedVersion, live);
+  await observeKnowledge(caseId, binary, runtime, expectedVersion, live, interruptAt);
 }
 
 it.skipIf(!installed).each(['fact-01', 'fact-02', 'fact-03', 'fact-04', ...authorityCases, 'process-01', 'process-02', 'process-03', 'process-04', 'process-05', 'process-06'])(
   'scores installed knowledge gather for local fixture %s', async caseId => installedKnowledge(caseId), 60_000);
+
+it.skipIf(!installed || process.platform === 'win32').each(['applied', 'committed'] as const)(
+  'recovers installed publication when SIGKILL interrupts the %s journal transaction',
+  async phase => installedKnowledge('fact-01', false, phase), 60_000);
 
 it.runIf(process.env.AFK_W11_LIVE_FACT01 === '1')('distills installed fact-01 with one restricted Claude worker',
   { timeout: 200_000, retry: 0 }, () => installedKnowledge('fact-01', 'observations'));
@@ -76,7 +81,7 @@ function observeParcelRedirect(home: string, mode: Exclude<LiveSource, false>) {
   } finally { db.close(); }
 }
 
-async function observeKnowledge(caseId: string, binary: string, runtime: string, expectedVersion: string, live: LiveSource = false) {
+async function observeKnowledge(caseId: string, binary: string, runtime: string, expectedVersion: string, live: LiveSource = false, interruptAt?: PublicationInterruption) {
   const entry = recallCases.find(item => item.id === caseId)!;
   const isProcess = entry.kind === 'process';
   const targetRef = isProcess ? 'wiki:return-handoff' : 'wiki:seal-cutoff';
@@ -214,10 +219,48 @@ async function observeKnowledge(caseId: string, binary: string, runtime: string,
     const validation = await invoke('experience', 'validate', candidateId, '--scope', scope, '--expected-version', '1', '--checker', identity.checkerId);
     expect(validation).toMatchObject({ status: 'validated', candidateId, receiptDigest: expect.stringMatching(/^[a-f0-9]{64}$/), validatedVersion: 2 });
     const prepared = await invoke('experience', 'knowledge', 'prepare', candidateId, '--scope', scope, '--expected-version', String(validation.validatedVersion));
-    const { publication } = await invoke('experience', 'knowledge', 'publish', prepared.key, '--scope', scope);
+    const pagePath = join(vault, pageName);
+    const publish = ['experience', 'knowledge', 'publish', prepared.key, '--scope', scope];
+    if (interruptAt) {
+      const hook = join(home, 'interrupt-publication.mjs');
+      await fs.writeFile(hook, `import { writeSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+const prepare = DatabaseSync.prototype.prepare;
+DatabaseSync.prototype.prepare = function (sql) {
+  const statement = prepare.call(this, sql);
+  if (sql.startsWith('INSERT INTO learning_ledger(kind, key, payload, bytes)')) {
+    const run = statement.run.bind(statement);
+    statement.run = (kind, key, payload, bytes) => {
+      const result = run(kind, key, payload, bytes);
+      if (kind === 'publication' && key === ${JSON.stringify(prepared.key)} && JSON.parse(payload).phase === ${JSON.stringify(interruptAt)}) {
+        writeSync(1, 'interrupted publication journal write\\n');
+        process.kill(process.pid, 'SIGKILL');
+      }
+      return result;
+    };
+  }
+  return statement;
+};`, { mode: 0o600 });
+      await expect(execute(process.execPath, ['--import', pathToFileURL(hook).href, binary, ...publish, '--json'],
+        { cwd: home, env, timeout: 20_000 })).rejects.toMatchObject({ signal: 'SIGKILL', stdout: 'interrupted publication journal write\n' });
+      const priorPhase = interruptAt === 'applied' ? 'prepared' : 'applied';
+      const reader = new CandidateStore({ file: join(home, '.afk/learning/candidates.sqlite') });
+      try {
+        expect(reader.getPublication(prepared.key)?.phase).toBe(priorPhase);
+        expect(reader.getCandidate(candidateId)?.state).toBe('validated');
+      } finally { reader.close(); }
+      const written = await fs.readFile(pagePath, 'utf8');
+      const modified = (await fs.stat(pagePath)).mtimeMs;
+      expect(await invoke('experience', 'knowledge', 'reconcile', '--scope', scope)).toMatchObject({
+        blocked: [], results: [{ publication: { key: prepared.key, candidateId, phase: 'committed' } }],
+      });
+      expect(await fs.readFile(pagePath, 'utf8')).toBe(written);
+      expect((await fs.stat(pagePath)).mtimeMs).toBe(modified);
+      console.log(JSON.stringify({ interruptedPhase: interruptAt, priorPhase, recoveredPhase: 'committed', pageDigest: hash(written) }));
+    }
+    const { publication } = await invoke(...publish);
     expect(publication).toMatchObject({ phase: 'committed', key: prepared.key, candidateId, targetRef, evidenceDigest: pack.digest,
       candidateVersion: validation.validatedVersion, validatorVersion: `learning-validation-v1:${validation.executionId}` });
-    const pagePath = join(vault, pageName);
     const content = await fs.readFile(pagePath, 'utf8');
     const material = JSON.parse(/\n```json\n([^\n]+)\n```/.exec(content)![1]);
     expect(material).toMatchObject({ evidenceDigest: publication.evidenceDigest, proposal: { kind: entry.kind, targetRef: publication.targetRef,

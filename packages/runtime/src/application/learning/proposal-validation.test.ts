@@ -792,6 +792,10 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('candidate use case w
     vi.stubEnv('DOCKER_TLS_VERIFY', '');
     const runtime = new PluginRuntime();
     const workspace = await test.repository.prepare!(test.checker.runtime.request);
+    vi.mocked(test.repository.snapshot).mockImplementation(async ({ ref }) => {
+      if (ref !== undefined) throw new Error('Only the current checkout can be inspected');
+      return workspace.snapshot;
+    });
     const checkoutRoot = join(test.root, 'checkouts');
     mkdirSync(checkoutRoot);
     const checkoutPath = join(checkoutRoot, workspace.id);

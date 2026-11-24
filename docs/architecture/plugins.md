@@ -1771,6 +1771,8 @@ Verifiers must implement the independent-assertion `learning-validation-v1` prot
 
 The private proposal catalog v1 accepts optional `resources: [{ path, digest }]` for each skill. Paths are relative to the owning `SKILL.md` directory; `digest` is the SHA-256 of the resource bytes. Declarations must be nonempty when present, unique, and cannot claim another skill's files or a skill entry point. The existing bounded scan applies the same file and UTF-8 checks to resources and rejects unlisted, missing, or changed files. Declared resources are part of the inventory digest, must match the captured Git commit before staging, and remain identical across original and proposed inputs. These declarations neither grant tool permissions nor prove that a skill interpreter loaded or executed a resource.
 
+Repository-asset validation snapshots the current checkout. A configured `repository.ref` must match the current branch. When the ref is omitted, a provider may supply the current branch during preparation. Both paths require the pinned commit and preserve repository identity through checkout.
+
 For repair review, `qa` additionally requires `repair: { failure, fix }` as pinned
 above. Validation binds the failed source audit, a successful implementation fix
 at `qa.targetRevision`, and independent QA at that same revision. The receipt

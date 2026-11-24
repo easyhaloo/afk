@@ -187,6 +187,21 @@ describe('Google browser OAuth', () => {
     expect(await store.read()).toBe(JSON.stringify(session));
   });
 
+  it('requires reauthorization for a rejected refresh grant and preserves the saved account', async () => {
+    const store = memoryStore(JSON.stringify(session));
+    const transport = vi.fn(async () => new Response(
+      JSON.stringify({ error: 'invalid_grant', error_description: 'SYNTHETIC_PRIVATE_DETAIL' }), { status: 400 },
+    ));
+    const provider = new GoogleOAuthCredentialProvider({ store, fetch: transport, now: () => now + 3_600_000 });
+    await expect(provider.resolve({ name: 'default' })).rejects.toMatchObject({
+      code: 'token.reauthorize',
+      message: 'Google offline authorization is no longer valid; sign in again to restore Gmail notifications',
+    });
+    expect(store.write).not.toHaveBeenCalled();
+    expect(store.remove).not.toHaveBeenCalled();
+    expect(await provider.status()).toMatchObject({ connected: true });
+  });
+
   it('revokes remotely before removing the local token and supports repeated logout', async () => {
     const store = memoryStore(JSON.stringify(session));
     const transport = vi.fn(async () => new Response('', { status: 200 }));

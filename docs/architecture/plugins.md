@@ -487,6 +487,10 @@ runtime first revokes Google authorization, then removes the Keychain record
 only after successful revocation. A failed revocation retains the record for
 retry. Logout retains plugin settings and does not disable other providers.
 
+When Google rejects refresh with `invalid_grant`, Gmail reports
+`token.reauthorize`. Sign in again to restore notifications. The saved account
+is retained until reauthorization succeeds.
+
 For an External OAuth app left in Testing, refresh tokens for this Gmail scope
 expire after **7 days**; authorize again when needed. Production publishing and
 any required Google verification are separate setup steps. See Google's

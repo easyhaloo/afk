@@ -1303,6 +1303,19 @@ on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `Trigg
 3. For a tracker, save `{}` as `empty.json`. Run `afk plugin invoke tracker.issue <linear-or-jira> health --input empty.json --json` and check for `status` equal to `ok`. Save `{"issueId":"DEMO-123"}` as `issue.json`, substituting a known authorized test issue. Run `afk plugin invoke tracker.issue <linear-or-jira> getIssue --input issue.json --json` and verify the returned issue. Both operations are read-only.
 4. For a notifier, confirm the webhook's destination accepts a test post. Save `{"title":"Plugin connection test","body":"Check CHECK-001"}` as `message.json`, substituting a unique check ID. Run `afk plugin invoke notification.provider <full-plugin-id> notify --input message.json --json`. Check for `delivered: true` and confirm the same ID in the destination group or channel.
 
+### First connection to Cursor and AWS SSM
+
+**Cursor (`agent.cursor`)**
+
+1. Install the Cursor CLI and run `cursor-agent login` to authorize your account in the browser. For unattended use, create a user API key and supply it through `CURSOR_API_KEY` in the AFK process environment. [Installation](https://cursor.com/docs/cli/installation) · [Authentication and API keys](https://cursor.com/docs/cli/reference/authentication)
+2. In the same environment, run `afk plugin doctor --probe --plugin agent.cursor`, `cursor-agent status`, and `cursor-agent models`. If the model list returns `Authentication required`, finish browser login again or check the API key before running a read-only Cursor task through AFK.
+
+**AWS SSM (`host.aws-ssm`)**
+
+1. Install AWS CLI v2. Choose an authorized Linux test node in Systems Manager and record its instance ID and region. Use a profile authorized to run `AWS-RunShellScript` on that node and read or cancel the invocation. For IAM Identity Center, configure the profile with `aws configure sso --profile ssm-test`, then run `aws sso login --profile ssm-test`. [CLI installation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) · [SSO setup](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) · [Run Command setup](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html)
+2. Replace `i-0123456789abcdef0`, `us-east-1`, and `ssm-test` with the node ID, region, and local profile name and save `{"hosts":[{"alias":"ssm-test","instanceId":"i-0123456789abcdef0"}],"region":"us-east-1","profile":"ssm-test"}` as `settings.json`. Run `afk plugin configure host.aws-ssm --builtin --file settings.json`.
+3. Run `afk plugin doctor --probe --plugin host.aws-ssm` to check the CLI. Run `afk host exec ssm-test --provider aws-ssm --timeout 30s --json -- echo CHECK-001`, substituting a unique check ID. Verify exit code `0` and the ID in stdout. Supply only the test node ID, region, and profile name when handing off the configuration.
+
 ### Complete configured example and scheduled invocation
 
 This `~/.afk/plugins.yml` example uses actual factory fields. The Linear entry

@@ -1019,6 +1019,19 @@ SDK 提供 `currentTriggerDeliveryId()`、`TriggerQueueOptions`、
 3. 对工单插件，将 `{}` 保存为 `empty.json`。运行 `afk plugin invoke tracker.issue <linear 或 jira> health --input empty.json --json`，确认 `status` 为 `ok`。再将 `{"issueId":"DEMO-123"}` 保存为 `issue.json`（替换为获授权的已知测试工单），运行 `afk plugin invoke tracker.issue <linear 或 jira> getIssue --input issue.json --json`，核对返回的工单。这两个操作均为只读。
 4. 对通知插件，先确认 webhook 绑定的群或频道允许试发。将 `{"title":"插件接入测试","body":"测试编号 CHECK-001"}` 保存为 `message.json`，替换为本次唯一编号。运行 `afk plugin invoke notification.provider <完整插件 ID> notify --input message.json --json`。核对 `delivered: true`，并在目标群或频道核对相同编号。
 
+### 首次连接 Cursor 和 AWS SSM
+
+**Cursor（`agent.cursor`）**
+
+1. 安装 Cursor CLI，运行 `cursor-agent login`，在浏览器授权账号。无人值守运行时，可创建用户 API key，通过 AFK 进程环境中的 `CURSOR_API_KEY` 提供。[安装](https://cursor.com/docs/cli/installation) · [认证和 API key](https://cursor.com/docs/cli/reference/authentication)
+2. 在同一环境运行 `afk plugin doctor --probe --plugin agent.cursor`、`cursor-agent status` 和 `cursor-agent models`。若模型列表返回 `Authentication required`，先重新完成浏览器授权或检查 API key，再通过 AFK 执行一个只读 Cursor 任务。
+
+**AWS SSM（`host.aws-ssm`）**
+
+1. 安装 AWS CLI v2。在 Systems Manager 中选择获准的 Linux 测试节点，记录实例 ID 和区域。使用有权限在该节点运行 `AWS-RunShellScript`、读取或取消调用的 profile。若使用 IAM Identity Center，先执行 `aws configure sso --profile ssm-test`，再执行 `aws sso login --profile ssm-test`。[安装 CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) · [配置 SSO](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) · [配置 Run Command](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html)
+2. 将 `{"hosts":[{"alias":"ssm-test","instanceId":"i-0123456789abcdef0"}],"region":"us-east-1","profile":"ssm-test"}` 保存为 `settings.json`，替换实例 ID、区域和本地 profile 名称。运行 `afk plugin configure host.aws-ssm --builtin --file settings.json`。
+3. 运行 `afk plugin doctor --probe --plugin host.aws-ssm` 检查 CLI。执行 `afk host exec ssm-test --provider aws-ssm --timeout 30s --json -- echo CHECK-001`，替换为本次唯一编号。核对退出码 `0` 与标准输出中的编号。交接配置时只需提供测试节点 ID、区域和 profile 名称。
+
 ### 完整配置与定时调用示例
 
 以下 `~/.afk/plugins.yml` 使用实际工厂字段。Linear 条目注册独立 issue 操作，

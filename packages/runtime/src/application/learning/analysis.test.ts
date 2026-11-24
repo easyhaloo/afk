@@ -10,6 +10,15 @@ function requestFor(pack: EvidencePack) {
 }
 
 describe('shared analysis without model execution', () => {
+  it('prioritizes grounded asset revisions during repair distillation', async () => {
+    const pack = await buildEvidencePack({ sources: [] });
+    const preference = 'prioritize one grounded revision of that asset';
+    const repair = buildAnalysisPrompt(pack, { ...requestFor(pack), reason: 'repaired' });
+    expect(repair).toContain(preference);
+    expect(repair).toContain('Cite only the complete observations for validation');
+    expect(buildAnalysisPrompt(pack, requestFor(pack))).not.toContain(preference);
+  });
+
   it('requires complete observations for lesson citations and separates target identity from publication authority', async () => {
     const pack = await buildEvidencePack({ sources: [] });
     const prompt = buildAnalysisPrompt(pack, requestFor(pack));

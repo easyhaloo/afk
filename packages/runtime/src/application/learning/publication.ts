@@ -305,7 +305,7 @@ async function stopPublication(input: PublicationOptions, publication: Publicati
 
 export function readCurrentPublishedKnowledge(input: PublicationOptions & { key: string; sourceReadGrantFile?: string;
   applicability?: ContextQuery['applicability']; target?: ContextQuery['target'] }): { path: string; content: string;
-    classification: KnowledgePlan['classification']; applicability: KnowledgePlan['applicability'];
+    classification: KnowledgePlan['classification']; applicability: KnowledgePlan['applicability']; publication: PublicationRecord;
     lesson?: Extract<KnowledgePlan['proposal'], { kind: 'lesson' }> } | null {
   try {
     checkAbort(input);
@@ -346,7 +346,7 @@ export function readCurrentPublishedKnowledge(input: PublicationOptions & { key:
     const current = committedKnowledge(input, publication, prepared, { checkSourceRead, version, environment: applicability?.environment });
     if (optionalReceipt(input, publication.key, 'withdrawal.json')) return null;
     checkSourceRead?.();
-    return { ...current, classification: prepared.classification, applicability: { ...prepared.applicability, project: input.policy.scope },
+    return { ...current, publication, classification: prepared.classification, applicability: { ...prepared.applicability, project: input.policy.scope },
       ...(prepared.proposal.kind === 'lesson' ? { lesson: prepared.proposal } : {}) };
   } catch { checkAbort(input); return null; }
 }

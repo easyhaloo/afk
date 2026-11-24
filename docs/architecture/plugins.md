@@ -1553,6 +1553,11 @@ Dispatch and SQLite persistence are not a cross-system transaction.
 Selection proves neither model reading nor adoption or benefit. This currently covers the builtin
 experience Provider, with no generic plugin-feedback protocol or new CLI command.
 
+Built-in `context.knowledge` records `knowledge.retrieved` and `knowledge.selected` in the run audit.
+Both bind the publication key, candidate version, target digest and retrieved content digest to the run and work item.
+Selection also records the retained fragment digest after executor acceptance and reference integrity verification.
+Model use and workflow benefit require separate evidence.
+
 Persisted `run.finished`, `qa.failed` and `failure.classified` events now derive version-one
 outcome receipts for actual builtin experience selections. Each receipt preserves its full
 historical `selected` snapshot, event run/sequence/hash/type/outcome, occurrence and observation

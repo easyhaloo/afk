@@ -447,7 +447,8 @@ export class QARunner {
           applicability: this.experienceContext?.applicability, target: this.experienceContext?.target };
         let context: ExperienceQueryContext | undefined;
         try {
-          experience = await prepareExperienceContext({ ...input, source: source ?? { runId: runtimeRunId, workItemId: experienceWorkItemId },
+          experience = await prepareExperienceContext({ ...input, recordKnowledge: lifecycleBase.observation?.record,
+            source: lifecycleBase.observation?.context ?? source ?? { runId: runtimeRunId, workItemId: experienceWorkItemId },
             prompt: `${backlog.title}\n${backlog.description ?? ''}`, onContext: resolved => { context = resolved; } });
         } catch (error) {
           if (error instanceof ExperienceFeedbackError) throw error;

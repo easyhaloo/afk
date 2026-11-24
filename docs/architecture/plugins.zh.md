@@ -1232,6 +1232,11 @@ Workflow 和 QA 传播，不能降为可选上下文警告。
 执行器分发和 SQLite 写入不构成跨系统事务，selected 不证明
 模型已读取、采纳或产生收益。该能力当前仅接内建经验 Provider，未增加通用插件反馈协议或新 CLI。
 
+内建 `context.knowledge` 在运行审计中记录 `knowledge.retrieved` 和 `knowledge.selected`。
+两者都将发布键、候选版本、发布目标摘要和召回内容摘要绑定到运行及工作项。
+执行器接受任务且引用文件通过完整性检查后，`selected` 还会记录最终保留的片段摘要。
+判断模型是否采纳知识、工作流是否受益，仍需独立证据。
+
 持久化的 `run.finished`、`qa.failed`、`failure.classified` 事件现为实际选中的内建经验派生
 version-1 outcome 收据。收据保存完整历史 `selected` 快照、事件 run/sequence/hash/type/outcome、
 发生及观察时间、复发标记和 `benefit: 'unknown'`。必须匹配准确项目、运行、工作项和完整本地审计，

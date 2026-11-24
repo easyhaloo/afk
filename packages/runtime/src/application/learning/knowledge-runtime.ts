@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { ContextFragment, ContextQuery, ContextSource, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
 import { recallTerms } from '../../domain/context/terms.js';
-import { CandidateStore } from './candidate-store.js';
+import { CandidateStore, type PublicationRecord } from './candidate-store.js';
 import { learningScopeSchema, type CandidateProposal } from './contracts.js';
 import { readKnowledgeGrant, type KnowledgePolicy } from './knowledge.js';
 import { prepareKnowledgePublication, publishLearningCandidate, readCurrentPublishedKnowledge, readPublishedKnowledge, reconcileKnowledgePublications, resolveKnowledgePublication,
@@ -254,6 +254,12 @@ export class KnowledgeContextProvider implements ContextSource {
   constructor(private readonly options: KnowledgeRuntimeOptions) {}
 
   async gather(query: ContextQuery, operation?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
+    return (await this.gatherWithPublications(query, operation)).map(result => result.fragment);
+  }
+
+  async gatherWithPublications(query: ContextQuery, operation?: ProviderOperationOptions): Promise<{
+    fragment: ContextFragment; publication: PublicationRecord;
+  }[]> {
     const signals = [operation?.signal, this.options.signal].filter((signal): signal is AbortSignal => signal !== undefined);
     const signal = signals.length ? AbortSignal.any(signals) : undefined;
     checkAbort({ signal });
@@ -266,7 +272,7 @@ export class KnowledgeContextProvider implements ContextSource {
     if (!terms.size && !/\p{Script=Han}{2}/u.test(query.prompt)) return [];
     try {
       return await withStore({ ...this.options, signal }, async store => {
-        const fragments: ContextFragment[] = [];
+        const results: { fragment: ContextFragment; publication: PublicationRecord }[] = [];
         const { bindings } = loadBindings(this.options.config);
         const budget = 8000;
         let remaining = budget;
@@ -290,7 +296,7 @@ export class KnowledgeContextProvider implements ContextSource {
             validationConfigurationFile: this.options.validationConfigurationFile, homeDir: this.options.homeDir,
             applicability: query.applicability, target: query.target });
           checkAbort({ signal });
-          if (!knowledge) continue;
+          if (!knowledge || results.some(result => result.publication.key === knowledge.publication.key)) continue;
           let content = knowledge.content;
           if (Buffer.byteLength(content, 'utf8') > budget && knowledge.lesson) {
             const { title, payload } = knowledge.lesson;
@@ -306,10 +312,11 @@ export class KnowledgeContextProvider implements ContextSource {
           const size = Buffer.byteLength(content, 'utf8');
           if (size > remaining) continue;
           remaining -= size;
-          fragments.push({ origin: `knowledge:${publication.key}; target:${publication.targetRef}`, content });
-          if (fragments.length >= limit) break;
+          const current = knowledge.publication;
+          results.push({ fragment: { origin: `knowledge:${current.key}; target:${current.targetRef}`, content }, publication: current });
+          if (results.length >= limit) break;
         }
-        return fragments;
+        return results;
       });
     } catch { checkAbort({ signal }); return []; }
   }

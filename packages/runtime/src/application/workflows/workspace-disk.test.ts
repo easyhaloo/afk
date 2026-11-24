@@ -154,6 +154,20 @@ describe('workspace disk inventory and targeted cleanup', () => {
     expect(await lstat(checkout)).toBeDefined();
   });
 
+  it.each([true, false])('inventories conflicting manifest versions once and reports zero reclaimable bytes (newer first: %s)', async newerFirst => {
+    const newerManifest = join(temporary, 'newer-manifest.json');
+    await writeFile(newerManifest, JSON.stringify({ ...manifest(), schemaVersion: 2 }));
+    const manifests = newerFirst ? [newerManifest, manifestPath] : [manifestPath, newerManifest];
+    const report = await inspectWorkspaceDisk({ root, manifests, leases });
+    expect(report.workspaces).toEqual([expect.objectContaining({
+      workItemId, path: workspace, state: 'unverified', active: null, reclaimableBytes: 0,
+      reason: 'duplicate workspace manifest',
+    })]);
+    expect(report.totals.workspaceBytes).toBeGreaterThan(0);
+    expect(report.totals.workspaceBytes).toBe(report.workspaces[0].bytes);
+    expect(report.totals.reclaimableBytes).toBe(0);
+  });
+
   it.each(['verification', 'blocked', 'requested', 'failed', 'unknown'])('retains %s executions', async state => {
     await phase(state);
     await retained('not safely completed');

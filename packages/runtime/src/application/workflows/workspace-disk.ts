@@ -219,19 +219,26 @@ export async function inspectWorkspaceDisk(options: DiskOptions = {}): Promise<W
         const previous = report.workspaces.find(entry => entry.path === workspace)!;
         report.totals.reclaimableBytes -= previous.reclaimableBytes;
         previous.reclaimableBytes = 0;
+        previous.active = null;
+        previous.state = 'unverified';
         previous.reason = 'duplicate workspace manifest';
         manifestsByWorkspace.delete(workspace);
         throw new Error('duplicate workspace manifest');
       }
-      const manifest = value.schemaVersion === undefined || value.schemaVersion === 0 ? undefined : parseExecutionManifest(value, { manifestPath: path, backlogId: identity });
       const bytes = await exists(workspace) ? await measure(workspace) : 0;
       seen.add(workspace);
       const entry: WorkspaceDiskReport['workspaces'][number] = { workItemId: identity, path: workspace, bytes, active: null, reclaimableBytes: 0 };
       report.workspaces.push(entry);
       report.totals.workspaceBytes += bytes;
-      if (!manifest) { entry.state = 'legacy'; entry.reason = 'legacy manifest is read-only'; continue; }
-      manifestsByWorkspace.set(workspace, manifest);
+      if (value.schemaVersion === undefined || value.schemaVersion === 0) {
+        entry.state = 'legacy';
+        entry.reason = 'legacy manifest is read-only';
+        continue;
+      }
+      entry.state = 'unverified';
       try {
+        const manifest = parseExecutionManifest(value, { manifestPath: path, backlogId: identity });
+        manifestsByWorkspace.set(workspace, manifest);
         entry.active = await leases.active(manifest.repositories.map(repository => `${repository.platform}:${repository.projectKey}`));
         const completion = await completionState(workspace);
         entry.state = completion.state;

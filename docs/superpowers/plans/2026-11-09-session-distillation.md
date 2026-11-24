@@ -2826,6 +2826,10 @@ Separate Claude Code and OpenCode sessions on `0.2.202` passed the expired-autho
 
 The installed CLI `0.2.211` ran two independent W06 tool revisions produced by Claude Code. Both accepted the five frozen control arguments and rejected `null`. Each paired Docker run executed 16 checks and returned `verification_failed`. The local reproduction identified a CommonJS import in the first ESM script. The second passed the ESM entry point but wrote `nextLine=2` after processing one line and added an undocumented `checked` field after recovery. Both runs cleaned up their containers, images, volumes, and temporary worktrees. CLI `0.2.212` tells the analyzer to preserve the observed interpreter, module format, and persisted recovery contract during tool revision.
 
+On November 24, 2026, installed macOS arm64 CLI `0.2.213` passed all 23 entry-point checks. Its W06 frozen Docker comparison executed 16 runs. The repaired fixture passed 8/8 and the original passed 4/8. The observer recorded `EROFS`, the recovery and replay matched the frozen checkpoint and stdout bytes, and no containers, images, volumes, or temporary worktrees remained. The repaired fixture used a previously generated candidate with a manually completed input schema.
+
+CLI `0.2.213` prioritizes grounded repository asset revisions in repair distillation while requiring complete observed citations for validation. The first managed Claude Code attempt reached the 120-second deadline. The controlled retry returned `analysis_invalid_output`, and the worker stored neither output as a candidate. End-to-end qualification of an unedited model-generated revision remains open.
+
 #### Acceptance and delivery checklist
 
 - [ ] Per-package typecheck/build/test plus `pnpm architecture:check`, `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm docs:check`, in a serialized frozen build window; exit0 throughout. Root green cannot replace package results.

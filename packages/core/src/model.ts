@@ -66,6 +66,7 @@ export interface RunAggregate {
   sequence: number;
   terminal: boolean;
   activeStep?: string;
+  activeSystemSteps?: readonly string[];
   humanGateId?: string;
 }
 
@@ -106,15 +107,15 @@ export function decide(state: RunAggregate, command: RunCommand): Decision {
         ? { accepted: true, effects: [{ kind: 'start_run', runId: command.runId }] }
         : { accepted: false, reason: 'run_not_pending', effects: [] };
     case 'start_step':
-      return state.run.status === 'running' && !state.activeStep
+      return state.run.status === 'running' && !state.activeStep && !state.activeSystemSteps?.includes(command.stepId)
         ? { accepted: true, effects: [{ kind: 'start_step', runId: command.runId, stepId: command.stepId, phase: command.phase }] }
         : { accepted: false, reason: 'step_not_runnable', effects: [] };
     case 'request_human_gate':
-      return state.run.status === 'running'
+      return state.run.status === 'running' && !state.activeStep && !state.activeSystemSteps?.length
         ? { accepted: true, effects: [{ kind: 'open_human_gate', runId: command.runId, gateId: command.gateId, reason: command.reason }] }
         : { accepted: false, reason: 'human_gate_not_runnable', effects: [] };
     case 'finish':
-      return state.run.status === 'running' && !state.activeStep
+      return state.run.status === 'running' && !state.activeStep && !state.activeSystemSteps?.length
         ? { accepted: true, effects: [{ kind: 'finish_run', runId: command.runId, outcome: command.outcome }] }
         : { accepted: false, reason: 'run_not_finishable', effects: [] };
   }

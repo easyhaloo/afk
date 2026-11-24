@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
-import type { RunEvent } from '@afk/core';
+import { replay, type RunEvent } from '@afk/core';
+import { projectWorkflowInstance } from '@afk/application';
 import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '../../domain/agents/types.js';
 import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
@@ -35,11 +36,12 @@ describe('WorkflowRunner default template commit audit', () => {
     { createsCommit: false, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, scenario: 'does not record a baseline or agent-reported SHA without a new commit' },
     { createsCommit: false, codexOverride: true, recoverAc: false, sandboxName: 'local' as const, scenario: 'records native telemetry and budget for a Codex step in a Claude workflow' },
     { createsCommit: false, codexOverride: false, recoverAc: false, sandboxName: 'docker' as const, scenario: 'records normalized container telemetry and budget without host transcripts' },
-    { createsCommit: false, codexOverride: false, recoverAc: true, sandboxName: 'local' as const, scenario: 'prepares and verifies publication after successful AC recovery' },
+    { createsCommit: false, codexOverride: false, recoverAc: true, sandboxName: 'local' as const, scenario: 'verifies and audits publication and QA after AC recovery' },
+    { createsCommit: false, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, scenario: 'records a failed publication and leaves dependent QA pending', failsPublication: true },
     { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, log: 'other', scenario: 'finishes its own run inside an unrelated log context' },
     { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, log: 'same', scenario: 'finishes its own run when the caller only binds matching logs' },
     { createsCommit: true, codexOverride: false, recoverAc: false, sandboxName: 'local' as const, callerOwned: true, scenario: 'leaves the run open for its explicit caller even without a log context' },
-  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName, recoverAc, log, callerOwned }) => {
+  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName, recoverAc, log, callerOwned, failsPublication }) => {
     const repoRoot = join(directory, 'repository');
     const worktreePath = join(directory, 'implementation');
     const runId = 'commit-audit-42';
@@ -103,6 +105,7 @@ describe('WorkflowRunner default template commit audit', () => {
         claim: vi.fn(async () => claim), transition: vi.fn(async () => undefined),
         setExecutionMode: vi.fn(async () => undefined), get: vi.fn(async () => item), list: vi.fn(async () => []),
         isRunnable: vi.fn(async () => true), getActiveRework: vi.fn(async () => undefined),
+        addComment: vi.fn(async () => undefined),
       },
       branches: {
         createBranch: vi.fn(async (backlog: BacklogItem, baseBranch: string) => {
@@ -111,7 +114,10 @@ describe('WorkflowRunner default template commit audit', () => {
         }),
         createVerificationWorktree: vi.fn(),
         preparePush,
-        push: vi.fn(async () => { eventsAtPush = await readEvents(store, runId); }),
+        push: vi.fn(async () => {
+          eventsAtPush = await readEvents(store, runId);
+          if (failsPublication) throw new Error('push rejected');
+        }),
         commit: vi.fn(), cleanup: vi.fn(async () => undefined),
       },
       changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
@@ -180,7 +186,7 @@ describe('WorkflowRunner default template commit audit', () => {
       ...(callerOwned ? { observationRunOwner: 'caller' as const } : {}),
     });
     const logIdentity = log === 'other' ? { runId: 'parent-run', workItemId: 'github:acme/api#99' } : { runId, workItemId };
-    await expect(log ? withLogContext(logIdentity, execute) : execute()).resolves.toEqual({ success: true });
+    await expect(log ? withLogContext(logIdentity, execute) : execute()).resolves.toEqual({ success: !failsPublication });
     await plugins.dispose();
 
     const head = (await simpleGit(worktreePath).revparse(['HEAD'])).trim();
@@ -223,6 +229,21 @@ describe('WorkflowRunner default template commit audit', () => {
     expect(onBeforePublish.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(providers.branches.push).mock.invocationCallOrder[0]);
     expect(providers.branches.push).toHaveBeenCalledTimes(1);
     expect(providers.branches.push).toHaveBeenCalledWith(item.branchName, worktreePath);
+    const publication = events.find(event => event.data.kind === 'step.completed' && event.data.stepId === 'publish');
+    expect(publication).toBeDefined();
+    expect(eventsAtPush.at(-1)?.sequence).toBeLessThan(publication!.sequence);
+    expect(eventsAtPush).toContainEqual(expect.objectContaining({ data: { kind: 'step.started', stepId: 'publish', stepKind: 'system' } }));
+    expect(projectWorkflowInstance(runId, workItemId, events)?.steps.slice(-2)).toMatchObject([
+      { id: 'publish', status: failsPublication ? 'failed' : 'succeeded' },
+      { id: 'queue-qa', status: failsPublication ? 'pending' : 'succeeded' },
+    ]);
+    expect(replay(events)).toMatchObject({ activeSystemSteps: [], terminal: !callerOwned });
+    if (failsPublication) {
+      expect(providers.backlog.transition).not.toHaveBeenCalledWith(item.id, 'verification', undefined);
+      expect(claim.release).toHaveBeenCalledTimes(1);
+      await expect(store.verify(runId)).resolves.toMatchObject({ valid: true });
+      return;
+    }
     expect(providers.backlog.transition).toHaveBeenCalledWith(item.id, 'verification', undefined);
     expect(providers.branches.commit).not.toHaveBeenCalled();
     expect(providers.changes.create).not.toHaveBeenCalled();

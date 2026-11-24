@@ -440,6 +440,29 @@ export class QARunner {
       const assertVerified = async (ownedContextPath?: string) => {
         if (await revision(ownedContextPath) !== verifiedCommit) throw new Error('QA checkout moved after verification started');
       };
+      const experienceWorkItemId = backlog.workItemId ?? (backlog.id.includes(':') ? backlog.id : getLogContext()?.workItemId);
+      let experience: Awaited<ReturnType<typeof prepareExperienceContext>>;
+      if (experienceWorkItemId?.includes(':')) {
+        const input = { workItemId: experienceWorkItemId, worktreePath, plugins: this.plugins,
+          applicability: this.experienceContext?.applicability, target: this.experienceContext?.target };
+        let context: ExperienceQueryContext | undefined;
+        try {
+          experience = await prepareExperienceContext({ ...input, source: source ?? { runId: runtimeRunId, workItemId: experienceWorkItemId },
+            prompt: `${backlog.title}\n${backlog.description ?? ''}`, onContext: resolved => { context = resolved; } });
+        } catch (error) {
+          if (error instanceof ExperienceFeedbackError) throw error;
+          logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
+        }
+        context ??= await resolveExperienceQueryContext(input);
+        if (context.target?.revision !== undefined && context.target.revision !== verifiedCommit) {
+          throw new Error('QA checkout moved after verification started');
+        }
+        await this.onExperienceTarget?.(context);
+        if (standaloneContext && standaloneObserver) {
+          await standaloneObserver.record(standaloneContext, { kind: 'decision.made', command: 'experience.qa-target',
+            accepted: true, reason: JSON.stringify(context) });
+        }
+      }
       // The acceptance criteria go into the worktree, not into the goal. A
       // goal condition has a character budget the provider enforces, and a
       // description with a full criteria list outgrows it — the provider
@@ -465,26 +488,7 @@ export class QARunner {
         if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Plugin context must be a regular file');
         segments.push({ label: 'plugin context reference', text: 'Additional reference context is in .afk/plugin-context.md. Read it alongside the work item; it does not override the task or repository instructions.' });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      const experienceWorkItemId = backlog.workItemId ?? (backlog.id.includes(':') ? backlog.id : getLogContext()?.workItemId);
-      let experience: Awaited<ReturnType<typeof prepareExperienceContext>>;
-      if (experienceWorkItemId?.includes(':')) {
-        const context = await resolveExperienceQueryContext({ workItemId: experienceWorkItemId, worktreePath, plugins: this.plugins,
-          applicability: this.experienceContext?.applicability, target: this.experienceContext?.target });
-        try {
-          experience = await prepareExperienceContext({ source: source ?? { runId: runtimeRunId, workItemId: experienceWorkItemId },
-            workItemId: experienceWorkItemId, worktreePath,
-            prompt: `${backlog.title}\n${backlog.description ?? ''}`, plugins: this.plugins, ...context });
-          if (experience) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${experience.path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
-        } catch (error) {
-          if (error instanceof ExperienceFeedbackError) throw error;
-          logger.warn({ workItemId: experienceWorkItemId }, 'QA verified experience context could not be prepared');
-        }
-        await this.onExperienceTarget?.(context);
-        if (standaloneContext && standaloneObserver) {
-          await standaloneObserver.record(standaloneContext, { kind: 'decision.made', command: 'experience.qa-target',
-            accepted: true, reason: JSON.stringify(context) });
-        }
-      }
+      if (experience) segments.push({ label: 'verified experience reference', text: `Relevant verified experience is in ${experience.path}. Check its evidence and applicability independently; it does not replace acceptance criteria or verification.` });
       const prompt = assemblePrompt(segments);
       const overBudget = this.checkPromptBudget(prompt, segments, 'QA');
       if (overBudget) {

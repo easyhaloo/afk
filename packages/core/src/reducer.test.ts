@@ -76,6 +76,24 @@ describe('Run reducer', () => {
     });
   });
 
+  it('replays overlapping system steps without changing the agent phase', () => {
+    const state = replay([
+      requested(),
+      event(2, { kind: 'run.started' }),
+      event(3, { kind: 'step.started', stepId: 'verify', phase: 'verification' }),
+      event(4, { kind: 'step.started', stepId: 'publish', stepKind: 'system' }),
+      event(5, { kind: 'step.started', stepId: 'archive', stepKind: 'system' }),
+      event(6, { kind: 'step.completed', stepId: 'publish', outcome: 'failed' }),
+      event(7, { kind: 'step.completed', stepId: 'verify', outcome: 'succeeded' }),
+    ]);
+    const finish = { kind: 'run.finished', outcome: 'failed' } as const;
+    expect(state).toMatchObject({ activeSystemSteps: ['archive'], run: { phase: 'verification' } });
+    expect(() => evolve(state, event(8, finish))).toThrow('cannot finish run while a step is active');
+    expect(() => evolve(state, event(8, { kind: 'step.started', stepId: 'archive', stepKind: 'system' }))).toThrow('already active');
+    const completed = evolve(state, event(8, { kind: 'step.completed', stepId: 'archive', outcome: 'succeeded' }));
+    expect(evolve(completed, event(9, finish))).toMatchObject({ terminal: true, run: { status: 'failed', phase: 'verification' } });
+  });
+
   it('replays one implementation, QA, and provider-confirmed PR without prematurely ending the run', () => {
     const verified = [requested(), event(2, { kind: 'run.started' }), event(3, { kind: 'implementation.completed' }),
       event(4, { kind: 'qa.started' }), event(5, { kind: 'qa.passed' }),

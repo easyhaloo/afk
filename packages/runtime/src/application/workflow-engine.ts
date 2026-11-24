@@ -1210,12 +1210,16 @@ export class WorkflowRunner {
       }, results),
       executeSystem: async step => {
         const startedAt = new Date().toISOString();
+        await this.recordObservation({ kind: 'step.started', stepId: step.id, stepKind: 'system' });
+        let result: Pick<StepResult, 'status' | 'output' | 'summary'>;
         try {
           const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input });
-          return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
+          result = { status: 'completed', output };
         } catch (error) {
-          return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };
+          result = { status: 'failed', summary: (error as Error).message };
         }
+        await this.recordObservation({ kind: 'step.completed', stepId: step.id, outcome: result.status === 'completed' ? 'succeeded' : 'failed' });
+        return { ...result, stepId: step.id, startedAt, completedAt: new Date().toISOString() };
       },
       systemActions: this.plugins?.listSystemActions(),
     });

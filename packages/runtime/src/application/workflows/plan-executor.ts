@@ -24,9 +24,13 @@ export class PlanExecutor {
         if (step.when) return true;
         return (step.dependsOn ?? []).every(id => results[id]?.status === 'completed');
       });
-      const completed = await Promise.all(runnable.map(step => step.kind === 'agent'
+      const running = runnable.map(async step => step.kind === 'agent'
         ? this.options.executeAgent(step, results)
-        : this.options.executeSystem(step, results)));
+        : this.options.executeSystem(step, results));
+      const completed = await Promise.all(running).catch(async error => {
+        await Promise.allSettled(running);
+        throw error;
+      });
       for (const result of completed) results[result.stepId] = result;
       // Do not stop here: templates may intentionally gate recovery steps on
       // a failed dependency (for example review -> fix).

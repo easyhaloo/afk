@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
-import type { RunEvent } from '@afk/core';
+import { replay, type RunEvent } from '@afk/core';
+import { projectWorkflowInstance } from '@afk/application';
 import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '../../domain/agents/types.js';
 import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
@@ -30,10 +31,11 @@ async function readEvents(store: JsonlEventStore, runId: string): Promise<RunEve
 describe('WorkflowRunner default template commit audit', () => {
   it.each([
     { createsCommit: true, codexOverride: false, sandboxName: 'local' as const, scenario: 'records the full local implementation SHA at publish' },
-    { createsCommit: false, codexOverride: false, sandboxName: 'local' as const, scenario: 'does not record a baseline or agent-reported SHA without a new commit' },
+    { createsCommit: false, codexOverride: false, sandboxName: 'local' as const, scenario: 'does not record a baseline or agent-reported SHA without a new commit', failsPublication: false },
+    { createsCommit: false, codexOverride: false, sandboxName: 'local' as const, scenario: 'records a failed publication and leaves dependent QA pending', failsPublication: true },
     { createsCommit: false, codexOverride: true, sandboxName: 'local' as const, scenario: 'records native telemetry and budget for a Codex step in a Claude workflow' },
     { createsCommit: false, codexOverride: false, sandboxName: 'docker' as const, scenario: 'records normalized container telemetry and budget without host transcripts' },
-  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName }) => {
+  ])('$scenario', async ({ createsCommit, codexOverride, sandboxName, failsPublication }) => {
     const repoRoot = join(directory, 'repository');
     const worktreePath = join(directory, 'implementation');
     const runId = 'commit-audit-42';
@@ -87,6 +89,7 @@ describe('WorkflowRunner default template commit audit', () => {
         claim: vi.fn(async () => claim), transition: vi.fn(async () => undefined),
         setExecutionMode: vi.fn(async () => undefined), get: vi.fn(async () => item), list: vi.fn(async () => []),
         isRunnable: vi.fn(async () => true), getActiveRework: vi.fn(async () => undefined),
+        addComment: vi.fn(async () => undefined),
       },
       branches: {
         createBranch: vi.fn(async (backlog: BacklogItem, baseBranch: string) => {
@@ -94,7 +97,10 @@ describe('WorkflowRunner default template commit audit', () => {
           return { branchName: backlog.branchName, worktreePath };
         }),
         createVerificationWorktree: vi.fn(),
-        push: vi.fn(async () => { eventsAtPush = await readEvents(store, runId); }),
+        push: vi.fn(async () => {
+          eventsAtPush = await readEvents(store, runId);
+          if (failsPublication) throw new Error('push rejected');
+        }),
         commit: vi.fn(), cleanup: vi.fn(async () => undefined),
       },
       changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
@@ -155,7 +161,7 @@ describe('WorkflowRunner default template commit audit', () => {
       backlogId: item.id, session: 'worker-42', targetBranch: item.branchName, baseBranch: 'main',
       repoRoot, workspaceRoot: directory, executionMode: 'batch',
       observationRunId: runId, observationWorkItemId: workItemId,
-    })).resolves.toEqual({ success: true });
+    })).resolves.toEqual({ success: !failsPublication });
 
     const head = (await simpleGit(worktreePath).revparse(['HEAD'])).trim();
     const events = await readEvents(new JsonlEventStore({ root: store.root }), runId);
@@ -188,6 +194,19 @@ describe('WorkflowRunner default template commit audit', () => {
       ]);
     expect(providers.branches.push).toHaveBeenCalledTimes(1);
     expect(providers.branches.push).toHaveBeenCalledWith(item.branchName, worktreePath);
+    expect(eventsAtPush.at(-1)?.sequence).toBeLessThan(events.find(event => event.data.kind === 'step.completed' && event.data.stepId === 'publish')!.sequence);
+    expect(eventsAtPush).toContainEqual(expect.objectContaining({ data: { kind: 'step.started', stepId: 'publish', stepKind: 'system' } }));
+    expect(projectWorkflowInstance(runId, workItemId, events)?.steps.slice(-2)).toMatchObject([
+      { id: 'publish', status: failsPublication ? 'failed' : 'succeeded' },
+      { id: 'queue-qa', status: failsPublication ? 'pending' : 'succeeded' },
+    ]);
+    expect(replay(events)).toMatchObject({ activeSystemSteps: [], terminal: !!failsPublication });
+    if (failsPublication) {
+      expect(providers.backlog.transition).not.toHaveBeenCalledWith(item.id, 'verification', undefined);
+      expect(claim.release).toHaveBeenCalledTimes(1);
+      await expect(store.verify(runId)).resolves.toMatchObject({ valid: true });
+      return;
+    }
     expect(providers.backlog.transition).toHaveBeenCalledWith(item.id, 'verification', undefined);
     expect(providers.branches.commit).not.toHaveBeenCalled();
     expect(providers.changes.create).not.toHaveBeenCalled();

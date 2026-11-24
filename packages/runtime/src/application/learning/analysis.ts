@@ -53,7 +53,7 @@ export function buildAnalysisPrompt(input: EvidencePack, source: DistillationReq
     'Emit candidates for supported findings even when other findings are uncertain. Return an empty candidates array only if no candidate is supported, and explain the evidence gap in warnings.',
     ...(processNeedsGap(pack) ? ['For this pack, every process candidate requires a step with missingEvidence describing the gap. If only a fact is supported, emit the fact alone.'] : []),
     'Return exactly one JSON object with two fields: type must be "goal_complete", and distillation must be the object described below. Do not wrap it in Markdown.',
-    'Trusted output contract: every object below is strict. Include only the listed fields and derive candidate values from the evidence.',
+    'Trusted output contract: every object below is strict. For each candidate, use only the payload fields listed for its kind. The payload field completion belongs only to process and skill. Before returning, check each payload against its own kind. Derive candidate values from the evidence.',
     'distillation={version:1,candidates:Candidate[],warnings:string[]}. At most 10 candidates, 32 warnings and 32768 UTF-8 bytes for distillation.',
     'Every Candidate={kind,title,statement,evidenceIds,applicability,payload,targetRef?}. title:1..256 bytes; statement:1..4096 bytes; evidenceIds:1..64 distinct entry.ref.id values from this pack.',
     'applicability={project,environments:string[],versions:string[],preconditions:string[],exclusions:string[],invalidationConditions:string[]}. project must equal the canonical request scope supplied by the caller (for example github:acme/api). Do not guess a project.',

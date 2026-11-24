@@ -52,6 +52,7 @@ describe('shared analysis without model execution', () => {
     for (const field of ['applicability', 'evidenceIds', 'rootCauseStatus', 'evaluationCases', 'sideEffects']) expect(prompt).toContain(field);
     expect(prompt).not.toMatch(/"distillation":\{"version":1,"candidates":\[\]/);
     expect(prompt).toContain('Emit candidates for supported findings even when other findings are uncertain');
+    expect(prompt).toContain('The payload field completion belongs only to process and skill');
     expect(prompt).toContain('Return an empty candidates array only if no candidate is supported');
     expect(prompt).toMatch(/preserve both verbatim in the fact payload/i);
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');

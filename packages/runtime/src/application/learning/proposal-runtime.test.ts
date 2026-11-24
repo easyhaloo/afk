@@ -822,7 +822,9 @@ describe('repository frozen proposal production orchestration', () => {
     const baseline = { ...workspace.snapshot };
     vi.mocked(repository.snapshot).mockResolvedValue(baseline);
     options.request = { ...options.request, repository: { url: workspace.repository.url } };
-    workspace.repository = { ...workspace.repository, ref };
+    const resolvedWorkspace = { ...workspace, repository: { ...workspace.repository, ref } };
+    vi.mocked(repository.prepare!).mockResolvedValue(resolvedWorkspace);
+    vi.mocked(repository.checkout!).mockResolvedValue(resolvedWorkspace);
     const verification = verifyRepositoryAssetProposal(prepared, options);
     if (ref === baseline.branch) {
       const result = await verification;

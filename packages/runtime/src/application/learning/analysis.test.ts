@@ -10,9 +10,9 @@ function requestFor(pack: EvidencePack) {
 }
 
 describe('shared analysis without model execution', () => {
-  it('prioritizes grounded asset revisions during repair distillation', async () => {
+  it('asks for a single revision when complete observations identify a repaired asset', async () => {
     const pack = await buildEvidencePack({ sources: [] });
-    const preference = 'prioritize one grounded revision of that asset';
+    const preference = 'When complete observations identify an existing repository asset and show its behavior before and after repair, return only one grounded revision of that asset.';
     const repair = buildAnalysisPrompt(pack, { ...requestFor(pack), reason: 'repaired' });
     expect(repair).toContain(preference);
     expect(repair).toContain('Cite only the complete observations for validation');

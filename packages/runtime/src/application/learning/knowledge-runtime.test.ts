@@ -1,12 +1,16 @@
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { PluginRuntime } from '../plugins/runtime.js';
 import { KnowledgeContextProvider, knowledgeConfigurationSchema, prepareConfiguredKnowledge, publishConfiguredKnowledge,
   reconcileConfiguredKnowledge } from './knowledge-runtime.js';
-import { knowledgeFixture } from './knowledge.fixture.spec.js';
+import { hash, knowledgeFixture } from './knowledge.fixture.spec.js';
 import { runWikiIngest } from './knowledge.js';
 import { candidateProposalSchema } from './contracts.js';
 import { output } from './ledger-data.fixture.spec.js';
+import { prepareExperienceContext } from './runtime.js';
 
 const fixtures: ReturnType<typeof knowledgeFixture>[] = [];
 const open = () => { const fixture = knowledgeFixture(); fixtures.push(fixture); return fixture; };
@@ -16,6 +20,55 @@ const options = (fixture: ReturnType<typeof open>) => ({ file: join(fixture.root
 afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup(); });
 
 describe('configured knowledge application use cases', () => {
+  it('binds durable knowledge receipts to the resolved publication and the unmodified reference', async () => {
+    const fixture = open();
+    const input = options(fixture);
+    const scope = fixture.policy.scope;
+    const { key } = await prepareConfiguredKnowledge({ ...input, scope, candidateId: fixture.candidate.id, expectedVersion: fixture.candidate.version });
+    const { publication } = await publishConfiguredKnowledge({ ...input, scope, key });
+    const plugins = new PluginRuntime();
+    const provider = new KnowledgeContextProvider(input);
+    await plugins.activate({ manifest: { id: 'knowledge-test', version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
+      activate(context) { context.registerContextProvider(provider.id, provider); } });
+    try {
+      const root = join(fixture.root, 'receipt-audit');
+      const observer = createRunObserver(root);
+      const store = new JsonlEventStore({ root });
+      const source = { runId: 'knowledge-receipt', workItemId: `${scope}#42` };
+      const context = { ...source, traceId: source.runId, profileId: 'fixture', attempt: 1, actor: { kind: 'system', id: 'fixture' } } as const;
+      const request = { source, workItemId: source.workItemId, worktreePath: fixture.root, plugins, prompt: 'Approval',
+        recordKnowledge: (data: Parameters<typeof observer.record>[1]) => observer.record(context, data) };
+      const receipts = async () => {
+        const result = [];
+        for await (const event of store.read(source.runId)) {
+          if (event.data.kind !== 'decision.made') throw new Error('Unexpected audit event');
+          expect(event.context).toMatchObject(source);
+          result.push({ command: event.data.command, binding: JSON.parse(event.data.reason!) });
+        }
+        return result;
+      };
+      expect(await prepareExperienceContext({ ...request, applicability: { version: 'wrong' } })).toBeUndefined();
+      expect(await receipts()).toEqual([]);
+      const applicability = { version: 'abc' };
+      const [fragment] = await provider.gather({ scope, prompt: request.prompt, applicability });
+      const binding = { scope, publicationKey: key, candidateId: publication.candidateId, candidateVersion: publication.candidateVersion,
+        targetRef: publication.targetRef, targetDigest: publication.targetDigest, retrievedDigest: hash(fragment!.content) };
+      const prepared = (await prepareExperienceContext({ ...request, applicability }))!;
+      const retrieved = { command: 'knowledge.retrieved', binding };
+      expect(await receipts()).toEqual([retrieved]);
+      const path = join(fixture.root, prepared.path);
+      const reference = readFileSync(path);
+      writeFileSync(path, 'overwritten');
+      await expect(prepared.recordSelection()).rejects.toThrow('selection feedback is incomplete');
+      expect(await receipts()).toEqual([retrieved]);
+      writeFileSync(path, reference);
+      await prepared.recordSelection();
+      await prepared.recordSelection();
+      expect(await receipts()).toEqual([retrieved, { command: 'knowledge.selected', binding: { ...binding, fragmentDigest: hash(fragment!.content) } }]);
+      expect(await store.verify(source.runId)).toMatchObject({ valid: true, lastSequence: 2 });
+    } finally { await plugins.dispose(); }
+  });
+
   it('finds two Chinese process actions in a paraphrase without matching a lone fragment', async () => {
     const fixture = knowledgeFixture(candidateProposalSchema.parse({ ...output.candidates[0], kind: 'process', targetRef: 'wiki:approval',
       title: '退件交接', statement: 'Return handoff', payload: { entry: 'handoff', systems: ['register'], preconditions: [], exceptions: [],

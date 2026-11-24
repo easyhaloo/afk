@@ -311,9 +311,11 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
     let failed = false;
     let value: ProposalRuntimeResult | undefined;
     try {
+      const ownedRepository = request.repository.ref === undefined && workspace.repository.ref !== undefined
+        ? { ...request.repository, ref: snapshot.branch } : request.repository;
       const assertWorkspace = (next: RepositoryWorkspace) => {
         if (!ownedId || next.id !== ownedId || next.runId !== request.runId || !next.path || resolve(next.path) !== next.path || realpathSync(next.path) !== next.path
-          || canonicalLearningJson(next.repository) !== canonicalLearningJson(request.repository) || next.snapshot.dirty || next.snapshot.commit !== commit) {
+          || canonicalLearningJson(next.repository) !== canonicalLearningJson(ownedRepository) || next.snapshot.dirty || next.snapshot.commit !== commit) {
           throw new Error('Proposal repository workspace ownership or baseline changed');
         }
       };
@@ -395,7 +397,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) throw new Error('Frozen evidence differs from configured proposal execution');
         const candidateCheck = prepared.checks.find(entry => entry.id === check.checkId)!;
         const receiptBinding: ProposalRuntimeObservation['receipt']['binding'] = freezeJson({ ...binding, repositoryId,
-          workspaceId: ownedId, runId: workspace.runId, commit, repositoryDigest: digest(workspace.repository), inventoryDigest, configurationDigest,
+          workspaceId: ownedId, runId: workspace.runId, commit, repositoryDigest: digest(request.repository), inventoryDigest, configurationDigest,
           proposalDigest: digest(prepared.proposal), artifactPath, artifactDigest: version === 'original' ? prepared.artifact.originalDigest! : prepared.artifact.digest,
           nonAssetDigest, version, checkId: check.checkId, checkDigest: check.checkDigest, inputDigest: bytesDigest(candidateCheck.input),
           oracleId: harness.id, oracleRevision: harness.revision, expectedDigest: digest(check.expected), operationId: execution.evidence.operationId,

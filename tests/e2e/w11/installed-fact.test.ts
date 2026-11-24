@@ -49,7 +49,7 @@ it.runIf(process.env.AFK_W11_LIVE_FACT01 === '1')('distills installed fact-01 wi
   { timeout: 200_000, retry: 0 }, () => installedKnowledge('fact-01', 'observations'));
 
 it.runIf(process.env.AFK_W11_LIVE_POLICY_RECEIPT === '1')('distills installed parcel policy receipt with one restricted Claude worker',
-  { timeout: 200_000, retry: 0 }, () => installedKnowledge('fact-01', 'policy-receipt'));
+  { timeout: 400_000, retry: 0 }, () => installedKnowledge('fact-01', 'policy-receipt'));
 
 it.runIf(process.env.AFK_W11_LIVE_AUTHORITY === '1').each(authorityCases)('checks live authority for %s',
   async caseId => installedKnowledge(caseId, 'policy-receipt'), 400_000);
@@ -302,14 +302,24 @@ DatabaseSync.prototype.prepare = function (sql) {
       try { expect(reader.getPublication(publication.key)).toMatchObject({ phase: 'committed', candidateId, evidenceDigest: pack.digest }); }
       finally { reader.close(); }
     }
-    if (entry.state === 'withdrawn') {
-      await save('authority.json', { ...handoff, completion: '已停止交接' });
+    const liveWithdrawal = caseId === 'fact-01' && live === 'policy-receipt';
+    const receipt = liveWithdrawal ? JSON.parse((await execute(process.execPath,
+      [driver, 'gate', runtime, home, binary, JSON.stringify(positive)], { env, cwd: home })).stdout) : undefined;
+    if (liveWithdrawal) expect(receipt).toMatchObject({ publication: { key: publication.key },
+      producerSession: expect.any(String), producerRun: expect.any(String) });
+    if (entry.state === 'withdrawn' || liveWithdrawal) {
+      await save('authority.json', isProcess ? { ...handoff, completion: '已停止交接' } :
+        { ...JSON.parse(await fs.readFile(authority, 'utf8')), rule: '封签点之后，已停用原改址规则。' });
       const reconciled = await invoke('experience', 'knowledge', 'reconcile', '--scope', scope);
       expect(reconciled).toMatchObject({ blocked: [], results: [{ publication: { key: publication.key },
         withdrawal: { key: publication.key, candidateVersion: publication.candidateVersion, evidenceDigest: pack.digest, status: 'withdrawn' } }] });
       withdrawal = reconciled.results[0].withdrawal;
       expect(await fs.readFile(pagePath, 'utf8')).toContain('knowledge_status: revoked');
-      await save('authority.json', handoff);
+      if (liveWithdrawal) {
+        expect(await gather(positive.query)).toEqual([]);
+        await verifyManagedFact({ binary, runtime, fixture: home, runDirectory: await fs.mkdtemp(join(home, 'withdrawn-')),
+          itemId: '49', cliVersion: expectedVersion, entryCase: positive, receipt, withdrawn: true });
+      } else await save('authority.json', handoff);
     }
     const actual = entry === positive ? control : await gather(entry.query);
     if (authorityPaths) {

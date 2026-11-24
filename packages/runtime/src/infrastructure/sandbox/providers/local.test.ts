@@ -1,5 +1,5 @@
 import { workspaceDataDirectory } from '../../workspace.js';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
 import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
 import { claudeStatuslineSettingsPath } from '../../../shared/workspace-paths.js';
 import { getAfkResourceRegistry } from '../../runtime/resource-registry.js';
+import { collectAgentTelemetry } from '../../observability/agent-telemetry.js';
 
 describe('LocalSandboxProvider', () => {
   const metadata = { provider: 'claude-code', transport: 'process' } as const;
@@ -321,6 +322,35 @@ describe('LocalSandboxProvider', () => {
     });
 
     await expect(access(statusPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('records the interactive Claude session from the status marker and its shortened transcript', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-interactive-transcript-'));
+    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = join(root, 'config');
+    try {
+      const worktreePath = join(root, 'project'.repeat(25), 'worktree-branch');
+      await mkdir(worktreePath, { recursive: true });
+      const statusDir = workspaceDataDirectory(worktreePath);
+      await mkdir(statusDir, { recursive: true });
+      const cwd = await realpath(worktreePath);
+      const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
+      const project = join(process.env.CLAUDE_CONFIG_DIR, 'projects', `${cwd.replace(/[/.]/g, '-').slice(0, 200)}-suffix`);
+      await mkdir(project, { recursive: true });
+      const transcriptPath = join(project, `${sessionId}.jsonl`);
+      await writeFile(transcriptPath, JSON.stringify({ cwd, sessionId }));
+      await writeFile(join(statusDir, 'claude-status.json'), JSON.stringify({ session_id: sessionId }));
+      const execution = new LocalAgentExecution({
+        worktreePath, sessionName: 'runner-session', command: { argv: ['claude'], cwd }, generation: 1,
+        prompt: 'go', signalType: 'goal_complete', metadata, tmux: {} as never,
+      });
+      const result = { version: 1, runId: 'run', status: 'completed', provider: 'local', commits: [] } as const;
+      await expect(collectAgentTelemetry(execution, { ...result, commits: [] }, 'local')).resolves.toMatchObject({ sessionId, transcriptPath });
+    } finally {
+      if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('accepts an AC verification completion signal', () => {

@@ -26,13 +26,15 @@ AFK_TEST_FROZEN_DOCKER=1 AFK_TEST_FROZEN_IMAGE=<local-node-image-id> \
   -t 'of the bounded manifest scan'
 ```
 
-With the suite's pinned image already present, replay the Docker case with:
+With the suite's pinned image already present, replay the Docker case with the command below. If that image is unavailable, set `AFK_FROZEN_SCRATCH_IMAGE` to the full local image ID of a reviewed image with Node.js, a static C compiler, and `base64`. The receipt records the selected ID and helper digest.
 
 ```sh
 AFK_FROZEN_SCRATCH_DOCKER=1 AFK_FROZEN_SCRATCH_EVIDENCE=/absolute/path/to/receipt.json \
   pnpm --filter @afk/runtime exec vitest run src/infrastructure/sandbox/container/frozen-scratch-helper.test.ts \
   -t 'reads the interrupted manifest scan checkpoint'
 ```
+
+The eight-case ledger test reads its frozen bundle from `AFK_TEST_W06_BUNDLE`. Set `AFK_TEST_W06_RECEIPT` to an unused path to save a new receipt. The test preserves the input bundle and refuses to overwrite a receipt.
 
 Formal coverage remains 0/8. Formal validation requires a new candidate and matching grant, a complete checker with the native scratch helper, and an independent permission witness bound to the proposed operation and target.
 

@@ -1019,6 +1019,19 @@ SDK 提供 `currentTriggerDeliveryId()`、`TriggerQueueOptions`、
 3. 对工单插件，将 `{}` 保存为 `empty.json`。运行 `afk plugin invoke tracker.issue <linear 或 jira> health --input empty.json --json`，确认 `status` 为 `ok`。再将 `{"issueId":"DEMO-123"}` 保存为 `issue.json`（替换为获授权的已知测试工单），运行 `afk plugin invoke tracker.issue <linear 或 jira> getIssue --input issue.json --json`，核对返回的工单。这两个操作均为只读。
 4. 对通知插件，先确认 webhook 绑定的群或频道允许试发。将 `{"title":"插件接入测试","body":"测试编号 CHECK-001"}` 保存为 `message.json`，替换为本次唯一编号。运行 `afk plugin invoke notification.provider <完整插件 ID> notify --input message.json --json`。核对 `delivered: true`，并在目标群或频道核对相同编号。
 
+### 首次连接 Cursor 和 AWS SSM
+
+**Cursor（`agent.cursor`）**
+
+1. 安装 Cursor CLI，运行 `cursor-agent login`，在浏览器授权账号。无人值守运行时，可创建用户 API key，通过 AFK 进程环境中的 `CURSOR_API_KEY` 提供。[安装](https://cursor.com/docs/cli/installation) · [认证和 API key](https://cursor.com/docs/cli/reference/authentication)
+2. 在同一环境运行 `afk plugin doctor --probe --plugin agent.cursor`、`cursor-agent status` 和 `cursor-agent models`。若模型列表返回 `Authentication required`，先重新完成浏览器授权或检查 API key，再通过 AFK 执行一个只读 Cursor 任务。
+
+**AWS SSM（`host.aws-ssm`）**
+
+1. 安装 AWS CLI v2。在 Systems Manager 中选择获准的 Linux 测试节点，记录实例 ID 和区域。使用有权限在该节点运行 `AWS-RunShellScript`、读取或取消调用的 profile。若使用 IAM Identity Center，先执行 `aws configure sso --profile ssm-test`，再执行 `aws sso login --profile ssm-test`。[安装 CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) · [配置 SSO](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) · [配置 Run Command](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html)
+2. 将 `{"hosts":[{"alias":"ssm-test","instanceId":"i-0123456789abcdef0"}],"region":"us-east-1","profile":"ssm-test"}` 保存为 `settings.json`，替换实例 ID、区域和本地 profile 名称。运行 `afk plugin configure host.aws-ssm --builtin --file settings.json`。
+3. 运行 `afk plugin doctor --probe --plugin host.aws-ssm` 检查 CLI。执行 `afk host exec ssm-test --provider aws-ssm --timeout 30s --json -- echo CHECK-001`，替换为本次唯一编号。核对退出码 `0` 与标准输出中的编号。交接配置时只需提供测试节点 ID、区域和 profile 名称。
+
 ### 完整配置与定时调用示例
 
 以下 `~/.afk/plugins.yml` 使用实际工厂字段。Linear 条目注册独立 issue 操作，
@@ -1232,6 +1245,11 @@ Workflow 和 QA 传播，不能降为可选上下文警告。
 执行器分发和 SQLite 写入不构成跨系统事务，selected 不证明
 模型已读取、采纳或产生收益。该能力当前仅接内建经验 Provider，未增加通用插件反馈协议或新 CLI。
 
+内建 `context.knowledge` 在运行审计中记录 `knowledge.retrieved` 和 `knowledge.selected`。
+两者都将发布键、候选版本、发布目标摘要和召回内容摘要绑定到运行及工作项。
+执行器接受任务且引用文件通过完整性检查后，`selected` 还会记录最终保留的片段摘要。
+判断模型是否采纳知识、工作流是否受益，仍需独立证据。
+
 持久化的 `run.finished`、`qa.failed`、`failure.classified` 事件现为实际选中的内建经验派生
 version-1 outcome 收据。收据保存完整历史 `selected` 快照、事件 run/sequence/hash/type/outcome、
 发生及观察时间、复发标记和 `benefit: 'unknown'`。必须匹配准确项目、运行、工作项和完整本地审计，
@@ -1396,6 +1414,16 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 
 私有提案目录 v1 支持按技能选填 `resources: [{ path, digest }]`。路径相对于所属 `SKILL.md` 所在目录，`digest` 为资源字节的 SHA-256。填写时列表不得为空，路径不得重复、归属其他技能或指向技能入口。原有有界扫描同样对资源执行文件和 UTF-8 检查，拒绝未声明、缺失或发生变化的文件。声明纳入目录摘要，冻结前与 Git 提交的字节核对，原版和提案版共享相同资源。声明不授予工具权限，也不证明技能解释器加载或执行了资源。
 
+仓库资产验证读取当前检出的快照。配置的 `repository.ref` 必须与当前分支一致。省略 `ref` 时，Provider 可在准备工作区时补全当前分支。两种方式均要求匹配固定提交，并在检出过程中保持仓库身份一致。
+
+仓库工具的修订使用资产记录中的准确逻辑引用 `targetRef`。独立验证要求完整的观测证据。纠正日志为草案提供声明信息。仓库资产 checker 接受可独立执行且 `dependencies` 与 `permissions` 均为空的脚本。写入 checker 提供的暂存空间须声明 `sideEffects: "filesystem"`，并配置恢复实验。
+
+工具的 `inputSchema` 同时覆盖普通输入，以及配置的取消、超时、权限拒绝和恢复实验实际传入的 JSON 参数，包括恢复的两个阶段。普通输入与控制输入的结构不同时使用 `anyOf`。拒绝用例的输入必须无法通过 schema 校验。
+
+提案的普通用例覆盖成功调用及其 JSON 输出。独立 checker 执行取消、超时、权限拒绝和多步恢复实验。提案源码及恢复说明应描述工具如何处理这些情况。
+
+失败或修复分析超时后，重试至多生成一个候选。观测证据明确标识仓库资产及其行为变化时，优先提炼资产修订。缺少此类观测时，可根据经验证的修复提炼经验教训。
+
 修复复盘还要求 `qa` 包含上述固定的 `repair: { failure, fix }`。验证绑定失败来源
 审计、在 `qa.targetRevision` 成功完成的实现修复，以及同版本的独立 QA；收据增加
 `repair` 和 `repairEvidence`，引用失败及修复事件。重放和发布重新检查这些审计及
@@ -1441,7 +1469,7 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 
 lesson 目标的 kinds 必须显式包含 lesson；既有 fact/process 默认不扩大。准备、发布、读取及补查核对当前独立 QA、来源、配置与收据，正文保存验证及修复版本引用。授权规则和必须不存在的目录规则进入最终读取快照，普通文件摘要读取上限64MiB、私有 grant 上限1MiB。准备、导航替换及 applied/committed 晋级获得数据库写锁后再次同步复核；漂移回滚。QA 单独失效只使对应 lesson 冲突并安排撤回，不失效同请求的 fact/process；未配置 knowledge 时仍补查 lesson 资格。
 
-committed lesson 自动幂等投影到同一学习目录的 ExperienceStore，绑定实际发布 key（包括导航更新后的 successor）、候选 ID/摘要、验证版本、证据摘要及验证器版本。重试保留原经验 ID、有效期、指标和采纳收据；撤销的经验不会因补查重新启用。每次召回和采纳（包括旧收据重放）重查当前来源、QA、配置、授权、正文及适用条件；历史记录可查看不代表当前可消费。版本标签及环境按已验证范围匹配，新的消费 revision 不必等于来源 QA revision；尚无具名 productVersions/runtimeVersions 兼容证明时拒绝携带这些映射的上下文。
+committed lesson 自动幂等投影到同一学习目录的 ExperienceStore，绑定实际发布 key（包括导航更新后的 successor）、候选 ID/摘要、验证版本、证据摘要及验证器版本。重试保留原经验 ID、有效期、指标和采纳收据。撤销的经验不会因补查重新启用。每次召回和采纳（包括旧收据重放）都重查当前来源、QA、配置、授权、正文及适用条件。版本和环境须匹配已验证范围，消费 revision 可以与来源 QA revision 不同。具备已验证 `productId` 的 lesson 要求 `target.productVersions` 仅包含该产品。同时提供 `applicability.version` 时，两处版本必须一致。没有已验证产品的 lesson 使用标量版本，并拒绝非空产品版本映射。已发布 lesson 暂不支持非空 `target.runtimeVersions` 映射。
 
 生产调用方传入可信 home，每次消费重读其中唯一启用的内置 learning.distiller 配置；config.enabled:false 只关闭自动学习，仍允许有效资产读取。显式自定义经验文件未提供 home 或可信 knowledge 配置时，不回退真实用户目录。发布经验不进入 v1 导出，copy 和普通 verify 不能移植或授予其发布证明。Wiki 已提交而经验投影失败时，保留提交结果并返回 experienceProjection.blocked；reconcile 报 experience_projection_blocked 并可修复缺失投影。发布后取消保留原取消原因，已提交发布由后续补查恢复投影。
 

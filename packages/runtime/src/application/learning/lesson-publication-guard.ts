@@ -8,7 +8,7 @@ import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/obs
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import type { CandidateStore, LearningCandidate } from './candidate-store.js';
 import { candidateProposalSchema, distillationRequestSchema, DISTILLATION_LIMITS, evidenceRefSchema, type EvidenceRef } from './contracts.js';
-import { auditEvidenceContent, matchesEvidenceWorkItem, validateEvidencePack } from './evidence.js';
+import { auditEvidenceContent, managedTranscriptRoots, matchesEvidenceWorkItem, validateEvidencePack } from './evidence.js';
 import { assertKnowledgeDirectory, KNOWLEDGE_FILE_BYTES, knowledgeFile, readKnowledgeAuthorization, readKnowledgeGrant } from './knowledge.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
 import { lessonQaConfigurationSchema, lessonRepairBindingSchema } from './validation-input.js';
@@ -213,7 +213,7 @@ export function verifyLessonPublication(input: LessonPublicationInput, options: 
         .sort((first, second) => first.sessionId < second.sessionId ? -1 : first.sessionId > second.sessionId ? 1 : 0);
       if (sessions.length > 63) fail('source_unavailable');
       const home = realpathSync(input.homeDir ?? homedir());
-      const roots = [join(home, '.afk', 'transcripts'), join(home, '.claude', 'projects'), join(home, '.codex', 'sessions'), join(home, '.codex', 'archived_sessions')];
+      const roots = managedTranscriptRoots(home);
       sources = [{ id: 'audit-1', kind: 'audit', path, allowedRoot: root, runId: identity.runId }, ...sessions.map((session, index) => {
         const path = session.transcriptPath;
         if (!path) fail('source_unavailable');

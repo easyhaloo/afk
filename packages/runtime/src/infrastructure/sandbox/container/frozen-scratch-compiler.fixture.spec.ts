@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { captureFrozenScratchHelper } from './frozen-input.js';
 
-export const scratchCompilerImage = 'sha256:eb5d9c60d047664130b3c88bb9d3ff77cf809b4a524ee05aa3ac898940332d39';
+export const scratchCompilerImage = process.env.AFK_FROZEN_SCRATCH_IMAGE
+  ?? 'sha256:eb5d9c60d047664130b3c88bb9d3ff77cf809b4a524ee05aa3ac898940332d39';
 export const scratchCompilerLabel = 'afk.scratch.s1=offline-helper';
 
 export function compileScratchFixture(path: string, source: Uint8Array = readFileSync(new URL('./frozen-scratch-helper.c', import.meta.url))) {
+  if (!/^sha256:[a-f0-9]{64}$/.test(scratchCompilerImage)) throw new Error('Scratch compiler must be an exact image ID');
   const encoded = execFileSync('docker', ['run', '--rm', '--interactive', '--pull=never', '--label', scratchCompilerLabel,
     '--read-only', '--user', '1000:1000', '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--pids-limit', '64', '--memory', '268435456', '--memory-swap', '268435456', '--cpus', '1', '--ipc', 'private',

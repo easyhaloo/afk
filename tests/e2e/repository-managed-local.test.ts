@@ -64,6 +64,11 @@ it.skipIf(!entry).each(['clean', 'unrelated ignored file'] as const)('enforces t
       expect(await git('-C', bare, 'ls-tree', '-r', '--name-only', revision)).toBe('shared.txt');
       expect(await git('-C', bare, 'ls-tree', '-r', '--name-only', `${branch}-qa`)).toBe('shared.txt');
       expect(events).toContainEqual(expect.objectContaining({ kind: 'commit.recorded', phase: 'implementation', branch, commitSha: revision }));
+      if (name === 'api') {
+        const verified = await git('-C', bare, 'rev-parse', `${branch}-qa`);
+        expect(events).toContainEqual(expect.objectContaining({ kind: 'decision.made', command: 'experience.qa-target', accepted: true,
+          reason: JSON.stringify({ target: { project: `gitlab:${server.host}/acme/api`, revision: verified, dirty: false } }) }));
+      }
       published.push({ name, origin: config.remoteUrl, path, seed, branch, revision, claimId: claim.claimId });
     }
     expect(claims.size).toBe(repositories.length);

@@ -224,9 +224,8 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
     const identity = [repository.snapshot, repository.prepare, repository.checkout, repository.cleanup, repository.withLifecycleLease];
     const capabilities = canonicalLearningJson(repository.capabilities);
     const ref = current.entry.repository.repository;
-    const frozenSkill = semantic.adapter === 'skill-trace-v1';
-    const baseline = snapshotSchema.parse(await repository.snapshot(frozenSkill ? { url: ref.url } : ref, options));
-    if (frozenSkill && ref.ref !== undefined && baseline.branch !== ref.ref) throw new Error('proposal_repository_changed');
+    const baseline = snapshotSchema.parse(await repository.snapshot({ url: ref.url }, options));
+    if (ref.ref !== undefined && baseline.branch !== ref.ref) throw new Error('proposal_repository_changed');
     authorization(options);
     const gitSnapshot = (operation: ProviderOperationOptions) => {
       options.checkBudget(operation);

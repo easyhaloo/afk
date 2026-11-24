@@ -817,6 +817,26 @@ describe('repository frozen proposal production orchestration', () => {
     expect(options.recordOwnership).toHaveBeenCalledTimes(fresh.checks.length);
   });
 
+  it.each(['main', 'other'])('checks an implicitly selected branch %s against the baseline', async ref => {
+    const { options, prepared, repository, workspace, engine } = fixture();
+    const baseline = { ...workspace.snapshot };
+    vi.mocked(repository.snapshot).mockResolvedValue(baseline);
+    options.request = { ...options.request, repository: { url: workspace.repository.url } };
+    const resolvedWorkspace = { ...workspace, repository: { ...workspace.repository, ref } };
+    vi.mocked(repository.prepare!).mockResolvedValue(resolvedWorkspace);
+    vi.mocked(repository.checkout!).mockResolvedValue(resolvedWorkspace);
+    const verification = verifyRepositoryAssetProposal(prepared, options);
+    if (ref === baseline.branch) {
+      const result = await verification;
+      if (result.status !== 'verification-observed') throw new Error('Expected actual observations');
+      expect(result.comparisons[0].proposed.receipt.binding.repositoryDigest).toBe(digest(options.request.repository));
+    } else {
+      await expect(verification).rejects.toThrow(/ownership|baseline/);
+      expect(engine.startFrozenContainer).not.toHaveBeenCalled();
+    }
+    expect(repository.cleanup).toHaveBeenCalledWith({ workspaceId: workspace.id }, expect.anything());
+  });
+
   it.each(['id', 'runId', 'path', 'repository', 'dirty', 'commit'] as const)('rejects checkout %s drift and cleans only the allocated workspace', async field => {
     const { options, prepared, repository, workspace, engine } = fixture();
     const next = { ...workspace, snapshot: { ...workspace.snapshot }, repository: { ...workspace.repository } };

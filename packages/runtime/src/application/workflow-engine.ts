@@ -1175,7 +1175,7 @@ export class WorkflowRunner {
       try {
         experience = await prepareExperienceContext({ source: this.observationContext && {
           runId: this.observationContext.runId, workItemId: this.observationContext.workItemId },
-          workItemId: experienceWorkItemId, worktreePath,
+          workItemId: experienceWorkItemId, worktreePath, recordKnowledge: data => this.recordObservation(data),
           onContext: ({ applicability, target }) => {
             const observation = this.observationContext;
             if (observation?.workItemId === experienceWorkItemId && this.workspaceRoot === worktreePath &&

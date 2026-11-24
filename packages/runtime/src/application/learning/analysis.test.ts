@@ -10,6 +10,15 @@ function requestFor(pack: EvidencePack) {
 }
 
 describe('shared analysis without model execution', () => {
+  it('asks for a single revision when complete observations identify a repaired asset', async () => {
+    const pack = await buildEvidencePack({ sources: [] });
+    const preference = 'When complete observations identify an existing repository asset and show its behavior before and after repair, return only one grounded revision of that asset.';
+    const repair = buildAnalysisPrompt(pack, { ...requestFor(pack), reason: 'repaired' });
+    expect(repair).toContain(preference);
+    expect(repair).toContain('Cite only the complete observations for validation');
+    expect(buildAnalysisPrompt(pack, requestFor(pack))).not.toContain(preference);
+  });
+
   it('requires complete observations for lesson citations and separates target identity from publication authority', async () => {
     const pack = await buildEvidencePack({ sources: [] });
     const prompt = buildAnalysisPrompt(pack, requestFor(pack));
@@ -52,15 +61,33 @@ describe('shared analysis without model execution', () => {
     for (const field of ['applicability', 'evidenceIds', 'rootCauseStatus', 'evaluationCases', 'sideEffects']) expect(prompt).toContain(field);
     expect(prompt).not.toMatch(/"distillation":\{"version":1,"candidates":\[\]/);
     expect(prompt).toContain('Emit candidates for supported findings even when other findings are uncertain');
+    expect(prompt).toContain('The payload field completion belongs only to process and skill');
+    expect(prompt).toContain('"version":1, "candidates" (array of Candidate), and "warnings" (array of strings)');
     expect(prompt).toContain('Return an empty candidates array only if no candidate is supported');
     expect(prompt).toMatch(/preserve both verbatim in the fact payload/i);
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
+    expect(prompt).toContain('For all candidate kinds, applicability.preconditions, applicability.exclusions and applicability.invalidationConditions contain only machine-readable boolean keys from observed evidence');
     expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
+    expect(prompt).toContain('Do not invent keys from prose or repeat project, environment or version restrictions in the boolean arrays');
     expect(prompt).toContain('report the gap in warnings and omit that process candidate');
     expect(prompt).toContain('at least two distinct normal inputs');
     expect(prompt).toContain('Encode each normal input and expected output as JSON text');
     expect(prompt).toContain('Include a refusal with a schema-invalid input');
     expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
+    expect(prompt).toContain('copy the exact logical reference into top-level targetRef');
+    expect(prompt).toContain('A correction journal can explain the revision, but cannot supply observed evidence');
+    expect(prompt).toContain('Preserve the existing entry point, interpreter, module format and argument encoding');
+    expect(prompt).toContain('decode argv[2] once and dispatch on the decoded value');
+    expect(prompt).toContain('preserve field names, value semantics and serialization');
+    expect(prompt).toContain('Match any observed checkpoint examples byte for byte');
+    expect(prompt).toContain('Only classify successful calls with JSON output as normal tests');
+    expect(prompt).toContain('omit cancellation, timeout, permission denial and multi-step recovery from payload.tests');
+    expect(prompt).toContain('A schema-valid input that hits a runtime permission denial is not a refusal test');
+    expect(prompt).toContain('multi-step recovery behavior in the source and recovery description for the independent checker');
+    expect(prompt).toContain('Do not copy redaction markers from evidence into executable source');
+    expect(prompt).toContain('Checker-provided scratch writes use sideEffects="filesystem"');
+    expect(prompt).toContain('include those actual JSON arguments in inputSchema, including both phases of recovery');
+    expect(prompt).toContain('use anyOf with a separate schema for each shape');
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

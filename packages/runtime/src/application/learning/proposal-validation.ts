@@ -4,15 +4,16 @@ import { z } from 'zod';
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { FrozenCleanupError } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import { RepositoryPreparationCleanupError } from '../../infrastructure/providers/repositories.js';
-import type { LearningCandidate } from './candidate-store.js';
+import type { LearningCandidate, ValidationReceipt } from './candidate-store.js';
 import { candidateProposalSchema, DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { ProposalRuntimeCleanupError, ProposalRuntimeLeaseError, verifyRepositoryAssetProposal,
   type ProposalRuntimeObservation, type ProposalRuntimeOptions } from './proposal-runtime.js';
-import { compareProposalActual, prepareAssetProposal } from './proposals.js';
+import { compareProposalActual, prepareAssetProposal, renderSkillProposal } from './proposals.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema, prepareDistillationRequest } from './requests.js';
 import { observeProposalExperiment, prepareProposalExperiment } from './proposal-semantics.js';
 import type { LearningValidationChecker, LearningValidationCommitSnapshot, LearningValidationDependencies, LearningValidationResult } from './validation.js';
 import { parseLearningValidationInput as parseInput } from './validation-input.js';
+import { proposalOwnershipRegistrationSchema } from './proposal-ownership.js';
 
 const protocol = 'learning-validation-v1';
 const targetSchema = z.object({ scope: learningScopeSchema, ref: learningIdentitySchema,
@@ -44,6 +45,80 @@ function fail(code: ValidationCode): never { throw new ValidationBlocked(code); 
 const digest = (value: unknown) => createHash('sha256').update(canonicalLearningJson(value)).digest('hex');
 const bytesDigest = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (first: unknown, second: unknown) => canonicalLearningJson(first) === canonicalLearningJson(second);
+
+const receiptBindingSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
+  candidateDigest: learningDigestSchema, evidenceDigest: learningDigestSchema, candidateVersion: z.number().int().positive().safe(),
+  executionId: z.string().uuid(), checkerId: learningIdentitySchema, target: targetSchema });
+const observationSchema = z.object({ receipt: z.object({ binding: z.record(z.unknown()), passed: z.boolean() }) });
+const proposalReceiptSchema = z.object({ protocol: z.literal(protocol), binding: receiptBindingSchema,
+  observationBinding: z.record(z.unknown()), comparisons: z.array(z.object({ binding: z.record(z.unknown()),
+    original: observationSchema.optional(), proposed: observationSchema })).min(1) });
+const artifactIdentitySchema = proposalOwnershipRegistrationSchema.shape.check.pick({ commit: true, artifactPath: true,
+  artifactDigest: true }).extend({ repositoryDigest: learningDigestSchema, proposalDigest: learningDigestSchema,
+  version: z.enum(['original', 'proposed']) }).strip();
+
+export const proposalValidationReceiptSchema = receiptBindingSchema.omit({ target: true }).extend({
+  kind: z.enum(['skill', 'tool']), validatedVersion: z.number().int().positive().safe(), receiptDigest: learningDigestSchema,
+  ...artifactIdentitySchema.omit({ proposalDigest: true, version: true }).shape,
+  originalArtifactDigest: learningDigestSchema.nullable(),
+});
+type ProposalValidationReceipt = z.infer<typeof proposalValidationReceiptSchema>;
+
+const artifactSourceSchema = z.string().refine(source => Buffer.byteLength(source) <= 64 * 1024);
+export const proposalValidationArtifactSchema = proposalValidationReceiptSchema.extend({ source: artifactSourceSchema });
+export const proposalArtifactInputSchema = z.object({ baseline: artifactSourceSchema.optional() }).strict();
+
+export function readProposalValidationArtifact(candidate: LearningCandidate, receipt: ProposalValidationReceipt, baseline?: string) {
+  const proposal = candidate.proposal;
+  const hash = (source: string) => createHash('sha256').update(source).digest('hex');
+  let source: string;
+  if (proposal.kind === 'skill') {
+    if ((baseline === undefined ? null : hash(baseline)) !== receipt.originalArtifactDigest) return null;
+    source = renderSkillProposal(proposal, baseline);
+  } else if (proposal.kind === 'tool' && baseline === undefined) {
+    source = proposal.payload.source;
+  } else return null;
+  if (hash(source) !== receipt.artifactDigest) return null;
+  return proposalValidationArtifactSchema.parse({ ...receipt, source });
+}
+
+export function readProposalValidationReceipt(candidate: LearningCandidate, saved: ValidationReceipt | undefined): ProposalValidationReceipt | null {
+  const kind = candidate.proposal.kind;
+  if ((kind !== 'skill' && kind !== 'tool') || candidate.state !== 'validated' || !saved?.passed
+    || saved.candidateId !== candidate.id || saved.candidateDigest !== candidate.digest || saved.evidenceDigest !== candidate.evidenceDigest
+    || saved.validatedVersion !== saved.candidateVersion + 1 || saved.validatedVersion !== candidate.version) return null;
+  const prefix = 'json-base64-v1:';
+  if (!saved.results.length || saved.results.length > 32 || saved.results.some(chunk =>
+    !/^json-base64-v1:[A-Za-z0-9+/]+={0,2}$/.test(chunk) || chunk.length > prefix.length + 1800)) return null;
+  const encoded = saved.results.map(chunk => chunk.slice(prefix.length)).join('');
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length > DISTILLATION_LIMITS.outputBytes || bytes.toString('base64') !== encoded) return null;
+  const envelope = z.object({ report: z.record(z.unknown()), receiptDigest: learningDigestSchema }).strict().parse(
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  if (digest(envelope.report) !== envelope.receiptDigest) return null;
+  const { binding, observationBinding, comparisons } = proposalReceiptSchema.parse(envelope.report);
+  if (saved.validatorVersion !== `${protocol}:${binding.executionId}` || binding.scope !== candidate.proposal.applicability.project
+    || binding.candidateId !== candidate.id || binding.candidateVersion !== saved.candidateVersion
+    || binding.candidateDigest !== candidate.digest || binding.evidenceDigest !== candidate.evidenceDigest
+    || binding.target.scope !== binding.scope) return null;
+  const observations = comparisons.map(comparison => {
+    const read = (observation: z.infer<typeof observationSchema>) => artifactIdentitySchema.parse({ ...observationBinding,
+      ...comparison.binding, ...observation.receipt.binding });
+    return { original: comparison.original ? read(comparison.original) : null, proposed: read(comparison.proposed) };
+  });
+  const first = observations[0]!;
+  const { commit, artifactPath, artifactDigest, repositoryDigest } = first.proposed;
+  if (commit !== binding.target.revision || first.proposed.version !== 'proposed' || first.proposed.proposalDigest !== candidate.digest
+    || (first.original && (first.original.version !== 'original' || first.original.commit !== commit
+      || first.original.artifactPath !== artifactPath || first.original.repositoryDigest !== repositoryDigest
+      || first.original.proposalDigest !== candidate.digest))
+    || comparisons.some(comparison => !comparison.proposed.receipt.passed)
+    || observations.some(observation => !same(observation, first))) return null;
+  return { kind, scope: binding.scope, candidateId: candidate.id, candidateVersion: saved.candidateVersion,
+    validatedVersion: saved.validatedVersion, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest,
+    checkerId: binding.checkerId, executionId: binding.executionId, receiptDigest: envelope.receiptDigest,
+    repositoryDigest, commit, artifactPath, artifactDigest, originalArtifactDigest: first.original?.artifactDigest ?? null };
+}
 
 function describeChecker(checker: ProposalValidationChecker) {
   const metadata = checkerSchema.parse({ id: checker.id, version: checker.version, runtimeVersion: checker.runtimeVersion,

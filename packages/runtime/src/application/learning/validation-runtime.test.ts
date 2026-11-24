@@ -30,7 +30,7 @@ const bytesDigest = (content: string | Buffer) => createHash('sha256').update(co
 const cleanups: Array<() => void> = [];
 afterEach(() => { cleanups.splice(0).reverse().forEach(clean => clean()); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
-async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = false, version?: string, project = scope, auditProject = project) {
+async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = false, version?: string, project = scope, auditProject = project, customClaude = false) {
   const scope = project;
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'validation-runtime-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
@@ -39,7 +39,10 @@ async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = f
   cleanups.push(() => store.close());
   const auditRoot = join(root, 'audit');
   const events = new JsonlEventStore({ root: auditRoot });
-  const transcripts = ['a-session', 'z-session', 'session-1'].map(session => join(root, '.afk', 'transcripts', `${session}.jsonl`));
+  const claudeConfig = join(root, 'custom-claude');
+  if (customClaude) vi.stubEnv('CLAUDE_CONFIG_DIR', claudeConfig);
+  const transcriptRoot = customClaude ? join(claudeConfig, 'projects', 'workspace') : join(root, '.afk', 'transcripts');
+  const transcripts = ['a-session', 'z-session', 'session-1'].map(session => join(transcriptRoot, `${session}.jsonl`));
   await events.append([{ id: 'event-1', schemaVersion: 1, type: 'agent.session_recorded', occurredAt: '2026-11-10T00:00:00Z',
     context: { runId: 'run-1', traceId: 'trace-1', workItemId: `${auditProject}#1`, profileId: 'default', attempt: 1,
       actor: { kind: 'system', id: 'fixture' } }, correlationId: 'run-1', data: { kind: 'agent.session_recorded', sessionId: 'session-1',
@@ -49,6 +52,7 @@ async function fixture(kind: 'fact' | 'process' | 'lesson' = 'fact', managed = f
     vi.stubEnv('HOME', root);
     mkdirSync(dirname(transcripts[0]), { recursive: true });
     transcripts.forEach((path, index) => writeFileSync(path, JSON.stringify({ type: 'user', message: { content: `Business approval observation ${index}` } }) + '\n'));
+    if (customClaude) writeFileSync(transcripts[0], JSON.stringify({ type: 'attachment', attachment: 'x'.repeat(140 * 1024) }) + '\n', { flag: 'a' });
     const data = [{ kind: 'qa.started' as const },
       { kind: 'agent.session_recorded' as const, sessionId: 'z-session', transcriptPath: transcripts[1] },
       { kind: 'agent.session_recorded' as const, sessionId: 'a-session', transcriptPath: transcripts[0] },
@@ -815,6 +819,13 @@ describe('persisted learning validation runtime', () => {
     expect(envelope.evidence.sources.slice(1).map((source: { sourceDigest: string }) => source.sourceDigest))
       .toEqual([0, 2, 1].map(index => bytesDigest(readFileSync(setup.transcripts[index]))));
     expect(setup.store.getValidation(setup.candidateId)?.passed).toBe(true);
+  });
+
+  it('validates the pinned full message range from a configured Claude transcript', async () => {
+    const setup = await fixture('process', true, undefined, scope, scope, true);
+    expect(setup.pack.sources[1]).toMatchObject({ completeness: 'complete', range: { start: 1, end: 1 } });
+    expect(await validateConfiguredLearningCandidate(setup.input, setup.options)).toMatchObject({ status: 'validated', validatedVersion: 2 });
+    expect(JSON.parse(setup.requests[0].target).evidence.digest).toBe(setup.pack.digest);
   });
 
   it('uses registered managed sources even when the checker configuration contains another source manifest', async () => {

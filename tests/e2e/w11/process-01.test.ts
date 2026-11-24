@@ -47,5 +47,6 @@ it.skipIf(!entry || !published || evidence).each(processHits)('consumes a suppli
 }, 205_000);
 
 it.skipIf(!entry || evidence || published).each(liveCases)('publishes a real process and checks a fresh managed agent answer for $id', frozen => {
-  execFileSync(process.execPath, [driver, frozen.id === 'process-01' ? 'review' : 'run', entry!, frozen.query.prompt, '', frozen.id], { stdio: 'inherit', timeout: 520_000 });
+  const mode = frozen.id === 'process-01' || frozen.id === 'process-06' ? 'review' : 'run';
+  execFileSync(process.execPath, [driver, mode, entry!, frozen.query.prompt, '', frozen.id], { stdio: 'inherit', timeout: 520_000 });
 }, 530_000);

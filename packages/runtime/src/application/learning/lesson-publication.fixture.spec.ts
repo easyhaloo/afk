@@ -25,6 +25,7 @@ export interface LessonPublicationFixtureOptions {
   analysisCallId?: string;
   versions?: string[];
   triggerAliases?: string[];
+  lessonFix?: string;
   managed?: boolean;
   repair?: boolean;
   includeFact?: boolean;
@@ -65,7 +66,7 @@ export async function createLessonPublicationFixture(options: LessonPublicationF
     ? [{ id: 'session-1', kind: 'session' as const, path: transcript, allowedRoot: dirname(transcript) }] : [])] });
   const payload = { trigger: 'duplicate retry', rootCause: 'check then write race', rootCauseStatus: 'confirmed' as const,
     ...(options.triggerAliases ? { triggerAliases: options.triggerAliases } : {}),
-    attempts: ['unserialized retry failed'], fix: 'Serialize retry read and write', prevention: ['Competing retry regression'] };
+    attempts: ['unserialized retry failed'], fix: options.lessonFix ?? 'Serialize retry read and write', prevention: ['Competing retry regression'] };
   const submission = { request: { version: 1 as const, scope, workItemId, sourceId: 'original-failure', sourceRunId: 'original-failure',
     evidenceDigest: pack.digest, analyzerVersion: 'fixture', reason: 'repaired' as const }, evidence: pack.entries.map(entry => entry.ref) };
   const history: RunEvent[] = readFileSync(sourceInput.path, 'utf8').split('\n').filter(line => line.trim()).map(line => JSON.parse(line));

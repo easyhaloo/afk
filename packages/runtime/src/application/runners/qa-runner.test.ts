@@ -80,7 +80,7 @@ function fixture(workspacePath = worktreePath) {
   const branches = {
     createVerificationWorktree: vi.fn(async () => ({ branchName: 'qa-60', worktreePath: workspacePath })),
     commit: vi.fn(async () => ({ sha: 'commit-60', skippedBinaryFiles: [] })),
-    verificationRevision: vi.fn(async (_path: string, _branch: string) => 'commit-60'),
+    verificationRevision: vi.fn(async (_path: string, _branch: string, _ownedContextPath?: string) => 'commit-60'),
     mergeFeatureIntoBaseline: vi.fn(async () => ({ merged: true, conflicts: [] })),
     listUnresolvedConflicts: vi.fn(async () => []),
     push: vi.fn(async () => {}),
@@ -489,6 +489,7 @@ describe('QARunner plugin publication policies', () => {
     const git = simpleGit(workspacePath);
     await git.init().addConfig('user.name', 'QA verification test').addConfig('user.email', 'qa@example.test');
     await git.commit('QA verification revision', { '--allow-empty': null });
+    current.branches.verificationRevision.mockResolvedValue((await git.revparse('HEAD')).trim());
     vi.stubEnv('AFK_EVENT_STORE_DIR', join(root, 'events'));
     const completion = join(root, 'agent-completed');
     const receipt = join(root, 'verification.jsonl');
@@ -507,7 +508,7 @@ describe('QARunner plugin publication policies', () => {
       integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } }));
     const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
     try {
-      const runner = new QARunner(current.providers, config, {
+      const runner = new QARunner(current.providers, { ...config, qaTimeout: 20_000 }, {
         plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
       });
       const result = await runner.process('60');
@@ -925,7 +926,9 @@ describe('QARunner execution boundary', () => {
     } finally { await plugins.dispose(); feedback.mockRestore(); storageFailure?.mockRestore(); await rm(root, { recursive: true, force: true }); }
   });
 
-  it.each(['pass', 'rework', 'execution-failed', 'cleanup-failed', 'cancelled'] as const)('persists standalone QA outcome feedback after %s', async verdict => {
+  it.each(['pass', 'managed-workspace-pass', 'rework', 'execution-failed', 'cleanup-failed', 'cancelled'] as const)('persists standalone QA outcome feedback after %s', async verdict => {
+    const managed = verdict === 'managed-workspace-pass';
+    const passed = verdict === 'pass' || managed;
     const root = await mkdtemp(join(tmpdir(), 'qa-outcome-'));
     const file = join(root, 'experience.sqlite');
     const eventRoot = join(root, 'events');
@@ -939,6 +942,7 @@ describe('QARunner execution boundary', () => {
       source: { runId: 'original', workItemId: `${scope}#1` }, evidence: ['evidence://original'] });
     store.verify(record.id, { runId: 'independent-qa', evidence: ['evidence://independent-qa'] });
     const provider = new ExperienceContextProvider(file);
+    const gather = vi.spyOn(provider, 'gatherForRun');
     const plugins = new PluginRuntime();
     try {
       await plugins.activate({ manifest: { id: provider.id, version: '1.0.0', apiVersion: 1, provides: ['context.provider'], trusted: true },
@@ -948,17 +952,20 @@ describe('QARunner execution boundary', () => {
       const git = simpleGit(checkout);
       await git.init();
       await git.checkoutLocalBranch('qa-60');
-      await writeFile(join(checkout, '.gitignore'), '/.afk/\n');
+      await writeFile(join(checkout, '.gitignore'), '/.afk/backlog-context.md\n/.afk/experience-context.md\n');
       await git.add('.gitignore');
       await git.raw(['-c', 'user.name=QA fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Freeze QA input']);
       const revision = (await git.revparse('HEAD')).trim();
       const current = fixture(checkout);
       const branches = new GitBranchProvider(checkout);
-      current.branches.verificationRevision.mockImplementation((path, branch) => branches.verificationRevision(path, branch));
+      current.branches.verificationRevision.mockImplementation((path, branch, ownedContextPath) => branches.verificationRevision(path, branch, ownedContextPath));
       const cancellation = new AbortController();
       const item = await current.providers.backlog.get('60');
       current.providers.backlog.get.mockResolvedValue({ ...item, workItemId });
       current.execution.waitForResult.mockImplementation(async () => {
+        if (managed) expect((await git.status(['--untracked-files=all'])).not_added).toEqual([
+          expect.stringMatching(/^\.afk\/backlog-context-.+\.md$/),
+        ]);
         vi.setSystemTime(new Date('2026-11-16T00:00:01.000Z'));
         if (verdict === 'cancelled') cancellation.abort(new Error('controlled QA cancellation'));
         return { version: 1, runId: current.execution.id, status: verdict === 'execution-failed' ? 'failed' : 'completed',
@@ -967,20 +974,27 @@ describe('QARunner execution boundary', () => {
       });
       if (verdict === 'cleanup-failed') current.sandbox.close.mockRejectedValue(new Error('injected cleanup failure'));
       const runner = new QARunner(current.providers, { ...config, qaTimeout: 30_000 }, { plugins, projectRoot: root, sandboxProvider: current.sandboxProvider,
-        agentProvider: current.agentProvider, executionMode: 'batch' });
+        agentProvider: current.agentProvider, executionMode: 'batch',
+        ...(managed ? {
+          repositories: [{ name: 'wiki', checkoutPath: 'wiki', platform: 'github', projectKey: 'acme/wiki', repoRoot: checkout, baseBranch: 'main',
+            workingBranch: item.branchName, primary: true }],
+          prepareRepositories: { prepare: vi.fn(async () => ({ repositories: [], primary: { handle: { path: checkout } },
+            release: vi.fn(async () => {}) })) } as any,
+        } : {}),
+      });
       const runtimeRunId = `qa-60-${Date.now()}-runtime`;
       if (verdict === 'cleanup-failed') await expect(runner.process('60')).rejects.toThrow(/cleanup/);
       else expect(await runner.process('60', { signal: cancellation.signal })).toMatchObject({
-        success: verdict === 'pass',
+        success: passed,
         ...(verdict === 'cancelled' ? { summary: expect.stringContaining('controlled QA cancellation') } : {}),
       });
       const receipts = store.contextReceipts({ scope, source: { runId: runtimeRunId, workItemId } });
       expect(receipts.filter(receipt => receipt.stage === 'selected')).toHaveLength(1);
       const source = receipts[0].source;
       const outcomes = store.outcomeReceipts({ scope, source });
-      expect(outcomes).toHaveLength(verdict === 'pass' ? 1 : 2);
+      expect(outcomes).toHaveLength(passed ? 1 : 2);
       expect(outcomes.find(receipt => receipt.event.type === 'run.finished')).toMatchObject({ selected: { source },
-        event: { outcome: verdict === 'pass' ? 'succeeded' : verdict === 'cancelled' ? 'cancelled' : 'failed' }, benefit: 'unknown', recurrence: false });
+        event: { outcome: passed ? 'succeeded' : verdict === 'cancelled' ? 'cancelled' : 'failed' }, benefit: 'unknown', recurrence: false });
       expect(store.metrics({ scope }).adoptions).toBe(0);
       const eventStore = new JsonlEventStore({ root: eventRoot });
       expect((await eventStore.verify(source.runId)).valid).toBe(true);
@@ -990,14 +1004,15 @@ describe('QARunner execution boundary', () => {
       expect(target).toHaveLength(1);
       expect(target[0]).toMatchObject({ context: { actor: { kind: 'system' } }, data: { accepted: true,
         reason: JSON.stringify({ target: { project: scope, revision, dirty: false } }) } });
+      expect(gather).toHaveBeenCalledWith(expect.objectContaining({ target: { project: scope, revision, dirty: false } }), source);
       const commits = events.filter(event => event.data.kind === 'commit.recorded');
-      if (verdict === 'pass') {
+      if (passed) {
         expect(commits).toHaveLength(1);
         expect(commits[0]).toMatchObject({ data: { phase: 'qa', commitSha: revision, branch: 'qa-60' } });
         expect(commits[0].sequence).toBeGreaterThan(target[0].sequence);
         expect(commits[0].sequence).toBeLessThan(events.find(event => event.data.kind === 'qa.passed')!.sequence);
       } else if (verdict !== 'cleanup-failed') expect(commits).toHaveLength(0);
-      const status = verdict === 'pass' ? 'succeeded' : verdict === 'cancelled' ? 'cancelled' : 'failed';
+      const status = passed ? 'succeeded' : verdict === 'cancelled' ? 'cancelled' : 'failed';
       expect(state).toMatchObject({ terminal: true, run: { id: source.runId, workItemId, status } });
       expect(await queryExecutionHistory({ workItemId }, eventStore)).toMatchObject({ executions: [
         { runId: source.runId, workItemId, status, terminal: true, startedAt: expect.any(String) },

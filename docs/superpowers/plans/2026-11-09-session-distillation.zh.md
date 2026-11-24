@@ -2826,6 +2826,8 @@ Release CLI 运行 `45323260884` 在 Linux 和 macOS 的 x64、arm64 四个平�
 
 `0.2.202` 使用独立的 Claude Code 和 OpenCode 会话验证了权威来源过期和撤回。`fact-05` 的首次冲突测试未通过正向对照，原因是提炼器将规则正文写入了布尔适用条件。CLI `0.2.203` 将基于证据的布尔键约定扩展到所有候选类型。安装版重跑时，权威来源一致时召回规则，冲突期间返回零条片段，恢复一致后重新召回同一发布版本。OpenCode 会话导出确认规则和发布标识未进入冲突期间的会话。召回仍要求可信的条件值。
 
+CLI `0.2.211` 安装版运行了 Claude Code 独立生成的两份 W06 工具修订候选。两份候选均接受五个冻结控制实参并拒绝 `null`。两次 Docker 新旧对照各执行 16 次，均返回 `verification_failed`。本地复现确认第一份 ESM 脚本使用了 CommonJS 导入。第二份通过 ESM 入口，但处理一行后写入 `nextLine=2`，恢复后还多写了 `checked` 字段。两次对照的容器、镜像、卷和临时工作树均已清理。CLI `0.2.212` 要求提炼器在修订工具时保留证据中的解释器、模块格式和持久化恢复约定。
+
 #### 验收、度量与交付清单
 
 - [ ] 逐包执行typecheck/build/test；已有可运行命令为`pnpm architecture:check`、`pnpm typecheck`、`pnpm build`、`pnpm test`、`pnpm docs:check`。按冻结构建窗口运行，全部退出0；根绿色不替代单包结果。

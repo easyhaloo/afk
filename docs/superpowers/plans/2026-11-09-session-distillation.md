@@ -2824,6 +2824,8 @@ Four live OpenCode runs on installed CLI `0.2.202` verified reuse of a business 
 
 Separate Claude Code and OpenCode sessions on `0.2.202` passed the expired-authority and withdrawal cases. The first `fact-05` conflict run failed its positive control because the analyzer put rule prose into boolean applicability fields. CLI `0.2.203` extends the analysis contract for evidence-backed boolean keys to all candidate kinds. Its live conflict rerun recalled the rule under consistent authorities, returned zero fragments once they disagreed, and recalled the same publication after they were restored. The OpenCode session export confirmed the published rule and its identifiers stayed out of the session during the conflict. The recall gate continues to require trusted condition values.
 
+The installed CLI `0.2.211` ran two independent W06 tool revisions produced by Claude Code. Both accepted the five frozen control arguments and rejected `null`. Each paired Docker run executed 16 checks and returned `verification_failed`. The local reproduction identified a CommonJS import in the first ESM script. The second passed the ESM entry point but wrote `nextLine=2` after processing one line and added an undocumented `checked` field after recovery. Both runs cleaned up their containers, images, volumes, and temporary worktrees. CLI `0.2.212` tells the analyzer to preserve the observed interpreter, module format, and persisted recovery contract during tool revision.
+
 #### Acceptance and delivery checklist
 
 - [ ] Per-package typecheck/build/test plus `pnpm architecture:check`, `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm docs:check`, in a serialized frozen build window; exit0 throughout. Root green cannot replace package results.

@@ -204,13 +204,11 @@ export function createJumpserverCredentialStore({ home, safeStorage, fileSystem 
 export type JumpserverCredentialService = ReturnType<typeof createJumpserverCredentialStore>;
 
 export function createJumpserverCredentialService({ home, safeStorage, fileSystem }: JumpserverCredentialServiceDependencies): JumpserverCredentialService {
-  if (safeStorage.isEncryptionAvailable()) return createJumpserverCredentialStore({ home, safeStorage, fileSystem });
-
   // Session-only fallback: keep credentials in process memory so headless
   // environments (CI, Linux without a keyring) keep working without ever
   // writing plaintext secrets to disk.
   const memory = new Map<string, { password: string; otpSecret?: string; target: JumpserverCredentialTarget }>();
-  return {
+  const sessionStore = {
     async has(bastionId: string, target: JumpserverCredentialTarget) {
       const entry = memory.get(bastionId);
       return entry !== undefined && isSameTarget(entry.target, normalizeTarget(target));
@@ -230,6 +228,17 @@ export function createJumpserverCredentialService({ home, safeStorage, fileSyste
     async remove(bastionId: string) {
       return memory.delete(bastionId);
     },
+  };
+  let store: JumpserverCredentialService | undefined;
+  const getStore = () => store ??= safeStorage.isEncryptionAvailable()
+    ? createJumpserverCredentialStore({ home, safeStorage, fileSystem })
+    : sessionStore;
+
+  return {
+    has: async (...args) => getStore().has(...args),
+    get: async (...args) => getStore().get(...args),
+    set: async (...args) => getStore().set(...args),
+    remove: async (...args) => getStore().remove(...args),
   };
 }
 

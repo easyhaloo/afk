@@ -57,19 +57,30 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
       return next;
     case 'step.started':
       requireRunStatus(state, 'running', event.type);
+      if (state.activeStep === event.data.stepId || state.activeSystemSteps?.includes(event.data.stepId)) {
+        throw new RunEventTransitionError(`step '${event.data.stepId}' is already active`);
+      }
+      if (event.data.stepKind === 'system') {
+        return { ...next, activeSystemSteps: [...(state.activeSystemSteps ?? []), event.data.stepId] };
+      }
       if (state.activeStep) throw new RunEventTransitionError(`step '${state.activeStep}' is already active`);
       return {
         ...next,
         run: { ...state.run!, phase: event.data.phase },
         activeStep: event.data.stepId,
       };
-    case 'step.completed':
+    case 'step.completed': {
       requireRunStatus(state, 'running', event.type);
-      if (state.activeStep !== event.data.stepId) throw new RunEventTransitionError(`completed step '${event.data.stepId}' is not active`);
+      const { stepId } = event.data;
+      if (state.activeSystemSteps?.includes(stepId)) {
+        return { ...next, activeSystemSteps: state.activeSystemSteps.filter(active => active !== stepId) };
+      }
+      if (state.activeStep !== stepId) throw new RunEventTransitionError(`completed step '${stepId}' is not active`);
       return { ...next, activeStep: undefined };
+    }
     case 'human_gate.opened':
       requireRunStatus(state, 'running', event.type);
-      if (state.activeStep) throw new RunEventTransitionError('cannot open human gate while a step is active');
+      if (state.activeStep || state.activeSystemSteps?.length) throw new RunEventTransitionError('cannot open human gate while a step is active');
       return {
         ...next,
         run: { ...state.run!, status: 'awaiting_human' },
@@ -87,7 +98,7 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
       if (!state.run || (state.run.status !== 'running' && !(state.run.status === 'pending' && event.data.outcome === 'cancelled'))) {
         throw new RunEventTransitionError(`event '${event.type}' requires a running run, except pending cancellation`);
       }
-      if (state.activeStep) throw new RunEventTransitionError('cannot finish run while a step is active');
+      if (state.activeStep || state.activeSystemSteps?.length) throw new RunEventTransitionError('cannot finish run while a step is active');
       return {
         ...next,
         run: { ...state.run!, status: event.data.outcome },

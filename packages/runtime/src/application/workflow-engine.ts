@@ -1165,10 +1165,6 @@ export class WorkflowRunner {
     // ── Step 4: Post launch comment ────────────────────────────────────────
     await this.transitionBacklog(iid, 'in_progress');
 
-    // ── Phases: implement then verify; handoff budgets are shared across both ──
-    // used = handoff rounds, tokens = accumulated total across generations.
-    const stepResults: Record<string, StepResult> = {};
-
     // ── Template execution: compilation + typed dispatch ─────────────────────
     logger.info({ iid, template }, 'using compiled execution plan');
     const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot, getPluginTemplate: name => this.plugins?.getTemplate(name) }).load(template);
@@ -1208,35 +1204,30 @@ export class WorkflowRunner {
         hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, stepIndex: 0,
         executionMode: step.executionMode ?? executionMode, persistBudget,
       }, results),
+      afterGroup: async (completed, results) => {
+        const verification = completed.find(result => result.stepId === 'verify-ac' && result.status === 'failed');
+        if (!verification) return;
+        await this.retryFailedAcVerification(loadedTemplate, {
+          iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
+          hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
+        }, verification, results);
+      },
       executeSystem: async step => {
         const startedAt = new Date().toISOString();
+        await this.recordObservation({ kind: 'step.started', stepId: step.id, stepKind: 'system' });
+        let result: Pick<StepResult, 'status' | 'output' | 'summary'>;
         try {
           const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch, step, input: step.input });
-          return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
+          result = { status: 'completed', output };
         } catch (error) {
-          return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };
+          result = { status: 'failed', summary: (error as Error).message };
         }
+        await this.recordObservation({ kind: 'step.completed', stepId: step.id, outcome: result.status === 'completed' ? 'succeeded' : 'failed' });
+        return { ...result, stepId: step.id, startedAt, completedAt: new Date().toISOString() };
       },
       systemActions: this.plugins?.listSystemActions(),
     });
-    const executedResults = await executor.execute(loadedTemplate);
-    Object.assign(stepResults, executedResults);
-    const verification = stepResults['verify-ac'];
-    if (verification?.status === 'failed') {
-      const recovered = await this.retryFailedAcVerification(loadedTemplate, {
-        iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
-        hardTimeoutMs, completionTimeoutMs, idleTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
-      }, verification, stepResults);
-      if (recovered) {
-        await this.runPublicationHooks(wt.path);
-        if (!this.preparedRepositories) {
-          await this.recordImplementationCommit(wt.path, wt.branch);
-          await this.providers.branches.push(wt.branch, wt.path);
-          await this.transitionBacklog(iid, 'verification');
-        }
-        this.systemActionsRan = true;
-      }
-    }
+    const stepResults = await executor.execute(loadedTemplate);
     const failedStep = Object.values(stepResults).find(result => result.status === 'failed' || result.status === 'timed_out' || result.status === 'aborted');
     if (failedStep) {
       // A step that did not complete is the run's reason, not the run's

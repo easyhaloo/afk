@@ -5,6 +5,7 @@ import type { StepResult, WorkflowTemplate } from '../../domain/templates/types.
 export interface PlanExecutorOptions {
   executeAgent(step: CompiledAgentStep, results: Record<string, StepResult>): Promise<StepResult>;
   executeSystem(step: CompiledSystemStep, results: Record<string, StepResult>): Promise<StepResult>;
+  afterGroup?(completed: readonly StepResult[], results: Record<string, StepResult>): Promise<void>;
   systemActions?: Iterable<string>;
 }
 
@@ -24,10 +25,15 @@ export class PlanExecutor {
         if (step.when) return true;
         return (step.dependsOn ?? []).every(id => results[id]?.status === 'completed');
       });
-      const completed = await Promise.all(runnable.map(step => step.kind === 'agent'
+      const running = runnable.map(async step => step.kind === 'agent'
         ? this.options.executeAgent(step, results)
-        : this.options.executeSystem(step, results)));
+        : this.options.executeSystem(step, results));
+      const completed = await Promise.all(running).catch(async error => {
+        await Promise.allSettled(running);
+        throw error;
+      });
       for (const result of completed) results[result.stepId] = result;
+      await this.options.afterGroup?.(completed, results);
       // Do not stop here: templates may intentionally gate recovery steps on
       // a failed dependency (for example review -> fix).
     }

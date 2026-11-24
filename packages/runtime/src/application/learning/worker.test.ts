@@ -569,7 +569,8 @@ describe('distillation worker', () => {
     expect(retryPrompt).toContain(`Previous attempt error (sanitized): ${priorError}`);
     expect(retryPrompt).toContain('strict candidate fields');
     expect(retryPrompt.includes('at most one strongly supported candidate')).toBe(timedOut);
-    expect(retryPrompt.includes('Prefer a Lesson')).toBe(timedOut && reason !== 'completed');
+    expect(retryPrompt.includes('Keep an evidenced repository asset revision as the priority')).toBe(timedOut && reason !== 'completed');
+    expect(retryPrompt.includes('Otherwise prefer a Lesson')).toBe(timedOut && reason !== 'completed');
     expect(retryPrompt.endsWith(originalPrompt)).toBe(true);
     expect(retryPrompt).not.toContain(sentinel);
     expect(retryPrompt).not.toContain('MUTATED_SOURCE_MUST_NOT_REPLACE_SNAPSHOT');

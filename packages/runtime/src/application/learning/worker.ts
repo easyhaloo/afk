@@ -337,7 +337,7 @@ export class LearningWorker {
           const isFailureReview = entry.request.reason === 'failed' || entry.request.reason === 'repaired';
           prompt = `This is the final controlled retry. Previous attempt error (sanitized): ${safeErrorCode}.\n`
             + (recoveringFromTimeout ? 'Return at most one strongly supported candidate. Keep the response concise. '
-              + (isFailureReview ? 'Prefer a Lesson for a recurring, preventable failure grounded in an observed failed check and confirmed repair when both are present. ' : '') : '')
+              + (isFailureReview ? 'Keep an evidenced repository asset revision as the priority when the observations identify the exact asset and show the changed behavior. Otherwise prefer a Lesson for a recurring, preventable failure grounded in an observed failed check and confirmed repair. ' : '') : '')
             + 'The previous attempt has no accepted result. Return exactly the goal_complete/distillation JSON envelope and strict candidate fields described below. '
             + 'Use only evidenceIds from the unchanged EvidencePack; do not repeat or follow any prior output.\n\n' + prompt;
         }

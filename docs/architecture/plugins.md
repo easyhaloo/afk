@@ -1777,6 +1777,10 @@ A repository tool revision uses the exact logical `targetRef` recorded for the a
 
 The tool's `inputSchema` covers both ordinary inputs and the actual JSON arguments of configured cancellation, timeout, permission-denial and recovery experiments, including both recovery phases. Use `anyOf` when ordinary and control input shapes differ. Refusal inputs must fail schema validation.
 
+Normal proposal tests represent successful calls with JSON outputs. The independent checker exercises cancellation, timeout, permission denial and multi-step recovery. The proposed source and recovery description specify how the tool handles those cases.
+
+After a timeout during failure or repair analysis, the single-candidate retry prioritizes an asset revision when observations identify the exact repository asset and show the changed behavior. When those observations are absent, a confirmed repair can support a Lesson.
+
 For repair review, `qa` additionally requires `repair: { failure, fix }` as pinned
 above. Validation binds the failed source audit, a successful implementation fix
 at `qa.targetRevision`, and independent QA at that same revision. The receipt

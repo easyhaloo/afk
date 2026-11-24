@@ -66,6 +66,9 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
     expect(prompt).toContain('copy the exact logical reference into top-level targetRef');
     expect(prompt).toContain('A correction journal can explain the revision, but cannot supply observed evidence');
+    expect(prompt).toContain('Only classify successful calls with JSON output as normal tests');
+    expect(prompt).toContain('multi-step recovery behavior in the source and recovery description for the independent checker');
+    expect(prompt).toContain('Do not copy redaction markers from evidence into executable source');
     expect(prompt).toContain('Checker-provided scratch writes use sideEffects="filesystem"');
     expect(prompt).toContain('include those actual JSON arguments in inputSchema, including both phases of recovery');
     expect(prompt).toContain('use anyOf with a separate schema for each shape');

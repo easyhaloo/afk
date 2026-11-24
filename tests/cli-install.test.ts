@@ -68,6 +68,19 @@ describe('precompiled CLI installer', () => {
     expect(await readdir(join(home, '.afk/cli'))).toEqual(['downloads', 'versions']);
   });
 
+  it('preserves the default executable across multiple installs to a different prefix', async () => {
+    const { root, env, command, install } = await fixture();
+    const stable = await archive(root);
+    await install('--archive', stable.file, '--checksum', stable.checksum);
+    const prefix = join(root, 'preview');
+    for (const version of ['0.1.1', '0.1.2']) {
+      const preview = await archive(root, version);
+      await install('--prefix', prefix, '--archive', preview.file, '--checksum', preview.checksum);
+    }
+    expect((await exec(command, ['--version'], { env })).stdout.trim()).toBe('0.1.0');
+    expect((await exec(join(prefix, 'afk'), ['--version'], { env })).stdout.trim()).toBe('0.1.2');
+  });
+
   it.each(['0.1.1', 'latest'])('downloads release %s and its checksum, then upgrades the executable', async version => {
     const { root, home, env, command, install } = await fixture();
     const first = await archive(root);

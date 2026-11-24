@@ -53,6 +53,7 @@ describe('shared analysis without model execution', () => {
     expect(prompt).not.toMatch(/"distillation":\{"version":1,"candidates":\[\]/);
     expect(prompt).toContain('Emit candidates for supported findings even when other findings are uncertain');
     expect(prompt).toContain('The payload field completion belongs only to process and skill');
+    expect(prompt).toContain('"version":1, "candidates" (array of Candidate), and "warnings" (array of strings)');
     expect(prompt).toContain('Return an empty candidates array only if no candidate is supported');
     expect(prompt).toMatch(/preserve both verbatim in the fact payload/i);
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
@@ -67,6 +68,8 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('copy the exact logical reference into top-level targetRef');
     expect(prompt).toContain('A correction journal can explain the revision, but cannot supply observed evidence');
     expect(prompt).toContain('Only classify successful calls with JSON output as normal tests');
+    expect(prompt).toContain('omit cancellation, timeout, permission denial and multi-step recovery from payload.tests');
+    expect(prompt).toContain('A schema-valid input that hits a runtime permission denial is not a refusal test');
     expect(prompt).toContain('multi-step recovery behavior in the source and recovery description for the independent checker');
     expect(prompt).toContain('Do not copy redaction markers from evidence into executable source');
     expect(prompt).toContain('Checker-provided scratch writes use sideEffects="filesystem"');

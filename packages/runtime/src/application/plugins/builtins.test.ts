@@ -6,6 +6,11 @@ import type { NotificationProvider } from '../../plugin-sdk/capabilities.js';
 import { createJumpserverPlugin } from './builtins.js';
 import { PluginRuntime } from './runtime.js';
 
+const { execFile } = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock('node:child_process', async importOriginal => ({
+  ...await importOriginal<typeof import('node:child_process')>(), execFile,
+}));
+
 describe('built-in plugins', () => {
   it('registers JumpServer as a host provider and reports missing binaries', async () => {
     const resolveBinaryPath = vi.fn(async () => '');
@@ -54,5 +59,34 @@ describe('built-in plugins', () => {
 
     expect(runtime.getNotificationProvider('test-notification')).toBe(notification);
     expect(runtime.listProvidersForPlugin('notification.test-notification')).toEqual(['test-notification']);
+  });
+
+  it('probes the built-in agent executables only when checking health', async () => {
+    execFile.mockReset();
+    execFile.mockImplementation((_binary, _argv, _options, callback) => callback(null));
+    const runtime = new PluginRuntime();
+    for (const plugin of createBuiltinAgentPlugins()) await runtime.activate(plugin);
+    expect(execFile).not.toHaveBeenCalled();
+
+    const health = await runtime.health();
+    expect(health.map(entry => entry.status)).toEqual(Array(6).fill('healthy'));
+    expect(execFile.mock.calls.map(([binary, argv]) => [binary, argv])).toEqual(
+      ['claude', 'codex', 'cursor-agent', 'pi', 'opencode', 'copilot'].map(binary => [binary, ['--version']]),
+    );
+  });
+
+  it('distinguishes a missing agent CLI from a failed version check without exposing process output', async () => {
+    execFile.mockReset();
+    execFile.mockImplementationOnce((_binary, _argv, _options, callback) => callback({ code: 'ENOENT' }));
+    execFile.mockImplementationOnce((_binary, _argv, _options, callback) => callback(new Error('private output')));
+    const runtime = new PluginRuntime();
+    await runtime.activate(createBuiltinAgentPlugins()[0]);
+
+    await expect(runtime.health('agent.claude-code')).resolves.toEqual([{
+      pluginId: 'agent.claude-code', status: 'degraded', message: 'claude CLI not found on the local host PATH',
+    }]);
+    await expect(runtime.health('agent.claude-code')).resolves.toEqual([{
+      pluginId: 'agent.claude-code', status: 'unhealthy', message: 'claude version check failed on the local host',
+    }]);
   });
 });

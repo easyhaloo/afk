@@ -304,6 +304,11 @@ afk plugin enable context.project-note
 afk plugin remove context.project-note
 ```
 
+For builtin Agent plugins, `afk plugin doctor --plugin agent.claude-code --json`
+runs the local CLI's `--version` check with a five-second timeout. A missing CLI
+is `degraded`. A failed version check is `unhealthy`. Check authentication,
+model access and sandbox execution separately.
+
 `project-note.settings.json` is `{"note":"Use the repository contribution guide."}`.
 It is the configuration object itself, not an enclosing `plugins` document.
 Installation enables the module; configure required settings before starting a

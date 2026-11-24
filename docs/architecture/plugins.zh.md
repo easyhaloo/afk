@@ -263,6 +263,10 @@ afk plugin enable context.project-note
 afk plugin remove context.project-note
 ```
 
+对于内置 Agent 插件，`afk plugin doctor --plugin agent.claude-code --json`
+在本机运行 CLI 的 `--version`，超时为五秒。找不到 CLI 时返回 `degraded`，
+版本检查失败时返回 `unhealthy`。登录、模型访问和沙箱执行需分别验证。
+
 `project-note.settings.json` 内容是 `{"note":"Use the repository contribution guide."}`，
 即配置对象本身，不是外层 `plugins` 文档。安装后默认启用；新建 Runtime 前应补齐必需配置。
 `remove` 禁用并删除已安装包，保留配置。Enable/disable/configure 在下次构造 Runtime 时

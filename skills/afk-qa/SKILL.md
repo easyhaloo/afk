@@ -47,6 +47,8 @@ Backlog dependencies define merge order. Before approving:
 - **Flaky checks:** fail on retry with no code change → note as flaky,
   move on. MUST NOT silently retry until green.
 - **Non-functional AC:** "P95 < 200ms" without tooling → fail, not pass.
+- **Local-only evidence:** a passing local grep or unit test proves nothing about
+  the deployed artifact → it does not open the environment verification gate.
 - **Self-report bias:** implementing agent's checklist is a hypothesis,
   not a substitute for independent re-run.
 
@@ -84,6 +86,49 @@ If binary evidence was generated, write paths to `.afk/artifacts.txt`
 (one absolute path per line). The runner uploads every listed file to the
 provider and links it from the change request; a run without that manifest
 publishes no attachments and says so in the runtime record.
+
+### Environment verification gate (环境验证门禁)
+
+This gate runs before Step 4 and is fail-closed: without environment evidence,
+the change request does not exist.
+
+**Trigger.** The implementation branch carries a deployable artifact (image tag
+or artifact version) — the change affects a deployable service. A change that
+declares itself non-deployable (library, documentation, config-only) skips this
+gate and says so in `notes`.
+
+**Evidence needed — every element:**
+
+- environment identity — which test environment (测试环境), and its address;
+- the artifact tag / version observed in that environment;
+- the assertion that was run — endpoint, page, log, or probe;
+- the raw observed output — response body, log excerpt, probe result;
+- the repository path that stores that output.
+
+**Decision:**
+
+- All elements present and observed on test → PASS may proceed to Step 4.
+- Any element missing → **do not create the PR/MR**. Return a structured FAIL
+  result naming the missing element; the runner creates a rework record, or
+  routes the item to `blocked` with `executionMode: hitl` and the retry
+  condition stated — which environment, which artifact, what has to return.
+  (缺证据 ⇒ 不创建 PR/MR ⇒ blocked/rework)
+
+**MUST NOT:**
+
+- accept a local grep, unit test, or local run as environment verification — it
+  proves the code runs on one machine, not that it runs when deployed;
+- accept evidence that lives outside the repository (scratch file, local log
+  path) — ask for it to be stored in the repository and registered;
+- collect evidence from pre-production or production. **Test only.** Reaching
+  those environments is a human action (manual CI console, manual deploy) and an
+  agent MUST NOT trigger it by any route.
+
+Environment evidence travels through the existing artifacts channel: list the
+stored evidence files in `.afk/artifacts.txt`, and the runner attaches them to
+the `## Verification Evidence` section it appends to the change request. The
+agent does not write that section and does not open a second evidence channel.
+
 ### Step 4 — Publish on PASS
 
 1. Return an explicit `goal_complete` payload with `kind: qa, result: PASS`.
@@ -125,6 +170,8 @@ Always HITL — no automation bypasses this merge gate.
 ## Caveats
 
 - MUST NOT publish a PR/MR on "looks reasonable" — every AC line needs evidence.
+- MUST NOT publish a PR/MR for a deployable change without test-environment
+  evidence — the environment verification gate above is fail-closed.
 - MUST NOT merge a root change or one targeting a protected release branch directly.
 - MUST NOT merge if any `dependsOn` backlog is incomplete.
 - MUST NOT copy the backlog/PRD body into the PR/MR description.

@@ -114,6 +114,8 @@ Assertions must verify externally meaningful behavior, state, outputs, side effe
 
 Run the narrowest relevant tests first. Then run affected integration or contract tests, broader regression suites, and static checks according to the changed boundary and risk. Run E2E checks when lower layers cannot verify the user-visible path.
 
+For a change that affects a deployable service, the E2E layer runs against the **test** environment (测试环境) — not a developer machine, not pre-production, not production. Pre-production and production are operated by a human (manual CI console, manual deploy); an agent MUST NOT trigger them to collect test evidence. Point the E2E runner at that environment through the repository's existing configuration instead of hardcoding a host (e.g. a Playwright config reading its base URL from an environment variable). The E2E run records the environment identity and the artifact tag or version it exercised, so its result can be told apart from a local run. The existing deployment-and-migration pattern (`references/patterns/deployment-and-migration.md`) covers the migration, rollout, and configuration risks of such a run.
+
 Capture actual commands, exit status, pass/fail/skip counts, and actionable failure output. Distinguish tests that passed, failed, were skipped, and were not run. Never infer success from partial logs or an agent's summary.
 
 ### 6. Diagnose failures
@@ -155,6 +157,8 @@ Use actual counts. Separate test-case changes from execution outcomes, and do no
 - test-case counts by unit, integration, E2E, and other applicable layers;
 - added, updated, and reused cases separately from execution outcomes;
 - commands actually run and their real results;
+- for E2E against a deployable service: the environment identity and the artifact
+  tag or version exercised;
 - baseline failures, new failures, flaky results, and checks not run;
 - test-quality evidence, if evaluated;
 - uncovered risks, assumptions, deviations, and production defects requiring follow-up.

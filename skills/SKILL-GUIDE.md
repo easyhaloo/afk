@@ -176,6 +176,46 @@ step is required or it isn't. Ambiguity causes execution drift.
 Always state where output goes. `/tmp/` for transient drafts, skill
 directory for durable artifacts. Ambiguity causes file system errors.
 
+### Delivery order and environment boundary
+
+A skill that produces a change request (PR/MR) or triggers a deployment MUST
+state, in its own body, what happens before the change request exists and which
+environments the agent may touch. The skill body is the only contract the agent
+reads before it starts — if the order and the boundary are not written there,
+they are not performed.
+
+The skill body contains:
+
+1. **Delivery order (交付顺序)** — implement → deploy to **test** → verify on that
+   test environment → only then produce the change request. Local checks are an
+   input to the sequence, not the gate that ends it.
+2. **Environment whitelist (环境边界)** — **test** only. Pre-production and
+   production are operated by a human (manual CI console, manual deploy); an
+   agent MUST NOT trigger them by any route.
+3. **Evidence location** — evidence lands at a reproducible path inside the
+   repository and is registered there. A file outside the repository is not
+   evidence.
+4. **Reuse** — reuse the repository's existing deploy and test assets. Add a
+   switch to an existing file instead of shipping a parallel script or compose
+   file.
+
+Minimal template for skill authors — copy and fill:
+
+> ## Delivery contract
+>
+> - **Order:** implement → deploy to test → verify on test → change request.
+> - **Environments:** test only; pre-production and production are human-operated.
+> - **Deployable artifact:** <image tag or artifact version>
+> - **Deployment method:** <existing deploy asset of the target repository>
+> - **Environment verification:** <assertion that runs on the test environment>
+> - **Evidence:** <repository path that stores the observed output>
+
+**Caveat scenario:** a skill that only says "run the checks, then open a PR"
+lets the agent publish a change request for a build that was not deployed.
+The environment-specific defects — migration order, base image, configuration
+wiring, dependency versions — surface after release, and the only evidence is a
+local grep against a file that does not exist in the repository.
+
 ### No example code or commands
 
 Code and commands date quickly. Describe intent and outcome instead.
@@ -202,6 +242,7 @@ the skill.
 - [ ] `SKILL.md` under 500 lines
 - [ ] Single responsibility — one skill does one thing
 - [ ] Domain-specific terms and values preserved (not abstracted away)
+- [ ] Delivery-type skill states the delivery order and the environment boundary
 
 ---
 

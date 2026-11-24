@@ -66,6 +66,8 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('copy the exact logical reference into top-level targetRef');
     expect(prompt).toContain('A correction journal can explain the revision, but cannot supply observed evidence');
     expect(prompt).toContain('Checker-provided scratch writes use sideEffects="filesystem"');
+    expect(prompt).toContain('include those actual JSON arguments in inputSchema, including both phases of recovery');
+    expect(prompt).toContain('use anyOf with a separate schema for each shape');
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

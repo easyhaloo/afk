@@ -1775,6 +1775,8 @@ Repository-asset validation snapshots the current checkout. A configured `reposi
 
 A repository tool revision uses the exact logical `targetRef` recorded for the asset. Independent validation requires complete observed source evidence. A correction journal provides declared context for a draft. The repository-asset checker accepts self-contained scripts with empty `dependencies` and `permissions`. Checker-provided scratch writes declare `sideEffects: "filesystem"` and require a configured recovery experiment.
 
+The tool's `inputSchema` covers both ordinary inputs and the actual JSON arguments of configured cancellation, timeout, permission-denial and recovery experiments, including both recovery phases. Use `anyOf` when ordinary and control input shapes differ. Refusal inputs must fail schema validation.
+
 For repair review, `qa` additionally requires `repair: { failure, fix }` as pinned
 above. Validation binds the failed source audit, a successful implementation fix
 at `qa.targetRevision`, and independent QA at that same revision. The receipt

@@ -1405,6 +1405,8 @@ Worker 已提供启动 / 周期补查、在途取消和受控重试。当前原�
 
 仓库工具的修订使用资产记录中的准确逻辑引用 `targetRef`。独立验证要求完整的观测证据。纠正日志为草案提供声明信息。仓库资产 checker 接受可独立执行且 `dependencies` 与 `permissions` 均为空的脚本。写入 checker 提供的暂存空间须声明 `sideEffects: "filesystem"`，并配置恢复实验。
 
+工具的 `inputSchema` 同时覆盖普通输入，以及配置的取消、超时、权限拒绝和恢复实验实际传入的 JSON 参数，包括恢复的两个阶段。普通输入与控制输入的结构不同时使用 `anyOf`。拒绝用例的输入必须无法通过 schema 校验。
+
 修复复盘还要求 `qa` 包含上述固定的 `repair: { failure, fix }`。验证绑定失败来源
 审计、在 `qa.targetRevision` 成功完成的实现修复，以及同版本的独立 QA；收据增加
 `repair` 和 `repairEvidence`，引用失败及修复事件。重放和发布重新检查这些审计及

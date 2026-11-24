@@ -1773,6 +1773,8 @@ The private proposal catalog v1 accepts optional `resources: [{ path, digest }]`
 
 Repository-asset validation snapshots the current checkout. A configured `repository.ref` must match the current branch. When the ref is omitted, a provider may supply the current branch during preparation. Both paths require the pinned commit and preserve repository identity through checkout.
 
+A repository tool revision uses the exact logical `targetRef` recorded for the asset. Independent validation requires complete observed source evidence. A correction journal provides declared context for a draft. The repository-asset checker accepts self-contained scripts with empty `dependencies` and `permissions`. Checker-provided scratch writes declare `sideEffects: "filesystem"` and require a configured recovery experiment.
+
 For repair review, `qa` additionally requires `repair: { failure, fix }` as pinned
 above. Validation binds the failed source audit, a successful implementation fix
 at `qa.targetRevision`, and independent QA at that same revision. The receipt

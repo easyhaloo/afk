@@ -63,6 +63,9 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('Encode each normal input and expected output as JSON text');
     expect(prompt).toContain('Include a refusal with a schema-invalid input');
     expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
+    expect(prompt).toContain('copy the exact logical reference into top-level targetRef');
+    expect(prompt).toContain('A correction journal can explain the revision, but cannot supply observed evidence');
+    expect(prompt).toContain('Checker-provided scratch writes use sideEffects="filesystem"');
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

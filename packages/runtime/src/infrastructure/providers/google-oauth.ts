@@ -14,6 +14,7 @@ const oauthErrors = {
   'authorization.timeout': 'Google sign-in timed out and the callback listener closed; start login again and use the newly opened browser page',
   'token.network': 'Cannot reach the Google token endpoint; check the configured network proxy',
   'token.exchange': 'Google token exchange failed; check the Desktop client and authorization permissions',
+  'token.reauthorize': 'Google offline authorization is no longer valid; sign in again to restore Gmail notifications',
   'token.scope': 'Google did not grant all requested permissions; authorize mail sending and account identity',
   'token.offline': 'Google did not provide an offline token; authorize again with consent',
   'account.identity': 'Google did not return a verified account identity',
@@ -123,11 +124,16 @@ export class GoogleOAuthCredentialProvider implements CredentialProvider {
     try {
       const response = await requestHttp(this.fetch, tokenEndpoint, {
         method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: parameters.toString(),
-      }, options);
+      }, previous ? { ...options, acceptedErrorStatus: 400 } : options);
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        if (z.object({ error: z.literal('invalid_grant') }).safeParse(body).success) throw new GoogleOAuthError('token.reauthorize');
+        throw new GoogleOAuthError('token.exchange');
+      }
       const payload = z.object({
         access_token: secretText, refresh_token: secretText.optional(), token_type: z.string().regex(/^bearer$/i),
         expires_in: z.number().int().positive().max(31_536_000), scope: z.string().optional(),
-      }).parse(await response.json());
+      }).parse(body);
       const scopes = payload.scope?.split(' ').filter(Boolean) ?? previous?.scopes ?? requestedScopes;
       if (!hasScopes(scopes, requestedScopes)) throw new GoogleOAuthError('token.scope', requestedScopes.filter(scope => !hasScopes(scopes, [scope])));
       const refreshToken = payload.refresh_token ?? previous?.refreshToken;

@@ -399,6 +399,9 @@ afk plugin configure notification.gmail --builtin --file ./gmail.settings.json
 先撤销 Google 授权，撤销成功后才移除 Keychain 记录；撤销失败保留记录供重试。
 退出保留插件配置，不会禁用其他已配置 Provider。
 
+Google 以 `invalid_grant` 拒绝刷新时，Gmail 返回 `token.reauthorize`。重新登录
+即可恢复通知。重新授权成功前保留已保存的账号。
+
 External OAuth 应用保持 Testing 时，包含此 Gmail scope 的 refresh token 会在
 **7 天**后过期，需要重新授权。发布到 Production 及 Google 要求的验证属于独立配置
 步骤。参考 Google 的 [Desktop OAuth 流程](https://developers.google.com/identity/protocols/oauth2/native-app)

@@ -24,6 +24,7 @@ export function checkAbort(options?: ProviderOperationOptions): void {
 export interface HttpRequestOptions extends ProviderOperationOptions {
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
+  readonly acceptedErrorStatus?: number;
 }
 
 export async function requestHttp(
@@ -71,7 +72,7 @@ export async function requestHttp(
       }),
       interrupted,
     ]);
-    if (!response.ok) {
+    if (!response.ok && response.status !== options?.acceptedErrorStatus) {
       void response.body?.cancel().catch(() => undefined);
       throw new Error(`Provider HTTP request failed (${response.status})`);
     }

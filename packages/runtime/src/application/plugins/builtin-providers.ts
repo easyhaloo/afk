@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Plugin, PluginHealth } from './runtime.js';
-import { AgentProviderRegistry, ensureBuiltinAgentProviders } from '../../domain/agents/index.js';
+import { AgentProviderRegistry, ensureBuiltinAgentProviders, ProcessAgentProvider } from '../../domain/agents/index.js';
 import { SandboxProviderRegistry, type SandboxProviderDeps } from '../../infrastructure/sandbox/registry.js';
 import type { CommandVerificationOptions } from '../../infrastructure/verification/index.js';
 import {
@@ -10,12 +12,31 @@ import {
 import type { VerificationProvider } from '../../plugin-sdk/capabilities.js';
 import type { RemoteContainerSandboxProvider } from '../../infrastructure/sandbox/remote-container.js';
 
+const execFileAsync = promisify(execFile);
+
 export function createBuiltinAgentPlugins(): Plugin[] {
   const registry = new AgentProviderRegistry();
   ensureBuiltinAgentProviders(registry);
   return registry.list().map(provider => ({
     manifest: { id: `agent.${provider.name}`, version: '0.1.0', apiVersion: 1, provides: ['agent.provider'], trusted: true },
     activate: context => context.registerAgentProvider(provider.name, provider),
+    async health(): Promise<PluginHealth> {
+      if (!(provider instanceof ProcessAgentProvider)) return { status: 'unknown' };
+      const [binary] = provider.buildCommand({
+        worktreePath: process.cwd(), sessionId: '', executionMode: 'batch',
+      }).argv;
+      try {
+        await execFileAsync(binary, ['--version'], {
+          timeout: 5_000, killSignal: 'SIGKILL', maxBuffer: 32_768,
+        });
+        return { status: 'healthy', message: `${binary} version check passed on the local host` };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return { status: 'degraded', message: `${binary} CLI not found on the local host PATH` };
+        }
+        return { status: 'unhealthy', message: `${binary} version check failed on the local host` };
+      }
+    },
   }));
 }
 

@@ -76,9 +76,10 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
     expect(prompt).toContain('copy the exact logical reference into top-level targetRef');
     expect(prompt).toContain('A correction journal can explain the revision, but cannot supply observed evidence');
-    expect(prompt).toContain('Preserve the existing entry point, interpreter and module format');
+    expect(prompt).toContain('Preserve the existing entry point, interpreter, module format and argument encoding');
+    expect(prompt).toContain('decode argv[2] once and dispatch on the decoded value');
     expect(prompt).toContain('preserve field names, value semantics and serialization');
-    expect(prompt).toContain('Do not add undocumented checkpoint fields');
+    expect(prompt).toContain('Match any observed checkpoint examples byte for byte');
     expect(prompt).toContain('Only classify successful calls with JSON output as normal tests');
     expect(prompt).toContain('omit cancellation, timeout, permission denial and multi-step recovery from payload.tests');
     expect(prompt).toContain('A schema-valid input that hits a runtime permission denial is not a refusal test');

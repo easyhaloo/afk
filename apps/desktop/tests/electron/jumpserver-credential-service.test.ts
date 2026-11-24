@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createJumpserverCredentialStore } from "../../electron/services/jumpserver-credential-service.js";
+import { createJumpserverCredentialService, createJumpserverCredentialStore } from "../../electron/services/jumpserver-credential-service.js";
 
 function dependencies() {
   const files = new Map<string, string>();
@@ -45,6 +45,21 @@ function dependencies() {
 describe("Jumpserver credential service", () => {
   const targetOne = { hostname: "bastion.example.test", port: 2222, user: "admin" };
   const targetTwo = { hostname: "bastion2.example.test", port: 2223, user: "operator" };
+
+  it.each([true, false])("probes the keychain on first use (available: %s)", async (available) => {
+    const deps = dependencies();
+    deps.safeStorage.isEncryptionAvailable.mockReturnValue(available);
+    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+
+    expect(deps.safeStorage.isEncryptionAvailable).not.toHaveBeenCalled();
+    await service.set("bastion:one", "password", targetOne, "otp");
+    expect(deps.safeStorage.isEncryptionAvailable).toHaveBeenCalled();
+    expect(await service.has("bastion:one", targetOne)).toBe(true);
+    expect(await service.get("bastion:one", targetOne)).toEqual({ password: "password", otpSecret: "otp" });
+    expect(deps.files.size).toBe(available ? 1 : 0);
+    expect(await service.remove("bastion:one")).toBe(true);
+    expect(await service.has("bastion:one", targetOne)).toBe(false);
+  });
 
   it("round-trips encryption and decryption of password", async () => {
     const deps = dependencies();

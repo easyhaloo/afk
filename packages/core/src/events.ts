@@ -167,7 +167,7 @@ export type RunEventData =
   | { kind: 'decision.made'; command: string; accepted: boolean; reason?: string }
   | { kind: 'effect.started'; effectKind: string; idempotencyKey: string }
   | { kind: 'effect.completed'; effectKind: string; idempotencyKey: string; outcome: 'succeeded' | 'failed'; summary?: string }
-  | { kind: 'step.started'; stepId: string; phase: RunPhase }
+  | ({ kind: 'step.started'; stepId: string } & ({ phase: RunPhase; stepKind?: 'agent' } | { phase?: never; stepKind: 'system' }))
   | { kind: 'step.completed'; stepId: string; outcome: 'succeeded' | 'failed' }
   | { kind: 'human_gate.opened'; gateId: string; reason: string }
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }

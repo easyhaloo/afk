@@ -55,7 +55,9 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('Return an empty candidates array only if no candidate is supported');
     expect(prompt).toMatch(/preserve both verbatim in the fact payload/i);
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
+    expect(prompt).toContain('For all candidate kinds, applicability.preconditions, applicability.exclusions and applicability.invalidationConditions contain only machine-readable boolean keys from observed evidence');
     expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
+    expect(prompt).toContain('Do not invent keys from prose or repeat project, environment or version restrictions in the boolean arrays');
     expect(prompt).toContain('report the gap in warnings and omit that process candidate');
     expect(prompt).toContain('at least two distinct normal inputs');
     expect(prompt).toContain('Encode each normal input and expected output as JSON text');

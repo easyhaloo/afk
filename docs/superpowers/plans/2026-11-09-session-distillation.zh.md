@@ -2814,6 +2814,18 @@ D01 SDK已完成首批独立交付：commit `9ed99fb681eb2842f0886a8c5d7ba155a8d
 
 5,268,903字节CLI安装包SHA256为`3c228176fd83999366310888803579bd6b4012b12c99e7ff14d187ae5f0af810`；官方源码外23入口及独立SDK8项通过，自有临时安装已移除。初次打包驱动错误与两次离线元数据缺失原样保留；使用既有pnpm、关闭自动依赖验证、ignore-scripts及prefer-offline完成正式打包，registry元数据获取不宣称全离线或共享cache未变。收据见`.codex/validation/plugin-external-tools-integration-20261114/commit-snapshot-v2/DELIVERY.md`。PR295已更新，CI43554331331的headSHA匹配9ed99fb6，八job全部成功，含Desktop E2E及PTY；首次watch API超时仅重连同一run，未重启workflow。V8 Linux Node22.23.4全配置源码覆盖率为Lines/Statements88.78%、Functions85.49%、Branches87.10%，policy violations为空，包基线保留；Desktop、PTY及独立spawn进程不在百分比范围内。完整run及490项下载产物hash保留，无合并。
 
+#### 2026 年 11 月 24 日安装版验收
+
+Release CLI 运行 `45323260884` 在 Linux 和 macOS 的 x64、arm64 四个平台验证了 `b4cffaa5`。四个平台均通过离线安装、`0.2.194` 升至 `0.2.202`、拒绝错误校验和、配置保全与回滚，每个平台通过 28 项安装器测试和 20 项安装版工作流测试。仅验证模式跳过发布。
+
+同一提交的 macOS arm64 未签名桌面包与 CLI `0.2.202` 通过 15 项 Playwright 测试。使用本机已认证的 Claude Code 独立跑通第 16 项。桌面端启动学习请求，Claude Code 生成候选，独立检查器验证后由桌面端发布到隔离 Wiki。测试验证了召回、来源失效及撤回。两次测试前后的用户插件配置校验和一致。
+
+安装版重试后通过 30 条冻结召回断言，其中 5 条流程用例首次运行超时。召回矩阵未调用模型。前瞻三臂对照的冻结预算为零，18 席待测。
+
+安装版 CLI `0.2.202` 启动了四次真实 OpenCode 任务，复用 Claude Code 提炼、独立校验并发布到隔离 Wiki 的业务规则。`fact-01` 和 `fact-02` 分别使用原问题和语义改写，均返回原文规则及发布来源。`fact-03` 和 `fact-04` 分别使用其他项目及错误产品版本，均未返回规则或来源，两项排除用例均通过正向召回对照。四次消费使用不同的原生会话，后三次运行前后的用户插件配置校验和一致。
+
+`0.2.202` 使用独立的 Claude Code 和 OpenCode 会话验证了权威来源过期和撤回。`fact-05` 的首次冲突测试未通过正向对照，原因是提炼器将规则正文写入了布尔适用条件。CLI `0.2.203` 将基于证据的布尔键约定扩展到所有候选类型。安装版重跑时，权威来源一致时召回规则，冲突期间返回零条片段，恢复一致后重新召回同一发布版本。OpenCode 会话导出确认规则和发布标识未进入冲突期间的会话。召回仍要求可信的条件值。
+
 #### 验收、度量与交付清单
 
 - [ ] 逐包执行typecheck/build/test；已有可运行命令为`pnpm architecture:check`、`pnpm typecheck`、`pnpm build`、`pnpm test`、`pnpm docs:check`。按冻结构建窗口运行，全部退出0；根绿色不替代单包结果。

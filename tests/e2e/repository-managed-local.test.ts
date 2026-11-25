@@ -8,6 +8,21 @@ import { branch, prepareRepositoryRun, startRepositoryServer } from './repositor
 
 const entry = process.env.AFK_E2E_CLI_ENTRY;
 
+it('returns the Git CGI response when the backend rejects a request without reading its body', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'afk-repository-http-')));
+  const server = await startRepositoryServer(root);
+  try {
+    const result = await fetch(`http://${server.host}/acme/api.git/git-receive-pack`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-git-receive-pack-request' }, body: Buffer.alloc(1024 * 1024),
+    });
+    expect(result.status).toBe(404);
+    await result.text();
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it.skipIf(!entry).each(['clean', 'unrelated ignored file'] as const)('enforces the installed multi-repository publication gate with a description: %s', async scenario => {
   const installation = resolveE2eRuntime(entry, process.env.AFK_E2E_RUNTIME_ROOT);
   if (installation.mode !== 'installed') throw new Error('An installed CLI is required');

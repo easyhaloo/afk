@@ -67,6 +67,7 @@ export function buildAnalysisPrompt(input: EvidencePack, source: DistillationReq
     'kind="process": payload={entry:string(1..1024 bytes),systems:string[](at least 1),preconditions:string[],steps:Step[](1..32),exceptions:string[],completion:string(1..2048 bytes)}. Step={id:identity,action:string(1..2048 bytes),stateChange:string(1..1024 bytes),evidenceIds:string[](0..64 distinct),missingEvidence?:string(1..1024 bytes)}. Each step requires evidenceIds or an explicit missingEvidence gap. Partial evidence must include a missingEvidence gap and cannot claim a complete business path.',
     'kind="lesson": payload={trigger:string(1..1024 bytes),triggerAliases?:string[],rootCause:string(1..2048 bytes),rootCauseStatus:"hypothesis"|"confirmed",attempts:string[],fix:string(1..4096 bytes),prevention:string[](at least 1)}. Include triggerAliases only for alternate symptom descriptions supported by the cited evidence (1..8 single-line phrases, each up to 128 bytes). Do not promote a hypothesis to confirmed without evidence.',
     'EvaluationCase={kind:"normal"|"recovery"|"refusal",input:string(1..2048 bytes),expected:string(1..2048 bytes)}.',
+    'For skill and tool proposals, every candidate.evidenceIds entry must have authority="observed" and completeness="complete". Declared session content may help interpret observations, but must not be cited. Omit unsupported proposals and report the evidence gap in warnings.',
     'kind="skill": payload={targetSkill?:logicalRef,originalDigest?:sha256,newReason?:string(1..1024 bytes),triggers:string[](at least 1),prohibitedConditions:string[],inputs:Input[](0..32),branches:string[],recovery:string[],completion:string(1..2048 bytes),patch:string(1..24576 bytes),evaluationCases:EvaluationCase[](3..12)}. Input={name:identity,description:string(1..1024 bytes),required:boolean}. Existing targetSkill requires originalDigest (64 lowercase hex); a new skill requires newReason. Include normal, recovery and refusal evaluation cases.',
     'kind="tool": payload={existingTools:string[],inputSchema:object,outputSchema:object,dependencies:string[],permissions:string[],timeoutMs:integer(1..120000),sideEffects:"none"|"filesystem"|"network"|"process"|"mixed",idempotency:string(1..2048 bytes),recovery:string(1..2048 bytes),source:string(1..24576 bytes),tests:EvaluationCase[](3..12)}. Propose source as data only; never execute it.',
     'For tool tests, include at least two distinct normal inputs. Encode each normal input and expected output as JSON text satisfying inputSchema and outputSchema respectively. For a string input, keep the JSON quotes and escape embedded newlines. Include a refusal with a schema-invalid input. A valid input reporting an invalid business value is a normal case.',
@@ -87,6 +88,10 @@ export function parseAnalysisOutput(raw: unknown, request: DistillationRequest, 
   if (output.candidates.some(candidate => candidate.kind === 'process'
     && processNeedsGap(pack)
     && !candidate.payload.steps.some(step => step.missingEvidence))) throw new Error('Partial evidence requires explicit process gaps');
+  const observedIds = new Set(pack.entries.filter(({ ref }) => ref.authority === 'observed' && ref.completeness === 'complete')
+    .map(({ ref }) => ref.id));
+  if (output.candidates.some(candidate => (candidate.kind === 'skill' || candidate.kind === 'tool')
+    && candidate.evidenceIds.some(id => !observedIds.has(id)))) throw new Error('Skill and tool proposals require complete observed evidence');
   return output;
 }
 

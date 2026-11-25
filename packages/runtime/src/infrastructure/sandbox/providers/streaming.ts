@@ -69,6 +69,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private error: ExecutionResult['error'] | undefined;
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
+  private contextTokens?: number;
   private completedTurnUsage?: TokenUsage;
   private readonly tools = new Map<string, AgentToolCallSummary>();
   private readonly stdoutDecoder = new StringDecoder('utf8');
@@ -208,6 +209,7 @@ export class StreamingAgentExecution implements AgentExecution {
         switch (event.type) {
           case 'usage':
             this.usage = event.usage;
+            this.contextTokens = event.contextTokens;
             break;
           case 'error':
             this.error = {
@@ -361,7 +363,7 @@ export class StreamingAgentExecution implements AgentExecution {
         };
       }
       if (!this.error && !this.completedTurnUsage && this.exitCode === undefined
-        && this.usage && this.usage.totalTokens >= contextHighTokens) {
+        && this.usage && (this.contextTokens ?? this.usage.totalTokens) >= contextHighTokens) {
         return {
           version: 1,
           runId: this.id,

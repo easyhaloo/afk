@@ -132,7 +132,7 @@ export interface AgentExecutionOptions extends AgentCommandOptions {
 export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'session'; sessionId: string; worktreePath?: string }
-  | { type: 'usage'; usage: TokenUsage }
+  | { type: 'usage'; usage: TokenUsage; contextTokens?: number }
   | { type: 'result'; result: unknown; completedTurnUsage?: TokenUsage }
   | { type: 'error'; error: Error };
 

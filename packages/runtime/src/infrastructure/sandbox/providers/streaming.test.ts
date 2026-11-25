@@ -957,6 +957,21 @@ describe('StreamingAgentExecution', () => {
       } finally { await execution.kill(); }
     });
 
+    it.each([[99, 'completed'], [100, 'context_high']] as const)('uses current context %i for the handoff threshold', async (contextTokens, status) => {
+      const usage = { inputTokens: 170, outputTokens: 30, totalTokens: 200 };
+      const result = JSON.stringify({ type: 'goal_complete' });
+      const execution = new StreamingAgentExecution({
+        command: command('console.log("usage"); setTimeout(() => console.log("result"), 1800)'),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+        parseLine: line => line === 'usage' ? [{ type: 'usage', usage, contextTokens }] : [{ type: 'result', result }],
+      });
+      execution.start();
+      try {
+        await expect(execution.waitForResult({ completionTimeoutMs: 5000, contextHighTokens: 100 }))
+          .resolves.toMatchObject({ status, usage });
+      } finally { await execution.kill(); }
+    });
+
     it.each(['below', 'completed', 'failed', 'cancelled'] as const)('preserves %s instead of rotating the context', async outcome => {
       const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: outcome === 'below' ? 79 : 80, outputTokens: 20, totalTokens: outcome === 'below' ? 99 : 100 } });
       const result = outcome === 'failed'

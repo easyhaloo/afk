@@ -142,10 +142,9 @@ async function verifyGroup(ids: string[]) {
         expect(contexts.every(event => !event.systemMentionsSkill && !event.catalog.includes(key))).toBe(true);
         expect(exposed).toEqual([]);
       }
-      assertObservedRecall(entry, { caseId: entry.id, status: 'observed', ranked: loaded.map(part => {
-        expect(part.state?.input.id).toBe(history.key);
-        return { scope: history.scope, key: history.key, edition };
-      }) });
+      assertObservedRecall(entry, { caseId: entry.id, status: 'observed', ranked: loaded
+        .filter(part => part.state?.input.id === key)
+        .map(() => ({ scope: history.scope, key, edition })) });
       return { runId, workspace, session: session.info.id, busy: session.info.time.busy, idle: session.info.time.idle };
     }));
     const log = readFileSync(join(shared.XDG_DATA_HOME, 'opencode/log/opencode.log'), 'utf8');

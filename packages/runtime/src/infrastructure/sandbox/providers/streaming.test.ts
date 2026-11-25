@@ -15,6 +15,18 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it('aligns PWD with the child working directory when starting a batch agent', async () => {
+    const execution = new StreamingAgentExecution({
+      command: { ...command('process.exit(process.env.PWD === process.cwd() ? 0 : 7)'),
+        cwd: realpathSync('..'), env: { PWD: process.cwd() } },
+      prompt: 'verify', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    try {
+      await expect(execution.waitForResult({ completionTimeoutMs: 5000 })).resolves.toMatchObject({ exitCode: 0 });
+    } finally { await execution.kill(); }
+  });
+
   it('waits for the OpenCode exit status after the stopped answer', async () => {
     const execution = new StreamingAgentExecution({
       command: command('console.log("stopped"); setTimeout(() => process.exit(7), 800)'),
@@ -954,6 +966,21 @@ describe('StreamingAgentExecution', () => {
         const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
         expect(child.exitCode).toBeNull();
         expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      } finally { await execution.kill(); }
+    });
+
+    it.each([[99, 'completed'], [100, 'context_high']] as const)('uses current context %i for the handoff threshold', async (contextTokens, status) => {
+      const usage = { inputTokens: 170, outputTokens: 30, totalTokens: 200 };
+      const result = JSON.stringify({ type: 'goal_complete' });
+      const execution = new StreamingAgentExecution({
+        command: command('console.log("usage"); setTimeout(() => console.log("result"), 1800)'),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+        parseLine: line => line === 'usage' ? [{ type: 'usage', usage, contextTokens }] : [{ type: 'result', result }],
+      });
+      execution.start();
+      try {
+        await expect(execution.waitForResult({ completionTimeoutMs: 5000, contextHighTokens: 100 }))
+          .resolves.toMatchObject({ status, usage });
       } finally { await execution.kill(); }
     });
 

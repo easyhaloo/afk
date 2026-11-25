@@ -62,7 +62,7 @@ async function businessSession() {
     { cwd: desk, env: nativeEnv, timeout: 140_000 });
   const sessionId = run.trim().split('\n').map(line => JSON.parse(line)).find(event => event.sessionID)?.sessionID;
   assert.match(sessionId, /^ses_/);
-  const native = JSON.parse(command('opencode', ['session', 'export', sessionId], { cwd: desk, env: nativeEnv }));
+  const native = JSON.parse(command('opencode', ['session', 'export', sessionId, '--standalone'], { cwd: desk, env: nativeEnv }));
   assert.equal(native.info.id, sessionId);
   assert.ok(native.messages.some(message => message.type === 'user' && message.text.includes(bag)));
   const transcriptRoot = join(home, '.afk/transcripts');
@@ -368,7 +368,7 @@ async function consume() {
     assert.ok(lstatSync(answer).isFile());
     if (excluded) {
       assert.deepEqual(read(answer), { steps: null, completion: null, source: null, productVersion: null });
-      const transcript = JSON.parse(command('opencode', ['session', 'export', session], { cwd: workspace, env: nativeEnv }));
+      const transcript = JSON.parse(command('opencode', ['session', 'export', session, '--standalone'], { cwd: workspace, env: nativeEnv }));
       assert.equal(transcript.info.id, session);
       assert.ok(transcript.messages.length > 0);
       const contents = JSON.stringify(transcript.messages);

@@ -15,6 +15,18 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it('aligns PWD with the child working directory when starting a batch agent', async () => {
+    const execution = new StreamingAgentExecution({
+      command: { ...command('process.exit(process.env.PWD === process.cwd() ? 0 : 7)'),
+        cwd: realpathSync('..'), env: { PWD: process.cwd() } },
+      prompt: 'verify', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    try {
+      await expect(execution.waitForResult({ completionTimeoutMs: 5000 })).resolves.toMatchObject({ exitCode: 0 });
+    } finally { await execution.kill(); }
+  });
+
   it('waits for the OpenCode exit status after the stopped answer', async () => {
     const execution = new StreamingAgentExecution({
       command: command('console.log("stopped"); setTimeout(() => process.exit(7), 800)'),

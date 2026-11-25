@@ -118,9 +118,10 @@ export class StreamingAgentExecution implements AgentExecution {
       argv.push('--usage-output-file', this.copilotReport.path);
     }
 
+    const cwd = this.command.cwd ?? this.worktreePath;
     const spawnOptions: SpawnOptions = {
-      cwd: this.command.cwd ?? this.worktreePath,
-      env: { ...process.env, ...this.command.env, AFK_EXECUTION_OWNER: this.processOwner },
+      cwd,
+      env: { ...process.env, ...this.command.env, PWD: cwd, AFK_EXECUTION_OWNER: this.processOwner },
       stdio: ['pipe', 'pipe', 'pipe'],
       // A provider command may be a shell wrapper (Claude's macOS shim is one)
       // and can spawn a real agent child. Put the whole tree in one process

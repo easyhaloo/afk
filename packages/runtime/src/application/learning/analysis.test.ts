@@ -62,6 +62,21 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('A pure computation over supplied arguments has permissions=[]');
   });
 
+  it.each(['skill', 'tool'] as const)('describes only the %s contract in a focused prompt', async kind => {
+    const pack = await buildEvidencePack({ sources: [] });
+    const prompt = buildAnalysisPrompt(pack, { ...requestFor(pack), candidateKind: kind });
+    expect(prompt).toContain(`Evaluate only the ${kind} kind.`);
+    expect(prompt).toContain(`kind="${kind}": payload=`);
+    for (const other of ['fact', 'process', 'lesson', kind === 'skill' ? 'tool' : 'skill']) {
+      expect(prompt).not.toContain(`kind="${other}": payload=`);
+    }
+    expect(prompt).toContain('authority="observed" and completeness="complete"');
+    if (kind === 'skill') {
+      expect(prompt).toContain('exact standalone request using observed fixture arguments');
+      expect(prompt).toContain('exact serialized answer');
+    }
+  });
+
   it('requires complete observed citations in model-generated skill and tool proposals', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-analysis-'));
     try {

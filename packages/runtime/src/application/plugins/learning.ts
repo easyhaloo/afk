@@ -11,7 +11,7 @@ import { LearningWorker, learningDirectory, queryLearningRequest, queryLearningS
 import { CandidateStore } from '../learning/candidate-store.js';
 import { assertCurrentKnowledgePublication } from '../learning/knowledge-publication-guard.js';
 import { verifyLessonPublication } from '../learning/lesson-publication-guard.js';
-import { reconcileDistillationSources, submitLearningCorrection } from '../learning/intake.js';
+import { reconcileDistillationSources, submitLearningCorrection, type ReconcileDistillationOptions } from '../learning/intake.js';
 import { learningDigestSchema, learningIdentitySchema } from '../learning/requests.js';
 import { experienceQueryContextSchema } from '../learning/experience-store.js';
 import { validateConfiguredLearningCandidate } from '../learning/validation-runtime.js';
@@ -99,7 +99,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
     }
   };
   const eventRootSchema = z.string().min(1).max(4096).refine(isAbsolute).optional();
-  const captureSources = async (input: { scope?: string; runId?: string; workItemId?: string; eventRoot?: string; includeFailed?: boolean } = {}) => {
+  const captureSources = async (input: Omit<ReconcileDistillationOptions, 'directory' | 'homeDir' | 'analyzerVersion'> = {}) => {
     const reconciliation = await reconcileDistillationSources({ directory, homeDir: options.homeDir, ...input });
     const root = resolve(input.eventRoot ?? process.env.AFK_EVENT_STORE_DIR ?? join(options.homeDir ?? homedir(), '.afk', 'events'));
     for (const source of reconciliation.checkedSources) {
@@ -260,7 +260,9 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         const parsed = z.object({ scope: learningScopeSchema, runId: learningIdentitySchema,
           kind: z.enum(['process', 'lesson', 'skill', 'tool']), checkerId: learningIdentitySchema, workItemId: z.string().optional(),
           repair: z.literal(true).optional() }).strict().parse(input);
-        const proposalKind = parsed.kind === 'skill' || parsed.kind === 'tool';
+        const { kind } = parsed;
+        const candidateKind = kind === 'skill' || kind === 'tool' ? kind : undefined;
+        const proposalKind = candidateKind !== undefined;
         let repairRoot: string | undefined;
         if (!proposalKind && !knowledge) throw new Error('knowledge_not_configured');
         if (!config.validation) throw new Error('validation_not_configured');
@@ -275,6 +277,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
           repairRoot = qa.repair.failure.root;
         }
         const source = { scope: parsed.scope, runId: parsed.runId,
+          ...(candidateKind ? { candidateKind } : {}),
           ...(parsed.repair ? { includeFailed: true, eventRoot: repairRoot } : {}),
           ...(parsed.workItemId === undefined ? {} : { workItemId: parseWorkItemId(parsed.workItemId).id }) };
         const capture = await captureSources(source);

@@ -75,6 +75,7 @@ export const evidenceRefSchema = z.object({
 export const distillationRequestSchema = z.object({
   version: z.literal(1), scope: learningScopeSchema, sourceId: identity,
   sourceRunId: identity.optional(), workItemId: identity.optional(), evidenceDigest: digest,
+  candidateKind: z.enum(['skill', 'tool']).optional(),
   analyzerVersion: identity, reason: z.enum(['completed', 'failed', 'repaired', 'correction', 'import']),
 }).strict().superRefine((value, context) => {
   if (value.workItemId === undefined) return;
@@ -155,6 +156,7 @@ export function distillationKey(input: DistillationRequest): string {
   const request = distillationRequestSchema.parse(input);
   return createHash('sha256').update(JSON.stringify([
     request.scope, request.sourceId, request.evidenceDigest, request.analyzerVersion,
+    ...(request.candidateKind ? [request.candidateKind] : []),
   ])).digest('hex');
 }
 
@@ -166,6 +168,7 @@ export function parseDistillationOutput(input: unknown, source: DistillationRequ
   const available = new Set(evidence.map(entry => evidenceRefSchema.parse(entry).id));
   if (available.size !== evidence.length) throw new Error('Duplicate evidence IDs');
   for (const candidate of output.candidates) {
+    if (request.candidateKind && candidate.kind !== request.candidateKind) throw new Error('Candidate kind differs from request kind');
     if (candidate.applicability.project !== request.scope) throw new Error('Candidate project differs from request scope');
     const refs = [...candidate.evidenceIds, ...(candidate.kind === 'process' ? candidate.payload.steps.flatMap(step => step.evidenceIds) : [])];
     if (refs.some(ref => !available.has(ref))) throw new Error('Unknown evidence reference');

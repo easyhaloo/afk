@@ -192,7 +192,7 @@ async function observeKnowledge(caseId: string, binary: string, runtime: string,
       const { job, candidates } = queryLearningRequest({ directory, ...target });
       console.log(JSON.stringify({ status: job.status, reason: job.reasonCode, calls: job.attempts.length, kinds: candidates.map(item => item.proposal.kind) }));
       expect(job).toMatchObject({ status: 'processed', attempts: [expect.objectContaining({ status: 'succeeded' })] });
-      const facts = candidates.filter(item => item.proposal.kind === 'fact');
+      const facts = candidates.filter(item => item.proposal.kind === 'fact' && item.proposal.targetRef === targetRef);
       expect(facts).toHaveLength(1);
       expect(facts[0]).toMatchObject({ state: 'candidate', version: 1, evidenceDigest: pack.digest, requestKey: target.requestKey });
       candidateId = facts[0].id;

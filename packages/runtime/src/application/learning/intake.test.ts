@@ -176,6 +176,39 @@ describe('durable learning intake', () => {
     } finally { store.close(); }
   });
 
+  it('distills a missing kind from the same source without replacing an existing legacy proposal', async () => {
+    const input = await fixture();
+    await input.append(input.complete);
+    const selected = { ...input, scope, runId: 'run-1', workItemId };
+    const { requestKeys: [generic] } = await reconcileDistillationSources(selected);
+    const store = input.open();
+    try {
+      const original = store.getRequest(generic)!;
+      const evidenceIds = [original.evidence[0].id];
+      const applicability = { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] };
+      const fact = { kind: 'fact', title: 'Review', statement: 'Require review.', evidenceIds, applicability,
+        payload: { subject: 'Review', rule: 'Require review.', classification: 'fact' } };
+      const tool = { kind: 'tool', title: 'Check', statement: 'Check inputs.', evidenceIds, applicability,
+        payload: { existingTools: [], inputSchema: {}, outputSchema: {}, dependencies: [], permissions: [], timeoutMs: 1000,
+          sideEffects: 'none', idempotency: 'pure', recovery: 'retry', source: 'return 1',
+          tests: ['normal', 'recovery', 'refusal'].map(kind => ({ kind, input: kind, expected: kind })) } };
+      const receipt = store.completeRequest(generic, { version: 1, warnings: [], candidates: [fact, tool] });
+      const skill = { ...selected, candidateKind: 'skill' as const };
+      const focused = await reconcileDistillationSources(skill);
+      const [key] = focused.requestKeys;
+      expect(focused).toMatchObject({ submitted: 1, blocked: [] });
+      expect(key).not.toBe(generic);
+      expect(store.getRequest(key)?.request).toEqual({ ...original.request, candidateKind: 'skill' });
+      expect(() => store.completeRequest(key, { version: 1, warnings: [], candidates: [fact] })).toThrow(/request kind/);
+      expect(await reconcileDistillationSources(skill)).toMatchObject({ submitted: 0, requestKeys: [key] });
+      expect(await reconcileDistillationSources({ ...selected, candidateKind: 'tool' })).toMatchObject({ submitted: 0, requestKeys: [generic] });
+      expect(await reconcileDistillationSources(selected)).toMatchObject({ submitted: 0, requestKeys: [generic] });
+      expect(store.getProcessingReceipt(generic)).toEqual(receipt);
+      await input.append([{ kind: 'qa.failed', reason: 'Source withdrawn' }, { kind: 'run.finished', outcome: 'failed' }]);
+      expect(await reconcileDistillationSources(selected)).toMatchObject({ invalidated: 2, requestKeys: [] });
+    } finally { store.close(); }
+  });
+
   it('returns no request keys when a new scan or replay cursor commit fails', async () => {
     const input = await fixture();
     await input.append(input.complete);

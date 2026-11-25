@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import { CandidateStore, type StoredDistillationRequest } from './candidate-store.js';
-import { distillationKey, learningScopeSchema } from './contracts.js';
+import { distillationKey, learningScopeSchema, type DistillationRequest } from './contracts.js';
 import { buildEvidencePack, managedTranscriptRoots, readEvidenceSource, redactEvidenceText, type EvidencePack, type EvidenceSourceInput } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
 import { experienceScope, failedRunEvidenceFromEvents, successfulRunEvidenceFromEvents } from './run-evidence.js';
@@ -21,6 +21,7 @@ export interface ReconcileDistillationOptions {
   runId?: string;
   workItemId?: string;
   analyzerVersion?: string;
+  candidateKind?: DistillationRequest['candidateKind'];
   includeFailed?: boolean;
   retryAnalysis?: boolean;
 }
@@ -175,13 +176,20 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
             ? 'merged' : 'ready';
           const epoch = failure ? `failure:${terminal!.sequence}:failed` : `qa:${qa!.sequence}:${phase}`;
           const sourceId = `run:${hash(runId)}:${epoch}:sessions:${signature}`;
-          const existing = prior.find(entry => entry.request.analyzerVersion === analyzerVersion && entry.request.sourceId === sourceId);
+          const matching = prior.filter(entry => entry.request.analyzerVersion === analyzerVersion && entry.request.sourceId === sourceId);
+          const generic = matching.find(entry => entry.request.candidateKind === undefined);
+          const { candidateKind } = input;
+          // Keep legacy proposals under their existing validation and revalidation rules.
+          const existing = matching.find(entry => entry.request.candidateKind === candidateKind)
+            ?? (candidateKind && generic && store.getProcessingReceipt(generic.key)?.candidateIds.some(id =>
+              store.getCandidate(id)?.proposal.kind === candidateKind) ? generic : undefined);
           if (existing) {
             requestKey = existing.key;
           } else {
             snapshots.push(pack);
             const request = { version: 1 as const, scope, sourceId, sourceRunId: runId,
               workItemId: history[0].context.workItemId, evidenceDigest: pack.digest, analyzerVersion,
+              ...(candidateKind ? { candidateKind } : {}),
               reason: failure ? 'failed' as const
                 : history.some(event => event.data.kind === 'qa.failed' || event.data.kind === 'failure.classified') ? 'repaired' as const : 'completed' as const };
             requests.push({ request, evidence: pack.entries.map(entry => entry.ref) });

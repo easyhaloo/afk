@@ -128,7 +128,10 @@ derived from the canonical work item and checked against the 512-byte UTF-8 scop
 to that exact work item before capture or analysis. `--hard-timeout` accepts
 integers from 1 through 2147483647 and is checked before Runtime creation.
 The `review` step captures the selected source, processes its exact request,
-validates the selected candidate kind with the saved checker. Success and repair
+and validates the selected candidate kind with the saved checker. Skill and tool
+reviews reuse an existing focused request for that kind or a general request
+that already produced the requested kind. Otherwise they create a request scoped
+to that kind using the same source evidence and analysis budget. Success and repair
 reviews additionally prepare publication previews. Their output contains the exact request
 key, candidate IDs, validated versions and prepared publications; `--json` emits
 compact JSON. It does not apply the previews. Publishing remains an explicit

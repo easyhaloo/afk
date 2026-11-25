@@ -266,7 +266,9 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         const parsed = z.object({ scope: learningScopeSchema, runId: learningIdentitySchema,
           kind: z.enum(['process', 'lesson', 'skill', 'tool']), checkerId: learningIdentitySchema, workItemId: z.string().optional(),
           repair: z.literal(true).optional() }).strict().parse(input);
-        const proposalKind = parsed.kind === 'skill' || parsed.kind === 'tool';
+        const { kind } = parsed;
+        const candidateKind = kind === 'skill' || kind === 'tool' ? kind : undefined;
+        const proposalKind = candidateKind !== undefined;
         let repairRoot: string | undefined;
         if (!proposalKind && !knowledge) throw new Error('knowledge_not_configured');
         if (!config.validation) throw new Error('validation_not_configured');
@@ -281,6 +283,7 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
           repairRoot = qa.repair.failure.root;
         }
         const source = { scope: parsed.scope, runId: parsed.runId, retryAnalysis: true,
+          ...(candidateKind ? { candidateKind } : {}),
           ...(parsed.repair ? { includeFailed: true, eventRoot: repairRoot } : {}),
           ...(parsed.workItemId === undefined ? {} : { workItemId: parseWorkItemId(parsed.workItemId).id }) };
         const capture = await captureSources(source);

@@ -101,8 +101,10 @@ Agent 运行时覆盖参数仅在执行路由解析，保留已有配置默认�
 `tool-optimization-validation`。四者均为内建学习工作流。项目 scope 从规范工作项推导，
 创建 Runtime 前检查 scope 不超过 512 个 UTF-8 字节；收集及分析前必须核对来源审计属于该准确工作项。`--hard-timeout` 仅接受
 1 至 2147483647 的整数，并在创建 Runtime 前校验。
-`review` 步骤收集所选来源、处理准确请求、用保存的 checker 验证所选类型候选，
-success 与 repair 复盘另准备发布预览，其输出包含准确的请求 key、候选 ID、验证版本及 prepared 发布；
+`review` 步骤收集所选来源、处理准确请求，并用保存的 checker 验证所选类型候选。
+skill 和 tool 复盘复用该类型的已有请求，或复用已产出该类型候选的通用请求。两者均
+不存在时，使用相同的来源证据和分析预算建立该类型的定向请求。
+success 与 repair 复盘另准备发布预览，其输出包含准确的请求 key、候选 ID、验证版本及 prepared 发布。
 `--json` 输出紧凑 JSON。预览不自动应用，正式发布仍通过独立授权的知识发布命令。
 失败返回通用错误。skill/tool 复盘在已有验证收据提交后中断时，另输出严格的
 `status: "incomplete"` JSON，包含本次调用已完成的收据、中断候选及安全原因，退出仍为失败。

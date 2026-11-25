@@ -175,6 +175,7 @@ describe.each(['skill', 'tool'] as const)('learning.retrospective %s optimizatio
     await expect(execute({ ...input, kind })).resolves.toHaveProperty('validated', [
       { status: 'validated', candidateId, candidateVersion: 7, validatedVersion: 8 },
     ]);
+    expect(mocks.capture).toHaveBeenCalledWith(expect.objectContaining({ candidateKind: kind }));
     expect(mocks.runOnce.mock.calls).toEqual([[target]]);
     expect(mocks.closeWorker).toHaveBeenCalledTimes(1);
     expect(mocks.runOnce.mock.invocationCallOrder[0]).toBeLessThan(mocks.validate.mock.invocationCallOrder[0]!);

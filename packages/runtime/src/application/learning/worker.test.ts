@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeProvider } from '../../domain/agents/claude-code.js';
 import { DurableTriggerQueue } from '../plugins/trigger-queue.js';
 import { CandidateStore } from './candidate-store.js';
-import { buildEvidencePack, saveEvidencePack } from './evidence.js';
+import { buildEvidencePack, saveEvidencePack, type EvidenceSourceInput } from './evidence.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
 import { LearningWorker, queryLearningRequest, queryLearningState, submitDistillation } from './worker.js';
 import type { AnalysisExecutionInput } from './analysis-runner.js';
@@ -19,12 +20,22 @@ const directories: string[] = [];
 const workers: LearningWorker[] = [];
 const scope = 'github:acme/api';
 
-async function fixture(reason: DistillationRequest['reason'] = 'completed') {
+async function fixture(reason: DistillationRequest['reason'] = 'completed', withAudit = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'learning-worker-'));
   directories.push(root);
   const file = join(root, 'session.txt');
   writeFileSync(file, 'User confirmed: require approval before publishing.');
-  const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path: file, allowedRoot: root, format: 'text' }] });
+  const sources: EvidenceSourceInput[] = [
+    { id: 'session-1', kind: 'journal', path: file, allowedRoot: root, format: 'text' },
+  ];
+  if (withAudit) {
+    const events = new JsonlEventStore({ root });
+    await events.append([{ id: 'qa', schemaVersion: 1, type: 'qa.started', occurredAt: '2026-11-09T00:00:00Z',
+      context: { runId: 'r1', traceId: 'trace', profileId: 'qa', attempt: 1, workItemId: `${scope}#42`, actor: { kind: 'system', id: 'test' } },
+      correlationId: 'r1', data: { kind: 'qa.started' } }]);
+    sources.push({ id: 'audit', kind: 'audit', runId: 'r1', path: events.pathFor('r1'), allowedRoot: root });
+  }
+  const pack = await buildEvidencePack({ sources });
   const directory = join(root, 'learning');
   const request = { version: 1 as const, scope, sourceId: 'run:r1', sourceRunId: 'r1', workItemId: `${scope}#42`,
     evidenceDigest: pack.digest, analyzerVersion: '1', reason };
@@ -54,11 +65,13 @@ afterEach(async () => {
 
 describe('distillation worker', () => {
   it.each([false, true])('records a mixed batch only when tool inputs match their schema (%s)', async validToolInput => {
-    const input = await fixture();
+    const input = await fixture('completed', true);
+    const observed = input.pack.entries.find(entry => entry.ref.authority === 'observed' && entry.ref.completeness === 'complete');
+    expect(observed).toBeDefined();
     const analyze = async () => {
       const result = await input.analyze();
       const [fact] = result.output.distillation.candidates;
-      const tool = { ...fact!, kind: 'tool', title: 'Text formatter', payload: {
+      const tool = { ...fact!, kind: 'tool', title: 'Text formatter', evidenceIds: [observed!.ref.id], payload: {
         existingTools: [], inputSchema: { type: 'string' }, outputSchema: { type: 'string' }, dependencies: [],
         permissions: [], timeoutMs: 1000, sideEffects: 'none', idempotency: 'Pure computation', recovery: 'Retry the input',
         source: 'export default value => value.toUpperCase()', tests: [

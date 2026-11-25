@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { buildEvidencePack, type EvidencePack } from './evidence.js';
 import { buildAnalysisPrompt, parseAnalysisOutput, parseModelJson, retroModelOutputSchema } from './analysis.js';
 
@@ -65,6 +66,7 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('"version":1, "candidates" (array of Candidate), and "warnings" (array of strings)');
     expect(prompt).toContain('Return an empty candidates array only if no candidate is supported');
     expect(prompt).toMatch(/preserve both verbatim in the fact payload/i);
+    expect(prompt).toContain('For skill and tool proposals, every candidate.evidenceIds entry must have authority="observed" and completeness="complete"');
     expect(prompt).toContain('authority="observed" and completeness="complete" in both candidate.evidenceIds and each step.evidenceIds');
     expect(prompt).toContain('For all candidate kinds, applicability.preconditions, applicability.exclusions and applicability.invalidationConditions contain only machine-readable boolean keys from observed evidence');
     expect(prompt).toContain('a required true key goes in applicability.preconditions, a required false key in applicability.exclusions');
@@ -88,6 +90,60 @@ describe('shared analysis without model execution', () => {
     expect(prompt).toContain('Checker-provided scratch writes use sideEffects="filesystem"');
     expect(prompt).toContain('include those actual JSON arguments in inputSchema, including both phases of recovery');
     expect(prompt).toContain('use anyOf with a separate schema for each shape');
+  });
+
+  it.each(['skill', 'tool'] as const)('describes only the %s contract in a focused prompt', async kind => {
+    const pack = await buildEvidencePack({ sources: [] });
+    const prompt = buildAnalysisPrompt(pack, { ...requestFor(pack), candidateKind: kind });
+    expect(prompt).toContain(`Evaluate only the ${kind} kind.`);
+    expect(prompt).toContain(`kind="${kind}": payload=`);
+    for (const other of ['fact', 'process', 'lesson', kind === 'skill' ? 'tool' : 'skill']) {
+      expect(prompt).not.toContain(`kind="${other}": payload=`);
+    }
+    expect(prompt).toContain('authority="observed" and completeness="complete"');
+    if (kind === 'skill') {
+      expect(prompt).toContain('exact standalone request using observed fixture arguments');
+      expect(prompt).toContain('exact serialized answer');
+    }
+  });
+
+  it('requires complete observed citations in model-generated skill and tool proposals', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-analysis-'));
+    try {
+      const path = join(root, 'session.jsonl');
+      await fs.writeFile(path, '{"role":"user","content":"a declaration"}\n');
+      const store = new JsonlEventStore({ root });
+      const runId = 'source-run-1';
+      await store.append([{ id: 'event', schemaVersion: 1, type: 'qa.started', occurredAt: '2026-11-09T00:00:00Z',
+        context: { runId, traceId: 'trace', profileId: 'qa', attempt: 1, workItemId: 'github:acme/api#1', actor: { kind: 'system', id: 'test' } },
+        correlationId: runId, data: { kind: 'qa.started' } }]);
+      const pack = await buildEvidencePack({ sources: [
+        { id: 'audit', kind: 'audit', runId, path: store.pathFor(runId), allowedRoot: root },
+        { id: 'session', kind: 'session', path, allowedRoot: root },
+      ] });
+      const [observed, declared] = pack.entries.map(entry => entry.ref.id);
+      const request = requestFor(pack);
+      const applicability = { project: request.scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] };
+      const evaluationCases = ['normal', 'recovery', 'refusal'].map(kind => ({ kind, input: kind, expected: kind }));
+      const common = { title: 'revision', statement: 'observed operation', applicability };
+      const proposals = [
+        { ...common, kind: 'skill', payload: { newReason: 'new flow', triggers: ['on request'], prohibitedConditions: [], inputs: [], branches: [], recovery: [], completion: 'done', patch: 'new steps', evaluationCases } },
+        { ...common, kind: 'tool', payload: { existingTools: [], inputSchema: { type: 'integer' }, outputSchema: { type: 'integer' }, dependencies: [], permissions: [], timeoutMs: 1000, sideEffects: 'none', idempotency: 'pure', recovery: 'retry', source: 'return 1', tests: [
+          { kind: 'normal', input: '1', expected: '1' },
+          { kind: 'normal', input: '2', expected: '1' },
+          { kind: 'refusal', input: 'null', expected: 'refused' },
+        ] } },
+        { ...common, kind: 'fact', payload: { subject: 'subject', rule: 'rule', classification: 'proposal' } },
+      ];
+      for (const proposal of proposals) {
+        const output = (evidenceIds: string[]) => ({ type: 'goal_complete', distillation: {
+          version: 1, warnings: [], candidates: [{ ...proposal, evidenceIds }],
+        } });
+        expect(parseAnalysisOutput(output([observed]), request, pack).candidates).toHaveLength(1);
+        if (proposal.kind === 'fact') expect(parseAnalysisOutput(output([declared]), request, pack).candidates).toHaveLength(1);
+        else expect(() => parseAnalysisOutput(output([observed, declared]), request, pack)).toThrow(/complete observed evidence/);
+      }
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 
   it('rejects complete process claims from partial evidence and model-supplied authority', async () => {

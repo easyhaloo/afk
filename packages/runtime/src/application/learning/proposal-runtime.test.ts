@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { getEventListeners, once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { compareProposalActual, prepareAssetProposal, type ProposalInventory } from './proposals.js';
 import { verifyRepositoryAssetProposal, ProposalRuntimeCleanupError, type ProposalRuntimeOptions, type ProposalRuntimeResult } from './proposal-runtime.js';
@@ -35,17 +35,19 @@ afterAll(() => {
   if (process.env.AFK_TEST_PROPOSAL_EVIDENCE) writeFileSync(process.env.AFK_TEST_PROPOSAL_EVIDENCE, JSON.stringify({ baseImageId, evidence: realEvidence }, null, 2));
 });
 
-function fixture(timeoutMs = 500) {
+function fixture(timeoutMs = 500, artifactPath = 'asset.js') {
   const root = directory();
   const original = 'console.log(JSON.stringify({value:"old"}));\n';
-  writeFileSync(join(root, 'asset.js'), original);
+  const asset = join(root, artifactPath);
+  mkdirSync(dirname(asset), { recursive: true });
+  writeFileSync(asset, original);
   writeFileSync(join(root, 'helper.txt'), 'baseline');
   git(root, 'init', '-b', 'main');
   git(root, 'add', '.');
   git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture');
   const commit = git(root, 'rev-parse', 'HEAD');
   const inventory: ProposalInventory = { skills: [], toolSearches: ['cli', 'script', 'plugin'], tools: [{ kind: 'script', ref: 'script:fixture',
-    name: 'fixture', description: 'Existing fixture', provenance: 'configured-repository', source: { root, file: join(root, 'asset.js') } }] };
+    name: 'fixture', description: 'Existing fixture', provenance: 'configured-repository', source: { root, file: asset } }] };
   const prepared = prepareAssetProposal({ ...output.candidates[0], kind: 'tool', targetRef: 'script:fixture', title: 'Fixture tool', payload: {
     existingTools: ['script:fixture'], inputSchema: { type: 'object', properties: { key: { type: 'string', pattern: '^[a-z]+$' } }, required: ['key'], additionalProperties: false },
     outputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false },
@@ -84,11 +86,11 @@ function fixture(timeoutMs = 500) {
   vi.spyOn(provider, 'frozen', 'get').mockReturnValue(engine);
   const options: ProposalRuntimeOptions & { signal?: ProviderOperationOptions['signal'] } = {
     repository, request: { repository: workspace.repository, runId: workspace.runId }, expectedCommit: commit, inventory,
-    artifactPath: 'asset.js', baseImageId,
+    artifactPath, baseImageId,
     binding: { scope: output.candidates[0].applicability.project, candidateId: 'd'.repeat(64), candidateVersion: 1, evidenceDigest: 'e'.repeat(64) },
     sandbox: { executeFrozen: input => executeFrozenContainer(provider, input) },
     harness: { id: 'configured-behavior', revision: 'v1', kind: 'tool', cases: prepared.checks.map(check => ({
-      checkId: check.id, checkDigest: digest(check), argv: ['node', '/workspace/asset.js'], expected: { value: 'new' },
+      checkId: check.id, checkDigest: digest(check), argv: ['node', `/workspace/${artifactPath}`], expected: { value: 'new' },
     })), observe: vi.fn(async result => ({ status: 'observed' as const, actual: JSON.parse(result.stdout), assertions: 1 })) },
     assertCurrent: vi.fn(async () => {}), recordOwnership: vi.fn(async () => {}),
   };
@@ -727,6 +729,45 @@ describe('repository frozen proposal production orchestration', () => {
       addEventListener: controller.signal.addEventListener.bind(controller.signal), removeEventListener: controller.signal.removeEventListener.bind(controller.signal) } });
     expect((await verifyRepositoryAssetProposal(prepared, options)).status).toBe('verification-observed');
     expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
+  it('freezes only approved files from an oversized committed tree', async () => {
+    const artifactPath = 'scripts/asset.js';
+    const { root, options, prepared, original } = fixture(500, artifactPath);
+    writeFileSync(join(root, 'oversized.txt'), Buffer.alloc(8 * 1024 * 1024));
+    git(root, 'add', 'oversized.txt');
+    git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'oversized');
+    options.expectedCommit = git(root, 'rev-parse', 'HEAD');
+    const workspace = { ...await options.repository.prepare!(options.request, {}),
+      snapshot: { commit: options.expectedCommit, branch: 'main', dirty: false } };
+    vi.mocked(options.repository.snapshot).mockResolvedValue(workspace.snapshot);
+    vi.mocked(options.repository.prepare!).mockResolvedValue(workspace);
+    vi.mocked(options.repository.checkout!).mockResolvedValue(workspace);
+    const execute = vi.spyOn(options.sandbox, 'executeFrozen');
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow('Proposal committed input exceeds byte limit');
+    expect(execute).not.toHaveBeenCalled();
+
+    options.inputFiles = ['helper.txt'];
+    expect((await verifyRepositoryAssetProposal(prepared, options)).status).toBe('verification-observed');
+    for (const [request] of execute.mock.calls) {
+      expect(request.input.manifest.map(entry => entry.path)).toEqual(['helper.txt', 'scripts', artifactPath]);
+      expect(request.input.manifest[0].digest).toBe(bytesDigest('baseline'));
+    }
+    expect(execute.mock.calls.slice(0, 2).map(([request]) => request.input.manifest[2].digest)).toEqual([
+      bytesDigest(original), prepared.artifact.digest,
+    ]);
+
+    execute.mockClear();
+    options.inputFiles = ['missing.txt'];
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow('missing committed file');
+    expect(execute).not.toHaveBeenCalled();
+    options.inputFiles = ['helper.txt'];
+    git(root, 'update-index', '--assume-unchanged', artifactPath);
+    chmodSync(join(root, artifactPath), 0o755);
+    execute.mockClear();
+    expect(git(root, 'status', '--porcelain')).toBe('');
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow(/bytes or mode/);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it.each(['hidden-content', 'hidden-mode'] as const)('checks committed bytes despite clean status for %s', async change => {

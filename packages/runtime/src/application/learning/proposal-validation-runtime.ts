@@ -276,6 +276,7 @@ Promise<{ status: 'ready'; dependencies: ProposalValidationDependencies } | Bloc
       runtime: { repository, request: { repository: current.entry.repository.repository, runId: randomUUID() },
         expectedCommit: snapshot.commit, inventory: catalog.inventory, inventoryDigest: catalog.inventoryDigest,
         inventoryRoot: current.entry.repository.root, artifactPath: current.entry.asset.path, baseImageId: current.entry.sandbox.baseImageId,
+        ...(current.entry.repository.inputFiles === undefined ? {} : { inputFiles: current.entry.repository.inputFiles }),
         ...(current.grant.sandbox.permissionObserverImageId === undefined ? {} : { permissionObserverImageId: current.grant.sandbox.permissionObserverImageId }),
         ...(scratchHelper === undefined ? {} : { scratchHelper }),
         harness: { id: current.entry.semantic.adapter, revision: current.entry.semantic.revision, kind: prepared.kind, cases,

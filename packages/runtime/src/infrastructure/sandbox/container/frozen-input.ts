@@ -80,8 +80,19 @@ function seal(manifest: FrozenInputEntry[], files: Map<string, Buffer>): Capture
   return input;
 }
 
-export function captureFrozenInput(root: string, options: { signal?: AbortSignal } = {}): CapturedFrozenInput {
+export function captureFrozenInput(root: string, options: { signal?: AbortSignal; paths?: readonly string[] } = {}): CapturedFrozenInput {
   checkAbort(options.signal);
+  const selected = options.paths && new Set(options.paths);
+  const children = new Map<string, Set<string>>();
+  for (const path of selected ?? []) {
+    safePath(path);
+    let parent = '';
+    for (const name of path.split('/')) {
+      if (!children.has(parent)) children.set(parent, new Set());
+      children.get(parent)!.add(name);
+      parent = parent ? `${parent}/${name}` : name;
+    }
+  }
   if (resolve(root) !== root || realpathSync(root) !== root || !lstatSync(root).isDirectory()) throw new Error('Frozen input root must be a canonical directory');
   const manifest: FrozenInputEntry[] = [];
   const files = new Map<string, Buffer>();
@@ -93,13 +104,16 @@ export function captureFrozenInput(root: string, options: { signal?: AbortSignal
     const before = lstatSync(directory);
     if (!before.isDirectory() || before.isSymbolicLink() || realpathSync(directory) !== directory) throw new Error('Frozen input directory changed');
     const names: string[] = [];
-    const handle = opendirSync(directory);
-    try {
-      for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
-        if (names.length >= 1024 - count) throw new Error('Frozen input entry limit exceeded');
-        names.push(entry.name);
-      }
-    } finally { handle.closeSync(); }
+    if (selected) names.push(...(children.get(prefix) ?? []));
+    else {
+      const handle = opendirSync(directory);
+      try {
+        for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
+          if (names.length >= 1024 - count) throw new Error('Frozen input entry limit exceeded');
+          names.push(entry.name);
+        }
+      } finally { handle.closeSync(); }
+    }
     for (const name of names.sort()) {
       checkAbort(options.signal);
       if (++count > 1024) throw new Error('Frozen input entry limit exceeded');
@@ -112,6 +126,7 @@ export function captureFrozenInput(root: string, options: { signal?: AbortSignal
         continue;
       }
       safePath(path);
+      if (selected && (metadata.isDirectory() ? selected.has(path) : children.has(path))) throw new Error('Frozen input selection must contain only files');
       if (metadata.isDirectory()) {
         manifest.push({ path, kind: 'directory', mode: 0o555, size: 0, digest: digest('') });
         visit(source, path, depth + 1);

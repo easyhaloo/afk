@@ -52,6 +52,7 @@ const absoluteAssetPath = savedPath.refine(value => !value.includes('\\'));
 const repositorySchema = z.object({ providerId: learningIdentitySchema,
   repository: z.object({ url: learningIdentitySchema, ref: learningIdentitySchema.optional() }).strict(),
   root: absoluteAssetPath, expectedCommit: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+  inputFiles: z.array(assetPath).max(32).refine(paths => new Set(paths).size === paths.length).optional(),
 }).strict();
 const assetSchema = z.object({ ref: learningIdentitySchema
   .refine(value => /^(?:cli|script|plugin|skill):[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)
@@ -171,6 +172,7 @@ const assetCheckerSchema = z.object({ mode: z.literal('repository-asset'), scope
   inventory: z.object({ file: absoluteAssetPath, digest: learningDigestSchema }).strict(), sandbox: sandboxSchema,
   semantic: z.union([semanticSchema, skillLoadSchema]), evidence: evidenceSchema.optional(),
 }).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.semantic.adapter))
+  .refine(value => value.repository.inputFiles === undefined || (value.kind === 'tool' && value.asset.ref !== null && !value.repository.inputFiles.includes(value.asset.path)))
   .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || !value.semantic.cases.some(entry => entry.experiment.recovery !== undefined) || value.sandbox.scratchHelper !== undefined)
   .refine(value => (value.semantic.protocol !== 'claude-explicit-load-v1'
     && value.semantic.cases.some(entry => entry.experiment.permissionDenial !== undefined)) === (value.sandbox.permissionObserverImageId !== undefined))
@@ -213,6 +215,7 @@ export const proposalExecutionGrantSchema = z.object({ version: z.literal(1), pu
   limits: z.object({ timeoutMs: z.number().int().positive().safe().max(120_000),
     maxOutputBytes: z.number().int().positive().safe().max(DISTILLATION_LIMITS.outputBytes) }).strict(),
 }).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.adapter.id) && (!value.skillObservation || value.kind === 'skill')
+  && (value.repository.inputFiles === undefined || (value.kind === 'tool' && value.asset.ref !== null && !value.repository.inputFiles.includes(value.asset.path)))
   && (value.sandbox.permissionObserverImageId === undefined || value.kind === 'tool')
   && (value.allowed.sideEffects !== 'filesystem' || (value.kind === 'tool' && value.sandbox.scratchHelper !== undefined)));
 export type ProposalExecutionGrant = z.infer<typeof proposalExecutionGrantSchema>;

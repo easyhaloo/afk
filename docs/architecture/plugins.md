@@ -1786,6 +1786,8 @@ The private proposal catalog v1 accepts optional `resources: [{ path, digest }]`
 
 Repository-asset validation snapshots the current checkout. A configured `repository.ref` must match the current branch. When the ref is omitted, a provider may supply the current branch during preparation. Both paths require the pinned commit and preserve repository identity through checkout.
 
+Set `repository.inputFiles` in both the checker and its independent execution grant to validate a tool revision with bounded inputs. List up to 32 additional repository-relative files, or use `[]` for the asset alone. The frozen inputs include the asset, the listed files, and their parent directories. Each original file must match the pinned Git blob and mode in a clean checkout. Omitting the setting retains whole-tree capture for tools.
+
 A repository tool revision uses the exact logical `targetRef` recorded for the asset. Independent validation requires complete observed source evidence. A correction journal provides declared context for a draft. The repository-asset checker accepts self-contained scripts with empty `dependencies` and `permissions`. Checker-provided scratch writes declare `sideEffects: "filesystem"` and require a configured recovery experiment.
 
 The tool's `inputSchema` covers both ordinary inputs and the actual JSON arguments of configured cancellation, timeout, permission-denial and recovery experiments, including both recovery phases. Use `anyOf` when ordinary and control input shapes differ. Refusal inputs must fail schema validation.

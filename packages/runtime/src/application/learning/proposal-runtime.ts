@@ -48,6 +48,7 @@ export interface ProposalRuntimeOptions extends ProviderOperationOptions {
   inventoryDigest?: string;
   inventoryRoot?: string;
   artifactPath: string;
+  inputFiles?: readonly string[];
   baseImageId: string;
   permissionObserverImageId?: string;
   scratchHelper?: CapturedFrozenScratchHelper;
@@ -132,7 +133,7 @@ async function git(workspace: string, args: string[], signal?: AbortSignal): Pro
 }
 
 async function captureCommitted(workspace: RepositoryWorkspace, commit: string, artifactPath: string, originalDigest: string | null,
-  skills: ProposalInventory['skills'], signal?: AbortSignal): Promise<CapturedFrozenInput> {
+  skills: ProposalInventory['skills'], paths: readonly string[] | undefined, signal?: AbortSignal): Promise<CapturedFrozenInput> {
   const root = workspace.path!;
   const text = async (args: string[]) => (await git(root, args, signal)).toString('utf8').trim();
   if (await text(['rev-parse', '--show-toplevel']) !== root || await text(['rev-parse', 'HEAD']) !== commit
@@ -142,7 +143,9 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
   if (await text(['cat-file', '-t', commit]) !== 'commit') throw new Error('Proposal baseline must be a Git commit');
   const objectFormat = await text(['rev-parse', '--show-object-format']);
   if (!['sha1', 'sha256'].includes(objectFormat)) throw new Error('Unsupported Git object format');
-  const tree = (await git(root, ['ls-tree', '-r', '-z', '--full-tree', commit], signal)).toString('utf8').split('\0').filter(Boolean);
+  const tree = (await git(root, ['--literal-pathspecs', 'ls-tree', '-r', '-z', '--full-tree', commit,
+    ...(paths === undefined ? [] : ['--', ...paths])], signal)).toString('utf8').split('\0').filter(Boolean);
+  const selected = paths && new Set(paths);
   if (tree.length > 1024) throw new Error('Proposal committed input exceeds entry limit');
   const expected = new Map<string, { mode: number; digest: string; size: number }>();
   const directories = new Set<string>();
@@ -151,6 +154,7 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
     const entry = /^(100644|100755) blob ([a-f0-9]{40}|[a-f0-9]{64})\t([^\0]+)$/.exec(item);
     if (!entry) throw new Error('Proposal commit contains an unsupported input type');
     const [, mode, object, path] = entry;
+    if (selected && !selected.delete(path)) throw new Error('Proposal input selection must contain only committed files');
     if (path.split('/').some(part => !part || part === '..' || part === '.' || part === '.git')) throw new Error('Unsafe committed proposal path');
     const content = await git(root, ['cat-file', 'blob', object], signal);
     total += content.length;
@@ -161,7 +165,8 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
     let parent = path.lastIndexOf('/');
     while (parent >= 0) { directories.add(path.slice(0, parent)); parent = path.lastIndexOf('/', parent - 1); }
   }
-  const input = captureFrozenInput(root, { signal });
+  if (selected?.size) throw new Error('Proposal input selection contains a missing committed file');
+  const input = captureFrozenInput(root, { signal, paths });
   if (input.manifest.length !== expected.size + directories.size) throw new Error('Proposal captured tree differs from committed inventory');
   for (const entry of input.manifest) {
     if (entry.kind === 'directory') { if (!directories.has(entry.path)) throw new Error('Proposal captured an uncommitted directory'); continue; }
@@ -210,6 +215,10 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   const commit = supplied.expectedCommit;
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) throw new Error('Proposal requires an exact committed baseline');
   const artifactPath = supplied.artifactPath;
+  const paths = supplied.inputFiles === undefined ? undefined : [...supplied.inputFiles, artifactPath].sort();
+  if (paths && (prepared.kind !== 'tool' || !prepared.artifact.originalDigest || paths.length > 33 || new Set(paths).size !== paths.length)) {
+    throw new Error('Proposal input selection requires an existing tool and unique committed files');
+  }
   if (!artifactPath || isAbsolute(artifactPath) || artifactPath.includes('\\') || artifactPath.split('/').some(part => !part || ['.', '..', '.git'].includes(part))) throw new Error('Unsafe configured proposal artifact path');
   const skill = prepared.kind === 'skill' ? inventory.skills.find(entry => `skill:${entry.name}` === prepared.artifact.targetRef) : undefined;
   if (prepared.kind === 'skill' && basename(artifactPath) !== 'SKILL.md') throw new Error('Configured skill artifact must be SKILL.md');
@@ -292,6 +301,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   const executeFrozen = supplied.sandbox.executeFrozen.bind(supplied.sandbox);
   const configurationDigest = digest({ repositoryId, request, commit, artifactPath, baseImageId, inventoryDigest, inventoryRoot,
     binding, harnessId: harness.id, harnessRevision: harness.revision, cases, proposal: prepared,
+    ...(paths === undefined ? {} : { paths }),
     ...(scratchHelper === undefined ? {} : { scratchHelper }), ...(limits === undefined ? {} : { limits }),
     ...(permissionObserverImageId === undefined ? {} : { permissionObserverImageId }) });
   const current = async () => { checkAbort(signal); await assertCurrent(binding, { signal }); checkAbort(signal); };
@@ -326,7 +336,8 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
       checkAbort(signal);
       assertWorkspace(workspace);
       if (workspace.path !== preparedPath) throw new Error('Proposal checkout relocated the owned workspace');
-      const committed = await captureCommitted(workspace, commit, artifactPath, prepared.artifact.originalDigest, inventory.skills, signal);
+      const committed = await captureCommitted(workspace, commit, artifactPath, prepared.artifact.originalDigest,
+        paths === undefined ? inventory.skills : [], paths, signal);
       const amended = replaceFrozenFile(committed, artifactPath, Buffer.from(prepared.artifact.content, 'utf8'));
       const skillFiles = prepared.kind === 'skill' ? [artifactPath] : undefined;
       if (skill && skillFiles) skillFiles.push(...(skill.resources ?? []).map(resource =>

@@ -447,6 +447,9 @@ collector 不具备完整语义资格。保存配置及新增实验遵守以下�
 - 配置 `version: 2`，checker 的 `mode: repository-asset`；包含 scope、checkerId、version、
   kind、repository、asset、inventory、sandbox、semantic、executionAuthorizationFile 及可选 evidence。
   仅选择匹配 scope/checkerId/kind 的条目；v1 知识配置保留原行为，不执行未选中的资产 checker。
+- 已有工具的修订可在 checker 和独立执行许可中同时设置 `repository.inputFiles`。填写最多 32 个额外的仓库相对文件路径，或用 `[]` 仅冻结资产。
+  冻结输入包含资产、列出的文件及其父目录。原文件须来自干净的检出，文件字节及模式必须与固定 Git 提交一致。
+  省略设置时，工具仍使用整树冻结。
 - 执行许可为独立私密文件，`version: 1`、`purpose: proposal-validation-execution`。
   绑定 checker 摘要和版本、项目、资产、精确仓库 commit、catalog 摘要、固定镜像、adapter 及宿主 revision；
   还须绑定候选的 `candidateId`、`candidateVersion`、`candidateDigest` 和 `evidenceDigest`。

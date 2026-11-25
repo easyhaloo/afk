@@ -129,6 +129,7 @@ function describeChecker(checker: ProposalValidationChecker) {
   const configuration = { ...metadata, runtime: { request: runtime.request, expectedCommit: runtime.expectedCommit,
     inventory: runtime.inventory, inventoryDigest: runtime.inventoryDigest, inventoryRoot: runtime.inventoryRoot,
     artifactPath: runtime.artifactPath, baseImageId: runtime.baseImageId, repositoryId: repository.id,
+    ...(runtime.inputFiles === undefined ? {} : { inputFiles: runtime.inputFiles }),
     ...(runtime.permissionObserverImageId === undefined ? {} : { permissionObserverImageId: runtime.permissionObserverImageId }),
     ...(runtime.scratchHelper === undefined ? {} : { scratchHelper: runtime.scratchHelper }),
     ...(runtime.sandbox.limits === undefined ? {} : { limits: runtime.sandbox.limits }),

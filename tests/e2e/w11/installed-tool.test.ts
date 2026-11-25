@@ -136,7 +136,7 @@ async function consumeExcludedTool(entry: typeof recallCases[number], profile: P
       contextRead: contextRead!.name, messages: transcript.length, nativeExportSha256: createHash('sha256').update(raw).digest('hex') };
   }
   expect(sessionId).toMatch(/^ses_/);
-  const { stdout } = await execute('opencode', ['session', 'export', sessionId], { cwd: workspace,
+  const { stdout } = await execute('opencode', ['session', 'export', sessionId, '--standalone'], { cwd: workspace,
     env: { ...sessionEnv, HOME: userHome }, maxBuffer: 8 * 1024 * 1024 });
   await fs.writeFile(join(evidence, 'native.json'), stdout, { mode: 0o600 });
   const transcript = JSON.parse(stdout);

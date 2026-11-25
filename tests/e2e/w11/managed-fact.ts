@@ -72,7 +72,7 @@ export async function verifyManagedFact(input: {
   const gathered = await execute(process.execPath, [binary, 'plugin', 'invoke', 'context.provider', 'context.knowledge', 'gather', '--input', controlFile], { env, cwd: fixture });
   const fragments = JSON.parse(gathered.stdout);
   expect(fragments).toEqual([{ origin, content: expect.stringContaining(fact.asset.source) }]);
-  const exported = await execute('opencode', ['session', 'export', native.sessionId], { cwd: workspace, maxBuffer: 8 * 1024 * 1024,
+  const exported = await execute('opencode', ['session', 'export', native.sessionId, '--standalone'], { cwd: workspace, maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, HOME: userHome, PWD: workspace, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? join(userHome, '.local/share') } });
   const transcript = JSON.parse(exported.stdout);
   expect(transcript.info.id).toBe(native.sessionId);

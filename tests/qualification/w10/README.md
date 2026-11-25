@@ -170,6 +170,8 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 
 ## 本轮两项实测
 
+macOS arm64 安装版 `0.2.215` 通过 `sandbox.docker` 启动隔离的本机 Docker `28.3.2` 容器。`docker top` 确认负载正在运行。手动中断发送 `SIGINT`，500 ms 后容器仍运行。`agent.wait` 触发 `SIGKILL` 并返回 `aborted`。关闭后旧句柄返回 `404 SANDBOX_MISSING`，独立 Docker 查询按完整 ID 确认容器移除，共通过 10 项检查，兜底清理数为零。[取消回执](docker-cancel.receipt.json)
+
 2026-11-19，Node 24.18.0。**[D]** 通过本机 Unix socket 连接 Docker 28.3.2，使用预存 Alpine。真实容器写 `/workspace/from-container.txt`，宿主读回 `hello`，1 项通过，27 项未选。**[J]** 本树 CLI 0.2.141 和 Git 2.53.0 检查两个真实临时仓库的别名、分支、提交及脏状态，1 项通过，100 项未选。
 
 从已有依赖及构建产物的工作树根复跑。使用新临时目录和仅含所需变量的环境，先核对镜像 ID，再执行容器用例。

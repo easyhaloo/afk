@@ -230,7 +230,9 @@ export class GitHubClient implements TrackerProvider {
 
   async listIssueComments(id: number): Promise<TrackerIssueComment[]> {
     const { owner, repo } = this.getOwnerRepo();
-    const { data } = await this.client.issues.listComments({ owner, repo, issue_number: id, per_page: 100 });
+    const data = await this.client.paginate('GET /repos/{owner}/{repo}/issues/{issue_number}/comments', {
+      owner, repo, issue_number: id, per_page: 100,
+    });
     return data.map(comment => ({ id: String(comment.id), body: comment.body ?? '' }));
   }
 
@@ -318,16 +320,14 @@ export class GitHubClient implements TrackerProvider {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
-    const { data } = await oct.pulls.list({
+    const data = await oct.paginate('GET /repos/{owner}/{repo}/pulls', {
       owner,
       repo,
       state,
       per_page: options.perPage || 20,
     });
     return data.map(pr => {
-      // merged property exists on individual PR get but may not on list
-      const merged = (pr as any).merged;
-      const prState = merged ? 'merged' : pr.state === 'open' ? 'opened' : 'closed';
+      const prState = pr.merged_at ? 'merged' : pr.state === 'open' ? 'opened' : 'closed';
       return {
         id: pr.number,
         platform: 'github' as const,

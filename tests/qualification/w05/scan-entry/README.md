@@ -26,7 +26,7 @@ AFK_TEST_FROZEN_DOCKER=1 AFK_TEST_FROZEN_IMAGE=<local-node-image-id> \
   -t 'of the bounded manifest scan'
 ```
 
-With the suite's pinned image already present, replay the Docker case with:
+Replay the Docker case with the suite's pinned image or set `AFK_TEST_FROZEN_SCRATCH_COMPILER_IMAGE` to the exact ID of a reviewed local image with Node and a C compiler that supports static builds. This setting also applies to the paired recovery test in `proposal-runtime.test.ts`. Image pulls are disabled for both replays.
 
 ```sh
 AFK_FROZEN_SCRATCH_DOCKER=1 AFK_FROZEN_SCRATCH_EVIDENCE=/absolute/path/to/receipt.json \

@@ -1303,6 +1303,19 @@ on the action settling. SDK callers can use `currentTriggerDeliveryId()`, `Trigg
 3. For a tracker, save `{}` as `empty.json`. Run `afk plugin invoke tracker.issue <linear-or-jira> health --input empty.json --json` and check for `status` equal to `ok`. Save `{"issueId":"DEMO-123"}` as `issue.json`, substituting a known authorized test issue. Run `afk plugin invoke tracker.issue <linear-or-jira> getIssue --input issue.json --json` and verify the returned issue. Both operations are read-only.
 4. For a notifier, confirm the webhook's destination accepts a test post. Save `{"title":"Plugin connection test","body":"Check CHECK-001"}` as `message.json`, substituting a unique check ID. Run `afk plugin invoke notification.provider <full-plugin-id> notify --input message.json --json`. Check for `delivered: true` and confirm the same ID in the destination group or channel.
 
+### First connection to Cursor and AWS SSM
+
+**Cursor (`agent.cursor`)**
+
+1. Install the Cursor CLI and run `cursor-agent login` to authorize your account in the browser. For unattended use, create a user API key and supply it through `CURSOR_API_KEY` in the AFK process environment. [Installation](https://cursor.com/docs/cli/installation) · [Authentication and API keys](https://cursor.com/docs/cli/reference/authentication)
+2. In the same environment, run `afk plugin doctor --probe --plugin agent.cursor`, `cursor-agent status`, and `cursor-agent models`. If the model list returns `Authentication required`, finish browser login again or check the API key before running a read-only Cursor task through AFK.
+
+**AWS SSM (`host.aws-ssm`)**
+
+1. Install AWS CLI v2. Choose an authorized Linux test node in Systems Manager and record its instance ID and region. Use a profile authorized to run `AWS-RunShellScript` on that node and read or cancel the invocation. For IAM Identity Center, configure the profile with `aws configure sso --profile ssm-test`, then run `aws sso login --profile ssm-test`. [CLI installation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) · [SSO setup](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) · [Run Command setup](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html)
+2. Replace `i-0123456789abcdef0`, `us-east-1`, and `ssm-test` with the node ID, region, and local profile name and save `{"hosts":[{"alias":"ssm-test","instanceId":"i-0123456789abcdef0"}],"region":"us-east-1","profile":"ssm-test"}` as `settings.json`. Run `afk plugin configure host.aws-ssm --builtin --file settings.json`.
+3. Run `afk plugin doctor --probe --plugin host.aws-ssm` to check the CLI. Run `afk host exec ssm-test --provider aws-ssm --timeout 30s --json -- echo CHECK-001`, substituting a unique check ID. Verify exit code `0` and the ID in stdout. Supply only the test node ID, region, and profile name when handing off the configuration.
+
 ### Complete configured example and scheduled invocation
 
 This `~/.afk/plugins.yml` example uses actual factory fields. The Linear entry
@@ -1553,6 +1566,11 @@ Dispatch and SQLite persistence are not a cross-system transaction.
 Selection proves neither model reading nor adoption or benefit. This currently covers the builtin
 experience Provider, with no generic plugin-feedback protocol or new CLI command.
 
+Built-in `context.knowledge` records `knowledge.retrieved` and `knowledge.selected` in the run audit.
+Both bind the publication key, candidate version, target digest and retrieved content digest to the run and work item.
+Selection also records the retained fragment digest after executor acceptance and reference integrity verification.
+Model use and workflow benefit require separate evidence.
+
 Persisted `run.finished`, `qa.failed` and `failure.classified` events now derive version-one
 outcome receipts for actual builtin experience selections. Each receipt preserves its full
 historical `selected` snapshot, event run/sequence/hash/type/outcome, occurrence and observation
@@ -1633,7 +1651,7 @@ Desktop's fixed `learning` API provides project/job/candidate queries, independe
 
 Default implementation and QA obtain these conditions through the configuration action and supply experience/knowledge consumption. Explicit context fields from trusted callers take precedence. Projects must match the work item and prepared repository; Git revision/dirty are observed from the actual worktree and cannot be configured. Version maps and conditions are bounded to 32 entries each; unknown fields, duplicate projects and invalid scopes are rejected. Prompts do not supply these conditions; inherited target/applicability properties are rejected at consumption boundaries. Disabling automatic learning still permits valid asset reads; disabling the plugin removes this action.
 
-Committed lessons are projected idempotently into ExperienceStore in the same learning directory. Bindings include the actual publication key (including a navigation successor), candidate ID/digest, validated version, evidence digest and validator version. Retry preserves the experience ID, expiry, metrics and adoption receipts; reconciliation never re-enables revoked experiences. Recall and adoption, including saved-receipt replay, recheck current source, QA, configuration, authorization, content and applicability. Historical visibility does not imply current eligibility. Version labels and environments use their validated ranges; a consumer revision need not equal the source QA revision. Contexts containing named productVersions/runtimeVersions are rejected until compatibility evidence supports those mappings.
+Committed lessons are projected idempotently into ExperienceStore in the same learning directory. Bindings include the actual publication key (including a navigation successor), candidate ID/digest, validated version, evidence digest and validator version. Retry preserves the experience ID, expiry, metrics and adoption receipts. Reconciliation never re-enables revoked experiences. Recall and adoption, including saved-receipt replay, recheck current source, QA, configuration, authorization, content and applicability. Historical visibility does not imply current eligibility. Versions and environments must match their validated ranges. The consumer revision may differ from the source QA revision. A lesson with a validated `productId` requires exactly that product in `target.productVersions`. Its version must agree with `applicability.version` when both are supplied. Lessons without a validated product use the scalar version and reject nonempty product maps. Nonempty `target.runtimeVersions` maps are unsupported for published lessons.
 
 Production callers supply a trusted home and reread its single enabled builtin learning.distiller entry on consumption. config.enabled:false disables automatic learning while permitting eligible reads. An explicit custom experience file without home or trusted knowledge settings never falls back to the real user home. Publication-bound records are excluded from v1 export; copy and ordinary verify cannot transfer or grant their publication authority. If Wiki commit succeeds but projection fails, publication returns its committed receipt with experienceProjection.blocked; reconciliation reports experience_projection_blocked and can repair missing projections. Cancellation after commit preserves the original abort reason; later reconciliation can restore the projection.
 
@@ -1762,9 +1780,19 @@ Missing observation context, mismatched execution binding, detected revision cha
 
 Optional `validation: { configurationFile }` selects a canonical absolute path to private checker configuration. Its shape is `{ version: 1, checkers: [...] }`; each checker declares `scope/checkerId/providerId/version/authorizationFile/target`, with `target: { ref, root, path }`. Exact scope/checker identity selects a registered Verification Provider. Managed sources are reconstructed from ledger scan registration, audit integrity and recorded sessions. Unregistered imports need trusted configuration with a matching evidence-digest source manifest; clients cannot supply it.
 
-Verifiers must implement the independent-assertion `learning-validation-v1` protocol and stable identity; ordinary test-runner providers do not qualify. Fact/process use domain assertions. Lesson additionally requires saved configuration with explicit `allowLessonValidation: true` and `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`, retaining current grant scope, target and revocation checks. Original source identity and independent QA audit integrity, system events and repair revision are verified before independently observing root cause, fix, prevention and applicability. Passing QA cannot replace semantic validation. The oracle snapshot digest and QA Git revision are bound separately. This permission is for lesson validation only; publication separately requires an explicit lesson target grant. Skill/tool use proposal validation; real production qualification remains blocked by the unavailable skill interpreter and tool permission-denied experiment. The review route does not bypass these guards or establish publication/installation completion.
+Verifiers must implement the independent-assertion `learning-validation-v1` protocol and stable identity; ordinary test-runner providers do not qualify. Fact/process use domain assertions. Lesson additionally requires saved configuration with explicit `allowLessonValidation: true` and `qa: { scope, workItemId, runId, targetRevision, root, auditDigest }`, retaining current grant scope, target and revocation checks. Original source identity and independent QA audit integrity, system events and repair revision are verified before independently observing root cause, fix, prevention and applicability. Passing QA cannot replace semantic validation. The oracle snapshot digest and QA Git revision are bound separately. This permission is for lesson validation only; publication separately requires an explicit lesson target grant. Skill and tool proposals require supported semantic contracts and independent execution grants. The same requirements apply to the review route. Publication and installation have separate acceptance criteria.
 
 The private proposal catalog v1 accepts optional `resources: [{ path, digest }]` for each skill. Paths are relative to the owning `SKILL.md` directory; `digest` is the SHA-256 of the resource bytes. Declarations must be nonempty when present, unique, and cannot claim another skill's files or a skill entry point. The existing bounded scan applies the same file and UTF-8 checks to resources and rejects unlisted, missing, or changed files. Declared resources are part of the inventory digest, must match the captured Git commit before staging, and remain identical across original and proposed inputs. These declarations neither grant tool permissions nor prove that a skill interpreter loaded or executed a resource.
+
+Repository-asset validation snapshots the current checkout. A configured `repository.ref` must match the current branch. When the ref is omitted, a provider may supply the current branch during preparation. Both paths require the pinned commit and preserve repository identity through checkout.
+
+A repository tool revision uses the exact logical `targetRef` recorded for the asset. Independent validation requires complete observed source evidence. A correction journal provides declared context for a draft. The repository-asset checker accepts self-contained scripts with empty `dependencies` and `permissions`. Checker-provided scratch writes declare `sideEffects: "filesystem"` and require a configured recovery experiment.
+
+The tool's `inputSchema` covers both ordinary inputs and the actual JSON arguments of configured cancellation, timeout, permission-denial and recovery experiments, including both recovery phases. Use `anyOf` when ordinary and control input shapes differ. Refusal inputs must fail schema validation.
+
+Normal proposal tests represent successful calls with JSON outputs. The independent checker exercises cancellation, timeout, permission denial and multi-step recovery. The proposed source and recovery description specify how the tool handles those cases.
+
+After a timeout during failure or repair analysis, the single-candidate retry prioritizes an asset revision when observations identify the exact repository asset and show the changed behavior. When those observations are absent, a confirmed repair can support a Lesson.
 
 For repair review, `qa` additionally requires `repair: { failure, fix }` as pinned
 above. Validation binds the failed source audit, a successful implementation fix
@@ -1786,17 +1814,33 @@ container identities; it recomputes the fragment rather than trusting flags.
 The maximum qualification is `qualified-bounded-returns-and-state`, with effect
 history always unobserved. Missing return assertions and requests for effect
 history remain unsupported. This contract is wired into saved production proposal
-configuration, execution grants, Runtime and final acceptance. Host execution
-grants use v3 and require independent reauthorization; saved configuration and
-grants bind the helper path and digest, while the host retains its owned capture
+configuration, execution grants, Runtime and final acceptance. The host revision
+is `proposal-validation-runtime-v5`. Saved configuration and grants bind the
+helper path and digest, while the host retains its owned capture
 API object and rechecks file identity. Each execution independently saves effective
 limits and operation/container identities. Final acceptance rechecks the contract,
 wrapper, helper, phase bytes and output without persisting trusted context.
-Semantic evidence revalidation errors return invalid_receipt, preserving timeout
-and cancellation priority. Mandatory permission-denied coverage still blocks
-before repository selection. This does not qualify tool publication or prove outer
-policy, cleanup, observer provenance or complete side effects. Current tests use
-synthetic observations, not container or native-execution acceptance.
+Semantic evidence revalidation errors return `invalid_receipt`, preserving timeout
+and cancellation priority. Recovery evidence qualifies only the bounded returns
+and state in its contract. `allowed.sideEffects` must match the proposal. Only
+tool proposals with a pinned scratch helper and a configured recovery experiment
+can use `filesystem`. This grant covers bounded sandbox scratch writes.
+
+Tool `permission-denied` checks support `readonly-workspace-openat-v1` with a
+schema-validated `callInput`, an exact file in the frozen `/workspace` manifest,
+and the same `sandbox.permissionObserverImageId` in saved configuration and the
+independent execution grant. Missing supported configuration blocks preflight
+before repository selection. Acceptance requires a matching operation, container
+and cgroup receipt, at least one kernel `EROFS` denial of a write to the exact
+target, and passing exit and output assertions. This qualifies the observed
+operation. Full candidate qualification requires the remaining checks as well.
+
+The persisted proposal receipt is capped at 32 KiB before base64 encoding. To
+reconstruct an observation, merge the report's `observationBinding`, comparison
+`binding` and observation `receipt.binding` in that order. Restore `expected`
+from the comparison and, for semantic observations, `actual` from
+`receipt.semantic.assertions`. Hash the reconstructed receipt to verify its
+`receiptDigest`.
 
 ### Knowledge publication and reading integration
 

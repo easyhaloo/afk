@@ -8,6 +8,7 @@ import { CodexProvider } from '../../../domain/agents/codex.js';
 import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
 import type { AgentStartOptions } from '../../../domain/agents/types.js';
 import { collectAgentTelemetry } from '../../observability/agent-telemetry.js';
+import { getAfkResourceRegistry } from '../../runtime/resource-registry.js';
 import { ContainerAgentExecution, ContainerSandbox } from './sandbox.js';
 import type { ContainerCreateOptions, ContainerEngine, ContainerProvider } from './types.js';
 
@@ -45,6 +46,34 @@ async function files(engine: ContainerEngine = 'docker') {
     },
   };
 }
+
+describe.each(['docker', 'podman'] as const)('container cleanup / %s', engine => {
+  it('shares a failed close, tracks the container until retry, and closes it only once', async () => {
+    const { root, provider } = await files(engine);
+    const sandbox = new ContainerSandbox({ worktreePath: root, image: 'test', user: '1000:1000' });
+    const remove = vi.fn<Parameters<ContainerProvider['remove']>, ReturnType<ContainerProvider['remove']>>()
+      .mockRejectedValueOnce(new Error('engine unavailable'))
+      .mockResolvedValue(undefined);
+    provider.create = async ({ name }) => ({ id: 'container', name, engine });
+    provider.remove = remove;
+    sandbox.bindProvider(provider);
+    await sandbox.createContainer();
+    const registry = getAfkResourceRegistry();
+
+    const closes = await Promise.allSettled([sandbox.close(), sandbox.close()]);
+    expect(closes).toEqual([
+      { status: 'rejected', reason: new Error('engine unavailable') },
+      { status: 'rejected', reason: new Error('engine unavailable') },
+    ]);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(registry.listActive(root)).toMatchObject([{ externalId: 'container', status: 'active' }]);
+
+    await sandbox.close();
+    await sandbox.close();
+    expect(remove.mock.calls).toEqual([['container', true], ['container', true]]);
+    expect(registry.listActive(root)).toEqual([]);
+  });
+});
 
 function nativeLines(name: 'cursor' | 'pi', root: string) {
   return name === 'cursor' ? [

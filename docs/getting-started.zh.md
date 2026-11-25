@@ -21,6 +21,7 @@ bash /tmp/afk-install.sh
 
 已有源码仓库也可以直接运行 `./install.sh`，同样下载发布包，不构建当前源码。
 升级时保留旧版本，其他安装入口和运行中的进程可以继续使用。将 `AFK_HOME` 设为绝对路径可隔离发布包和下载缓存，使用 `--prefix` 指定可执行文件目录。
+CLI 运行时根据 `HOME` 定位 `~/.afk/plugins.yml`。测试 `afk plugin configure` 等命令时，请使用独立的 `HOME`。
 
 ```bash
 bash /tmp/afk-install.sh --version 0.1.0 --skip-completion

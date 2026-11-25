@@ -1,22 +1,22 @@
 import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { createHash } from 'node:crypto';
-import { promises as fs, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { promises as fs } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Command } from 'commander';
 import { z } from 'zod';
 import type { AgentToolCallSummary, RunEvent } from '@afk/core';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import { JsonlEventStore } from '@afk/runtime/infrastructure/observability/jsonl-event-store';
-import { readAgentTelemetry, readAgentTools, findCodexRollout } from '@afk/runtime/infrastructure/observability/agent-telemetry';
+import { readAgentTranscriptTelemetry, findCodexRollout } from '@afk/runtime/infrastructure/observability/agent-telemetry';
 import { defaultSessionStoreChain } from '@afk/runtime/application/sessions/chain';
-import { claudeProjectSlug } from '@afk/runtime/shared/agent-transcript-path';
+import { claudeTranscriptPath } from '@afk/runtime/shared/agent-transcript-path';
 import { ClaudeCodeProvider } from '@afk/runtime/domain/agents/claude-code';
 import { buildEvidencePack, saveEvidencePack, buildRetroPrompt, executeAnalysis,
   retroModelOutputSchema as modelOutputSchema, retroReportSchema as reportSchema,
   type EvidencePack, type EvidenceSourceInput } from '@afk/runtime/execution';
 
-const RETRO_VERSION = '4';
+const RETRO_VERSION = '5';
 
 type RetroReport = z.infer<typeof reportSchema>;
 type Event = RunEvent;
@@ -125,10 +125,7 @@ async function findStateRoot(workspace: string, executionId: string): Promise<st
 async function transcriptPath(workspace: string, provider: RetroOptions['provider'], sessionId: string): Promise<string | undefined> {
   if (provider === 'codex') return findCodexRollout(sessionId);
   if (provider === 'opencode') return `opencode://session/${encodeURIComponent(sessionId)}`;
-  let realWorkspace = workspace;
-  try { realWorkspace = realpathSync(workspace); } catch { /* workspace may be a fixture */ }
-  const slug = claudeProjectSlug(realWorkspace);
-  return join(homedir(), '.claude', 'projects', slug, `${sessionId}.jsonl`);
+  return claudeTranscriptPath(workspace, sessionId);
 }
 
 function assertRetroEvidence(findings: z.infer<typeof modelOutputSchema>['findings'], pack: EvidencePack): void {
@@ -178,32 +175,53 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   const sessions = integrity.valid ? sessionEvents(events) : [];
   const sessionProjections: Array<{ sessionId: string; source: 'transcript_found' | 'transcript_missing' | 'transcript_unindexed'; transcriptPath?: string; usage?: unknown; tools?: AgentToolCallSummary[]; transcript?: string }> = [];
   const missing: string[] = [];
-  for (const session of sessions) {
-    const recordedPath = options.transcript ?? session.transcriptPath;
-    const archivedRoot = join(homedir(), '.afk', 'transcripts') + '/';
-    const indexedPath = recordedPath && !recordedPath.startsWith(archivedRoot) ? recordedPath : undefined;
-    const indexedTranscript = indexedPath ? await transcriptExists(indexedPath) : false;
-    const path = indexedTranscript ? indexedPath : await transcriptPath(options.workspace, options.provider, session.sessionId);
-    const transcript = indexedTranscript || (path ? await transcriptExists(path) : false);
-    if (path && !path.startsWith('opencode://')) evidenceSources.push({
-      id: `session-${evidenceSources.length}`, kind: 'session', path, allowedRoot: dirname(path), provider: options.provider,
-    });
-    if (!path || !transcript) {
-      missing.push(`transcript:${session.sessionId}`);
-      sessionProjections.push({ sessionId: session.sessionId, source: 'transcript_missing', ...(path ? { transcriptPath: path } : {}), tools: undefined, usage: undefined });
-      continue;
+  const nativePaths = new Map<string, string>();
+  let staging: string | undefined;
+  let pack: EvidencePack;
+  try {
+    for (const session of sessions) {
+      const recordedPath = options.transcript ?? session.transcriptPath;
+      const archivedRoot = join(homedir(), '.afk', 'transcripts') + '/';
+      const indexedPath = recordedPath && !recordedPath.startsWith(archivedRoot) ? recordedPath : undefined;
+      const nativePath = options.provider === 'opencode' && indexedPath?.startsWith('opencode://session/');
+      const indexedTranscript = nativePath || (indexedPath ? await transcriptExists(indexedPath) : false);
+      const path = indexedTranscript ? indexedPath : await transcriptPath(options.workspace, options.provider, session.sessionId);
+      const native = options.provider === 'opencode' && path?.startsWith('opencode://session/');
+      const telemetry = path && (native || indexedTranscript || await transcriptExists(path))
+        ? await readAgentTranscriptTelemetry({ provider: options.provider, transcriptPath: path, sandboxKind: 'local' }, native === true)
+        : undefined;
+      const id = `session-${evidenceSources.length}`;
+      if (!path || !telemetry) {
+        missing.push(`transcript:${session.sessionId}`);
+        sessionProjections.push({ sessionId: session.sessionId, source: 'transcript_missing', ...(path ? { transcriptPath: path } : {}), tools: undefined, usage: undefined });
+        continue;
+      }
+      if (!native) evidenceSources.push({ id, kind: 'session', path, allowedRoot: dirname(path), provider: options.provider });
+      const { usage, tools, nativeExport } = telemetry;
+      if (!usage && !tools) missing.push(`telemetry:${session.sessionId}`);
+      if (native && nativeExport) {
+        staging ??= await fs.mkdtemp(join(tmpdir(), 'afk-retro-native-'));
+        const snapshot = join(staging, `${id}.json`);
+        await fs.writeFile(snapshot, nativeExport, { mode: 0o600, flag: 'wx' });
+        evidenceSources.push({ id, kind: 'session', path: snapshot, allowedRoot: staging, format: 'json' });
+        nativePaths.set(id, path);
+      } else if (native) {
+        missing.push(`transcript-evidence:${session.sessionId}`);
+      }
+      sessionProjections.push({ sessionId: session.sessionId, source: indexedTranscript ? 'transcript_found' : 'transcript_unindexed', transcriptPath: path, usage, tools });
     }
-    const telemetryOptions = { provider: options.provider, transcriptPath: path, sandboxKind: 'local' as const };
-    const [usage, tools] = await Promise.all([readAgentTelemetry(telemetryOptions), readAgentTools(telemetryOptions)]);
-    if (!usage && !tools) missing.push(`telemetry:${session.sessionId}`);
-    sessionProjections.push({ sessionId: session.sessionId, source: indexedTranscript ? 'transcript_found' : 'transcript_unindexed', transcriptPath: path, usage, tools });
+    pack = await buildEvidencePack({ sources: evidenceSources });
+  } finally {
+    if (staging) await fs.rm(staging, { recursive: true, force: true });
+  }
+  for (const source of pack.sources) {
+    if (source.completeness === 'partial' && (source.kind !== 'audit' || integrity.valid)) missing.push(`evidence:${source.id}`);
   }
 
-  const pack = await buildEvidencePack({ sources: evidenceSources });
   const evidence: EvidenceFile[] = pack.sources.flatMap(source => {
     const input = evidenceSources.find(entry => entry.id === source.id)!;
-    return source.sourceDigest ? [{ kind: source.kind === 'session' ? 'transcript' : source.kind, path: input.path,
-      uri: `evidence://${source.sourceDigest}`, sha256: source.sourceDigest, mediaType: 'application/x-ndjson' }] : [];
+    return source.sourceDigest ? [{ kind: source.kind === 'session' ? 'transcript' : source.kind, path: nativePaths.get(source.id) ?? input.path,
+      uri: `evidence://${source.sourceDigest}`, sha256: source.sourceDigest, mediaType: input.format === 'json' ? 'application/json' : 'application/x-ndjson' }] : [];
   });
   for (const session of sessionProjections) {
     const transcript = evidence.find(entry => entry.kind === 'transcript' && entry.path === session.transcriptPath);

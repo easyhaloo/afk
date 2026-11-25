@@ -161,12 +161,15 @@ export function extractOpenCodeToolEvents(lines: readonly string[]): AgentToolCa
   const tools: AgentToolCallSummary[] = [];
   for (const line of lines) {
     try {
-      const exportData = JSON.parse(line) as { messages?: Array<{ parts?: unknown[] }> };
+      const exportData = JSON.parse(line) as { messages?: Array<{ type?: string; content?: unknown[]; parts?: unknown[] }> };
       for (const message of exportData.messages ?? []) {
-        for (const rawPart of message.parts ?? []) {
+        const parts = message.type === 'assistant' ? message.content : message.parts;
+        for (const rawPart of parts ?? []) {
           if (!isObject(rawPart)) continue;
-          const part = rawPart as { type?: unknown; callID?: unknown; tool?: unknown; state?: unknown };
-          if (part.type !== 'tool' || typeof part.callID !== 'string' || typeof part.tool !== 'string') continue;
+          const part = rawPart as { type?: unknown; id?: unknown; name?: unknown; callID?: unknown; tool?: unknown; state?: unknown };
+          const id = part.callID ?? part.id;
+          const name = part.tool ?? part.name;
+          if (part.type !== 'tool' || typeof id !== 'string' || !id || typeof name !== 'string' || !name) continue;
           const state = isObject(part.state) ? part.state as { status?: unknown } : {};
           const status = state.status;
           const result: AgentToolCallSummary['result'] = status === 'error' || status === 'rejected'
@@ -174,7 +177,7 @@ export function extractOpenCodeToolEvents(lines: readonly string[]): AgentToolCa
             : status === 'completed'
               ? 'succeeded'
               : 'in_progress';
-          tools.push({ id: part.callID, name: part.tool, result });
+          tools.push({ id, name, result });
         }
       }
     } catch {

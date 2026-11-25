@@ -11,13 +11,7 @@ const controls = JSON.parse(readFileSync(new URL('./control-cases.json', import.
 const historicalCases = (JSON.parse(readFileSync(new URL('./checker-cases.json', import.meta.url), 'utf8')) as
   { checkId: string; experiment: unknown }[]).map(({ checkId, experiment }) =>
   ({ checkId, ...proposalSemanticConfigurationSchema.parse(experiment) }));
-const inputSchema = {
-  anyOf: [
-    { type: 'string' },
-    { type: 'object', properties: { phase: { type: 'string', enum: ['fault', 'resume', 'wait'] }, manifest: { type: 'string' } },
-      required: ['phase', 'manifest'], additionalProperties: false },
-  ],
-};
+const { inputSchema } = controls;
 const fixture = fileURLToPath(new URL('./checkpoint.fixture.mjs', import.meta.url));
 let scratch: string;
 beforeEach(() => { scratch = mkdtempSync(join(tmpdir(), 'scan-entry-control-')); });
@@ -58,6 +52,17 @@ it.runIf(process.geteuid !== undefined && process.geteuid() !== 0)('independentl
   expect(readFileSync(writablePath, 'utf8')).toBe(replacement);
   expect(() => write(protectedPath)).toThrow(expect.objectContaining({ code: expectedErrno, path: protectedPath }));
   expect(readFileSync(protectedPath, 'utf8')).toBe(original);
+});
+
+it('binds the permission checker to the same checkpoint write used in recovery', () => {
+  const { check, case: { checkId, checkDigest, experiment } } = controls.permission;
+  const prepared = prepareProposalExperiment('tool', 'checkpoint.fixture.mjs', check, experiment, inputSchema);
+  expect(prepared).toMatchObject({ status: 'prepared', experiment: { checkId, checkDigest } });
+  const checkpoint = join(scratch, 'scan-checkpoint.json');
+  writeFileSync(checkpoint, '', { flag: 'wx' });
+  const run = spawnSync(process.execPath, [fixture, experiment.callInput], { cwd: scratch, timeout: 5000, encoding: 'utf8' });
+  expect([run.status, run.stdout, run.stderr]).toEqual([23, '', '']);
+  expect(readFileSync(checkpoint).toString('base64')).toBe(controls.recovery.case.experiment.recovery.assertions.fault[0].bytes);
 });
 
 it('prepares the bounded checker and observes partial, recovered and replayed checkpoints', () => {

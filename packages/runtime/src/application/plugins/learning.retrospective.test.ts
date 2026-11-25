@@ -384,7 +384,7 @@ describe('learning.retrospective production routing with mocked intake, worker/q
     const result = route === 'direct' ? await runtime.dispatchSystemAction('learning.retrospective', input) : await execute();
     expect(result).toEqual({ scope, runId, requestKey, processing: requestState().processing,
       prepared: [{ candidateId, validatedVersion: 8, publication }] });
-    expect(mocks.capture.mock.calls).toEqual([[{ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId }]]);
+    expect(mocks.capture.mock.calls).toEqual([[{ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId, retryAnalysis: true }]]);
     expect(mocks.query.mock.calls).toEqual([[{ directory: join(homeDir, '.afk', 'learning'), ...target }]]);
     expect(mocks.queryAll).not.toHaveBeenCalled();
     expect(mocks.worker).not.toHaveBeenCalled();
@@ -485,7 +485,7 @@ describe('learning.retrospective production routing with mocked intake, worker/q
       provider, reconcileSources: expect.any(Function) })]]);
     expect(mocks.runOnce.mock.calls).toEqual([[target]]);
     await mocks.worker.mock.calls[0]![0].reconcileSources();
-    expect(mocks.capture).toHaveBeenLastCalledWith({ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId });
+    expect(mocks.capture).toHaveBeenLastCalledWith({ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId, retryAnalysis: true });
     expect(mocks.closeWorker).toHaveBeenCalledTimes(1);
     await runtime.close();
     expect(mocks.closeWorker).toHaveBeenCalledTimes(1);

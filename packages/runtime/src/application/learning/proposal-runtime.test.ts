@@ -150,13 +150,16 @@ describe('repository frozen proposal production orchestration', () => {
     expect(repository.cleanup).toHaveBeenCalledOnce();
   });
 
-  it('blocks unsupported control experiments before allocating a repository', async () => {
+  it.each([false, true])('blocks permission experiments before repository allocation (contract present: %s)', async bound => {
     const { options, prepared, repository, engine } = fixture();
     const check = prepared.checks.find(entry => entry.kind === 'permission-denied')!;
     const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
-    configured.argv = ['node', '/workspace/asset.js', check.input];
+    const callInput = '{"key":"protected"}';
+    configured.argv = ['node', '/workspace/asset.js', bound ? callInput : check.input];
     configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: check.kind, input: check.input,
-      assertions: [{ id: 'exit', source: 'exit-code', expected: 0 }, { id: 'claimed', source: 'stdout', expected: 'cancelled' }] };
+      assertions: [{ id: 'exit', source: 'exit-code', expected: 0 }, { id: 'claimed', source: 'stdout', expected: 'denied' }],
+      ...(bound ? { callInput, permissionDenial: { contractRevision: 'readonly-workspace-openat-v1', operation: 'openat-write',
+        target: '/workspace/asset.js', errno: 'EROFS' } } : {}) };
     expect(await verifyRepositoryAssetProposal(prepared, options)).toMatchObject({ status: 'blocked', code: 'oracle_unsupported' });
     expect(repository.prepare).not.toHaveBeenCalled();
     expect(engine.buildFrozenImage).not.toHaveBeenCalled();
@@ -812,6 +815,26 @@ describe('repository frozen proposal production orchestration', () => {
     if (result.status !== 'verification-observed') throw new Error('Expected observations');
     expect(result.comparisons.every(entry => entry.original === undefined)).toBe(true);
     expect(options.recordOwnership).toHaveBeenCalledTimes(fresh.checks.length);
+  });
+
+  it.each(['main', 'other'])('checks an implicitly selected branch %s against the baseline', async ref => {
+    const { options, prepared, repository, workspace, engine } = fixture();
+    const baseline = { ...workspace.snapshot };
+    vi.mocked(repository.snapshot).mockResolvedValue(baseline);
+    options.request = { ...options.request, repository: { url: workspace.repository.url } };
+    const resolvedWorkspace = { ...workspace, repository: { ...workspace.repository, ref } };
+    vi.mocked(repository.prepare!).mockResolvedValue(resolvedWorkspace);
+    vi.mocked(repository.checkout!).mockResolvedValue(resolvedWorkspace);
+    const verification = verifyRepositoryAssetProposal(prepared, options);
+    if (ref === baseline.branch) {
+      const result = await verification;
+      if (result.status !== 'verification-observed') throw new Error('Expected actual observations');
+      expect(result.comparisons[0].proposed.receipt.binding.repositoryDigest).toBe(digest(options.request.repository));
+    } else {
+      await expect(verification).rejects.toThrow(/ownership|baseline/);
+      expect(engine.startFrozenContainer).not.toHaveBeenCalled();
+    }
+    expect(repository.cleanup).toHaveBeenCalledWith({ workspaceId: workspace.id }, expect.anything());
   });
 
   it.each(['id', 'runId', 'path', 'repository', 'dirty', 'commit'] as const)('rejects checkout %s drift and cleans only the allocated workspace', async field => {

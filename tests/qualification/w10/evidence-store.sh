@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
-if [ "$#" -ne 1 ]; then
-  echo 'Usage: sh evidence-store.sh /path/to/installed/0.2.147/bin/afk' >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  echo 'Usage: sh evidence-store.sh /path/to/installed/afk [expected-version]' >&2
   exit 2
 fi
 recipe=$(cd "$(dirname "$0")" && pwd -P)
@@ -15,6 +15,6 @@ exec env -i HOME="$scratch/home" TMPDIR="$scratch/tmp" W10_DB="$scratch/store.sq
   node --input-type=module -e '
     import * as sdk from "@afk/runtime/plugin-sdk";
     import { pathToFileURL } from "node:url";
-    const [recipe, cli, scratch] = process.argv.slice(1);
-    await (await import(pathToFileURL(recipe))).qualify(sdk, cli, scratch);
-  ' "$recipe/evidence-store.mjs" "$cli" "$scratch"
+    const [recipe, cli, scratch, expectedVersion] = process.argv.slice(1);
+    await (await import(pathToFileURL(recipe))).qualify(sdk, cli, scratch, expectedVersion);
+  ' "$recipe/evidence-store.mjs" "$cli" "$scratch" "${2-0.2.147}"

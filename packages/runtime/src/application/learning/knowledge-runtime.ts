@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import type { ContextFragment, ContextQuery, ContextSource, ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
 import { recallTerms } from '../../domain/context/terms.js';
-import { CandidateStore } from './candidate-store.js';
+import { CandidateStore, type PublicationRecord } from './candidate-store.js';
 import { learningScopeSchema, type CandidateProposal } from './contracts.js';
 import { readKnowledgeGrant, type KnowledgePolicy } from './knowledge.js';
 import { prepareKnowledgePublication, publishLearningCandidate, readCurrentPublishedKnowledge, readPublishedKnowledge, reconcileKnowledgePublications, resolveKnowledgePublication,
@@ -253,6 +254,12 @@ export class KnowledgeContextProvider implements ContextSource {
   constructor(private readonly options: KnowledgeRuntimeOptions) {}
 
   async gather(query: ContextQuery, operation?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
+    return (await this.gatherWithPublications(query, operation)).map(result => result.fragment);
+  }
+
+  async gatherWithPublications(query: ContextQuery, operation?: ProviderOperationOptions): Promise<{
+    fragment: ContextFragment; publication: PublicationRecord;
+  }[]> {
     const signals = [operation?.signal, this.options.signal].filter((signal): signal is AbortSignal => signal !== undefined);
     const signal = signals.length ? AbortSignal.any(signals) : undefined;
     checkAbort({ signal });
@@ -265,9 +272,10 @@ export class KnowledgeContextProvider implements ContextSource {
     if (!terms.size && !/\p{Script=Han}{2}/u.test(query.prompt)) return [];
     try {
       return await withStore({ ...this.options, signal }, async store => {
-        const fragments: ContextFragment[] = [];
+        const results: { fragment: ContextFragment; publication: PublicationRecord }[] = [];
         const { bindings } = loadBindings(this.options.config);
-        let bytes = 0;
+        const budget = 8000;
+        let remaining = budget;
         const ranked = store.listPublications().flatMap(publication => {
           checkAbort({ signal });
           if (publication.phase !== 'committed') return [];
@@ -288,12 +296,27 @@ export class KnowledgeContextProvider implements ContextSource {
             validationConfigurationFile: this.options.validationConfigurationFile, homeDir: this.options.homeDir,
             applicability: query.applicability, target: query.target });
           checkAbort({ signal });
-          if (!knowledge || bytes + Buffer.byteLength(knowledge.content, 'utf8') > 8000) continue;
-          bytes += Buffer.byteLength(knowledge.content, 'utf8');
-          fragments.push({ origin: `knowledge:${publication.key}; target:${publication.targetRef}`, content: knowledge.content });
-          if (fragments.length >= limit) break;
+          if (!knowledge || results.some(result => result.publication.key === knowledge.publication.key)) continue;
+          let content = knowledge.content;
+          if (Buffer.byteLength(content, 'utf8') > budget && knowledge.lesson) {
+            const { title, payload } = knowledge.lesson;
+            const heading = `Excerpt from published Wiki Lesson (${knowledge.path})\n\n`;
+            const excerpt = [title, `Trigger: ${payload.trigger}`, `Root cause: ${payload.rootCause}`,
+              `Fix: ${payload.fix}`, `Prevention: ${payload.prevention.join('; ')}`].join('\n');
+            const excerptBudget = remaining - Buffer.byteLength(heading, 'utf8');
+            if (excerptBudget <= 0) continue;
+            const body = new StringDecoder('utf8').write(Buffer.from(excerpt, 'utf8').subarray(0, excerptBudget));
+            if (!body) continue;
+            content = heading + body;
+          }
+          const size = Buffer.byteLength(content, 'utf8');
+          if (size > remaining) continue;
+          remaining -= size;
+          const current = knowledge.publication;
+          results.push({ fragment: { origin: `knowledge:${current.key}; target:${current.targetRef}`, content }, publication: current });
+          if (results.length >= limit) break;
         }
-        return fragments;
+        return results;
       });
     } catch { checkAbort({ signal }); return []; }
   }

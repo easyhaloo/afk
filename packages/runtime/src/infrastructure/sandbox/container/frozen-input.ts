@@ -207,7 +207,7 @@ export function buildFrozenContext(input: CapturedFrozenInput, baseImageId: stri
   if (operationId !== undefined && !/^[a-f0-9-]{36}$/.test(operationId)) throw new Error('Invalid frozen build ownership');
   const ownership = operationId ? `LABEL afk.frozen.managed="true" afk.frozen.operation="${operationId}"\n` : '';
   if (helper) assertFrozenScratchHelper(helper);
-  const dockerfile = `FROM ${baseImageId}\n${ownership}COPY input/ /workspace/\n${helper ? 'COPY observer/ /afk-observer/\n' : ''}WORKDIR /workspace\nUSER 1000:1000\nENTRYPOINT []\nHEALTHCHECK NONE\n`;
+  const dockerfile = `FROM ${baseImageId}\n${ownership}COPY input/ /workspace/\n${helper ? 'COPY observer/ /afk-observer/\n' : ''}`;
   const entries = [tarEntry('Dockerfile', Buffer.from(dockerfile), 0o444), tarEntry('input/', Buffer.alloc(0), 0o555, true)];
   if (helper) entries.push(tarEntry('observer/', Buffer.alloc(0), 0o555, true), tarEntry('observer/scratch-v1', helpers.get(helper)!, 0o555));
   for (const entry of input.manifest) entries.push(tarEntry(`input/${entry.path}${entry.kind === 'directory' ? '/' : ''}`, files.get(entry.path) ?? Buffer.alloc(0), entry.mode, entry.kind === 'directory'));

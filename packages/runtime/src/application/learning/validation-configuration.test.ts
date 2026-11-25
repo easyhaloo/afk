@@ -78,6 +78,39 @@ describe('shared validation configuration', () => {
     expect(module.validationConfigurationSchema.safeParse(v2(recoveryAsset(legacy))).success).toBe(true);
   });
 
+  it('includes the exact denied operation and target in the saved checker digest', async () => {
+    const module = await configuration();
+    const entry = asset();
+    const permissionDenial = { contractRevision: 'readonly-workspace-openat-v1', operation: 'openat-write',
+      target: '/workspace/guard', errno: 'EROFS' };
+    const configured = { ...experiment(), kind: 'permission-denied', input: 'Deny the declared permissions', callInput: '{}', permissionDenial };
+    const observer = `sha256:${'e'.repeat(64)}`;
+    type ExperimentFixture = Omit<typeof configured, 'permissionDenial' | 'callInput'>
+      & Partial<Pick<typeof configured, 'permissionDenial' | 'callInput'>>;
+    const save = (configuredExperiment: ExperimentFixture,
+      observerImageId = configuredExperiment.permissionDenial ? observer : undefined) => v2({ ...entry,
+      sandbox: { ...entry.sandbox, ...(observerImageId === undefined ? {} : { permissionObserverImageId: observerImageId }) }, semantic: { ...entry.semantic,
+      cases: [{ ...entry.semantic.cases[0], checkId: 'control-permission', experiment: configuredExperiment }] } });
+    const saved = save(configured);
+    expect(module.validationConfigurationSchema.parse(saved)).toEqual(saved);
+    const checkerDigest = (value: unknown) => createHash('sha256')
+      .update(canonicalLearningJson(module.validationConfigurationSchema.parse(value).checkers[0])).digest('hex');
+    expect(checkerDigest(saved)).not.toBe(checkerDigest(save({ ...configured, permissionDenial: { ...permissionDenial, target: '/workspace/other' } })));
+    expect(checkerDigest(saved)).not.toBe(checkerDigest(save(configured, image)));
+    expect(module.validationConfigurationSchema.safeParse(save(configured, 'observer:latest')).success).toBe(false);
+    expect(module.validationConfigurationSchema.safeParse(v2({ ...(saved.checkers[0] as typeof entry), sandbox: entry.sandbox })).success).toBe(false);
+    for (const target of ['/scratch/guard', '/workspace/../guard', '/workspace//guard', '/workspace/guard\n']) {
+      expect(module.validationConfigurationSchema.safeParse(save({ ...configured, permissionDenial: { ...permissionDenial, target } })).success)
+        .toBe(false);
+    }
+    for (const invalid of [{ ...configured, kind: 'normal' }, { ...configured, callInput: '' },
+      { ...configured, permissionDenial: { ...permissionDenial, operation: 'read' } }]) {
+      expect(module.validationConfigurationSchema.safeParse(save(invalid)).success).toBe(false);
+    }
+    expect(module.validationConfigurationSchema.safeParse(save({ ...configured, permissionDenial: undefined, callInput: undefined })).success)
+      .toBe(true);
+  });
+
   it('requires a helper only for cases with a recovery contract and preserves unbound legacy cases', async () => {
     const module = await configuration();
     const entry = recoveryAsset();

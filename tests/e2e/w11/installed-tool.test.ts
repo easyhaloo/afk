@@ -242,7 +242,7 @@ it.skipIf(!installed).each(recallCases.filter(entry => entry.kind === 'tool'))('
         const itemId = alias ? '48' : '47';
         const scan = { target: source.project, input: alias ? '9780306406158\n9780306406157\n5012345678900\n5012345678901' : '4006381333931\n4006381333932\n5901234123457' };
         await fs.writeFile(join(workspace, 'manifest.json'), JSON.stringify(scan));
-        const launcher = join(directory, 'afk');
+        const launcher = join(directory, 'afk.cjs');
         const binary = await fs.realpath(installed!);
         await fs.writeFile(launcher, `#!${process.execPath}\n` +
           `const {spawnSync}=require('node:child_process'),fs=require('node:fs');\n` +
@@ -251,7 +251,7 @@ it.skipIf(!installed).each(recallCases.filter(entry => entry.kind === 'tool'))('
           `fs.appendFileSync(${JSON.stringify(join(directory, 'calls.jsonl'))},JSON.stringify({args,status:r.status,stdout:r.stdout})+'\\n');\n` +
           `process.stdout.write(r.stdout??'');process.stderr.write(r.stderr??'');process.exit(r.status??1);\n`, { mode: 0o700 });
         const scenario = join(directory, 'scenario.json');
-        await fs.writeFile(scenario, JSON.stringify({ instructions: `从 .afk/experience-context.md 读取可用工具路由。使用 ${launcher} plugin invoke <capability> <provider> <operation> --input manifest.json --json 执行。校验位错误时退出码为 1，仍有 JSON 结果。将工具输出中的 checked 和 invalidLines 写入 answer.json。` }));
+        await fs.writeFile(scenario, JSON.stringify({ instructions: `只读取当前工作区的 .afk/experience-context.md 获取工具路由。使用 ${launcher} plugin invoke <capability> <provider> <operation> --input manifest.json --json 调用该路由一次。退出码 1 表示校验发现错误，stdout 仍是有效 JSON。将其 output 中的 checked 和 invalidLines 写入当前工作区的 answer.json。写入成功后直接按下方 AFK 完成协议回复，不再调用工具或搜索其他文件。` }));
         await fs.copyFile(delivery, join(directory, 'scan-manifest.tgz'));
         await fs.writeFile(join(directory, 'installation.json'), JSON.stringify({ cliVersion, tool: receipt, grant, sharedGrant: sharedGrant(receipt, source.project, workspace), catalog: JSON.parse(await fs.readFile(join(home, '.afk/plugins', catalog, 'install.json'), 'utf8')) }));
         console.info(`Managed ${entry.id} evidence: ${directory}`);
@@ -268,6 +268,7 @@ it.skipIf(!installed).each(recallCases.filter(entry => entry.kind === 'tool'))('
         expect(report.events).toContainEqual(expect.objectContaining({ kind: 'agent.session_recorded', sessionId: expect.stringMatching(/^ses_/) }));
         const business = alias ? { checked: 4, invalidLines: [1, 4] } : { checked: 3, invalidLines: [2] };
         const calls = (await fs.readFile(join(directory, 'calls.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+        expect(calls).toHaveLength(1);
         const call = calls.find(row => row.status === 1 && row.args.slice(0, 5).join(' ') === `plugin invoke ${route.capability} ${route.provider} ${route.operation}`);
         expect(JSON.parse(call.stdout)).toMatchObject({ passed: false, output: JSON.stringify(business) });
         expect(JSON.parse(await fs.readFile(join(workspace, 'answer.json'), 'utf8'))).toEqual(business);

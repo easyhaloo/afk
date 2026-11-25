@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { frozenExecutionArgv, verifyFrozenScratchRecoveryOutcome, type FrozenExecutionOptions,
+import { frozenExecutionArgv, verifyFrozenScratchRecoveryOutcome, type FrozenExecutionOptions, type FrozenPermissionDenialEvidence,
   type FrozenExecutionResult } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import { buildFrozenContext } from '../../infrastructure/sandbox/container/frozen-input.js';
 import type { FrozenScratchBaselineFailure } from '../../infrastructure/sandbox/container/types.js';
@@ -69,6 +69,12 @@ const recoverySchema = z.object({
   if (Object.values(value.returnAssertions).reduce((total, returned) => total + (returned.stdoutHex.length + returned.stderrHex.length) / 2, 0)
     > DISTILLATION_LIMITS.outputBytes) reject();
 });
+const permissionDenialSchema = z.object({
+  contractRevision: z.literal('readonly-workspace-openat-v1'),
+  operation: z.literal('openat-write'),
+  target: z.string().max(256).regex(/^\/workspace(?:\/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)+$/),
+  errno: z.literal('EROFS'),
+}).strict();
 const experimentSchema = z.object({
   protocol: z.literal('proposal-semantic-v1'), adapter: z.enum(['node-json-argv-v1', 'skill-trace-v1']),
   skillTrace: skillTraceBindingSchema.optional(),
@@ -77,6 +83,7 @@ const experimentSchema = z.object({
   assertions: z.array(assertionSchema).min(2).max(32),
   control: z.object({ kind: z.enum(['cancellation', 'timeout']), afterMs: z.number().int().positive().max(120_000) }).strict().optional(),
   recovery: recoverySchema.optional(),
+  permissionDenial: permissionDenialSchema.optional(),
 }).strict();
 export const proposalSemanticConfigurationSchema = experimentSchema;
 export type ProposalSemanticConfiguration = z.infer<typeof experimentSchema>;
@@ -90,6 +97,7 @@ export interface ProposalSemanticExecutionContext {
 }
 export interface ProposalSemanticObservation {
   protocol: 'proposal-semantic-v1'; experimentDigest: string; deliveredInputDigest: string;
+  permissionDenial?: FrozenPermissionDenialEvidence;
   skillTrace?: ReturnType<typeof observeSkillTrace>['trace'];
   baselineFailure?: { phase: FrozenScratchBaselineFailure['failedPhase']; reason: FrozenScratchBaselineFailure['reason'];
     expectedExitCode: number; observedExitCode: number; phasesObserved: number; evidenceDigest: string };
@@ -117,6 +125,9 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
     }
   }
   if (recovery !== undefined && check.kind !== 'recovery') throw new Error('Semantic recovery differs from check kind');
+  if (configured.permissionDenial && (check.kind !== 'permission-denied' || configured.adapter !== 'node-json-argv-v1' || kind !== 'tool')) {
+    throw new Error('Semantic permission denial differs from check kind or adapter');
+  }
   if (configured.adapter === 'skill-trace-v1') {
     const binding = configured.skillTrace;
     if (kind !== 'skill' || !binding) return { status: 'unsupported', reason: 'skill_interpreter_unavailable' };
@@ -134,23 +145,26 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
   }
   if (configured.skillTrace) throw new Error('Unexpected skill trace binding on tool experiment');
   if (kind !== 'tool') return { status: 'unsupported', reason: 'skill_interpreter_unavailable' };
-  if (!['normal', 'refusal', 'recovery', 'cancellation', 'timeout'].includes(check.kind)) return { status: 'unsupported', reason: 'control_experiment_unavailable' };
+  const permission = configured.permissionDenial;
+  if (check.kind === 'permission-denied' && !permission) return { status: 'unsupported', reason: 'control_experiment_unavailable' };
   const recovering = check.kind === 'recovery';
   if (recovering && recovery === undefined) return { status: 'unsupported', reason: 'recovery_contract_unavailable' };
   const controlled = check.kind === 'cancellation' || check.kind === 'timeout';
-  if (!controlled && !recovering && configured.callInput !== undefined) throw new Error('Semantic call input cannot replace a normal or refusal case');
+  if (!controlled && !recovering && !permission && configured.callInput !== undefined) throw new Error('Semantic call input cannot replace a normal or refusal case');
   if (controlled ? configured.control?.kind !== check.kind : configured.control !== undefined || configured.assertions.some(entry => entry.source === 'control')) {
     throw new Error('Semantic control differs from check kind');
   }
   const exits = configured.assertions.filter(entry => entry.source === 'exit-code');
   if (exits.length !== 1 || !configured.assertions.some(entry => entry.source !== 'exit-code')
-    || (controlled ? exits[0].expected !== 137 : check.kind === 'normal' || recovering ? exits[0].expected !== 0 : exits[0].expected === 0)) throw new Error('Semantic experiment lacks required outcome assertions');
+    || (controlled ? exits[0].expected !== 137 : check.kind === 'normal' || recovering ? exits[0].expected !== 0
+      : check.kind === 'refusal' && exits[0].expected === 0)) throw new Error('Semantic experiment lacks required outcome assertions');
   if (check.kind === 'normal') {
     const parsedInput: unknown = JSON.parse(configured.input);
     compareProposalActual(parsedInput, parsedInput);
   }
-  if (controlled) {
-    if (configured.callInput === undefined || toolInputSchema === undefined) return { status: 'unsupported', reason: 'control_input_unavailable' };
+  if (controlled || permission) {
+    if (configured.callInput === undefined || toolInputSchema === undefined) return { status: 'unsupported',
+      reason: permission ? 'permission_denial_input_unavailable' : 'control_input_unavailable' };
     const callInput: unknown = JSON.parse(configured.callInput);
     compareProposalActual(callInput, callInput);
     checkProposalToolParameterPaths(callInput);
@@ -175,6 +189,27 @@ export function prepareProposalExperiment(kind: PreparedAssetProposal['kind'], a
 
 export function observeProposalExperiment(experiment: PreparedProposalExperiment, execution: Readonly<FrozenExecutionResult>,
   context?: ProposalSemanticExecutionContext): ProposalSemanticObservation {
+  const permissionDenial = execution.evidence.permissionDenial;
+  if (experiment.kind === 'permission-denied') {
+    const configured = experiment.permissionDenial;
+    const requested = context?.options.permissionDenial;
+    const evidence = execution.evidence;
+    if (!configured || !requested || !context || !permissionDenial || requested.target !== configured.target
+      || !/^sha256:[a-f0-9]{64}$/.test(requested.observerImageId)
+      || !/^[1-9][0-9]{0,19}$/.test(permissionDenial.cgroupId)
+      || !Number.isSafeInteger(permissionDenial.deniedWrites) || permissionDenial.deniedWrites < 0
+      || !isDeepStrictEqual(permissionDenial, { ...configured, observerImageId: requested.observerImageId,
+        operationId: context.operationId, containerId: context.containerId, cgroupId: permissionDenial.cgroupId, deniedWrites: permissionDenial.deniedWrites })
+      || context.operationId !== evidence.operationId || context.containerId !== evidence.containerId
+      || context.options.input.digest !== evidence.inputDigest || context.options.baseImageId !== evidence.baseImageId
+      || !context.options.input.manifest.some(entry => entry.kind === 'file' && `/workspace/${entry.path}` === requested.target)
+      || buildFrozenContext(context.options.input, context.options.baseImageId, context.operationId).digest !== evidence.contextDigest
+      || evidence.mechanism !== 'docker-frozen-image' || evidence.cwd !== '/workspace'
+      || evidence.policy?.id !== context.containerId || evidence.policy.operationId !== context.operationId
+      || evidence.policy.imageId !== evidence.imageId || evidence.policy.status !== 'exited' || evidence.policy.exitCode !== execution.exitCode) {
+      throw new Error('Semantic permission denial requires a trusted operation witness');
+    }
+  } else if (permissionDenial !== undefined) throw new Error('Unexpected semantic permission denial witness');
   let baselineFailure: ProposalSemanticObservation['baselineFailure'];
   if (experiment.recovery !== undefined) {
     if (!context?.options.scratch?.recovery) throw new Error('Semantic recovery requires trusted execution context');
@@ -267,6 +302,8 @@ export function observeProposalExperiment(experiment: PreparedProposalExperiment
   return { protocol: 'proposal-semantic-v1', experimentDigest: digest(experiment),
     deliveredInputDigest: createHash('sha256').update(experiment.callInput ?? experiment.input).digest('hex'), assertions,
     ...(baselineFailure ? { baselineFailure } : {}),
+    ...(permissionDenial ? { permissionDenial } : {}),
     ...(skill && { skillTrace: skill.trace }),
-    passed: (skill?.passed ?? true) && !baselineFailure && controlTriggered && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
+    passed: (skill?.passed ?? true) && !baselineFailure && controlTriggered && (permissionDenial?.deniedWrites ?? 1) > 0
+      && assertions.every(assertion => assertion.status === 'observed' && assertion.passed) };
 }

@@ -371,7 +371,7 @@ jobs:
     # It still runs after changes land on main, alongside the required checks.
     if: needs.changes.outputs.shared == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout

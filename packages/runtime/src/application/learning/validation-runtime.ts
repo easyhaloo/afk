@@ -15,7 +15,7 @@ import type { FrozenExecutionOwnership } from '../../infrastructure/sandbox/cont
 import type { ProviderOperationOptions, RepositoryProvider, VerificationProvider } from '../../plugin-sdk/capabilities.js';
 import { CandidateStore, type LearningCandidate } from './candidate-store.js';
 import { DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
-import { buildEvidencePack, readEvidenceSource, type EvidenceSourceInput } from './evidence.js';
+import { buildEvidencePack, managedTranscriptRoots, readEvidenceSource, type EvidenceSourceInput } from './evidence.js';
 import { readKnowledgeAuthorization, readKnowledgeGrant } from './knowledge.js';
 import { canonicalLearningJson, learningIdentitySchema } from './requests.js';
 import { failedRunEvidenceFromEvents, successfulRunEvidenceFromEvents } from './run-evidence.js';
@@ -251,8 +251,7 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
           .sort((first, second) => first.sessionId < second.sessionId ? -1 : first.sessionId > second.sessionId ? 1 : 0);
         if (sessions.length > 63) throw new Error('managed_source_limit');
         const home = realpathSync(options.homeDir ?? homedir());
-        const roots = [join(home, '.afk', 'transcripts'), join(home, '.claude', 'projects'),
-          join(home, '.codex', 'sessions'), join(home, '.codex', 'archived_sessions')];
+        const roots = managedTranscriptRoots(home);
         resolved = [audit, ...sessions.map((session, index) => {
           const path = savedPath.parse(session.transcriptPath);
           const allowedRoot = roots.find(root => {
@@ -274,7 +273,7 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
           || (source.kind === 'audit' && request?.request.sourceRunId && source.runId !== request.request.sourceRunId)) {
           throw new Error('source_manifest_mismatch');
         }
-        return { ...source, expectedDigest: original.sourceDigest };
+        return { ...source, ...(cursor && original.range ? { range: original.range } : {}), expectedDigest: original.sourceDigest };
       });
       return { stored, sources };
     };
@@ -308,7 +307,9 @@ export async function validateConfiguredLearningCandidate(input: unknown, option
         checkBudget({ signal: controller.signal });
         const result = await validateProposalCandidate(parsed.data, assembled.dependencies, { ...options, signal: controller.signal,
           timeoutMs: Math.max(1, Math.floor(deadline - performance.now())) });
-        if (result.status === 'blocked' && (expired || performance.now() >= deadline)) return { status: 'blocked', code: 'timed_out' };
+        if (result.status === 'blocked' && result.code !== 'storage_failed' && (expired || performance.now() >= deadline)) {
+          return { status: 'blocked', code: 'timed_out' };
+        }
         return result;
       } finally {
         clearTimeout(timer);

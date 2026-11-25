@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { collectAgentTelemetry, extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, extractOpenCodeTranscriptTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
+import { collectAgentTelemetry, extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, extractOpenCodeTranscriptTokens, readAgentTelemetry, readAgentTools, readAgentTranscriptTelemetry, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
 import type { AgentExecution, ExecutionResult } from '../../domain/agents/types.js';
 import { mkdirSync, writeFileSync, rmSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -383,6 +383,7 @@ describe('resolveAgentTranscript', () => {
   let tmp: string;
 
   beforeEach(() => {
+    childProcessMocks.execFile.mockReset();
     tmp = '/tmp/afk-transcript-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
     mkdirSync(tmp, { recursive: true });
     vi.stubEnv('HOME', tmp);
@@ -478,8 +479,45 @@ describe('resolveAgentTranscript', () => {
     expect(childProcessMocks.execFile).not.toHaveBeenCalled();
   });
 
-  it('reads a database-only OpenCode session through the provider database command', async () => {
-    childProcessMocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => {
+  it('reads OpenCode 2.2 session usage and tool status from one sanitized export', async () => {
+    const tokens = { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 3 } };
+    const messages = [
+      { type: 'user', text: 'request' },
+      { type: 'assistant', tokens, content: [
+        { type: 'text', text: 'response' },
+        { type: 'tool', id: 'read-1', name: 'read', state: { status: 'completed' } },
+        { type: 'tool', id: 'shell-1', name: 'shell', state: { status: 'error' } },
+      ] },
+    ];
+    const stdout = JSON.stringify({ info: { id: 'ses_native', tokens }, messages }, null, 2);
+    childProcessMocks.execFile.mockImplementation((_file, _args, _options, callback) =>
+      callback(null, { stdout, stderr: '' }));
+
+    await expect(readAgentTranscriptTelemetry({ provider: 'opencode', transcriptPath: 'opencode://session/ses_native', sandboxKind: 'local' }, true)).resolves.toEqual({
+      usage: { inputTokens: 15, outputTokens: 6, totalTokens: 21 },
+      tools: [{ id: 'read-1', name: 'read', result: 'succeeded' }, { id: 'shell-1', name: 'shell', result: 'failed' }],
+      nativeExport: stdout,
+    });
+    expect(extractOpenCodeTranscriptTokens([JSON.stringify({ messages })])).toEqual({ inputTokens: 15, outputTokens: 6, totalTokens: 21 });
+    expect(childProcessMocks.execFile).toHaveBeenCalledTimes(1);
+    expect(childProcessMocks.execFile).toHaveBeenCalledWith('opencode', ['session', 'export', '--standalone', '--sanitize', 'ses_native'], expect.any(Object), expect.any(Function));
+  });
+
+  it('does not read a different OpenCode session or interpret an argument as a flag', async () => {
+    childProcessMocks.execFile.mockImplementation((_file, _args, _options, callback) =>
+      callback(null, { stdout: '{"info":{"id":"ses_other"},"messages":[]}', stderr: '' }));
+    const options = { provider: 'opencode', sandboxKind: 'local' } as const;
+    await expect(readAgentTranscriptTelemetry({ ...options, transcriptPath: 'opencode://session/--help' })).resolves.toBeUndefined();
+    await expect(readAgentTranscriptTelemetry({ ...options, transcriptPath: 'opencode://session/ses_native' })).resolves.toBeUndefined();
+    expect(childProcessMocks.execFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a legacy database-only OpenCode session when session export is unavailable', async () => {
+    childProcessMocks.execFile.mockImplementation((_file, args, _options, callback) => {
+      if (args[0] !== 'db') {
+        callback(new Error('Unknown command: session'));
+        return;
+      }
       const isSessionQuery = args[1]?.includes('from session');
       const isMessageQuery = args[1]?.includes('from message');
       const stdout = isSessionQuery
@@ -495,6 +533,6 @@ describe('resolveAgentTranscript', () => {
     expect(resolved).toEqual({ sessionId: 'ses_db', path: 'opencode://session/ses_db' });
     await expect(readAgentTelemetry({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual({ inputTokens: 12, outputTokens: 6, totalTokens: 18 });
     await expect(readAgentTools({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([{ id: 'call-db', name: 'bash', result: 'succeeded' }]);
-    expect(childProcessMocks.execFile).toHaveBeenCalledTimes(6);
+    expect(childProcessMocks.execFile).toHaveBeenCalledTimes(8);
   });
 });

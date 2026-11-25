@@ -22,13 +22,14 @@ export async function verifyManagedFact(input: {
   entryCase: (typeof recallCases)[number];
   receipt: { publication: { key: string; targetRef: string }; producerRun: string; producerSession: string };
   restoreAuthority?: () => Promise<void>;
+  withdrawn?: boolean;
 }) {
   const { binary, runtime, fixture, runDirectory, itemId, cliVersion, entryCase, receipt } = input;
   const userHome = userInfo().homedir;
   const workspace = join(runDirectory, 'workspace');
   await mkdir(workspace);
   const env = { ...process.env, HOME: fixture, USERPROFILE: fixture, AFK_EVENT_STORE_DIR: join(fixture, 'events') };
-  const negative = entryCase.expected === 'exclude';
+  const negative = input.withdrawn || entryCase.expected === 'exclude';
   const scope = entryCase.query.scope;
   const version = entryCase.query.target!.productVersions!.parcel;
   const origin = `knowledge:${receipt.publication.key}; target:${receipt.publication.targetRef}`;
@@ -71,7 +72,7 @@ export async function verifyManagedFact(input: {
   await writeFile(controlFile, JSON.stringify(control));
   const gathered = await execute(process.execPath, [binary, 'plugin', 'invoke', 'context.provider', 'context.knowledge', 'gather', '--input', controlFile], { env, cwd: fixture });
   const fragments = JSON.parse(gathered.stdout);
-  expect(fragments).toEqual([{ origin, content: expect.stringContaining(fact.asset.source) }]);
+  expect(fragments).toEqual(input.withdrawn ? [] : [{ origin, content: expect.stringContaining(fact.asset.source) }]);
   const exported = await execute('opencode', ['session', 'export', native.sessionId, '--standalone'], { cwd: workspace, maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, HOME: userHome, PWD: workspace, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? join(userHome, '.local/share') } });
   const transcript = JSON.parse(exported.stdout);
@@ -83,5 +84,5 @@ export async function verifyManagedFact(input: {
   }
   await writeFile(join(runDirectory, 'non-exposure.json'), JSON.stringify({ runId: report.runId, workItemId: report.workItemId,
     sessionId: native.sessionId, nativeMessages: transcript.messages.length, nativeExportSha256: createHash('sha256').update(exported.stdout).digest('hex'),
-    exposedSourceMarkers: [], provider: 'context.knowledge', retrieval, control: { query: control, origins: [fragments[0].origin] } }, null, 2));
+    exposedSourceMarkers: [], provider: 'context.knowledge', retrieval, control: { query: control, origins: fragments.map((fragment: { origin: string }) => fragment.origin) } }, null, 2));
 }

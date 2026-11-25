@@ -44,6 +44,7 @@ describeE2E('external TUI plugins', () => {
     const pluginDir = join(pluginHome, '.afk', 'plugins', 'example', 'dist');
     mkdirSync(pluginDir, { recursive: true });
     writeFileSync(join(pluginHome, '.afk', 'plugins.yml'), 'plugins:\n  - id: example\n    enabled: true\n');
+    writeFileSync(join(dirname(pluginDir), 'package.json'), '{"type":"module"}\n');
     writeFileSync(join(pluginDir, 'index.js'), `
       import React from ${JSON.stringify(reactUrl)};
       import { Text } from ${JSON.stringify(inkUrl)};
@@ -63,20 +64,22 @@ describeE2E('external TUI plugins', () => {
     processHandle = spawn(process.execPath, [distPath], {
       cols: 100,
       rows: 30,
+      cwd: pluginHome,
       env: { ...process.env, HOME: pluginHome, NO_TMUX: '1', AFK_SKIP_SPLASH: '1' },
     });
     processHandle.onData(data => output.push(data));
 
     const terminalText = () => stripVTControlCharacters(output.join(''));
-    await vi.waitFor(() => expect(terminalText()).toContain('1 tasks'), { timeout: 8_000 });
+    const wait = { timeout: 8_000, interval: 150 };
+    await vi.waitFor(() => expect(terminalText()).toContain('1 tasks'), wait);
     await vi.waitFor(() => {
       const text = terminalText();
-      if (!text.includes('EXTERNAL PLUGIN ACTIVE')) processHandle!.write('z');
+      if (!text.includes('EXTERNAL PLUGIN ACTIVE')) processHandle?.write('z');
       expect(text).toContain('EXTERNAL PLUGIN ACTIVE');
-    }, { interval: 150, timeout: 8_000 });
+    }, wait);
     output.length = 0;
     processHandle.write('1');
-    await vi.waitFor(() => expect(terminalText()).toContain('1 tasks'), { timeout: 8_000 });
+    await vi.waitFor(() => expect(terminalText()).toContain('1 tasks'), wait);
     processHandle.write('q');
   });
 });

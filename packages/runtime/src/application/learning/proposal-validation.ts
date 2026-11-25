@@ -4,15 +4,16 @@ import { z } from 'zod';
 import type { ProviderOperationOptions } from '../../plugin-sdk/capabilities.js';
 import { FrozenCleanupError } from '../../infrastructure/sandbox/container/frozen-execution.js';
 import { RepositoryPreparationCleanupError } from '../../infrastructure/providers/repositories.js';
-import type { LearningCandidate } from './candidate-store.js';
+import type { LearningCandidate, ValidationReceipt } from './candidate-store.js';
 import { candidateProposalSchema, DISTILLATION_LIMITS, learningScopeSchema } from './contracts.js';
 import { ProposalRuntimeCleanupError, ProposalRuntimeLeaseError, verifyRepositoryAssetProposal,
   type ProposalRuntimeObservation, type ProposalRuntimeOptions } from './proposal-runtime.js';
-import { compareProposalActual, prepareAssetProposal } from './proposals.js';
+import { compareProposalActual, prepareAssetProposal, renderSkillProposal } from './proposals.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema, prepareDistillationRequest } from './requests.js';
 import { observeProposalExperiment, prepareProposalExperiment } from './proposal-semantics.js';
 import type { LearningValidationChecker, LearningValidationCommitSnapshot, LearningValidationDependencies, LearningValidationResult } from './validation.js';
 import { parseLearningValidationInput as parseInput } from './validation-input.js';
+import { proposalOwnershipRegistrationSchema } from './proposal-ownership.js';
 
 const protocol = 'learning-validation-v1';
 const targetSchema = z.object({ scope: learningScopeSchema, ref: learningIdentitySchema,
@@ -45,6 +46,80 @@ const digest = (value: unknown) => createHash('sha256').update(canonicalLearning
 const bytesDigest = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (first: unknown, second: unknown) => canonicalLearningJson(first) === canonicalLearningJson(second);
 
+const receiptBindingSchema = z.object({ scope: learningScopeSchema, candidateId: learningDigestSchema,
+  candidateDigest: learningDigestSchema, evidenceDigest: learningDigestSchema, candidateVersion: z.number().int().positive().safe(),
+  executionId: z.string().uuid(), checkerId: learningIdentitySchema, target: targetSchema });
+const observationSchema = z.object({ receipt: z.object({ binding: z.record(z.unknown()), passed: z.boolean() }) });
+const proposalReceiptSchema = z.object({ protocol: z.literal(protocol), binding: receiptBindingSchema,
+  observationBinding: z.record(z.unknown()), comparisons: z.array(z.object({ binding: z.record(z.unknown()),
+    original: observationSchema.optional(), proposed: observationSchema })).min(1) });
+const artifactIdentitySchema = proposalOwnershipRegistrationSchema.shape.check.pick({ commit: true, artifactPath: true,
+  artifactDigest: true }).extend({ repositoryDigest: learningDigestSchema, proposalDigest: learningDigestSchema,
+  version: z.enum(['original', 'proposed']) }).strip();
+
+export const proposalValidationReceiptSchema = receiptBindingSchema.omit({ target: true }).extend({
+  kind: z.enum(['skill', 'tool']), validatedVersion: z.number().int().positive().safe(), receiptDigest: learningDigestSchema,
+  ...artifactIdentitySchema.omit({ proposalDigest: true, version: true }).shape,
+  originalArtifactDigest: learningDigestSchema.nullable(),
+});
+type ProposalValidationReceipt = z.infer<typeof proposalValidationReceiptSchema>;
+
+const artifactSourceSchema = z.string().refine(source => Buffer.byteLength(source) <= 64 * 1024);
+export const proposalValidationArtifactSchema = proposalValidationReceiptSchema.extend({ source: artifactSourceSchema });
+export const proposalArtifactInputSchema = z.object({ baseline: artifactSourceSchema.optional() }).strict();
+
+export function readProposalValidationArtifact(candidate: LearningCandidate, receipt: ProposalValidationReceipt, baseline?: string) {
+  const proposal = candidate.proposal;
+  const hash = (source: string) => createHash('sha256').update(source).digest('hex');
+  let source: string;
+  if (proposal.kind === 'skill') {
+    if ((baseline === undefined ? null : hash(baseline)) !== receipt.originalArtifactDigest) return null;
+    source = renderSkillProposal(proposal, baseline);
+  } else if (proposal.kind === 'tool' && baseline === undefined) {
+    source = proposal.payload.source;
+  } else return null;
+  if (hash(source) !== receipt.artifactDigest) return null;
+  return proposalValidationArtifactSchema.parse({ ...receipt, source });
+}
+
+export function readProposalValidationReceipt(candidate: LearningCandidate, saved: ValidationReceipt | undefined): ProposalValidationReceipt | null {
+  const kind = candidate.proposal.kind;
+  if ((kind !== 'skill' && kind !== 'tool') || candidate.state !== 'validated' || !saved?.passed
+    || saved.candidateId !== candidate.id || saved.candidateDigest !== candidate.digest || saved.evidenceDigest !== candidate.evidenceDigest
+    || saved.validatedVersion !== saved.candidateVersion + 1 || saved.validatedVersion !== candidate.version) return null;
+  const prefix = 'json-base64-v1:';
+  if (!saved.results.length || saved.results.length > 32 || saved.results.some(chunk =>
+    !/^json-base64-v1:[A-Za-z0-9+/]+={0,2}$/.test(chunk) || chunk.length > prefix.length + 1800)) return null;
+  const encoded = saved.results.map(chunk => chunk.slice(prefix.length)).join('');
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length > DISTILLATION_LIMITS.outputBytes || bytes.toString('base64') !== encoded) return null;
+  const envelope = z.object({ report: z.record(z.unknown()), receiptDigest: learningDigestSchema }).strict().parse(
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  if (digest(envelope.report) !== envelope.receiptDigest) return null;
+  const { binding, observationBinding, comparisons } = proposalReceiptSchema.parse(envelope.report);
+  if (saved.validatorVersion !== `${protocol}:${binding.executionId}` || binding.scope !== candidate.proposal.applicability.project
+    || binding.candidateId !== candidate.id || binding.candidateVersion !== saved.candidateVersion
+    || binding.candidateDigest !== candidate.digest || binding.evidenceDigest !== candidate.evidenceDigest
+    || binding.target.scope !== binding.scope) return null;
+  const observations = comparisons.map(comparison => {
+    const read = (observation: z.infer<typeof observationSchema>) => artifactIdentitySchema.parse({ ...observationBinding,
+      ...comparison.binding, ...observation.receipt.binding });
+    return { original: comparison.original ? read(comparison.original) : null, proposed: read(comparison.proposed) };
+  });
+  const first = observations[0]!;
+  const { commit, artifactPath, artifactDigest, repositoryDigest } = first.proposed;
+  if (commit !== binding.target.revision || first.proposed.version !== 'proposed' || first.proposed.proposalDigest !== candidate.digest
+    || (first.original && (first.original.version !== 'original' || first.original.commit !== commit
+      || first.original.artifactPath !== artifactPath || first.original.repositoryDigest !== repositoryDigest
+      || first.original.proposalDigest !== candidate.digest))
+    || comparisons.some(comparison => !comparison.proposed.receipt.passed)
+    || observations.some(observation => !same(observation, first))) return null;
+  return { kind, scope: binding.scope, candidateId: candidate.id, candidateVersion: saved.candidateVersion,
+    validatedVersion: saved.validatedVersion, candidateDigest: candidate.digest, evidenceDigest: candidate.evidenceDigest,
+    checkerId: binding.checkerId, executionId: binding.executionId, receiptDigest: envelope.receiptDigest,
+    repositoryDigest, commit, artifactPath, artifactDigest, originalArtifactDigest: first.original?.artifactDigest ?? null };
+}
+
 function describeChecker(checker: ProposalValidationChecker) {
   const metadata = checkerSchema.parse({ id: checker.id, version: checker.version, runtimeVersion: checker.runtimeVersion,
     configurationDigest: checker.configurationDigest, target: checker.target });
@@ -54,6 +129,7 @@ function describeChecker(checker: ProposalValidationChecker) {
   const configuration = { ...metadata, runtime: { request: runtime.request, expectedCommit: runtime.expectedCommit,
     inventory: runtime.inventory, inventoryDigest: runtime.inventoryDigest, inventoryRoot: runtime.inventoryRoot,
     artifactPath: runtime.artifactPath, baseImageId: runtime.baseImageId, repositoryId: repository.id,
+    ...(runtime.permissionObserverImageId === undefined ? {} : { permissionObserverImageId: runtime.permissionObserverImageId }),
     ...(runtime.scratchHelper === undefined ? {} : { scratchHelper: runtime.scratchHelper }),
     ...(runtime.sandbox.limits === undefined ? {} : { limits: runtime.sandbox.limits }),
     repositoryCapabilities: repository.capabilities, harness: harness && { id: harness.id, revision: harness.revision, kind: harness.kind, cases: harness.cases } } };
@@ -85,7 +161,9 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
     rejectCancellation = () => reject(new ValidationBlocked(timedOut || performance.now() >= deadline ? 'timed_out' : 'cancelled'));
     controller.signal.addEventListener('abort', rejectCancellation, { once: true });
   });
+  void cancellation.catch(() => undefined);
   const operation = { signal: controller.signal };
+  const waitForRead = <Value>(read: Promise<Value>) => Promise.race([read, cancellation]);
 
   const load = () => {
     checkAbort();
@@ -135,18 +213,18 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
     const initial = load();
     const candidate = initial.candidate;
     let authorization: z.infer<typeof authorizationSchema>;
-    try { authorization = authorizationSchema.parse(await dependencies.authorize(structuredClone(candidate), operation)); }
+    try { authorization = authorizationSchema.parse(await waitForRead(dependencies.authorize(structuredClone(candidate), operation))); }
     catch { checkAbort(); fail('unauthorized'); }
     checkAbort();
     if (!authorization.allowed) fail('unauthorized');
     try {
-      const source = sourceSchema.parse(await dependencies.reconcile(structuredClone(candidate), operation));
+      const source = sourceSchema.parse(await waitForRead(dependencies.reconcile(structuredClone(candidate), operation)));
       if (!source.current || source.evidenceDigest !== candidate.evidenceDigest) fail('source_unavailable');
     } catch { checkAbort(); fail('source_unavailable'); }
     let selected: ProposalValidationChecker;
     let pinned: ReturnType<typeof describeChecker>;
     try {
-      const checker = await dependencies.resolveChecker(structuredClone(candidate), request.checkerId, operation);
+      const checker = await waitForRead(dependencies.resolveChecker(structuredClone(candidate), request.checkerId, operation));
       checkAbort();
       if (!checker) fail('checker_unavailable');
       selected = checker;
@@ -202,7 +280,7 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
     const assertCurrent = runtime.assertCurrent.bind(runtime);
     const executionOptions: ProposalRuntimeOptions = { ...runtime, binding: runtimeBinding, signal: controller.signal,
       inventory: structuredClone(runtime.inventory), request: structuredClone(runtime.request),
-      harness: { ...harness, cases: structuredClone(harness.cases), observe: harness.observe.bind(harness) },
+      harness: { ...harness, cases: structuredClone(harness.cases), observe: (...args) => waitForRead(harness.observe(...args)) },
       sandbox: { executeFrozen: runtime.sandbox.executeFrozen.bind(runtime.sandbox),
         ...(runtime.sandbox.limits === undefined ? {} : { limits: structuredClone(runtime.sandbox.limits) }),
         ...(runtime.sandbox.remainingMs === undefined ? {} : { remainingMs: runtime.sandbox.remainingMs.bind(runtime.sandbox) }) },
@@ -256,11 +334,13 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
           const semanticExperiment = prepareProposalExperiment(prepared.kind, executionOptions.artifactPath, check, configured.experiment,
             prepared.proposal.kind === 'tool' ? prepared.proposal.payload.inputSchema : undefined);
           if (semanticExperiment.status !== 'prepared') fail('insufficient_coverage');
-          if (semanticExperiment.experiment.recovery || semanticExperiment.experiment.skillTrace) {
+          if (semanticExperiment.experiment.recovery || semanticExperiment.experiment.skillTrace || semanticExperiment.experiment.permissionDenial) {
             const context = observation.semanticContext;
             const frozen = context?.options;
             if (!context || !frozen || (semanticExperiment.experiment.recovery && (!frozen.scratch || frozen.scratch.candidateVersion !== version
               || frozen.scratch.helper !== executionOptions.scratchHelper)) || frozen.baseImageId !== executionOptions.baseImageId
+              || (semanticExperiment.experiment.permissionDenial !== undefined && (executionOptions.permissionObserverImageId === undefined
+                || frozen.permissionDenial?.observerImageId !== executionOptions.permissionObserverImageId))
               || context.operationId !== binding.operationId || context.containerId !== execution.evidence.containerId
               || frozen.input.digest !== binding.inputTreeDigest
               || frozen.input.manifest.find(entry => entry.path === executionOptions.artifactPath)?.digest !== binding.artifactDigest
@@ -284,17 +364,24 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
     const observations = result.comparisons.flatMap(comparison => comparison.original ? [comparison.original, comparison.proposed] : [comparison.proposed]);
     const observationBinding = Object.fromEntries(Object.entries(observations[0].receipt.binding).filter(([key, value]) =>
       observations.every(observation => same(observation.receipt.binding[key as keyof typeof observation.receipt.binding], value))));
-    const packObservation = (observation: ProposalRuntimeObservation) => ({ receipt: { ...observation.receipt,
-      binding: Object.fromEntries(Object.entries(observation.receipt.binding).filter(([key]) => !Object.hasOwn(observationBinding, key))) },
-      receiptDigest: observation.receiptDigest });
+    const packObservation = ({ receipt, receiptDigest }: ProposalRuntimeObservation, comparisonBinding: typeof observationBinding) => {
+      const { actual, binding, expected: _expected, ...fields } = receipt;
+      return { receipt: { ...fields, ...(fields.semantic ? {} : { actual }),
+        binding: Object.fromEntries(Object.entries(binding).filter(([key]) => !Object.hasOwn(observationBinding, key)
+          && !Object.hasOwn(comparisonBinding, key))) }, receiptDigest };
+    };
     const report = { protocol, binding: { ...runtimeBinding, executionId, candidateDigest: candidate.digest, requestDigest: digest(initial.source),
       sourceRunIds: initial.sourceRunIds,
       checkerId: pinned.metadata.id, checkerVersion: pinned.metadata.version, runtimeVersion: pinned.metadata.runtimeVersion,
       configurationDigest: pinned.metadata.configurationDigest,
       authorizationDigest: authorization.authorizationDigest, target: pinned.metadata.target, runtimeDigest: bytesDigest(pinned.configuration),
       runtimeConfigurationDigest: result.configurationDigest }, observationBinding,
-      comparisons: result.comparisons.map(comparison => ({ checkId: comparison.checkId,
-        original: comparison.original && packObservation(comparison.original), proposed: packObservation(comparison.proposed) })) };
+      comparisons: result.comparisons.map(({ checkId, original, proposed }) => {
+        const binding = original ? Object.fromEntries(Object.entries(proposed.receipt.binding).filter(([key, value]) =>
+          !Object.hasOwn(observationBinding, key) && same(original.receipt.binding[key as keyof typeof original.receipt.binding], value))) : {};
+        return { checkId, binding, expected: proposed.receipt.expected, original: original && packObservation(original, binding),
+          proposed: packObservation(proposed, binding) };
+      }) };
     const receiptDigest = digest(report);
     const audit = canonicalLearningJson({ report, receiptDigest });
     if (Buffer.byteLength(audit) > DISTILLATION_LIMITS.outputBytes) fail('output_limit');
@@ -314,7 +401,7 @@ export async function validateProposalCandidate(input: unknown, dependencies: Pr
   };
   try {
     if (options.signal?.aborted) cancel();
-    return await Promise.race([execute(), cancellation]);
+    return await execute();
   } catch (error) {
     return { status: 'blocked', code: error instanceof ValidationBlocked ? error.code : 'storage_failed' };
   } finally {

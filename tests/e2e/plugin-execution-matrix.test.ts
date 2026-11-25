@@ -299,6 +299,12 @@ describe('built WorkflowRunner Agent × Sandbox (simulated agent outputs)', () =
           usage: { inputTokens: 15, outputTokens: 4, totalTokens: 19 } }),
       ]);
     }
+    if (agent === 'opencode' && sandbox === 'local') {
+      const transcriptCalls = (await current.transportCalls()).filter(call => call.binary === 'opencode' && call.argv[0] !== 'run');
+      expect(transcriptCalls).toEqual([
+        { binary: 'opencode', argv: ['session', 'export', '--standalone', '--sanitize', 'matrix-opencode-native'] },
+      ]);
+    }
     if (agent === 'copilot') {
       expect(report.events.filter((event: { kind: string }) => event.kind === 'agent.session_recorded')).toEqual([
         expect.objectContaining({ kind: 'agent.session_recorded', sessionId: 'matrix-copilot-native',

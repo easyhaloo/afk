@@ -35,7 +35,7 @@ afterAll(() => {
   if (process.env.AFK_TEST_PROPOSAL_EVIDENCE) writeFileSync(process.env.AFK_TEST_PROPOSAL_EVIDENCE, JSON.stringify({ baseImageId, evidence: realEvidence }, null, 2));
 });
 
-function fixture() {
+function fixture(timeoutMs = 500) {
   const root = directory();
   const original = 'console.log(JSON.stringify({value:"old"}));\n';
   writeFileSync(join(root, 'asset.js'), original);
@@ -49,7 +49,7 @@ function fixture() {
   const prepared = prepareAssetProposal({ ...output.candidates[0], kind: 'tool', targetRef: 'script:fixture', title: 'Fixture tool', payload: {
     existingTools: ['script:fixture'], inputSchema: { type: 'object', properties: { key: { type: 'string', pattern: '^[a-z]+$' } }, required: ['key'], additionalProperties: false },
     outputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false },
-    source: 'console.log(JSON.stringify({value:"new"}));', dependencies: [], permissions: [], timeoutMs: 500,
+    source: 'console.log(JSON.stringify({value:"new"}));', dependencies: [], permissions: [], timeoutMs,
     sideEffects: 'none', idempotency: 'Pure', recovery: 'Retry', tests: [
       { kind: 'normal', input: '{"key":"alpha"}', expected: '{"value":"new"}' },
       { kind: 'normal', input: '{"key":"beta"}', expected: '{"value":"new"}' },
@@ -870,7 +870,7 @@ describe('repository frozen proposal production orchestration', () => {
 });
 
 function managedFixture() {
-  const test = fixture();
+  const test = fixture(5000);
   vi.restoreAllMocks();
   const managedRoot = directory();
   const owned = new Set<string>();

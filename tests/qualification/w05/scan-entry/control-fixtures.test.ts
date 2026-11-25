@@ -19,6 +19,7 @@ const inputSchema = {
   ],
 };
 const fixture = fileURLToPath(new URL('./checkpoint.fixture.mjs', import.meta.url));
+const scanner = fileURLToPath(new URL('./scan-manifest.mjs', import.meta.url));
 let scratch: string;
 beforeEach(() => { scratch = mkdtempSync(join(tmpdir(), 'scan-entry-control-')); });
 afterEach(() => rmSync(scratch, { recursive: true, force: true }));
@@ -83,11 +84,11 @@ it('prepares the bounded checker and observes partial, recovered and replayed ch
   }
 });
 
-it('resumes a multi-line manifest and preserves the checkpoint on refusal and replay', () => {
+it.each([fixture, scanner])('resumes a multi-line manifest and preserves the checkpoint on refusal and replay via %s', entry => {
   const manifest = 'bad-first\n9780306406157\nbad-third\n5901234123457';
   const checkpoint = join(scratch, 'scan-checkpoint.json');
   const run = (phase: 'fault' | 'resume', input: string) => spawnSync(process.execPath,
-    [fixture, JSON.stringify({ phase, manifest: input })], { cwd: scratch, env: { TMPDIR: scratch }, timeout: 5000 });
+    [entry, JSON.stringify({ phase, manifest: input })], { cwd: scratch, env: { TMPDIR: scratch }, timeout: 5000 });
   expect(run('fault', manifest).status).toBe(23);
   const partial = readFileSync(checkpoint, 'utf8');
   expect(JSON.parse(partial)).toEqual({ manifest, nextLine: 1, invalidLines: [1] });
@@ -109,4 +110,17 @@ it('resumes a multi-line manifest and preserves the checkpoint on refusal and re
   expect(replayed.status).toBe(0);
   expect(replayed.stdout).toEqual(recovered.stdout);
   expect(readFileSync(checkpoint, 'utf8')).toBe(final);
+});
+
+it('keeps the scanner import side-effect free and preserves its argv validation', () => {
+  const run = (args: string[]) => spawnSync(process.execPath, args, { cwd: scratch, encoding: 'utf8', timeout: 5000 });
+  const imported = run(['--input-type=module', '-e',
+    'const {checkManifest} = await import(process.argv[2]); console.log(JSON.stringify(checkManifest("")));',
+    'import-probe', new URL('./scan-manifest.mjs', import.meta.url).href]);
+  expect([imported.status, imported.stdout, imported.stderr]).toEqual([0, '{"checked":1,"invalidLines":[1]}\n', '']);
+  for (const [args, expected] of [[[], 'error: expected one JSON argument'], [['null', 'null'], 'error: expected one JSON argument'],
+    [['{'], 'error: invalid JSON'], [['{}'], 'error: input must be a string']] as const) {
+    const result = run([scanner, ...args]);
+    expect([result.status, result.stdout, result.stderr]).toEqual([1, '', expected]);
+  }
 });

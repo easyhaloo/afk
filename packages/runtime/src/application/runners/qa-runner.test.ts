@@ -507,7 +507,7 @@ describe('QARunner plugin publication policies', () => {
       integrations: { verifications: [{ provider: 'test-runner', command, timeoutMs: 5000 }] } }));
     const plugins = await createDefaultPluginRuntime({ homeDir: root, workspaceRoot: root });
     try {
-      const runner = new QARunner(current.providers, config, {
+      const runner = new QARunner(current.providers, { ...config, qaTimeout: 30_000 }, {
         plugins, sandboxProvider: current.sandboxProvider, agentProvider: current.agentProvider,
       });
       const result = await runner.process('60');

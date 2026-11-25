@@ -434,12 +434,16 @@ describe('saved repository-asset production validation routing', () => {
     expect(test.store.getValidation(test.candidate.id)).toBeUndefined();
   });
 
-  it.each(['revoked', 'checker', 'repository', 'asset', 'catalog', 'image', 'adapter', 'legacy-host', 'budget'] as const)(
+  it.each(['revoked', 'checker', 'repository', 'input', 'asset', 'catalog', 'image', 'adapter', 'legacy-host', 'budget'] as const)(
     'rejects a mismatched or revoked execution grant (%s)', async field => {
       const test = await fixture();
       if (field === 'revoked') test.grant.revoked = true;
       if (field === 'checker') test.grant.checkerVersion = 'different';
       if (field === 'repository') test.grant.repository = { ...test.grant.repository, expectedCommit: 'c'.repeat(40) };
+      if (field === 'input') {
+        const repository = { ...test.entry.repository, inputFiles: [] };
+        test.entry.repository = repository;
+      }
       if (field === 'asset') test.grant.asset = { ...test.grant.asset, path: 'script/other.js' };
       if (field === 'catalog') test.grant.inventoryDigest = 'c'.repeat(64);
       if (field === 'image') test.grant.sandbox = { ...test.grant.sandbox, baseImageId: `sha256:${'c'.repeat(64)}` };

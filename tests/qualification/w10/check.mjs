@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { configuredPluginManifests } from '../../../packages/runtime/src/application/plugins/configured.ts';
 
 const matrix = readFileSync(new URL('matrix.tsv', import.meta.url), 'utf8');
@@ -37,15 +37,34 @@ const auditDir = process.env.W10_AUDIT_DIR;
 if (auditDir) {
   const auditText = readFileSync(join(auditDir, 'provider-matrix.json'));
   assert.equal(createHash('sha256').update(auditText).digest('hex'), '19f3401ce59ff0f3739ddca34d35a53b62450cc5865b223575fe93015564de83');
-  const { providers } = JSON.parse(auditText);
+  const { providers, workspace } = JSON.parse(auditText);
   const { installedPassedCases } = JSON.parse(readFileSync(join(auditDir, 'evidence-index.json'), 'utf8'));
+  const reportRoot = realpathSync(process.env.W10_REPORT_ROOT ?? resolve(auditDir, '../../..'));
+  const reports = new Map();
+  const checked = new Set();
   assert.deepEqual(rows.map(record => record.row), providers.map(provider => provider.id));
   for (const [index, record] of rows.entries()) {
     const cases = record.audit_cases === '—' ? [] : record.audit_cases.split(',');
     assert.deepEqual(cases, [...new Set(providers[index].stages.installed.caseIds)], record.row);
-    for (const id of cases) assert.equal(installedPassedCases[id]?.status, 'passed', `${record.row} ${id}`);
+    for (const id of cases) {
+      if (checked.has(id)) continue;
+      const entry = installedPassedCases[id];
+      assert.equal(entry?.status, 'passed', `${record.row} ${id} index`);
+      if (!reports.has(entry.resultPath)) {
+        const path = realpathSync(resolve(reportRoot, entry.resultPath));
+        const withinRoot = relative(reportRoot, path);
+        assert.ok(withinRoot && !isAbsolute(withinRoot) && withinRoot !== '..' && !withinRoot.startsWith(`..${sep}`), `${id} report outside report root`);
+        reports.set(entry.resultPath, JSON.parse(readFileSync(path, 'utf8')).testResults);
+      }
+      const matches = reports.get(entry.resultPath)
+        .filter(suite => suite.name === join(workspace, entry.suite))
+        .flatMap(suite => suite.assertionResults)
+        .filter(assertion => assertion.fullName === entry.fullName);
+      assert.deepEqual(matches.map(assertion => assertion.status), ['passed'], `${record.row} ${id} raw assertion`);
+      checked.add(id);
+    }
   }
-  console.log('Original audit digest, row order, per-row case IDs and indexed pass statuses verified.');
+  console.log(`Original audit digest, row order, per-row case IDs and ${checked.size} unique assertions in ${reports.size} raw reports verified.`);
 } else {
   console.log('Historical audit not checked. Set W10_AUDIT_DIR to include it.');
 }

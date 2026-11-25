@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EnvVarAllowlist } from './env-allowlist.js';
 import { DockerContainerProvider } from './docker.js';
 import { PodmanContainerProvider } from './podman.js';
@@ -124,6 +124,22 @@ describe('CliContainerProvider — argv construction', () => {
     expect(tail[0]).toBe('alpine:3.20');
     expect(tail[1]).toBe('sleep');
     expect(tail[2]).toBe('infinity');
+  });
+});
+
+describe.each([DockerContainerProvider, PodmanContainerProvider])('container removal through $name', Provider => {
+  it('accepts an absent container and propagates real engine errors', async () => {
+    const provider = new Provider();
+    const run = vi.spyOn(provider as unknown as {
+      run(argv: string[]): Promise<{ code: number; stdout: string; stderr: string }>;
+    }, 'run');
+    const podman = provider.engine === 'podman';
+    run.mockResolvedValueOnce({ code: podman ? 0 : 1, stdout: '', stderr: podman ? '' : 'No such container: cid' });
+    run.mockResolvedValueOnce({ code: 125, stdout: '', stderr: 'cannot connect to the container engine' });
+
+    await expect(provider.remove('cid', true)).resolves.toBeUndefined();
+    expect(run).toHaveBeenCalledWith([provider.binary, 'rm', ...(podman ? ['--ignore'] : []), '-f', 'cid']);
+    await expect(provider.remove('cid', true)).rejects.toThrow(/cannot connect to the container engine/);
   });
 });
 

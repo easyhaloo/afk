@@ -107,10 +107,14 @@ describe('captured frozen input', () => {
   it('uses an implementation-owned recipe even if input includes a Dockerfile', () => {
     const root = directory();
     writeFileSync(join(root, 'Dockerfile'), 'RUN touch /untrusted');
-    const context = buildFrozenContext(captureFrozenInput(root), baseImageId);
-    expect(context.dockerfile).toContain(`FROM ${baseImageId}`);
-    expect(context.dockerfile).not.toContain('RUN');
-    expect(context.dockerfile).toContain('COPY input/ /workspace/');
+    const operationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const context = buildFrozenContext(captureFrozenInput(root), baseImageId, operationId);
+    expect(context.dockerfile).toEqual([
+      `FROM ${baseImageId}`,
+      `LABEL afk.frozen.managed="true" afk.frozen.operation="${operationId}"`,
+      'COPY input/ /workspace/',
+      '',
+    ].join('\n'));
     expect(() => buildFrozenContext(captureFrozenInput(root), 'node:latest')).toThrow(/image/i);
   });
 

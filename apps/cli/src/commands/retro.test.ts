@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '@afk/runtime/infrastructure/observability/jsonl-event-store';
+import { readAgentTranscriptTelemetry } from '@afk/runtime/infrastructure/observability/agent-telemetry';
 import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { claudeProjectSlug } from '@afk/runtime/shared/agent-transcript-path';
 import { registerRetroCommands, renderRetroHtml, reportSchema } from './retro.js';
@@ -14,6 +15,10 @@ vi.mock('@afk/runtime/execution', async importOriginal => ({
   ...await importOriginal<typeof import('@afk/runtime/execution')>(),
   executeAnalysis: analysisMocks.executeAnalysis,
 }));
+vi.mock('@afk/runtime/infrastructure/observability/agent-telemetry', async importOriginal => {
+  const original = await importOriginal<typeof import('@afk/runtime/infrastructure/observability/agent-telemetry')>();
+  return { ...original, readAgentTranscriptTelemetry: vi.fn(original.readAgentTranscriptTelemetry) };
+});
 
 function analysisResult(report: unknown) {
   return { analysisRunId: 'retro-analysis', output: { type: 'goal_complete', report } };
@@ -23,6 +28,7 @@ const roots: string[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   analysisMocks.executeAnalysis.mockReset();
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
@@ -130,6 +136,52 @@ describe('retro command', () => {
 
     expect(report.sessions).toEqual([{ sessionId: 'synthetic-session', source: 'transcript_found', transcriptPath }]);
     expect(report.metrics.toolCallCount).toBe(1);
+  });
+
+  it('uses one native OpenCode export for telemetry and redacted evidence', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-opencode-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    const transcriptPath = 'opencode://session/ses_native';
+    const secret = 'sample-retro-tool-credential';
+    const nativeExport = JSON.stringify({ info: { id: 'ses_native', tokens: { input: 6, output: 3 } }, messages: [
+      { type: 'user', text: 'Verify the work item' },
+      { type: 'assistant', content: [{ type: 'tool', id: 'call-1', name: 'read', state: { status: 'error', error: `Bearer ${secret}` } }] },
+    ] });
+    const usage = { inputTokens: 6, outputTokens: 3, totalTokens: 9 };
+    const reader = vi.mocked(readAgentTranscriptTelemetry).mockClear().mockResolvedValueOnce({
+      nativeExport, usage, tools: [{ id: 'call-1', name: 'read', result: 'failed' }],
+    });
+    await createRetroFixture({ workspace, eventRoot, indexedPath: transcriptPath, sessionId: 'ses_native' });
+    const state = workspaceDataDirectory(workspace);
+    await fs.writeFile(join(state, 'executions', 'run-1.jsonl'), '{"type":"test-journal"}\n');
+    analysisMocks.executeAnalysis.mockResolvedValue(analysisResult({ summary: 'ok', findings: [] }));
+
+    const { runRetro } = await import('./retro.js');
+    const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'opencode' });
+
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(reader).toHaveBeenCalledWith({ provider: 'opencode', transcriptPath, sandboxKind: 'local' }, true);
+    const output = join(state, 'retro', report.retroId);
+    const manifest = JSON.parse(await fs.readFile(join(output, 'manifest.json'), 'utf8'));
+    const packed = await fs.readFile(join(output, 'input.json'), 'utf8');
+    expect(manifest.sessions[0]).toMatchObject({ sessionId: 'ses_native', source: 'transcript_found', transcriptPath, usage,
+      transcript: expect.stringMatching(/^evidence:\/\/[a-f0-9]{64}$/) });
+    expect(JSON.parse(packed).entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ref: expect.objectContaining({ kind: 'tool-result', locator: 'source:session-2/messages/2' }) }),
+    ]));
+    expect(packed).not.toContain(secret);
+    expect(report.metrics).toMatchObject({ toolCallCount: 1, failedToolCallCount: 1, missingEvidenceCount: 0 });
+    expect(report.source).toBe('final');
+
+    await fs.unlink(join(state, 'executions', 'run-1.jsonl'));
+    reader.mockResolvedValueOnce({ nativeExport, usage, tools: [] });
+    const partial = await runRetro({ runId: 'run-1', executionId: 'run-1', workspace, root: eventRoot, provider: 'opencode' });
+    expect(partial.source).toBe('provisional');
+    expect(partial.metrics.missingEvidenceCount).toBe(1);
+    const partialManifest = JSON.parse(await fs.readFile(join(state, 'retro', partial.retroId, 'manifest.json'), 'utf8'));
+    expect(partialManifest.missing).toEqual(['evidence:journal-1']);
   });
 
   it('analyzes only sanitized inline evidence without personal skill or repository mounts', async () => {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stripVTControlCharacters } from 'util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -44,6 +44,7 @@ describeE2E('external TUI plugins', () => {
     const pluginDir = join(pluginHome, '.afk', 'plugins', 'example', 'dist');
     mkdirSync(pluginDir, { recursive: true });
     writeFileSync(join(pluginHome, '.afk', 'plugins.yml'), 'plugins:\n  - id: example\n    enabled: true\n');
+    writeFileSync(join(dirname(pluginDir), 'package.json'), '{"type":"module"}\n');
     writeFileSync(join(pluginDir, 'index.js'), `
       import React from ${JSON.stringify(reactUrl)};
       import { Text } from ${JSON.stringify(inkUrl)};
@@ -63,21 +64,22 @@ describeE2E('external TUI plugins', () => {
     processHandle = spawn(process.execPath, [distPath], {
       cols: 100,
       rows: 30,
+      cwd: pluginHome,
       env: { ...process.env, HOME: pluginHome, NO_TMUX: '1', AFK_SKIP_SPLASH: '1' },
     });
     processHandle.onData(data => output.push(data));
 
-    await new Promise(resolve => setTimeout(resolve, 1800));
-    processHandle.write('z');
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const text = stripVTControlCharacters(output.join(''));
+    const terminalText = () => stripVTControlCharacters(output.join(''));
+    const wait = { timeout: 8_000, interval: 150 };
+    await vi.waitFor(() => expect(terminalText()).toContain('1 tasks'), wait);
+    await vi.waitFor(() => {
+      const text = terminalText();
+      if (!text.includes('EXTERNAL PLUGIN ACTIVE')) processHandle?.write('z');
+      expect(text).toContain('EXTERNAL PLUGIN ACTIVE');
+    }, wait);
     output.length = 0;
     processHandle.write('1');
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const builtInText = stripVTControlCharacters(output.join(''));
+    await vi.waitFor(() => expect(terminalText()).toContain('1 tasks'), wait);
     processHandle.write('q');
-
-    expect(text).toContain('EXTERNAL PLUGIN ACTIVE');
-    expect(builtInText).toContain('1 tasks');
   });
 });

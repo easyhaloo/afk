@@ -16,7 +16,6 @@
 
 import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { randomUUID } from 'crypto';
-import { realpathSync } from 'fs';
 import { StringDecoder } from 'node:string_decoder';
 import type { AgentToolCallSummary } from '@afk/core';
 import type {
@@ -37,7 +36,7 @@ import type {
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
 import { ActivityWatch } from '../../../domain/agents/activity.js';
-import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
+import { claudeTranscriptPath } from '../../../shared/agent-transcript-path.js';
 import { spawnGuardedAnalysis } from './analysis-process-guard.js';
 import { createCopilotUsageReport } from './copilot-usage.js';
 
@@ -69,6 +68,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private error: ExecutionResult['error'] | undefined;
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
+  private contextTokens?: number;
   private completedTurnUsage?: TokenUsage;
   private readonly tools = new Map<string, AgentToolCallSummary>();
   private readonly stdoutDecoder = new StringDecoder('utf8');
@@ -117,9 +117,10 @@ export class StreamingAgentExecution implements AgentExecution {
       argv.push('--usage-output-file', this.copilotReport.path);
     }
 
+    const cwd = this.command.cwd ?? this.worktreePath;
     const spawnOptions: SpawnOptions = {
-      cwd: this.command.cwd ?? this.worktreePath,
-      env: { ...process.env, ...this.command.env, AFK_EXECUTION_OWNER: this.processOwner },
+      cwd,
+      env: { ...process.env, ...this.command.env, PWD: cwd, AFK_EXECUTION_OWNER: this.processOwner },
       stdio: ['pipe', 'pipe', 'pipe'],
       // A provider command may be a shell wrapper (Claude's macOS shim is one)
       // and can spawn a real agent child. Put the whole tree in one process
@@ -208,6 +209,7 @@ export class StreamingAgentExecution implements AgentExecution {
         switch (event.type) {
           case 'usage':
             this.usage = event.usage;
+            this.contextTokens = event.contextTokens;
             break;
           case 'error':
             this.error = {
@@ -361,7 +363,7 @@ export class StreamingAgentExecution implements AgentExecution {
         };
       }
       if (!this.error && !this.completedTurnUsage && this.exitCode === undefined
-        && this.usage && this.usage.totalTokens >= contextHighTokens) {
+        && this.usage && (this.contextTokens ?? this.usage.totalTokens) >= contextHighTokens) {
         return {
           version: 1,
           runId: this.id,
@@ -556,18 +558,9 @@ export class StreamingAgentExecution implements AgentExecution {
     // AFK's own — Claude Code writes the transcript under its own session_id, so
     // using ours yields a path that never exists.
     const harnessSessionId = this._mutableMetadata.threadId ?? this.sessionId;
-    if (!harnessSessionId) return undefined;
-    // Resolve symlinks first: the harness derives its project directory from the
-    // real path. On macOS /tmp resolves to /private/tmp, so an unresolved path
-    // yields `-tmp` where the transcript actually lives in `-private-tmp`.
-    let base = this.worktreePath;
-    try {
-      base = realpathSync(this.worktreePath);
-    } catch {
-      // Path may not exist yet; fall back to what we were given.
-    }
-    const slug = claudeProjectSlug(base);
-    return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${harnessSessionId}.jsonl`;
+    return harnessSessionId
+      ? claudeTranscriptPath(this.command.cwd ?? this.worktreePath, harnessSessionId, { ...process.env, ...this.command.env })
+      : undefined;
   }
 
   private drainStdoutLines(): void {

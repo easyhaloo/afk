@@ -26,6 +26,8 @@ An existing checkout can also run `./install.sh`; it downloads the same release
 without building the checkout. Updates retain old releases because other prefixes
 and running processes may still use them. Set `AFK_HOME` to an absolute directory
 to isolate release storage and downloads. Use `--prefix` to choose the executable directory.
+The CLI resolves `~/.afk/plugins.yml` from `HOME` when it runs. Use a separate
+`HOME` for test commands such as `afk plugin configure`.
 
 ```bash
 bash /tmp/afk-install.sh --version 0.1.0 --skip-completion

@@ -50,7 +50,8 @@ export class ContainerSandbox implements Sandbox {
   private readonly workspaceRoot: string;
   private readonly runtimeRunId?: string;
   private _containerId: string | null = null;
-  private _closed = false;
+  private _closeRequested = false;
+  private _closePromise?: Promise<void>;
 
   constructor(opts: {
     id?: string;
@@ -109,7 +110,7 @@ export class ContainerSandbox implements Sandbox {
   }
 
   async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
-    if (this._closed) throw new Error('sandbox already closed');
+    if (this._closeRequested) throw new Error('sandbox already closed');
     if (!this._containerId) {
       throw new Error('sandbox not created — call create() first');
     }
@@ -174,24 +175,27 @@ export class ContainerSandbox implements Sandbox {
     return execution;
   }
 
-  async close(): Promise<void> {
-    if (this._closed) return;
-    this._closed = true;
-    if (this._containerId) {
-      try {
-        await this._provider.killContainer(this._containerId, 'SIGKILL');
-      } catch { /* already dead */ }
-      try {
-        await this._provider.remove(this._containerId, true);
-      } catch { /* already gone */ }
-      getAfkResourceRegistry().markClosed({
-        workspacePath: this.workspaceRoot,
-        worktreePath: this.worktreePath,
-        kind: 'container',
-        origin: 'container-sandbox',
-        name: this.containerName,
-      });
-    }
+  close(): Promise<void> {
+    this._closeRequested = true;
+    this._closePromise ??= this.closeContainer().catch(error => {
+      this._closePromise = undefined;
+      throw error;
+    });
+    return this._closePromise;
+  }
+
+  private async closeContainer(): Promise<void> {
+    const containerId = this._containerId;
+    if (!containerId) return;
+    await this._provider.killContainer(containerId, 'SIGKILL').catch(() => undefined);
+    await this._provider.remove(containerId, true);
+    getAfkResourceRegistry().markClosed({
+      workspacePath: this.workspaceRoot,
+      worktreePath: this.worktreePath,
+      kind: 'container',
+      origin: 'container-sandbox',
+      name: this.containerName,
+    });
   }
 
   /**

@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
-export async function qualify(sdk, cli, scratch) {
+export async function qualify(sdk, cli, scratch, expectedVersion) {
   const run = (...args) => execFileSync(cli, args, { cwd: scratch, encoding: 'utf8', timeout: 15000 }).trim();
   const version = run('--version');
-  assert.equal(version, '0.2.147');
+  assert.equal(version, expectedVersion);
   const { HOME: homeDir, W10_DB: dbPath } = process.env;
   const project = 'github:w10/parcel';
   const events = join(scratch, 'events');

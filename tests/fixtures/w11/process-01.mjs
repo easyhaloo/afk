@@ -62,7 +62,7 @@ async function businessSession() {
     { cwd: desk, env: nativeEnv, timeout: 140_000 });
   const sessionId = run.trim().split('\n').map(line => JSON.parse(line)).find(event => event.sessionID)?.sessionID;
   assert.match(sessionId, /^ses_/);
-  const native = JSON.parse(command('opencode', ['session', 'export', sessionId], { cwd: desk, env: nativeEnv }));
+  const native = JSON.parse(command('opencode', ['session', 'export', sessionId, '--standalone'], { cwd: desk, env: nativeEnv }));
   assert.equal(native.info.id, sessionId);
   assert.ok(native.messages.some(message => message.type === 'user' && message.text.includes(bag)));
   const transcriptRoot = join(home, '.afk/transcripts');
@@ -165,7 +165,9 @@ async function pipeline() {
     assert.ok(snapshot.entries.some(entry => entry.ref.kind === 'message' && JSON.parse(entry.content).role === 'assistant'));
     configure(source, snapshot.digest);
     command(process.execPath, [script, 'worker', binary], { timeout: 155_000, env: { ...env, HOME: userHome, USERPROFILE: userHome,
-      CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } });
+      CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } });
     const { queryLearningRequest } = await load('application/learning/worker');
     const { job, candidates } = queryLearningRequest({ directory, scope, requestKey });
     save('extraction.json', { job, candidates });
@@ -206,15 +208,23 @@ async function reviewProcess(source, version) {
   assert.equal(snapshot.completeness, 'complete');
   configure(source, snapshot.digest);
   assert.deepEqual(invoke('experience', 'jobs', '--scope', scope), []);
-  const review = JSON.parse(command(process.execPath, [binary, 'experience', 'review', '--kind', 'success', '--run-id', source.runId,
-    '--backlog-id', source.workItemId, '--checker', meta.checkerId, '--json'], { timeout: 155_000, env: { ...env,
-      CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || join(userHome, '.claude'), ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } }));
+  let review;
+  try {
+    review = JSON.parse(command(process.execPath, [binary, 'experience', 'review', '--kind', 'success', '--run-id', source.runId,
+      '--backlog-id', source.workItemId, '--checker', meta.checkerId, '--json'], { timeout: 155_000, env: { ...env,
+        CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || join(userHome, '.claude'), CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+        CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } }));
+  } catch (error) {
+    save('review-failure.json', { runId: source.runId, scope, status: error.status, signal: error.signal, code: error.code });
+    throw error;
+  }
   save('review.json', review);
   assert.equal(review.runId, source.runId);
   assert.equal(review.scope, scope);
   const { requestKey } = review;
   const { queryLearningRequest } = await load('application/learning/worker');
+  const { CandidateStore } = await load('application/learning/candidate-store');
   const { job, candidates } = queryLearningRequest({ directory, scope, requestKey });
   save('intake.json', { version, binary, source, requestKey, snapshot });
   save('extraction.json', { job, candidates });
@@ -231,6 +241,7 @@ async function reviewProcess(source, version) {
   save('publication.json', published);
   assert.equal(published.phase, 'committed');
   assert.ok(readFileSync(join(home, 'wiki/ReturnHandoff.md'), 'utf8').includes(snapshot.digest));
+  if (revokeAccess || withdraw) changePublicationAccess(published, source, CandidateStore);
   save('consumer-run.json', launchConsumer(home));
 }
 
@@ -368,7 +379,7 @@ async function consume() {
     assert.ok(lstatSync(answer).isFile());
     if (excluded) {
       assert.deepEqual(read(answer), { steps: null, completion: null, source: null, productVersion: null });
-      const transcript = JSON.parse(command('opencode', ['session', 'export', session], { cwd: workspace, env: nativeEnv }));
+      const transcript = JSON.parse(command('opencode', ['session', 'export', session, '--standalone'], { cwd: workspace, env: nativeEnv }));
       assert.equal(transcript.info.id, session);
       assert.ok(transcript.messages.length > 0);
       const contents = JSON.stringify(transcript.messages);

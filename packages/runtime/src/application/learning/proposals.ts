@@ -9,7 +9,7 @@ import type { RepositoryWorkspace, VerificationProvider, VerificationResult, Pro
 import type { Sandbox, IsolationLevel } from '../../infrastructure/sandbox/types.js';
 import { LocalSandbox } from '../../infrastructure/sandbox/providers/local.js';
 import { recallTerms } from '../../domain/context/terms.js';
-import { checkProposalToolParameterPaths, compileProposalToolSchema } from './proposal-tool-schema.js';
+import { validateProposalToolCases } from './proposal-tool-schema.js';
 
 export interface ProposalInventory {
   skills: { name: string; description: string; 'disable-model-invocation': boolean; 'user-invocable': boolean;
@@ -261,6 +261,15 @@ function matches(terms: Set<string>, name: string, description: string): boolean
   return false;
 }
 
+export function renderSkillProposal(candidate: Extract<CandidateProposal, { kind: 'skill' }>, baseline?: string): string {
+  const payload = candidate.payload;
+  const source = baseline ?? `---\nname: candidate-${hash(canonicalLearningJson(candidate)).slice(0, 12)}\ndescription: ${JSON.stringify(candidate.statement)}\ndisable-model-invocation: true\nuser-invocable: false\n---\n`;
+  return `${source}\n## Candidate amendment (requires human review)\n\n${canonicalLearningJson({
+    parameters: payload.inputs, triggers: payload.triggers, prohibitedConditions: payload.prohibitedConditions,
+    branches: payload.branches, recovery: payload.recovery, completion: payload.completion, proposedChange: payload.patch,
+  })}\n`;
+}
+
 export function prepareAssetProposal(input: unknown, inventory: ProposalInventory): PreparedAssetProposal {
   if (Buffer.byteLength(canonicalLearningJson(input)) > DISTILLATION_LIMITS.outputBytes) throw new Error('Asset proposal exceeds byte limit');
   const candidate = candidateProposalSchema.parse(input);
@@ -286,7 +295,7 @@ export function prepareAssetProposal(input: unknown, inventory: ProposalInventor
     if (payload.targetSkill && !target) throw new Error('Target skill is missing from the existing catalog');
     if (!target && existing.length) throw new Error(`Prefer an existing skill patch: ${existing.map(entry => entry.name).join(', ')}`);
     if (candidate.targetRef && candidate.targetRef !== payload.targetSkill) throw new Error('Skill target differs from catalog target');
-    let source = '';
+    let source: string | undefined;
     if (target) {
       source = readAsset(target.source.root, target.source.file);
       originalDigest = hash(source);
@@ -302,13 +311,9 @@ export function prepareAssetProposal(input: unknown, inventory: ProposalInventor
         allowedTools: metadata['allowed-tools'] ?? [], disallowedTools: metadata['disallowed-tools'] ?? [] };
     } else {
       if (payload.originalDigest) throw new Error('A new skill cannot claim an original digest');
-      source = `---\nname: candidate-${hash(canonicalLearningJson(candidate)).slice(0, 12)}\ndescription: ${JSON.stringify(candidate.statement)}\ndisable-model-invocation: true\nuser-invocable: false\n---\n`;
       invocation = { automatic: false, userInvocable: false, allowedTools: [], disallowedTools: [] };
     }
-    content = `${source}\n## Candidate amendment (requires human review)\n\n${canonicalLearningJson({
-      parameters: payload.inputs, triggers: payload.triggers, prohibitedConditions: payload.prohibitedConditions,
-      branches: payload.branches, recovery: payload.recovery, completion: payload.completion, proposedChange: payload.patch,
-    })}\n`;
+    content = renderSkillProposal(candidate, source);
     checks = payload.evaluationCases.map((entry, index) => ({ id: `behavior-${index + 1}`, ...entry }));
     execution = { requiresIsolatedTask: true, autoInstall: false, timeoutMs: DISTILLATION_LIMITS.timeoutMs,
       dependencies: [], permissions: [], sideEffects: 'none', idempotency: 'Verification must not change production state', recovery: payload.recovery.join('\n') };
@@ -329,20 +334,7 @@ export function prepareAssetProposal(input: unknown, inventory: ProposalInventor
       || matches(terms, entry.name, entry.description));
     if (!targetRef && existing.length) throw new Error(`Reuse existing tools before proposing source: ${existing.map(entry => entry.ref).join(', ')}`);
     if (payload.existingTools.some(ref => !inventory.tools.some(entry => entry.ref === ref || entry.name === ref))) throw new Error('Existing tool claims are absent from searched inventory');
-    const validInput = compileProposalToolSchema(payload.inputSchema);
-    const validOutput = compileProposalToolSchema(payload.outputSchema);
-    const normal = payload.tests.filter(entry => entry.kind === 'normal');
-    const parameters = normal.map(entry => {
-      const value: unknown = JSON.parse(entry.input);
-      checkProposalToolParameterPaths(value);
-      if (!validInput(value) || !validOutput(JSON.parse(entry.expected))) throw new Error('Normal tool case does not satisfy input/output schemas');
-      return canonicalLearningJson(value);
-    });
-    if (new Set(parameters).size < 2) throw new Error('Tool verification requires two distinct valid parameter sets');
-    const refusals = payload.tests.filter(entry => entry.kind === 'refusal');
-    if (!refusals.length || refusals.some(entry => {
-      try { return validInput(JSON.parse(entry.input)); } catch { return false; }
-    })) throw new Error('Malicious refusal cases must contain schema-invalid input');
+    validateProposalToolCases(payload);
     content = payload.source;
     checks = payload.tests.map((entry, index) => ({ id: `behavior-${index + 1}`, ...entry }));
     checks.push(

@@ -2,7 +2,8 @@ import Ajv from 'ajv';
 import type { CandidateProposal } from './contracts.js';
 import { canonicalLearningJson } from './requests.js';
 
-export type ProposalToolSchema = Extract<CandidateProposal, { kind: 'tool' }>['payload']['inputSchema'];
+type ToolPayload = Extract<CandidateProposal, { kind: 'tool' }>['payload'];
+export type ProposalToolSchema = ToolPayload['inputSchema'];
 
 export function compileProposalToolSchema(schema: ProposalToolSchema) {
   if (Buffer.byteLength(canonicalLearningJson(schema)) > 8192) throw new Error('Tool schema exceeds byte limit');
@@ -27,4 +28,21 @@ export function checkProposalToolParameterPaths(value: unknown): void {
     checkProposalToolParameterPaths(key);
     checkProposalToolParameterPaths(entry);
   }
+}
+
+export function validateProposalToolCases(payload: ToolPayload): void {
+  const validInput = compileProposalToolSchema(payload.inputSchema);
+  const validOutput = compileProposalToolSchema(payload.outputSchema);
+  const normal = payload.tests.filter(entry => entry.kind === 'normal');
+  const parameters = normal.map(entry => {
+    const value: unknown = JSON.parse(entry.input);
+    checkProposalToolParameterPaths(value);
+    if (!validInput(value) || !validOutput(JSON.parse(entry.expected))) throw new Error('Normal tool case does not satisfy input/output schemas');
+    return canonicalLearningJson(value);
+  });
+  if (new Set(parameters).size < 2) throw new Error('Tool verification requires two distinct valid parameter sets');
+  const refusals = payload.tests.filter(entry => entry.kind === 'refusal');
+  if (!refusals.length || refusals.some(entry => {
+    try { return validInput(JSON.parse(entry.input)); } catch { return false; }
+  })) throw new Error('Malicious refusal cases must contain schema-invalid input');
 }

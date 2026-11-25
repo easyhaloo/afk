@@ -8,10 +8,10 @@ import { parseWorkItemId } from '../../domain/work-item/identity.js';
 import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import { CandidateStore, type StoredDistillationRequest } from './candidate-store.js';
 import { distillationKey, learningScopeSchema } from './contracts.js';
-import { buildEvidencePack, readEvidenceSource, redactEvidenceText, type EvidencePack, type EvidenceSourceInput } from './evidence.js';
+import { buildEvidencePack, managedTranscriptRoots, readEvidenceSource, redactEvidenceText, type EvidencePack, type EvidenceSourceInput } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema, learningIdentitySchema } from './requests.js';
 import { experienceScope, failedRunEvidenceFromEvents, successfulRunEvidenceFromEvents } from './run-evidence.js';
-import { queryLearningState, submitDistillation } from './worker.js';
+import { permitsHandoff, queryLearningState, submitDistillation } from './worker.js';
 
 export interface ReconcileDistillationOptions {
   directory: string;
@@ -22,6 +22,7 @@ export interface ReconcileDistillationOptions {
   workItemId?: string;
   analyzerVersion?: string;
   includeFailed?: boolean;
+  retryAnalysis?: boolean;
 }
 
 export interface DistillationReconciliation {
@@ -57,8 +58,7 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
   const analyzerVersion = learningIdentitySchema.parse(input.analyzerVersion ?? '1');
   const home = await fs.realpath(input.homeDir ?? homedir());
   const defaultRoot = resolve(input.eventRoot ?? process.env.AFK_EVENT_STORE_DIR ?? join(home, '.afk', 'events'));
-  const allowedRoots = [join(home, '.afk', 'transcripts'), join(home, '.claude', 'projects'),
-    join(home, '.codex', 'sessions'), join(home, '.codex', 'archived_sessions')];
+  const allowedRoots = managedTranscriptRoots(home);
   const result: DistillationReconciliation = { scanned: 0, submitted: 0, requestKeys: [], invalidated: 0, checkedSources: [], blocked: [] };
   const store = new CandidateStore({ file: join(input.directory, 'candidates.sqlite') });
   try {
@@ -168,7 +168,7 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
             if (!allowedRoot) throw new Error('source_not_allowed');
             sources.push({ id: `session-${index + 1}`, kind: 'session', path, allowedRoot });
           }
-          const pack = await buildEvidencePack({ sources });
+          const pack = await buildEvidencePack({ sources, completeSessionRanges: true });
           const signature = hash(canonicalLearningJson({ sessions, sources: pack.sources.slice(1) }));
           const qa = history.filter(event => event.data.kind === 'qa.started').at(-1);
           const phase = completion && history.some(event => event.data.kind === 'change.merge_verified' && !event.data.child && event.data.changeId === completion.publishedChange)
@@ -196,7 +196,9 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
             store.setRequestBlocked(entry.key, null, 'source_unstable');
           }
           const current = requestKey ? store.getRequest(requestKey) : undefined;
-          if (current && !current.blockedReason) result.requestKeys.push(current.key);
+          if (current && (!current.blockedReason || (input.retryAnalysis && scopeFilter && runFilter && permitsHandoff(current.blockedReason)))) {
+            result.requestKeys.push(current.key);
+          }
           result.checkedSources.push({ runId, eventRoot: events.root });
         }
         result.submitted += requests.length;

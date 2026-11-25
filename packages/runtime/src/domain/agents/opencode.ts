@@ -105,7 +105,7 @@ export class OpenCodeProvider extends ProcessAgentProvider {
       if (usage) {
         inputTokens += usage.inputTokens;
         outputTokens += usage.outputTokens;
-        events.push({ type: 'usage', usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } });
+        events.push({ type: 'usage', usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }, contextTokens: usage.totalTokens });
       }
       stopped = part.reason === 'stop';
       if (stopped && !step.usedTool && step.text) events.push({ type: 'result', result: step.text });

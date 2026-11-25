@@ -58,6 +58,12 @@ describe('bounded immutable evidence', () => {
     expect(validateEvidencePack(pack)).toEqual(pack);
   });
 
+  it('keeps long transcript text intact while masking prefixed credential fields', () => {
+    const text = 'x'.repeat(64 * 1024);
+    const output = redactEvidenceText(`${text} app-client_secret="test-value" app-api_key="test-value" app-authorization="test-value"`);
+    expect(output).toBe(`${text} app-client_secret=[redacted] app-api_key=[redacted] app-authorization=[redacted]`);
+  });
+
   it.each(['2001:db8:85a3::8a2e:370:7334', '[2001:db8::1]:443', '::1', '::ffff:10.23.45.67', 'fe80::1%en0'])('removes IPv6 addresses without damaging relative API routes: %s', address => {
     const output = redactEvidenceText(`host=${address} route=api/v1/orders route=v2/users/{id} GET /api/v1/orders`);
     expect(output).not.toContain(address);

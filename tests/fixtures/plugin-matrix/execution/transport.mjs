@@ -14,7 +14,11 @@ const finish = result => {
   process.exit(result.status ?? 91);
 };
 
-if (binary === 'opencode' && argv[0] === 'db') {
+if (binary === 'opencode' && argv[0] === 'session') {
+  if (argv.length !== 5 || argv[1] !== 'export' || argv[2] !== '--standalone'
+    || argv[3] !== '--sanitize' || argv[4] !== 'matrix-opencode-native') process.exit(64);
+  json({ info: { id: 'matrix-opencode-native' }, messages: [] });
+} else if (binary === 'opencode' && argv[0] === 'db') {
   if (argv.length !== 5 || !argv[1].includes("session") || !argv[1].includes("'matrix-opencode-native'")
     || argv[2] !== '--pure' || argv[3] !== '--format' || argv[4] !== 'json') process.exit(64);
   json([]);

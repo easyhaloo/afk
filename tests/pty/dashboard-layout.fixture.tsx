@@ -2,11 +2,17 @@ import React from 'react';
 import { Box, render } from 'ink';
 import { AppContent } from '../../apps/cli/src/tui/app/AppContent.js';
 import { StateProvider } from '../../apps/cli/src/tui/app/state/StateContext.js';
+import type { Task } from '../../apps/cli/src/tui/board/task-types.js';
 
-const tasks = [{
-  iid: 17,
+const tasks: Task[] = [{
+  backlogId: '17',
+  runId: 'run-e2e-layout',
   title: 'Exercise responsive task navigation',
-  status: 'active' as const,
+  status: 'active',
+  phase: 'implementing',
+  executionMode: 'interactive',
+  sandboxProvider: 'local',
+  agentProvider: 'claude',
   session: 'afk-e2e-task',
   branch: 'afk/e2e-layout',
   progress: '50%',
@@ -60,4 +66,4 @@ function DashboardFixture() {
   );
 }
 
-render(<DashboardFixture />, { exitOnCtrlC: true, patchConsole: false });
+render(<DashboardFixture />, { exitOnCtrlC: true, patchConsole: false, interactive: true });

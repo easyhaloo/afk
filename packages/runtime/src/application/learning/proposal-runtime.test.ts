@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { getEventListeners, once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { compareProposalActual, prepareAssetProposal, type ProposalInventory } from './proposals.js';
 import { verifyRepositoryAssetProposal, ProposalRuntimeCleanupError, type ProposalRuntimeOptions, type ProposalRuntimeResult } from './proposal-runtime.js';
@@ -35,21 +35,23 @@ afterAll(() => {
   if (process.env.AFK_TEST_PROPOSAL_EVIDENCE) writeFileSync(process.env.AFK_TEST_PROPOSAL_EVIDENCE, JSON.stringify({ baseImageId, evidence: realEvidence }, null, 2));
 });
 
-function fixture() {
+function fixture(timeoutMs = 500, artifactPath = 'asset.js') {
   const root = directory();
   const original = 'console.log(JSON.stringify({value:"old"}));\n';
-  writeFileSync(join(root, 'asset.js'), original);
+  const asset = join(root, artifactPath);
+  mkdirSync(dirname(asset), { recursive: true });
+  writeFileSync(asset, original);
   writeFileSync(join(root, 'helper.txt'), 'baseline');
   git(root, 'init', '-b', 'main');
   git(root, 'add', '.');
   git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture');
   const commit = git(root, 'rev-parse', 'HEAD');
   const inventory: ProposalInventory = { skills: [], toolSearches: ['cli', 'script', 'plugin'], tools: [{ kind: 'script', ref: 'script:fixture',
-    name: 'fixture', description: 'Existing fixture', provenance: 'configured-repository', source: { root, file: join(root, 'asset.js') } }] };
+    name: 'fixture', description: 'Existing fixture', provenance: 'configured-repository', source: { root, file: asset } }] };
   const prepared = prepareAssetProposal({ ...output.candidates[0], kind: 'tool', targetRef: 'script:fixture', title: 'Fixture tool', payload: {
     existingTools: ['script:fixture'], inputSchema: { type: 'object', properties: { key: { type: 'string', pattern: '^[a-z]+$' } }, required: ['key'], additionalProperties: false },
     outputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false },
-    source: 'console.log(JSON.stringify({value:"new"}));', dependencies: [], permissions: [], timeoutMs: 500,
+    source: 'console.log(JSON.stringify({value:"new"}));', dependencies: [], permissions: [], timeoutMs,
     sideEffects: 'none', idempotency: 'Pure', recovery: 'Retry', tests: [
       { kind: 'normal', input: '{"key":"alpha"}', expected: '{"value":"new"}' },
       { kind: 'normal', input: '{"key":"beta"}', expected: '{"value":"new"}' },
@@ -84,11 +86,11 @@ function fixture() {
   vi.spyOn(provider, 'frozen', 'get').mockReturnValue(engine);
   const options: ProposalRuntimeOptions & { signal?: ProviderOperationOptions['signal'] } = {
     repository, request: { repository: workspace.repository, runId: workspace.runId }, expectedCommit: commit, inventory,
-    artifactPath: 'asset.js', baseImageId,
+    artifactPath, baseImageId,
     binding: { scope: output.candidates[0].applicability.project, candidateId: 'd'.repeat(64), candidateVersion: 1, evidenceDigest: 'e'.repeat(64) },
     sandbox: { executeFrozen: input => executeFrozenContainer(provider, input) },
     harness: { id: 'configured-behavior', revision: 'v1', kind: 'tool', cases: prepared.checks.map(check => ({
-      checkId: check.id, checkDigest: digest(check), argv: ['node', '/workspace/asset.js'], expected: { value: 'new' },
+      checkId: check.id, checkDigest: digest(check), argv: ['node', `/workspace/${artifactPath}`], expected: { value: 'new' },
     })), observe: vi.fn(async result => ({ status: 'observed' as const, actual: JSON.parse(result.stdout), assertions: 1 })) },
     assertCurrent: vi.fn(async () => {}), recordOwnership: vi.fn(async () => {}),
   };
@@ -150,13 +152,16 @@ describe('repository frozen proposal production orchestration', () => {
     expect(repository.cleanup).toHaveBeenCalledOnce();
   });
 
-  it('blocks unsupported control experiments before allocating a repository', async () => {
+  it.each([false, true])('blocks permission experiments before repository allocation (contract present: %s)', async bound => {
     const { options, prepared, repository, engine } = fixture();
     const check = prepared.checks.find(entry => entry.kind === 'permission-denied')!;
     const configured = options.harness!.cases.find(entry => entry.checkId === check.id)!;
-    configured.argv = ['node', '/workspace/asset.js', check.input];
+    const callInput = '{"key":"protected"}';
+    configured.argv = ['node', '/workspace/asset.js', bound ? callInput : check.input];
     configured.experiment = { protocol: 'proposal-semantic-v1', adapter: 'node-json-argv-v1', kind: check.kind, input: check.input,
-      assertions: [{ id: 'exit', source: 'exit-code', expected: 0 }, { id: 'claimed', source: 'stdout', expected: 'cancelled' }] };
+      assertions: [{ id: 'exit', source: 'exit-code', expected: 0 }, { id: 'claimed', source: 'stdout', expected: 'denied' }],
+      ...(bound ? { callInput, permissionDenial: { contractRevision: 'readonly-workspace-openat-v1', operation: 'openat-write',
+        target: '/workspace/asset.js', errno: 'EROFS' } } : {}) };
     expect(await verifyRepositoryAssetProposal(prepared, options)).toMatchObject({ status: 'blocked', code: 'oracle_unsupported' });
     expect(repository.prepare).not.toHaveBeenCalled();
     expect(engine.buildFrozenImage).not.toHaveBeenCalled();
@@ -726,6 +731,45 @@ describe('repository frozen proposal production orchestration', () => {
     expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
   });
 
+  it('freezes only approved files from an oversized committed tree', async () => {
+    const artifactPath = 'scripts/asset.js';
+    const { root, options, prepared, original } = fixture(500, artifactPath);
+    writeFileSync(join(root, 'oversized.txt'), Buffer.alloc(8 * 1024 * 1024));
+    git(root, 'add', 'oversized.txt');
+    git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'oversized');
+    options.expectedCommit = git(root, 'rev-parse', 'HEAD');
+    const workspace = { ...await options.repository.prepare!(options.request, {}),
+      snapshot: { commit: options.expectedCommit, branch: 'main', dirty: false } };
+    vi.mocked(options.repository.snapshot).mockResolvedValue(workspace.snapshot);
+    vi.mocked(options.repository.prepare!).mockResolvedValue(workspace);
+    vi.mocked(options.repository.checkout!).mockResolvedValue(workspace);
+    const execute = vi.spyOn(options.sandbox, 'executeFrozen');
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow('Proposal committed input exceeds byte limit');
+    expect(execute).not.toHaveBeenCalled();
+
+    options.inputFiles = ['helper.txt'];
+    expect((await verifyRepositoryAssetProposal(prepared, options)).status).toBe('verification-observed');
+    for (const [request] of execute.mock.calls) {
+      expect(request.input.manifest.map(entry => entry.path)).toEqual(['helper.txt', 'scripts', artifactPath]);
+      expect(request.input.manifest[0].digest).toBe(bytesDigest('baseline'));
+    }
+    expect(execute.mock.calls.slice(0, 2).map(([request]) => request.input.manifest[2].digest)).toEqual([
+      bytesDigest(original), prepared.artifact.digest,
+    ]);
+
+    execute.mockClear();
+    options.inputFiles = ['missing.txt'];
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow('missing committed file');
+    expect(execute).not.toHaveBeenCalled();
+    options.inputFiles = ['helper.txt'];
+    git(root, 'update-index', '--assume-unchanged', artifactPath);
+    chmodSync(join(root, artifactPath), 0o755);
+    execute.mockClear();
+    expect(git(root, 'status', '--porcelain')).toBe('');
+    await expect(verifyRepositoryAssetProposal(prepared, options)).rejects.toThrow(/bytes or mode/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each(['hidden-content', 'hidden-mode'] as const)('checks committed bytes despite clean status for %s', async change => {
     const { root, options, prepared, engine } = fixture();
     git(root, 'update-index', '--assume-unchanged', 'helper.txt');
@@ -814,6 +858,26 @@ describe('repository frozen proposal production orchestration', () => {
     expect(options.recordOwnership).toHaveBeenCalledTimes(fresh.checks.length);
   });
 
+  it.each(['main', 'other'])('checks an implicitly selected branch %s against the baseline', async ref => {
+    const { options, prepared, repository, workspace, engine } = fixture();
+    const baseline = { ...workspace.snapshot };
+    vi.mocked(repository.snapshot).mockResolvedValue(baseline);
+    options.request = { ...options.request, repository: { url: workspace.repository.url } };
+    const resolvedWorkspace = { ...workspace, repository: { ...workspace.repository, ref } };
+    vi.mocked(repository.prepare!).mockResolvedValue(resolvedWorkspace);
+    vi.mocked(repository.checkout!).mockResolvedValue(resolvedWorkspace);
+    const verification = verifyRepositoryAssetProposal(prepared, options);
+    if (ref === baseline.branch) {
+      const result = await verification;
+      if (result.status !== 'verification-observed') throw new Error('Expected actual observations');
+      expect(result.comparisons[0].proposed.receipt.binding.repositoryDigest).toBe(digest(options.request.repository));
+    } else {
+      await expect(verification).rejects.toThrow(/ownership|baseline/);
+      expect(engine.startFrozenContainer).not.toHaveBeenCalled();
+    }
+    expect(repository.cleanup).toHaveBeenCalledWith({ workspaceId: workspace.id }, expect.anything());
+  });
+
   it.each(['id', 'runId', 'path', 'repository', 'dirty', 'commit'] as const)('rejects checkout %s drift and cleans only the allocated workspace', async field => {
     const { options, prepared, repository, workspace, engine } = fixture();
     const next = { ...workspace, snapshot: { ...workspace.snapshot }, repository: { ...workspace.repository } };
@@ -847,7 +911,7 @@ describe('repository frozen proposal production orchestration', () => {
 });
 
 function managedFixture() {
-  const test = fixture();
+  const test = fixture(5000);
   vi.restoreAllMocks();
   const managedRoot = directory();
   const owned = new Set<string>();

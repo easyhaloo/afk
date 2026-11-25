@@ -85,33 +85,60 @@ async function withProfile(name: string, test: (profile: Profile) => Promise<voi
 async function consumeExcludedTool(entry: typeof recallCases[number], profile: Profile, workspace: string) {
   const { home, runtime, env, cli } = profile;
   const { target, applicability, prompt, scope } = entry.query;
+  const claude = process.env.AFK_W11_TOOL_NEGATIVE_AGENT === 'claude-code';
+  const agent = claude ? 'claude-code' : 'opencode';
+  const evidence = await fs.mkdtemp(join(tmpdir(), `w11-${entry.id}-native-`));
   const scenario = join(home, 'scenario.json');
   const settings = join(home, 'execution-context.json');
+  const contextFile = join(workspace, '.afk/experience-context.md');
+  const answerFile = join(workspace, 'answer.json');
   await fs.writeFile(settings, JSON.stringify({ enabled: false, executionContexts: [{ target, applicability }] }));
   await cli('configure', 'learning.distiller', '--builtin', '--file', settings);
-  await fs.writeFile(scenario, JSON.stringify({ instructions: '请读取当前工作区的 .afk/experience-context.md。从该文件选择与问题匹配的完整工具路由对象，写入 answer.json 的 route 字段。文件不存在或无匹配时该字段填 null。只使用该文件作为路由来源，写好答案即结束。请勿搜索其他目录、提交或推送。' }));
+  await fs.writeFile(scenario, JSON.stringify({ instructions: `请读取 ${JSON.stringify(contextFile)}。从该文件选择与问题匹配的完整工具路由对象，写入 ${JSON.stringify(answerFile)} 的 route 字段。文件不存在或无匹配时该字段填 null。只使用该文件作为路由来源，写好答案即结束。请勿搜索其他目录、提交或推送。` }));
   const userHome = userInfo().homedir;
+  const claudeConfig = process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude');
   const sessionEnv = { ...process.env, ...env, PWD: workspace, INIT_CWD: workspace,
+    ...(claude && { CLAUDE_CONFIG_DIR: claudeConfig }),
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(userHome, '.config'),
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? join(userHome, '.local/share') };
   const itemId = String(47 + Number(entry.id.slice(-2)));
-  await execute(process.execPath, [driver, 'consume', runtime, home, prompt, scope, home, itemId, scenario],
+  console.info(`Managed ${entry.id} ${agent} evidence: ${evidence}`);
+  await execute(process.execPath, [driver, 'consume', runtime, home, prompt, scope, evidence, itemId, scenario, agent],
     { cwd: workspace, env: sessionEnv, timeout: 200_000 });
-  const report = JSON.parse(await fs.readFile(join(home, 'result.json'), 'utf8'));
+  const report = JSON.parse(await fs.readFile(join(evidence, 'result.json'), 'utf8'));
   expect(report.result).toEqual({ success: true });
   expect(report.workItemId).toBe(`${scope}#${itemId}`);
   expect(report.retrievals).toEqual([{ query: expect.objectContaining({ scope, target: expect.objectContaining(target!), applicability,
     prompt: expect.stringContaining(prompt) }), origins: [] }]);
   expect(report.events).toContainEqual(expect.objectContaining({ kind: 'step.completed', stepId: 'implement', outcome: 'succeeded' }));
   expect(report.events).not.toContainEqual(expect.objectContaining({ command: 'experience.recall', accepted: true }));
-  await expect(fs.lstat(join(workspace, '.afk/experience-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
-  const answer = JSON.parse(await fs.readFile(join(workspace, 'answer.json'), 'utf8'));
+  await expect(fs.lstat(contextFile)).rejects.toMatchObject({ code: 'ENOENT' });
+  const answer = JSON.parse(await fs.readFile(answerFile, 'utf8'));
   expect(answer).toEqual({ route: null });
+  await fs.copyFile(answerFile, join(evidence, 'answer.json'));
   const sessions = report.events.filter((event: { kind: string }) => event.kind === 'agent.session_recorded');
-  expect(sessions).toEqual([expect.objectContaining({ sessionId: expect.stringMatching(/^ses_/) })]);
+  expect(sessions).toHaveLength(1);
   const sessionId = sessions[0].sessionId;
+  if (claude) {
+    expect(sessionId).toMatch(/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+    const { claudeProjectSlug } = await import(pathToFileURL(join(runtime, 'shared/agent-transcript-path.js')).href);
+    const raw = await fs.readFile(join(claudeConfig, 'projects', claudeProjectSlug(workspace), `${sessionId}.jsonl`), 'utf8');
+    await fs.writeFile(join(evidence, 'native.jsonl'), raw, { mode: 0o600 });
+    const transcript = raw.trim().split('\n').map(line => JSON.parse(line));
+    expect(transcript.some(message => message.type === 'user' && JSON.stringify(message.message?.content).includes(prompt))).toBe(true);
+    for (const marker of [plugin, 'verification.provider', source.description, 'plugin invoke']) expect(raw).not.toContain(marker);
+    const calls = transcript.filter(message => message.type === 'assistant').flatMap(message => message.message?.content ?? []);
+    const contextRead = calls.find(call => call.type === 'tool_use' &&
+      ((call.name === 'Read' && call.input?.file_path?.endsWith('.afk/experience-context.md')) ||
+       (call.name === 'Bash' && call.input?.command?.includes('.afk/experience-context.md'))));
+    expect(contextRead).toBeDefined();
+    return { runId: report.runId, workItemId: report.workItemId, sessionId, answer, retrieval: report.retrievals[0], agent,
+      contextRead: contextRead!.name, messages: transcript.length, nativeExportSha256: createHash('sha256').update(raw).digest('hex') };
+  }
+  expect(sessionId).toMatch(/^ses_/);
   const { stdout } = await execute('opencode', ['session', 'export', sessionId], { cwd: workspace,
     env: { ...sessionEnv, HOME: userHome }, maxBuffer: 8 * 1024 * 1024 });
+  await fs.writeFile(join(evidence, 'native.json'), stdout, { mode: 0o600 });
   const transcript = JSON.parse(stdout);
   expect(transcript.info.id).toBe(sessionId);
   expect(transcript.messages).toContainEqual(expect.objectContaining({ type: 'user', text: expect.stringContaining(prompt) }));
@@ -124,7 +151,7 @@ async function consumeExcludedTool(entry: typeof recallCases[number], profile: P
   const contextRead = calls.find(call => (call.name === 'read' && call.state?.input?.path?.endsWith('.afk/experience-context.md')) ||
     (call.name === 'shell' && call.state?.input?.command?.includes('.afk/experience-context.md')));
   expect(contextRead).toBeDefined();
-  return { runId: report.runId, workItemId: report.workItemId, sessionId, answer, retrieval: report.retrievals[0],
+  return { runId: report.runId, workItemId: report.workItemId, sessionId, answer, retrieval: report.retrievals[0], agent,
     contextRead: contextRead!.name, messages: transcript.messages.length, nativeExportSha256: createHash('sha256').update(stdout).digest('hex') };
 }
 

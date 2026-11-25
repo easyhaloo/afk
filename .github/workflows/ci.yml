@@ -377,14 +377,18 @@ jobs:
             node-gyp-${{ runner.os }}-node22-
 
       - name: Build PTY E2E native dependencies
-        run: pnpm rebuild esbuild node-pty puppeteer --pending --reporter=append-only
+        run: pnpm rebuild esbuild node-pty --pending --reporter=append-only
 
       - name: Build CLI for PTY E2E
         run: pnpm build
 
       - name: Test (PTY E2E, advisory)
         continue-on-error: true
-        run: pnpm test:e2e:pty
+        run: |
+          PUPPETEER_EXECUTABLE_PATH="$(command -v google-chrome)"
+          export PUPPETEER_EXECUTABLE_PATH
+          "$PUPPETEER_EXECUTABLE_PATH" --version
+          pnpm test:e2e:pty
 
   verify:
     name: Verify + Desktop E2E

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './client.js';
 
 describe('GitHubClient', () => {
@@ -14,15 +15,40 @@ describe('GitHubClient', () => {
     await scoped.getIssue(7);
     expect(get).toHaveBeenCalledWith({ owner: 'org', repo: 'other', issue_number: 7 });
   });
-  it('does not repeat a relationship comment that is already written', async () => {
+  it('does not repeat a relationship comment found on a later page', async () => {
     const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
-    const createComment = vi.fn().mockResolvedValue({});
-    const listComments = vi.fn().mockResolvedValue({ data: [{ id: 3, body: 'Blocked by org/other#8' }] });
-    (client as unknown as { client: { issues: { createComment: typeof createComment; listComments: typeof listComments } } }).client = {
-      issues: { createComment, listComments },
-    };
+    const firstPage = 'https://api.github.com/repos/owner/code/issues/5/comments?per_page=100';
+    const secondPage = `${firstPage}&page=2`;
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json([{ id: 2, body: null }], { headers: { link: `<${secondPage}>; rel="next"` } }))
+      .mockResolvedValueOnce(Response.json([{ id: 3, body: 'Blocked by org/other#8' }]));
+    (client as unknown as { client: Octokit }).client = new Octokit({ request: { fetch } });
+
     await client.linkIssues(5, 8, 'blocked_by', 'org/other');
-    expect(createComment).not.toHaveBeenCalled();
+
+    expect(fetch.mock.calls.map(([url, options]) => [url, options.method])).toEqual([
+      [firstPage, 'GET'], [secondPage, 'GET'],
+    ]);
+  });
+
+  it('returns pull requests beyond the first page and preserves their states', async () => {
+    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const pull = { title: 'Change', head: { ref: 'fix/change' }, base: { ref: 'main' }, html_url: 'https://example/pull' };
+    const paginate = vi.fn().mockResolvedValue([
+      { ...pull, number: 9, state: 'open', merged_at: null },
+      { ...pull, number: 8, state: 'closed', merged_at: '2026-11-25T00:00:00Z' },
+      { ...pull, number: 7, state: 'closed', merged_at: null },
+    ]);
+    (client as unknown as { client: unknown }).client = { paginate };
+
+    const results = await client.listMRs({ state: 'all', perPage: 1 });
+
+    expect(paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls', {
+      owner: 'owner', repo: 'code', state: 'all', per_page: 1,
+    });
+    expect(results.map(({ id, state }) => ({ id, state }))).toEqual([
+      { id: 9, state: 'opened' }, { id: 8, state: 'merged' }, { id: 7, state: 'closed' },
+    ]);
   });
   it('reads the PR-side closing issue references for open PRs', async () => {
     const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });

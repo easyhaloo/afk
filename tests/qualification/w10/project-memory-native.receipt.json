@@ -1,0 +1,75 @@
+{
+  "date": "2026-11-26",
+  "scope": "isolated synthetic handoff, local inference, installed Runtime with synthetic backlog adapter",
+  "platform": "darwin-arm64",
+  "macOS": "15.2",
+  "version": "0.2.224",
+  "sourceCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549",
+  "model": "Qwen3.5-4B Q4_K_M",
+  "modelSha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+  "backend": "ollama version is 0.40.18",
+  "agents": {
+    "pi": "1.6.0",
+    "opencode": "opencode v2.2.7"
+  },
+  "provider": "context.project-memory",
+  "memorySha256": "a40573a30b884b34c2bf77928156eed5d9c951c269c9a6e3a3ec930f82aaf53c",
+  "nativeFinal": {
+    "type": "goal_complete",
+    "kind": "task",
+    "summary": "93"
+  },
+  "consumers": [
+    {
+      "runId": "project-memory-60d0ac9b-9dc1-489e-8b42-cdd59314dd91",
+      "workItemId": "github:qualification/project-memory#77",
+      "agentName": "pi",
+      "nativeSession": "01a21661-ec0d-7450-9b0a-15d41e28d33b",
+      "summary": "93",
+      "dispatches": 1,
+      "matchedRecords": 1,
+      "contextSha256": "89f3fe6ff5adcb0bb38edfab7e15e3a293b782cc9d8acbeb748c6eeb8201a0b1",
+      "cleanup": true,
+      "outcome": "succeeded",
+      "nativeTraceSha256": "c3b03bbf7f1d5ad4265ed4ce0c504a253e3fe6906583cab2319f87afeff80332",
+      "nativeContextReads": 1,
+      "nativeBacklogReads": 1,
+      "usage": {
+        "inputTokens": 2843,
+        "outputTokens": 202,
+        "totalTokens": 3045
+      }
+    },
+    {
+      "runId": "project-memory-d727ceac-f2ad-4f1d-8591-3c74cbed1479",
+      "workItemId": "github:qualification/project-memory#78",
+      "agentName": "opencode",
+      "nativeSession": "ses_de99ded82ffeIU185lh12i6jHt",
+      "summary": "93",
+      "dispatches": 1,
+      "matchedRecords": 1,
+      "contextSha256": "89f3fe6ff5adcb0bb38edfab7e15e3a293b782cc9d8acbeb748c6eeb8201a0b1",
+      "cleanup": true,
+      "outcome": "succeeded",
+      "nativeTraceSha256": "cd641c152f57909c3d8b9514ec993674d52f79297145640a08d4d4970b22211e",
+      "nativeContextReads": 1,
+      "nativeBacklogReads": 1,
+      "usage": {
+        "inputTokens": 4306,
+        "outputTokens": 323,
+        "totalTokens": 4629
+      }
+    }
+  ],
+  "disabledControl": {
+    "runId": "project-memory-ca7f3657-fe86-40be-8a11-0ea0e372004b",
+    "workItemId": "github:qualification/project-memory#79",
+    "agentName": "pi",
+    "dispatches": 0,
+    "matchedRecords": 0,
+    "cleanup": true,
+    "outcome": "failed",
+    "diagnostic": "Capability provider is not registered"
+  }
+}

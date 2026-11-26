@@ -17,6 +17,8 @@
 
 2026-11-26，macOS arm64 离线预演安装版 CLI 0.2.223 通过项目记忆复验。12 个独立 Node 进程调用安装包内的 `ProjectMemoryProvider.remember()` 写入同一隔离项目，两个独立 CLI 进程均读回全部 12 条，未命中查询返回空列表。另两个独立进程各自运行安装版的 `WorkflowRunner`，通过 `integrations.contexts` 把 12 条记录及来源写入各自工作区，并在 Agent 派发时提供文件指针。确定性的 Agent 替身读回完整文件，两次运行都清理了上下文。停用插件后，CLI 返回 `Capability provider is not registered`，保留该选择的工作流在派发前失败，记忆文件字节保持一致。运行 `node tests/qualification/w10/project-memory-installed.mjs <安装版 CLI 入口>` 可复验。生产工作流写入接线及目标部署的消费待验。[回执](project-memory-installed.receipt.json)
 
+同日，离线安装版 CLI `0.2.224`（`6198fbbe`）在隔离项目中用本地 Ollama 和 Qwen3.5-4B 驱动 Pi 与 OpenCode。两个独立工作项和原生会话各读取一次 `.afk/plugin-context.md`，均从同一条合成项目记忆计算出正确结果 `93`。核对了原生工具结果、最终输出、会话 ID 和上下文清理。停用插件后的第三个工作项在派发前被拦截，未生成原生会话。初次使用 llama.cpp 的两轮诊断中，原生读取已发生，Agent 未输出有效完成回执。目标部署的 JSON 来源和业务记录仍待验。[双 Agent 回执](project-memory-native.receipt.json)
+
 2026-11-22，从仓库外安装 macOS arm64 CLI 0.2.189，通过 `plugin configure context.retrieval --builtin --file` 导入三份真实 Markdown 摘录。相同输入在 0.2.188 被配置校验拒绝。修复后通过 `plugin invoke context.provider context.retrieval gather --input <文件> --json` 查询工作项关系、PRD 基线和中文桌面设计，分别命中预期首条来源，分数为 2、3、2，正文与输入逐字一致（去除首尾空白）。未命中查询返回 `[]`。同一安装版通过 17 项上下文与记忆回归。归档 SHA-256 为 `889fd413a8fe55f8e73fa7cfb1a15ea01e50d1017bec802c8cd7b643728e6bdf`，语料 SHA-256 为 `7576d829b54de19576d98942c96c0a810890541990c2eede780c12715ac814d7`。
 
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)

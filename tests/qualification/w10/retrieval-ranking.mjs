@@ -5,9 +5,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const [repoPath, archiveDir, queryPath, version = '0.2.224', ...extra] = process.argv.slice(2);
-assert.ok(repoPath && archiveDir && !extra.length,
-  'Usage: node retrieval-ranking.mjs <repository> <archive-directory> [query-set.json [version]]');
+const [repoPath, archiveDir, queryPath, version = '0.2.224', corpusMode, ...extra] = process.argv.slice(2);
+assert.ok(repoPath && archiveDir && !extra.length && (!corpusMode || (corpusMode === 'expanded' && queryPath)),
+  'Usage: node retrieval-ranking.mjs <repository> <archive-directory> [query-set.json [version [expanded]]]');
 const repo = resolve(repoPath);
 const packageDir = resolve(archiveDir);
 const source = '6198fbbec9b4c4e0980b1c24d2abbaeab9046c19';
@@ -35,7 +35,11 @@ const excerpts = sectionSources.map(([path, heading]) => {
   const end = lines.findIndex((line, i) => i > index && new RegExp(`^#{1,${rank}} `).test(line));
   return { origin: `${path}#${heading.replace(/^#+ /, '')}`, content: lines.slice(index, end < 0 ? undefined : end).join('\n').trim() };
 });
-const docs = [...adrs, ...excerpts];
+const docs = corpusMode === 'expanded'
+  ? git('ls-tree', '-r', '--name-only', source, 'docs').trim().split('\n')
+    .filter(path => path.endsWith('.md') && !path.startsWith('docs/_archive/'))
+    .map(origin => ({ origin, content: git('show', `${source}:${origin}`).trim() }))
+  : [...adrs, ...excerpts];
 const historicalQueries = [
   ['How does afk doctor --fix reclaim a leaked dependency pool checkout?', '0038-workspace'],
   ['The JumpServer bastion rejected ssh -J. Which CLI reaches a host asset?', '0029-jumpserver'],

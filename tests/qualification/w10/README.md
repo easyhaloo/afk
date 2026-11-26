@@ -29,6 +29,8 @@ macOS arm64 的 `0.2.224` 离线安装版在 `6198fbbe` 的 27 篇 ADR 和 10 �
 
 macOS arm64 离线安装的 `0.2.225` 候选（`6d6263b8`）优先排列命中不同查询词更多的文档。原始组首位由 2/12 提升到 7/12，前五由 5/12 提升到 12/12。第二组首位由 4/12 提升到 5/12，前五由 6/12 提升到 10/12。两版共同返回的片段分数一致，两组无匹配对照均为空。第二组候选回执两次重放逐字节一致。正式发布版和目标部署待复验。[候选对比回执](retrieval-ranking.candidate.receipt.json)
 
+在 `6198fbbe` 冻结的 58 份未归档 Markdown 上，16 条中英文查询各有一个指定来源。macOS arm64 的 `0.2.224` 本地离线制品（`6198fbbe`）首位 0/16、前五 1/16，`0.2.225` CI 制品（`6d6263b8`）首位 1/16、前五 5/16。候选有 13/16 条的首位来自实施计划目录。切成 1,098 个标题段后，候选首位 0/16、前五 4/16。三组无匹配对照均返回空结果。 [冻结查询](retrieval-ranking.expanded.json) · [制品、语料清单散列及排名回执](retrieval-ranking.expanded.receipt.json)。全篇复跑在第二组命令的归档目录和查询集对应替换后，于末尾传入版本及 `expanded`。
+
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
 
 2026-11-20 在真实 tmux 3.6a 上复现安装版 CLI 0.2.174 返回 `aborted` 后前台子进程仍在运行。tmux `-CC` 无法在 Node 管道中启动，报 `tcgetattr failed`。切换至 `-C` 后，仓库外安装的 macOS arm64 CLI 0.2.175 通过同一 PTY 断言。前台 Python 进程捕获 Ctrl-C，产物登记的 pane ID 与 tmux 一致，关闭后自有会话消失，活动资源归零，同一隔离服务器中的未登记会话仍存在。测试载荷为有界 Python 进程。归档 SHA-256 为 `e8df48c0a75817522627fe425984985c41125897b4a0384769d38e1e85058868`。

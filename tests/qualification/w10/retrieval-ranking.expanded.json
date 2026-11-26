@@ -1,0 +1,19 @@
+[
+  ["What coordination does a local filesystem lease lack when executors run on multiple hosts?", "docs/architecture/overview.md"],
+  ["When a change reaches merge_ready, who actually decides whether it lands?", "docs/architecture/overview.md"],
+  ["Which command checks the integrity of the JSONL event hash chain?", "docs/architecture/observability.md"],
+  ["从运行事件还原聚合状态时，会重新执行副作用吗？", "docs/architecture/observability.md"],
+  ["桌面界面里，什么时候可以用加号按钮直接新增，什么时候需要先选择上下文？", "docs/architecture/design-system.md"],
+  ["How can I tell which installed Claude Code marketplace copy of a skill actually runs?", "docs/guides/agent-plugins.md"],
+  ["When verification needs to run independently of the managed workflow, which entry point should I use?", "docs/guides/workflows.md"],
+  ["要单独验证一个事项而不运行整套工作流，该用哪个入口？", "docs/guides/workflows.zh.md"],
+  ["How can I verify a CLI archive checksum during installation from local files?", "docs/getting-started.md"],
+  ["怎么为本地 CLI 安装指定隔离的配置目录和安装路径？", "docs/getting-started.zh.md"],
+  ["How can terminal tests inject keystrokes into a child process and capture the output?", "docs/guides/testing.md"],
+  ["Why are absolute-positioned Ink components empty when rendered without a sized container?", "docs/guides/testing.md"],
+  ["What is the difference between a prerequisite relationship and a parent container in the domain model?", "docs/architecture/glossary.md"],
+  ["Which identifiers refer to an execution attempt rather than the canonical work item?", "docs/architecture/glossary.md"],
+  ["Claude Code、Codex CLI 和 opencode 在规划、迭代和验证节奏上有什么差别？", "docs/research/agent-cli-comparison.zh.md"],
+  ["Where are Claude Code marketplace metadata and Codex plugin package files kept?", "docs/guides/agent-plugins.md"],
+  ["zxywnohit00014231", null]
+]

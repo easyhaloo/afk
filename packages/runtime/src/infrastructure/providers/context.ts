@@ -109,6 +109,7 @@ function rankedFragments(prompt: string, documents: readonly { origin: string; c
 
 export interface CodeContextOptions {
   readonly root: string;
+  readonly useAuthorizedWorkspace?: boolean;
   readonly fs?: ContextFileSystem;
   readonly maxFileBytes?: number;
   readonly maxFiles?: number;
@@ -118,24 +119,27 @@ export class CodeContextProvider implements ContextSource {
   readonly id = 'context.code';
   readonly capabilities = { 'read-only': true, summarize: false, search: true } as const;
   private readonly root: string;
+  private readonly useAuthorizedWorkspace: boolean;
   private readonly fs: ContextFileSystem;
   private readonly maxFileBytes: number;
   private readonly maxFiles: number;
 
   constructor(options: CodeContextOptions) {
     this.root = resolve(options.root);
+    this.useAuthorizedWorkspace = options.useAuthorizedWorkspace ?? false;
     this.fs = options.fs ?? defaultContextFileSystem;
     this.maxFileBytes = positiveLimit(options.maxFileBytes ?? 1024 * 1024);
     this.maxFiles = positiveLimit(options.maxFiles ?? 1000);
   }
 
-  async gather(query: ContextQuery, options?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
+  async gather(query: ContextQuery, options?: ProviderOperationOptions & { readonly authorizedWorkspace?: string }): Promise<readonly ContextFragment[]> {
     checkAbort(options);
     const limit = queryLimit(query.limit);
     if (!limit) return [];
-    const lexicalScope = safePath(this.root, query.scope || '.');
-    const root = await this.fs.realpath(this.root);
-    const scope = safePath(root, relative(this.root, lexicalScope) || '.');
+    const rootPath = this.useAuthorizedWorkspace && options?.authorizedWorkspace ? resolve(options.authorizedWorkspace) : this.root;
+    const lexicalScope = safePath(rootPath, query.scope || '.');
+    const root = await this.fs.realpath(rootPath);
+    const scope = safePath(root, relative(rootPath, lexicalScope) || '.');
     const pending = [scope];
     const documents: { origin: string; content: string }[] = [];
     let visited = 0;

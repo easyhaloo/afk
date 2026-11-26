@@ -861,6 +861,8 @@ integrations:
 策略条目结构为 `{ provider, input }`，上下文条目为
 `{ provider, query: { scope, prompt, limit? } }`。此片段只选择现有 Provider；
 具体文件系统根、参数和 transport 仍由 configured factory 构造。
+工作流绑定了宿主授权的执行 worktree 时，默认 `context.code` 读取该 worktree。
+独立 CLI 调用读取 CLI 工作区。设置 `config.root` 后，两种入口均使用该固定根目录。
 不要把 constructor 字段塞入 `integrations`，也不能假定它会创建不存在的 Provider。
 
 `verifications` 默认为空，最多 32 项；每项仅接受 `{ provider, command?, timeoutMs? }`。

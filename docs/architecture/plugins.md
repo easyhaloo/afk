@@ -1093,8 +1093,12 @@ integrations:
 Policy entries contain `{ provider, input }`; context entries contain
 `{ provider, query: { scope, prompt, limit? } }`. This fragment selects existing
 providers; their concrete filesystem roots, settings and transports are still
-constructed by the configured factory. Do not add constructor fields to
-`integrations` or assume it creates a missing provider.
+constructed by the configured factory.
+The default `context.code` provider reads from the host-authorized worktree
+when a workflow binds one and from the CLI workspace on standalone calls.
+Setting `config.root` pins the provider to that root for both entry points.
+Do not add constructor fields to `integrations` or assume it creates a missing
+provider.
 
 `verifications` defaults to an empty list, with at most 32 entries containing
 only `{ provider, command?, timeoutMs? }`. The command is an argv array without

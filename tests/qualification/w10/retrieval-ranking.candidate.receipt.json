@@ -160,5 +160,104 @@
     ],
     "noMatchControl": []
   },
-  "holdoutReplayIdentical": true
+  "holdoutReplayIdentical": true,
+  "ciReplay": {
+    "verification": {
+      "runId": 45781339313,
+      "attempt": 2,
+      "passedJobs": 8,
+      "coveragePassedTests": 9045,
+      "coverageSkippedTests": 258
+    },
+    "packaging": {
+      "runId": 45796167299,
+      "verifyOnly": true,
+      "passedPlatforms": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-arm64",
+        "linux-x64"
+      ]
+    },
+    "darwin-arm64": {
+      "archiveSha256": "5469600a298d7a4b68fed12f6baf5b466f0441098ebbd2808668ac5b1a46e146",
+      "ranking": {
+        "historical": {
+          "querySetSha256": "c4aa261bb55754ea94d517ffb6fd0accc592b23cd946c167e9c3af2df0c6b768",
+          "top1": 7,
+          "top5": 12
+        },
+        "holdout": {
+          "querySetSha256": "0899dbb8ff648ea3cd9891ca097acb636a27401ec749086fc808e4c2a1c53842",
+          "top1": 5,
+          "top5": 10
+        }
+      },
+      "codeContext": {
+        "defaultRoot": [
+          {
+            "agentName": "pi",
+            "nativeContextReads": 1,
+            "nativeTraceSha256": "eabfc68ee9495230583b3daa3ab8323717b61ee8778bd966a1d9fcac7b364942",
+            "cleanup": true,
+            "outcome": "succeeded"
+          },
+          {
+            "agentName": "opencode",
+            "nativeContextReads": 1,
+            "nativeTraceSha256": "d2507e830c9dde3a82e14b0d8831537d827b9a39bcae0e634b0e18ec3d2edfa5",
+            "cleanup": true,
+            "outcome": "succeeded"
+          }
+        ],
+        "fixedSourceRoot": {
+          "agentName": "pi",
+          "nativeContextReads": 1,
+          "nativeTraceSha256": "7f39e502ef149de226ed41d432a2b97a02f87a27f6ae283a1609baa472175076",
+          "cleanup": true,
+          "outcome": "succeeded"
+        },
+        "disabled": {
+          "dispatches": 0,
+          "matchedRecords": 0,
+          "cleanup": true,
+          "outcome": "failed"
+        }
+      }
+    },
+    "linux-arm64": {
+      "archiveSha256": "9f4823a5df5acb3d0055c88255767ecefb231ac0d3bf438804aa9987c2dd396c",
+      "separateProfileAndWorkspacePerUid": true,
+      "checks": [
+        {
+          "uid": 10001,
+          "groups": [
+            10001
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        },
+        {
+          "uid": 10002,
+          "groups": [
+            10002
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        }
+      ]
+    }
+  }
 }

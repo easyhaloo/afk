@@ -222,6 +222,8 @@ docker run --rm --pull=never --platform linux/arm64 --network none \
   node /check.mjs /package/afk-linux-arm64.tar.gz /package/afk-linux-arm64.tar.gz.sha256 /package/install.sh 0.2.224
 ```
 
+2026-11-26，从 `6d6263b8` 构建的 CLI `0.2.225` 通过四平台 CI 离线打包验证。校验归档散列后，macOS arm64 复现两组排名，并确认 Pi、OpenCode 各读取一次本工作树中的上下文。固定根依然读取源检出，停用后零派发。禁网的 Linux arm64 容器中，两个独立 UID 均通过跨根和符号链接隔离复验。正式发布和目标部署待验。[打包验证](https://github.com/easyhaloo/afk/actions/runs/45796167299) · [散列和验收回执](retrieval-ranking.candidate.receipt.json)
+
 ## 合规规则发布阶段复验
 
 2026-11-26 在 macOS arm64 离线安装版 `0.2.224`（`6198fbbe`）中，确定性的 Agent 替身在写入两个仓库后，通过安装版 CLI 将匹配项目的规则从允许改为拒绝。两个场景均完成实现和验收检查。

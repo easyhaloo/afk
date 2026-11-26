@@ -170,6 +170,20 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [E] | [P] 同文“W10 Evidence 安装版验收”，以及 `$O/.codex/validation/installed-learning-0.2.126.UJkt32/installed-observe-routing-validation.log` | 选择路由、回读、保全本地数据，后端为测试 Provider |
 | [U] | `../verification/runtime-suite.log` | 本表引用 `logger.test.ts` 的 9 项及 `knowledge-base-configuration.test.ts` 的 16 项 |
 
+## D07 发布记忆安装复验
+
+2026-11-26，macOS arm64 预演安装版 CLI `0.2.223`（`a31e29b1`，归档 SHA-256 `a6a1a92fd18a47e39d2df08bc61ab52536a65fee090d6cb481b3d920a7745095`）使用合成证据、隔离知识库和确定性 Agent 传输通过 16/16。安装版验证、发布和 `ExperienceStore` 投影绑定来源、版本、证据与发布键。匹配的工作流收到经验和知识两个来源的引用。错误版本和否定适用性查询返回空。发布授权撤回后，`context.experience` 和 `context.knowledge` 均停止召回。`experience knowledge reconcile` 持久化撤回，恢复授权并重启后也没有召回。另一个用例在独立 QA 状态变化后撤回发布，旧采纳回执无法重放。
+
+从 `a31e29b1` 检出运行已存在的用例。`AFK_E2E_CLI_ENTRY` 指向 `0.2.223` 安装版解析后的 `dist/index.js`。
+
+```sh
+AFK_E2E_CLI_ENTRY=/absolute/path/to/dist/index.js pnpm exec vitest run --no-file-parallelism \
+  tests/e2e/plugin-learning-validation.test.ts tests/e2e/plugin-lesson-lifecycle.test.ts \
+  tests/e2e/w11/installed-lesson.test.ts
+```
+
+D07 的受管记忆走 `ExperienceStore`。`context.project-memory` 的公开能力从配置的 JSON 文件读取。目标部署中的两个独立 Agent 消费仍待验。
+
 ## 代码上下文安装复验
 
 2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自分支内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版、目标部署和多用户工作区待验。[安装回执](code-context-installed.receipt.json)

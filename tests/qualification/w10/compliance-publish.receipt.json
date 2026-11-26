@@ -1,0 +1,49 @@
+{
+  "sourceCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549",
+  "version": "0.2.224",
+  "platform": "darwin-arm64",
+  "entrySha256": "0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c",
+  "cases": [
+    {
+      "action": "tool.source.read",
+      "exit": 1,
+      "status": "failed",
+      "integrityValid": true,
+      "runId": "2eeaefea-139e-498b-bd6e-cae9120771ab",
+      "completed": [
+        "implement",
+        "verify-ac"
+      ],
+      "readers": [
+        "implementation",
+        "ac"
+      ],
+      "failure": "Execution denied by capability policy",
+      "receivePackRequests": 0,
+      "mrCreates": 0,
+      "repositories": 2,
+      "freshDecision": "deny"
+    },
+    {
+      "action": "publish",
+      "exit": 0,
+      "status": "awaiting_human",
+      "integrityValid": true,
+      "runId": "8b025674-5b60-426d-a5ac-951094035a26",
+      "completed": [
+        "implement",
+        "verify-ac"
+      ],
+      "readers": [
+        "implementation",
+        "ac",
+        "qa"
+      ],
+      "receivePackRequests": 8,
+      "mrCreates": 1,
+      "repositories": 2,
+      "freshDecision": "deny"
+    }
+  ]
+}

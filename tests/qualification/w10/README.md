@@ -201,6 +201,14 @@ node tests/qualification/w10/code-context-installed.mjs \
   "$ARCHIVE" "$ARCHIVE.sha256" "$(dirname "$ARCHIVE")/install.sh"
 ```
 
+## 合规规则发布阶段复验
+
+2026-11-26 在 macOS arm64 离线安装版 `0.2.224`（`6198fbbe`）中，确定性的 Agent 替身在写入两个仓库后，通过安装版 CLI 将匹配项目的规则从允许改为拒绝。两个场景均完成实现和验收检查。
+
+配置为 `tool.source.read` 的生命周期检查在 `before-publish` 读到拒绝。两个回环 Git 裸仓均仅保留原 `main`，`receive-pack` 和 MR 创建请求均为零。通用 `publish` 检查沿用运行启动时的规则，产生 8 次 `receive-pack` 请求和 1 次 MR 创建请求，停在人工合并状态。两个场景均由新进程重新评估并读到拒绝，运行审计完整。
+
+运行 `node tests/qualification/w10/compliance-publish.mjs <安装版 CLI 入口>` 可复验。目标部署的规则生效时点和通用发布撤权需求待确认。[安装版回执](compliance-publish.receipt.json)
+
 ## Docker 容器补验
 
 macOS arm64 安装版 `0.2.215` 通过 `sandbox.docker` 启动隔离的本机 Docker `28.3.2` 容器。`docker top` 确认负载正在运行。手动中断发送 `SIGINT`，500 ms 后容器仍运行。`agent.wait` 触发 `SIGKILL` 并返回 `aborted`。关闭后旧句柄返回 `404 SANDBOX_MISSING`，独立 Docker 查询按完整 ID 确认容器移除，共通过 10 项检查，兜底清理数为零。[取消回执](docker-cancel.receipt.json)

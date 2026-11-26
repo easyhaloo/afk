@@ -1,0 +1,40 @@
+{
+  "sourceCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "containerImage": "node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34",
+  "containerImageId": "sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34",
+  "containerNetwork": "none",
+  "version": "0.2.224",
+  "platform": "linux-arm64",
+  "archiveSha256": "57813d79888c6cb8a835d1ef2d6a9644e040b2dcb96f577d6b7a56753a7443f3",
+  "separateProfileAndWorkspacePerUid": true,
+  "checks": [
+    {
+      "uid": 10001,
+      "groups": [
+        10001
+      ],
+      "ownerRead": true,
+      "relativeCrossRootRejected": true,
+      "absoluteCrossRootRejected": true,
+      "linkedFileRejected": true,
+      "directoryScanExcludesLink": true,
+      "osCrossReadDenied": true,
+      "configuredForeignRootDenied": true,
+      "ownerReadRestored": true
+    },
+    {
+      "uid": 10002,
+      "groups": [
+        10002
+      ],
+      "ownerRead": true,
+      "relativeCrossRootRejected": true,
+      "absoluteCrossRootRejected": true,
+      "linkedFileRejected": true,
+      "directoryScanExcludesLink": true,
+      "osCrossReadDenied": true,
+      "configuredForeignRootDenied": true,
+      "ownerReadRestored": true
+    }
+  ]
+}

@@ -190,7 +190,7 @@ D07 的受管记忆走 `ExperienceStore`。同一安装版上，Pi 1.6.0 和 Ope
 
 ## 代码上下文安装复验
 
-2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自工作树的内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版、目标部署和多用户工作区待验。[安装回执](code-context-installed.receipt.json)
+2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自工作树的内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版和目标部署待验。[安装回执](code-context-installed.receipt.json)
 
 同一安装版用本地 Ollama 驱动 Pi 和 OpenCode。两个独立工作项和原生会话各读取一次 `.afk/plugin-context.md`，分别返回各自工作树的随机值。第三个独立会话验证显式根读取源检出。停用后工作流零派发，未产生原生会话，CLI 查询被拒。所有执行工作树均已清理。[双 Agent 原生回执](code-context-native.receipt.json)
 
@@ -199,6 +199,19 @@ D07 的受管记忆走 `ExperienceStore`。同一安装版上，Pi 1.6.0 和 Ope
 ```sh
 node tests/qualification/w10/code-context-installed.mjs \
   "$ARCHIVE" "$ARCHIVE.sha256" "$(dirname "$ARCHIVE")/install.sh"
+```
+
+2026-11-26，从同一源码提交构建 Linux arm64 `0.2.224` 并离线安装。UID `10001` 和 `10002` 共用 CLI 安装，各有独立 AFK profile 和权限为 `0700` 的工作区。两者分别读取自己的正文，拒绝相对或绝对跨根路径和直读符号链接，目录扫描排除链接。显式根指向另一用户的私有目录时，Linux 权限检查拒绝访问。恢复各自的根后，读取再次成功。[双用户回执](code-context-users.receipt.json)
+
+从仓库根运行。`PACKAGE_DIR` 为包含 `afk-linux-arm64.tar.gz`、校验文件和 `install.sh` 的绝对路径。先准备回执中固定的 ARM64 镜像，复验容器禁网且仅以只读方式挂载输入。
+
+```sh
+IMAGE=node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34
+docker pull --platform linux/arm64 "$IMAGE"
+docker run --rm --pull=never --platform linux/arm64 --network none \
+  -v "$PWD/tests/qualification/w10/code-context-users.mjs:/check.mjs:ro" \
+  -v "$PACKAGE_DIR:/package:ro" "$IMAGE" \
+  node /check.mjs /package/afk-linux-arm64.tar.gz /package/afk-linux-arm64.tar.gz.sha256 /package/install.sh 0.2.224
 ```
 
 ## 合规规则发布阶段复验

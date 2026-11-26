@@ -186,13 +186,13 @@ D07 的受管记忆走 `ExperienceStore`。`context.project-memory` 的公开能
 
 ## 代码上下文安装复验
 
-2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自分支内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版、目标部署和多用户工作区待验。[安装回执](code-context-installed.receipt.json)
+2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自工作树的内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版、目标部署和多用户工作区待验。[安装回执](code-context-installed.receipt.json)
 
-在 macOS arm64 上从 `6198fbbe` 构建 `0.2.224` 归档时，可使用 `pnpm release:cli --output <归档目录>`。在本树根运行安装复验，标准输出为新的 JSON 回执。
+在 macOS arm64 上从 `6198fbbe` 构建 `0.2.224` 归档时，可使用 `pnpm release:cli --output <归档目录>`。将 `ARCHIVE` 设为归档的绝对路径，在本树根运行安装复验。标准输出为新的 JSON 回执。
 
 ```sh
 node tests/qualification/w10/code-context-installed.mjs \
-  <归档文件> <SHA-256校验文件> <归档同批次install.sh>
+  "$ARCHIVE" "$ARCHIVE.sha256" "$(dirname "$ARCHIVE")/install.sh"
 ```
 
 ## Docker 容器补验

@@ -95,20 +95,51 @@ function positiveLimit(value: number): number {
   return value;
 }
 
-function rankedFragments(prompt: string, documents: readonly { origin: string; content: string }[], limit: number): ContextFragment[] {
+function rankedFragments(
+  prompt: string,
+  documents: readonly { origin: string; content: string }[],
+  limit: number,
+  normalizeCoverage = false,
+): ContextFragment[] {
   const queryTerms = [...new Set([
     ...prompt.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter(Boolean),
     ...lexicalTerms(prompt).filter(term => term.length >= 2 && /\p{Script=Han}/u.test(term) && !QUESTION_WORDS.has(term)),
   ])];
-  return documents.map(document => {
+  const documentFrequency = normalizeCoverage ? new Array<number>(queryTerms.length).fill(0) : undefined;
+  let totalLength = 0;
+  const ranked = documents.map(document => {
     const lower = document.content.toLowerCase();
-    const score = queryTerms.reduce((total, term) => total + (lower.split(term).length - 1), 0);
-    return { content: document.content.slice(0, 20_000), origin: document.origin, score };
-  }).filter(fragment => fragment.score > 0).sort((left, right) => right.score - left.score || left.origin.localeCompare(right.origin)).slice(0, limit);
+    const matchedTerms: number[] = [];
+    let score = 0;
+    for (const [index, term] of queryTerms.entries()) {
+      const matches = lower.split(term).length - 1;
+      score += matches;
+      if (documentFrequency && matches > 0) {
+        documentFrequency[index]++;
+        matchedTerms.push(index);
+      }
+    }
+    totalLength += lower.length;
+    return { fragment: { content: document.content.slice(0, 20_000), origin: document.origin, score },
+      matchedTerms, length: lower.length, relevance: 0 };
+  }).filter(({ fragment }) => fragment.score > 0);
+  if (documentFrequency && ranked.length) {
+    const weights = documentFrequency.map(count => Math.log((documents.length + 1) / (count + 1)));
+    const averageLength = totalLength / documents.length;
+    for (const row of ranked) {
+      const coverage = row.matchedTerms.reduce((sum, index) => sum + weights[index], 0);
+      row.relevance = coverage / Math.sqrt(1 + row.length / averageLength);
+    }
+  }
+  return ranked.sort((left, right) => right.relevance - left.relevance
+    || right.fragment.score - left.fragment.score
+    || left.fragment.origin.localeCompare(right.fragment.origin))
+    .slice(0, limit).map(({ fragment }) => fragment);
 }
 
 export interface CodeContextOptions {
   readonly root: string;
+  readonly useAuthorizedWorkspace?: boolean;
   readonly fs?: ContextFileSystem;
   readonly maxFileBytes?: number;
   readonly maxFiles?: number;
@@ -118,24 +149,27 @@ export class CodeContextProvider implements ContextSource {
   readonly id = 'context.code';
   readonly capabilities = { 'read-only': true, summarize: false, search: true } as const;
   private readonly root: string;
+  private readonly useAuthorizedWorkspace: boolean;
   private readonly fs: ContextFileSystem;
   private readonly maxFileBytes: number;
   private readonly maxFiles: number;
 
   constructor(options: CodeContextOptions) {
     this.root = resolve(options.root);
+    this.useAuthorizedWorkspace = options.useAuthorizedWorkspace ?? false;
     this.fs = options.fs ?? defaultContextFileSystem;
     this.maxFileBytes = positiveLimit(options.maxFileBytes ?? 1024 * 1024);
     this.maxFiles = positiveLimit(options.maxFiles ?? 1000);
   }
 
-  async gather(query: ContextQuery, options?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
+  async gather(query: ContextQuery, options?: ProviderOperationOptions & { readonly authorizedWorkspace?: string }): Promise<readonly ContextFragment[]> {
     checkAbort(options);
     const limit = queryLimit(query.limit);
     if (!limit) return [];
-    const lexicalScope = safePath(this.root, query.scope || '.');
-    const root = await this.fs.realpath(this.root);
-    const scope = safePath(root, relative(this.root, lexicalScope) || '.');
+    const rootPath = this.useAuthorizedWorkspace && options?.authorizedWorkspace ? resolve(options.authorizedWorkspace) : this.root;
+    const lexicalScope = safePath(rootPath, query.scope || '.');
+    const root = await this.fs.realpath(rootPath);
+    const scope = safePath(root, relative(rootPath, lexicalScope) || '.');
     const pending = [scope];
     const documents: { origin: string; content: string }[] = [];
     let visited = 0;
@@ -215,7 +249,7 @@ export class RetrievalProvider implements ContextSource {
 
   async gather(query: ContextQuery, options?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
     checkAbort(options);
-    return rankedFragments(query.prompt, this.documents, queryLimit(query.limit));
+    return rankedFragments(query.prompt, this.documents, queryLimit(query.limit), true);
   }
 }
 

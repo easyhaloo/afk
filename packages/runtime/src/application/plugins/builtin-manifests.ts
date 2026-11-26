@@ -43,7 +43,7 @@ function defaultSelections(homeDir: string, workspaceRoot: string) {
       create: () => createBuiltinCapabilityPlugins({
         notifications: [new DesktopNotificationProvider()],
         contexts: [new ExperienceContextProvider(join(homeDir, '.afk', 'learning', 'experience.sqlite'), { homeDir }),
-          new CodeContextProvider({ root: workspaceRoot }), new RetrievalProvider([]),
+          new CodeContextProvider({ root: workspaceRoot, useAuthorizedWorkspace: true }), new RetrievalProvider([]),
           new ProjectMemoryProvider({ file: join(homeDir, '.afk', 'memory.json') })],
         credentials: [new SystemKeychainProvider()],
         artifacts: [new TestReportProvider({ root: join(homeDir, '.afk', 'artifacts') })],

@@ -685,13 +685,27 @@ describe('createDefaultPluginRuntime', () => {
     await expect(lifecycle.run('init', { iid: 42, projectName: undefined, baseBranch: 'main', params: {}, originalCwd: workspaceRoot })).rejects.toThrow();
   });
 
-  it('writes selected context into the execution worktree and removes it on cleanup', async () => {
-    const { workspaceRoot, context, lifecycle } = await fixture({ integrations: { contexts: [{ provider: 'context.code', query: { scope: '.', prompt: 'widget' } }] } });
-    await writeFile(join(workspaceRoot, 'widget.ts'), 'export const widget = 42;');
-    await lifecycle.run('before-agent', context);
-    expect(await readFile(join(workspaceRoot, '.afk', 'plugin-context.md'), 'utf8')).toContain('widget = 42');
-    await lifecycle.run('cleanup', context);
-    await expect(readFile(join(workspaceRoot, '.afk', 'plugin-context.md'))).rejects.toThrow();
+  it.each([false, true])('gathers code context for the execution worktree (explicit root: %s)', async fixedRoot => {
+    const query = { scope: 'widget.ts', prompt: 'widget' };
+    const { workspaceRoot, homeDir, context, lifecycle, runtime } = await fixture({
+      plugins: fixedRoot ? [{ id: 'context.code', builtin: true, config: { root: '.' } }] : [],
+      integrations: { contexts: [{ provider: 'context.code', query }] },
+    });
+    const worktreePath = join(homeDir, 'execution');
+    const execution = { ...context, worktreePath };
+    const output = join(worktreePath, '.afk', 'plugin-context.md');
+    await mkdir(worktreePath);
+    await writeFile(join(workspaceRoot, 'widget.ts'), 'export const widget = "source-checkout";');
+    await writeFile(join(worktreePath, 'widget.ts'), 'export const widget = "execution-worktree";');
+    await expect(runtime.dispatchSystemAction('capability.invoke', { capability: 'context.provider', provider: 'context.code', operation: 'gather', input: query }))
+      .resolves.toMatchObject([{ origin: 'widget.ts', content: expect.stringContaining('source-checkout') }]);
+    await lifecycle.run('before-agent', execution);
+    const contents = await readFile(output, 'utf8');
+    expect(contents).toContain(fixedRoot ? 'source-checkout' : 'execution-worktree');
+    expect(contents).not.toContain(fixedRoot ? 'execution-worktree' : 'source-checkout');
+    await expect(readFile(join(workspaceRoot, '.afk', 'plugin-context.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await lifecycle.run('cleanup', execution);
+    await expect(readFile(output)).rejects.toMatchObject({ code: 'ENOENT' });
   });
   it('blocks publishing generated secrets from the actual worktree rather than scanning the source checkout', async () => {
     const { lifecycle, context, homeDir } = await fixture({ integrations: { policies: [{ provider: 'secret-scan', input: { action: 'publish' } }] } });

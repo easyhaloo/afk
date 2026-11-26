@@ -861,6 +861,8 @@ integrations:
 策略条目结构为 `{ provider, input }`，上下文条目为
 `{ provider, query: { scope, prompt, limit? } }`。此片段只选择现有 Provider；
 具体文件系统根、参数和 transport 仍由 configured factory 构造。
+工作流绑定了宿主授权的执行 worktree 时，默认 `context.code` 读取该 worktree。
+独立 CLI 调用读取 CLI 工作区。设置 `config.root` 后，两种入口均使用该固定根目录。
 不要把 constructor 字段塞入 `integrations`，也不能假定它会创建不存在的 Provider。
 
 `verifications` 默认为空，最多 32 项；每项仅接受 `{ provider, command?, timeoutMs? }`。
@@ -1188,7 +1190,7 @@ lifecycle 策略闸门。
 
 引用上下文保留来源，每个文件最多 32,000 字符；生命周期每个工作树最多保留 64 个有界片段。经验检索最多五条，序列化记录预算 8,000 字符。提示词携带短文件引用，仍遵循 Provider 的提示词预算。只有同一规范项目内相关、已验证且未过期的经验能够进入上下文。实现引擎通过 `decision.made`、`command=experience.recall` 审计经验供应。
 
-Code、Retrieval 与 Project Memory 的本地词项排序支持中文分词及英文查询，共用经验检索的分词函数，新增中文词项过滤通用疑问词。经验召回在分词后执行自身的相关性、否定条件和适用范围过滤；通用 Context 的词项命中不授予经验验证或发布资格。
+Code、Retrieval 与 Project Memory 的本地词项排序支持中文分词及英文查询，共用经验检索的分词函数，新增中文词项过滤通用疑问词。经验召回在分词后执行自身的相关性、否定条件和适用范围过滤；通用 Context 的词项命中不授予经验验证或发布资格。 Retrieval 按逆文档频率对不同查询词的命中加权，再按文档长度调整排序分。同分时按子串命中总数和来源名称排序。返回的 `score` 仍为命中总数，Code 与 Project Memory 也按该总数排序。
 
 结构化失败（含中途可重试失败）自动形成候选经验，保留运行和工作项身份。共享 SQLite 账本跨工作树使用、按项目隔离，保存有界且脱敏的诊断及证据引用，不复制原始会话。限制为 1,000 条、逻辑负载与来源收据合计 8 MiB、单条 32 KiB、每条 256 个来源，默认有效期 90 天；容量淘汰优先处理过期和未验证记录。
 

@@ -106,7 +106,7 @@ describe('createCapabilityLifecycle', () => {
     await new LifecycleDispatcher([module]).run('before-agent', context);
     expect(calls).toEqual(['policy', 'gather', 'prompt']);
     expect(policy.evaluate).toHaveBeenCalledWith({ action: 'execute', context: { iid: 42, worktreePath: context.worktreePath } });
-    expect(source.gather).toHaveBeenCalledWith({ scope: context.worktreePath, prompt: 'Issue 42' });
+    expect(source.gather).toHaveBeenCalledWith({ scope: context.worktreePath, prompt: 'Issue 42' }, { authorizedWorkspace: context.worktreePath });
     expect(assemblePrompt(segments)).toBe('Implement issue 42\n\nUse the existing service');
     expect(context).toEqual(original);
   });

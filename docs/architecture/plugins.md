@@ -1093,8 +1093,12 @@ integrations:
 Policy entries contain `{ provider, input }`; context entries contain
 `{ provider, query: { scope, prompt, limit? } }`. This fragment selects existing
 providers; their concrete filesystem roots, settings and transports are still
-constructed by the configured factory. Do not add constructor fields to
-`integrations` or assume it creates a missing provider.
+constructed by the configured factory.
+The default `context.code` provider reads from the host-authorized worktree
+when a workflow binds one and from the CLI workspace on standalone calls.
+Setting `config.root` pins the provider to that root for both entry points.
+Do not add constructor fields to `integrations` or assume it creates a missing
+provider.
 
 `verifications` defaults to an empty list, with at most 32 entries containing
 only `{ provider, command?, timeoutMs? }`. The command is an argv array without
@@ -1490,7 +1494,7 @@ Implementation, QA/conflict resolution and CLI graph generation can select regis
 
 Selected reference context retains source identifiers and is capped at 32,000 characters per file; the lifecycle retains at most 64 bounded fragments per worktree. Experience retrieval selects at most five records within an 8,000-character serialized-record budget. Prompts carry short file references and remain subject to the provider's prompt limit. Only relevant, unexpired, verified records from the exact canonical project enter this context. The implementation runner audits a supplied experience context as `decision.made` with command `experience.recall`.
 
-Local Code, Retrieval and Project Memory ranking supports Chinese word segmentation alongside English queries, sharing the experience-recall tokenizer and filtering generic question words from the added Chinese terms. Experience recall applies its own relevance, exclusion and applicability filters after segmentation; a generic Context match does not grant experience verification or publication authority.
+Local Code, Retrieval and Project Memory ranking supports Chinese word segmentation alongside English queries, sharing the experience-recall tokenizer and filtering generic question words from the added Chinese terms. Experience recall applies its own relevance, exclusion and applicability filters after segmentation; a generic Context match does not grant experience verification or publication authority. Retrieval ranks distinct matches by inverse document frequency with a document-length adjustment, then breaks ties by total substring match count and source name. The returned `score` remains the total match count, which also orders Code and Project Memory results.
 
 Structured runner failures, including intermediate retryable failures, automatically create candidates with run/work-item provenance. A shared SQLite ledger isolates projects across checkouts and stores bounded redacted diagnoses and evidence references. It does not copy transcripts. Bounds are 1,000 records, 8 MiB logical payload/receipts, 32 KiB per record, 256 source identities per record and a default 90-day validity period. Eviction prefers expired and unverified records.
 

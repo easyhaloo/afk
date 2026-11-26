@@ -160,10 +160,11 @@ export function createCapabilityLifecycle(runtime: PluginRuntime, selection: Cap
     async onBeforeAgent(context) {
       await evaluatePolicies(context);
       for (const source of contexts) {
+        const options = { authorizedWorkspace: context.worktreePath, ...(context.signal ? { signal: context.signal } : {}) };
         const fragments = contextFragmentsSchema.parse(await invokeCapability(runtime, {
           capability: 'context.provider', provider: source.provider, operation: 'gather',
-          input: await withCancellation(() => source.query(context), context.signal ? { signal: context.signal } : undefined),
-        }, context.signal ? { signal: context.signal } : undefined));
+          input: await withCancellation(() => source.query(context), options),
+        }, options));
         await withCancellation(() => source.consume(fragments, context), context.signal ? { signal: context.signal } : undefined);
       }
     },

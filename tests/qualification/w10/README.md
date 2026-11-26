@@ -15,7 +15,7 @@
 
 ## 核对行清单与历史用例
 
-2026-11-26，macOS arm64 离线预演安装版 CLI 0.2.223 通过项目记忆复验。12 个独立 Node 进程调用安装包内的 `ProjectMemoryProvider.remember()` 写入同一隔离项目，两个独立 CLI 进程均读回全部 12 条，未命中查询返回空列表。停用插件后，CLI 返回 `Capability provider is not registered`，记忆文件字节保持一致。运行 `node tests/qualification/w10/project-memory-installed.mjs <安装版 CLI 入口>` 可复验。真实工作流的记忆写入接线待验。[回执](project-memory-installed.receipt.json)
+2026-11-26，macOS arm64 离线预演安装版 CLI 0.2.223 通过项目记忆复验。12 个独立 Node 进程调用安装包内的 `ProjectMemoryProvider.remember()` 写入同一隔离项目，两个独立 CLI 进程均读回全部 12 条，未命中查询返回空列表。另两个独立进程各自运行安装版的 `WorkflowRunner`，通过 `integrations.contexts` 把 12 条记录及来源写入各自工作区，并在 Agent 派发时提供文件指针。确定性的 Agent 替身读回完整文件，两次运行都清理了上下文。停用插件后，CLI 返回 `Capability provider is not registered`，保留该选择的工作流在派发前失败，记忆文件字节保持一致。运行 `node tests/qualification/w10/project-memory-installed.mjs <安装版 CLI 入口>` 可复验。生产工作流写入接线及目标部署的消费待验。[回执](project-memory-installed.receipt.json)
 
 2026-11-22，从仓库外安装 macOS arm64 CLI 0.2.189，通过 `plugin configure context.retrieval --builtin --file` 导入三份真实 Markdown 摘录。相同输入在 0.2.188 被配置校验拒绝。修复后通过 `plugin invoke context.provider context.retrieval gather --input <文件> --json` 查询工作项关系、PRD 基线和中文桌面设计，分别命中预期首条来源，分数为 2、3、2，正文与输入逐字一致（去除首尾空白）。未命中查询返回 `[]`。同一安装版通过 17 项上下文与记忆回归。归档 SHA-256 为 `889fd413a8fe55f8e73fa7cfb1a15ea01e50d1017bec802c8cd7b643728e6bdf`，语料 SHA-256 为 `7576d829b54de19576d98942c96c0a810890541990c2eede780c12715ac814d7`。
 

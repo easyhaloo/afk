@@ -1,0 +1,164 @@
+{
+  "sourceCommit": "6d6263b89a327cc31253de2675a8e86fc1885aae",
+  "corpusCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "platform": "darwin-arm64",
+  "baseline": {
+    "version": "0.2.224",
+    "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549"
+  },
+  "candidate": {
+    "version": "0.2.225",
+    "archiveSha256": "16441b56e0071321404dec1979788e4275fe78b1456d08a4446798697f3d4d63"
+  },
+  "historical": {
+    "baseline": {
+      "top1": 2,
+      "top5": 5
+    },
+    "candidate": {
+      "top1": 7,
+      "top5": 12,
+      "querySetSha256": "c4aa261bb55754ea94d517ffb6fd0accc592b23cd946c167e9c3af2df0c6b768",
+      "returnedFragments": 60
+    },
+    "ranks": [
+      {
+        "expected": "docs/adr/0038-workspace-resource-reclamation.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0029-jumpserver-assets-through-jms.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0018-evidence-classification-and-redaction.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0024-prd-baseline-branches.md",
+        "before": null,
+        "after": 2
+      },
+      {
+        "expected": "docs/adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0016-run-event-audit-spine.md",
+        "before": null,
+        "after": 5
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#PRD 基线分支",
+        "before": 2,
+        "after": 1
+      },
+      {
+        "expected": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+        "before": 3,
+        "after": 3
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#上下文交接",
+        "before": 2,
+        "after": 2
+      },
+      {
+        "expected": "docs/guides/skills.zh.md#Agent 能力与推理治理",
+        "before": null,
+        "after": 2
+      }
+    ],
+    "noMatchControl": []
+  },
+  "holdout": {
+    "baseline": {
+      "top1": 4,
+      "top5": 6
+    },
+    "candidate": {
+      "top1": 5,
+      "top5": 10,
+      "querySetSha256": "0899dbb8ff648ea3cd9891ca097acb636a27401ec749086fc808e4c2a1c53842",
+      "returnedFragments": 60
+    },
+    "ranks": [
+      {
+        "expected": "docs/adr/0014-interactive-and-batch-structured-output.md",
+        "before": null,
+        "after": 4
+      },
+      {
+        "expected": "docs/adr/0023-repository-store-and-dependency-pool.md",
+        "before": null,
+        "after": 3
+      },
+      {
+        "expected": "docs/adr/0036-schedule-scope.md",
+        "before": 2,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0034-transient-failure-is-not-permanent-failure.md",
+        "before": null,
+        "after": 2
+      },
+      {
+        "expected": "docs/adr/0029-worktree-claim-lifetime.md",
+        "before": null,
+        "after": null
+      },
+      {
+        "expected": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+        "before": 1,
+        "after": 2
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#上下文交接",
+        "before": 3,
+        "after": 2
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#执行基线与配置",
+        "before": null,
+        "after": null
+      },
+      {
+        "expected": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/guides/skills.zh.md#需求与产品规划",
+        "before": null,
+        "after": 1
+      }
+    ],
+    "noMatchControl": []
+  },
+  "holdoutReplayIdentical": true
+}

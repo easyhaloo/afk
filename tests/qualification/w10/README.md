@@ -21,11 +21,13 @@
 
 2026-11-22，从仓库外安装 macOS arm64 CLI 0.2.189，通过 `plugin configure context.retrieval --builtin --file` 导入三份真实 Markdown 摘录。相同输入在 0.2.188 被配置校验拒绝。修复后通过 `plugin invoke context.provider context.retrieval gather --input <文件> --json` 查询工作项关系、PRD 基线和中文桌面设计，分别命中预期首条来源，分数为 2、3、2，正文与输入逐字一致（去除首尾空白）。未命中查询返回 `[]`。同一安装版通过 17 项上下文与记忆回归。归档 SHA-256 为 `889fd413a8fe55f8e73fa7cfb1a15ea01e50d1017bec802c8cd7b643728e6bdf`，语料 SHA-256 为 `7576d829b54de19576d98942c96c0a810890541990c2eede780c12715ac814d7`。
 
-macOS arm64 的 `0.2.224` 离线安装版在 `6198fbbe` 的 27 篇 ADR 和 10 段中文文档上复验。12 条查询各指定一个预期来源。Top-1 为 2/12，Top-5 为 5/12。6 条英文查询的预期来源均未进入前五。所有返回片段保留配置正文，遵守 5 条上限，无匹配对照返回 `[]`。当前排序统计词项的子串出现次数，常见词可以反复推高长文档的分数。[查询及排序回执](retrieval-ranking.receipt.json)
+macOS arm64 的 `0.2.224` 离线安装版在 `6198fbbe` 的 27 篇 ADR 和 10 段中文文档上复验。12 条查询各指定一个预期来源。Top-1 为 2/12，Top-5 为 5/12。6 条英文查询的预期来源均未进入前五。所有返回片段保留配置正文，遵守 5 条上限，无匹配对照返回 `[]`。0.2.224 按词项的子串出现次数排序，常见词可以反复推高长文档的分数。[查询及排序回执](retrieval-ranking.receipt.json)
 
 从仓库根运行 `node tests/qualification/w10/retrieval-ranking.mjs "$PWD" <0.2.224归档目录>` 可重放。归档目录包含对应平台的压缩包、校验文件和 `install.sh`。
 
 同一安装包和语料上的第二组查询在运行前已固定预期来源。12 条查询中，预期来源排名首位 **4/12**，进入前五 **6/12**（英文 2/6，中文 4/6）。无匹配对照返回 `[]`，两次重放回执逐字节一致。在原命令末尾追加 `tests/qualification/w10/retrieval-ranking.holdout.json` 可复跑。每条查询只标注了一个预期来源，数字衡量的是这个来源的排名。[固定查询集](retrieval-ranking.holdout.json) · [回执](retrieval-ranking.holdout.receipt.json)
+
+macOS arm64 离线安装的 `0.2.225` 候选（`6d6263b8`）优先排列命中不同查询词更多的文档。原始组首位由 2/12 提升到 7/12，前五由 5/12 提升到 12/12。第二组首位由 4/12 提升到 5/12，前五由 6/12 提升到 10/12。两版共同返回的片段分数一致，两组无匹配对照均为空。第二组候选回执两次重放逐字节一致。正式发布版和目标部署待复验。[候选对比回执](retrieval-ranking.candidate.receipt.json)
 
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
 

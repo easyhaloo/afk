@@ -1,0 +1,22 @@
+{
+  "version": "0.2.223",
+  "platform": "darwin-arm64",
+  "provider": "context.project-memory",
+  "runtimeSha256": "ca7e67de93f41f2548f2052284816116ae1b02cc9b7b99dcd0210e9aeec17bce",
+  "fileSha256": "ce75895282b994b9dc429591edce4909caeb095d630c3b0ac1a80069ed170574",
+  "writes": 12,
+  "reads": [
+    12,
+    12,
+    0
+  ],
+  "initialRead": 0,
+  "remainingFiles": [
+    "memory.json"
+  ],
+  "fileMode": "0600",
+  "disabled": {
+    "exit": 1,
+    "diagnostic": "Capability provider is not registered"
+  }
+}

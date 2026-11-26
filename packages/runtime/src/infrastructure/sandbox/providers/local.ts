@@ -15,11 +15,11 @@ import { workspaceDataDirectory } from '../../workspace.js';
  */
 
 import { randomUUID } from 'crypto';
-import { promises as fs, realpathSync } from 'fs';
+import { promises as fs } from 'fs';
 import { isAbsolute, join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
-import { clearSignal, configureStatusline, getTokenUsage, readSignal, preacceptClaudeProjectTrust, isClaudeCodeArgv, logger } from '../../io/index.js';
+import { clearSignal, configureStatusline, getTokenUsage, readClaudeStatus, readSignal, preacceptClaudeProjectTrust, isClaudeCodeArgv, logger } from '../../io/index.js';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
 import {
@@ -42,7 +42,7 @@ import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../.
 import { ActivityWatch } from '../../../domain/agents/activity.js';
 import { CodexTurnWatcher } from '../../../infrastructure/codex/turn-failure.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
-import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
+import { claudeTranscriptPath } from '../../../shared/agent-transcript-path.js';
 import { repositoryClaimIds } from '../../git/repository-lease.js';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
@@ -569,17 +569,11 @@ export class LocalAgentExecution implements AgentExecution {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * Path to the Claude Code transcript for this session.
-   * Returns undefined if the session has no sessionId or the transcript
-   * does not exist (caller decides whether to read it).
-   */
-  get telemetryPath(): string | undefined {
-    if (!this.sessionId) return undefined;
-    let base = this.worktreePath;
-    try { base = realpathSync(this.worktreePath); } catch { /* path may not exist yet */ }
-    const slug = claudeProjectSlug(base);
-    return join(process.env.HOME ?? '', '.claude', 'projects', slug, `${this.sessionId}.jsonl`);
+  get telemetryPath(): Promise<string | undefined> {
+    return readClaudeStatus(this.worktreePath).then(status => {
+      const sessionId = this.metadata.threadId ?? status?.session_id ?? this.sessionId;
+      return sessionId ? claudeTranscriptPath(this.worktreePath, sessionId) : undefined;
+    });
   }
 }
 

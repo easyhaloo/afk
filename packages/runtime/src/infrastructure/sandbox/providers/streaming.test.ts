@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
+import { collectAgentTelemetry } from '../../observability/agent-telemetry.js';
 
 function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
@@ -15,6 +16,18 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it('aligns PWD with the child working directory when starting a batch agent', async () => {
+    const execution = new StreamingAgentExecution({
+      command: { ...command('process.exit(process.env.PWD === process.cwd() ? 0 : 7)'),
+        cwd: realpathSync('..'), env: { PWD: process.cwd() } },
+      prompt: 'verify', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    try {
+      await expect(execution.waitForResult({ completionTimeoutMs: 5000 })).resolves.toMatchObject({ exitCode: 0 });
+    } finally { await execution.kill(); }
+  });
+
   it('waits for the OpenCode exit status after the stopped answer', async () => {
     const execution = new StreamingAgentExecution({
       command: command('console.log("stopped"); setTimeout(() => process.exit(7), 800)'),
@@ -871,7 +884,7 @@ describe('StreamingAgentExecution', () => {
       const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
 
       const execution = new StreamingAgentExecution({
-        command: command(`console.log('ok')`),
+        command: { ...command(`console.log('ok')`), cwd: worktreePath },
         prompt: 'go',
         signalType: 'goal_complete',
         worktreePath,
@@ -896,7 +909,7 @@ describe('StreamingAgentExecution', () => {
       // replaces both path separators and dots with hyphens.
       const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
       const execution = new StreamingAgentExecution({
-        command: command(`console.log('ok')`),
+        command: { ...command(`console.log('ok')`), cwd: '/Users/shenggangshu/.loop-workspace/github/easyhaloo/afk' },
         prompt: 'go',
         signalType: 'goal_complete',
         worktreePath: '/Users/shenggangshu/.loop-workspace/github/easyhaloo/afk',
@@ -907,6 +920,37 @@ describe('StreamingAgentExecution', () => {
       expect(execution.telemetryPath).toBe(
         `${process.env.HOME}/.claude/projects/-Users-shenggangshu--loop-workspace-github-easyhaloo-afk/${sessionId}.jsonl`,
       );
+    });
+
+    it('records a shortened Claude transcript only when its native session and workspace match uniquely', async () => {
+      const worktreePath = join(tmp, 'project'.repeat(25), 'worktree-branch');
+      mkdirSync(worktreePath, { recursive: true });
+      const cwd = realpathSync(worktreePath);
+      const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
+      const config = join(tmp, 'custom-config');
+      const prefix = cwd.replace(/[/.]/g, '-').slice(0, 200);
+      const add = (suffix: string, identity: { cwd: string; sessionId: string }) => {
+        const directory = join(config, 'projects', `${prefix}-${suffix}`);
+        mkdirSync(directory, { recursive: true });
+        const path = join(directory, `${sessionId}.jsonl`);
+        writeFileSync(path, `${JSON.stringify({ type: 'summary' })}\n${JSON.stringify(identity)}\n`);
+        return path;
+      };
+      const execution = new StreamingAgentExecution({
+        command: { ...command(''), cwd: worktreePath, env: { CLAUDE_CONFIG_DIR: config } },
+        prompt: 'go', signalType: 'goal_complete', worktreePath, sessionId: 'runner-session',
+        metadata: { ...PROCESS_METADATA, threadId: sessionId },
+      });
+      const result = { version: 1, runId: 'run', status: 'completed', provider: 'local', commits: [] } as const;
+      const collect = (sandbox: 'local' | 'container') => collectAgentTelemetry(execution, { ...result, commits: [] }, sandbox);
+      add('other-cwd', { cwd: `${cwd}-other`, sessionId });
+      add('other-session', { cwd, sessionId: 'another-session' });
+      expect(await collect('local')).not.toHaveProperty('transcriptPath');
+      const resolved = add('match', { cwd, sessionId });
+      expect(await collect('local')).toMatchObject({ sessionId, transcriptPath: resolved });
+      expect(await collect('container')).not.toHaveProperty('transcriptPath');
+      add('duplicate', { cwd, sessionId });
+      expect(await collect('local')).not.toHaveProperty('transcriptPath');
     });
   });
 
@@ -954,6 +998,21 @@ describe('StreamingAgentExecution', () => {
         const child = (execution as unknown as { proc: ChildProcessWithoutNullStreams }).proc;
         expect(child.exitCode).toBeNull();
         expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      } finally { await execution.kill(); }
+    });
+
+    it.each([[99, 'completed'], [100, 'context_high']] as const)('uses current context %i for the handoff threshold', async (contextTokens, status) => {
+      const usage = { inputTokens: 170, outputTokens: 30, totalTokens: 200 };
+      const result = JSON.stringify({ type: 'goal_complete' });
+      const execution = new StreamingAgentExecution({
+        command: command('console.log("usage"); setTimeout(() => console.log("result"), 1800)'),
+        prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA,
+        parseLine: line => line === 'usage' ? [{ type: 'usage', usage, contextTokens }] : [{ type: 'result', result }],
+      });
+      execution.start();
+      try {
+        await expect(execution.waitForResult({ completionTimeoutMs: 5000, contextHighTokens: 100 }))
+          .resolves.toMatchObject({ status, usage });
       } finally { await execution.kill(); }
     });
 

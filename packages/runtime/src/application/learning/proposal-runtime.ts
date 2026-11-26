@@ -48,7 +48,9 @@ export interface ProposalRuntimeOptions extends ProviderOperationOptions {
   inventoryDigest?: string;
   inventoryRoot?: string;
   artifactPath: string;
+  inputFiles?: readonly string[];
   baseImageId: string;
+  permissionObserverImageId?: string;
   scratchHelper?: CapturedFrozenScratchHelper;
   binding: ProposalRuntimeBinding;
   sandbox: { executeFrozen(options: FrozenExecutionOptions): Promise<FrozenExecutionResult>;
@@ -131,7 +133,7 @@ async function git(workspace: string, args: string[], signal?: AbortSignal): Pro
 }
 
 async function captureCommitted(workspace: RepositoryWorkspace, commit: string, artifactPath: string, originalDigest: string | null,
-  skills: ProposalInventory['skills'], signal?: AbortSignal): Promise<CapturedFrozenInput> {
+  skills: ProposalInventory['skills'], paths: readonly string[] | undefined, signal?: AbortSignal): Promise<CapturedFrozenInput> {
   const root = workspace.path!;
   const text = async (args: string[]) => (await git(root, args, signal)).toString('utf8').trim();
   if (await text(['rev-parse', '--show-toplevel']) !== root || await text(['rev-parse', 'HEAD']) !== commit
@@ -141,7 +143,9 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
   if (await text(['cat-file', '-t', commit]) !== 'commit') throw new Error('Proposal baseline must be a Git commit');
   const objectFormat = await text(['rev-parse', '--show-object-format']);
   if (!['sha1', 'sha256'].includes(objectFormat)) throw new Error('Unsupported Git object format');
-  const tree = (await git(root, ['ls-tree', '-r', '-z', '--full-tree', commit], signal)).toString('utf8').split('\0').filter(Boolean);
+  const tree = (await git(root, ['--literal-pathspecs', 'ls-tree', '-r', '-z', '--full-tree', commit,
+    ...(paths === undefined ? [] : ['--', ...paths])], signal)).toString('utf8').split('\0').filter(Boolean);
+  const selected = paths && new Set(paths);
   if (tree.length > 1024) throw new Error('Proposal committed input exceeds entry limit');
   const expected = new Map<string, { mode: number; digest: string; size: number }>();
   const directories = new Set<string>();
@@ -150,6 +154,7 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
     const entry = /^(100644|100755) blob ([a-f0-9]{40}|[a-f0-9]{64})\t([^\0]+)$/.exec(item);
     if (!entry) throw new Error('Proposal commit contains an unsupported input type');
     const [, mode, object, path] = entry;
+    if (selected && !selected.delete(path)) throw new Error('Proposal input selection must contain only committed files');
     if (path.split('/').some(part => !part || part === '..' || part === '.' || part === '.git')) throw new Error('Unsafe committed proposal path');
     const content = await git(root, ['cat-file', 'blob', object], signal);
     total += content.length;
@@ -160,7 +165,8 @@ async function captureCommitted(workspace: RepositoryWorkspace, commit: string, 
     let parent = path.lastIndexOf('/');
     while (parent >= 0) { directories.add(path.slice(0, parent)); parent = path.lastIndexOf('/', parent - 1); }
   }
-  const input = captureFrozenInput(root, { signal });
+  if (selected?.size) throw new Error('Proposal input selection contains a missing committed file');
+  const input = captureFrozenInput(root, { signal, paths });
   if (input.manifest.length !== expected.size + directories.size) throw new Error('Proposal captured tree differs from committed inventory');
   for (const entry of input.manifest) {
     if (entry.kind === 'directory') { if (!directories.has(entry.path)) throw new Error('Proposal captured an uncommitted directory'); continue; }
@@ -209,6 +215,10 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   const commit = supplied.expectedCommit;
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) throw new Error('Proposal requires an exact committed baseline');
   const artifactPath = supplied.artifactPath;
+  const paths = supplied.inputFiles === undefined ? undefined : [...supplied.inputFiles, artifactPath].sort();
+  if (paths && (prepared.kind !== 'tool' || !prepared.artifact.originalDigest || paths.length > 33 || new Set(paths).size !== paths.length)) {
+    throw new Error('Proposal input selection requires an existing tool and unique committed files');
+  }
   if (!artifactPath || isAbsolute(artifactPath) || artifactPath.includes('\\') || artifactPath.split('/').some(part => !part || ['.', '..', '.git'].includes(part))) throw new Error('Unsafe configured proposal artifact path');
   const skill = prepared.kind === 'skill' ? inventory.skills.find(entry => `skill:${entry.name}` === prepared.artifact.targetRef) : undefined;
   if (prepared.kind === 'skill' && basename(artifactPath) !== 'SKILL.md') throw new Error('Configured skill artifact must be SKILL.md');
@@ -257,6 +267,11 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   }
   const harness = { id: configured.id, revision: configured.revision, observe: configured.observe.bind(configured) };
   const baseImageId = supplied.baseImageId;
+  const permissionObserverImageId = supplied.permissionObserverImageId;
+  if ([...experiments.values()].some(experiment => experiment.permissionDenial !== undefined)
+    && (permissionObserverImageId === undefined || !/^sha256:[a-f0-9]{64}$/.test(permissionObserverImageId))) {
+    return { status: 'blocked', code: 'oracle_unsupported', observations: [] };
+  }
   const scratchHelper = supplied.scratchHelper;
   if (scratchHelper !== undefined) assertFrozenScratchHelper(scratchHelper);
   if ([...experiments.values()].some(experiment => experiment.recovery !== undefined) && scratchHelper === undefined) {
@@ -286,7 +301,9 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
   const executeFrozen = supplied.sandbox.executeFrozen.bind(supplied.sandbox);
   const configurationDigest = digest({ repositoryId, request, commit, artifactPath, baseImageId, inventoryDigest, inventoryRoot,
     binding, harnessId: harness.id, harnessRevision: harness.revision, cases, proposal: prepared,
-    ...(scratchHelper === undefined ? {} : { scratchHelper }), ...(limits === undefined ? {} : { limits }) });
+    ...(paths === undefined ? {} : { paths }),
+    ...(scratchHelper === undefined ? {} : { scratchHelper }), ...(limits === undefined ? {} : { limits }),
+    ...(permissionObserverImageId === undefined ? {} : { permissionObserverImageId }) });
   const current = async () => { checkAbort(signal); await assertCurrent(binding, { signal }); checkAbort(signal); };
   await current();
   const operationState: { outcome?: ProposalOperationOutcome; workspaceId?: string } = {};
@@ -304,9 +321,11 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
     let failed = false;
     let value: ProposalRuntimeResult | undefined;
     try {
+      const ownedRepository = request.repository.ref === undefined && workspace.repository.ref !== undefined
+        ? { ...request.repository, ref: snapshot.branch } : request.repository;
       const assertWorkspace = (next: RepositoryWorkspace) => {
         if (!ownedId || next.id !== ownedId || next.runId !== request.runId || !next.path || resolve(next.path) !== next.path || realpathSync(next.path) !== next.path
-          || canonicalLearningJson(next.repository) !== canonicalLearningJson(request.repository) || next.snapshot.dirty || next.snapshot.commit !== commit) {
+          || canonicalLearningJson(next.repository) !== canonicalLearningJson(ownedRepository) || next.snapshot.dirty || next.snapshot.commit !== commit) {
           throw new Error('Proposal repository workspace ownership or baseline changed');
         }
       };
@@ -317,7 +336,8 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
       checkAbort(signal);
       assertWorkspace(workspace);
       if (workspace.path !== preparedPath) throw new Error('Proposal checkout relocated the owned workspace');
-      const committed = await captureCommitted(workspace, commit, artifactPath, prepared.artifact.originalDigest, inventory.skills, signal);
+      const committed = await captureCommitted(workspace, commit, artifactPath, prepared.artifact.originalDigest,
+        paths === undefined ? inventory.skills : [], paths, signal);
       const amended = replaceFrozenFile(committed, artifactPath, Buffer.from(prepared.artifact.content, 'utf8'));
       const skillFiles = prepared.kind === 'skill' ? [artifactPath] : undefined;
       if (skill && skillFiles) skillFiles.push(...(skill.resources ?? []).map(resource =>
@@ -336,6 +356,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
         const captured = version === 'original' ? original : proposed;
         if (!captured) throw new Error('Original skill input is unavailable');
         const experiment = experiments.get(check.checkId);
+        const observesContainer = Boolean(experiment?.recovery || experiment?.skillTrace || experiment?.permissionDenial);
         const registration: { ownership?: FrozenExecutionOwnership; containerId?: string; recorded: boolean } = { recorded: false };
         const remaining = remainingMs?.() ?? prepared.execution.timeoutMs;
         if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Proposal execution deadline exceeded');
@@ -343,11 +364,13 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           timeoutMs: Math.max(1, Math.floor(Math.min(prepared.execution.timeoutMs, limits?.timeoutMs ?? prepared.execution.timeoutMs, remaining))),
           maxOutputBytes: Math.min(DISTILLATION_LIMITS.outputBytes, limits?.maxOutputBytes ?? DISTILLATION_LIMITS.outputBytes), signal,
           ...(experiment?.control ? { control: experiment.control } : {}),
+          ...(experiment?.permissionDenial ? { permissionDenial: Object.freeze({ target: experiment.permissionDenial.target,
+            observerImageId: permissionObserverImageId! }) } : {}),
           ...(experiment?.recovery ? { scratch: Object.freeze({ helper: scratchHelper!, artifactPath, candidateVersion: version,
             callInput: experiment.callInput!, resources: experiment.recovery.resources,
             recovery: Object.freeze({ callInput: experiment.recovery.callInput, requireEffectHistory: experiment.recovery.requireEffectHistory,
               assertions: experiment.recovery.assertions, returnAssertions: experiment.recovery.returnAssertions }) }) } : {}),
-          ...(experiment?.recovery || experiment?.skillTrace ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
+          ...(observesContainer ? { onContainer: (container: Readonly<{ operationId: string; containerId: string }>) => {
             if (!registration.recorded || !registration.ownership || registration.containerId !== undefined
               || container.operationId !== registration.ownership.operationId || !learningIdentitySchema.safeParse(container.containerId).success) {
               throw new Error('Frozen container identity differs from recorded ownership registration');
@@ -375,7 +398,7 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
         checkAbort(signal);
         if (!registration.recorded || !registration.ownership || execution.evidence.operationId !== registration.ownership.operationId
           || execution.evidence.contextDigest !== registration.ownership.contextDigest) throw new Error('Frozen evidence differs from recorded ownership registration');
-        if ((experiment?.recovery || experiment?.skillTrace) && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
+        if (observesContainer && (!registration.containerId || execution.evidence.containerId !== registration.containerId)) {
           throw new Error('Frozen evidence differs from independently recorded container identity');
         }
         if (execution.evidence.mechanism !== 'docker-frozen-image' || execution.evidence.inputDigest !== captured.digest || execution.evidence.baseImageId !== baseImageId
@@ -385,14 +408,14 @@ async function runRepositoryAssetProposal(input: PreparedAssetProposal, supplied
           || !execution.cleanup.containerRemoved || !execution.cleanup.imageRemoved) throw new Error('Frozen evidence differs from configured proposal execution');
         const candidateCheck = prepared.checks.find(entry => entry.id === check.checkId)!;
         const receiptBinding: ProposalRuntimeObservation['receipt']['binding'] = freezeJson({ ...binding, repositoryId,
-          workspaceId: ownedId, runId: workspace.runId, commit, repositoryDigest: digest(workspace.repository), inventoryDigest, configurationDigest,
+          workspaceId: ownedId, runId: workspace.runId, commit, repositoryDigest: digest(request.repository), inventoryDigest, configurationDigest,
           proposalDigest: digest(prepared.proposal), artifactPath, artifactDigest: version === 'original' ? prepared.artifact.originalDigest! : prepared.artifact.digest,
           nonAssetDigest, version, checkId: check.checkId, checkDigest: check.checkDigest, inputDigest: bytesDigest(candidateCheck.input),
           oracleId: harness.id, oracleRevision: harness.revision, expectedDigest: digest(check.expected), operationId: execution.evidence.operationId,
           imageId: execution.evidence.imageId, baseImageId, contextDigest: execution.evidence.contextDigest, executionDigest: digest(execution), argv: execution.evidence.argv,
           inputTreeDigest: execution.evidence.inputDigest, commandDigest: execution.evidence.commandDigest,
           policyDigest: execution.evidence.policyDigest, cwd: execution.evidence.cwd });
-        const semanticContext = experiment?.recovery || experiment?.skillTrace ? Object.freeze({ options: executionRequest,
+        const semanticContext = observesContainer ? Object.freeze({ options: executionRequest,
           operationId: registration.ownership.operationId, containerId: registration.containerId! }) : undefined;
         const semantic = experiment ? observeProposalExperiment(experiment, execution, semanticContext) : undefined;
         if (semantic?.skillTrace && !declaredSkillReads(semantic.skillTrace.calls.map(call => call.result), skill?.resources)) {

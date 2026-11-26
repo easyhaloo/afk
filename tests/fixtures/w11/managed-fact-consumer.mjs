@@ -45,7 +45,7 @@ async function publishedReceipt(cli, { asset, query }) {
   }
 }
 
-async function consume(question, scope, runDirectory, itemId, scenarioFile) {
+async function consume(question, scope, runDirectory, itemId, scenarioFile, agentProvider = 'opencode') {
   const workspace = process.cwd();
   const scenario = scenarioFile ? JSON.parse(await readFile(scenarioFile, 'utf8')) : undefined;
   const workflow = scenario ? 'tool-consumer' : 'fact-consumer';
@@ -99,7 +99,7 @@ steps:
     }, { plugins, observer: { record: async (_context, event) => { events.push(event); } } });
     result = await runner.run({ backlogId: item.id, workItemId, session: runId, observationRunId: runId,
       observationWorkItemId: workItemId, targetBranch: branchName, baseBranch: 'main', baseBranchExplicit: true,
-      repoRoot: workspace, workspaceRoot: workspace, template, agentProvider: 'opencode', sandboxProvider: 'local',
+      repoRoot: workspace, workspaceRoot: workspace, template, agentProvider, sandboxProvider: 'local',
       executionMode: 'batch', completionTimeoutMs: 120_000, hardTimeoutMs: 150_000, maxHandoffs: 1, maxRetries: 0 });
   } catch (error) {
     result = { success: false, error: error.message };

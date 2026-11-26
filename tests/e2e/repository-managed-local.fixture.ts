@@ -4,6 +4,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
@@ -31,8 +33,11 @@ export async function startRepositoryServer(root: string, onPushRequest?: (reque
           GIT_HTTP_EXPORT_ALL: '1', PATH_INFO: path, QUERY_STRING: url.search.slice(1), REQUEST_METHOD: request.method,
           CONTENT_TYPE: request.headers['content-type'] ?? '', CONTENT_LENGTH: String(body.length),
         } });
-        backend.child.stdin!.end(body);
-        const { stdout } = await backend;
+        const input = pipeline(Readable.from([body]), backend.child.stdin!).catch((error: NodeJS.ErrnoException) => {
+          // Git can return a valid CGI response before consuming a rejected request body.
+          if (error.code !== 'EPIPE') throw error;
+        });
+        const [{ stdout }] = await Promise.all([backend, input]);
         const split = stdout.indexOf('\r\n\r\n');
         if (split < 0) throw new Error('Invalid Git CGI response');
         for (const line of stdout.subarray(0, split).toString().split('\r\n')) {

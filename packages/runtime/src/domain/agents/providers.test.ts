@@ -470,7 +470,7 @@ describe('Agent providers — fixture coverage', () => {
       expect(execution.sessionId).toBe('ses_one');
       expect(parse(row('text', { text: '41' }))).toEqual([{ type: 'text', text: '41' }]);
       expect(parse(row('step_finish', { reason: 'stop', tokens: { input: 636, output: 119 } }))).toEqual([
-        { type: 'usage', usage: { inputTokens: 636, outputTokens: 119, totalTokens: 755 } }, { type: 'result', result: '41' }]);
+        { type: 'usage', usage: { inputTokens: 636, outputTokens: 119, totalTokens: 755 }, contextTokens: 755 }, { type: 'result', result: '41' }]);
       await expect(p.restoreSession()).rejects.toThrow(/resume/);
     });
 
@@ -492,20 +492,20 @@ describe('Agent providers — fixture coverage', () => {
       expect(parse('plain output')).toEqual([{ type: 'text', text: 'plain output' }]);
     });
 
-    it('counts completed tool and answer messages once, including cached and reasoning tokens', async () => {
+    it('reports per-step context alongside cumulative usage including cached and reasoning tokens', async () => {
       const { parse } = await batch();
       const text = '{"type":"goal_complete","summary":"intermediate"}';
       parse(row('step_start'));
       parse(row('text', { text }));
       expect(parse(row('tool_use', { type: 'tool', state: { output: text } }))).toEqual([]);
       const finish = row('step_finish', { reason: 'tool-calls', tokens: { input: 811, output: 92 } });
-      expect(parse(finish)).toEqual([{ type: 'usage', usage: { inputTokens: 811, outputTokens: 92, totalTokens: 903 } }]);
+      expect(parse(finish)).toEqual([{ type: 'usage', usage: { inputTokens: 811, outputTokens: 92, totalTokens: 903 }, contextTokens: 903 }]);
       expect(parse(finish)).toEqual([]);
       parse(row('step_start', {}, 'final'));
       parse(row('text', { text: '{"type":"goal_complete",' }, 'final'));
       parse(row('text', { text: '"summary":"41"}' }, 'final'));
       expect(parse(row('step_finish', { reason: 'stop', tokens: { input: 36, output: 77, reasoning: 3, cache: { read: 900, write: 3 } } }, 'final')))
-        .toEqual([{ type: 'usage', usage: { inputTokens: 1750, outputTokens: 172, totalTokens: 1922 } },
+        .toEqual([{ type: 'usage', usage: { inputTokens: 1750, outputTokens: 172, totalTokens: 1922 }, contextTokens: 1019 },
           { type: 'result', result: '{"type":"goal_complete","summary":"41"}' }]);
       expect(parse(row('step_start', {}, 'extra'))[0]?.type).toBe('error');
     });

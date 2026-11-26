@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { simpleGit } from 'simple-git';
-import type { RunEvent } from '@afk/core';
+import type { RunEvent, RunEventData } from '@afk/core';
 import { parseCanonicalProject } from '../../domain/work-item/identity.js';
 import { JsonlEventStore, verifyRunEventHistory } from '../../infrastructure/observability/jsonl-event-store.js';
 import { checkAbort } from '../../infrastructure/providers/dependencies.js';
@@ -15,7 +15,7 @@ import type { FailureDiagnostic } from '../workflows/failure-diagnostic.js';
 import { serializeReferenceContext, writeReferenceContext } from '../workflows/context-file.js';
 import { ExperienceStore, experienceContextMatches, experienceQueryContextSchema, type ExperienceAdoptionContext, type ExperienceContextReceipt, type ExperienceOutcomeReceipt, type ExperienceQueryContext, type ExperienceRecord, type RecordFailureInput } from './experience-store.js';
 import { adoptionRunContextFromEvents, experienceScope, successfulRunEvidenceFromEvents } from './run-evidence.js';
-import type { KnowledgeRuntimeOptions } from './knowledge-runtime.js';
+import { KnowledgeContextProvider, type KnowledgeRuntimeOptions } from './knowledge-runtime.js';
 
 export { experienceScope, successfulRunEvidenceFromEvents } from './run-evidence.js';
 
@@ -247,6 +247,7 @@ export async function resolveExperienceQueryContext(input: {
 
 export async function prepareExperienceContext(input: {
   onContext?: (context: ExperienceQueryContext) => void;
+  recordKnowledge?: (data: Extract<RunEventData, { kind: 'decision.made' }>) => Promise<unknown>;
   source?: { runId: string; workItemId: string }; workItemId: string; worktreePath: string; prompt: string; plugins?: PluginRuntime;
 } & ExperienceQueryContext): Promise<{ path: string; recordSelection: () => Promise<void> } | undefined> {
   const source = input.source ? { runId: input.source.runId, workItemId: input.source.workItemId } : undefined;
@@ -270,12 +271,35 @@ export async function prepareExperienceContext(input: {
     ? [input.plugins.getContextProvider('context.experience'), input.plugins.getContextProvider('context.knowledge'),
       input.plugins.getContextProvider('context.installed-tools')]
     : [new ExperienceContextProvider(undefined, { homeDir: homedir() })];
-  const groups = await Promise.all(providers.map(async provider => {
+  type Recall = { fragment: ContextFragment; receipt?: ExperienceContextReceipt; provider?: ExperienceContextProvider;
+    recordKnowledgeSelection?: (content: string) => Promise<void> };
+  const groups = await Promise.all(providers.map(async (provider): Promise<Recall[]> => {
     if (provider instanceof ExperienceContextProvider && source) {
       return provider.gatherForRun(query, source)
         .map(result => ({ ...result, provider }));
     }
-    return (provider ? await provider.gather(query) : []).map(fragment => ({ fragment, receipt: undefined, provider: undefined }));
+    const recordKnowledge = input.recordKnowledge;
+    if (provider instanceof KnowledgeContextProvider && source && recordKnowledge) {
+      try {
+        const results: Recall[] = [];
+        for (const { fragment, publication } of await provider.gatherWithPublications(query)) {
+          const binding = { scope, publicationKey: publication.key, candidateId: publication.candidateId,
+            candidateVersion: publication.candidateVersion, targetRef: publication.targetRef, targetDigest: publication.targetDigest,
+            retrievedDigest: createHash('sha256').update(fragment.content).digest('hex') };
+          await recordKnowledge({ kind: 'decision.made', command: 'knowledge.retrieved', accepted: true, reason: JSON.stringify(binding) });
+          let recorded = false;
+          results.push({ fragment, recordKnowledgeSelection: async content => {
+            if (recorded) return;
+            await recordKnowledge({ kind: 'decision.made', command: 'knowledge.selected', accepted: true, reason: JSON.stringify({
+              ...binding, fragmentDigest: createHash('sha256').update(content).digest('hex'),
+            }) });
+            recorded = true;
+          } });
+        }
+        return results;
+      } catch (cause) { throw new ExperienceFeedbackError('Knowledge retrieval feedback is incomplete', { cause }); }
+    }
+    return (provider ? await provider.gather(query) : []).map(fragment => ({ fragment }));
   }));
   const selected: (typeof groups)[number][number][] = [];
   for (let index = 0; index < 5 && selected.length < 5; index++) {
@@ -299,7 +323,7 @@ export async function prepareExperienceContext(input: {
   const digest = createHash('sha256').update(serialized).digest('hex');
   const path = await writeReferenceContext(input.worktreePath, 'experience-context.md', fragments);
   return { path, recordSelection: async () => {
-    if (!retained.some(result => result.receipt)) return;
+    if (!retained.some(result => result.receipt || result.recordKnowledgeSelection)) return;
     try {
       if (await fs.realpath(directory) !== directory) throw new Error('Prepared experience reference directory changed before feedback');
       const target = join(directory, 'experience-context.md');
@@ -321,6 +345,7 @@ export async function prepareExperienceContext(input: {
           .map(result => ({ receipt: result.receipt!, content: result.fragment.content }));
         if (selections.length) provider.recordSelections(selections);
       }
+      for (const result of retained) await result.recordKnowledgeSelection?.(result.fragment.content);
     } catch (cause) {
       throw new ExperienceFeedbackError('Execution accepted the experience reference, but selection feedback is incomplete', { cause });
     }

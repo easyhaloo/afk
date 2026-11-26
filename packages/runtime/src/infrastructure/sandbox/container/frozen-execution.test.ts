@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { observeProposalExperiment, prepareProposalExperiment } from '../../../application/learning/proposal-semantics.js';
 import { DockerContainerProvider } from './docker.js';
 import { captureFrozenInput, captureFrozenScratchHelper } from './frozen-input.js';
 import { executeFrozenContainer, FrozenCleanupError, verifyFrozenScratchRecoveryEvidence, type FrozenExecutionOptions, type FrozenExecutionOwnership } from './frozen-execution.js';
@@ -46,9 +47,10 @@ function fixture() {
 describe('frozen execution preflight', () => {
   it('records the policy-checked container identity before starting the candidate', async () => {
     const { provider, engine, options } = fixture();
-    const onContainer = vi.fn((binding: Readonly<{ operationId: string; containerId: string }>) => {
+    const onContainer = vi.fn(async (binding: Readonly<{ operationId: string; containerId: string }>) => {
       expect(Object.isFrozen(binding)).toBe(true);
       expect(engine.inspectFrozenContainer).toHaveBeenCalledOnce();
+      await Promise.resolve();
       expect(engine.startFrozenContainer).not.toHaveBeenCalled();
     });
     const result = await executeFrozenContainer(provider, { ...options, onContainer } as FrozenExecutionOptions);
@@ -194,6 +196,29 @@ describe('frozen execution preflight', () => {
 
 describe('bounded frozen ownership registration', () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it.each(['deadline', 'abort'] as const)('cleans up without starting after container registration %s', async boundary => {
+    vi.useFakeTimers();
+    const { provider, engine, options } = fixture();
+    const controller = new AbortController();
+    const reason = new Error('cancel container registration');
+    let release!: () => void;
+    const readiness = new Promise<void>(resolve => { release = resolve; });
+    const onContainer = vi.fn(() => readiness);
+    const pending = executeFrozenContainer(provider, { ...options, timeoutMs: 25, signal: controller.signal, onContainer });
+    const outcome = boundary === 'abort' ? expect(pending).rejects.toBe(reason)
+      : expect(pending).rejects.toThrow('Frozen container registration deadline exceeded');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onContainer).toHaveBeenCalledOnce();
+    if (boundary === 'abort') controller.abort(reason);
+    await vi.advanceTimersByTimeAsync(25);
+    await outcome;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.startFrozenContainer).not.toHaveBeenCalled();
+    expect(engine.cleanupFrozenOperation).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   function held(mode: 'plain' | 'scratch' | 'recovery' = 'plain') {
     const test = mode === 'plain' ? fixture() : mode === 'scratch' ? scratchFixture() : recoveryFixture();
@@ -1173,6 +1198,7 @@ describe('frozen host control experiments', () => {
 
 describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen execution', () => {
   const baseImageId = process.env.AFK_TEST_FROZEN_IMAGE ?? '';
+  const observerImageId = process.env.AFK_TEST_FROZEN_PERMISSION_OBSERVER_IMAGE;
   const provider = new DockerContainerProvider();
   const ownerships: FrozenExecutionOwnership[] = [];
   const receipts: object[] = [];
@@ -1192,6 +1218,50 @@ describe.runIf(process.env.AFK_TEST_FROZEN_DOCKER === '1')('real Docker frozen e
     });
     if (process.env.AFK_TEST_FROZEN_EVIDENCE) writeFileSync(process.env.AFK_TEST_FROZEN_EVIDENCE, JSON.stringify({ baseImageId, resources, receipts }, null, 2));
   });
+
+  it.runIf(Boolean(observerImageId))('binds startup write denials to the native container and ignores printed claims', async () => {
+    const root = directory();
+    writeFileSync(join(root, 'guard'), 'unchanged');
+    const input = captureFrozenInput(root);
+    for (const deniedWrites of [1, 0]) {
+      const command = deniedWrites ? 'try { require("node:fs").writeFileSync("/workspace/guard", "changed"); } catch (error) { console.log(error.code); }'
+        : 'console.log("EROFS");';
+      const result = await execute({ input, baseImageId, timeoutMs: 15_000, argv: ['node', '-e', command],
+        permissionDenial: { observerImageId: observerImageId!, target: '/workspace/guard' } });
+      expect(result.stdout.trim()).toBe('EROFS');
+      expect(result.evidence.permissionDenial).toMatchObject({ observerImageId, target: '/workspace/guard', deniedWrites,
+        operationId: result.evidence.operationId, containerId: result.evidence.containerId, errno: 'EROFS' });
+    }
+    expect(readFileSync(join(root, 'guard'), 'utf8')).toBe('unchanged');
+  }, 60_000);
+
+  it.runIf(Boolean(observerImageId))('qualifies manifest checkpoint permission denial with the native semantic checker', async () => {
+    const fixtures = new URL('../../../../../../tests/qualification/w05/scan-entry/', import.meta.url);
+    const { inputSchema, permission: { check, case: { checkDigest, experiment: configured } } } =
+      JSON.parse(readFileSync(new URL('control-cases.json', fixtures), 'utf8'));
+    const entry = 'checkpoint.fixture.mjs';
+    const prepared = prepareProposalExperiment('tool', entry, check, configured, inputSchema);
+    if (prepared.status !== 'prepared') throw new Error(prepared.reason);
+    expect(prepared.experiment.checkDigest).toBe(checkDigest);
+    const root = directory();
+    const checkpoint = join(root, 'scan-checkpoint.json');
+    writeFileSync(checkpoint, 'original state');
+    writeFileSync(join(root, 'scan-manifest.mjs'), readFileSync(new URL('scan-manifest.mjs', fixtures)));
+    for (const attempt of [true, false]) {
+      writeFileSync(join(root, entry), attempt ? readFileSync(new URL(entry, fixtures)) :
+        'process.stderr.write("error: checkpoint volume is read-only"); process.exitCode = 1;');
+      let container: { operationId: string; containerId: string } | undefined;
+      const options: FrozenExecutionOptions = { input: captureFrozenInput(root), baseImageId, timeoutMs: 15_000,
+        argv: prepared.experiment.argv, permissionDenial: { observerImageId: observerImageId!, target: configured.permissionDenial.target },
+        onContainer: identity => { container = identity; } };
+      const result = await execute(options);
+      if (!container) throw new Error('Missing registered container identity');
+      const observation = observeProposalExperiment(prepared.experiment, result, { ...container, options });
+      expect(observation.assertions).toMatchObject([{ passed: true, actual: 1 }, { passed: true, actual: 'error: checkpoint volume is read-only' }]);
+      expect(observation).toMatchObject({ passed: attempt, permissionDenial: { deniedWrites: attempt ? 1 : 0 } });
+      expect(readFileSync(checkpoint, 'utf8')).toBe('original state');
+    }
+  }, 60_000);
 
   it('executes captured bytes while an independent host process repeatedly changes the source', async () => {
     const root = directory();

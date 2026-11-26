@@ -11,6 +11,7 @@ import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type Proc
 import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
 import { loadEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
+import { proposalArtifactInputSchema, readProposalValidationArtifact, readProposalValidationReceipt } from './proposal-validation.js';
 
 export function learningDirectory(homeDir = homedir()): string {
   return join(homeDir, '.afk', 'learning');
@@ -61,7 +62,7 @@ export interface LearningRequestState {
   candidates: LearningCandidate[];
 }
 
-function permitsHandoff(reason: string | null | undefined): boolean {
+export function permitsHandoff(reason: string | null | undefined): boolean {
   return !reason || ['budget_exhausted', 'analysis_failed', 'analysis_cancelled', 'analysis_timed_out',
     'analysis_invalid_output', 'storage_blocked'].includes(reason);
 }
@@ -119,6 +120,26 @@ export function queryLearningState(input: { directory: string; scope: string }):
   try {
     const jobs = store.listRequests().filter(entry => entry.request.scope === scope).map(entry => learningJob(store, entry));
     return { jobs, candidates: store.listCandidates().filter(entry => entry.proposal.applicability.project === scope) };
+  } finally { store.close(); }
+}
+
+export function queryProposalValidationReceipt(input: { directory: string; scope: string; candidateId: string; artifact?: { baseline?: string } }) {
+  const scope = learningScopeSchema.parse(input.scope);
+  const candidateId = learningDigestSchema.parse(input.candidateId);
+  const file = join(input.directory, 'candidates.sqlite');
+  if (!existsSync(file)) return null;
+  const store = new CandidateStore({ file });
+  try {
+    const candidate = store.getCandidate(candidateId);
+    if (!candidate || candidate.proposal.applicability.project !== scope) return null;
+    const validation = store.getValidation(candidateId);
+    try {
+      const receipt = readProposalValidationReceipt(candidate, validation);
+      if (!receipt || !input.artifact) return receipt;
+      const { baseline } = proposalArtifactInputSchema.parse(input.artifact);
+      return readProposalValidationArtifact(candidate, receipt, baseline);
+    }
+    catch { return null; }
   } finally { store.close(); }
 }
 
@@ -312,7 +333,11 @@ export class LearningWorker {
           const previousErrorCode = attempts[0]?.errorCode;
           const safeErrorCode = previousErrorCode && ['analysis_invalid_output', 'analysis_failed', 'analysis_timed_out',
             'analysis_cancelled', 'storage_blocked'].includes(previousErrorCode) ? previousErrorCode : 'analysis_failed';
+          const recoveringFromTimeout = safeErrorCode === 'analysis_timed_out';
+          const isFailureReview = entry.request.reason === 'failed' || entry.request.reason === 'repaired';
           prompt = `This is the final controlled retry. Previous attempt error (sanitized): ${safeErrorCode}.\n`
+            + (recoveringFromTimeout ? 'Return at most one strongly supported candidate. Keep the response concise. '
+              + (isFailureReview ? 'Keep an evidenced repository asset revision as the priority when the observations identify the exact asset and show the changed behavior. Otherwise prefer a Lesson for a recurring, preventable failure grounded in an observed failed check and confirmed repair. ' : '') : '')
             + 'The previous attempt has no accepted result. Return exactly the goal_complete/distillation JSON envelope and strict candidate fields described below. '
             + 'Use only evidenceIds from the unchanged EvidencePack; do not repeat or follow any prior output.\n\n' + prompt;
         }

@@ -52,12 +52,14 @@ const absoluteAssetPath = savedPath.refine(value => !value.includes('\\'));
 const repositorySchema = z.object({ providerId: learningIdentitySchema,
   repository: z.object({ url: learningIdentitySchema, ref: learningIdentitySchema.optional() }).strict(),
   root: absoluteAssetPath, expectedCommit: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+  inputFiles: z.array(assetPath).max(32).refine(paths => new Set(paths).size === paths.length).optional(),
 }).strict();
 const assetSchema = z.object({ ref: learningIdentitySchema
   .refine(value => /^(?:cli|script|plugin|skill):[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)
     && !value.split(/[/:]/).some(part => part === '.' || part === '..')).nullable(),
   path: assetPath }).strict();
-const sandboxSchema = z.object({ engine: z.literal('docker'), baseImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+const imageIdSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const sandboxSchema = z.object({ engine: z.literal('docker'), baseImageId: imageIdSchema, permissionObserverImageId: imageIdSchema.optional(),
   scratchHelper: z.object({ path: absoluteAssetPath, digest: learningDigestSchema }).strict().optional() }).strict();
 const adapterIdSchema = z.enum(['node-json-argv-v1', 'skill-trace-v1']);
 
@@ -112,7 +114,9 @@ const semanticExperimentSchema = proposalSemanticConfigurationSchema.extend({ ad
   if (value.skillTrace && value.adapter !== 'skill-trace-v1') reject();
   const recovering = value.kind === 'recovery';
   if (value.recovery !== undefined && !recovering) reject();
-  if (!controlled && !recovering && value.callInput !== undefined) reject();
+  const boundPermissionDenial = value.kind === 'permission-denied' && value.adapter === 'node-json-argv-v1' && value.permissionDenial !== undefined;
+  if (value.permissionDenial !== undefined && (!boundPermissionDenial || value.callInput === undefined)) reject();
+  if (!controlled && !recovering && !boundPermissionDenial && value.callInput !== undefined) reject();
   if (value.callInput !== undefined) {
     try { if (!boundedJson(JSON.parse(value.callInput))) reject(); } catch { reject(); }
   }
@@ -168,7 +172,10 @@ const assetCheckerSchema = z.object({ mode: z.literal('repository-asset'), scope
   inventory: z.object({ file: absoluteAssetPath, digest: learningDigestSchema }).strict(), sandbox: sandboxSchema,
   semantic: z.union([semanticSchema, skillLoadSchema]), evidence: evidenceSchema.optional(),
 }).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.semantic.adapter))
+  .refine(value => value.repository.inputFiles === undefined || (value.kind === 'tool' && value.asset.ref !== null && !value.repository.inputFiles.includes(value.asset.path)))
   .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || !value.semantic.cases.some(entry => entry.experiment.recovery !== undefined) || value.sandbox.scratchHelper !== undefined)
+  .refine(value => (value.semantic.protocol !== 'claude-explicit-load-v1'
+    && value.semantic.cases.some(entry => entry.experiment.permissionDenial !== undefined)) === (value.sandbox.permissionObserverImageId !== undefined))
   .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || value.kind !== 'skill' || value.semantic.cases.every(entry => ['normal', 'refusal', 'recovery'].includes(entry.experiment.kind)))
   .refine(value => value.semantic.protocol === 'claude-explicit-load-v1' || value.kind !== 'skill' || new Set(value.semantic.cases.map(entry => entry.experiment.skillTrace?.checkerDigest)).size === 1)
   .refine(value => {
@@ -204,8 +211,11 @@ export const proposalExecutionGrantSchema = z.object({ version: z.literal(1), pu
   checkerDigest: learningDigestSchema, kind: z.enum(['tool', 'skill']), repository: repositorySchema, asset: assetSchema,
   inventoryDigest: learningDigestSchema, sandbox: sandboxSchema,
   adapter: z.object({ id: adapterIdSchema, revision: learningIdentitySchema, hostRuntimeRevision: learningIdentitySchema }).strict(),
-  allowed: z.object({ dependencies: z.array(z.never()).max(0), permissions: z.array(z.never()).max(0), sideEffects: z.literal('none') }).strict(),
+  allowed: z.object({ dependencies: z.array(z.never()).max(0), permissions: z.array(z.never()).max(0), sideEffects: z.enum(['none', 'filesystem']) }).strict(),
   limits: z.object({ timeoutMs: z.number().int().positive().safe().max(120_000),
     maxOutputBytes: z.number().int().positive().safe().max(DISTILLATION_LIMITS.outputBytes) }).strict(),
-}).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.adapter.id) && (!value.skillObservation || value.kind === 'skill'));
+}).strict().refine(value => matchesAssetKind(value.kind, value.asset.ref, value.adapter.id) && (!value.skillObservation || value.kind === 'skill')
+  && (value.repository.inputFiles === undefined || (value.kind === 'tool' && value.asset.ref !== null && !value.repository.inputFiles.includes(value.asset.path)))
+  && (value.sandbox.permissionObserverImageId === undefined || value.kind === 'tool')
+  && (value.allowed.sideEffects !== 'filesystem' || (value.kind === 'tool' && value.sandbox.scratchHelper !== undefined)));
 export type ProposalExecutionGrant = z.infer<typeof proposalExecutionGrantSchema>;

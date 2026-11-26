@@ -26,6 +26,8 @@ AFK 执行已经存在、且由上游完成拆分的 Provider-backed 工作项�
 - `afk execute --work-item-id <id>`：执行受管生命周期，包括资格与 manifest 校验、实现、独立 QA、变更请求处理，以及由人控制的合并闸门。`--agent <name>`、`--sandbox <name>` 和 `--execution-mode <batch|interactive>` 显式选择本次运行的 Provider 和模式；模板仍可为单个步骤单独选择 Provider。
 - `afk experience list --scope <platform:projectKey> [--status <candidate|verified|revoked>] [--limit <0..100>] [--json]`：查看项目经验；`recall --scope <scope> --query <text> [--context <file>] [--json]` 只返回相关、已验证且未过期的经验。可选context文件为至多32 KiB的UTF-8 JSON，只接受严格的applicability/target查询schema，项目必须与scope一致。非法context在打开存储前拒绝且不回显内容。查询上下文不授予执行来源、QA、采纳或发布资格。
 - `afk experience jobs --scope <scope> [--limit <0..100>] [--offset <非负安全整数>] [--json]` 与相同参数的 `candidates`：按完整 ID 升序读取已持久化的学习任务或候选；精确 scope 过滤后再分页，默认 offset 0 / limit 100。`inspect <64位小写十六进制候选ID> --scope <scope> [--json]` 读取单个候选。注入插件运行时时优先调用学习 action，否则使用共享账本查询；只读命令不启动分析，也不创建缺失账本。偏移量针对当前结果，不保证跨次查询快照一致。
+- `afk experience inspect <候选ID> --scope <scope> --proposal-receipt [--json]` 读取技能或工具候选当前已验证版本的收据，返回仓库摘要、基线提交、产物相对路径及新旧产物摘要。收据缺失、跨项目或无效时返回非零退出码。该收据记录历史验证，发布和安装需要各自的授权。
+- `afk experience inspect <候选ID> --scope <scope> --proposal-artifact [基线文件] [--json]` 同时返回收据和供评审的已验证 UTF-8 `source`。技能补丁需要提供与收据摘要一致的原始文件。命令校验产物摘要后返回结果。
   尝试记录中的 `analysis_executable_changed` 表示启动前无法再次确认所选分析程序的身份。请核验安装；重启 Worker 不会重试该请求，已预留的预算不退回。
 - `afk experience export --scope <scope> [--limit <0..100>] [--output <new-file>]`、`import --scope <target> --file <file>`、`copy <id> --scope <source> --target-scope <target>`：交换最多 1 MiB / 100 条的可移植 JSON。导入与复制只产生候选，必须在目标项目独立验证；导出不携带验证权限且排除发布绑定经验；copy 不能移植其发布绑定。`metrics --scope <scope> [--json]` 区分检索、显式采纳与复发；`adopt <id> --scope <scope> --run-id <run> --work-item-id <canonical-id>` 仍输出 JSON 指标（`retrievals`、`adoptions`、`recurrences`），新增 `receipt` 绑定已验证内容/验证/适用条件及已记录的实际目标上下文（`binding: 'verified-version'`，格式 `version: 2`，增量字段 `contextStatus: 'recorded' | 'unavailable'`）。可信 QA 目标快照可在进行中运行尚未完成 QA 时记录实际上下文；上下文缺失时绑定规范化的 `{}` 并标记 `contextStatus: 'unavailable'`，不虚构目标。相同来源、版本与上下文重放返回原收据和时间，不重复计数；验证或上下文变化报冲突，损坏绑定拒绝，历史收据保持 `legacy-unbound` 且不升级。采纳是显式确认，不代表观测到使用/结果；发布绑定经验另保留 CandidateStore 发布/版本身份；每条经验最多 64 个采纳收据。兼容性始终对实际上下文检查，同一上下文在 QA 前后结果一致；即使经验未存储 applicability，也不能绕过已知 `productVersions` 的兼容性检查。存储了 applicability 或发布绑定的经验额外要求成功 QA 及匹配实际上下文的已验证适用资格，包括干净目标及精确 QA revision；仅有进行中快照不能授予此资格。同时提供的实际与已验证上下文必须匹配。未存储 applicability 或发布绑定的普通经验可针对完整进行中运行确认，即使上下文不可用，仍须通过实际上下文兼容性检查。收据字段与来源规则见[经验复用](plugins.zh.md#执行治理与经验复用)。
 - `afk experience outcomes --scope <scope> --run-id <run> --work-item-id <规范ID> [--limit <0..100>] [--json]`：查询精确消费运行与工作项组合的历史结果收据，工作项必须属于scope。默认20条，按审计序号倒序、经验/选择身份稳定排序；默认格式化JSON数组，`--json`紧凑输出，无收据返回`[]`。保留所选引用、可选发布/版本身份、审计结果、复发关联及`benefit: "unknown"`。选择不等于显式采纳，成功不证明收益，`recurrence: false`不证明没有复发。查询不激活插件、不运行模型、不刷新凭据、不召回资产、不改变使用计数；关闭存储后再输出，查询或关闭失败不泄露私有错误。历史收据不授予当前召回或发布资格。
@@ -99,8 +101,10 @@ Agent 运行时覆盖参数仅在执行路由解析，保留已有配置默认�
 `tool-optimization-validation`。四者均为内建学习工作流。项目 scope 从规范工作项推导，
 创建 Runtime 前检查 scope 不超过 512 个 UTF-8 字节；收集及分析前必须核对来源审计属于该准确工作项。`--hard-timeout` 仅接受
 1 至 2147483647 的整数，并在创建 Runtime 前校验。
-`review` 步骤收集所选来源、处理准确请求、用保存的 checker 验证所选类型候选，
-success 与 repair 复盘另准备发布预览，其输出包含准确的请求 key、候选 ID、验证版本及 prepared 发布；
+`review` 步骤收集所选来源、处理准确请求，并用保存的 checker 验证所选类型候选。
+skill 和 tool 复盘复用该类型的已有请求，或复用已产出该类型候选的通用请求。两者均
+不存在时，使用相同的来源证据和分析预算建立该类型的定向请求。
+success 与 repair 复盘另准备发布预览，其输出包含准确的请求 key、候选 ID、验证版本及 prepared 发布。
 `--json` 输出紧凑 JSON。预览不自动应用，正式发布仍通过独立授权的知识发布命令。
 失败返回通用错误。skill/tool 复盘在已有验证收据提交后中断时，另输出严格的
 `status: "incomplete"` JSON，包含本次调用已完成的收据、中断候选及安全原因，退出仍为失败。
@@ -194,7 +198,7 @@ agent 自己报告的失败原因就是根因。provider 抓到的 stdout/stderr
 
 超时是一等失败。静默超时、完成超时、硬超时各有自己的 code，并带上用尽的预算、最后已知活动与判定依据。
 
-批处理执行将收到的 stdout、stderr 数据块计为活动；即使字节重复或捕获尾部已达到长度上限，也不会因此误判静默。执行仍活动且归一化用量达到 `contextHighTokens` 时返回 `context_high`，保留进程供协调器捕获并停止。完成、取消和已知失败保留各自结果；完成期限耗尽优先于上下文轮换。Provider 不提供中间用量时，不能在实际观察到用量之前主动触发轮换。
+批处理执行将收到的 stdout、stderr 数据块计为活动，即使字节重复或捕获尾部已达到长度上限也一样。本地批处理仍在执行且观察到的上下文达到 `contextHighTokens` 时，返回 `context_high`，保留进程供协调器捕获并停止。OpenCode 按最新一步的上下文判断是否轮换，累计用量用于记账。其他 Provider 可沿用其用量快照。完成、取消、已知失败和完成期限均优先于上下文轮换。Provider 需要提供中间用量才能主动触发轮换。
 
 「重试一次尝试是否有意义」从诊断里读，而不是从被拍平的字符串里重新推导。agent 错误码词汇保持原样：`AGENT_TURN_FAILED`、`AGENT_GONE`、`AGENT_IDLE` 是 agent 运行的事实而不是对工作的判决，而超时是关于工作的事实。
 

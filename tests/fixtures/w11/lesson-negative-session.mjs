@@ -49,7 +49,7 @@ if (mode === 'run') {
     save('workflow.json', { id, workspace, runId, workItemId, result, events, calls, contextFile: existsSync(join(workspace, '.afk/experience-context.md')) });
     const session = events.find(event => event.kind === 'agent.session_recorded')?.sessionId;
     assert.match(session, /^ses_/);
-    save('session.json', JSON.parse(execFileSync('opencode', ['session', 'export', session], { encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 })));
+    save('session.json', JSON.parse(execFileSync('opencode', ['session', 'export', session, '--standalone'], { encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 })));
     save('answer.json', read(join(workspace, 'answer.json')));
   } finally { await plugins.dispose(); }
 } else assert.equal(mode, 'replay');

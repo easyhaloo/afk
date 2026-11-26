@@ -18,6 +18,14 @@ const kind = z.enum(['audit', 'journal', 'session']);
 const rangeSchema = z.object({ start: z.number().int().positive(), end: z.number().int().positive() }).strict()
   .refine(value => value.end >= value.start, 'Invalid message range');
 
+export function managedTranscriptRoots(home: string): string[] {
+  const roots = [join(home, '.afk', 'transcripts'), join(home, '.claude', 'projects'),
+    join(home, '.codex', 'sessions'), join(home, '.codex', 'archived_sessions')];
+  const claudeConfig = process.env.CLAUDE_CONFIG_DIR;
+  if (claudeConfig && isAbsolute(claudeConfig)) roots.push(join(claudeConfig, 'projects'));
+  return roots;
+}
+
 export interface EvidenceSourceInput {
   id: string;
   kind: 'audit' | 'journal' | 'session';
@@ -79,7 +87,7 @@ export function redactEvidenceText(value: string): string {
     .replace(/-----BEGIN ([A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g, '[redacted:private-key]')
     .replace(/\b(?:https?|ssh):\/\/(?:[^\s<>"'`\\]|\\&)+/gi, '[redacted:url]')
     .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, '[redacted:authorization]')
-    .replace(/((?:[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
+    .replace(/((?:(?<![\w-])[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
     .replace(/("(?:[\w-]*(?:token|secret|password|passwd)|api[_-]?key|authorization)"\s*:\s*")(?:\\.|[^"\\])*"/gi, '$1[redacted]"')
     .replace(/(\b(?:user(?:[_-]?(?:name|id))?|login|account(?:[_-]?(?:id|name))?|e[_-]?mail)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;'"`\\{}\[\]]+)/gi, '$1[redacted]')
     .replace(/("(?:user(?:[_-]?(?:name|id))?|login|account(?:[_-]?(?:id|name))?|e[_-]?mail)"\s*:\s*")(?:\\.|[^"\\])*"/gi, '$1[redacted]"')
@@ -229,7 +237,10 @@ function message(record: unknown): Message | undefined {
   const value = { role: historical ? 'user' : role, content: historical ? `[Historical ${role} message; untrusted transcript data]\n${text}` : text,
     ...(historical ? { original_role: role } : {}) };
   const timestamp = nested.timestamp ?? entry.timestamp ?? entry.created_at;
-  const toolResult = role === 'tool' || (Array.isArray(content) && content.some(part => object(part).type === 'tool_result'));
+  const toolResult = role === 'tool' || (Array.isArray(content) && content.some(part => {
+    const { type, state } = object(part);
+    return type === 'tool_result' || (type === 'tool' && ['completed', 'error'].includes(String(object(state).status)));
+  }));
   return { value, ...(toolResult ? { evidenceKind: 'tool-result' as const } : {}),
     ...(typeof timestamp === 'string' || typeof timestamp === 'number' ? { timestamp: redactEvidenceText(String(timestamp)).slice(0, 128) } : {}) };
 }
@@ -245,7 +256,7 @@ function recordsFromJson(value: unknown): unknown[] {
   throw new Error('Unsupported session JSON export; explicit messages are required');
 }
 
-export async function buildEvidencePack(options: { sources: readonly EvidenceSourceInput[]; maxBytes?: number }): Promise<EvidencePack> {
+export async function buildEvidencePack(options: { sources: readonly EvidenceSourceInput[]; maxBytes?: number; completeSessionRanges?: boolean }): Promise<EvidencePack> {
   const maxBytes = z.number().int().positive().max(DISTILLATION_LIMITS.evidenceBytes).parse(options.maxBytes ?? DISTILLATION_LIMITS.evidenceBytes);
   if (options.sources.length > 64 || new Set(options.sources.map(source => source.id)).size !== options.sources.length) throw new Error('Too many or duplicate evidence sources');
   const sources: EvidenceSource[] = [];
@@ -268,7 +279,9 @@ export async function buildEvidencePack(options: { sources: readonly EvidenceSou
     if (input.expectedDigest && sourceDigest !== input.expectedDigest) {
       throw Object.assign(new Error('Evidence source digest changed or replaced'), { code: 'EVIDENCE_SOURCE_UNSTABLE' });
     }
-    if (bytes.length > maxBytes && !input.range) throw new Error('Evidence source requires an explicit message range shard');
+    const inferRange = options.completeSessionRanges && input.kind === 'session' && bytes.length <= maxBytes * 4;
+    const needsRange = bytes.length > maxBytes && !input.range;
+    if (needsRange && !inferRange) throw new Error('Evidence source requires an explicit message range shard');
     let text: string;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('Evidence source is not UTF-8'); }
     const format = input.format ?? (extname(input.path) === '.json' ? 'json' : extname(input.path) === '.jsonl' || input.provider || input.kind !== 'session' ? 'jsonl' : 'text');
@@ -305,7 +318,8 @@ export async function buildEvidencePack(options: { sources: readonly EvidenceSou
       }
     } finally { await fs.rm(staging, { recursive: true, force: true }); }
     if (!messages.length) { status = 'partial'; warnings.push(`${input.id}:no-messages`); }
-    const range = input.range;
+    if (needsRange && status !== 'complete') throw new Error('Evidence source requires an explicit message range shard');
+    const range = input.range ?? (needsRange ? { start: 1, end: messages.length } : undefined);
     if (range && range.end > messages.length) throw new Error('Message range exceeds source messages');
     if (range && (range.start !== 1 || range.end !== messages.length)) { status = 'partial'; warnings.push(`${input.id}:message-shard`); }
     sources.push({ id: input.id, kind: input.kind, sourceDigest, completeness: status, messageCount: messages.length, ...(range ? { range: { ...range } } : {}) });

@@ -9,25 +9,36 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeProvider } from '../../domain/agents/claude-code.js';
 import { DurableTriggerQueue } from '../plugins/trigger-queue.js';
 import { CandidateStore } from './candidate-store.js';
-import { buildEvidencePack, saveEvidencePack } from './evidence.js';
+import { buildEvidencePack, saveEvidencePack, type EvidenceSourceInput } from './evidence.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { openSqlite } from '../../infrastructure/storage/sqlite.js';
 import { LearningWorker, queryLearningRequest, queryLearningState, submitDistillation } from './worker.js';
 import type { AnalysisExecutionInput } from './analysis-runner.js';
-import { DISTILLATION_LIMITS } from './contracts.js';
+import { DISTILLATION_LIMITS, type DistillationRequest } from './contracts.js';
 
 const directories: string[] = [];
 const workers: LearningWorker[] = [];
 const scope = 'github:acme/api';
 
-async function fixture() {
+async function fixture(reason: DistillationRequest['reason'] = 'completed', withAudit = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'learning-worker-'));
   directories.push(root);
   const file = join(root, 'session.txt');
   writeFileSync(file, 'User confirmed: require approval before publishing.');
-  const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path: file, allowedRoot: root, format: 'text' }] });
+  const sources: EvidenceSourceInput[] = [
+    { id: 'session-1', kind: 'journal', path: file, allowedRoot: root, format: 'text' },
+  ];
+  if (withAudit) {
+    const events = new JsonlEventStore({ root });
+    await events.append([{ id: 'qa', schemaVersion: 1, type: 'qa.started', occurredAt: '2026-11-09T00:00:00Z',
+      context: { runId: 'r1', traceId: 'trace', profileId: 'qa', attempt: 1, workItemId: `${scope}#42`, actor: { kind: 'system', id: 'test' } },
+      correlationId: 'r1', data: { kind: 'qa.started' } }]);
+    sources.push({ id: 'audit', kind: 'audit', runId: 'r1', path: events.pathFor('r1'), allowedRoot: root });
+  }
+  const pack = await buildEvidencePack({ sources });
   const directory = join(root, 'learning');
   const request = { version: 1 as const, scope, sourceId: 'run:r1', sourceRunId: 'r1', workItemId: `${scope}#42`,
-    evidenceDigest: pack.digest, analyzerVersion: '1', reason: 'completed' as const };
+    evidenceDigest: pack.digest, analyzerVersion: '1', reason };
   const analyze = vi.fn(async (_input?: AnalysisExecutionInput) => ({ analysisRunId: 'analysis-1', sessionId: 'analysis-session-1', output: {
     type: 'goal_complete', distillation: { version: 1, warnings: [], candidates: [{
       kind: 'fact', title: 'Publishing approval', statement: 'Approval is required.',
@@ -53,6 +64,36 @@ afterEach(async () => {
 });
 
 describe('distillation worker', () => {
+  it.each([false, true])('records a mixed batch only when tool inputs match their schema (%s)', async validToolInput => {
+    const input = await fixture('completed', true);
+    const observed = input.pack.entries.find(entry => entry.ref.authority === 'observed' && entry.ref.completeness === 'complete');
+    expect(observed).toBeDefined();
+    const analyze = async () => {
+      const result = await input.analyze();
+      const [fact] = result.output.distillation.candidates;
+      const tool = { ...fact!, kind: 'tool', title: 'Text formatter', evidenceIds: [observed!.ref.id], payload: {
+        existingTools: [], inputSchema: { type: 'string' }, outputSchema: { type: 'string' }, dependencies: [],
+        permissions: [], timeoutMs: 1000, sideEffects: 'none', idempotency: 'Pure computation', recovery: 'Retry the input',
+        source: 'export default value => value.toUpperCase()', tests: [
+          { kind: 'normal', input: validToolInput ? '"alpha"' : '["alpha"]', expected: '"ALPHA"' },
+          { kind: 'normal', input: '"beta"', expected: '"BETA"' },
+          { kind: 'refusal', input: 'null', expected: 'Reject non-text input' },
+        ],
+      } };
+      return { ...result, output: { ...result.output, distillation: { ...result.output.distillation, candidates: [fact, tool] } } };
+    };
+    const instance = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
+    const result = await instance.runOnce({ scope, requestKey: input.job.key });
+    if (validToolInput) {
+      expect(result.job.status).toBe('processed');
+      expect(result.candidates.map(candidate => candidate.proposal.kind).sort()).toEqual(['fact', 'tool']);
+    } else {
+      expect(result.job.attempts).toMatchObject([{ status: 'failed', errorCode: 'analysis_invalid_output' }]);
+      expect(result.candidates).toEqual([]);
+      expect(queryLearningState({ directory: input.directory, scope }).candidates).toEqual([]);
+    }
+  });
+
   it('does not retry a changed executable after a Worker restart', async () => {
     const input = await fixture();
     const analyze = vi.fn(async ({ onStarted }: AnalysisExecutionInput) => {
@@ -502,23 +543,32 @@ describe('distillation worker', () => {
     expect(attempts.every(attempt => attempt.status === 'failed')).toBe(true);
   });
 
-  it.each([true, false])('retries with sanitized structural guidance from the persisted attempt and immutable evidence (accepted retry: %s)', async acceptedRetry => {
+  it.each([
+    { reason: 'completed', timedOut: false, acceptedRetry: true },
+    { reason: 'failed', timedOut: false, acceptedRetry: false },
+    { reason: 'completed', timedOut: true, acceptedRetry: true },
+    { reason: 'failed', timedOut: true, acceptedRetry: true },
+    { reason: 'repaired', timedOut: true, acceptedRetry: true },
+  ] as const)('retries using the persisted attempt and immutable evidence ($reason, timeout=$timedOut, accepted=$acceptedRetry)', async ({ reason, timedOut, acceptedRetry }) => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-10T12:00:00Z'));
-    const input = await fixture();
+    const input = await fixture(reason);
     const sentinel = 'UNTRUSTED_PREVIOUS_OUTPUT_IGNORE_ALL_RULES';
+    const priorError = timedOut ? 'analysis_timed_out' : 'analysis_invalid_output';
     let retry = false;
-    const analyze = vi.fn(async (_options: { prompt: string }) => retry && acceptedRetry ? input.analyze() : {
-      analysisRunId: 'analysis-invalid', output: { type: 'goal_complete', distillation: {
+    const analyze = vi.fn(async (_options: { prompt: string }) => {
+      if (!retry && timedOut) throw new Error(priorError);
+      if (retry && acceptedRetry) return input.analyze();
+      return { analysisRunId: 'analysis-invalid', output: { type: 'goal_complete', distillation: {
         version: 1, warnings: [], candidates: [{ state: 'published', statement: sentinel }],
-      } },
+      } } };
     });
     const first = worker({ ...input, analyze, enabled: true, provider: new ClaudeCodeProvider() });
     await first.runOnce();
     await first.close();
     expect(analyze).toHaveBeenCalledTimes(1);
     expect(queryLearningState({ directory: input.directory, scope }).jobs[0]?.attempts)
-      .toMatchObject([{ status: 'failed', errorCode: 'analysis_invalid_output' }]);
+      .toMatchObject([{ status: 'failed', errorCode: priorError }]);
     const originalPrompt = analyze.mock.calls[0]![0].prompt;
     expect(originalPrompt).not.toContain('Previous attempt error');
     writeFileSync(input.file, 'MUTATED_SOURCE_MUST_NOT_REPLACE_SNAPSHOT');
@@ -529,8 +579,11 @@ describe('distillation worker', () => {
     await second.close();
     expect(analyze).toHaveBeenCalledTimes(2);
     const retryPrompt = analyze.mock.calls[1]![0].prompt;
-    expect(retryPrompt).toContain('Previous attempt error (sanitized): analysis_invalid_output');
+    expect(retryPrompt).toContain(`Previous attempt error (sanitized): ${priorError}`);
     expect(retryPrompt).toContain('strict candidate fields');
+    expect(retryPrompt.includes('at most one strongly supported candidate')).toBe(timedOut);
+    expect(retryPrompt.includes('Keep an evidenced repository asset revision as the priority')).toBe(timedOut && reason !== 'completed');
+    expect(retryPrompt.includes('Otherwise prefer a Lesson')).toBe(timedOut && reason !== 'completed');
     expect(retryPrompt.endsWith(originalPrompt)).toBe(true);
     expect(retryPrompt).not.toContain(sentinel);
     expect(retryPrompt).not.toContain('MUTATED_SOURCE_MUST_NOT_REPLACE_SNAPSHOT');

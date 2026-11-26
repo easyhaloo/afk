@@ -6,7 +6,8 @@ import { checkManifest } from './scan-manifest.mjs';
 
 async function scan(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)
-    || Object.keys(input).length !== 2 || typeof input.manifest !== 'string'
+    || Object.keys(input).some(key => !['phase', 'manifest', 'checkpointVolume'].includes(key)) || typeof input.manifest !== 'string'
+    || (Object.hasOwn(input, 'checkpointVolume') && (input.phase !== 'fault' || input.checkpointVolume !== 'workspace'))
     || !['fault', 'resume', 'wait'].includes(input.phase)) return checkManifest(input);
   const { phase, manifest } = input;
   if (phase === 'wait') {
@@ -16,13 +17,15 @@ async function scan(input) {
 
   const lines = manifest.split('\n');
   assert.ok(lines.length >= 2);
-  const scratch = process.env.TMPDIR;
+  const scratch = input.checkpointVolume === 'workspace' ? process.cwd() : process.env.TMPDIR;
   assert.ok(scratch);
   const path = join(scratch, 'scan-checkpoint.json');
 
   if (phase === 'fault') {
     const { invalidLines } = checkManifest(lines[0]);
-    writeFileSync(path, JSON.stringify({ manifest, nextLine: 1, invalidLines }), { flag: 'wx' });
+    writeFileSync(path, JSON.stringify({ manifest, nextLine: 1, invalidLines }), {
+      flag: input.checkpointVolume === 'workspace' ? 'w' : 'wx',
+    });
     process.exit(23);
   }
 
@@ -54,6 +57,6 @@ try {
   catch { throw new SyntaxError('error: invalid JSON'); }
   process.stdout.write(JSON.stringify(await scan(input)));
 } catch (error) {
-  process.stderr.write(error.message);
+  process.stderr.write(error.code === 'EROFS' ? 'error: checkpoint volume is read-only' : error.message);
   process.exitCode = 1;
 }

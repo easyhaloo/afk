@@ -175,6 +175,7 @@ describe.each(['skill', 'tool'] as const)('learning.retrospective %s optimizatio
     await expect(execute({ ...input, kind })).resolves.toHaveProperty('validated', [
       { status: 'validated', candidateId, candidateVersion: 7, validatedVersion: 8 },
     ]);
+    expect(mocks.capture).toHaveBeenCalledWith(expect.objectContaining({ candidateKind: kind }));
     expect(mocks.runOnce.mock.calls).toEqual([[target]]);
     expect(mocks.closeWorker).toHaveBeenCalledTimes(1);
     expect(mocks.runOnce.mock.invocationCallOrder[0]).toBeLessThan(mocks.validate.mock.invocationCallOrder[0]!);
@@ -384,7 +385,7 @@ describe('learning.retrospective production routing with mocked intake, worker/q
     const result = route === 'direct' ? await runtime.dispatchSystemAction('learning.retrospective', input) : await execute();
     expect(result).toEqual({ scope, runId, requestKey, processing: requestState().processing,
       prepared: [{ candidateId, validatedVersion: 8, publication }] });
-    expect(mocks.capture.mock.calls).toEqual([[{ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId }]]);
+    expect(mocks.capture.mock.calls).toEqual([[{ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId, retryAnalysis: true }]]);
     expect(mocks.query.mock.calls).toEqual([[{ directory: join(homeDir, '.afk', 'learning'), ...target }]]);
     expect(mocks.queryAll).not.toHaveBeenCalled();
     expect(mocks.worker).not.toHaveBeenCalled();
@@ -485,7 +486,7 @@ describe('learning.retrospective production routing with mocked intake, worker/q
       provider, reconcileSources: expect.any(Function) })]]);
     expect(mocks.runOnce.mock.calls).toEqual([[target]]);
     await mocks.worker.mock.calls[0]![0].reconcileSources();
-    expect(mocks.capture).toHaveBeenLastCalledWith({ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId });
+    expect(mocks.capture).toHaveBeenLastCalledWith({ directory: join(homeDir, '.afk', 'learning'), homeDir, scope, runId, retryAnalysis: true });
     expect(mocks.closeWorker).toHaveBeenCalledTimes(1);
     await runtime.close();
     expect(mocks.closeWorker).toHaveBeenCalledTimes(1);

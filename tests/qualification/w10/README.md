@@ -145,7 +145,7 @@ W10_AUDIT_DIR="$A" node_modules/.bin/tsx tests/qualification/w10/check.mjs
 jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidence-index.json"
 ```
 
-`audit_cases` 的 I/N/S 加数字均为 `installedPassedCases` 键，`resultPath` 相对原验证工作树。`—` 表示原审计未列该行的安装用例。脚本逐行核对 case ID、索引状态及 `provider-matrix.json` 的 SHA-256。11 月 13 日的 Repository 接线结论由后续 [R] 更新。
+`audit_cases` 的 I/N/S 加数字均为 `installedPassedCases` 键，`resultPath` 相对原验证工作树。`—` 表示原审计未列该行的安装用例。脚本检查 `provider-matrix.json` 的 SHA-256，并按测试文件和完整用例名逐条核对原始 Vitest 报告中的通过状态。使用独立归档时，将 `W10_REPORT_ROOT` 指向保留了 `resultPath` 相对目录结构的归档根。11 月 13 日的 Repository 接线结论由后续 [R] 更新。
 
 用 `uv run --no-project --with boto3==1.44.7 -- python tests/qualification/w10/object-storage-presigned.py <MinIO 可执行文件> <安装包内 artifacts.js 路径> --cli <安装后的 afk>` 复跑预签名上传。脚本使用 CLI 配置环境引用并发起 PUT，独立读回对象。省略 `--cli` 可单独验证 Runtime URL resolver。
 
@@ -164,7 +164,7 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [R] | `$O/.codex/validation/request-lifecycle-20261118/release-142.saPyl47d/{installed.log,batch-gate-rerun.log}` | 0.2.142 的 6 + 2 项覆盖真 Git、回环 Git HTTP、替身 Agent、双仓门禁和挂载工作区。见 `$O/tests/e2e/repository-{managed-local,managed-remote,verification-hook,verification-batch}.test.ts` |
 | [RC] | `$O/.codex/validation/remote-container-installed-20261118/attempt-zzvkne/events.ndjson` 的 `verdict` | 安装服务通过回环调用真实 Docker，最终 PASS，跨物理机部署待验 |
 | [O] | [P] 同文“W10 真实本地 OTLP Collector” | 0.2.118 的 `collector-smoke-14750` 由官方 Collector 0.164.0 解码 span、Sum、Histogram，受管任务标记为 `not_claimed` |
-| [ES] | `sh tests/qualification/w10/evidence-store.sh "$(command -v afk)"` | macOS arm64 安装版 0.2.147 经独立 SQLite 进程写入并读取证据。单独的只读连接核对 115 字节和 SHA-256。范围外项目保留三个本地事件，向后端传输零字节。 |
+| [ES] | `sh tests/qualification/w10/evidence-store.sh <安装版CLI绝对路径> [预期版本]` | 预期版本默认是历史验收的 `0.2.147`。安装版经独立 SQLite 进程写入并读取证据。单独的只读连接核对 115 字节和 SHA-256。范围外项目保留三个本地事件，向后端传输零字节。 |
 | [E] | [P] 同文“W10 Evidence 安装版验收”，以及 `$O/.codex/validation/installed-learning-0.2.126.UJkt32/installed-observe-routing-validation.log` | 选择路由、回读、保全本地数据，后端为测试 Provider |
 | [U] | `../verification/runtime-suite.log` | 本表引用 `logger.test.ts` 的 9 项及 `knowledge-base-configuration.test.ts` 的 16 项 |
 

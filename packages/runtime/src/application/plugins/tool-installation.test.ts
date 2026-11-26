@@ -269,7 +269,11 @@ it('ships every hash-bound recipe asset through official production package depl
   await fs.writeFile(join(cli, 'dist/index.js'), 'process.exitCode = 0;');
   await fs.cp(TOOL_ASSETS, join(runtime, resourcePath), { recursive: true });
   const destination = join(f.root, 'deployed');
-  const args = ['--filter', 'afk-tool-cli-fixture', 'deploy', '--legacy', '--prod', '--ignore-scripts', '--ignore-pnpmfile', '--offline', '--config.hoist=false', '--config.force=false', '--userconfig', '/dev/null', '--store-dir', join(f.root, 'store'), '--state-dir', join(f.root, 'state'), destination];
+  const args = [
+    '--filter', 'afk-tool-cli-fixture', 'deploy', '--legacy', '--prod', '--ignore-scripts', '--ignore-pnpmfile', '--offline',
+    '--config.hoist=false', '--config.force=false', '--config.userconfig=/dev/null',
+    '--store-dir', join(f.root, 'store'), `--config.state-dir=${join(f.root, 'state')}`, destination,
+  ];
   const result = await promisify(execFile)('pnpm', args, { cwd: workspace, timeout: 30000, maxBuffer: 1024 * 1024, env: { PATH: process.env.PATH, HOME: join(f.root, 'package-home'), TMPDIR: f.root, CI: 'true', PNPM_HOME: join(f.root, 'pnpm-home'), XDG_CACHE_HOME: join(f.root, 'cache'), XDG_STATE_HOME: join(f.root, 'state'), XDG_DATA_HOME: join(f.root, 'data') } });
   const deployed = join(destination, 'node_modules/afk-tool-runtime-fixture', resourcePath);
   const files = (await fs.readdir(deployed)).sort();

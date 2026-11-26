@@ -14,6 +14,8 @@ const repositoryRoot = join(__dirname, '../..');
 const distPath = join(repositoryRoot, 'apps/cli/dist/index.js');
 const tsxPath = join(repositoryRoot, 'node_modules/tsx/dist/cli.mjs');
 const fixturePath = join(__dirname, 'dashboard-layout.fixture.tsx');
+// The footer can contain "preview" in the working directory or branch name.
+const previewPanelTitle = /│[ \t]+preview[ \t]+│/i;
 
 const delay = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -94,7 +96,7 @@ describePty('dashboard layout (node-pty)', () => {
     expect(frame).toContain('2 backlogs');
     expect(frame).toContain('3 projects');
     expect(frame).toContain('4 board');
-    expect(frame.toLowerCase()).not.toContain('preview');
+    expect(frame).not.toMatch(previewPanelTitle);
   }, 8_000);
 
   it('switches independent subviews and returns from a grouped detail screen', async () => {
@@ -109,7 +111,7 @@ describePty('dashboard layout (node-pty)', () => {
     expect(detail).toContain('identity');
     expect(detail).toContain('relationships');
     expect(detail).toContain('fixture detail description');
-    expect(detail).not.toContain('preview');
+    expect(detail).not.toMatch(previewPanelTitle);
 
     const list = await dashboard.send('b');
     expect(list).toContain('backlog 42');
@@ -118,7 +120,7 @@ describePty('dashboard layout (node-pty)', () => {
     const board = await dashboard.send('4');
     expect(board).toContain('board · 1 backlogs');
     expect(board).toContain('backlog 42');
-    expect(board).not.toContain('preview');
+    expect(board).not.toMatch(previewPanelTitle);
   }, 8_000);
 });
 

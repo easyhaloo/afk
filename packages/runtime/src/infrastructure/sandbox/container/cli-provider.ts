@@ -323,15 +323,10 @@ export abstract class CliContainerProvider implements ContainerProvider {
   }
 
   async remove(containerId: string, force = false): Promise<void> {
-    const argv = force
-      ? [this.binary, 'rm', '-f', containerId]
-      : [this.binary, 'rm', containerId];
-    const r = await this.run(argv);
-    if (r.code !== 0) {
-      // ENOENT is fine — remove is idempotent.
-      if (!/No such container/i.test(r.stderr) && !/no such container/i.test(r.stderr)) {
-        throw new ContainerError(`rm failed: ${r.stderr}`, this.engine);
-      }
+    const result = await this.run([this.binary, 'rm',
+      ...(this.engine === 'podman' ? ['--ignore'] : []), ...(force ? ['-f'] : []), containerId]);
+    if (result.code !== 0 && !(this.engine === 'docker' && /No such container/i.test(result.stderr))) {
+      throw new ContainerError(`rm failed: ${result.stderr}`, this.engine);
     }
   }
 

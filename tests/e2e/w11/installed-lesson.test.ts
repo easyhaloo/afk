@@ -31,9 +31,9 @@ async function publishFixture(home: string, runtime: string, cli: (...args: stri
   const { CandidateStore } = await load('application/learning/candidate-store') as typeof import('../../../packages/runtime/src/application/learning/candidate-store.js');
   const { buildEvidencePack } = await load('application/learning/evidence') as typeof import('../../../packages/runtime/src/application/learning/evidence.js');
   const events = new JsonlEventStore({ root: join(home, 'audit') });
-  const append = (runId: string, data: RunEventData[]) => events.append(data.map((event, index) => ({
+  const append = (runId: string, data: RunEventData[], eventWorkItemId = workItemId) => events.append(data.map((event, index) => ({
     id: `${runId}-${index}-${event.kind}`, schemaVersion: 1, type: event.kind, occurredAt: '2026-11-18T00:00:00Z', correlationId: runId,
-    context: { runId, traceId: runId, workItemId, profileId: 'local-fixture', attempt: 1, actor: { kind: 'system', id: 'fixture' } }, data: event,
+    context: { runId, traceId: runId, workItemId: eventWorkItemId, profileId: 'local-fixture', attempt: 1, actor: { kind: 'system', id: 'fixture' } }, data: event,
   })));
   const registration = { target: [20, 50], reproduced: [20, 56], afterCalibration: [20, 50] };
   const measurement = observeAlias ? { registration } : {};
@@ -221,4 +221,46 @@ it.skipIf(!installed).each(['lesson-01', 'lesson-02', 'lesson-03', 'lesson-04', 
       scope: record.scope, publication: record.publication, validation: validation.receiptDigest, qaRun, qaDigest,
       controlOrigin: origin, ranked, withdrawal, aliasObservation }));
     assertObservedRecall(entry, { caseId: entry.id, status: 'observed', ranked });
+  }), 60_000);
+
+it.skipIf(!installed)('binds installed lesson adoption to the exact publication and rejects replay after withdrawal', () =>
+  withInstalledCli(async (home, runtime, cli) => {
+    const invoke = async (...args: string[]) => JSON.parse(await cli(...args, '--json'));
+    const { publication, append } = await publishFixture(home, runtime, cli, false);
+    const [record]: ExperienceRecord[] = await invoke('experience', 'list', '--scope', scope);
+    expect(record.publication?.key).toBe(publication.key);
+
+    const runId = 'label-offset-consumer';
+    const consumer = `${scope}#20`;
+    const consumerRevision = 'b'.repeat(40);
+    const source = { runId, workItemId: consumer };
+    const { applicability, target } = frozen('lesson-01').query;
+    const context = { applicability, target: { ...target, project: scope, revision: consumerRevision, dirty: false } };
+    const adopt = async (item = consumer) => JSON.parse(await cli('experience', 'adopt', record.id, '--scope', scope,
+      '--root', join(home, 'audit'), '--run-id', runId, '--work-item-id', item));
+    const metrics = () => invoke('experience', 'metrics', '--scope', scope);
+
+    await append(runId, [{ kind: 'qa.started' }, { kind: 'decision.made', command: 'experience.qa-target', accepted: true,
+      reason: JSON.stringify(context) }], consumer);
+    await expect(adopt()).rejects.toMatchObject({ stderr: expect.stringContaining('matching verified applicability') });
+    expect((await metrics()).adoptions).toBe(0);
+
+    await append(runId, [{ kind: 'qa.passed' }, { kind: 'commit.recorded', phase: 'qa', branch: 'qa', commitSha: consumerRevision },
+      { kind: 'run.finished', outcome: 'succeeded' }], consumer);
+    await expect(adopt(workItemId)).rejects.toMatchObject({ stderr: expect.stringContaining('exact work item') });
+    const adopted = await adopt();
+    expect(adopted).toMatchObject({ adoptions: 1, receipt: { version: 2, binding: 'verified-version', contextStatus: 'recorded',
+      experienceId: record.id, scope, source, contextDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      verificationDigest: expect.stringMatching(/^[a-f0-9]{64}$/), acknowledgedAt: expect.any(String) } });
+    expect(adopted.receipt.publication).toEqual(record.publication);
+    expect(await adopt()).toEqual(adopted);
+    expect((await metrics()).adoptions).toBe(1);
+
+    await append(qaRun, [{ kind: 'qa.failed', reason: '走纸回归检查失败' }]);
+    expect(await invoke('experience', 'knowledge', 'reconcile', '--scope', scope)).toMatchObject({ blocked: [],
+      results: [{ withdrawal: { key: publication.key, status: 'withdrawn' } }] });
+    expect(await gather(home, cli, frozen('lesson-01').query)).toEqual([]);
+    await expect(adopt()).rejects.toMatchObject({ stderr: expect.stringContaining('matching verified applicability') });
+    expect((await metrics()).adoptions).toBe(1);
+    console.log(JSON.stringify({ fixture: 'publication-bound-adoption', adopted, withdrawal: 'withdrawn', replayAfterWithdrawal: 'rejected' }));
   }), 60_000);

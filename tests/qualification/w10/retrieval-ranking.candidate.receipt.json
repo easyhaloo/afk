@@ -193,6 +193,14 @@
           "top5": 10
         }
       },
+      "localLogs": {
+        "networkDenied": true,
+        "blockedWriteFailures": 1,
+        "blockedTimelineIntegrity": true,
+        "recoveredTimelineIntegrity": true,
+        "recoveredFailureEvents": 0,
+        "checkLogSha256": "4372992bf4ba6e6b29c74d08478a755fb28f308aab216e016e9c7f4fbd74c5c1"
+      },
       "codeContext": {
         "defaultRoot": [
           {

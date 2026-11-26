@@ -25,6 +25,8 @@ macOS arm64 的 `0.2.224` 离线安装版在 `6198fbbe` 的 27 篇 ADR 和 10 �
 
 从仓库根运行 `node tests/qualification/w10/retrieval-ranking.mjs "$PWD" <0.2.224归档目录>` 可重放。归档目录包含对应平台的压缩包、校验文件和 `install.sh`。
 
+同一安装包和语料上的第二组查询在运行前已固定预期来源。12 条查询中，预期来源排名首位 **4/12**，进入前五 **6/12**（英文 2/6，中文 4/6）。无匹配对照返回 `[]`，两次重放回执逐字节一致。在原命令末尾追加 `tests/qualification/w10/retrieval-ranking.holdout.json` 可复跑。每条查询只标注了一个预期来源，数字衡量的是这个来源的排名。[固定查询集](retrieval-ranking.holdout.json) · [回执](retrieval-ranking.holdout.receipt.json)
+
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
 
 2026-11-20 在真实 tmux 3.6a 上复现安装版 CLI 0.2.174 返回 `aborted` 后前台子进程仍在运行。tmux `-CC` 无法在 Node 管道中启动，报 `tcgetattr failed`。切换至 `-C` 后，仓库外安装的 macOS arm64 CLI 0.2.175 通过同一 PTY 断言。前台 Python 进程捕获 Ctrl-C，产物登记的 pane ID 与 tmux 一致，关闭后自有会话消失，活动资源归零，同一隔离服务器中的未登记会话仍存在。测试载荷为有界 Python 进程。归档 SHA-256 为 `e8df48c0a75817522627fe425984985c41125897b4a0384769d38e1e85058868`。

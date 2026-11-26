@@ -1,0 +1,492 @@
+{
+  "sourceCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "platform": "darwin-arm64",
+  "version": "0.2.224",
+  "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549",
+  "querySetSha256": "0899dbb8ff648ea3cd9891ca097acb636a27401ec749086fc808e4c2a1c53842",
+  "corpus": [
+    {
+      "origin": "docs/adr/0001-desktop-deferred-and-declined-refactors.md",
+      "sha256": "84a1d80b4c74204657ee5cd3e75198525779bb0401953cd2bd7f968baeccbc1c"
+    },
+    {
+      "origin": "docs/adr/0014-interactive-and-batch-structured-output.md",
+      "sha256": "7fdd2d78d3847d42bc92619b36da1c8b2695250e02e708f4cdfdc27f7ab194dc"
+    },
+    {
+      "origin": "docs/adr/0015-typed-workflow-runtime.md",
+      "sha256": "9c867fd74cc9f64e223d45abea8423f3216a99e783d1394676a349017d227dea"
+    },
+    {
+      "origin": "docs/adr/0016-run-event-audit-spine.md",
+      "sha256": "1e945bf7993c997b781e6a1279cb5e8a1c777465bf1f2574c0bd067221a67b6b"
+    },
+    {
+      "origin": "docs/adr/0017-capability-profiles-and-ports.md",
+      "sha256": "b6821e291e0cd8d2279755f66e0705909cc577740546c6a39b7d350fd097e3c5"
+    },
+    {
+      "origin": "docs/adr/0018-evidence-classification-and-redaction.md",
+      "sha256": "33c51c5548e8b4147b803abff1af4a039b5b97baee9b48f2ace8fd1341e0a601"
+    },
+    {
+      "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+      "sha256": "ef1cb038a13d244d73871ad413cd3d3a322e331abf3b53ca0c6b96087b86410b"
+    },
+    {
+      "origin": "docs/adr/0020-backlog-item-drop-singular-change-request.md",
+      "sha256": "f9259ae9ae12891b3270fd79d8f341ff22ab482532e185b892f2be3d6f2610ac"
+    },
+    {
+      "origin": "docs/adr/0021-backlog-relation-carrying.md",
+      "sha256": "40e7c067353d358593e7601152c5801d091b4096d7d1f81e573551e5ed28bae8"
+    },
+    {
+      "origin": "docs/adr/0022-execution-plan-and-repository-leases.md",
+      "sha256": "75e35939d3b15e45f4253d38f3302f91b1cc03fe216c201c5f1439405f909c48"
+    },
+    {
+      "origin": "docs/adr/0023-repository-store-and-dependency-pool.md",
+      "sha256": "d83808de8a3fa42bcea5de9533f0f8cec5a80e8839da335db17f89811223e378"
+    },
+    {
+      "origin": "docs/adr/0024-prd-baseline-branches.md",
+      "sha256": "db5599d43441d37615373a1c7754f47537beebf997588691c054816c4fdb2baa"
+    },
+    {
+      "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+      "sha256": "6a735a0c88252f6daca36f1388f90673c0844e95181c90aa0768812fb0dfb78c"
+    },
+    {
+      "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+      "sha256": "4580ad5904337a2eceda3e9c495989d49bbcdf7382d8f396e8fef83e57c98829"
+    },
+    {
+      "origin": "docs/adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md",
+      "sha256": "727929be6b42e8f385be1eca1b3ac02c49026523b895880275505b0fd7866169"
+    },
+    {
+      "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+      "sha256": "cab467b3cc48d55baa677fdc149011c464228d5a06bfa232b84971967ea23fba"
+    },
+    {
+      "origin": "docs/adr/0029-jumpserver-assets-through-jms.md",
+      "sha256": "94dc0efd311b39e4c6decd50bc6c0a7b86c114dee6957c81e1bda757a9e53072"
+    },
+    {
+      "origin": "docs/adr/0029-worktree-claim-lifetime.md",
+      "sha256": "1a5230123d98652e046c2caff61186d7548a4a5309ddc11f8cf23a23ebd2702d"
+    },
+    {
+      "origin": "docs/adr/0030-afk-worktrees-are-invisible.md",
+      "sha256": "5f436aa42dca114f0c03c9336cd41919236a3e761130f014adbadd161c780009"
+    },
+    {
+      "origin": "docs/adr/0030-host-capability-plugin.md",
+      "sha256": "69065e2d14b0c59163e1b0fd854ab67d72cc99f08e39642e60667c03d1f8ef2c"
+    },
+    {
+      "origin": "docs/adr/0031-publish-boundary.md",
+      "sha256": "ac5197d0095131c7e4c34c3a528b5181e392292dbeaa2e6b00b62d5322a60bb4"
+    },
+    {
+      "origin": "docs/adr/0032-provider-and-runtime-are-one-decision.md",
+      "sha256": "8c927105ae43c1b11ec14b566d38bf4918b4928474af50a7e381dda8a2c75741"
+    },
+    {
+      "origin": "docs/adr/0033-agent-tui-modals.md",
+      "sha256": "d5dcb8aa48a5386201c7d0b7cece7b2d15fe3b01b46bf523cb34febd4e249f2b"
+    },
+    {
+      "origin": "docs/adr/0034-transient-failure-is-not-permanent-failure.md",
+      "sha256": "bfe5bae48959c3905fb823364a299e0b669f654b458b706532327757be29c804"
+    },
+    {
+      "origin": "docs/adr/0035-rework-records-are-revisable.md",
+      "sha256": "1f2b72de0761ada37ce7a8da08d71cd9d3035d7724d0af435a338efef2663c00"
+    },
+    {
+      "origin": "docs/adr/0036-schedule-scope.md",
+      "sha256": "c4cbe0a30bead8b0143c4117ffb45bd9d1b78c7b396b0942cafb240661958466"
+    },
+    {
+      "origin": "docs/adr/0038-workspace-resource-reclamation.md",
+      "sha256": "6d045143669c8ceaf83f2d892afb3c571b32888f14d528b7bb384946b51cfc9f"
+    },
+    {
+      "origin": "docs/architecture/execution.zh.md#上下文交接",
+      "sha256": "5255490561eefd656908bcbf20c0c3afe0dc914e1fe0edaf0acba181380200b1"
+    },
+    {
+      "origin": "docs/architecture/execution.zh.md#执行基线与配置",
+      "sha256": "72efed97f46876b1ab2143cd5febcf115237130a031516fe6408d7223fa12caa"
+    },
+    {
+      "origin": "docs/architecture/execution.zh.md#PRD 基线分支",
+      "sha256": "b2f97c24d5d6dc4aab4bdd14b626bafd79db51260f3e17371ec82a757dacd0b0"
+    },
+    {
+      "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+      "sha256": "26b29bc932edc8f1a39fc9e9d61ddb5bef12fd5e97609f88fcc36715ed2e865f"
+    },
+    {
+      "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+      "sha256": "e9530120d0866bdb81febf84db4fd9ab39c3b148ba2ae23bc7c450655c2ccdab"
+    },
+    {
+      "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+      "sha256": "8683eadc5195d48b829e50eb4e254e3e1e4c124af4fde0c1ba7d4a35ee1b17c9"
+    },
+    {
+      "origin": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+      "sha256": "f6780b0f8f19b65c8b7b9a722c9229357d52f439562a29ad5f0005a96170eb97"
+    },
+    {
+      "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+      "sha256": "6cf72a2f1eb1719771ef30996709fe089cf3334ef9c7bfb550111d0ac2a399f5"
+    },
+    {
+      "origin": "docs/guides/skills.zh.md#需求与产品规划",
+      "sha256": "5753d62fc5e2ae6ec3dc2fde4953bcbc94d9e43b67457d8053d66339d40efe88"
+    },
+    {
+      "origin": "docs/guides/skills.zh.md#Agent 能力与推理治理",
+      "sha256": "e9b5a94a8750d6921b26d0dd8c65948c9e8946354182386c17baeacc47eac4e8"
+    }
+  ],
+  "returnedFragments": 60,
+  "top1": 4,
+  "top5": 6,
+  "results": [
+    {
+      "prompt": "Where does the runner get a completion signal from an interactive agent if it cannot parse stdout?",
+      "expected": "docs/adr/0014-interactive-and-batch-structured-output.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1741
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 1203
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 984
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 888
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 837
+        }
+      ]
+    },
+    {
+      "prompt": "Can the same Node installation be reused across checkouts with different lockfiles or Node ABIs?",
+      "expected": "docs/adr/0023-repository-store-and-dependency-pool.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 380
+        },
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 354
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 320
+        },
+        {
+          "origin": "docs/adr/0035-rework-records-are-revisable.md",
+          "score": 281
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 270
+        }
+      ]
+    },
+    {
+      "prompt": "Which scope and repository identity are used when dispatching a scheduled PRD across several projects?",
+      "expected": "docs/adr/0036-schedule-scope.md",
+      "rank": 2,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1255
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 857
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 638
+        },
+        {
+          "origin": "docs/adr/0030-host-capability-plugin.md",
+          "score": 584
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 579
+        }
+      ]
+    },
+    {
+      "prompt": "Does the scheduler keep polling after a temporary network failure during a provider inventory read?",
+      "expected": "docs/adr/0034-transient-failure-is-not-permanent-failure.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1269
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 1009
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 812
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 715
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 675
+        }
+      ]
+    },
+    {
+      "prompt": "Can an older linked checkout be mistaken for one still claimed by a live AFK process?",
+      "expected": "docs/adr/0029-worktree-claim-lifetime.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1432
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 961
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 735
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 646
+        },
+        {
+          "origin": "docs/adr/0030-host-capability-plugin.md",
+          "score": 644
+        }
+      ]
+    },
+    {
+      "prompt": "Which state source can tell the desktop whether a run is alive, and why is an old start event insufficient?",
+      "expected": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+      "rank": 1,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1870
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 1280
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 987
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 869
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 865
+        }
+      ]
+    },
+    {
+      "prompt": "原生恢复进程启动失败并回退时，是否需要再次预留交接预算？",
+      "expected": "docs/architecture/execution.zh.md#上下文交接",
+      "rank": 3,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 30
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 27
+        },
+        {
+          "origin": "docs/architecture/execution.zh.md#上下文交接",
+          "score": 23
+        },
+        {
+          "origin": "docs/adr/0021-backlog-relation-carrying.md",
+          "score": 13
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 10
+        }
+      ]
+    },
+    {
+      "prompt": "如何在工作项里固定工作流的执行版本和配置？",
+      "expected": "docs/architecture/execution.zh.md#执行基线与配置",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 27
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 25
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 20
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 16
+        },
+        {
+          "origin": "docs/architecture/execution.zh.md#上下文交接",
+          "score": 10
+        }
+      ]
+    },
+    {
+      "prompt": "工作流上下文是否会授予学习动作的执行或发布权限？",
+      "expected": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+      "rank": 1,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 56
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 32
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 21
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 17
+        },
+        {
+          "origin": "docs/architecture/execution.zh.md#上下文交接",
+          "score": 12
+        }
+      ]
+    },
+    {
+      "prompt": "如何让 Agent 通过文件指针拿到收集的上下文片段？",
+      "expected": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+      "rank": 1,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 39
+        },
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 27
+        },
+        {
+          "origin": "docs/adr/0032-provider-and-runtime-are-one-decision.md",
+          "score": 24
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 24
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 20
+        }
+      ]
+    },
+    {
+      "prompt": "离线插件测试覆盖率报告用哪个变量指定变更基线？",
+      "expected": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+      "rank": 1,
+      "returned": [
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 31
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 5
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 5
+        },
+        {
+          "origin": "docs/adr/0020-backlog-item-drop-singular-change-request.md",
+          "score": 3
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+          "score": 1
+        }
+      ]
+    },
+    {
+      "prompt": "已确认的需求要拆成 Backlog 工作项，应选哪个技能？",
+      "expected": "docs/guides/skills.zh.md#需求与产品规划",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0020-backlog-item-drop-singular-change-request.md",
+          "score": 14
+        },
+        {
+          "origin": "docs/adr/0021-backlog-relation-carrying.md",
+          "score": 14
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 12
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 12
+        },
+        {
+          "origin": "docs/adr/0035-rework-records-are-revisable.md",
+          "score": 9
+        }
+      ]
+    },
+    {
+      "prompt": "qwzrholdout831046",
+      "expected": null,
+      "rank": null,
+      "returned": []
+    }
+  ]
+}

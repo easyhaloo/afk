@@ -1,0 +1,15 @@
+[
+  ["Where does the runner get a completion signal from an interactive agent if it cannot parse stdout?", "docs/adr/0014-interactive-and-batch-structured-output.md"],
+  ["Can the same Node installation be reused across checkouts with different lockfiles or Node ABIs?", "docs/adr/0023-repository-store-and-dependency-pool.md"],
+  ["Which scope and repository identity are used when dispatching a scheduled PRD across several projects?", "docs/adr/0036-schedule-scope.md"],
+  ["Does the scheduler keep polling after a temporary network failure during a provider inventory read?", "docs/adr/0034-transient-failure-is-not-permanent-failure.md"],
+  ["Can an older linked checkout be mistaken for one still claimed by a live AFK process?", "docs/adr/0029-worktree-claim-lifetime.md"],
+  ["Which state source can tell the desktop whether a run is alive, and why is an old start event insufficient?", "docs/adr/0019-desktop-run-log-viewer-projection.md"],
+  ["原生恢复进程启动失败并回退时，是否需要再次预留交接预算？", "docs/architecture/execution.zh.md#上下文交接"],
+  ["如何在工作项里固定工作流的执行版本和配置？", "docs/architecture/execution.zh.md#执行基线与配置"],
+  ["工作流上下文是否会授予学习动作的执行或发布权限？", "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议"],
+  ["如何让 Agent 通过文件指针拿到收集的上下文片段？", "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针"],
+  ["离线插件测试覆盖率报告用哪个变量指定变更基线？", "docs/guides/testing.zh.md#插件矩阵与源码覆盖率"],
+  ["已确认的需求要拆成 Backlog 工作项，应选哪个技能？", "docs/guides/skills.zh.md#需求与产品规划"],
+  ["qwzrholdout831046", null]
+]

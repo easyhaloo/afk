@@ -100,6 +100,24 @@ describe('context providers', () => {
     ]);
   });
 
+  it('ranks distinct retrieval matches ahead of repetitions and retains match counts', async () => {
+    const documents = [
+      { origin: 'repeated', content: 'alpha alpha alpha alpha' },
+      { origin: 'more-matches', content: 'alpha alpha beta' },
+      { origin: 'first-tie', content: 'alpha beta' },
+      { origin: 'second-tie', content: 'beta alpha' },
+    ];
+    const provider = new RetrievalProvider(documents);
+    await expect(provider.gather({ scope: '.', prompt: 'ALPHA beta alpha', limit: 4 })).resolves.toEqual([
+      { ...documents[1], score: 3 },
+      { ...documents[2], score: 2 },
+      { ...documents[3], score: 2 },
+      { ...documents[0], score: 4 },
+    ]);
+    await expect(provider.gather({ scope: '.', prompt: 'alpha beta', limit: 1 }))
+      .resolves.toEqual([{ ...documents[1], score: 3 }]);
+  });
+
   it.each(['retrieval', 'code', 'memory'] as const)('recalls Chinese business context through %s', async kind => {
     const path = await root();
     const documents = [

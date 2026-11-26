@@ -95,16 +95,31 @@ function positiveLimit(value: number): number {
   return value;
 }
 
-function rankedFragments(prompt: string, documents: readonly { origin: string; content: string }[], limit: number): ContextFragment[] {
+function rankedFragments(
+  prompt: string,
+  documents: readonly { origin: string; content: string }[],
+  limit: number,
+  prioritizeCoverage = false,
+): ContextFragment[] {
   const queryTerms = [...new Set([
     ...prompt.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter(Boolean),
     ...lexicalTerms(prompt).filter(term => term.length >= 2 && /\p{Script=Han}/u.test(term) && !QUESTION_WORDS.has(term)),
   ])];
   return documents.map(document => {
     const lower = document.content.toLowerCase();
-    const score = queryTerms.reduce((total, term) => total + (lower.split(term).length - 1), 0);
-    return { content: document.content.slice(0, 20_000), origin: document.origin, score };
-  }).filter(fragment => fragment.score > 0).sort((left, right) => right.score - left.score || left.origin.localeCompare(right.origin)).slice(0, limit);
+    let score = 0;
+    let coverage = 0;
+    for (const term of queryTerms) {
+      const matches = lower.split(term).length - 1;
+      score += matches;
+      if (prioritizeCoverage && matches > 0) coverage++;
+    }
+    return { fragment: { content: document.content.slice(0, 20_000), origin: document.origin, score }, coverage };
+  }).filter(({ fragment }) => fragment.score > 0)
+    .sort((left, right) => right.coverage - left.coverage
+      || right.fragment.score - left.fragment.score
+      || left.fragment.origin.localeCompare(right.fragment.origin))
+    .slice(0, limit).map(({ fragment }) => fragment);
 }
 
 export interface CodeContextOptions {
@@ -219,7 +234,7 @@ export class RetrievalProvider implements ContextSource {
 
   async gather(query: ContextQuery, options?: ProviderOperationOptions): Promise<readonly ContextFragment[]> {
     checkAbort(options);
-    return rankedFragments(query.prompt, this.documents, queryLimit(query.limit));
+    return rankedFragments(query.prompt, this.documents, queryLimit(query.limit), true);
   }
 }
 

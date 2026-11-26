@@ -1,0 +1,78 @@
+{
+  "scope": "local macOS arm64 installed CLI publication and installed Runtime workflow with synthetic evidence, vault and backlog",
+  "version": "0.2.223",
+  "sourceCommit": "a31e29b1476b3237b1d010ea6073104f5599abde",
+  "archiveSha256": "a6a1a92fd18a47e39d2df08bc61ab52536a65fee090d6cb481b3d920a7745095",
+  "publication": {
+    "key": "7238b333391b6c95180344ed5e13a82e058e685250814e96cbd1a56d137bb4db",
+    "candidateId": "129bc06c2755fdaf3862b54c75cf3b4a5215ec1b91eaa559275f1aa1b787a60a",
+    "validatedVersion": 2,
+    "candidateDigest": "e59b7f117d92408270490e9c700d67694297fc5d720da4047144a90dc1d749a0",
+    "evidenceDigest": "3b398e954fec62d3f7786bd91f8b121b5e19235efc6eb221ad85f5a533bc15db",
+    "validatorVersion": "learning-validation-v1:6a834a23-6764-4958-b0cd-39c55c7ba4dd",
+    "targetRef": "wiki:retry"
+  },
+  "model": "Qwen3.5-4B Q4_K_M",
+  "modelSha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+  "backend": "ollama version is 0.40.18",
+  "agents": {
+    "pi": "1.6.0",
+    "opencode": "opencode v2.2.7"
+  },
+  "consumers": [
+    {
+      "runId": "lesson-publication-75e18440-1117-4699-9471-ee7a1c2a0c2c",
+      "workItemId": "github:acme/lesson#71",
+      "agentName": "pi",
+      "nativeSession": "01a2166e-e1c8-735c-87ac-b008ede0c630",
+      "summary": "52859945",
+      "dispatches": 1,
+      "contextSha256": "119a40f232b96735fd7762484019ee6d21f1d4bd2a2f3090dc472cfe4b4803a2",
+      "outcome": "succeeded",
+      "nativeTraceSha256": "6638902b0463ffda5c51665fd870f71629b553515d4e862ba10d97db2865dbe7",
+      "nativeContextReads": 1,
+      "nativeBacklogReads": 0,
+      "usage": {
+        "inputTokens": 5977,
+        "outputTokens": 171,
+        "totalTokens": 6148
+      },
+      "acceptedDecisions": [
+        "knowledge.retrieved",
+        "experience.recall",
+        "knowledge.selected"
+      ]
+    },
+    {
+      "runId": "lesson-publication-d7a91ba0-fa5d-4440-ab01-9a62efb236cf",
+      "workItemId": "github:acme/lesson#72",
+      "agentName": "opencode",
+      "nativeSession": "ses_de990b6c4ffe4FqWsMjQiDmRos",
+      "summary": "52859945",
+      "dispatches": 1,
+      "contextSha256": "119a40f232b96735fd7762484019ee6d21f1d4bd2a2f3090dc472cfe4b4803a2",
+      "outcome": "succeeded",
+      "nativeTraceSha256": "0e6b7227e12841565606a91915769f3de93dfd259bcec55b3e9c348717f6860a",
+      "nativeContextReads": 1,
+      "nativeBacklogReads": 1,
+      "usage": {
+        "inputTokens": 5849,
+        "outputTokens": 329,
+        "totalTokens": 6178
+      },
+      "acceptedDecisions": [
+        "knowledge.retrieved",
+        "experience.recall",
+        "knowledge.selected"
+      ]
+    }
+  ],
+  "revokedControl": {
+    "seededStaleContextRemoved": true,
+    "nativeToolsDisabled": true,
+    "nativeCompletion": "missing",
+    "nativeTraceSha256": "d2a84ee130ee882fa001d27d7e5a6600cb55fb2cebc64093eb60246771d5b970",
+    "deterministicLifecycleReceiptSha256": "e1a64b2e4c6a7f1e6e0944d3299506c2397c76ff6bbe9b1cdbe7ccd581d10e81"
+  },
+  "date": "2026-11-26"
+}

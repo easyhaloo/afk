@@ -184,7 +184,9 @@ AFK_E2E_CLI_ENTRY=/absolute/path/to/dist/index.js pnpm exec vitest run --no-file
   tests/e2e/w11/installed-lesson.test.ts
 ```
 
-D07 的受管记忆走 `ExperienceStore`。`context.project-memory` 的公开能力从配置的 JSON 文件读取。目标部署中的两个独立 Agent 消费仍待验。
+D07 的受管记忆走 `ExperienceStore`。同一安装版上，Pi 1.6.0 和 OpenCode 2.2.7 在两个独立工作项中分别原生读取了一次 `.afk/experience-context.md`。两次工具结果均含同一发布的经验与知识片段，两个会话都返回正确的合成恢复码。撤权复跑清除了预置的旧上下文。该次 Pi 控制禁用了工具，会话没有返回完成标记。撤权、重启和采纳拒绝的完整对照见上面的确定性用例。目标部署待验。[D07 原生回执](lesson-publication-native.receipt.json)
+
+`context.project-memory` 使用配置的 JSON 文件。
 
 ## 代码上下文安装复验
 

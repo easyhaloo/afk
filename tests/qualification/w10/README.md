@@ -6,8 +6,8 @@
 | --- | ---: | --- |
 | `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
 | `service` | 20 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[JumpServer](jumpserver.receipt.json)、[Pi 本地推理](pi-local-inference.receipt.json)、[Podman](podman-native.md)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
-| `native` | 15 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
-| `local` | 8 | 本地实现的文件、规则、映射或检索断言通过 |
+| `native` | 16 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
+| `local` | 7 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
 | `fixture` | 6 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
@@ -191,6 +191,8 @@ D07 的受管记忆走 `ExperienceStore`。同一安装版上，Pi 1.6.0 和 Ope
 ## 代码上下文安装复验
 
 2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自工作树的内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版、目标部署和多用户工作区待验。[安装回执](code-context-installed.receipt.json)
+
+同一安装版用本地 Ollama 驱动 Pi 和 OpenCode。两个独立工作项和原生会话各读取一次 `.afk/plugin-context.md`，分别返回各自工作树的随机值。第三个独立会话验证显式根读取源检出。停用后工作流零派发，未产生原生会话，CLI 查询被拒。所有执行工作树均已清理。[双 Agent 原生回执](code-context-native.receipt.json)
 
 在 macOS arm64 上从 `6198fbbe` 构建 `0.2.224` 归档时，可使用 `pnpm release:cli --output <归档目录>`。将 `ARCHIVE` 设为归档的绝对路径，在本树根运行安装复验。标准输出为新的 JSON 回执。
 

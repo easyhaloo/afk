@@ -1,0 +1,181 @@
+{
+  "platform": "darwin-arm64",
+  "corpusCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "expandedCorpusManifestSha256": "aa67eb2e9b721269d62dd0b96364a5b763f51c6358283a796bc1d14da9fa6c4f",
+  "corpusManifestEncoding": "UTF-8 JSON.stringify(receipt.corpus)",
+  "comparison": {
+    "version": "0.2.225",
+    "githubActionsRun": 45796167299,
+    "archiveSha256": "5469600a298d7a4b68fed12f6baf5b466f0441098ebbd2808668ac5b1a46e146"
+  },
+  "candidate": {
+    "version": "0.2.226",
+    "buildCommit": "62567ca5a2d3e6b0bb4c626e249afb70fdef0e9a",
+    "localArchiveSha256": "47662a3d9e9c0ec7bda2c70f99e88085e13539771b52c3915aab54bf339b662c",
+    "githubActionsRun": 45819678954,
+    "ciArchiveSha256": "ac9f59d1fa3e2c2b79d81f6c9c50e26c0a6c2a33890403e969a85ccfcccd65a0",
+    "verifyOnlyUpgradeAndRollbackPlatforms": [
+      "linux-arm64",
+      "linux-x64",
+      "darwin-arm64",
+      "darwin-x64"
+    ]
+  },
+  "runs": {
+    "expanded": {
+      "fragments": 58,
+      "labeledQueries": 16,
+      "querySetSha256": "872e6deed4a6ba48659bac749af69f06957c7a14f8df666b06ab6290f623a3a4",
+      "comparisonTop1Top5": [
+        1,
+        5
+      ],
+      "candidateTop1Top5": [
+        6,
+        12
+      ],
+      "candidateRanks": [
+        null,
+        null,
+        2,
+        null,
+        1,
+        null,
+        4,
+        5,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "candidateNoMatchReturned": 0,
+      "localReceiptSha256": "39940e92c1717ad8009ebdf17ab97d43befc27a3f119b82bae629515876426ff",
+      "comparisonRanks": [
+        null,
+        null,
+        null,
+        null,
+        2,
+        null,
+        null,
+        null,
+        null,
+        4,
+        5,
+        2,
+        null,
+        null,
+        1,
+        null
+      ],
+      "comparisonNoMatchReturned": 0,
+      "sharedResultScoresVerified": 35,
+      "ciReceiptSha256": "65013a653a1f377f961363b3383f49553fcd0f8d703cb883fea58d3d4f2a2f02",
+      "localReplayByteIdentical": true
+    },
+    "expandedHoldout": {
+      "fragments": 58,
+      "labeledQueries": 10,
+      "querySetSha256": "09531d74d9a1177234c0b24c9fcc931e73cdefeb148b82b22d984d1cc857cb41",
+      "comparisonTop1Top5": [
+        2,
+        8
+      ],
+      "candidateTop1Top5": [
+        3,
+        10
+      ],
+      "candidateRanks": [
+        3,
+        2,
+        1,
+        2,
+        3,
+        5,
+        3,
+        2,
+        1,
+        1
+      ],
+      "candidateNoMatchReturned": 0,
+      "localReceiptSha256": "b0ba491372bb7b43ae4f646170e28b9615c04daf123ee55a90e5fc41c66ce938",
+      "comparisonRanks": [
+        null,
+        5,
+        4,
+        1,
+        1,
+        5,
+        4,
+        4,
+        3,
+        null
+      ],
+      "comparisonNoMatchReturned": 0,
+      "sharedResultScoresVerified": 29,
+      "ciReceiptSha256": "b353c5d42604224293b8340892f2589edb2ed18bfb431da9568b4e5654695577",
+      "localReplayByteIdentical": true
+    },
+    "historical": {
+      "fragments": 37,
+      "labeledQueries": 12,
+      "comparisonTop1Top5": [
+        7,
+        12
+      ],
+      "candidateTop1Top5": [
+        9,
+        12
+      ],
+      "candidateRanks": [
+        1,
+        1,
+        1,
+        2,
+        1,
+        1,
+        1,
+        1,
+        2,
+        4,
+        1,
+        1
+      ],
+      "candidateNoMatchReturned": 0,
+      "localReceiptSha256": "90505b07221410367d0a627c2266640f787c9ee34a4348efa0355646cb6fe7e3"
+    },
+    "historicalHoldout": {
+      "fragments": 37,
+      "labeledQueries": 12,
+      "querySetSha256": "0899dbb8ff648ea3cd9891ca097acb636a27401ec749086fc808e4c2a1c53842",
+      "comparisonTop1Top5": [
+        5,
+        10
+      ],
+      "candidateTop1Top5": [
+        9,
+        10
+      ],
+      "candidateRanks": [
+        1,
+        1,
+        1,
+        1,
+        null,
+        5,
+        1,
+        null,
+        1,
+        1,
+        1,
+        1
+      ],
+      "candidateNoMatchReturned": 0,
+      "localReceiptSha256": "5d4eda5cbffde15675bb88d0800dbf3f14765d0ad4c3fd8b8ef50874c9053273"
+    }
+  }
+}

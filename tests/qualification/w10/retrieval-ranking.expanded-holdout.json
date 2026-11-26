@@ -1,0 +1,13 @@
+[
+  ["Can raw secrets be persisted in the run evidence journal before redaction?", "docs/adr/0018-evidence-classification-and-redaction.md"],
+  ["Which branch collects PRD slices until the parent change can be reviewed?", "docs/adr/0024-prd-baseline-branches.md"],
+  ["What wakes a scheduler during --watch when nobody finishes a task?", "docs/adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md"],
+  ["执行架构中，返工记录可以修订吗？", "docs/architecture/execution.zh.md"],
+  ["插件架构在哪里定义 CLI 操作白名单？", "docs/architecture/plugins.zh.md"],
+  ["哪里有使用 node-pty 驱动 TUI 的端到端测试示例？", "docs/guides/testing.zh.md"],
+  ["Why are AFK's internal worktrees invisible to git worktree list in the user's repository?", "docs/adr/0030-afk-worktrees-are-invisible.md"],
+  ["Can one execution attempt release a worktree claim taken by another attempt?", "docs/adr/0029-worktree-claim-lifetime.md"],
+  ["When does the repository dependency pool reclaim stale leases and checkouts?", "docs/adr/0038-workspace-resource-reclamation.md"],
+  ["How does AFK get SSH credentials for a host asset from the JumpServer desktop client?", "docs/adr/0029-jumpserver-assets-through-jms.md"],
+  ["zxywnohit00014232", null]
+]

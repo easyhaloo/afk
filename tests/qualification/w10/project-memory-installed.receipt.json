@@ -1,0 +1,51 @@
+{
+  "version": "0.2.223",
+  "platform": "darwin-arm64",
+  "provider": "context.project-memory",
+  "runtimeSha256": "ca7e67de93f41f2548f2052284816116ae1b02cc9b7b99dcd0210e9aeec17bce",
+  "fileSha256": "5e660ff9ff00fa63b32ff6d55c96dfeb3adc7ac4a64ce809eec2db016cee31f3",
+  "writes": 12,
+  "reads": [
+    12,
+    12,
+    0
+  ],
+  "initialRead": 0,
+  "remainingFiles": [
+    "memory.json"
+  ],
+  "fileMode": "0600",
+  "disabled": {
+    "exit": 1,
+    "diagnostic": "Capability provider is not registered"
+  },
+  "workflows": [
+    {
+      "runId": "project-memory-94b5cb77-3ec7-407b-a77f-731b8a9aeabd",
+      "workItemId": "github:qualification/project-memory#13",
+      "dispatches": 1,
+      "matchedRecords": 12,
+      "contextSha256": "291586fd031f65336312932658d9d53489a25cae61e94c8db3bd963c002ad2cc",
+      "cleanup": true,
+      "outcome": "succeeded"
+    },
+    {
+      "runId": "project-memory-3c8e6790-c6e4-4bc3-9587-d9524361daec",
+      "workItemId": "github:qualification/project-memory#14",
+      "dispatches": 1,
+      "matchedRecords": 12,
+      "contextSha256": "291586fd031f65336312932658d9d53489a25cae61e94c8db3bd963c002ad2cc",
+      "cleanup": true,
+      "outcome": "succeeded"
+    }
+  ],
+  "disabledWorkflow": {
+    "runId": "project-memory-1cefaed9-e2a5-460c-b3cd-6279dbd1b8f7",
+    "workItemId": "github:qualification/project-memory#15",
+    "dispatches": 0,
+    "matchedRecords": 0,
+    "cleanup": true,
+    "outcome": "failed",
+    "diagnostic": "Capability provider is not registered"
+  }
+}

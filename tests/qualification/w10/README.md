@@ -6,8 +6,8 @@
 | --- | ---: | --- |
 | `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
 | `service` | 20 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[JumpServer](jumpserver.receipt.json)、[Pi 本地推理](pi-local-inference.receipt.json)、[Podman](podman-native.md)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
-| `native` | 14 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
-| `local` | 9 | 本地实现的文件、规则、映射或检索断言通过 |
+| `native` | 16 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
+| `local` | 7 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
 | `fixture` | 6 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
 
@@ -15,7 +15,23 @@
 
 ## 核对行清单与历史用例
 
+2026-11-26，macOS arm64 离线预演安装版 CLI 0.2.223 通过项目记忆复验。12 个独立 Node 进程调用安装包内的 `ProjectMemoryProvider.remember()` 写入同一隔离项目，两个独立 CLI 进程均读回全部 12 条，未命中查询返回空列表。另两个独立进程各自运行安装版的 `WorkflowRunner`，通过 `integrations.contexts` 把 12 条记录及来源写入各自工作区，并在 Agent 派发时提供文件指针。确定性的 Agent 替身读回完整文件，两次运行都清理了上下文。停用插件后，CLI 返回 `Capability provider is not registered`，保留该选择的工作流在派发前失败，记忆文件字节保持一致。运行 `node tests/qualification/w10/project-memory-installed.mjs <安装版 CLI 入口>` 可复验。生产工作流写入接线及目标部署的消费待验。[回执](project-memory-installed.receipt.json)
+
+同日，离线安装版 CLI `0.2.224`（`6198fbbe`）在隔离项目中用本地 Ollama 和 Qwen3.5-4B 驱动 Pi 与 OpenCode。两个独立工作项和原生会话各读取一次 `.afk/plugin-context.md`，均从同一条合成项目记忆计算出正确结果 `93`。核对了原生工具结果、最终输出、会话 ID 和上下文清理。停用插件后的第三个工作项在派发前被拦截，未生成原生会话。初次使用 llama.cpp 的两轮诊断中，原生读取已发生，Agent 未输出有效完成回执。目标部署的 JSON 来源和业务记录仍待验。[双 Agent 回执](project-memory-native.receipt.json)
+
 2026-11-22，从仓库外安装 macOS arm64 CLI 0.2.189，通过 `plugin configure context.retrieval --builtin --file` 导入三份真实 Markdown 摘录。相同输入在 0.2.188 被配置校验拒绝。修复后通过 `plugin invoke context.provider context.retrieval gather --input <文件> --json` 查询工作项关系、PRD 基线和中文桌面设计，分别命中预期首条来源，分数为 2、3、2，正文与输入逐字一致（去除首尾空白）。未命中查询返回 `[]`。同一安装版通过 17 项上下文与记忆回归。归档 SHA-256 为 `889fd413a8fe55f8e73fa7cfb1a15ea01e50d1017bec802c8cd7b643728e6bdf`，语料 SHA-256 为 `7576d829b54de19576d98942c96c0a810890541990c2eede780c12715ac814d7`。
+
+macOS arm64 的 `0.2.224` 离线安装版在 `6198fbbe` 的 27 篇 ADR 和 10 段中文文档上复验。12 条查询各指定一个预期来源。Top-1 为 2/12，Top-5 为 5/12。6 条英文查询的预期来源均未进入前五。所有返回片段保留配置正文，遵守 5 条上限，无匹配对照返回 `[]`。0.2.224 按词项的子串出现次数排序，常见词可以反复推高长文档的分数。[查询及排序回执](retrieval-ranking.receipt.json)
+
+从仓库根运行 `node tests/qualification/w10/retrieval-ranking.mjs "$PWD" <0.2.224归档目录>` 可重放。归档目录包含对应平台的压缩包、校验文件和 `install.sh`。
+
+同一安装包和语料上的第二组查询在运行前已固定预期来源。12 条查询中，预期来源排名首位 **4/12**，进入前五 **6/12**（英文 2/6，中文 4/6）。无匹配对照返回 `[]`，两次重放回执逐字节一致。在原命令末尾追加 `tests/qualification/w10/retrieval-ranking.holdout.json` 可复跑。每条查询只标注了一个预期来源，数字衡量的是这个来源的排名。[固定查询集](retrieval-ranking.holdout.json) · [回执](retrieval-ranking.holdout.receipt.json)
+
+macOS arm64 离线安装的 `0.2.225` 候选（`6d6263b8`）优先排列命中不同查询词更多的文档。原始组首位由 2/12 提升到 7/12，前五由 5/12 提升到 12/12。第二组首位由 4/12 提升到 5/12，前五由 6/12 提升到 10/12。两版共同返回的片段分数一致，两组无匹配对照均为空。第二组候选回执两次重放逐字节一致。正式发布版和目标部署待复验。[候选对比回执](retrieval-ranking.candidate.receipt.json)
+
+在 `6198fbbe` 冻结的 58 份未归档 Markdown 上，16 条中英文查询各有一个指定来源。macOS arm64 的 `0.2.224` 本地离线制品（`6198fbbe`）首位 0/16、前五 1/16，`0.2.225` CI 制品（`6d6263b8`）首位 1/16、前五 5/16。候选有 13/16 条的首位来自实施计划目录。切成 1,098 个标题段后，候选首位 0/16、前五 4/16。三组无匹配对照均返回空结果。 [冻结查询](retrieval-ranking.expanded.json) · [制品、语料清单散列及排名回执](retrieval-ranking.expanded.receipt.json)。全篇复跑在第二组命令的归档目录和查询集对应替换后，于末尾传入版本及 `expanded`。
+
+`0.2.226`（`62567ca5`）按词项文档频率和文章长度调整排序。在同一 58 份文档上，扩展集首位由 1/16 升至 6/16，前五由 5/16 升至 12/16。调参前固定的第二组 10 条查询，首位由 2/10 升至 3/10，前五由 8/10 升至 10/10。两组本地回执分别逐字节复现，macOS arm64 CI 安装版重现所有排序和分数。两组版本共同返回的片段分数一致。37 份片段上较早两组的前五仍为 12/12、10/12，四组无匹配对照均为空。四平台通过离线安装、升级和回退验证。正式发布与目标部署待复验。 [留出查询](retrieval-ranking.expanded-holdout.json) · [排序、制品和回放回执](retrieval-ranking.normalized.receipt.json) · [打包验证](https://github.com/easyhaloo/afk/actions/runs/45819678954)。留出组使用同一 `expanded` 命令，替换查询文件。
 
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
 
@@ -168,7 +184,65 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [E] | [P] 同文“W10 Evidence 安装版验收”，以及 `$O/.codex/validation/installed-learning-0.2.126.UJkt32/installed-observe-routing-validation.log` | 选择路由、回读、保全本地数据，后端为测试 Provider |
 | [U] | `../verification/runtime-suite.log` | 本表引用 `logger.test.ts` 的 9 项及 `knowledge-base-configuration.test.ts` 的 16 项 |
 
-## 本轮两项实测
+## D07 发布记忆安装复验
+
+2026-11-26，macOS arm64 预演安装版 CLI `0.2.223`（`a31e29b1`，归档 SHA-256 `a6a1a92fd18a47e39d2df08bc61ab52536a65fee090d6cb481b3d920a7745095`）使用合成证据、隔离知识库和确定性 Agent 传输通过 16/16。安装版验证、发布和 `ExperienceStore` 投影绑定来源、版本、证据与发布键。匹配的工作流收到经验和知识两个来源的引用。错误版本和否定适用性查询返回空。发布授权撤回后，`context.experience` 和 `context.knowledge` 均停止召回。`experience knowledge reconcile` 持久化撤回，恢复授权并重启后也没有召回。另一个用例在独立 QA 状态变化后撤回发布，旧采纳回执无法重放。
+
+从 `a31e29b1` 检出运行已存在的用例。`AFK_E2E_CLI_ENTRY` 指向 `0.2.223` 安装版解析后的 `dist/index.js`。
+
+```sh
+AFK_E2E_CLI_ENTRY=/absolute/path/to/dist/index.js pnpm exec vitest run --no-file-parallelism \
+  tests/e2e/plugin-learning-validation.test.ts tests/e2e/plugin-lesson-lifecycle.test.ts \
+  tests/e2e/w11/installed-lesson.test.ts
+```
+
+D07 的受管记忆走 `ExperienceStore`。同一安装版上，Pi 1.6.0 和 OpenCode 2.2.7 在两个独立工作项中分别原生读取了一次 `.afk/experience-context.md`。两次工具结果均含同一发布的经验与知识片段，两个会话都返回正确的合成恢复码。撤权对照在第三个独立工作项中清除了预置旧上下文，两路召回均未选中内容。Pi 的一次原生读取返回 `ENOENT`，会话以 `WITHDRAWN` 完成。重启和旧采纳回执拒绝见上面的确定性用例。目标部署待验。[D07 原生回执](lesson-publication-native.receipt.json)
+
+`context.project-memory` 使用配置的 JSON 文件。
+
+## 代码上下文安装复验
+
+2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自工作树的内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版和目标部署待验。[安装回执](code-context-installed.receipt.json)
+
+同一安装版用本地 Ollama 驱动 Pi 和 OpenCode。两个独立工作项和原生会话各读取一次 `.afk/plugin-context.md`，分别返回各自工作树的随机值。第三个独立会话验证显式根读取源检出。停用后工作流零派发，未产生原生会话，CLI 查询被拒。所有执行工作树均已清理。[双 Agent 原生回执](code-context-native.receipt.json)
+
+在 macOS arm64 上从 `6198fbbe` 构建 `0.2.224` 归档时，可使用 `pnpm release:cli --output <归档目录>`。将 `ARCHIVE` 设为归档的绝对路径，在本树根运行安装复验。标准输出为新的 JSON 回执。
+
+```sh
+node tests/qualification/w10/code-context-installed.mjs \
+  "$ARCHIVE" "$ARCHIVE.sha256" "$(dirname "$ARCHIVE")/install.sh"
+```
+
+2026-11-26，从同一源码提交构建 Linux arm64 `0.2.224` 并离线安装。UID `10001` 和 `10002` 共用 CLI 安装，各有独立 AFK profile 和权限为 `0700` 的工作区。两者分别读取自己的正文，拒绝相对或绝对跨根路径和直读符号链接，目录扫描排除链接。显式根指向另一用户的私有目录时，Linux 权限检查拒绝访问。恢复各自的根后，读取再次成功。[双用户回执](code-context-users.receipt.json)
+
+从仓库根运行。`PACKAGE_DIR` 为包含 `afk-linux-arm64.tar.gz`、校验文件和 `install.sh` 的绝对路径。先准备回执中固定的 ARM64 镜像，复验容器禁网且仅以只读方式挂载输入。
+
+```sh
+IMAGE=node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34
+docker pull --platform linux/arm64 "$IMAGE"
+docker run --rm --pull=never --platform linux/arm64 --network none \
+  -v "$PWD/tests/qualification/w10/code-context-users.mjs:/check.mjs:ro" \
+  -v "$PACKAGE_DIR:/package:ro" "$IMAGE" \
+  node /check.mjs /package/afk-linux-arm64.tar.gz /package/afk-linux-arm64.tar.gz.sha256 /package/install.sh 0.2.224
+```
+
+2026-11-26，从 `6d6263b8` 构建的 CLI `0.2.225` 通过四平台 CI 离线打包验证。校验归档散列后，macOS arm64 复现两组排名，并确认 Pi、OpenCode 各读取一次本工作树中的上下文。固定根依然读取源检出，停用后零派发。禁网的 Linux arm64 和 x64 容器中，两个独立 UID 都能读取各自的工作区，跨根路径、符号链接直读和对方私有根访问均被拒绝。同一 macOS 归档在禁网环境用 `local-logs.mjs` 复验，CLI 时间线记录一次预期的日志写入失败，恢复后的事件链完整且无失败事件。正式发布和目标部署待验。[打包验证](https://github.com/easyhaloo/afk/actions/runs/45796167299) · [散列和验收回执](retrieval-ranking.candidate.receipt.json)
+
+macOS arm64 的 `0.2.226` CI 归档（`62567ca5`）通过同一原生复验。Pi 和 OpenCode 在两个独立工作项中各读取一次上下文并返回各自工作树的随机值。第三个会话读到固定根，停用对照为零派发。独立核验将三份原生读取结果与上下文文件逐字节比对，并确认文件和执行工作树清理。[归档及原生回执](code-context-native-0226.receipt.json)
+
+同一 CI 运行的 Linux arm64 和 x64 `0.2.226` 归档在禁网 Colima 容器中离线安装并各执行两次双用户复验。两名独立 UID 均能读取自己的工作区，跨根路径、符号链接直读及配置到对方私有根的访问均被拒绝。每个平台两次回执逐字节相同。正式发布和目标部署待验。[双平台回执](code-context-users-0226.receipt.json)
+
+## 合规规则发布阶段复验
+
+2026-11-26 在 macOS arm64 离线安装版 `0.2.224`（`6198fbbe`）中，确定性的 Agent 替身在写入两个仓库后，通过安装版 CLI 将匹配项目的规则从允许改为拒绝。两个场景均完成实现和验收检查。
+
+配置为 `tool.source.read` 的生命周期检查在 `before-publish` 读到拒绝。两个回环 Git 裸仓均仅保留原 `main`，`receive-pack` 和 MR 创建请求均为零。通用 `publish` 检查沿用运行启动时的规则，产生 8 次 `receive-pack` 请求和 1 次 MR 创建请求，停在人工合并状态。两个场景均由新进程重新评估并读到拒绝，运行审计完整。
+
+运行 `node tests/qualification/w10/compliance-publish.mjs <安装版 CLI 入口>` 可复验。目标部署的规则生效时点和通用发布撤权需求待确认。[安装版回执](compliance-publish.receipt.json)
+
+## Docker 容器补验
+
+macOS arm64 安装版 `0.2.215` 通过 `sandbox.docker` 启动隔离的本机 Docker `28.3.2` 容器。`docker top` 确认负载正在运行。手动中断发送 `SIGINT`，500 ms 后容器仍运行。`agent.wait` 触发 `SIGKILL` 并返回 `aborted`。关闭后旧句柄返回 `404 SANDBOX_MISSING`，独立 Docker 查询按完整 ID 确认容器移除，共通过 10 项检查，兜底清理数为零。[取消回执](docker-cancel.receipt.json)
 
 2026-11-19，Node 24.18.0。**[D]** 通过本机 Unix socket 连接 Docker 28.3.2，使用预存 Alpine。真实容器写 `/workspace/from-container.txt`，宿主读回 `hello`，1 项通过，27 项未选。**[J]** 本树 CLI 0.2.141 和 Git 2.53.0 检查两个真实临时仓库的别名、分支、提交及脏状态，1 项通过，100 项未选。
 

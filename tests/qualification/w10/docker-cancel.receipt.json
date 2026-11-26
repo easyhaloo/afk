@@ -1,0 +1,89 @@
+{
+  "checkedAt": "2026-11-25T23:27:07.071904+00:00",
+  "provider": "sandbox.docker",
+  "cliVersion": "0.2.215",
+  "archiveSha256": "81ec2a50c308283cfc7bce1fc0afe178eef230971ef263b5cbb68b530593fb84",
+  "installedMembersMatchingArchive": {
+    "dist/index.js": "0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c",
+    "dist/commands/plugin.js": "9efbff97716538cfa864cae282109c6fe3ea174734e47750634bc79b02116c20",
+    "release.json": "d0fb3ba304823ed68e7d03c33bc823a1bc6ea40de14f95ab7cfc6e76d0ea5b1b",
+    "node_modules/.pnpm/@afk+runtime@file+packages+runtime_supports-color@8.1.1/node_modules/@afk/runtime/package.json": "997cb485581839e2f4f01065403c555ab71cc50104bbc27804d322572fed8b24",
+    "node_modules/.pnpm/@afk+runtime@file+packages+runtime_supports-color@8.1.1/node_modules/@afk/runtime/dist/infrastructure/sandbox/remote-container-server.js": "7c64fe35b8b5c3e9485cc63df914a6b5cdd721aba4b7068380fba271dfce792f",
+    "node_modules/.pnpm/@afk+runtime@file+packages+runtime_supports-color@8.1.1/node_modules/@afk/runtime/dist/infrastructure/sandbox/container/provider.js": "441295052476f38fd37bf1bccd15250a67bb929de84a69b436b5121fa41f1800",
+    "node_modules/.pnpm/@afk+runtime@file+packages+runtime_supports-color@8.1.1/node_modules/@afk/runtime/dist/infrastructure/sandbox/container/docker.js": "913eaea3f366b66683126b9c9990ca3f572adcdcf2377b71834fdcd904dfbd9c",
+    "node_modules/.pnpm/@afk+runtime@file+packages+runtime_supports-color@8.1.1/node_modules/@afk/runtime/dist/infrastructure/sandbox/container/cli-provider.js": "6aafd9859342eda07098364a9cb2eee909cd7c845c7d8de964682faea552c8e8",
+    "node_modules/.pnpm/@afk+runtime@file+packages+runtime_supports-color@8.1.1/node_modules/@afk/runtime/dist/infrastructure/sandbox/container/sandbox.js": "8329500a83678afa510c8ee986e8c49e4f6d6bea03e403899bb26584a9369260"
+  },
+  "nodeVersion": "v24.18.0",
+  "dockerEngineVersion": "28.3.2",
+  "image": {
+    "id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "repoDigests": [
+      "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+    ],
+    "platform": "linux/arm64"
+  },
+  "containerId": "ee532bc9409dcf61763f6aa5590cf1458c872589e2b35129fb43ba255af6213b",
+  "sourceReceiptSha256": "e3f65430a209531cd73458a4bc7f3a3fdd38a4bfdabfbc1ed19c91bd33abe682",
+  "dockerEvents": [
+    {
+      "action": "create",
+      "elapsedMs": 0
+    },
+    {
+      "action": "start",
+      "elapsedMs": 66
+    },
+    {
+      "action": "exec_create",
+      "elapsedMs": 137
+    },
+    {
+      "action": "exec_start",
+      "elapsedMs": 138
+    },
+    {
+      "action": "top",
+      "elapsedMs": 193
+    },
+    {
+      "action": "kill",
+      "elapsedMs": 216,
+      "signal": 2
+    },
+    {
+      "action": "kill",
+      "elapsedMs": 771,
+      "signal": 9
+    },
+    {
+      "action": "exec_die",
+      "elapsedMs": 772
+    },
+    {
+      "action": "die",
+      "elapsedMs": 789
+    },
+    {
+      "action": "destroy",
+      "elapsedMs": 847
+    }
+  ],
+  "passed": true,
+  "checks": {
+    "assignedRunningContainerUsesOnlyPrivateMountsAndNoNetwork": true,
+    "startedMarkerAndNativeSleepObservedBeforeInterrupt": true,
+    "manualInterruptAcknowledged": true,
+    "resultAborted": true,
+    "containerStoppedBeforeClose": true,
+    "workloadDidNotCompleteNormally": true,
+    "sandboxCloseAcknowledged": true,
+    "closedHandleMissing": true,
+    "independentDockerAbsenceAfterClose": true,
+    "dockerObservedSigintAndOrderedLifecycle": true
+  },
+  "runningAfterInterruptBeforeWait": true,
+  "interruptThroughWaitMs": 592,
+  "fallbackRemovedIds": [],
+  "ownedIdsAfterFinalCleanup": []
+}

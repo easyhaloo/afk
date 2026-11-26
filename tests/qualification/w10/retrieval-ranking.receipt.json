@@ -1,0 +1,491 @@
+{
+  "sourceCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "platform": "darwin-arm64",
+  "version": "0.2.224",
+  "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549",
+  "corpus": [
+    {
+      "origin": "docs/adr/0001-desktop-deferred-and-declined-refactors.md",
+      "sha256": "84a1d80b4c74204657ee5cd3e75198525779bb0401953cd2bd7f968baeccbc1c"
+    },
+    {
+      "origin": "docs/adr/0014-interactive-and-batch-structured-output.md",
+      "sha256": "7fdd2d78d3847d42bc92619b36da1c8b2695250e02e708f4cdfdc27f7ab194dc"
+    },
+    {
+      "origin": "docs/adr/0015-typed-workflow-runtime.md",
+      "sha256": "9c867fd74cc9f64e223d45abea8423f3216a99e783d1394676a349017d227dea"
+    },
+    {
+      "origin": "docs/adr/0016-run-event-audit-spine.md",
+      "sha256": "1e945bf7993c997b781e6a1279cb5e8a1c777465bf1f2574c0bd067221a67b6b"
+    },
+    {
+      "origin": "docs/adr/0017-capability-profiles-and-ports.md",
+      "sha256": "b6821e291e0cd8d2279755f66e0705909cc577740546c6a39b7d350fd097e3c5"
+    },
+    {
+      "origin": "docs/adr/0018-evidence-classification-and-redaction.md",
+      "sha256": "33c51c5548e8b4147b803abff1af4a039b5b97baee9b48f2ace8fd1341e0a601"
+    },
+    {
+      "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+      "sha256": "ef1cb038a13d244d73871ad413cd3d3a322e331abf3b53ca0c6b96087b86410b"
+    },
+    {
+      "origin": "docs/adr/0020-backlog-item-drop-singular-change-request.md",
+      "sha256": "f9259ae9ae12891b3270fd79d8f341ff22ab482532e185b892f2be3d6f2610ac"
+    },
+    {
+      "origin": "docs/adr/0021-backlog-relation-carrying.md",
+      "sha256": "40e7c067353d358593e7601152c5801d091b4096d7d1f81e573551e5ed28bae8"
+    },
+    {
+      "origin": "docs/adr/0022-execution-plan-and-repository-leases.md",
+      "sha256": "75e35939d3b15e45f4253d38f3302f91b1cc03fe216c201c5f1439405f909c48"
+    },
+    {
+      "origin": "docs/adr/0023-repository-store-and-dependency-pool.md",
+      "sha256": "d83808de8a3fa42bcea5de9533f0f8cec5a80e8839da335db17f89811223e378"
+    },
+    {
+      "origin": "docs/adr/0024-prd-baseline-branches.md",
+      "sha256": "db5599d43441d37615373a1c7754f47537beebf997588691c054816c4fdb2baa"
+    },
+    {
+      "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+      "sha256": "6a735a0c88252f6daca36f1388f90673c0844e95181c90aa0768812fb0dfb78c"
+    },
+    {
+      "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+      "sha256": "4580ad5904337a2eceda3e9c495989d49bbcdf7382d8f396e8fef83e57c98829"
+    },
+    {
+      "origin": "docs/adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md",
+      "sha256": "727929be6b42e8f385be1eca1b3ac02c49026523b895880275505b0fd7866169"
+    },
+    {
+      "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+      "sha256": "cab467b3cc48d55baa677fdc149011c464228d5a06bfa232b84971967ea23fba"
+    },
+    {
+      "origin": "docs/adr/0029-jumpserver-assets-through-jms.md",
+      "sha256": "94dc0efd311b39e4c6decd50bc6c0a7b86c114dee6957c81e1bda757a9e53072"
+    },
+    {
+      "origin": "docs/adr/0029-worktree-claim-lifetime.md",
+      "sha256": "1a5230123d98652e046c2caff61186d7548a4a5309ddc11f8cf23a23ebd2702d"
+    },
+    {
+      "origin": "docs/adr/0030-afk-worktrees-are-invisible.md",
+      "sha256": "5f436aa42dca114f0c03c9336cd41919236a3e761130f014adbadd161c780009"
+    },
+    {
+      "origin": "docs/adr/0030-host-capability-plugin.md",
+      "sha256": "69065e2d14b0c59163e1b0fd854ab67d72cc99f08e39642e60667c03d1f8ef2c"
+    },
+    {
+      "origin": "docs/adr/0031-publish-boundary.md",
+      "sha256": "ac5197d0095131c7e4c34c3a528b5181e392292dbeaa2e6b00b62d5322a60bb4"
+    },
+    {
+      "origin": "docs/adr/0032-provider-and-runtime-are-one-decision.md",
+      "sha256": "8c927105ae43c1b11ec14b566d38bf4918b4928474af50a7e381dda8a2c75741"
+    },
+    {
+      "origin": "docs/adr/0033-agent-tui-modals.md",
+      "sha256": "d5dcb8aa48a5386201c7d0b7cece7b2d15fe3b01b46bf523cb34febd4e249f2b"
+    },
+    {
+      "origin": "docs/adr/0034-transient-failure-is-not-permanent-failure.md",
+      "sha256": "bfe5bae48959c3905fb823364a299e0b669f654b458b706532327757be29c804"
+    },
+    {
+      "origin": "docs/adr/0035-rework-records-are-revisable.md",
+      "sha256": "1f2b72de0761ada37ce7a8da08d71cd9d3035d7724d0af435a338efef2663c00"
+    },
+    {
+      "origin": "docs/adr/0036-schedule-scope.md",
+      "sha256": "c4cbe0a30bead8b0143c4117ffb45bd9d1b78c7b396b0942cafb240661958466"
+    },
+    {
+      "origin": "docs/adr/0038-workspace-resource-reclamation.md",
+      "sha256": "6d045143669c8ceaf83f2d892afb3c571b32888f14d528b7bb384946b51cfc9f"
+    },
+    {
+      "origin": "docs/architecture/execution.zh.md#上下文交接",
+      "sha256": "5255490561eefd656908bcbf20c0c3afe0dc914e1fe0edaf0acba181380200b1"
+    },
+    {
+      "origin": "docs/architecture/execution.zh.md#执行基线与配置",
+      "sha256": "72efed97f46876b1ab2143cd5febcf115237130a031516fe6408d7223fa12caa"
+    },
+    {
+      "origin": "docs/architecture/execution.zh.md#PRD 基线分支",
+      "sha256": "b2f97c24d5d6dc4aab4bdd14b626bafd79db51260f3e17371ec82a757dacd0b0"
+    },
+    {
+      "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+      "sha256": "26b29bc932edc8f1a39fc9e9d61ddb5bef12fd5e97609f88fcc36715ed2e865f"
+    },
+    {
+      "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+      "sha256": "e9530120d0866bdb81febf84db4fd9ab39c3b148ba2ae23bc7c450655c2ccdab"
+    },
+    {
+      "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+      "sha256": "8683eadc5195d48b829e50eb4e254e3e1e4c124af4fde0c1ba7d4a35ee1b17c9"
+    },
+    {
+      "origin": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+      "sha256": "f6780b0f8f19b65c8b7b9a722c9229357d52f439562a29ad5f0005a96170eb97"
+    },
+    {
+      "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+      "sha256": "6cf72a2f1eb1719771ef30996709fe089cf3334ef9c7bfb550111d0ac2a399f5"
+    },
+    {
+      "origin": "docs/guides/skills.zh.md#需求与产品规划",
+      "sha256": "5753d62fc5e2ae6ec3dc2fde4953bcbc94d9e43b67457d8053d66339d40efe88"
+    },
+    {
+      "origin": "docs/guides/skills.zh.md#Agent 能力与推理治理",
+      "sha256": "e9b5a94a8750d6921b26d0dd8c65948c9e8946354182386c17baeacc47eac4e8"
+    }
+  ],
+  "returnedFragments": 60,
+  "top1": 2,
+  "top5": 5,
+  "results": [
+    {
+      "prompt": "How does afk doctor --fix reclaim a leaked dependency pool checkout?",
+      "expected": "docs/adr/0038-workspace-resource-reclamation.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1119
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 737
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 609
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 546
+        },
+        {
+          "origin": "docs/adr/0035-rework-records-are-revisable.md",
+          "score": 505
+        }
+      ]
+    },
+    {
+      "prompt": "The JumpServer bastion rejected ssh -J. Which CLI reaches a host asset?",
+      "expected": "docs/adr/0029-jumpserver-assets-through-jms.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1241
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 964
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 791
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 674
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 665
+        }
+      ]
+    },
+    {
+      "prompt": "Which fields must be redacted before storing evidence in logs or traces?",
+      "expected": "docs/adr/0018-evidence-classification-and-redaction.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 473
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 263
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 225
+        },
+        {
+          "origin": "docs/adr/0030-host-capability-plugin.md",
+          "score": 219
+        },
+        {
+          "origin": "docs/adr/0035-rework-records-are-revisable.md",
+          "score": 173
+        }
+      ]
+    },
+    {
+      "prompt": "Where should a PRD slice merge without bypassing human review?",
+      "expected": "docs/adr/0024-prd-baseline-branches.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1114
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 739
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 587
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 540
+        },
+        {
+          "origin": "docs/adr/0035-rework-records-are-revisable.md",
+          "score": 493
+        }
+      ]
+    },
+    {
+      "prompt": "How do runtime timer waits expose their reason to the scheduler?",
+      "expected": "docs/adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 316
+        },
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 247
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 237
+        },
+        {
+          "origin": "docs/adr/0028-rework-attempt-budget-per-cycle.md",
+          "score": 217
+        },
+        {
+          "origin": "docs/adr/0035-rework-records-are-revisable.md",
+          "score": 189
+        }
+      ]
+    },
+    {
+      "prompt": "How can I restore run continuity with an immutable run event audit spine?",
+      "expected": "docs/adr/0016-run-event-audit-spine.md",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 1492
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 773
+        },
+        {
+          "origin": "docs/adr/0030-host-capability-plugin.md",
+          "score": 666
+        },
+        {
+          "origin": "docs/adr/0026-goal-condition-budget-and-worktree-context.md",
+          "score": 631
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 588
+        }
+      ]
+    },
+    {
+      "prompt": "PRD 切片应合并到哪个基线分支？",
+      "expected": "docs/architecture/execution.zh.md#PRD 基线分支",
+      "rank": 2,
+      "returned": [
+        {
+          "origin": "docs/adr/0024-prd-baseline-branches.md",
+          "score": 38
+        },
+        {
+          "origin": "docs/architecture/execution.zh.md#PRD 基线分支",
+          "score": 20
+        },
+        {
+          "origin": "docs/adr/0036-schedule-scope.md",
+          "score": 19
+        },
+        {
+          "origin": "docs/adr/0034-transient-failure-is-not-permanent-failure.md",
+          "score": 10
+        },
+        {
+          "origin": "docs/adr/0031-publish-boundary.md",
+          "score": 9
+        }
+      ]
+    },
+    {
+      "prompt": "怎么用安装版做插件矩阵验证并测量源码覆盖率？",
+      "expected": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+      "rank": 1,
+      "returned": [
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 39
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 26
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 11
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+          "score": 3
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 2
+        }
+      ]
+    },
+    {
+      "prompt": "怎样独立验证候选并保存断言证据？",
+      "expected": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+      "rank": 1,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 50
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 17
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 15
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+          "score": 5
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 4
+        }
+      ]
+    },
+    {
+      "prompt": "定时任务如何配置接收端和调用？",
+      "expected": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+      "rank": 3,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 13
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 9
+        },
+        {
+          "origin": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+          "score": 4
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 2
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 2
+        }
+      ]
+    },
+    {
+      "prompt": "如何将执行上下文交接给下一阶段？",
+      "expected": "docs/architecture/execution.zh.md#上下文交接",
+      "rank": 2,
+      "returned": [
+        {
+          "origin": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+          "score": 23
+        },
+        {
+          "origin": "docs/architecture/execution.zh.md#上下文交接",
+          "score": 13
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 13
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+          "score": 13
+        },
+        {
+          "origin": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+          "score": 9
+        }
+      ]
+    },
+    {
+      "prompt": "Agent 能力与推理治理由哪些技能支持？",
+      "expected": "docs/guides/skills.zh.md#Agent 能力与推理治理",
+      "rank": null,
+      "returned": [
+        {
+          "origin": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+          "score": 27
+        },
+        {
+          "origin": "docs/adr/0032-provider-and-runtime-are-one-decision.md",
+          "score": 24
+        },
+        {
+          "origin": "docs/adr/0025-structured-failure-diagnostics.md",
+          "score": 20
+        },
+        {
+          "origin": "docs/architecture/plugin-integration-standard.zh.md#3. 能力接口与调用协议",
+          "score": 20
+        },
+        {
+          "origin": "docs/adr/0014-interactive-and-batch-structured-output.md",
+          "score": 14
+        }
+      ]
+    },
+    {
+      "prompt": "zxywnohit00013297",
+      "expected": null,
+      "rank": null,
+      "returned": []
+    }
+  ]
+}

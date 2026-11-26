@@ -1,0 +1,44 @@
+{
+  "version": "0.2.224",
+  "platform": "darwin-arm64",
+  "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549",
+  "standalone": "source",
+  "defaults": [
+    {
+      "runId": "code-context-221f3a27-26d8-43ed-94e0-661a3d21d3d5",
+      "workItemId": "github:qualification/code-context#21",
+      "dispatches": 1,
+      "matchedRecords": 1,
+      "contextSha256": "0150c15eca4ced25ea111ec9f2ef5060a33447f531fa7aa005dcf4a81e5da391",
+      "cleanup": true,
+      "outcome": "succeeded"
+    },
+    {
+      "runId": "code-context-16d99767-4f41-4adb-94c4-ff9d4008317e",
+      "workItemId": "github:qualification/code-context#22",
+      "dispatches": 1,
+      "matchedRecords": 1,
+      "contextSha256": "a37b0270af33025a6becb7cca85bdf3cdf333c46003dfc3567b0b7b37f9f5240",
+      "cleanup": true,
+      "outcome": "succeeded"
+    }
+  ],
+  "fixed": {
+    "runId": "code-context-9091ebdc-dd06-4ff0-ab6d-c80db5e05b60",
+    "workItemId": "github:qualification/code-context#23",
+    "dispatches": 1,
+    "matchedRecords": 1,
+    "contextSha256": "edcd6de729e3e74228134a1982859b7061f991a5179ac873e345a8cfa561ae42",
+    "cleanup": true,
+    "outcome": "succeeded"
+  },
+  "disabled": {
+    "runId": "code-context-6637cf05-3fd5-467a-8164-d88c73a14a51",
+    "workItemId": "github:qualification/code-context#24",
+    "dispatches": 0,
+    "matchedRecords": 0,
+    "cleanup": true,
+    "outcome": "failed",
+    "diagnostic": "Capability provider is not registered"
+  }
+}

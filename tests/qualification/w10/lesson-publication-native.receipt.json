@@ -1,0 +1,87 @@
+{
+  "scope": "local macOS arm64 installed CLI publication and installed Runtime workflow with synthetic evidence, vault and backlog",
+  "version": "0.2.223",
+  "sourceCommit": "a31e29b1476b3237b1d010ea6073104f5599abde",
+  "archiveSha256": "a6a1a92fd18a47e39d2df08bc61ab52536a65fee090d6cb481b3d920a7745095",
+  "publication": {
+    "key": "4ec940c2ee7f5db9a7ae5a3f45eb6ea029bd4d6359fd2d8c36109b38e7762d5e",
+    "candidateId": "010204102802d6a38fcec86c1f35d2d8d43a4196b6b504da08a00bc762e35d3a",
+    "validatedVersion": 2,
+    "candidateDigest": "d020abe64a3ee7c5479c001495da461f97501c3ca98d4b15c77f14022ac9ac21",
+    "evidenceDigest": "1fa0237f2a9681da9497f1ddf73ffbcfe4c97b36e27f0bfc200c7f6f6e0e4be5",
+    "validatorVersion": "learning-validation-v1:d08d65cd-4e56-4f7e-8e6b-38cd49fcb235",
+    "targetRef": "wiki:retry"
+  },
+  "model": "Qwen3.5-4B Q4_K_M",
+  "modelSha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+  "backend": "ollama version is 0.40.18",
+  "agents": {
+    "pi": "1.6.0",
+    "opencode": "opencode v2.2.7"
+  },
+  "consumers": [
+    {
+      "runId": "lesson-publication-1fdf9e6c-42f4-4fd5-9ba0-392fbabe975f",
+      "workItemId": "github:acme/lesson#71",
+      "agentName": "pi",
+      "nativeSession": "01a21677-f809-72cc-ae1d-e0ceffdfdb77",
+      "summary": "37472734",
+      "dispatches": 1,
+      "contextSha256": "5745397ba79e51c8d1a0dc52ef4bc73271a1e2d7bf9d5a58cf6dfe7924a7b88c",
+      "outcome": "succeeded",
+      "nativeTraceSha256": "a99861e5d485e832e1f2d952787445665c74964f8e0ee393f869c71473b4e01f",
+      "nativeContextReads": 1,
+      "nativeBacklogReads": 0,
+      "usage": {
+        "inputTokens": 5892,
+        "outputTokens": 171,
+        "totalTokens": 6063
+      },
+      "acceptedDecisions": [
+        "knowledge.retrieved",
+        "experience.recall",
+        "knowledge.selected"
+      ]
+    },
+    {
+      "runId": "lesson-publication-fd8538b1-d1d3-4420-8acc-5091681436ea",
+      "workItemId": "github:acme/lesson#72",
+      "agentName": "opencode",
+      "nativeSession": "ses_de987cdd7ffe1vpBFVpbpV7E3a",
+      "summary": "37472734",
+      "dispatches": 1,
+      "contextSha256": "5745397ba79e51c8d1a0dc52ef4bc73271a1e2d7bf9d5a58cf6dfe7924a7b88c",
+      "outcome": "succeeded",
+      "nativeTraceSha256": "3f6218a5ad7e0d2b80f845614d168b037470a5c405e480774a0b7dd41072dc09",
+      "nativeContextReads": 1,
+      "nativeBacklogReads": 1,
+      "usage": {
+        "inputTokens": 5831,
+        "outputTokens": 294,
+        "totalTokens": 6125
+      },
+      "acceptedDecisions": [
+        "knowledge.retrieved",
+        "experience.recall",
+        "knowledge.selected"
+      ]
+    }
+  ],
+  "revokedControl": {
+    "runId": "lesson-publication-2452728a-e6a9-4ad8-9aeb-1c14f2721e9d",
+    "workItemId": "github:acme/lesson#73",
+    "agentName": "pi",
+    "nativeSession": "01a21678-63a9-733a-8628-65ff7218597d",
+    "summary": "WITHDRAWN",
+    "dispatches": 1,
+    "outcome": "succeeded",
+    "seededStaleContextRemoved": true,
+    "nativeReadAttempts": 1,
+    "successfulNativeContextReads": 0,
+    "toolResult": "ENOENT",
+    "nativeCompletion": "WITHDRAWN",
+    "nativeTraceSha256": "ff5f70fa381d9f118e7047c04363529e5a5289e5e6e84ab22aaf7cef2cd3bef1",
+    "deterministicLifecycleReceiptSha256": "e1a64b2e4c6a7f1e6e0944d3299506c2397c76ff6bbe9b1cdbe7ccd581d10e81"
+  },
+  "date": "2026-11-26"
+}

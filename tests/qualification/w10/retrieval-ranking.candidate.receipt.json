@@ -1,0 +1,308 @@
+{
+  "sourceCommit": "6d6263b89a327cc31253de2675a8e86fc1885aae",
+  "corpusCommit": "6198fbbec9b4c4e0980b1c24d2abbaeab9046c19",
+  "platform": "darwin-arm64",
+  "baseline": {
+    "version": "0.2.224",
+    "archiveSha256": "62b6d6b899ac914e55310afde5b94b1288961cf1a95fd4fd3ecd597556749549"
+  },
+  "candidate": {
+    "version": "0.2.225",
+    "archiveSha256": "16441b56e0071321404dec1979788e4275fe78b1456d08a4446798697f3d4d63"
+  },
+  "historical": {
+    "baseline": {
+      "top1": 2,
+      "top5": 5
+    },
+    "candidate": {
+      "top1": 7,
+      "top5": 12,
+      "querySetSha256": "c4aa261bb55754ea94d517ffb6fd0accc592b23cd946c167e9c3af2df0c6b768",
+      "returnedFragments": 60
+    },
+    "ranks": [
+      {
+        "expected": "docs/adr/0038-workspace-resource-reclamation.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0029-jumpserver-assets-through-jms.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0018-evidence-classification-and-redaction.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0024-prd-baseline-branches.md",
+        "before": null,
+        "after": 2
+      },
+      {
+        "expected": "docs/adr/0027-scheduler-timer-re-evaluation-and-wait-reasons.md",
+        "before": null,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0016-run-event-audit-spine.md",
+        "before": null,
+        "after": 5
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#PRD 基线分支",
+        "before": 2,
+        "after": 1
+      },
+      {
+        "expected": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/architecture/plugins.zh.md#完整配置与定时调用示例",
+        "before": 3,
+        "after": 3
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#上下文交接",
+        "before": 2,
+        "after": 2
+      },
+      {
+        "expected": "docs/guides/skills.zh.md#Agent 能力与推理治理",
+        "before": null,
+        "after": 2
+      }
+    ],
+    "noMatchControl": []
+  },
+  "holdout": {
+    "baseline": {
+      "top1": 4,
+      "top5": 6
+    },
+    "candidate": {
+      "top1": 5,
+      "top5": 10,
+      "querySetSha256": "0899dbb8ff648ea3cd9891ca097acb636a27401ec749086fc808e4c2a1c53842",
+      "returnedFragments": 60
+    },
+    "ranks": [
+      {
+        "expected": "docs/adr/0014-interactive-and-batch-structured-output.md",
+        "before": null,
+        "after": 4
+      },
+      {
+        "expected": "docs/adr/0023-repository-store-and-dependency-pool.md",
+        "before": null,
+        "after": 3
+      },
+      {
+        "expected": "docs/adr/0036-schedule-scope.md",
+        "before": 2,
+        "after": 1
+      },
+      {
+        "expected": "docs/adr/0034-transient-failure-is-not-permanent-failure.md",
+        "before": null,
+        "after": 2
+      },
+      {
+        "expected": "docs/adr/0029-worktree-claim-lifetime.md",
+        "before": null,
+        "after": null
+      },
+      {
+        "expected": "docs/adr/0019-desktop-run-log-viewer-projection.md",
+        "before": 1,
+        "after": 2
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#上下文交接",
+        "before": 3,
+        "after": 2
+      },
+      {
+        "expected": "docs/architecture/execution.zh.md#执行基线与配置",
+        "before": null,
+        "after": null
+      },
+      {
+        "expected": "docs/architecture/plugin-integration-standard.zh.md#8.1 候选独立验证协议",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/architecture/plugins.zh.md#配置策略、验证闸门和 Agent 上下文指针",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/guides/testing.zh.md#插件矩阵与源码覆盖率",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "expected": "docs/guides/skills.zh.md#需求与产品规划",
+        "before": null,
+        "after": 1
+      }
+    ],
+    "noMatchControl": []
+  },
+  "holdoutReplayIdentical": true,
+  "ciReplay": {
+    "verification": {
+      "runId": 45781339313,
+      "attempt": 2,
+      "passedJobs": 8,
+      "coveragePassedTests": 9045,
+      "coverageSkippedTests": 258
+    },
+    "packaging": {
+      "runId": 45796167299,
+      "verifyOnly": true,
+      "passedPlatforms": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-arm64",
+        "linux-x64"
+      ]
+    },
+    "darwin-arm64": {
+      "archiveSha256": "5469600a298d7a4b68fed12f6baf5b466f0441098ebbd2808668ac5b1a46e146",
+      "ranking": {
+        "historical": {
+          "querySetSha256": "c4aa261bb55754ea94d517ffb6fd0accc592b23cd946c167e9c3af2df0c6b768",
+          "top1": 7,
+          "top5": 12
+        },
+        "holdout": {
+          "querySetSha256": "0899dbb8ff648ea3cd9891ca097acb636a27401ec749086fc808e4c2a1c53842",
+          "top1": 5,
+          "top5": 10
+        }
+      },
+      "localLogs": {
+        "networkDenied": true,
+        "blockedWriteFailures": 1,
+        "blockedTimelineIntegrity": true,
+        "recoveredTimelineIntegrity": true,
+        "recoveredFailureEvents": 0,
+        "checkLogSha256": "4372992bf4ba6e6b29c74d08478a755fb28f308aab216e016e9c7f4fbd74c5c1"
+      },
+      "codeContext": {
+        "defaultRoot": [
+          {
+            "agentName": "pi",
+            "nativeContextReads": 1,
+            "nativeTraceSha256": "eabfc68ee9495230583b3daa3ab8323717b61ee8778bd966a1d9fcac7b364942",
+            "cleanup": true,
+            "outcome": "succeeded"
+          },
+          {
+            "agentName": "opencode",
+            "nativeContextReads": 1,
+            "nativeTraceSha256": "d2507e830c9dde3a82e14b0d8831537d827b9a39bcae0e634b0e18ec3d2edfa5",
+            "cleanup": true,
+            "outcome": "succeeded"
+          }
+        ],
+        "fixedSourceRoot": {
+          "agentName": "pi",
+          "nativeContextReads": 1,
+          "nativeTraceSha256": "7f39e502ef149de226ed41d432a2b97a02f87a27f6ae283a1609baa472175076",
+          "cleanup": true,
+          "outcome": "succeeded"
+        },
+        "disabled": {
+          "dispatches": 0,
+          "matchedRecords": 0,
+          "cleanup": true,
+          "outcome": "failed"
+        }
+      }
+    },
+    "linux-arm64": {
+      "archiveSha256": "9f4823a5df5acb3d0055c88255767ecefb231ac0d3bf438804aa9987c2dd396c",
+      "separateProfileAndWorkspacePerUid": true,
+      "checks": [
+        {
+          "uid": 10001,
+          "groups": [
+            10001
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        },
+        {
+          "uid": 10002,
+          "groups": [
+            10002
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        }
+      ]
+    },
+    "linux-x64": {
+      "archiveSha256": "59ff87b2161703aa36967b3c4f1f454db904b2489a282382fa039c9dd619ba89",
+      "separateProfileAndWorkspacePerUid": true,
+      "checks": [
+        {
+          "uid": 10001,
+          "groups": [
+            10001
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        },
+        {
+          "uid": 10002,
+          "groups": [
+            10002
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        }
+      ],
+      "imageId": "sha256:1471ea646673136b8308550ac14b36d847ffb21c24bc31828279e443c924e488",
+      "networkMode": "none",
+      "receiptSha256": "dfcbecd3df17bc635671e75b5a88294e8ab1ad96fd1673ac1b3b41285c88ceb4"
+    }
+  }
+}

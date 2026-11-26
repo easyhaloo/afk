@@ -1,0 +1,86 @@
+{
+  "version": "0.2.226",
+  "platform": "darwin-arm64",
+  "archiveSha256": "ac9f59d1fa3e2c2b79d81f6c9c50e26c0a6c2a33890403e969a85ccfcccd65a0",
+  "standalone": "source",
+  "defaults": [
+    {
+      "runId": "code-context-4740f9a9-96ae-4d9a-8a6e-6b55658966aa",
+      "workItemId": "github:qualification/code-context#21",
+      "dispatches": 1,
+      "matchedRecords": 1,
+      "contextSha256": "014053e037052f516db462280728895c576c05761bf51f014f0630094f67a2bd",
+      "agentName": "pi",
+      "nativeSession": "01a217f2-9b0b-743f-9300-6154baa07aed",
+      "summary": "42033382",
+      "cleanup": true,
+      "outcome": "succeeded",
+      "nativeTraceSha256": "0125d47ece073044fe1f2b0b3b9d71e6badb9c4a6f9dab712c558fbdf941e53e",
+      "nativeContextReads": 1,
+      "usage": {
+        "inputTokens": 2643,
+        "outputTokens": 128,
+        "totalTokens": 2771
+      }
+    },
+    {
+      "runId": "code-context-e80c4142-7162-4e8a-846e-d23f54a98d62",
+      "workItemId": "github:qualification/code-context#22",
+      "dispatches": 1,
+      "matchedRecords": 1,
+      "contextSha256": "fa8fab116ff47ff006236ba48592bc3cad4c97d3560018b482851a9224c37e9d",
+      "agentName": "opencode",
+      "nativeSession": "ses_de80d3d49ffevU6hwnh287APCZ",
+      "summary": "31542698",
+      "cleanup": true,
+      "outcome": "succeeded",
+      "nativeTraceSha256": "30a08824b5ba386a05529ad655838973c2c1bbe12c7fcac83fb63e3c91907d06",
+      "nativeContextReads": 1,
+      "usage": {
+        "inputTokens": 2574,
+        "outputTokens": 167,
+        "totalTokens": 2741
+      }
+    }
+  ],
+  "fixed": {
+    "runId": "code-context-30c5b326-d080-473f-83d8-40b101945af7",
+    "workItemId": "github:qualification/code-context#23",
+    "dispatches": 1,
+    "matchedRecords": 1,
+    "contextSha256": "edcd6de729e3e74228134a1982859b7061f991a5179ac873e345a8cfa561ae42",
+    "agentName": "pi",
+    "nativeSession": "01a217f2-e0a4-7429-9fde-d68c8835a43f",
+    "summary": "source",
+    "cleanup": true,
+    "outcome": "succeeded",
+    "nativeTraceSha256": "466532596af7bd2c21cee5e5984e6d4d0f402f3556ae5630e5fb7f34989a2d62",
+    "nativeContextReads": 1,
+    "usage": {
+      "inputTokens": 2636,
+      "outputTokens": 114,
+      "totalTokens": 2750
+    }
+  },
+  "disabled": {
+    "runId": "code-context-c3de9507-1dba-45ea-bbaa-e07e97e80b1c",
+    "workItemId": "github:qualification/code-context#24",
+    "dispatches": 0,
+    "matchedRecords": 0,
+    "agentName": "pi",
+    "cleanup": true,
+    "outcome": "failed",
+    "diagnostic": "Capability provider is not registered"
+  },
+  "scope": "isolated installed CLI and runtime, real Git worktrees, synthetic source, native agents using local inference",
+  "sourceCommit": "62567ca5a2d3e6b0bb4c626e249afb70fdef0e9a",
+  "model": "Qwen3.5-4B Q4_K_M",
+  "modelSha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+  "backend": "ollama version is 0.40.18",
+  "agents": {
+    "pi": "1.6.0",
+    "opencode": "opencode v2.2.7"
+  },
+  "date": "2026-11-26",
+  "ciRunId": 45819678954
+}

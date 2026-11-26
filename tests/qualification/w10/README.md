@@ -170,7 +170,18 @@ jq '.installedPassedCases.I108 | {suite,fullName,status,resultPath}' "$A/evidenc
 | [E] | [P] 同文“W10 Evidence 安装版验收”，以及 `$O/.codex/validation/installed-learning-0.2.126.UJkt32/installed-observe-routing-validation.log` | 选择路由、回读、保全本地数据，后端为测试 Provider |
 | [U] | `../verification/runtime-suite.log` | 本表引用 `logger.test.ts` 的 9 项及 `knowledge-base-configuration.test.ts` 的 16 项 |
 
-## 本轮两项实测
+## 代码上下文安装复验
+
+2026-11-26，macOS arm64 本地离线安装版 CLI `0.2.224`（`6198fbbe`）验证 `context.code` 的默认根。两个独立进程各自创建真实 Git worktree，确定性 Agent 替身均从 `.afk/plugin-context.md` 读到各自分支内容。工作流只将文件指针交给 Agent，结束后清理上下文文件。显式 `config.root` 和独立 CLI 仍读取源检出。停用插件后，CLI 查询被拒，工作流在派发前失败。正式发布版、目标部署和多用户工作区待验。[安装回执](code-context-installed.receipt.json)
+
+在 macOS arm64 上从 `6198fbbe` 构建 `0.2.224` 归档时，可使用 `pnpm release:cli --output <归档目录>`。在本树根运行安装复验，标准输出为新的 JSON 回执。
+
+```sh
+node tests/qualification/w10/code-context-installed.mjs \
+  <归档文件> <SHA-256校验文件> <归档同批次install.sh>
+```
+
+## Docker 容器补验
 
 macOS arm64 安装版 `0.2.215` 通过 `sandbox.docker` 启动隔离的本机 Docker `28.3.2` 容器。`docker top` 确认负载正在运行。手动中断发送 `SIGINT`，500 ms 后容器仍运行。`agent.wait` 触发 `SIGKILL` 并返回 `aborted`。关闭后旧句柄返回 `404 SANDBOX_MISSING`，独立 Docker 查询按完整 ID 确认容器移除，共通过 10 项检查，兜底清理数为零。[取消回执](docker-cancel.receipt.json)
 

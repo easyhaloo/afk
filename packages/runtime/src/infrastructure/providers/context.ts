@@ -99,26 +99,41 @@ function rankedFragments(
   prompt: string,
   documents: readonly { origin: string; content: string }[],
   limit: number,
-  prioritizeCoverage = false,
+  normalizeCoverage = false,
 ): ContextFragment[] {
   const queryTerms = [...new Set([
     ...prompt.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter(Boolean),
     ...lexicalTerms(prompt).filter(term => term.length >= 2 && /\p{Script=Han}/u.test(term) && !QUESTION_WORDS.has(term)),
   ])];
-  return documents.map(document => {
+  const documentFrequency = normalizeCoverage ? new Array<number>(queryTerms.length).fill(0) : undefined;
+  let totalLength = 0;
+  const ranked = documents.map(document => {
     const lower = document.content.toLowerCase();
+    const matchedTerms: number[] = [];
     let score = 0;
-    let coverage = 0;
-    for (const term of queryTerms) {
+    for (const [index, term] of queryTerms.entries()) {
       const matches = lower.split(term).length - 1;
       score += matches;
-      if (prioritizeCoverage && matches > 0) coverage++;
+      if (documentFrequency && matches > 0) {
+        documentFrequency[index]++;
+        matchedTerms.push(index);
+      }
     }
-    return { fragment: { content: document.content.slice(0, 20_000), origin: document.origin, score }, coverage };
-  }).filter(({ fragment }) => fragment.score > 0)
-    .sort((left, right) => right.coverage - left.coverage
-      || right.fragment.score - left.fragment.score
-      || left.fragment.origin.localeCompare(right.fragment.origin))
+    totalLength += lower.length;
+    return { fragment: { content: document.content.slice(0, 20_000), origin: document.origin, score },
+      matchedTerms, length: lower.length, relevance: 0 };
+  }).filter(({ fragment }) => fragment.score > 0);
+  if (documentFrequency && ranked.length) {
+    const weights = documentFrequency.map(count => Math.log((documents.length + 1) / (count + 1)));
+    const averageLength = totalLength / documents.length;
+    for (const row of ranked) {
+      const coverage = row.matchedTerms.reduce((sum, index) => sum + weights[index], 0);
+      row.relevance = coverage / Math.sqrt(1 + row.length / averageLength);
+    }
+  }
+  return ranked.sort((left, right) => right.relevance - left.relevance
+    || right.fragment.score - left.fragment.score
+    || left.fragment.origin.localeCompare(right.fragment.origin))
     .slice(0, limit).map(({ fragment }) => fragment);
 }
 

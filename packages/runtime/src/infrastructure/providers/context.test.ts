@@ -100,7 +100,7 @@ describe('context providers', () => {
     ]);
   });
 
-  it('ranks distinct retrieval matches ahead of repetitions and retains match counts', async () => {
+  it('ranks concise retrieval matches ahead of repetitions and retains match counts', async () => {
     const documents = [
       { origin: 'repeated', content: 'alpha alpha alpha alpha' },
       { origin: 'more-matches', content: 'alpha alpha beta' },
@@ -109,13 +109,23 @@ describe('context providers', () => {
     ];
     const provider = new RetrievalProvider(documents);
     await expect(provider.gather({ scope: '.', prompt: 'ALPHA beta alpha', limit: 4 })).resolves.toEqual([
-      { ...documents[1], score: 3 },
       { ...documents[2], score: 2 },
       { ...documents[3], score: 2 },
+      { ...documents[1], score: 3 },
       { ...documents[0], score: 4 },
     ]);
     await expect(provider.gather({ scope: '.', prompt: 'alpha beta', limit: 1 }))
-      .resolves.toEqual([{ ...documents[1], score: 3 }]);
+      .resolves.toEqual([{ ...documents[2], score: 2 }]);
+  });
+
+  it('favors a rare query term over several common matches', async () => {
+    const documents = [
+      { origin: 'target', content: 'alpha gamma' },
+      { origin: 'distractor', content: 'alpha beta delta' },
+      ...Array.from({ length: 4 }, (_, index) => ({ origin: `common-${index}`, content: 'alpha beta delta' })),
+    ];
+    await expect(new RetrievalProvider(documents).gather({ scope: '.', prompt: 'alpha beta delta gamma', limit: 1 }))
+      .resolves.toEqual([{ ...documents[0], score: 2 }]);
   });
 
   it.each(['retrieval', 'code', 'memory'] as const)('recalls Chinese business context through %s', async kind => {

@@ -21,6 +21,10 @@
 
 2026-11-22，从仓库外安装 macOS arm64 CLI 0.2.189，通过 `plugin configure context.retrieval --builtin --file` 导入三份真实 Markdown 摘录。相同输入在 0.2.188 被配置校验拒绝。修复后通过 `plugin invoke context.provider context.retrieval gather --input <文件> --json` 查询工作项关系、PRD 基线和中文桌面设计，分别命中预期首条来源，分数为 2、3、2，正文与输入逐字一致（去除首尾空白）。未命中查询返回 `[]`。同一安装版通过 17 项上下文与记忆回归。归档 SHA-256 为 `889fd413a8fe55f8e73fa7cfb1a15ea01e50d1017bec802c8cd7b643728e6bdf`，语料 SHA-256 为 `7576d829b54de19576d98942c96c0a810890541990c2eede780c12715ac814d7`。
 
+macOS arm64 的 `0.2.224` 离线安装版在 `6198fbbe` 的 27 篇 ADR 和 10 段中文文档上复验。12 条查询各指定一个预期来源。Top-1 为 2/12，Top-5 为 5/12。6 条英文查询的预期来源均未进入前五。所有返回片段保留配置正文，遵守 5 条上限，无匹配对照返回 `[]`。当前排序统计词项的子串出现次数，常见词可以反复推高长文档的分数。[查询及排序回执](retrieval-ranking.receipt.json)
+
+从仓库根运行 `node tests/qualification/w10/retrieval-ranking.mjs "$PWD" <0.2.224归档目录>` 可重放。归档目录包含对应平台的压缩包、校验文件和 `install.sh`。
+
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
 
 2026-11-20 在真实 tmux 3.6a 上复现安装版 CLI 0.2.174 返回 `aborted` 后前台子进程仍在运行。tmux `-CC` 无法在 Node 管道中启动，报 `tcgetattr failed`。切换至 `-C` 后，仓库外安装的 macOS arm64 CLI 0.2.175 通过同一 PTY 断言。前台 Python 进程捕获 Ctrl-C，产物登记的 pane ID 与 tmux 一致，关闭后自有会话消失，活动资源归零，同一隔离服务器中的未登记会话仍存在。测试载荷为有界 Python 进程。归档 SHA-256 为 `e8df48c0a75817522627fe425984985c41125897b4a0384769d38e1e85058868`。

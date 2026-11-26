@@ -266,6 +266,43 @@
           "ownerReadRestored": true
         }
       ]
+    },
+    "linux-x64": {
+      "archiveSha256": "59ff87b2161703aa36967b3c4f1f454db904b2489a282382fa039c9dd619ba89",
+      "separateProfileAndWorkspacePerUid": true,
+      "checks": [
+        {
+          "uid": 10001,
+          "groups": [
+            10001
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        },
+        {
+          "uid": 10002,
+          "groups": [
+            10002
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        }
+      ],
+      "imageId": "sha256:1471ea646673136b8308550ac14b36d847ffb21c24bc31828279e443c924e488",
+      "networkMode": "none",
+      "receiptSha256": "dfcbecd3df17bc635671e75b5a88294e8ab1ad96fd1673ac1b3b41285c88ceb4"
     }
   }
 }

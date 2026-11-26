@@ -297,13 +297,17 @@ describe('context selection and persisted memory', () => {
     expect(await test.effects()).toEqual(before);
   });
 
-  it('context.retrieval ranks ties by origin and applies the requested limit after filtering', async () => {
+  it('context.retrieval favors concise matches, breaks ties by origin, and applies the limit', async () => {
     const test = await configured('context.retrieval');
     const documents = [{ origin: 'z', content: 'needle' }, { origin: 'top', content: 'NEEDLE needle needle' }, { origin: 'a', content: 'needle' }, { origin: 'miss', content: 'ordinary' }];
     await test.configure(test.provider.id, { documents });
-    expect(JSON.parse((await test.run({ scope: '.', prompt: 'needle NEEDLE', limit: 2 })).stdout)).toEqual([
-      { origin: 'top', content: 'NEEDLE needle needle', score: 3 }, { origin: 'a', content: 'needle', score: 1 },
-    ]);
+    const ranked = [
+      { origin: 'a', content: 'needle', score: 1 },
+      { origin: 'z', content: 'needle', score: 1 },
+      { origin: 'top', content: 'NEEDLE needle needle', score: 3 },
+    ];
+    expect(JSON.parse((await test.run({ scope: '.', prompt: 'needle NEEDLE' })).stdout)).toEqual(ranked);
+    expect(JSON.parse((await test.run({ scope: '.', prompt: 'needle NEEDLE', limit: 2 })).stdout)).toEqual(ranked.slice(0, 2));
     expect(JSON.parse((await test.run({ scope: '.', prompt: '' })).stdout)).toEqual([]);
     expect(await readFile(join(test.workspace, 'widget.ts'), 'utf8')).toBe(content);
   });

@@ -1,0 +1,90 @@
+{
+  "sourceCommit": "62567ca5a2d3e6b0bb4c626e249afb70fdef0e9a",
+  "ciRunId": 45819678954,
+  "driverSha256": "ab0b34cff578de68a78f8194fd8b8ff742c1180cdabf0f89c5ed9edbc103d180",
+  "runtime": {
+    "engine": "Docker in Colima with macOS Virtualization.Framework",
+    "dockerServerVersion": "29.5.2",
+    "amd64Emulation": "Rosetta",
+    "containerNetwork": "none",
+    "containerImage": "node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34"
+  },
+  "results": [
+    {
+      "version": "0.2.226",
+      "platform": "linux-arm64",
+      "archiveSha256": "2fd172f74e665021b35541c2f79e7c165a002149cd4eeb4c255933462b2cbbe1",
+      "separateProfileAndWorkspacePerUid": true,
+      "checks": [
+        {
+          "uid": 10001,
+          "groups": [
+            10001
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        },
+        {
+          "uid": 10002,
+          "groups": [
+            10002
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        }
+      ],
+      "containerImageId": "sha256:6b84a3d695387c70b7d5f45224899d5bf5bf96c4345bed678f07822927c850a0",
+      "replayIdentical": true
+    },
+    {
+      "version": "0.2.226",
+      "platform": "linux-x64",
+      "archiveSha256": "56e9e2b282a285ee5345547bbda892e24fdec6a8a3727b19f97b9dbceb7600ab",
+      "separateProfileAndWorkspacePerUid": true,
+      "checks": [
+        {
+          "uid": 10001,
+          "groups": [
+            10001
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        },
+        {
+          "uid": 10002,
+          "groups": [
+            10002
+          ],
+          "ownerRead": true,
+          "relativeCrossRootRejected": true,
+          "absoluteCrossRootRejected": true,
+          "linkedFileRejected": true,
+          "directoryScanExcludesLink": true,
+          "osCrossReadDenied": true,
+          "configuredForeignRootDenied": true,
+          "ownerReadRestored": true
+        }
+      ],
+      "containerImageId": "sha256:1471ea646673136b8308550ac14b36d847ffb21c24bc31828279e443c924e488",
+      "replayIdentical": true
+    }
+  ]
+}

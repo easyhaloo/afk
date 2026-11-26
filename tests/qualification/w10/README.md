@@ -228,6 +228,8 @@ docker run --rm --pull=never --platform linux/arm64 --network none \
 
 2026-11-26，从 `6d6263b8` 构建的 CLI `0.2.225` 通过四平台 CI 离线打包验证。校验归档散列后，macOS arm64 复现两组排名，并确认 Pi、OpenCode 各读取一次本工作树中的上下文。固定根依然读取源检出，停用后零派发。禁网的 Linux arm64 和 x64 容器中，两个独立 UID 都能读取各自的工作区，跨根路径、符号链接直读和对方私有根访问均被拒绝。同一 macOS 归档在禁网环境用 `local-logs.mjs` 复验，CLI 时间线记录一次预期的日志写入失败，恢复后的事件链完整且无失败事件。正式发布和目标部署待验。[打包验证](https://github.com/easyhaloo/afk/actions/runs/45796167299) · [散列和验收回执](retrieval-ranking.candidate.receipt.json)
 
+macOS arm64 的 `0.2.226` CI 归档（`62567ca5`）通过同一原生复验。Pi 和 OpenCode 在两个独立工作项中各读取一次上下文并返回各自工作树的随机值。第三个会话读到固定根，停用对照为零派发。独立核验将三份原生读取结果与上下文文件逐字节比对，并确认文件和执行工作树清理。该版本的 Linux 双用户及目标部署复验待完成。[归档及原生回执](code-context-native-0226.receipt.json)
+
 ## 合规规则发布阶段复验
 
 2026-11-26 在 macOS arm64 离线安装版 `0.2.224`（`6198fbbe`）中，确定性的 Agent 替身在写入两个仓库后，通过安装版 CLI 将匹配项目的规则从允许改为拒绝。两个场景均完成实现和验收检查。

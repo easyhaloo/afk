@@ -4,12 +4,12 @@
   "sourceCommit": "a31e29b1476b3237b1d010ea6073104f5599abde",
   "archiveSha256": "a6a1a92fd18a47e39d2df08bc61ab52536a65fee090d6cb481b3d920a7745095",
   "publication": {
-    "key": "7238b333391b6c95180344ed5e13a82e058e685250814e96cbd1a56d137bb4db",
-    "candidateId": "129bc06c2755fdaf3862b54c75cf3b4a5215ec1b91eaa559275f1aa1b787a60a",
+    "key": "4ec940c2ee7f5db9a7ae5a3f45eb6ea029bd4d6359fd2d8c36109b38e7762d5e",
+    "candidateId": "010204102802d6a38fcec86c1f35d2d8d43a4196b6b504da08a00bc762e35d3a",
     "validatedVersion": 2,
-    "candidateDigest": "e59b7f117d92408270490e9c700d67694297fc5d720da4047144a90dc1d749a0",
-    "evidenceDigest": "3b398e954fec62d3f7786bd91f8b121b5e19235efc6eb221ad85f5a533bc15db",
-    "validatorVersion": "learning-validation-v1:6a834a23-6764-4958-b0cd-39c55c7ba4dd",
+    "candidateDigest": "d020abe64a3ee7c5479c001495da461f97501c3ca98d4b15c77f14022ac9ac21",
+    "evidenceDigest": "1fa0237f2a9681da9497f1ddf73ffbcfe4c97b36e27f0bfc200c7f6f6e0e4be5",
+    "validatorVersion": "learning-validation-v1:d08d65cd-4e56-4f7e-8e6b-38cd49fcb235",
     "targetRef": "wiki:retry"
   },
   "model": "Qwen3.5-4B Q4_K_M",
@@ -21,21 +21,21 @@
   },
   "consumers": [
     {
-      "runId": "lesson-publication-75e18440-1117-4699-9471-ee7a1c2a0c2c",
+      "runId": "lesson-publication-1fdf9e6c-42f4-4fd5-9ba0-392fbabe975f",
       "workItemId": "github:acme/lesson#71",
       "agentName": "pi",
-      "nativeSession": "01a2166e-e1c8-735c-87ac-b008ede0c630",
-      "summary": "52859945",
+      "nativeSession": "01a21677-f809-72cc-ae1d-e0ceffdfdb77",
+      "summary": "37472734",
       "dispatches": 1,
-      "contextSha256": "119a40f232b96735fd7762484019ee6d21f1d4bd2a2f3090dc472cfe4b4803a2",
+      "contextSha256": "5745397ba79e51c8d1a0dc52ef4bc73271a1e2d7bf9d5a58cf6dfe7924a7b88c",
       "outcome": "succeeded",
-      "nativeTraceSha256": "6638902b0463ffda5c51665fd870f71629b553515d4e862ba10d97db2865dbe7",
+      "nativeTraceSha256": "a99861e5d485e832e1f2d952787445665c74964f8e0ee393f869c71473b4e01f",
       "nativeContextReads": 1,
       "nativeBacklogReads": 0,
       "usage": {
-        "inputTokens": 5977,
+        "inputTokens": 5892,
         "outputTokens": 171,
-        "totalTokens": 6148
+        "totalTokens": 6063
       },
       "acceptedDecisions": [
         "knowledge.retrieved",
@@ -44,21 +44,21 @@
       ]
     },
     {
-      "runId": "lesson-publication-d7a91ba0-fa5d-4440-ab01-9a62efb236cf",
+      "runId": "lesson-publication-fd8538b1-d1d3-4420-8acc-5091681436ea",
       "workItemId": "github:acme/lesson#72",
       "agentName": "opencode",
-      "nativeSession": "ses_de990b6c4ffe4FqWsMjQiDmRos",
-      "summary": "52859945",
+      "nativeSession": "ses_de987cdd7ffe1vpBFVpbpV7E3a",
+      "summary": "37472734",
       "dispatches": 1,
-      "contextSha256": "119a40f232b96735fd7762484019ee6d21f1d4bd2a2f3090dc472cfe4b4803a2",
+      "contextSha256": "5745397ba79e51c8d1a0dc52ef4bc73271a1e2d7bf9d5a58cf6dfe7924a7b88c",
       "outcome": "succeeded",
-      "nativeTraceSha256": "0e6b7227e12841565606a91915769f3de93dfd259bcec55b3e9c348717f6860a",
+      "nativeTraceSha256": "3f6218a5ad7e0d2b80f845614d168b037470a5c405e480774a0b7dd41072dc09",
       "nativeContextReads": 1,
       "nativeBacklogReads": 1,
       "usage": {
-        "inputTokens": 5849,
-        "outputTokens": 329,
-        "totalTokens": 6178
+        "inputTokens": 5831,
+        "outputTokens": 294,
+        "totalTokens": 6125
       },
       "acceptedDecisions": [
         "knowledge.retrieved",
@@ -68,10 +68,19 @@
     }
   ],
   "revokedControl": {
+    "runId": "lesson-publication-2452728a-e6a9-4ad8-9aeb-1c14f2721e9d",
+    "workItemId": "github:acme/lesson#73",
+    "agentName": "pi",
+    "nativeSession": "01a21678-63a9-733a-8628-65ff7218597d",
+    "summary": "WITHDRAWN",
+    "dispatches": 1,
+    "outcome": "succeeded",
     "seededStaleContextRemoved": true,
-    "nativeToolsDisabled": true,
-    "nativeCompletion": "missing",
-    "nativeTraceSha256": "d2a84ee130ee882fa001d27d7e5a6600cb55fb2cebc64093eb60246771d5b970",
+    "nativeReadAttempts": 1,
+    "successfulNativeContextReads": 0,
+    "toolResult": "ENOENT",
+    "nativeCompletion": "WITHDRAWN",
+    "nativeTraceSha256": "ff5f70fa381d9f118e7047c04363529e5a5289e5e6e84ab22aaf7cef2cd3bef1",
     "deterministicLifecycleReceiptSha256": "e1a64b2e4c6a7f1e6e0944d3299506c2397c76ff6bbe9b1cdbe7ccd581d10e81"
   },
   "date": "2026-11-26"

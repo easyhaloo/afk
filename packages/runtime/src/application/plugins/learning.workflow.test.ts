@@ -142,7 +142,7 @@ describe('learning workflow input binding through production routing', () => {
   });
 
   it.each([
-    'learning.distill', 'learning.correct', 'learning.capture', 'learning.reconcile', 'learning.knowledge.prepare',
+    'learning.distill', 'learning.replay', 'learning.correct', 'learning.capture', 'learning.reconcile', 'learning.knowledge.prepare',
     'learning.validate', 'learning.knowledge.publish', 'learning.knowledge.reconcile', 'learning.worker.once', 'learning.retrospective',
   ])('%s remains disabled for raw DTOs and valid envelopes', async action => {
     const { runtime, executor, homeDir } = await fixture();

@@ -3,7 +3,7 @@ import { constants, promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { ExperienceStore, experienceScope, experienceStorePath, learningDirectory, queryLearningState, queryProposalValidationReceipt,
-  candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningScopeSchema, proposalValidationReceiptSchema,
+  candidateProposalSchema, candidateStateSchema, experienceQueryContextSchema, learningIdentitySchema, learningReplayRevisionSchema, learningScopeSchema, proposalValidationReceiptSchema,
   proposalValidationArtifactSchema,
   verifyAdoptionRun, verifyExperienceRun,
   LearningReviewIncompleteError, learningReviewIncompleteSchema,
@@ -246,6 +246,28 @@ export function registerExperienceCommands(program: Command, composition: Experi
       const record = records.find(candidate => candidate.id === candidateId);
       if (!record) throw new Error('Candidate not found in scope');
       emitLearning([record], options.json, true);
+    });
+
+  experience.command('replay')
+    .description('Queue a new analysis of an existing request’s frozen evidence')
+    .argument('<requestKey>', '64 lowercase hexadecimal original request key', parseCandidateId)
+    .requiredOption('--scope <project>', 'Canonical platform:projectKey', parseScope)
+    .requiredOption('--revision <id>', 'Replay revision for idempotent submission', value => {
+      const parsed = learningReplayRevisionSchema.safeParse(value);
+      if (!parsed.success) throw new InvalidArgumentError('expected 1–64 letters, digits, dots, underscores or hyphens, starting with a letter or digit');
+      return parsed.data;
+    })
+    .option('--json', 'Emit compact JSON')
+    .action(async (requestKey: string, options: { scope: string; revision: string; json?: boolean }) => {
+      const { scope, revision } = options;
+      const receipt = await withRuntime('Learning replay failed', async plugins => {
+        const digest = z.string().regex(/^[a-f0-9]{64}$/);
+        return z.object({ jobId: digest.refine(value => value !== requestKey), scope: z.literal(scope),
+          sourceRequestKey: z.literal(requestKey), evidenceDigest: digest })
+          .parse(await plugins.dispatchSystemAction('learning.replay', { scope, requestKey, revision }));
+      }, error => error instanceof Error && ['learning_disabled', 'learning_request_not_found', 'learning_replay_source_unavailable']
+        .includes(error.message) ? error.message : undefined);
+      process.stdout.write(`${JSON.stringify(receipt, null, options.json ? undefined : 2)}\n`);
     });
 
   experience.command('correct')

@@ -8,7 +8,7 @@ import { DurableTriggerQueue, TriggerQueueFull } from '../plugins/trigger-queue.
 import { buildAnalysisPrompt, parseAnalysisOutput } from './analysis.js';
 import { executeAnalysis, type AnalysisExecutionResult } from './analysis-runner.js';
 import { CandidateStore, type AnalysisAttempt, type LearningCandidate, type ProcessingReceipt, type StoredDistillationRequest } from './candidate-store.js';
-import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
+import { DISTILLATION_LIMITS, distillationRequestSchema, learningReplayRevisionSchema, learningScopeSchema, type DistillationOutput, type DistillationRequest } from './contracts.js';
 import { loadEvidencePack, validateEvidencePack, type EvidencePack } from './evidence.js';
 import { canonicalLearningJson, learningDigestSchema } from './requests.js';
 import { proposalArtifactInputSchema, readProposalValidationArtifact, readProposalValidationReceipt } from './proposal-validation.js';
@@ -55,6 +55,18 @@ export interface LearningWorkerResult {
 
 const learningRequestTargetSchema = z.object({ scope: learningScopeSchema, requestKey: learningDigestSchema }).strict();
 export type LearningRequestTarget = z.infer<typeof learningRequestTargetSchema>;
+
+export const learningReplayTargetSchema = learningRequestTargetSchema.extend({ revision: learningReplayRevisionSchema });
+
+export function submitLearningReplay(input: LearningRequestTarget & { directory: string; revision: string }) {
+  const file = join(input.directory, 'candidates.sqlite');
+  if (!existsSync(file)) throw new Error('learning_request_not_found');
+  const store = new CandidateStore({ file });
+  try {
+    const request = store.submitReplay({ scope: input.scope, requestKey: input.requestKey, revision: input.revision });
+    return { jobId: request.key, scope: input.scope, sourceRequestKey: input.requestKey, evidenceDigest: request.request.evidenceDigest };
+  } finally { store.close(); }
+}
 
 export interface LearningRequestState {
   job: LearningJob;

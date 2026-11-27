@@ -7,7 +7,7 @@ import type { AgentProvider } from '../../domain/agents/types.js';
 import type { PluginManifest } from '../../plugin-sdk/profile.js';
 import { DISTILLATION_LIMITS, distillationRequestSchema, learningScopeSchema, LearningReviewIncompleteError, normalizeLearningActionInput } from '../learning/contracts.js';
 import { validateEvidencePack } from '../learning/evidence.js';
-import { LearningWorker, learningDirectory, queryLearningRequest, queryLearningState, queryProposalValidationReceipt, submitDistillation } from '../learning/worker.js';
+import { LearningWorker, learningDirectory, learningReplayTargetSchema, queryLearningRequest, queryLearningState, queryProposalValidationReceipt, submitDistillation, submitLearningReplay } from '../learning/worker.js';
 import { CandidateStore } from '../learning/candidate-store.js';
 import { proposalArtifactInputSchema } from '../learning/proposal-validation.js';
 import { assertCurrentKnowledgePublication } from '../learning/knowledge-publication-guard.js';
@@ -163,6 +163,10 @@ export function createLearningPlugin(options: { homeDir?: string; config?: unkno
         assertEnabled();
         const parsed = z.object({ request: distillationRequestSchema, pack: z.unknown() }).strict().parse(input);
         return submitDistillation({ directory, request: parsed.request, pack: validateEvidencePack(parsed.pack) });
+      });
+      registerAction('learning.replay', input => {
+        assertEnabled();
+        return submitLearningReplay({ directory, ...learningReplayTargetSchema.parse(input) });
       });
       registerAction('learning.correct', async input => {
         assertEnabled();

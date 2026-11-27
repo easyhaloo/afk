@@ -11,7 +11,7 @@ export { experienceStorePath, experienceScope, verifyExperienceRun, verifyApplic
   resolveExperienceQueryContext, recordSuccessfulExperience, recordExperienceOutcomes } from './application/learning/runtime.js';
 export { experienceQueryContextSchema, type ExperienceQueryContext } from './application/learning/experience-store.js';
 export { learningIdentitySchema } from './application/learning/requests.js';
-export { DISTILLATION_LIMITS, learningScopeSchema, learningReviewIncompleteSchema, LearningReviewIncompleteError,
+export { DISTILLATION_LIMITS, learningScopeSchema, learningReplayRevisionSchema, learningReviewIncompleteSchema, LearningReviewIncompleteError,
   evidenceRefSchema, distillationRequestSchema,
   candidateStateSchema, candidateProposalSchema, distillationOutputSchema, distillationKey,
   parseDistillationOutput, assertCandidateTransition, type EvidenceRef as LearningEvidenceRef,

@@ -72,10 +72,13 @@ export const evidenceRefSchema = z.object({
   authority: z.enum(['observed', 'declared', 'inferred']),
 }).strict();
 
+export const learningReplayRevisionSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+
 export const distillationRequestSchema = z.object({
   version: z.literal(1), scope: learningScopeSchema, sourceId: identity,
   sourceRunId: identity.optional(), workItemId: identity.optional(), evidenceDigest: digest,
   candidateKind: z.enum(['skill', 'tool']).optional(),
+  replay: z.object({ sourceRequestKey: digest, revision: learningReplayRevisionSchema }).strict().optional(),
   analyzerVersion: identity, reason: z.enum(['completed', 'failed', 'repaired', 'correction', 'import']),
 }).strict().superRefine((value, context) => {
   if (value.workItemId === undefined) return;
@@ -157,6 +160,7 @@ export function distillationKey(input: DistillationRequest): string {
   return createHash('sha256').update(JSON.stringify([
     request.scope, request.sourceId, request.evidenceDigest, request.analyzerVersion,
     ...(request.candidateKind ? [request.candidateKind] : []),
+    ...(request.replay ? [[request.replay.sourceRequestKey, request.replay.revision]] : []),
   ])).digest('hex');
 }
 

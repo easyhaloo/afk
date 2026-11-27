@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { TokenUsage } from '../../domain/agents/types.js';
 import { openSqlite, transaction, type SqliteDatabase } from '../../infrastructure/storage/sqlite.js';
 import { assertCandidateTransition, candidateStateSchema, DISTILLATION_LIMITS, learningScopeSchema,
-  parseDistillationOutput, type CandidateProposal, type CandidateState } from './contracts.js';
+  learningReplayRevisionSchema, parseDistillationOutput, type CandidateProposal, type CandidateState } from './contracts.js';
 import { blockedReasonSchema, canonicalLearningJson, learningDigestSchema, learningIdentitySchema,
   prepareDistillationRequest, type DistillationSubmission, type PreparedDistillationRequest } from './requests.js';
 import { validateEvidencePack, type EvidencePack } from './evidence.js';
@@ -305,9 +305,43 @@ export class CandidateStore {
 
   submitRequest(input: DistillationSubmission, snapshot?: EvidencePack): StoredDistillationRequest {
     const prepared = prepareDistillationRequest(input);
+    if (prepared.request.replay) throw new Error('Use frozen evidence replay admission');
     return this.write(() => {
       this.insertRequest(prepared);
       if (snapshot) this.insertSnapshots([prepared], [snapshot]);
+      return this.getRequest(prepared.key)!;
+    });
+  }
+
+  submitReplay(input: { scope: string; requestKey: string; revision: string }): StoredDistillationRequest {
+    const scope = learningScopeSchema.parse(input.scope);
+    const sourceRequestKey = learningDigestSchema.parse(input.requestKey);
+    const revision = learningReplayRevisionSchema.parse(input.revision);
+    return this.write(() => {
+      const source = this.getRequest(sourceRequestKey);
+      if (!source || source.key !== sourceRequestKey || source.request.scope !== scope) throw new Error('learning_request_not_found');
+      if (source.request.replay || source.blockedReason === 'source_invalidated' || source.blockedReason === 'source_unstable') {
+        throw new Error('learning_replay_source_unavailable');
+      }
+      const original = source.request;
+      let pack: EvidencePack | undefined;
+      try { pack = this.getEvidencePack(original.evidenceDigest); }
+      catch { throw new Error('learning_replay_source_unavailable'); }
+      if (!pack?.entries.length) throw new Error('learning_replay_source_unavailable');
+      const evidence = pack.entries.map(entry => entry.ref);
+      const verified = prepareDistillationRequest({ request: original, evidence });
+      if (verified.key !== source.key || canonicalLearningJson(verified.evidence) !== canonicalLearningJson(source.evidence)) {
+        throw new Error('learning_replay_source_unavailable');
+      }
+      const identity = original.sourceRunId ? { scope, runId: original.sourceRunId, analyzerVersion: original.analyzerVersion } : undefined;
+      const cursor = identity && this.getScanCursor(identity);
+      const prepared = prepareDistillationRequest({ request: { ...original, replay: { sourceRequestKey, revision } }, evidence });
+      if (identity && cursor) {
+        const sourceRoot = this.getScanSourceRoot(identity);
+        if (!sourceRoot || !this.getScanRequestKeys(identity).includes(source.key)) throw new Error('learning_replay_source_unavailable');
+        this.attachScanRequests(identity, cursor, sourceRoot, [prepared.key]);
+      }
+      this.insertRequest(prepared);
       return this.getRequest(prepared.key)!;
     });
   }
@@ -351,16 +385,31 @@ export class CandidateStore {
   }
 
   invalidateRequestSource(key: string, expectedReason?: string | null): boolean {
+    return this.invalidateRequestSources([key], expectedReason) > 0;
+  }
+
+  invalidateRequestSources(keys: readonly string[], expectedReason?: string | null): number {
+    if (!keys.length) return 0;
     return this.write(() => {
-      const current = this.requireRequest(key);
-      if (expectedReason !== undefined && (current.blockedReason ?? null) !== expectedReason) return false;
-      const invalidated = current.blockedReason !== 'source_invalidated';
-      if (invalidated) this.put('blocking', key, { reason: 'source_invalidated' });
-      for (const id of this.getProcessingReceipt(key)?.candidateIds ?? []) {
-        const candidate = this.requireCandidate(id);
-        if (['candidate', 'validated', 'published'].includes(candidate.state)) this.move(candidate, 'conflict');
+      const invalidated = new Set<string>();
+      const replays = this.database.prepare(`SELECT key FROM learning_ledger
+        WHERE kind = 'request' AND json_extract(payload, '$.request.replay.sourceRequestKey') = ?`);
+      for (const key of keys) {
+        const current = this.requireRequest(key);
+        if (expectedReason !== undefined && (current.blockedReason ?? null) !== expectedReason) continue;
+        const related = current.request.replay ? [] : replays.all(key).map(row => String(row.key));
+        for (const affected of [key, ...related]) {
+          if (this.requireRequest(affected).blockedReason !== 'source_invalidated') {
+            this.put('blocking', affected, { reason: 'source_invalidated' });
+            invalidated.add(affected);
+          }
+          for (const id of this.getProcessingReceipt(affected)?.candidateIds ?? []) {
+            const candidate = this.requireCandidate(id);
+            if (['candidate', 'validated', 'published'].includes(candidate.state)) this.move(candidate, 'conflict');
+          }
+        }
       }
-      return invalidated;
+      return invalidated.size;
     }, true);
   }
 
@@ -396,6 +445,7 @@ export class CandidateStore {
     const parsed = scanSchema.parse(input);
     const identity = { scope: parsed.scope, runId: parsed.runId, analyzerVersion: parsed.analyzerVersion };
     const requests = parsed.requests.map(entry => prepareDistillationRequest(entry as DistillationSubmission));
+    if (requests.some(entry => entry.request.replay)) throw new Error('Use frozen evidence replay admission');
     if (requests.some(entry => entry.request.sourceRunId !== identity.runId || entry.request.scope !== identity.scope
       || entry.request.analyzerVersion !== identity.analyzerVersion)) throw new Error('Scan request differs from run, scope or analyzer version');
     return this.write(() => {
@@ -407,11 +457,14 @@ export class CandidateStore {
         && (parsed.cursor.head !== current.head || !requests.length))) throw new Error('Scan cursor must advance or atomically accept late-source evidence at the same head');
       for (const entry of requests) this.insertRequest(entry);
       this.insertSnapshots(requests, snapshots);
-      const requestKeys = [...new Set([...this.getScanRequestKeys(identity), ...requests.map(entry => entry.key)])];
-      this.put('cursor', digest(identity), { ...identity, ...parsed.cursor, requestKeys,
-        ...(sourceRoot || parsed.sourceRoot ? { sourceRoot: sourceRoot ?? resolve(parsed.sourceRoot!) } : {}) });
+      this.attachScanRequests(identity, parsed.cursor, sourceRoot ?? (parsed.sourceRoot && resolve(parsed.sourceRoot)), requests.map(entry => entry.key));
       return requests.map(entry => this.getRequest(entry.key)!);
     });
+  }
+
+  private attachScanRequests(identity: ScanIdentity, cursor: ScanCursor, sourceRoot: string | undefined, newKeys: readonly string[]): void {
+    const requestKeys = [...new Set([...this.getScanRequestKeys(identity), ...newKeys])];
+    this.put('cursor', digest(identity), { ...identity, ...cursor, requestKeys, ...(sourceRoot ? { sourceRoot } : {}) });
   }
 
   getProcessingReceipt(key: string): ProcessingReceipt | undefined {

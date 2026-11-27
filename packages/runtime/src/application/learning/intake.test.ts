@@ -574,25 +574,49 @@ describe('durable learning intake', () => {
     try { expect(store.listRequests()).toEqual([]); } finally { store.close(); }
   });
 
-  it('withdraws the source and candidate after late QA failure without inventing a new successful job', async () => {
+  it('replays frozen evidence and withdraws both jobs and candidates after late QA failure', async () => {
     const input = await fixture();
     await input.append(input.complete);
-    await reconcileDistillationSources(input);
+    const captured = await reconcileDistillationSources(input);
+    const [sourceKey] = captured.requestKeys;
     let store = input.open();
-    let candidateId: string;
+    let replayKey!: string;
+    let alternateKey!: string;
+    let candidateIds!: string[];
+    const revision = 'fact-versions-v2';
+    const submit = { scope, requestKey: sourceKey, revision };
     try {
-      const [entry] = store.listRequests();
-      const receipt = store.completeRequest(entry.key, { version: 1, warnings: [], candidates: [{ kind: 'fact', title: 'Review', statement: 'Review before publishing.',
-        evidenceIds: [entry.evidence[0].id], applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] },
-        payload: { subject: 'publishing', rule: 'Review before publishing', classification: 'proposal' } }] });
-      candidateId = receipt.candidateIds[0];
+      const source = store.getRequest(sourceKey)!;
+      const replay = store.submitReplay(submit);
+      replayKey = replay.key;
+      expect(replayKey).not.toBe(sourceKey);
+      expect(store.submitReplay(submit)).toEqual(replay);
+      alternateKey = store.submitReplay({ ...submit, revision: 'fact-versions-v3' }).key;
+      expect(new Set([sourceKey, replayKey, alternateKey]).size).toBe(3);
+      expect(replay.request).toEqual({ ...source.request, replay: { sourceRequestKey: sourceKey, revision } });
+      expect(replay.evidence).toEqual(source.evidence);
+      expect(replay.evidence.some(ref => ref.authority === 'observed')).toBe(true);
+      expect(() => store.submitReplay({ ...submit, scope: 'github:acme/other' })).toThrow('learning_request_not_found');
+      expect(() => store.submitReplay({ ...submit, requestKey: replayKey })).toThrow('learning_replay_source_unavailable');
+      expect(store.getScanRequestKeys({ scope, runId: 'run-1', analyzerVersion: source.request.analyzerVersion }))
+        .toEqual(expect.arrayContaining([sourceKey, replayKey, alternateKey]));
+      candidateIds = [source, replay].flatMap(entry => store.completeRequest(entry.key, {
+        version: 1, warnings: [], candidates: [{ kind: 'fact', title: 'Review', statement: 'Review before publishing.',
+          evidenceIds: [entry.evidence[0].id], applicability: { project: scope, environments: [], versions: [], preconditions: [], exclusions: [], invalidationConditions: [] },
+          payload: { subject: 'publishing', rule: 'Review before publishing', classification: 'proposal' } }],
+      }).candidateIds);
+      expect(new Set(candidateIds).size).toBe(2);
+      expect(candidateIds.map(id => store.getCandidate(id)?.state)).toEqual(['candidate', 'candidate']);
+      expect(store.getProcessingReceipt(sourceKey)?.candidateIds).toEqual([candidateIds[0]]);
     } finally { store.close(); }
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [sourceKey], invalidated: 0 });
     await input.append([{ kind: 'qa.failed', summary: 'The review assertion was disproved.' }]);
-    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [], invalidated: 1 });
+    expect(await reconcileDistillationSources(input)).toMatchObject({ submitted: 0, requestKeys: [], invalidated: 3 });
     store = input.open();
     try {
-      expect(store.listRequests()[0].blockedReason).toBe('source_invalidated');
-      expect(store.getCandidate(candidateId!)).toMatchObject({ state: 'conflict' });
+      for (const key of [sourceKey, replayKey, alternateKey]) expect(store.getRequest(key)?.blockedReason).toBe('source_invalidated');
+      for (const id of candidateIds) expect(store.getCandidate(id)?.state).toBe('conflict');
+      expect(() => store.submitReplay({ ...submit, revision: 'after-withdrawal' })).toThrow('learning_replay_source_unavailable');
     } finally { store.close(); }
   });
 

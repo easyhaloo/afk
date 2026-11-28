@@ -15,6 +15,8 @@
 
 ## 核对行清单与历史用例
 
+本地模型验收入口已退役。下文的本地推理回执及桌面回执仅保留为历史证据。
+
 2026-11-22，从仓库外安装 macOS arm64 CLI 0.2.189，通过 `plugin configure context.retrieval --builtin --file` 导入三份真实 Markdown 摘录。相同输入在 0.2.188 被配置校验拒绝。修复后通过 `plugin invoke context.provider context.retrieval gather --input <文件> --json` 查询工作项关系、PRD 基线和中文桌面设计，分别命中预期首条来源，分数为 2、3、2，正文与输入逐字一致（去除首尾空白）。未命中查询返回 `[]`。同一安装版通过 17 项上下文与记忆回归。归档 SHA-256 为 `889fd413a8fe55f8e73fa7cfb1a15ea01e50d1017bec802c8cd7b643728e6bdf`，语料 SHA-256 为 `7576d829b54de19576d98942c96c0a810890541990c2eede780c12715ac814d7`。
 
 2026-11-21，使用 macOS arm64 的 `0.2.182` 安装包分别从真实 GitHub 和 GitLab 账户执行 `tracker.provider getIssue`。独立的 `gh` 和 `glab` 查询与 AFK 返回的编号、标题、状态和 URL 一致。GitLab 回环服务在写标签前返回一次 HTTP 409。另一个 CLI 进程重试成功，服务端共应用一次写入，读回确认目标标签及原有无关标签。真实服务上的写回恢复仍待验。Cursor 原生只读批处理和 AFK 的本地 Sandbox 入口均返回 `Authentication required`，没有产出原生会话事件。[Tracker 回执](tracker-182.receipt.json)
@@ -87,7 +89,7 @@ macOS arm64 安装版 `0.2.176` 经 Docker Desktop Linux VM 中的 Nginx 向 Ope
 
 同一安装包的本地审计重放通过 3 项。两项双仓门禁用例通过 `observe verify` 校验事件链，用 `observe replay --json` 重放，并和原运行视图核对工单、序列及状态。拒绝用例停在 `failed`，两个远端保持原引用。放行用例读回两个远端公布的提交，重放停在 `awaiting_human` 的 `merge:2`，与末事件一致。第三项独立检查核对失败事件绑定的验证证据。场景使用真实 Git 仓库、回环 Tracker 和脚本 Agent。将 `AFK_E2E_CLI_ENTRY` 指向仓库外安装的 `dist/index.js` 后，可运行 `pnpm exec vitest run tests/e2e/repository-verification-{batch,replay}.test.ts` 复验。同一安装包也复验了开发等待人工合并、冲突修复成功及成功复盘预览三个状态。参见 [W07 三套模板](../w07/README.md)。
 
-macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[复跑脚本](opencode-local-inference.py) · [安装包与结果回执](opencode-local-inference.receipt.json)
+macOS arm64 仓库外安装版 `0.2.174` 通过 Local Sandbox 启动 OpenCode `2.2.7` 独立进程和私有 server，推理由回环 Ollama 的 Qwen3.5-2B 执行。两个批处理用例的会话 ID、最终结构化输出、正常退出和累计用量均与 OpenCode 原生导出一致。读文件用例返回正确答案 `41`，实际读取两次，未满足一次读取的断言。直接作答用例尝试了被拒绝的 `skill` 调用，答案也未满足固定模板。取消用例在生成出现增量后中断，CLI 和 server 在 Sandbox 关闭前退出，旧句柄返回 `404 SANDBOX_MISSING`。严格批处理为 0/2，取消为 1/1。[安装包与结果回执](opencode-local-inference.receipt.json)
 
 macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环 Ollama 的 `qwen3.5:4b`，严格批处理通过 2/2。`--template` 显式禁用模型工具，`--read` 观察到恰好一次成功读取。两项均返回 `41`，原生会话、退出状态及累计用量与 AFK 记录一致。[批处理回执](opencode-batch-176.receipt.json)
 
@@ -107,7 +109,7 @@ macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环
 
 Pi 1.5.2 的 `pi auth check --provider anthropic --no-refresh` 返回 `not_ready`。使用 Anthropic 时可通过 `pi auth login anthropic` 配置。
 
-安装版 0.2.168 经 Local Sandbox、Pi 1.5.2 和临时 Ollama 服务运行 Qwen3.5-2B。Pi 正确回答随机算术题，AFK 会话 ID 与 Pi 原生记录一致，输入 513、输出 80、合计 593 token，工具调用为零。加 `--cancel` 可复验流式输出中的取消。同版本 macOS arm64 CI 发行包复验时，Pi 在关闭 Sandbox 前退出，关闭后原句柄返回 `404 SANDBOX_MISSING`。云端 `wiscode-aiproxy` 的独立请求曾返回 HTTP 402。[复跑脚本](pi-local-inference.py) · [推理回执](pi-local-inference.receipt.json) · [取消回执](pi-local-cancel.receipt.json) · [云端回执](agent-pi.receipt.json)
+安装版 0.2.168 经 Local Sandbox、Pi 1.5.2 和临时 Ollama 服务运行 Qwen3.5-2B。Pi 正确回答随机算术题，AFK 会话 ID 与 Pi 原生记录一致，输入 513、输出 80、合计 593 token，工具调用为零。同版本 macOS arm64 CI 发行包复验时，Pi 在关闭 Sandbox 前退出，关闭后原句柄返回 `404 SANDBOX_MISSING`。云端 `wiscode-aiproxy` 的独立请求曾返回 HTTP 402。[推理回执](pi-local-inference.receipt.json) · [取消回执](pi-local-cancel.receipt.json) · [云端回执](agent-pi.receipt.json)
 
 2026-11-20，安装版 0.2.162 通过 `plugin invoke repository.provider special-git-backend run` 驱动独立 Git 命令后端。首次执行因动作查询失败而清理工作树，裸仓库只有 `main`。同一 runId 重试后，裸仓库的 `review` 指向 `9e3aabe46203670a9a56bf61b08e2ac61ce91e92`，读回 `parcel.txt` 的内容为 `ready for review`。基线 `main` 仍指向 `d7e85a8f44cb3bb06a302f3b8c970e37176adeea`，临时工作树已移除。运行 `python3 tests/qualification/w10/special-git-backend.py <安装版 CLI 可执行文件>` 可在独立临时仓库复验。
 

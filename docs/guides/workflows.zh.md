@@ -51,6 +51,9 @@ Agent 无响应、无法运行验证或缺少必要证据时，应保留失败�
 
 Skills 提供 Agent 侧的需求澄清、研究、PRD 编写、Issue 拆分、实现、测试、QA、交接和知识管理工作流，但不会替代 AFK Runtime 生命周期或 Provider 状态。职责边界见[Skills 指南](skills.zh.md)。
 
+做复盘或从会话中沉淀可复用的 Skill、workflow 或 CLI 改进时，由当前 Agent 调用
+`retro` 并按 [Agent 学习工作流](../architecture/plugins.zh.md#agent-学习工作流)完成。
+
 ## 相关文档
 
 - [全流程执行与 E2E 验证架构](../architecture/full-workflow-e2e-architecture.md)

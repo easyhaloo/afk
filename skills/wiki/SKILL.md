@@ -11,9 +11,16 @@ description: >-
 # Wiki
 
 **Goal:** turn verified task context into current, connected wiki knowledge,
-and retrieve or check that knowledge through the bundled local CLI.
+and retrieve or check that knowledge locally.
 
-## Steps
+When the user's shared wiki protocol defines vault discovery, direct Markdown
+edits, and checking, follow that protocol. Read the vault's `AGENTS.md` before
+editing and use its required checks. For prior sessions, [find and verify the
+transcript](references/session-ingest.md) before applying the vault's write procedure.
+For session findings that call for a Skill, workflow, or CLI change, the current
+Agent uses the existing `retro` skill and prepares that asset in its own repository.
+
+## Default CLI workflow
 
 1. Locate [the CLI](scripts/wiki.py) relative to this skill's own directory
    and run its `locate` operation. It resolves the vault in order: the user's

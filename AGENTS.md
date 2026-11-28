@@ -38,6 +38,10 @@ before touching `apps/desktop/`.
 
 ## Workflow rules
 
+- **Learning and distillation.** For a requested retrospective or reusable
+  improvement from session evidence, the current Agent invokes the existing
+  `retro` skill and follows the [Agent learning workflow](docs/architecture/plugins.md#agent-learning-workflow).
+
 - **Work on a task branch.** Never modify an existing repository's integration
   line in place. Cut `fix/*` or `feat/*` from the integration line, commit
   there, push it, and open a pull request against the integration line. The

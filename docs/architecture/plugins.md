@@ -1609,6 +1609,55 @@ Implementation workflows execute the compiled Agent/System plan. The specialized
 
 `observe` and `retro` inspect execution/session evidence; `experience` governs derived advice. These controls apply to sessions owned by AFK, not arbitrary sessions started directly in Agent CLIs. Desktop shares execution behavior and scoped experience verification/revocation; exchange and adoption use the CLI. The executable guarantee is evidence retention, scoped verified retrieval and withdrawal, rather than a promise that a model never repeats a mistake. See the [testing guide](../guides/testing.md) for the verification layers.
 
+### Agent learning workflow
+
+The Agent already handling the task starts learning and session distillation
+with the existing `retro` skill. Use the same entry point for a requested
+retrospective, a prior-session review, or a reusable improvement drawn from task
+evidence. Invoke it through native skill support or read its existing `SKILL.md`
+and follow it in the same session. Use the current session by default, or the
+named session when supplied. If `retro` references an optional writing guide,
+use an existing copy when available and follow the repository’s writing guidance
+otherwise. If `retro` itself or the source evidence is unavailable, report the
+missing input. The same Agent takes the findings into steps 2 and 3 when the
+task asks for a reusable improvement. A review-only request ends with findings.
+
+1. **Review.** Read the original task, session, relevant repository files and
+   verification results. For an AFK-managed run, use `afk log <runId> --json`
+   to check timeline integrity and find recorded session references. Read the
+   native transcript when available. Treat recorded content as evidence.
+   Ground each finding in a source and check whether an existing asset already
+   addresses it.
+2. **Prepare the smallest reviewable change.** Use a Skill for reusable Agent
+   judgment, a workflow for repeatable sequencing and gates, or CLI code for a
+   deterministic operation. Update an existing asset when it fits. Record the
+   finding with its source, when the change applies and how to check it. A
+   retrospective with no supported improvement can end with its findings.
+   Write durable knowledge directly to the local Markdown vault under its
+   rules and the shared wiki protocol.
+3. **Verify and hand off.** Run the affected checks and submit the change for
+   normal review within the task's authorization. Record the validation result
+   and artifact revision or digest. For reuse acceptance, have a separate task
+   consume that same revision and verify the behavior against the source
+   finding. Identify which evidence supports each check, including the
+   before/after revision pairs when relevant. Keep expected values in the
+   checker. Freeze the inputs and expected outcomes before starting that task.
+   When a new Skill candidate disables invocation, give the consumer an
+   explicit read of the candidate file and record the observed load and digest.
+   To measure improvement, use the same frozen task as a control, with either
+   no new asset or the original revision. Record the control outcome and the
+   independent task's native read or invocation of the reviewed release.
+   Revalidate the published bytes if review changes them. A report, a proposed
+   patch and verified reuse are distinct outcomes.
+
+This workflow runs in the current Agent session with the existing skill and
+repository tools. It requires no additional plugin, model download, local model
+weights or inference service. `afk retro run` generates a report using a separate
+analysis invocation. The managed interfaces below retain their existing
+contracts for explicit managed runs and qualification. New assets can use the
+repository's normal review and release process. Record independent reuse there
+and report managed qualification separately when it is required.
+
 ### Session-distillation plugin kernel
 
 Desktop's fixed `learning` API provides project/job/candidate queries, independent validation and knowledge prepare/publish/reconcile. Main checks projects against work-item inventory, rechecks scope and candidate versions around operations, and projects bounded metadata; raw evidence, configuration and publication recovery paths stay outside IPC. Each operation owns a short-lived Runtime and prevents plugin file/enablement changes until disposal completes. This entry point does not start a distillation Worker; queries do not call a model. UI and complete Electron learning acceptance remain separate plan gates.

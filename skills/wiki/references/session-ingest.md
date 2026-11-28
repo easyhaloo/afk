@@ -52,13 +52,11 @@ defense in depth, not a guarantee that every secret format is recognized.
 3. Distill durable decisions, confirmed facts, validated troubleshooting,
    constraints, and learnings. Separate proposals from adopted decisions;
    preserve disagreements and uncertainty. Do not ingest a verbatim transcript.
-4. Cite session ID plus normalized message indexes and timestamps when present
-   in the existing plan's `evidence` entries.
-5. Search/read related wiki pages, templates, and vault instructions as required
-   by [the existing ingest workflow](ingest.md). Generate the same version-1
-   JSON plan consumed by `wiki.py ingest --plan`.
-6. Preview first. Apply only under the current task's write authorization and
-   verify the report and final lint. Repeated ingest must not duplicate content.
-
-Never write directly from the reader's output. The existing wiki ingest
-pipeline remains the only supported write path.
+4. Cite the session ID, normalized message indexes, and any timestamps. In a
+   CLI plan, put these references in `evidence`.
+5. Search and read related wiki pages, templates, and vault instructions. Apply
+   confirmed findings under the current task's write authorization. Use the
+   shared wiki protocol if it defines direct Markdown writes. For the default
+   CLI workflow, generate the version-1 [ingest plan](ingest.md), preview, and
+   apply it before checking the report and final lint. Repeated ingest must
+   preserve existing content without duplicates.

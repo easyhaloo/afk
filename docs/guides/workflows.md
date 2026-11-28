@@ -53,6 +53,9 @@ If an agent stops responding, verification cannot run, or required evidence is m
 
 Skills provide agent-side workflows for clarification, research, PRD authoring, issue decomposition, implementation, testing, QA, handoff, and knowledge management. They do not replace AFK's runtime lifecycle or provider state. For skill responsibilities and boundaries, see the [Skills Guide](skills.md).
 
+For a retrospective or a reusable change to a Skill, workflow, or CLI, use
+`retro` in the current Agent session. Follow the [Agent learning workflow](../architecture/plugins.md#agent-learning-workflow).
+
 ## Related documents
 
 - [Full Workflow & E2E Architecture](../architecture/full-workflow-e2e-architecture.md)

@@ -75,6 +75,14 @@ authorization with an incomplete handoff. The authorized recovery case has a
 missing third page. The original scored 0/3 and read the fixture in every case.
 The candidate scored 3/3 and read the fixture once, in the normal case.
 
+An isolated Claude Code project also rehearsed installation and rollback using
+`.claude/skills/reconcile-bags/SKILL.md`. A fresh native `/reconcile-bags`
+command expanded the candidate body, read a third handoff once, and passed the
+JSON contract. After replacing the file with the pinned original, another new
+session expanded the original body. The first probe with `--restricted` did
+not list the project skill in either session. Check discovery and native
+expansion before counting a run as an installed-skill observation.
+
 ## Historical receipts
 
 On 2026-11-20 the macOS arm64 archive built from `f52bedb6` (CLI 0.2.165, SHA-256 `b3cd4e77cd7b25b1ab0365ecbf1af971d11546d16a3a374c8a83d7eab3315f71`) passed the 23 installed command entry checks. A second isolated installation verified the checksum and resolved the selected executable to the same version in `release.json`. Two earlier packaging attempts timed out in `tar`. The successful timed run listed entries in under a second and extracted the archive in approximately nine seconds. The checker protocol suite passed 20/20.

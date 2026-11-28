@@ -1632,7 +1632,9 @@ If the skill or source is unavailable, report the missing input.
    normal review within the task's authorization. Record the validation result
    and artifact revision or digest. For reuse acceptance, have a separate task
    consume that same revision and verify the behavior against the source
-   finding. A report, a proposed patch and verified reuse are distinct outcomes.
+   finding. Identify which evidence supports each check, including the
+   before/after revision pairs when relevant. Keep expected values in the
+   checker. A report, a proposed patch and verified reuse are distinct outcomes.
 
 This workflow runs in the current Agent session with the existing skill and
 repository tools. It requires no additional plugin, model download, local model

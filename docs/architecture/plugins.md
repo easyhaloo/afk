@@ -1616,10 +1616,11 @@ with the existing `retro` skill. Use the same entry point for a requested
 retrospective, a prior-session review, or a reusable improvement drawn from task
 evidence. Invoke it through native skill support or read its existing `SKILL.md`
 and follow it in the same session. Use the current session by default, or the
-named session when supplied. If the skill or source is unavailable, report the
-missing input. When `retro`
-ends with suggested improvements, the same Agent uses those findings in steps
-2 and 3. A request to only review or explain ends with the findings.
+named session when supplied. If `retro` references an optional writing guide,
+use an existing copy when available and follow the repository’s writing guidance
+otherwise. If `retro` itself or the source evidence is unavailable, report the
+missing input. The same Agent takes the findings into steps 2 and 3 when the
+task asks for a reusable improvement. A review-only request ends with findings.
 
 1. **Review.** Read the original task, session, relevant repository files and
    verification results. For an AFK-managed run, use `afk log <runId> --json`

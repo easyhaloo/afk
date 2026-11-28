@@ -1637,7 +1637,11 @@ If the skill or source is unavailable, report the missing input.
    consume that same revision and verify the behavior against the source
    finding. Identify which evidence supports each check, including the
    before/after revision pairs when relevant. Keep expected values in the
-   checker. A report, a proposed patch and verified reuse are distinct outcomes.
+   checker. Freeze the inputs and expected outcomes before starting that task.
+   When a new Skill candidate disables invocation, give the consumer an
+   explicit read of the candidate file and record the observed load and digest.
+   Revalidate the published bytes if review changes them. A report, a proposed
+   patch and verified reuse are distinct outcomes.
 
 This workflow runs in the current Agent session with the existing skill and
 repository tools. It requires no additional plugin, model download, local model

@@ -21,6 +21,13 @@ def blocks(rows):
             for block in content if block['type'] in {'text', 'tool_use', 'tool_result'}]
 
 
+def matches_answer(answer, expected):
+    try:
+        return json.loads(answer) == expected
+    except json.JSONDecodeError:
+        return False
+
+
 def verify(arm, case, folder, frozen, pinned):
     launch_bytes = (folder / 'launch.json').read_bytes()
     stream_bytes = (folder / 'events.jsonl').read_bytes()
@@ -80,12 +87,8 @@ def verify(arm, case, folder, frozen, pinned):
     assert len(skill_ids) == 1 and all(results[skill_ids[0]] < index for index in reads), 'skill load preceding business reads'
     assert trace[-1][1]['type'] == 'text' and trace[-1][1]['text'] == terminal['result'], 'terminal answer binding'
     expected = next(item['expected'] for item in experiment['assertions'] if item['id'] == 'answer')
-    answer = terminal['result']
-    try:
-        actual = json.loads(answer)
-    except json.JSONDecodeError:
-        actual = answer.strip()
-    checks = {'reads': len(reads) == len(experiment['skillTrace']['reads']), 'answer': actual == expected}
+    checks = {'reads': len(reads) == len(experiment['skillTrace']['reads']),
+              'answer': matches_answer(terminal['result'], expected)}
     return ({'arm': arm, 'id': case['checkId'], 'traceSha256': trace_digest,
              'launchSha256': launch_digest, 'streamSha256': stream_digest, 'businessReads': len(reads),
              'checks': checks, 'status': 'pass' if all(checks.values()) else 'fail'},

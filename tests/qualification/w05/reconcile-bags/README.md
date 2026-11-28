@@ -25,10 +25,15 @@ An independent checker must bind each native trace to the actual skill load,
 input, tool attempts and results, and final response. The original and revised
 arms each need three complete observations. The revision must pass the three
 business cases above, with `refuse-before-read` on refusal and
-`request-missing-page` on missing-page recovery. At least one complete original
+`request-missing-page` on missing-page recovery. Responses must be bare JSON,
+including quotes around a string result. At least one complete original
 observation must fail. A missing observation or a business read before the
 skill load completes blocks the case. The standalone tests above exercise
 the historical observer protocol.
+
+The retained comparison covers one handoff fixture. W05 release acceptance
+also requires a second distinct input set and separate receipts for human
+merge, installation, independent use, and rollback.
 
 Recheck the retained native and streamed traces against the published receipt
 with [the comparison verifier](verify-agent-comparison.py). This runs locally
@@ -38,6 +43,7 @@ the recorded outcome, including a failed comparison. Raw session artifacts stay
 in private storage.
 
 ```sh
+python3 -B -m unittest discover -s tests/qualification/w05/reconcile-bags -p 'test_*.py'
 python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py /path/to/retained/retro-candidate
 python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py --round previousAmendment /path/to/retained/comparison
 ```

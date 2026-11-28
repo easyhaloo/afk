@@ -51,7 +51,8 @@ the normal case. Its normal and refusal answers included Markdown or prose.
 The current Agent used `retro` to write a candidate with ordered preconditions
 and explicit JSON output for each branch. Six fresh Claude Code 2.1.332
 sessions used the configured HTTPS route and identical tool policy. The receipt
-binds both skill digests and six native trace digests in each round.
+binds both skill digests and the launch record, stream, and native trace
+for each of the six sessions in each round.
 [Candidate fixture](retro-candidate.skill.md) · [Comparison receipt](agent-comparison.receipt.json)
 
 | Case | Original | `retro` candidate |

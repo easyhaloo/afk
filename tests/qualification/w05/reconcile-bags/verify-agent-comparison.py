@@ -7,8 +7,8 @@ from pathlib import Path
 from uuid import UUID
 
 
-def lines(path):
-    return [json.loads(line) for line in path.read_text().splitlines()]
+def lines(data):
+    return [json.loads(line) for line in data.decode('utf-8').splitlines()]
 
 
 def digest(path):
@@ -22,15 +22,21 @@ def blocks(rows):
 
 
 def verify(arm, case, folder, frozen, pinned):
-    launch = json.loads((folder / 'launch.json').read_text())
+    launch_bytes = (folder / 'launch.json').read_bytes()
+    stream_bytes = (folder / 'events.jsonl').read_bytes()
+    launch_digest = sha256(launch_bytes).hexdigest()
+    stream_digest = sha256(stream_bytes).hexdigest()
+    assert launch_digest == pinned['launchSha256'], 'launch digest'
+    assert stream_digest == pinned['streamSha256'], 'stream digest'
+    launch = json.loads(launch_bytes)
     assert (launch['arm'], launch['id'], launch['exit']) == (arm, case['checkId'], 0), 'launch'
     session = launch['session']
     assert str(UUID(session)) == session, 'session ID'
-    stream_path = folder / 'events.jsonl'
     native_path, = folder.glob(f'profile/projects/*/{session}.jsonl')
-    trace_digest = digest(native_path)
+    native_bytes = native_path.read_bytes()
+    trace_digest = sha256(native_bytes).hexdigest()
     assert trace_digest == pinned['traceSha256'], 'native trace digest'
-    stream, native = lines(stream_path), lines(native_path)
+    stream, native = lines(stream_bytes), lines(native_bytes)
     init, = (row for row in stream if row.get('subtype') == 'init')
     terminal, = (row for row in stream if row['type'] == 'result')
     assert {row['session_id'] for row in stream} == {session}, 'stream session'
@@ -80,7 +86,8 @@ def verify(arm, case, folder, frozen, pinned):
     except json.JSONDecodeError:
         actual = answer.strip()
     checks = {'reads': len(reads) == len(experiment['skillTrace']['reads']), 'answer': actual == expected}
-    return ({'arm': arm, 'id': case['checkId'], 'traceSha256': trace_digest, 'businessReads': len(reads),
+    return ({'arm': arm, 'id': case['checkId'], 'traceSha256': trace_digest,
+             'launchSha256': launch_digest, 'streamSha256': stream_digest, 'businessReads': len(reads),
              'checks': checks, 'status': 'pass' if all(checks.values()) else 'fail'},
             (session, init['model'], launch['routeSha256']))
 

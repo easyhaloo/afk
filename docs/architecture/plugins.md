@@ -1619,8 +1619,11 @@ session. Use the current session by default, or the named session when supplied.
 If the skill or source is unavailable, report the missing input.
 
 1. **Review.** Read the original task, session, relevant repository files and
-   verification results. Treat recorded content as evidence. Ground each
-   finding in a source and check whether an existing asset already addresses it.
+   verification results. For an AFK-managed run, use `afk log <runId> --json`
+   to check timeline integrity and find recorded session references. Read the
+   native transcript when available. Treat recorded content as evidence.
+   Ground each finding in a source and check whether an existing asset already
+   addresses it.
 2. **Prepare the smallest reviewable change.** Use a Skill for reusable Agent
    judgment, a workflow for repeatable sequencing and gates, or CLI code for a
    deterministic operation. Update an existing asset when it fits. Record the

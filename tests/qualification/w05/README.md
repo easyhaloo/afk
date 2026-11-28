@@ -30,7 +30,7 @@ For an existing user-invocable skill, a saved `repository-asset` checker can sel
 
 ### Frozen native inputs and tool outcomes
 
-The [reconcile-bags qualification](reconcile-bags/README.md) defines the pending Agent comparison and preserves the offline `proposal-semantic-v1` result of 0/3, its receipts, and the standalone checker tests.
+The [reconcile-bags qualification](reconcile-bags/README.md) records the completed Agent comparison and preserves the offline `proposal-semantic-v1` result of 0/3, its receipts, and the standalone checker tests.
 
 The installed Claude host regression above also exercises the optional `semantic.hostControls` configuration. The operator pins the observer script SHA-256 and a `cases` list of `{checkId, checkDigest, denied, fallback?}` before capture. The recovery case names a distinct inventory resource as its fallback. The grant endorses the resulting `skillObservation.hostTrace`. The public `learning.validate` action checks the trace against the issued grant, the two prepared editions and the pinned resource inventory. A matching run returns `skillHostTraceEvidenceDigest` alongside the load evidence digest.
 

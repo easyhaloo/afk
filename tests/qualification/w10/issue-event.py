@@ -1,5 +1,7 @@
-"""Run with python3 issue-event.py /path/to/installed/afk /path/to/gitea."""
+"""Qualify Gitea Issue Event or Git Push with an installed AFK CLI."""
 
+import argparse
+import base64
 import hashlib
 import hmac
 import http.client
@@ -41,7 +43,7 @@ def wait_for(check):
     raise TimeoutError(check.__name__)
 
 
-def qualify(afk, gitea, root):
+def qualify(afk, gitea, root, *, git_push=False):
     secret = secrets.token_hex(32)
     env = dict(HOME=str(root), TMPDIR=str(root), PATH=os.pathsep.join([str(Path(shutil.which(tool)).parent) for tool in ('node', 'git')] + ['/usr/bin', '/bin']), GIT_CONFIG_NOSYSTEM='1', GIT_TERMINAL_PROMPT='0')
     listener_env = {**env, 'ISSUE_AUTH': secret}
@@ -55,8 +57,19 @@ def qualify(afk, gitea, root):
 
     version = run(afk, '--version')
     effects = root / 'action.txt'
-    configure('verification.test-runner', {'command': [sys.executable, '-c', 'import sys; open(sys.argv[1], "a").write("verified\\n")', str(effects)]})
-    configure('trigger.issue-event', {'triggers': [{'id': 'opened-ready', 'kind': 'webhook', 'payload': {'action': 'opened', 'label': 'ready'}, 'input': {'capability': 'verification.provider', 'provider': 'test-runner', 'operation': 'verify', 'input': {'target': str(root)}}}]}, '--action', 'capability.invoke')
+    bare = root / 'data/gitea-repositories/qualifier/parcel.git'
+    if git_push:
+        provider, trigger_id, match = 'trigger.git-push', 'native-main', {'branch': 'main'}
+        verifier = ('import subprocess, sys; '
+                    'tip = subprocess.check_output(["git", "--git-dir", sys.argv[2], "rev-parse", "refs/heads/main"], text=True); '
+                    'open(sys.argv[1], "a").write(tip)')
+    else:
+        provider, trigger_id, match = 'trigger.issue-event', 'opened-ready', {'action': 'opened', 'label': 'ready'}
+        verifier = 'import sys; open(sys.argv[1], "a").write("verified\\n")'
+    verifier_arguments = [str(effects), str(bare)] if git_push else [str(effects)]
+    configure('verification.test-runner', {'command': [sys.executable, '-c', verifier, *verifier_arguments]})
+    configure(provider, {'triggers': [{'id': trigger_id, 'kind': 'webhook', 'payload': match,
+        'input': {'capability': 'verification.provider', 'provider': 'test-runner', 'operation': 'verify', 'input': {'target': str(root)}}}]}, '--action', 'capability.invoke')
 
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
@@ -108,7 +121,7 @@ ENABLED = false
 
         listener_port, stop_listener = start_listener('listener', 0)
         listener = f'http://127.0.0.1:{listener_port}'
-        endpoint = '/triggers/trigger.issue-event'
+        endpoint = '/triggers/' + provider
         start('gitea', [*service, 'web'], env)
         def ready():
             try:
@@ -120,6 +133,92 @@ ENABLED = false
             status, raw = request(port, method, '/api/v1'+path, json.dumps(data) if data is not None else None, {'Authorization': 'token '+token, 'Content-Type': 'application/json'})
             assert 200 <= status < 300, (method, path, status)
             return json.loads(raw) if raw else None
+
+        if git_push:
+            repo = api('POST', '/user/repos', {'name': 'parcel', 'private': True, 'auto_init': True, 'default_branch': 'main'})
+            project = repo['full_name']
+            assert project == 'qualifier/parcel'
+            route = '/repos/' + project
+            remote = f'{base}/{project}.git'
+            before = api('GET', route + '/branches/main')['commit']['id']
+            auth = base64.b64encode(f'qualifier:{token}'.encode()).decode()
+            git_env = {**env, 'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_COUNT': '1',
+                       'GIT_CONFIG_KEY_0': 'http.extraHeader', 'GIT_CONFIG_VALUE_0': 'Authorization: Basic ' + auth,
+                       'GIT_ALLOW_PROTOCOL': 'http'}
+            work = root / 'work'
+            run('git', 'clone', remote, str(work), environment=git_env)
+            (work / 'parcel.txt').write_text('accepted main tip\n')
+            run('git', '-C', str(work), 'add', 'parcel.txt')
+            run('git', '-C', str(work), '-c', 'user.name=QA', '-c', 'user.email=qa@example.invalid', 'commit', '-m', 'record parcel')
+            after = run('git', '-C', str(work), 'rev-parse', 'HEAD')
+            hook = api('POST', route + '/hooks', {'type': 'gitea', 'active': True, 'events': ['push'],
+                'config': {'url': listener + endpoint, 'content_type': 'json', 'secret': secret}})
+
+            def history():
+                with sqlite3.connect(f'file:{database}?mode=ro', uri=True) as connection:
+                    return connection.execute('SELECT uuid, request_content, response_content FROM hook_task WHERE hook_id=? AND is_delivered=1 ORDER BY id', (hook['id'],)).fetchall()
+
+            def deliveries_at(expected_count):
+                state = json.loads(run(afk, 'plugin', 'deliveries', '--url', listener, '--token-env', 'ISSUE_AUTH', environment=listener_env))['deliveries']
+                if len(state) == expected_count and all(
+                    item['status'] == 'delivered' and item['attempts'] == 1 and item['providerId'] == provider
+                    for item in state
+                ):
+                    return state
+
+            sent = []
+            for index, branch in enumerate(('preview', 'main'), 1):
+                ref = 'refs/heads/' + branch
+                run('git', '-C', str(work), 'push', 'origin', 'HEAD:' + ref, environment=git_env)
+                assert run('git', '--git-dir', str(bare), 'rev-parse', ref) == after
+                def next_delivery():
+                    rows = history()
+                    return rows[-1] if len(rows) == index else None
+                source, req_raw, rsp_raw = wait_for(next_delivery)
+                req = json.loads(req_raw)
+                rsp = json.loads(rsp_raw)
+                assert req['url'] == listener + endpoint and req['http_method'] == 'POST'
+                headers = {name.lower(): value[0] if isinstance(value, list) else value
+                           for name, value in req['headers'].items()}
+                assert 'authorization' not in headers and 'x-gitlab-token' not in headers
+                body = req['body'].encode()
+                payload = json.loads(body)
+                assert headers['x-gitea-delivery'] == headers['x-github-delivery'] == source
+                assert headers['x-gitea-event'] == 'push'
+                signature = 'sha256=' + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+                assert hmac.compare_digest(headers['x-hub-signature-256'], signature)
+                prior_tip = before if branch == 'main' else '0' * len(after)
+                assert (payload['ref'], payload['before'], payload['after']) == (ref, prior_tip, after)
+                assert payload['repository']['id'] == repo['id'] and payload['repository']['full_name'] == project
+                assert rsp['status'] == 202, rsp['status']
+                accepted = json.loads(rsp['body'])
+                assert accepted['duplicate'] is False
+                assert accepted['deliveryId'] in {row['deliveryId'] for row in wait_for(lambda: deliveries_at(index))}
+                action_tips = effects.read_text().splitlines() if effects.exists() else []
+                assert action_tips == ([after] if branch == 'main' else [])
+                sent.append((body, headers, dict(branch=branch, ref=ref, before=prior_tip, after=after,
+                    sourceId=source, bodySha256=hashlib.sha256(body).hexdigest(), accepted=accepted,
+                    actionTips=action_tips)))
+            stop_listener()
+            assert start_listener('restarted', listener_port)[0] == listener_port
+            receipts = []
+            for body, headers, receipt in sent:
+                signed = {name: headers[name] for name in (
+                    'x-hub-signature-256', 'x-github-delivery', 'x-gitea-delivery', 'content-type')}
+                modified_status, _ = request(listener_port, 'POST', endpoint, body + b' ', signed)
+                assert modified_status == 401
+                status, raw = request(listener_port, 'POST', endpoint, body, signed)
+                replayed = json.loads(raw)
+                assert status == 202 and replayed['duplicate']
+                assert replayed['deliveryId'] == receipt['accepted']['deliveryId']
+                receipts.append(dict(receipt, replay=replayed, modifiedBodyStatus=modified_status))
+            deliveries = wait_for(lambda: deliveries_at(2))
+            assert len(history()) == 2 and len({item['sourceId'] for item in receipts}) == 2
+            assert {item['accepted']['deliveryId'] for item in receipts} == {item['deliveryId'] for item in deliveries}
+            action_tips = effects.read_text().splitlines()
+            assert action_tips == [after]
+            return dict(afk=version, gitea=run(gitea, '--version'), repository=project, repositoryId=repo['id'],
+                        events=receipts, queue=deliveries, replayAfterListenerRestart=True, actionTips=action_tips)
 
         repo = api('POST', '/user/repos', {'name': 'parcel', 'private': True})
         project = repo['full_name']
@@ -219,7 +318,13 @@ ENABLED = false
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('afk', type=Path)
+    parser.add_argument('gitea', type=Path)
+    parser.add_argument('--git-push', action='store_true', help='qualify Git Push instead of Issue Event')
+    args = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix='w10-issue-event.') as temporary:
-        result = qualify(*(str(Path(arg).resolve(strict=True)) for arg in sys.argv[1:]), Path(temporary))
+        result = qualify(str(args.afk.resolve(strict=True)), str(args.gitea.resolve(strict=True)),
+                         Path(temporary), git_push=args.git_push)
         print(json.dumps(result, indent=2))

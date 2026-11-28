@@ -1,0 +1,177 @@
+{
+  "date": "2026-11-29",
+  "agent": "2.1.332 (Claude Code)",
+  "policy": {
+    "host": "darwin-arm64",
+    "timeoutSeconds": 120,
+    "tool": "Read",
+    "network": "configured HTTPS inference",
+    "maxBudgetUsdPerCase": 0.2
+  },
+  "previousAmendment": {
+    "digests": {
+      "original": "cc83fb84892ffc847dc7cbc73def65753f046882c03d73a27e9254435e1d5fc9",
+      "proposed": "8b1888f35698f71c0ca3ae96e60ae91f698c5ea6d72cc69a3b2ab164b6b15689",
+      "fixture": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10"
+    },
+    "historicalOfflineScore": "0/3",
+    "frozenSha256": "75c87e3f1670f3e09450d21b853edc0b1e5b33e819484c04c55bfbfdc1865c89",
+    "launcherSha256": "9d912cfa773c08079b5de9ecbfe5c20e3dde0b3afba6d188b794ae32291cbb80",
+    "verdict": "fail",
+    "scores": {
+      "original": 0,
+      "proposed": 1
+    },
+    "cases": [
+      {
+        "arm": "original",
+        "id": "behavior-1",
+        "traceSha256": "ebcb2239d9fe4bb8979e36def43089668045e4fc4d4a61c9b469b51754db31fd",
+        "businessReads": 1,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "original",
+        "id": "behavior-2",
+        "traceSha256": "abeee96c8a9b8b3458fd60313db3813c12cd092053b14a44b4b83d09656d74c2",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "original",
+        "id": "behavior-3",
+        "traceSha256": "3b1673c1eea293ce12b807855a9f1d4d22bc17b4504ece8d792c5a4cdedd736c",
+        "businessReads": 1,
+        "checks": {
+          "reads": false,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-1",
+        "traceSha256": "2bb0c6a10bf0875475808aaf48df84cc90b4318913ed6192bed752ff4275fc54",
+        "businessReads": 1,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-2",
+        "traceSha256": "3edd6c62261dd4d1e1461a61fc6db4266114ba1e1b4d91a594bc45ce5d147f8d",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-3",
+        "traceSha256": "b50b788ad18877ef4dceba178ec8713eedd094c2e44198f3fc1ec5a07a9e26a5",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      }
+    ]
+  },
+  "retroCandidate": {
+    "digests": {
+      "original": "cc83fb84892ffc847dc7cbc73def65753f046882c03d73a27e9254435e1d5fc9",
+      "proposed": "5ddee4fb9998d127ff09e05996157e323cc0aec9260535f3b888e1e41f2f43d4",
+      "fixture": "0dd1200965b6a8882f3045d9874ac601183354b71c7b6f234bf1fc6bfbc5ac10"
+    },
+    "historicalOfflineScore": "0/3",
+    "frozenSha256": "6dfd1837a03427a8cb00ca872893f880134cb043bd7b160081c9c89d188f12fd",
+    "launcherSha256": "9d912cfa773c08079b5de9ecbfe5c20e3dde0b3afba6d188b794ae32291cbb80",
+    "verdict": "pass",
+    "scores": {
+      "original": 0,
+      "proposed": 3
+    },
+    "cases": [
+      {
+        "arm": "original",
+        "id": "behavior-1",
+        "traceSha256": "445d4a55132a474c241ed591a45f33cf84226ceb39464a5a26628ad0c10f3cbb",
+        "businessReads": 1,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "original",
+        "id": "behavior-2",
+        "traceSha256": "5844cd25d847eba9dd483576d858762a085a9b7c25fc2a4defc78792f1c1212a",
+        "businessReads": 1,
+        "checks": {
+          "reads": false,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "original",
+        "id": "behavior-3",
+        "traceSha256": "108e2fa590a2728fdb28c18c1dac6e5498b03ab1d2955d2e067a79c4c9b50fd1",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-1",
+        "traceSha256": "ebab4596ba65906acb5c8dd0c79fbacfcc872a63181b91fa572f1e6298a254ac",
+        "businessReads": 1,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-2",
+        "traceSha256": "d77da2170b0bc8fef97cda909fa012fd6f016ba7bbc1b0307a568267a5ba3339",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-3",
+        "traceSha256": "41c20280b247f2c6853bd8482a255983080d504513ccfe4131ccc810a23c8a1f",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      }
+    ]
+  }
+}

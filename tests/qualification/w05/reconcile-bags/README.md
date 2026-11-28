@@ -2,7 +2,7 @@
 
 **Status.** The retired offline protocol recorded a formal result of 0/3.
 It required Linux arm64, 120 seconds, 256 MiB, one CPU, no network and no swap.
-The Agent comparison described below is pending.
+The current Agent comparison passed with the `retro` candidate.
 
 The historical image owned the observer and the business fixture. The protocol checker verifies the exact native command arguments and expanded skill body on the first Messages request. Each completed backend Read must match the CLI event and the numbered bytes returned on the next request. The final backend text must match both the CLI assistant event and its successful result. The host checks the stdout digest, inventory paths and digests, and independent business assertions. A completed malformed answer is a measured business failure. A missing or inconsistent observation blocks validation.
 
@@ -17,17 +17,36 @@ to prepare a revision. Replay the original and revised skill in fresh sessions
 on the same existing Agent route and tool policy. The route may use its
 configured HTTPS inference. Before replay, pin both skill digests, the three
 unchanged inputs, the handoff fixture, and the Agent version and configuration.
-Expose only the approved fixture through the file tool. Keep the expected answers
-and verdicts outside the Agent input.
+Expose only the skill text and approved fixture through the file tool. Ask the
+Agent to read the skill by itself and wait for its result before starting the
+business task. Keep the expected answers and verdicts outside the Agent input.
 
 An independent checker must bind each native trace to the actual skill load,
 input, tool attempts and results, and final response. The original and revised
 arms each need three complete observations. The revision must pass the three
 business cases above, with `refuse-before-read` on refusal and
 `request-missing-page` on missing-page recovery. At least one complete original
-observation must fail. Record missing observations as blocked and record the
-Agent result separately from the frozen offline result. The standalone tests
-above exercise the historical observer protocol.
+observation must fail. A missing observation or a business read before the
+skill load completes blocks the case. The standalone tests above exercise
+the historical observer protocol.
+
+### Results
+
+On November 29, 2026 the first ordered comparison returned 0/3 for the original
+and 1/3 for the previous amendment. The amendment restricted document reads to
+the normal case. Its normal and refusal answers included Markdown or prose.
+
+The current Agent used `retro` to write a candidate with ordered preconditions
+and explicit JSON output for each branch. Six fresh Claude Code 2.1.332
+sessions used the configured HTTPS route and identical tool policy. The receipt
+binds both skill digests and six native trace digests in each round.
+[Candidate fixture](retro-candidate.skill.md) · [Comparison receipt](agent-comparison.receipt.json)
+
+| Case | Original | `retro` candidate |
+| --- | --- | --- |
+| Normal | 1 document read, answer failed | 1 document read, passed |
+| Refusal | 1 document read, answer failed | 0 document reads, passed |
+| Missing page | 0 document reads, answer failed | 0 document reads, passed |
 
 ## Historical receipts
 

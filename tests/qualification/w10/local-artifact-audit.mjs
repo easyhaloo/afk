@@ -18,7 +18,7 @@ async function qualify(provider) {
   const homeDir = join(workspace, 'home');
   const output = join(workspace, 'out');
   const events = join(workspace, 'events');
-  await mkdir(join(homeDir, '.afk'), { recursive: true });
+  await mkdir(join(homeDir, '.afk'), { recursive: true, mode: 0o700 });
   const env = { ...process.env, HOME: homeDir, AFK_LOG_DIR: join(workspace, 'logs'), GIT_CONFIG_NOSYSTEM: '1' };
   const command = (exe, args) => execFileSync(exe, args, { cwd: workspace, env, encoding: 'utf8' }).trim();
   command('git', ['init', '-q', '-b', 'main']);

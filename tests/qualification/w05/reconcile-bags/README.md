@@ -104,6 +104,31 @@ The pinned original has SHA-256
    distribution commit, digests, case verdicts and native trace references in
    the acceptance receipt. Keep raw traces in private storage.
 
+Use `--installed-frozen` to grade each fixture against the matching retained
+`frozen.json`. Pass each case's frozen `experiment.input` verbatim as the
+argument to `/reconcile-bags`. Save each case under `ordered-<arm>-<checkId>`
+with `launch.json` (`arm`, `id`, `exit`, `session`, `routeSha256`),
+`events.jsonl`, `profile/projects/*/<session>.jsonl`, and archived copies of the
+installed Skill and handoff under `task/`. `arm` is `original` or `proposed`.
+Capture `routeSha256` at launch using the SHA-256 of the configured endpoint's
+hostname followed by its path, excluding credentials and query. Use `--rollback`
+with the archive of a fresh native run of the first case after restoring the
+original. Record the distribution commit and restored file digest alongside
+the checker output.
+
+```sh
+python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py \
+  --installed-frozen /private/first/frozen.json \
+  --rollback /private/first/restored-original /private/first/installed
+python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py \
+  --round secondFixture --installed-frozen /private/second/frozen.json \
+  /private/second/installed
+```
+
+The verifier reports the route digest, model, and evidence hashes. Confirm the
+model and route digest match across both fixture reports. Each command requires
+three candidate passes and at least one measured original failure.
+
 ## Historical receipts
 
 On 2026-11-20 the macOS arm64 archive built from `f52bedb6` (CLI 0.2.165, SHA-256 `b3cd4e77cd7b25b1ab0365ecbf1af971d11546d16a3a374c8a83d7eab3315f71`) passed the 23 installed command entry checks. A second isolated installation verified the checksum and resolved the selected executable to the same version in `release.json`. Two earlier packaging attempts timed out in `tar`. The successful timed run listed entries in under a second and extracted the archive in approximately nine seconds. The checker protocol suite passed 20/20.

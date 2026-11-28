@@ -1,0 +1,108 @@
+{
+  "observedDate": "2026-11-29",
+  "scope": "disposable loopback Gitea instance on macOS arm64",
+  "inputs": {
+    "afk": {
+      "version": "0.2.227",
+      "sourceCommit": "0f29c65ef3a2c87f5785131e6301feb0d3dda27a",
+      "archive": "afk-darwin-arm64.tar.gz",
+      "archiveSha256": "3b74686f4654d5d0894f5e1d624adf608169ee82e02625df52e562118ff868ef"
+    },
+    "gitea": {
+      "version": "28.4.0",
+      "bottle": "arm64_sequoia",
+      "bottleSha256": "03e0bed5292292371875d1a81566fdb507331e7b0377f66479720047bdab5777",
+      "binarySha256": "0a128e7ebc99ec86469764c4c13d79a276348deb5280b70597fa444f7564bc0f"
+    },
+    "fixtureSha256": "90edaa6da381df381661ed70b4b67ee6f760005c3a8e45de0b84e57a29a4561e",
+    "resultSha256": "35122c90d170a000d8b435e7e8623f353027292169846fe84fa31f34c4013105"
+  },
+  "result": {
+    "afk": "0.2.227",
+    "gitea": "gitea version 28.4.0 built with go1.27.4 : bindata, sqlite, sqlite_unlock_notify",
+    "repository": "qualifier/parcel",
+    "repositoryId": 1,
+    "events": [
+      {
+        "branch": "preview",
+        "ref": "refs/heads/preview",
+        "before": "0000000000000000000000000000000000000000",
+        "after": "238dd7017184a01d4f317af5a3e2c0923583f698",
+        "sourceId": "7f99eee3-ece2-4d76-b05f-a362f8628c0c",
+        "bodySha256": "dfb4cc441b1815b318f6889270e9eaf3ba7ea2db61d24009cb078b5dda51cb39",
+        "accepted": {
+          "deliveryId": "48e1b210fe8442d8eaef426d3a36021cd176eb268114a19bc74ee4d8ddef20d1",
+          "providerId": "trigger.git-push",
+          "status": "pending",
+          "attempts": 0,
+          "receivedAt": 1795893792204,
+          "nextAttemptAt": 1795893792204,
+          "duplicate": false
+        },
+        "actionTips": [],
+        "replay": {
+          "deliveryId": "48e1b210fe8442d8eaef426d3a36021cd176eb268114a19bc74ee4d8ddef20d1",
+          "providerId": "trigger.git-push",
+          "status": "delivered",
+          "attempts": 1,
+          "receivedAt": 1795893792204,
+          "nextAttemptAt": 1795893793205,
+          "duplicate": true
+        },
+        "modifiedBodyStatus": 401
+      },
+      {
+        "branch": "main",
+        "ref": "refs/heads/main",
+        "before": "02ff387ce0f784bcf8668a282807baf4610c0004",
+        "after": "238dd7017184a01d4f317af5a3e2c0923583f698",
+        "sourceId": "492dbc60-4990-4572-9ad1-712b766cb817",
+        "bodySha256": "24767e391ebfcfc68a3a040637846877bdd45e710ef2618baf6918e249fb71c8",
+        "accepted": {
+          "deliveryId": "c187f299aa75c1a5e042e8c18a9361a1418c921c46401c537a3cd52e672ab1df",
+          "providerId": "trigger.git-push",
+          "status": "pending",
+          "attempts": 0,
+          "receivedAt": 1795893793217,
+          "nextAttemptAt": 1795893793217,
+          "duplicate": false
+        },
+        "actionTips": [
+          "238dd7017184a01d4f317af5a3e2c0923583f698"
+        ],
+        "replay": {
+          "deliveryId": "c187f299aa75c1a5e042e8c18a9361a1418c921c46401c537a3cd52e672ab1df",
+          "providerId": "trigger.git-push",
+          "status": "delivered",
+          "attempts": 1,
+          "receivedAt": 1795893793217,
+          "nextAttemptAt": 1795893794276,
+          "duplicate": true
+        },
+        "modifiedBodyStatus": 401
+      }
+    ],
+    "queue": [
+      {
+        "deliveryId": "c187f299aa75c1a5e042e8c18a9361a1418c921c46401c537a3cd52e672ab1df",
+        "providerId": "trigger.git-push",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795893793217,
+        "nextAttemptAt": 1795893794276
+      },
+      {
+        "deliveryId": "48e1b210fe8442d8eaef426d3a36021cd176eb268114a19bc74ee4d8ddef20d1",
+        "providerId": "trigger.git-push",
+        "status": "delivered",
+        "attempts": 1,
+        "receivedAt": 1795893792204,
+        "nextAttemptAt": 1795893793205
+      }
+    ],
+    "replayAfterListenerRestart": true,
+    "actionTips": [
+      "238dd7017184a01d4f317af5a3e2c0923583f698"
+    ]
+  }
+}

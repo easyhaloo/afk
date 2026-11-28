@@ -5,8 +5,8 @@
 | 证据等级 | 行数 | 判定依据 |
 | --- | ---: | --- |
 | `account` | 6 | 有真实账户侧操作或用户收件记录，含 GitHub 工单查询和 [Codex 开发与独立 QA](agent-codex.md) |
-| `service` | 20 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[JumpServer](jumpserver.receipt.json)、[Pi 本地推理](pi-local-inference.receipt.json)、[Podman](podman-native.md)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
-| `native` | 14 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
+| `service` | 21 | 有独立工具进程、引擎、接收服务或远端主机的回执，含[JumpServer](jumpserver.receipt.json)、[Pi 本地推理](pi-local-inference.receipt.json)、[Podman](podman-native.md)、[知识库](knowledge-base-meili.md)、[OAuth 客户端授权](oauth/README.md)、[OIDC 令牌交换](oidc-keycloak.md)、[Grafana 报告读回](report-platform.md)、[Kubernetes Exec](kubernetes-exec.receipt.json)及[共享挂载工作区](mounted-workspace.receipt.json) |
+| `native` | 13 | 产品实际驱动本机进程、Git、时钟、事件文件或[隔离钥匙串](system-keychain.md)，可核对效果 |
 | `local` | 9 | 本地实现的文件、规则、映射或检索断言通过 |
 | `partial` | 0 | 有关联的真实操作，仍缺本行目标入口的直接回执 |
 | `fixture` | 6 | 证据止于替身、合成输入或模拟服务，目标集成待验 |
@@ -239,10 +239,20 @@ Git 2.39.5 向自建裸仓推送。验收脚本安装的 `post-receive` 钩子�
 | 新建 `preview`，指向 `def5585` | `delivered`，1 次处理 | 分支过滤后 0 次 |
 | `main` 从 `5928e59` 快进至 `def5585` | `delivered`，1 次处理 | `capability.invoke` 经 `test-runner` 在裸仓读取 `refs/heads/main`，记录 1 次 `def5585` |
 
-`$V/git-push.cTC65J/` 保存 Git 钩子输入与 HTTP 回执 `post-receive.ndjson`、产品 CLI 导出的 `{preview,main}-deliveries.json`、动作记录 `actions.txt`、完整提交号 `verified.json` 和裸仓 `parcel.git`。本轮覆盖本地 Git 接收和产品消费。托管平台原生投递、平台项目身份、跨服务重试及 Issue 生命周期待验。
+`$V/git-push.cTC65J/` 保存 Git 钩子输入与 HTTP 回执 `post-receive.ndjson`、产品 CLI 导出的 `{preview,main}-deliveries.json`、动作记录 `actions.txt`、完整提交号 `verified.json` 和裸仓 `parcel.git`。这份历史证据覆盖本地 Git 接收和产品消费。Gitea 原生投递及平台项目身份见下节。
 
 ```sh
 receipts=$(mktemp -d)
 node tests/qualification/w10/git-push.mjs "$(command -v afk)" "$receipts"
 git --git-dir="$(find "$receipts" -type d -name parcel.git)" show-ref --heads
 ```
+
+## [GP-Gitea] 托管仓库原生签名投递
+
+2026-11-29，macOS arm64 的隔离 AFK 安装版 `0.2.227` 接收回环 Gitea `28.4.0` 生成的两条原生签名 webhook。通过 HTTP Git 分别推送到 `preview` 和 `main`。回环夹具从 Gitea 交付历史核对平台仓库 ID、全名、ref、更新前后提交、交付 UUID 和签名。`preview` 无动作，`main` 触发一次，验证器从 Gitea 裸仓读到新提交。监听器重启后，以原 UUID 重放原字节返回同一回执，修改字节并沿用原签名均返回 401。最终队列两条记录各尝试一次，动作总计一次。安装归档提交与 SHA-256、Gitea bottle 和夹具散列均见[回执](git-push-gitea.receipt.json)。
+
+```sh
+python3 tests/qualification/w10/issue-event.py /path/to/installed/afk /path/to/gitea --git-push
+```
+
+剩余验收覆盖正式分发版、授权目标托管项目，以及平台原生重投生成新 UUID 时的行为。

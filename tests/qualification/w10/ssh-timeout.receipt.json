@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-29",
+  "afk": "0.2.227",
+  "platform": "linux-arm64",
+  "artifactCommit": "0f29c65ef3a2c87f5785131e6301feb0d3dda27a",
+  "archiveSha256": "2f9da4f6952bd7ee3da2b9b03100cece263a59b2c5be3b64317649f1d1bf7628",
+  "cliSha256": "0e93c41b8f53ebb7c3ac5a48fcaa67a715f8378a20f053931b7a5143c748ce4c",
+  "fixtureSha256": "ec735d25d7b75542630676528f31b625b694145ce235516ddc9987791c1bd0a3",
+  "sourceLogSha256": "4323577e2dba0d4fa1748cc14fb871a94a29f834a70949a1c46648162f508a15",
+  "server": "native OpenSSH loopback",
+  "sshdVersion": "OpenSSH_9.6p1 Ubuntu-3ubuntu13.16, OpenSSL 3.0.13 30 Jan 2024",
+  "aliasDiscoveryExit": 0,
+  "successExit": 0,
+  "nonzeroExit": 42,
+  "nonzeroStreams": {
+    "stdout": "output\n",
+    "stderr": "failure\n"
+  },
+  "clientTimeout": {
+    "exit": 1,
+    "errorCode": "unreachable",
+    "remoteStarted": true,
+    "remoteCompleted": true
+  },
+  "remoteDeadline": {
+    "completionMarker": false,
+    "exit": 124,
+    "shellGone": true
+  },
+  "nextInvocationExit": 0,
+  "acceptedPublicKeySessions": 5,
+  "temporaryInstallationRemoved": true
+}

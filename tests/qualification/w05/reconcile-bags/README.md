@@ -1,12 +1,33 @@
 # Frozen reconcile-bags validation
 
-**Status: retired local-model runner.** The formal W05 result remains 0/3. The frozen requirements are Linux arm64, 120 seconds, 256 MiB, one CPU, no network and no swap. The current remote Agent route needs network access. The validation records below describe historical runs.
+**Status.** The retired offline protocol recorded a formal result of 0/3.
+It required Linux arm64, 120 seconds, 256 MiB, one CPU, no network and no swap.
+The Agent comparison described below is pending.
 
 The historical image owned the observer and the business fixture. The protocol checker verifies the exact native command arguments and expanded skill body on the first Messages request. Each completed backend Read must match the CLI event and the numbered bytes returned on the next request. The final backend text must match both the CLI assistant event and its successful result. The host checks the stdout digest, inventory paths and digests, and independent business assertions. A completed malformed answer is a measured business failure. A missing or inconsistent observation blocks validation.
 
 The normal case requires one document read and `{ "missing": ["H-502"], "extra": ["H-863"] }`. The refusal and missing-page cases require zero reads and their respective business responses. For a revision, all proposed cases must pass and at least one matched original skill behavior case must fail with a complete observation. A tie leaves the candidate at its prior version.
 
 Run the standalone protocol tests with `node --test tests/qualification/w05/reconcile-bags/checker.test.mjs`.
+
+## Agent comparison
+
+Use the [Agent learning workflow](../../../../docs/architecture/plugins.md#agent-learning-workflow)
+to prepare a revision. Replay the original and revised skill in fresh sessions
+on the same existing Agent route and tool policy. The route may use its
+configured HTTPS inference. Before replay, pin both skill digests, the three
+unchanged inputs, the handoff fixture, and the Agent version and configuration.
+Expose only the approved fixture through the file tool. Keep the expected answers
+and verdicts outside the Agent input.
+
+An independent checker must bind each native trace to the actual skill load,
+input, tool attempts and results, and final response. The original and revised
+arms each need three complete observations. The revision must pass the three
+business cases above, with `refuse-before-read` on refusal and
+`request-missing-page` on missing-page recovery. At least one complete original
+observation must fail. Record missing observations as blocked and record the
+Agent result separately from the frozen offline result. The standalone tests
+above exercise the historical observer protocol.
 
 ## Historical receipts
 

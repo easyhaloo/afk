@@ -1,5 +1,9 @@
 # Session Distillation and Reusable Assets Implementation Plan
 
+The [Agent learning workflow](../../architecture/plugins.md#agent-learning-workflow)
+is the entry point for task retrospectives and distillation. The managed paths
+and receipts below document separate product qualification.
+
 **2026-11-20 historical control audit.** The four frozen environment and repair ledgers registered only the new edition. The three process revisions belonged to one candidate with a single committed publication. Across the three scenarios, zero of the six old-edition slots could be replayed. The historical experiment retains 12/18 observations. For the next study, freeze independently retrievable old and new releases and the scoring rules before the first consumer run.
 
 **2026-11-20 installed release checks.** CLI 0.2.168 passed 24 recall checks for facts, processes, lessons and tools on fixed local cases. The local OpenCode 2.2.7 prompt adapter passed six skill checks. The two test filters left seven and three other tests unselected, respectively. These 30 checks count toward local recall regression. Production extraction and benefit studies use their own sample counts. The macOS arm64 archive passed ten release checks and an offline 0.2.166 → 0.2.168 upgrade with checksum rejection, configuration preservation and rollback.

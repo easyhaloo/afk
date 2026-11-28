@@ -30,6 +30,18 @@ observation must fail. A missing observation or a business read before the
 skill load completes blocks the case. The standalone tests above exercise
 the historical observer protocol.
 
+Recheck the retained native and streamed traces against the published receipt
+with [the comparison verifier](verify-agent-comparison.py). This runs locally
+with Python's standard library and reads the saved evidence. The JSON output
+contains scores and the verdict. Exit zero means the saved evidence reproduces
+the recorded outcome, including a failed comparison. Raw session artifacts stay
+in private storage.
+
+```sh
+python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py /path/to/retained/retro-candidate
+python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py --round previousAmendment /path/to/retained/comparison
+```
+
 ### Results
 
 On November 29, 2026 the first ordered comparison returned 0/3 for the original

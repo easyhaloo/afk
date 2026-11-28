@@ -12,7 +12,7 @@ node tests/qualification/w05/skill-scope.mjs > scope.json
 node tests/qualification/w05/native-skill.mjs > native.json
 ```
 
-The scope test invokes the registered Codex `UserPromptSubmit` command as a separate process for each case and asserts the complete response. The native test adapts the plan's `native-skill-loading-20261118` probe. Each edition runs in fresh temporary directories with a second discoverable manual skill as a loading control. A loopback model fixture observes argument expansion and tool results. It requests the approved fallback file only after receiving the host's denial for the first file. The receipt records whether the denied bytes ever reached the fixture. Each program exits nonzero on failed checks.
+The scope test invokes the registered Codex `UserPromptSubmit` command as a separate process for each case and asserts the complete response. The native test adapts the plan's `native-skill-loading-20261118` probe. Each edition runs in fresh temporary directories with a second discoverable manual skill as a loading control. A scripted loopback fixture observes argument expansion and tool results. It requests the approved fallback file only after receiving the host's denial for the first file. The receipt records whether the denied bytes ever reached the fixture. Each program exits nonzero on failed checks.
 
 ### Binding native loading to a saved candidate
 
@@ -30,9 +30,9 @@ For an existing user-invocable skill, a saved `repository-asset` checker can sel
 
 ### Frozen native inputs and tool outcomes
 
-For repository-backed read-only skills, the [reconcile-bags qualification](reconcile-bags/README.md) exercises `proposal-semantic-v1` with an independently pinned checker in the managed frozen image. Its receipt records the outcome for the supplied local model environment.
+The [reconcile-bags qualification](reconcile-bags/README.md) preserves historical `proposal-semantic-v1` receipts and standalone checker tests. The local-model runner is retired and the formal W05 result remains 0/3.
 
-The same regression command exercises the optional `semantic.hostControls` configuration. The operator pins the observer script SHA-256 and a `cases` list of `{checkId, checkDigest, denied, fallback?}` before capture. The recovery case names a distinct inventory resource as its fallback. The grant endorses the resulting `skillObservation.hostTrace`. The public `learning.validate` action checks the trace against the issued grant, the two prepared editions and the pinned resource inventory. A matching run returns `skillHostTraceEvidenceDigest` alongside the load evidence digest.
+The installed Claude host regression above also exercises the optional `semantic.hostControls` configuration. The operator pins the observer script SHA-256 and a `cases` list of `{checkId, checkDigest, denied, fallback?}` before capture. The recovery case names a distinct inventory resource as its fallback. The grant endorses the resulting `skillObservation.hostTrace`. The public `learning.validate` action checks the trace against the issued grant, the two prepared editions and the pinned resource inventory. A matching run returns `skillHostTraceEvidenceDigest` alongside the load evidence digest.
 
 The fixed Claude fixture launches eight fresh host processes. Each uses a Seatbelt profile protecting the plugin directory against writes. A separate process tries to open the skill and selected resource files for append under the same profile and verifies it can write to the scratch directory. The observer hashes the staged skill and resource bytes before and after execution. Its snapshot binds those hashes to the observer, binary, grant, case, edition and invocation input. For each edition the loopback observer records two successful reads on distinct inputs, a denied read on `denied`, and an ordered denial followed by a successful fallback read on `fallback`. It checks call IDs, exact paths and successful result bytes, and checks the denied resource contents stayed out of the observed requests.
 

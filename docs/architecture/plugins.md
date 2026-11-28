@@ -1643,6 +1643,9 @@ ends with suggested improvements, the same Agent uses those findings in steps
    checker. Freeze the inputs and expected outcomes before starting that task.
    When a new Skill candidate disables invocation, give the consumer an
    explicit read of the candidate file and record the observed load and digest.
+   To measure improvement, use the same frozen task as a control, with either
+   no new asset or the original revision. Record the control outcome and the
+   independent task's native read or invocation of the reviewed release.
    Revalidate the published bytes if review changes them. A report, a proposed
    patch and verified reuse are distinct outcomes.
 
@@ -1650,7 +1653,9 @@ This workflow runs in the current Agent session with the existing skill and
 repository tools. It requires no additional plugin, model download, local model
 weights or inference service. `afk retro run` generates a report using a separate
 analysis invocation. The managed interfaces below retain their existing
-contracts for explicit managed runs and qualification.
+contracts for explicit managed runs and qualification. New assets can use the
+repository's normal review and release process. Record independent reuse there
+and report managed qualification separately when it is required.
 
 ### Session-distillation plugin kernel
 

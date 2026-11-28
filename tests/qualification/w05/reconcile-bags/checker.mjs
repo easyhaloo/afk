@@ -1,16 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { basename, dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const business = '/business/handoff.json';
-const backend = '/opt/afk/model/messages';
-const run = promisify(execFile);
 
 export function decodeReply(bytes) {
   const stream = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replaceAll('\r\n', '\n');
@@ -136,64 +128,3 @@ export function businessOutput(answer) {
   if (result && typeof result === 'object' && !Array.isArray(result)) return { stdout: JSON.stringify(result), exit: 0, valid: true };
   return { stdout: answer, exit: 2, valid: false };
 }
-
-async function main(artifact, input) {
-  const source = readFileSync(artifact);
-  const markdown = new TextDecoder('utf-8', { fatal: true }).decode(source);
-  const match = /^---\n([^]*?)\n---\n([^]*)$/.exec(markdown);
-  assert.ok(match && match[2].trim() && !/[!`]|\$\{|\$ARGUMENTS/.test(markdown), 'Unsupported executable or templated skill');
-  const name = basename(dirname(artifact));
-  assert.match(name, /^[a-z][a-z0-9-]*$/);
-  const fields = match[1].split('\n');
-  assert.ok(fields.every(line => /^(name|description|allowed-tools|disallowed-tools|recall-scope|afk-recall|user-invocable|disable-model-invocation): [^\n]+$/.test(line)));
-  assert.ok(fields.includes(`name: ${name}`) && fields.includes('allowed-tools: [Read]') && !fields.includes('user-invocable: false'));
-  const directory = `/scratch/plugin/skills/${name}`;
-  mkdirSync(directory, { recursive: true });
-  mkdirSync('/scratch/plugin/.claude-plugin');
-  writeFileSync('/scratch/plugin/.claude-plugin/plugin.json', '{"name":"verified"}');
-  copyFileSync(artifact, join(directory, 'SKILL.md'));
-  const env = { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/scratch', TMPDIR: '/scratch', CLAUDE_CONFIG_DIR: '/scratch/.claude',
-    DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_MAX_RETRIES: '0' };
-  const session = transcript(name, match[2], input, readFileSync(business));
-  let failed = false, busy = false, requests = 0;
-  const proxy = createServer(async (request, response) => {
-    if (!/^\/v1\/messages(?:\?|$)/.test(request.url)) { response.writeHead(404).end(); return; }
-    if (busy) { failed = true; response.destroy(); return; }
-    busy = true;
-    try {
-      assert.ok(!failed && request.method === 'POST' && ++requests <= 17);
-      const chunks = [];
-      let size = 0;
-      for await (const chunk of request) { assert.ok((size += chunk.length) <= 1024 * 1024); chunks.push(chunk); }
-      const bytes = Buffer.concat(chunks);
-      session.request(JSON.parse(bytes));
-      const inference = run(backend, [], { cwd: '/scratch', env, encoding: 'buffer', maxBuffer: 256 * 1024 });
-      inference.child.stdin.on('error', () => {});
-      inference.child.stdin.end(bytes);
-      const { stdout } = await inference;
-      session.reply(stdout);
-      response.writeHead(200, { 'content-type': 'text/event-stream' }).end(stdout);
-    } catch { failed = true; response.destroy(); }
-    finally { busy = false; }
-  });
-  try {
-    assert.equal(realpathSync(backend), backend);
-    await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
-    const settings = { disableAllHooks: true, enabledPlugins: {}, permissions: { allow: ['Read(//business/handoff.json)'] } };
-    const { stdout } = await run('/usr/local/bin/claude', ['--bare', '--restricted', '--print', '--verbose', '--output-format', 'stream-json',
-      '--no-session-persistence', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--plugin-dir', '/scratch/plugin',
-      '--tools', 'Read', '--permission-mode', 'dontAsk', '--settings', JSON.stringify(settings), '--append-system-prompt',
-      'Return only the business result as JSON: an object for a reconciliation or a string for a refusal or information request.',
-      '--', `/verified:${name} ${input}`], { cwd: '/business', env: { ...env, ANTHROPIC_BASE_URL: `http://127.0.0.1:${proxy.address().port}`,
-        ANTHROPIC_API_KEY: 'isolated-loopback' }, maxBuffer: 1024 * 1024 });
-    assert.ok(!failed && !busy);
-    const { answer, calls, inputDigest } = session.finish(stdout.trim().split('\n').map(line => JSON.parse(line)));
-    const businessResult = businessOutput(answer);
-    process.stdout.write(businessResult.stdout);
-    writeFileSync(3, JSON.stringify({ protocol: 'skill-trace-v1', completed: true, inputDigest, loaded: { path: artifact, digest: sha(source) },
-      outputDigest: sha(businessResult.stdout), businessValid: businessResult.valid, calls }));
-    process.exitCode = businessResult.exit;
-  } finally { proxy.closeAllConnections(); proxy.close(); }
-}
-
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) await main(...process.argv.slice(2));

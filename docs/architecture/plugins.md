@@ -1611,12 +1611,13 @@ Implementation workflows execute the compiled Agent/System plan. The specialized
 
 ### Agent learning workflow
 
-The Agent already handling the task owns learning and session distillation.
-Use the existing `retro` skill for a requested retrospective, a prior-session
-review, or a reusable improvement drawn from task evidence. Invoke it through
-native skill support or read its existing `SKILL.md` and follow it in the same
-session. Use the current session by default, or the named session when supplied.
-If the skill or source is unavailable, report the missing input. When `retro`
+The Agent already handling the task starts learning and session distillation
+with the existing `retro` skill. Use the same entry point for a requested
+retrospective, a prior-session review, or a reusable improvement drawn from task
+evidence. Invoke it through native skill support or read its existing `SKILL.md`
+and follow it in the same session. Use the current session by default, or the
+named session when supplied. If the skill or source is unavailable, report the
+missing input. When `retro`
 ends with suggested improvements, the same Agent uses those findings in steps
 2 and 3. A request to only review or explain ends with the findings.
 

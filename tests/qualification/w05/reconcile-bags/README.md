@@ -31,10 +31,6 @@ observation must fail. A missing observation or a business read before the
 skill load completes blocks the case. The standalone tests above exercise
 the historical observer protocol.
 
-The retained comparisons cover two distinct handoff fixtures. W05 release
-acceptance still requires receipts for human merge, installation, independent
-use, and rollback.
-
 Recheck the retained native and streamed traces against the published receipt
 with [the comparison verifier](verify-agent-comparison.py). This runs locally
 with Python's standard library and reads the saved evidence. The JSON output
@@ -82,6 +78,31 @@ JSON contract. After replacing the file with the pinned original, another new
 session expanded the original body. The first probe with `--restricted` did
 not list the project skill in either session. Check discovery and native
 expansion before counting a run as an installed-skill observation.
+
+## Acceptance after merge
+
+W05 distributes the fixture as a project Skill. Its candidate was recorded in
+commit `50a860f6de91fc4b616f1e83d52d72afe7545403` with SHA-256
+`5ddee4fb9998d127ff09e05996157e323cc0aec9260535f3b888e1e41f2f43d4`.
+The pinned original has SHA-256
+`cc83fb84892ffc847dc7cbc73def65753f046882c03d73a27e9254435e1d5fc9`.
+
+1. Record the human merge and the commit selected for distribution. Extract
+   `tests/qualification/w05/reconcile-bags/retro-candidate.skill.md` from that
+   commit (`git show <commit>:<path>`). Verify the digest against the reviewed
+   candidate and re-freeze the comparison if the distributed bytes changed.
+2. In an isolated project, a separate acceptance task installs each version in
+   turn at `.claude/skills/reconcile-bags/SKILL.md`, first the pinned original
+   and then the distributed candidate. For each version, record the installed
+   digest and run the three frozen cases for both handoff fixtures through
+   native `/reconcile-bags` in fresh sessions on the same Agent route and tool
+   policy. Verify host discovery, exact expansion, business reads and final
+   JSON from native evidence against the independent checker. For each fixture,
+   require all three candidate passes and at least one complete original failure.
+3. Restore the pinned original bytes and verify the on-disk digest. In a fresh
+   session, confirm `/reconcile-bags` expands the restored original. Retain the
+   distribution commit, digests, case verdicts and native trace references in
+   the acceptance receipt. Keep raw traces in private storage.
 
 ## Historical receipts
 

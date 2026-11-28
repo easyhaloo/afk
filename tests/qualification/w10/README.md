@@ -95,6 +95,8 @@ macOS arm64 仓库外安装版 `0.2.176` 使用 OpenCode `2.2.7` 与隔离回环
 
 安装版 0.2.170 在 macOS arm64 上驱动原生 Copilot CLI 和本地 Ollama。首次在 90 秒内未观察到取消前的文本增量。第二次回答 `16 + 22 = 38`，原生会话、输入 13,326 和输出 49 token 均与 AFK 匹配。下一段生成出现文本增量后，AFK 中断执行，进程在 Sandbox 关闭前退出。账号托管推理及完整工单待验。[两版安装包回执](copilot-local-inference.receipt.json)
 
+Linux arm64 的 `0.2.227` CI 安装版通过真实回环 OpenSSH 验证主机发现、正常输出及退出 `42` 的 stdout 和 stderr。客户端 `--timeout 1s` 返回 `unreachable` 后，远端命令仍写出了完成标记。需要限制远端执行时，在目标主机使用其执行期限工具，并独立观察进程和完成标记。此次夹具使用 GNU `timeout`，返回 `124`，远端 shell 已退出且完成标记未出现。下一次调用成功。[SSH 验收回执](ssh-timeout.receipt.json)
+
 仓库外安装的 0.2.169 复验了两种 `jms` 的发现结果。SSH 型客户端列出 16 个资产，安装版 `afk host exec --provider jumpserver` 在唯一匹配的 Wiki 资产上运行 `echo`，返回本次随机标记及退出码 0。OpenAPI 型客户端的资产发现返回退出码 1。[安装版回执](jumpserver.receipt.json)
 
 2026-11-20，安装版 0.2.168 通过 `afk host ls --provider jumpserver --json` 列出 16 个资产，各记录均含别名且 provider 为 `jumpserver`。本次仅对该进程调整 `PATH`，选择支持 `config list` 和 `ls` 的 SSH 型 `jms` 0.2.0。默认 `PATH` 中优先选中的 OpenAPI 型 `jms` 0.1.8 拒绝 `config` 命令。遇到该情况，0.2.168 曾返回成功的空列表，0.2.169 返回退出码 1 并提示所需的 CLI 命令。

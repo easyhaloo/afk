@@ -18,7 +18,7 @@ const digest = (value: unknown) => bytesDigest(canonicalLearningJson(value));
 const cleanups: Array<() => void> = [];
 afterEach(() => { vi.restoreAllMocks(); cleanups.splice(0).reverse().forEach(cleanup => cleanup()); });
 
-async function fixture(kind: 'fact' | 'process' = 'fact', configurationVersion: 1 | 2 = 1, managed = false, sessionHome?: string) {
+async function fixture(kind: 'fact' | 'process' = 'fact', configurationVersion: 1 | 2 = 1, managed = false, sessionHome?: string, replay = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'knowledge-publication-contract-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, 'ledger.sqlite');
@@ -54,7 +54,8 @@ async function fixture(kind: 'fact' | 'process' = 'fact', configurationVersion: 
   const source = managed ? store.commitScan({ scope, runId: 'source-run', analyzerVersion: 'local-contract', sourceRoot: events.root,
     expectedCursor: null, cursor: { sequence: history.length, head: history.at(-1).integrity.hash }, requests: [submission] }, [pack])[0]!
     : store.submitRequest(submission, pack);
-  const candidateId = store.completeRequest(source.key, { version: 1, candidates: [proposal], warnings: [] }).candidateIds[0]!;
+  const job = replay ? store.submitReplay({ scope, requestKey: source.key, revision: 'v2' }) : source;
+  const candidateId = store.completeRequest(job.key, { version: 1, candidates: [proposal], warnings: [] }).candidateIds[0]!;
   const original = store.getCandidate(candidateId)!;
   const vault = join(root, 'vault');
   mkdirSync(vault);
@@ -151,6 +152,24 @@ describe('fact/process publication guard local contract with synthetic receipts'
       .toThrow('knowledge_publication_source_unavailable');
     expect(current.store.getCandidate(current.candidate.id)).toEqual(current.candidate);
     expect(current.store.getValidation(current.candidate.id)).toEqual(current.receipt);
+  });
+
+  it.each([false, true])('rechecks frozen replay evidence for publication with managed source %s', async managed => {
+    const current = await fixture('fact', 1, managed, undefined, true);
+    expect(current.candidate.requestKey).not.toBe(current.source.key);
+    expect(current.candidate.evidenceDigest).toBe(current.source.request.evidenceDigest);
+    if (managed) {
+      Reflect.deleteProperty(current.checker, 'evidence');
+      current.persistConfig();
+      current.refreshBindings();
+    }
+    expect(() => assertCurrentKnowledgePublication(current.input)).not.toThrow();
+    current.publish();
+    expect(() => assertCurrentKnowledgePublication(current.input)).not.toThrow();
+    writeFileSync(join(current.root, 'audit', `${Buffer.from('source-run').toString('base64url')}.jsonl`), 'changed\n');
+    expect(() => assertCurrentKnowledgePublication(current.input)).toThrow('knowledge_publication_source_unavailable');
+    expect(current.store.invalidateRequestSource(current.source.key)).toBe(true);
+    expect(current.store.getCandidate(current.candidate.id)?.state).toBe('conflict');
   });
 
   it('requires the requested checker to match the current process validation receipt', async () => {

@@ -120,6 +120,39 @@ function learningFixture(composition: ExperienceCommandComposition = {}) {
   };
 }
 
+describe('experience replay', () => {
+  const sourceRequestKey = 'a'.repeat(64);
+  const receipt = { sourceRequestKey, scope, jobId: 'b'.repeat(64), evidenceDigest: 'd'.repeat(64) };
+  const args = ['replay', sourceRequestKey, '--scope', scope, '--revision', 'fact-versions-v2', '--json'];
+
+  it('dispatches the scoped replay and prints only the bound receipt', async () => {
+    const dispatchSystemAction = vi.fn().mockResolvedValue({ ...receipt, internalEvidence: ['private'] });
+    const test = learningFixture({ pluginRuntime: { dispatchSystemAction } as unknown as ExperienceCommandComposition['pluginRuntime'] });
+    await test.parse(...args);
+    expect(dispatchSystemAction).toHaveBeenCalledOnce();
+    expect(dispatchSystemAction).toHaveBeenCalledWith('learning.replay', { scope, requestKey: sourceRequestKey, revision: 'fact-versions-v2' });
+    expect(JSON.parse(test.printed())).toEqual(receipt);
+  });
+
+  it.each([[1, 'A'.repeat(64)], [3, 'unscoped'], [5, '../revision']] as const)('rejects invalid argument at %i before dispatch', async (index, value) => {
+    const dispatchSystemAction = vi.fn();
+    const test = learningFixture({ pluginRuntime: { dispatchSystemAction } as unknown as ExperienceCommandComposition['pluginRuntime'] });
+    const rejected = [...args];
+    rejected[index] = value;
+    await expect(test.parse(...rejected)).rejects.toMatchObject({ code: 'commander.invalidArgument' });
+    expect(dispatchSystemAction).not.toHaveBeenCalled();
+    expect(test.printed()).toBe('');
+  });
+
+  it.each([{ jobId: sourceRequestKey }, { sourceRequestKey: receipt.jobId }, { scope: 'github:other/project' }, { evidenceDigest: 'invalid' }])(
+    'rejects an unbound receipt %j without printing it', async override => {
+      const dispatchSystemAction = vi.fn().mockResolvedValue({ ...receipt, ...override });
+      const test = learningFixture({ pluginRuntime: { dispatchSystemAction } as unknown as ExperienceCommandComposition['pluginRuntime'] });
+      await expect(test.parse(...args)).rejects.toThrow('Learning replay failed');
+      expect(test.printed()).toBe('');
+    });
+});
+
 describe('execution review', () => {
   const reviewOutput = { scope, runId: 'source-run', requestKey: 'a'.repeat(64),
     processing: { requestKey: 'a'.repeat(64), outputDigest: 'd'.repeat(64), candidateIds: ['b'.repeat(64)], warnings: [] },

@@ -44,11 +44,7 @@ function contains(root: string, path: string): boolean {
 }
 
 function withdraw(store: CandidateStore, requests: readonly StoredDistillationRequest[]): number {
-  let invalidated = 0;
-  for (const entry of requests) {
-    if (store.invalidateRequestSource(entry.key)) invalidated += 1;
-  }
-  return invalidated;
+  return store.invalidateRequestSources(requests.map(entry => entry.key));
 }
 
 export async function reconcileDistillationSources(input: ReconcileDistillationOptions): Promise<DistillationReconciliation> {
@@ -176,7 +172,8 @@ export async function reconcileDistillationSources(input: ReconcileDistillationO
             ? 'merged' : 'ready';
           const epoch = failure ? `failure:${terminal!.sequence}:failed` : `qa:${qa!.sequence}:${phase}`;
           const sourceId = `run:${hash(runId)}:${epoch}:sessions:${signature}`;
-          const matching = prior.filter(entry => entry.request.analyzerVersion === analyzerVersion && entry.request.sourceId === sourceId);
+          const matching = prior.filter(entry => !entry.request.replay
+            && entry.request.analyzerVersion === analyzerVersion && entry.request.sourceId === sourceId);
           const generic = matching.find(entry => entry.request.candidateKind === undefined);
           const { candidateKind } = input;
           // Keep legacy proposals under their existing validation and revalidation rules.

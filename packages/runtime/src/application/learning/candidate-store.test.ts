@@ -525,6 +525,23 @@ describe('private learning ledger', () => {
     expect(open().getEvidencePack(pack.digest)).toEqual(pack);
   });
 
+  it.each(['missing', 'invalid'] as const)('rejects replay with a %s frozen snapshot', async defect => {
+    const path = join(root, 'session.txt');
+    writeFileSync(path, 'Review required.');
+    const pack = await buildEvidencePack({ sources: [{ id: 'session-1', kind: 'journal', path, allowedRoot: root, format: 'text' }] });
+    const store = open();
+    const saved = store.submitRequest({ request: { ...request, evidenceDigest: pack.digest }, evidence: pack.entries.map(entry => entry.ref) },
+      defect === 'missing' ? undefined : pack);
+    if (defect === 'invalid') {
+      const database = new sqlite.DatabaseSync(file);
+      try { database.prepare("UPDATE learning_ledger SET payload = '{}' WHERE kind = 'snapshot' AND key = ?").run(pack.digest); }
+      finally { database.close(); }
+    }
+    expect(() => store.submitReplay({ scope: request.scope, requestKey: saved.key, revision: 'v2' }))
+      .toThrow('learning_replay_source_unavailable');
+    expect(store.listRequests()).toEqual([saved]);
+  });
+
   it('counts pending snapshot bytes and rejects unrelated evidence before committing', async () => {
     const path = join(root, 'large-session.txt');
     writeFileSync(path, 'Review. '.repeat(1000));

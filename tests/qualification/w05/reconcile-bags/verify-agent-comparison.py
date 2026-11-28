@@ -95,10 +95,17 @@ def verify(arm, case, folder, frozen, pinned):
             (session, init['model'], launch['routeSha256']))
 
 
+ROUND_FIXTURES = {
+    'previousAmendment': 'handoff.json',
+    'retroCandidate': 'handoff.json',
+    'secondFixture': 'handoff-second.json',
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('evidence', type=Path, help='retained ordered comparison directory')
-    parser.add_argument('--round', choices=['retroCandidate', 'previousAmendment'], default='retroCandidate')
+    parser.add_argument('--round', choices=ROUND_FIXTURES, default='retroCandidate')
     args = parser.parse_args()
     if not __debug__:
         parser.exit(2, 'Run the verifier with Python assertions enabled.\n')
@@ -114,8 +121,8 @@ def main():
         frozen = json.loads(frozen_path.read_text())
         assert frozen['claude'] == receipt['agent'] and frozen['policy'] == receipt['policy'], 'frozen policy'
         assert frozen['digests'] == pinned['digests'], 'frozen artifacts'
-        assert digest(reference / 'handoff.json') == pinned['digests']['fixture'], 'repository fixture digest'
-        if args.round == 'retroCandidate':
+        assert digest(reference / ROUND_FIXTURES[args.round]) == pinned['digests']['fixture'], 'repository fixture digest'
+        if args.round != 'previousAmendment':
             assert digest(reference / 'retro-candidate.skill.md') == pinned['digests']['proposed'], 'repository skill digest'
         arms = ('original', 'proposed')
         cases = [(arm, case) for arm in arms for case in frozen['cases']]

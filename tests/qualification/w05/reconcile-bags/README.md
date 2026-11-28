@@ -31,9 +31,9 @@ observation must fail. A missing observation or a business read before the
 skill load completes blocks the case. The standalone tests above exercise
 the historical observer protocol.
 
-The retained comparison covers one handoff fixture. W05 release acceptance
-also requires a second distinct input set and separate receipts for human
-merge, installation, independent use, and rollback.
+The retained comparisons cover two distinct handoff fixtures. W05 release
+acceptance still requires receipts for human merge, installation, independent
+use, and rollback.
 
 Recheck the retained native and streamed traces against the published receipt
 with [the comparison verifier](verify-agent-comparison.py). This runs locally
@@ -46,6 +46,7 @@ in private storage.
 python3 -B -m unittest discover -s tests/qualification/w05/reconcile-bags -p 'test_*.py'
 python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py /path/to/retained/retro-candidate
 python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py --round previousAmendment /path/to/retained/comparison
+python3 tests/qualification/w05/reconcile-bags/verify-agent-comparison.py --round secondFixture /path/to/retained/second-comparison
 ```
 
 ### Results
@@ -66,6 +67,13 @@ for each of the six sessions in each round.
 | Normal | 1 document read, answer failed | 1 document read, passed |
 | Refusal | 1 document read, answer failed | 0 document reads, passed |
 | Missing page | 0 document reads, answer failed | 0 document reads, passed |
+
+The [second fixture](handoff-second.json) uses the same original and candidate
+bytes and six fresh sessions. The normal case requires the fixture to determine
+an empty missing set and one extra bag. The refusal case combines missing
+authorization with an incomplete handoff. The authorized recovery case has a
+missing third page. The original scored 0/3 and read the fixture in every case.
+The candidate scored 3/3 and read the fixture once, in the normal case.
 
 ## Historical receipts
 

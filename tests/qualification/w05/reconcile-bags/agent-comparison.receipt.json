@@ -197,5 +197,100 @@
         "status": "pass"
       }
     ]
+  },
+  "secondFixture": {
+    "digests": {
+      "original": "cc83fb84892ffc847dc7cbc73def65753f046882c03d73a27e9254435e1d5fc9",
+      "proposed": "5ddee4fb9998d127ff09e05996157e323cc0aec9260535f3b888e1e41f2f43d4",
+      "fixture": "9801dc5ad1acf0bda4ab25a7bcb044abfe80a09f5dd7d1d8f471e883568eac08"
+    },
+    "historicalOfflineScore": "0/3",
+    "frozenSha256": "ed8089a495955975940f3128a0950cf9a62ae263fde24567f8d075f467973f6a",
+    "launcherSha256": "9d912cfa773c08079b5de9ecbfe5c20e3dde0b3afba6d188b794ae32291cbb80",
+    "verdict": "pass",
+    "scores": {
+      "original": 0,
+      "proposed": 3
+    },
+    "cases": [
+      {
+        "arm": "original",
+        "id": "behavior-1",
+        "traceSha256": "c0679bbe66e0c88025ad82cb6c1c477551dd85e34ca3b54b6bf16e79a7cac121",
+        "launchSha256": "8e413a54f04dfbf4bd3b9b578f38132cdda7dbf9c3d3d1be27279a4a327b3b54",
+        "streamSha256": "894578c3228d09f4334ae513e82cb39be67339906afb5eb9e124e8cea3cad8b2",
+        "businessReads": 1,
+        "checks": {
+          "reads": true,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "original",
+        "id": "behavior-2",
+        "traceSha256": "77f98ccae1420f5767f9d7fc076d3305010d4a39e518a83c8ae992c5699890e7",
+        "launchSha256": "0e1002252db618c093ac9c2294708ac77f6b8d93bf0ab38c73bfcbb2de71927b",
+        "streamSha256": "f9192ad550d114eec104f701b4eb0ce4240de6ed15adb6750c289d12d1af368b",
+        "businessReads": 1,
+        "checks": {
+          "reads": false,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "original",
+        "id": "behavior-3",
+        "traceSha256": "ffcd8945c5522135caa37bf5c191b0f4fd785e34844d189cc4f7951785da681f",
+        "launchSha256": "8c58176334f9ef5359b00652b16283dd9847477529cb5cf63810629047451d6d",
+        "streamSha256": "f7d99f0fa644b442b37aec514812186877001d5d3abdfd51d7b2d04e23b44234",
+        "businessReads": 1,
+        "checks": {
+          "reads": false,
+          "answer": false
+        },
+        "status": "fail"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-1",
+        "traceSha256": "45813e51c08be15c363a472733bc3623fd80aa6481a123e5097fd9609068287d",
+        "launchSha256": "ad227aa27b25ff76e21dd539f8e4dc3955c47f9fb1de35fd7493900426383e1e",
+        "streamSha256": "a10d825fb07519c2ed5c8c396ce11c827c6cd767994243ac63d950668d620f0d",
+        "businessReads": 1,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-2",
+        "traceSha256": "ecafd81fbf07c36c343aa05e7a6f19b5efedb4d27cfc5f8fc56935e812bfc2a3",
+        "launchSha256": "6dc4a1418ef58713ab6259e96ee7919ed5c0bd979aed00906703745e7e440a43",
+        "streamSha256": "d0de774189bb5bc2cef02075a42b70a870b99e46d0d01ec558696bff2df84288",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      },
+      {
+        "arm": "proposed",
+        "id": "behavior-3",
+        "traceSha256": "a9eb382fd75b2ba6c44e6d1b7dac24a131200181b9eeda20d146b421899af368",
+        "launchSha256": "a932e7b129c4de3b5b55568cce87d19b55e15ec1eeba2b787fa8417841e59fc4",
+        "streamSha256": "902c95f0eba7e47facf2c347e65985befcd387fd15f01a05791523c714ecb042",
+        "businessReads": 0,
+        "checks": {
+          "reads": true,
+          "answer": true
+        },
+        "status": "pass"
+      }
+    ]
   }
 }

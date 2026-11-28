@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
-export async function qualify(sdk, cli, scratch) {
+export async function qualify(sdk, cli, scratch, expectedVersion) {
   const run = (...args) => execFileSync(cli, args, { cwd: scratch, encoding: 'utf8', timeout: 15000 }).trim();
   const version = run('--version');
-  assert.equal(version, '0.2.147');
+  assert.equal(version, expectedVersion);
   const { HOME: homeDir, W10_DB: dbPath } = process.env;
   const project = 'github:w10/parcel';
   const events = join(scratch, 'events');
@@ -44,7 +44,8 @@ export async function qualify(sdk, cli, scratch) {
     assert.equal(effect.data.outcome, 'succeeded');
     const summary = JSON.parse(effect.data.summary);
     const [ref] = source.evidence;
-    const local = await (await sdk.createLocalEncryptedEvidenceStore(homeDir)).get(ref);
+    const store = await sdk.createLocalEncryptedEvidenceStore(homeDir);
+    const local = await store.get(ref);
     const snapshot = () => ({ records: reader.prepare('SELECT * FROM records ORDER BY id').all(),
       calls: reader.prepare('SELECT * FROM calls ORDER BY rowid').all() });
     const before = snapshot();
@@ -69,10 +70,48 @@ export async function qualify(sdk, cli, scratch) {
     assert.equal(denied.length, 3);
     assert.equal(denied[2].evidence?.length ?? 0, 0);
     assert.deepEqual(snapshot(), before);
+
+    const corruptBytes = Buffer.from('w10-corrupted');
+    const mirrorRun = async (runId, expectedOutcome) => {
+      const [, , event, mirror, ...extra] = await record(runId, `${project}#2`);
+      assert.equal(extra.length, 0);
+      assert.equal(mirror.causationId, event.id);
+      assert.equal(mirror.data.effectKind, 'evidence.mirror');
+      assert.equal(mirror.data.outcome, expectedOutcome);
+      const [sourceRef] = event.evidence;
+      const sourceBytes = Buffer.from(await store.get(sourceRef));
+      const { recordId, localSha256, sha256, reason, sourceEventId } = JSON.parse(mirror.data.summary);
+      assert.equal(sourceEventId, event.id);
+      assert.equal(JSON.parse(sourceBytes).sourceEventId, event.id);
+      assert.equal(hash(sourceBytes), sourceRef.sha256);
+      assert.equal(localSha256, sourceRef.sha256);
+      assert.equal(sha256, sourceRef.sha256);
+      const { bytes } = reader.prepare('SELECT bytes FROM records WHERE id = ?').get(recordId);
+      const calls = reader.prepare('SELECT operation, receivedBytes FROM calls WHERE id = ? ORDER BY rowid').all(recordId);
+      assert.deepEqual(calls.map(call => [call.operation, call.receivedBytes]), [['put', sourceBytes.length], ['get', 0]]);
+      return {
+        bytes: Buffer.from(bytes), sourceBytes, sourceRef,
+        receipt: { recordId, sourceEventId, reason, outcome: mirror.data.outcome, localSha256, backendSha256: hash(bytes) },
+      };
+    };
+    execFileSync('sqlite3', [dbPath, `CREATE TRIGGER corrupt_readback AFTER INSERT ON records BEGIN
+      UPDATE records SET bytes = X'${corruptBytes.toString('hex')}' WHERE id = NEW.id;
+    END;`]);
+    const mismatch = await mirrorRun('w10-mismatch', 'failed');
+    assert.equal(mismatch.receipt.reason, 'provider_failed');
+    assert.deepEqual(mismatch.bytes, corruptBytes);
+    assert.notDeepEqual(mismatch.sourceBytes, mismatch.bytes);
+    execFileSync('sqlite3', [dbPath, 'DROP TRIGGER corrupt_readback;']);
+    const recovery = await mirrorRun('w10-recovered', 'succeeded');
+    assert.deepEqual(recovery.bytes, recovery.sourceBytes);
+    assert.deepEqual(Buffer.from(await store.get(mismatch.sourceRef)), mismatch.sourceBytes);
+    assert.deepEqual(Buffer.from(await store.get(ref)), Buffer.from(local));
+
     const receipt = { version, cli, cliSha256: hash(readFileSync(cli)), sqliteVersion, node: process.version,
       project, runId: source.context.runId, sourceEventId: source.id, recordId: row.id,
       backendBytes: row.bytes.length, backendSha256: digest, localSha256: ref.sha256, mirror: effect.data.outcome,
-      calls: before.calls, negative: { workItemId: denied[0].context.workItemId, auditEvents: denied.length, calls: 0, bytes: 0 } };
+      calls: before.calls, negative: { workItemId: denied[0].context.workItemId, auditEvents: denied.length, calls: 0, bytes: 0 },
+      mismatch: mismatch.receipt, recovery: recovery.receipt };
     const path = join(scratch, 'receipt.json');
     writeFileSync(path, JSON.stringify(receipt, null, 2) + '\n');
     console.log(path);
